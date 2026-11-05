@@ -5,6 +5,7 @@
 //! refused until its list says otherwise.
 
 use serde_json::{Map, Value};
+use std::borrow::Cow;
 
 /// A change step a plugin's plan may use on a DAW.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,11 +27,14 @@ pub struct PluginStep {
     /// A true or false, or a number, is matched by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field
     /// whatever it holds (`("remove", &["*"])`).
     pub refused: &'static [(&'static str, &'static [&'static str])],
+    /// What the DAW's instructions teach about its input (Live's notation), which a plugin's host reads with the step
+    /// since it doesn't have Kumi's instructions.
+    pub noting: Option<&'static str>,
 }
 
 impl PluginStep {
     pub const fn new(tool: &'static str, family: &'static str) -> PluginStep {
-        PluginStep { tool, family, file_field: None, described: None, browser_field: None, refused: &[] }
+        PluginStep { tool, family, file_field: None, described: None, browser_field: None, refused: &[], noting: None }
     }
 
     /// It takes an audio file in `field`, which the import step fills from a source; `described` is what it does as the
@@ -39,9 +43,14 @@ impl PluginStep {
         PluginStep { file_field: Some(field), described: Some(described), ..self }
     }
 
-    /// Its description as the plugin gives it: its own for a file step, the DAW's (`native`) otherwise.
-    pub fn description<'a>(&self, native: &'a str) -> &'a str {
-        self.described.unwrap_or(native)
+    /// Its description as the plugin gives it: its own for a file step, the DAW's (`native`) otherwise; then what the
+    /// DAW's instructions teach about its input.
+    pub fn description<'a>(&self, native: &'a str) -> Cow<'a, str> {
+        let said = self.described.unwrap_or(native);
+        match self.noting {
+            Some(more) => Cow::Owned(format!("{said}\n\nFrom Kumi's instructions: {more}")),
+            None => Cow::Borrowed(said),
+        }
     }
 
     /// It names something in the DAW's browser in `field`, by a path of names.
@@ -52,6 +61,11 @@ impl PluginStep {
     /// It refuses these values of these fields.
     pub const fn refusing(self, refused: &'static [(&'static str, &'static [&'static str])]) -> PluginStep {
         PluginStep { refused, ..self }
+    }
+
+    /// Its input as the DAW's instructions teach it, after its description.
+    pub const fn noting(self, more: &'static str) -> PluginStep {
+        PluginStep { noting: Some(more), ..self }
     }
 }
 
@@ -176,8 +190,8 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
 }
 
 /// A step's input schema as a plugin's plan fills it: its file field takes `source` (an object naming where the file
-/// comes from) in place of a path, and the fields no step may hold are left out wherever they are (and out of
-/// `required`).
+/// comes from) in place of a path, and the fields no step may hold, and those this step refuses whatever they hold, are
+/// left out wherever they are (and out of `required`).
 pub fn plugin_schema(step: &PluginStep, schema: &Map<String, Value>, source: &Value) -> Map<String, Value> {
     let mut schema = schema.clone();
     prune(step, &mut schema, true);
@@ -189,15 +203,16 @@ pub fn plugin_schema(step: &PluginStep, schema: &Map<String, Value>, source: &Va
     schema
 }
 
-/// `schema` without the fields no step may hold, at every depth (`top`: the step's own fields, where its file and
-/// browser fields are its own to keep).
+/// `schema` without the fields no step may hold, nor those `step` refuses whatever they hold, at every depth (`top`: the
+/// step's own fields, where its file and browser fields are its own to keep).
 fn prune(step: &PluginStep, schema: &mut Map<String, Value>, top: bool) {
     let mut gone = Vec::new();
     if let Some(Value::Object(properties)) = schema.get_mut("properties") {
         properties.retain(|field, _| {
             let plain = field.to_ascii_lowercase().replace(['_', '-'], "");
             let own = top && (step.file_field == Some(field.as_str()) || step.browser_field == Some(field.as_str()));
-            let kept = own || !NEVER.contains(&plain.as_str());
+            let refused = step.refused.iter().any(|(name, values)| *name == field.as_str() && values.contains(&"*"));
+            let kept = own || !(NEVER.contains(&plain.as_str()) || refused);
             if !kept {
                 gone.push(field.clone());
             }
@@ -290,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugins_schema_takes_a_source_in_the_file_field_and_holds_no_path() {
+    fn a_plugins_schema_takes_a_source_in_the_file_field_and_holds_no_path_nor_a_refused_field() {
         let schema = json!({"type": "object", "required": ["deviceRef", "sample"], "properties": {
             "deviceRef": {"type": "string"}, "sample": {"type": "string"}, "path": {"type": "string"}
         }});
@@ -306,6 +321,17 @@ mod tests {
         let shown = plugin_schema(&STEPS[0], nested.as_object().unwrap(), &source);
         assert_eq!(shown["properties"]["options"], json!({"type": "object", "required": [], "properties": {"amount": {"type": "number"}}}));
         assert_eq!(shown["properties"]["rows"]["items"]["properties"], json!({"name": {}}));
+        // A field the step refuses whatever it holds isn't shown, at any depth; one it refuses only some values of is.
+        let lines = json!({"type": "object", "properties": {"clear": {"type": "boolean"}, "lines": {"type": "array", "items": {
+            "type": "object", "required": ["line", "clear"], "properties": {"line": {}, "clear": {}}
+        }}}});
+        let whole = PluginStep::new("notes_write", "clip").refusing(&[("clear", &["*"])]);
+        assert_eq!(
+            plugin_schema(&whole, lines.as_object().unwrap(), &source)["properties"],
+            json!({"lines": {"type": "array", "items": {"type": "object", "required": ["line"], "properties": {"line": {}}}}})
+        );
+        let some = PluginStep::new("notes_write", "clip").refusing(&[("clear", &["true"])]);
+        assert!(plugin_schema(&some, lines.as_object().unwrap(), &source)["properties"].get("clear").is_some());
     }
 
     #[test]
