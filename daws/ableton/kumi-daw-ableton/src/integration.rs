@@ -787,18 +787,21 @@ impl Integration for Ableton {
         let _live = self.rendering.hold(&signal).await?;
         let guard = &self.history.host.guard;
         guard.take_refusal();
-        // A group's guarded changes are all read first, so one changed since leaves the whole group as it is; each is read
-        // again right before Live is asked to undo it.
+        // A group's guarded changes are all read first, newest first, so one changed since leaves the whole group as it
+        // is; each is read again right before Live is asked to undo it.
         let members = self.history.entries.borrow().get(id).and_then(|entry| entry.borrow().members.clone()).unwrap_or_default();
-        for member in members {
-            let Some(member) = self.history.entries.borrow().get(&member).map(|entry| entry.borrow().clone()) else { continue };
-            if member.record.state == ChangeState::Applied && super::undo_guard::guarded(&self.history, &member) {
-                if let Some(reason) = super::undo_guard::refusal(&self.history, &member, &signal).await {
-                    return Ok(Err(UndoRefusal { code: "changed_since", reason }));
-                }
-            }
+        let guarded: Vec<_> = members
+            .iter()
+            .filter_map(|member| self.history.entries.borrow().get(member).map(|entry| entry.borrow().clone()))
+            .filter(|member| member.record.state == ChangeState::Applied && super::undo_guard::guarded(&self.history, member))
+            .collect();
+        if let Some(reason) = super::undo_guard::group_refusal(&self.history, &guarded, &signal).await {
+            return Ok(Err(UndoRefusal { code: "changed_since", reason }));
         }
-        let outcome = self.history.undo(id, signal, false).await?;
+        guard.asked(Some(signal.clone()));
+        let outcome = self.history.undo(id, signal, false).await;
+        guard.asked(None);
+        let outcome = outcome?;
         let refused = guard.take_refusal();
         match outcome.record {
             Some(record) => {
@@ -818,7 +821,7 @@ impl Integration for Ableton {
         if !super::undo_guard::guarded(&self.history, &entry) {
             return Ok(None);
         }
-        Ok(Some(super::undo_guard::preview(&self.history, id, &entry.record.title, &signal).await))
+        Ok(Some(super::undo_guard::preview(&self.history, &entry, &signal).await))
     }
     async fn audio_file(&self, named: &str, signal: Signal) -> Result<Option<String>, RuntimeError> {
         self.mutations.clip_file(named, signal).await

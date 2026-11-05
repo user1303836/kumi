@@ -299,6 +299,7 @@ impl LiveHistory for History {
         let gone = names("gone");
         self.remember.schedule_save(20_000);
         if moved.is_empty() && gone.is_empty() {
+            self.host.guard.forget(&entry.borrow().record.id);
             return Ok(self.undone(entry));
         }
         if back != 0. {
@@ -371,6 +372,8 @@ impl LiveHistory for History {
                 true,
             )));
         }
+        // Undone: nothing is left to check of it.
+        self.host.guard.forget(&snapshot.record.id);
         Ok(None)
     }
     async fn undo_material(
