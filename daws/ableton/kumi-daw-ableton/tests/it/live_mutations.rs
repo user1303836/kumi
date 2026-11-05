@@ -18,7 +18,7 @@ use kumi_daw_ableton::history::Audible;
 use kumi_daw_ableton::{
     actions::ACTIONS,
     arrange::ArrangeHost,
-    changes::CHANGES,
+    changes::{CHANGES, MAKES_A_DEVICE},
     connection::LiveConnection,
     integration::Ableton,
     mutations::Mutations,
@@ -914,4 +914,128 @@ async fn a_plugin_host_is_never_offered_lives_menus() {
             }
         })
         .await;
+}
+
+/// A bridge that loads a device and takes it out again, offering Live's undo steps or not, its undo working or failing:
+/// the calls it was sent, in order.
+struct UndoFixture {
+    steps: bool,
+    undo_fails: bool,
+    calls: RefCell<Vec<String>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for UndoFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        let mut tools = vec!["live_status", "live_browser_load_preview", "live_browser_load_apply", "live_undo"];
+        if self.steps {
+            tools.extend(["live_undo_step_begin", "live_undo_step_end"]);
+        }
+        let tools: Vec<Value> = tools.iter().map(|name| json!({"name":name,"inputSchema":{"type":"object"}})).collect();
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.calls.borrow_mut().push(name.to_string());
+        let (body, error) = match name {
+            "live_status" => (json!({"connected":true,"adapter":"real-live","epoch":7}), false),
+            "live_browser_load_preview" => (
+                json!({"transactionId":"load1","epoch":7,"confirmation":"apply","undoable":true,"proposed":{"itemId":"audio_effects/Reverb"}}),
+                false,
+            ),
+            "live_browser_load_apply" => {
+                (json!({"state":"applied","undoable":true,"deviceObjectIdentity":"obj-42","loaded":{"name":"Reverb"}}), false)
+            }
+            "live_undo" if self.undo_fails => (json!({"reason":"Live refused to remove the device"}), true),
+            "live_undo" => (json!({"transactionId":"load1","state":"undone"}), false),
+            "live_undo_step_begin" => (json!({"open":true,"stepId":"undo_step_1"}), false),
+            "live_undo_step_end" => (json!({"closed":true,"stepId":"undo_step_1"}), false),
+            _ => (json!({"reason":format!("{name} isn't this fixture's")}), true),
+        };
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body,"isError":error}))
+            .unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// Kumi's undo of a device it loaded takes it out inside one Live undo step, closed even when the undo fails, so Live's
+/// own undo after it stays sound (#1101); with no Live undo step to open, it removes nothing and says Live's undo will.
+#[tokio::test(flavor = "current_thread")]
+async fn kumis_undo_of_a_device_it_loaded_runs_inside_one_live_undo_step_or_not_at_all() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (steps, undo_fails) in [(true, false), (true, true), (false, false)] {
+                let fixture = Rc::new(UndoFixture { steps, undo_fails, calls: RefCell::new(vec![]) });
+                let endpoint = fixture.clone();
+                let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint: Rc<dyn McpEndpoint> = endpoint.clone();
+                    async move { Ok(endpoint) }.boxed_local()
+                }));
+                let integration = Ableton::new(options);
+                let connection = integration.connection.clone();
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                connection.available.set(true);
+                connection.epoch.set(Some(7.));
+                connection.references.borrow_mut().refs.insert("7:track:0".into(), "track".into());
+                let steps_in = json!({"steps":[{"tool":"load_device","input":{"trackRef":"7:track:0","itemId":"audio_effects/Reverb"}}]});
+                let made = integration.mutations.make_changes(steps_in.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+                assert!(!made.is_error, "{}", made.text);
+                let id = integration.history.entries.borrow().values().next().unwrap().borrow().record.id.clone();
+                fixture.calls.borrow_mut().clear();
+                let undone = integration.history.undo(&id, Signal::new(), false).await.unwrap();
+                let calls = fixture.calls.borrow().clone();
+                let sent = |name: &str| calls.iter().position(|call| call == name);
+                match (steps, undo_fails) {
+                    (true, false) => {
+                        assert!(!undone.is_error, "{}", undone.text);
+                        let (begin, undo, end) = (sent("live_undo_step_begin"), sent("live_undo"), sent("live_undo_step_end"));
+                        assert!(begin.is_some() && begin < undo && undo < end, "{calls:?}");
+                    }
+                    (true, true) => {
+                        assert!(
+                            sent("live_undo").is_some() && sent("live_undo") < sent("live_undo_step_end"),
+                            "closed after it failed: {calls:?}"
+                        );
+                    }
+                    _ => {
+                        assert!(undone.is_error && undone.text.contains("Cmd-Z"), "{}", undone.text);
+                        assert_eq!(sent("live_undo"), None, "nothing removed: {calls:?}");
+                    }
+                }
+            }
+        })
+        .await;
+}
+
+/// Every change that makes a device is one whose undo runs inside a Live undo step: a kind that produces a device is on
+/// the list, and the list names only kinds Live has.
+#[test]
+fn every_change_that_makes_a_device_is_undone_inside_one_live_undo_step() {
+    let applied =
+        json!({"deviceRef":"7:device:0:1","created":{"ref":"7:device:0:1","deviceRef":"7:device:0:1"},"result":{"ref":"7:device:0:1"}});
+    for kind in CHANGES.iter() {
+        if kind.produces(applied.as_object().unwrap()).is_some_and(|made| made.kind == "device") {
+            assert!(kind.makes_a_device(), "{} makes a device", kind.tool);
+        }
+    }
+    for tool in MAKES_A_DEVICE {
+        assert!(CHANGES.iter().any(|kind| kind.tool == tool), "{tool} isn't a change of Live's");
+    }
 }
