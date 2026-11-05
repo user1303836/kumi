@@ -2,6 +2,7 @@
 blocked before anyone is asked; and that the hook never holds up Hermes's other tools."""
 from __future__ import annotations
 
+import contextvars
 import os
 import unittest
 from unittest import mock
@@ -39,26 +40,49 @@ class Approvals(unittest.TestCase):
         self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"},
                                                     "compare_to": {"file": "/Samples/a.wav"}}))
 
-    def test_a_scheduled_job_never_starts_kumi_nor_runs_what_the_producer_approves_first(self):
+    def test_a_scheduled_job_reads_only_kumis_published_status_and_never_reaches_the_runtime(self):
+        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
+        calls = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
+                 "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS},
+                 "kumi_observe": {"scope": "focus"}, "kumi_read": {"action": "data"}, "kumi_sounds": {"query": "a"},
+                 "kumi_history": {}, "kumi_job": {"job_id": "j-1"}}
+        before = support.requests(self.data / "state")
+        self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
+        for tool, args in calls.items():  # with the producer's chat's runtime running, whatever Hermes would allow
+            decision = self.hook(tool, args)
+            self.assertEqual((decision["action"], decision["message"]), ("block", policy.SCHEDULED), tool)
+        self.assertIsNone(self.hook("kumi_status", {}))
+        published = support.call(self.host, "kumi_status", {}, session_id="cron-1")
+        self.assertEqual((published["connected"], published["project"]["name"]), (True, "Night Drive"))
+        self.assertEqual(support.requests(self.data / "state"), before, "nothing reached the runtime")
+        self.ctx.cron_execution = None
+        self.assertEqual(self.hook("kumi_change", change())["action"], "approve", "a chat's change is asked as before")
+
+    def test_where_nobody_can_answer_an_approval_nothing_that_needs_one_runs(self):
+        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
+        with mock.patch.dict(os.environ, {"HERMES_SINGLE_QUERY_SESSION": "1"}):  # what `hermes -q` exports
+            for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}), ("kumi_listen", track),
+                               ("kumi_library", {"action": "add_folder", "folder": support.DRUMS})):
+                decision = self.hook(tool, args)
+                self.assertEqual((decision["action"], decision["message"]), ("block", policy.UNATTENDED), tool)
+            self.assertIsNone(self.hook("kumi_connect", {}), "a one-shot query still connects")
+            self.assertIsNone(self.hook("kumi_observe", {"scope": "focus"}), "and reads")
+
+    def test_hermess_own_session_variables_tell_a_scheduled_job_and_a_webhook(self):
         try:
-            import gateway.session_context  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
+            from gateway.session_context import set_session_vars  # only where Hermes is importable
         except ImportError:
             self.skipTest("Hermes isn't importable here")
-        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
-        asked = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
-                 "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS}}
-        before = len(support.requests(self.data / "state"))
-        with mock.patch.dict(os.environ, {"HERMES_CRON_SESSION": "1"}):  # Hermes's cron marks its runs so
-            for tool, args in asked.items():  # with the producer's chat's runtime running, whatever cron_mode says
-                decision = self.hook(tool, args)
-                self.assertEqual(decision["action"], "block", tool)
-                self.assertIn("from a scheduled job", decision["message"])
-            self.assertEqual([m["params"]["name"] for m in support.requests(self.data / "state")[before:]
-                              if m.get("method") == "tools/call"], ["listen"], "only the track listen's preview")
-            self.assertIsNone(self.hook("kumi_history", {}), "a scheduled job still reads")
-            self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}}))
-        self.assertIsNone(self.hook("kumi_connect", {}), "in a chat, connecting needs no approval")
-        self.assertEqual(self.hook("kumi_change", change())["action"], "approve", "and a chat's change is asked")
+
+        def deciding(**session) -> dict:  # as Hermes binds them for a turn: its context variables, not the environment
+            def run():
+                set_session_vars(**session)
+                return self.hook("kumi_change", change())
+            return contextvars.copy_context().run(run)
+
+        self.assertEqual(deciding(cron_session="1")["message"], policy.SCHEDULED)
+        self.assertEqual(deciding(platform="webhook")["message"], policy.UNATTENDED)
+        self.assertEqual(deciding(platform="telegram")["action"], "approve")
 
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())

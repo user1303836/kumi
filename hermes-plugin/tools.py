@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 import uuid
 
-from . import calls, listening, runtime, schemas, setup
+from . import calls, listening, runtime, schemas, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -132,15 +132,26 @@ class Host:
         """The Hermes profile this call runs in (its plugin data is that profile's)."""
         return str(getattr(self._ctx, "profile_name", "") or "")
 
-    def scheduled(self) -> bool:
-        """Whether this call runs in a Hermes scheduled job (cron), with no chat and nobody there: Hermes's own session
-        variable, read as Hermes reads it (`gateway.session_context.get_session_env`, `utils.is_truthy_value`)."""
+    def unattended(self) -> str | None:
+        """Who can answer for this call: "scheduled" in a Hermes cron job (no chat, and nobody there), "unattended"
+        where nobody can answer an approval (a one-shot `hermes -q`, a webhook), else None (a chat).
+
+        A cron job is told first by Hermes's `ctx.current_cron_execution()`, bound for each fire and, under
+        `plugins.isolation: host`, answered in the calling context; then, like the others, by Hermes's session
+        variables (`gateway.session_context.get_session_env`, which falls back to the process environment), or by the
+        environment itself when that isn't importable."""
         try:
-            from gateway.session_context import get_session_env  # Hermes's
-            from utils import is_truthy_value  # Hermes's
+            if self._ctx.current_cron_execution() is not None:
+                return "scheduled"
         except Exception:
-            return False
-        return is_truthy_value(get_session_env("HERMES_CRON_SESSION", ""))
+            log.warning("Kumi couldn't ask Hermes whether this call is a scheduled job", exc_info=True)
+        cron, single, platform = _session_values("HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
+                                                 "HERMES_SESSION_PLATFORM")
+        if _truthy(cron):
+            return "scheduled"
+        if _truthy(single) or platform in UNATTENDED_PLATFORMS:
+            return "unattended"
+        return None
 
     def identity(self, kwargs: dict) -> dict:
         """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5). Hermes gives a
@@ -156,6 +167,26 @@ class Host:
     def on_session_finalize(self, session_id: str | None = None, **kwargs: Any) -> None:
         """The chat ended: stop the runtime it started (its DAW stays open)."""
         self.runtimes.stop_session(session_id)
+
+
+# Hermes's platforms where no person ever answers an approval (`tools/approval_context.py`'s notifier-blind ones). The
+# API server isn't one: Hermes lets its turns say whether someone can answer.
+UNATTENDED_PLATFORMS = frozenset({"webhook", "msgraph_webhook"})
+
+
+def _session_values(*names: str) -> list[str]:
+    """Hermes's session variables as Hermes reads them (its public `get_session_env`: the calling context's value,
+    else the process environment), or the environment alone when Hermes isn't importable."""
+    try:
+        from gateway.session_context import get_session_env  # Hermes's
+    except Exception:
+        return [os.environ.get(name, "") for name in names]
+    return [str(get_session_env(name, "") or "") for name in names]
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on")  # Hermes's own truthy words
+
 
 
 def broadcast(event: str, payload: dict) -> None:
@@ -238,6 +269,14 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
         host.install(data_dir)
     except runtime.Unavailable as failure:
         report["message"] = report["setup"].get("message") or failure.reason
+        return report
+    if host.unattended() == "scheduled":  # never the runtime: a call makes its caller the runtime's holder
+        published = snapshots.status(Path(data_dir) / "state")
+        report.update({key: published[key] for key in ("connected", "daw", "project")
+                       if published.get(key) is not None})
+        report["message"] = ("As Kumi last published it, for a scheduled job: " + (
+            "Kumi's runtime is running." if published.get("running") is not False and not published.get("stale")
+            else "Kumi's runtime isn't running; it starts when a chat connects to the DAW."))
         return report
     live = host.runtimes.get(data_dir)
     if live is None:

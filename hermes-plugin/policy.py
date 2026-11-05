@@ -6,9 +6,12 @@ approval.
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
 current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. A folder the
 producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt in the
-words of the plan they carry out (C8). Anything else of Kumi's is blocked. A scheduled job (Hermes's cron) never starts,
-connects or sets up Kumi, and never runs a call the producer approves first, whatever `approvals.cron_mode` says:
-there's no chat to hold the runtime and its change lease, and nobody there to approve.
+words of the plan they carry out (C8). Anything else of Kumi's is blocked.
+
+Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
+approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
+what Kumi last published: it never starts, connects, sets up or calls the runtime, which a gateway's chats share with
+it. Where nobody can answer an approval (a one-shot `hermes -q`, a webhook), nothing that needs one runs.
 
 The hook runs for every tool call in Hermes, and one that's slow or blocked stops them all: a call that isn't Kumi's
 returns at once, the runtime is never waited for, and a preview gets at most half of Hermes's hook timeout.
@@ -32,12 +35,13 @@ LINE = 120
 PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
-# What starts Kumi's runtime for the calling chat (and with it the change lease), or sets Kumi up; and what the producer
-# always approves first. Neither runs in a scheduled job.
-STARTS = {"kumi_connect", "kumi_setup"}
+# What a scheduled job (Hermes's cron) may call: reads answered from what Kumi last published, never from the runtime,
+# whose every call makes its caller the runtime's holder (C3's owner). And what the producer always approves first.
+SCHEDULED_READS = {"kumi_status"}
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
-UNATTENDED = ("Kumi doesn't start, connect, set up or change anything from a scheduled job, or do what the producer "
-              "approves first: nobody is there. Open a chat with Kumi for that.")
+SCHEDULED = ("A scheduled job reads only Kumi's status, as Kumi last published it: it never starts or calls Kumi's "
+             "runtime, or changes anything. Open a chat with Kumi for that.")
+UNATTENDED = "Nobody is here to approve this (a one-shot query or a webhook), so Kumi didn't run it. Ask in a chat."
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -77,13 +81,16 @@ def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **k
 
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
-    """The decision for one Kumi call. In a scheduled job, a start or anything the producer would be asked about is
-    blocked instead, without asking the runtime first when the tool always asks."""
-    scheduled = host.scheduled()
-    if scheduled and tool in STARTS | ASKED:
+    """The decision for one Kumi call. In a scheduled job, only a published read passes, before anything else is
+    looked at. Where nobody can answer an approval, a call that needs one is blocked whatever Hermes's settings or an
+    earlier "Always" say: before the runtime is asked when it always needs one, else after its decision."""
+    unattended = host.unattended()
+    if unattended == "scheduled" and tool not in SCHEDULED_READS:
+        return block(SCHEDULED), {}
+    if unattended and tool in ASKED:
         return block(UNATTENDED), {}
     decision, extra = _decide(host, tool, args, kwargs)
-    if scheduled and decision is not None and decision["action"] == "approve":
+    if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
     return decision, extra
 

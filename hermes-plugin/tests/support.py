@@ -85,6 +85,10 @@ class Context:
         self.aux_tasks: dict[str, dict] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
+        self.cron_execution: Any = None  # what ctx.current_cron_execution() answers: the cron run executing now
+
+    def current_cron_execution(self):
+        return self.cron_execution
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False,
                       description="", emoji="", override=False):
