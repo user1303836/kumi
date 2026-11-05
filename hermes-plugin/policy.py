@@ -60,9 +60,12 @@ def post_approval_response(host: Any, tool_call_id: Any = None, choice: Any = No
 
 def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **kwargs: Any) -> None:
     """Hermes's `post_tool_call`, after every call however it ended, a blocked one included (another plugin's veto, or
-    no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it."""
+    no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it. A
+    search or a listen that went well is announced to Desktop (CC-9)."""
     if isinstance(tool_name, str) and tool_name.startswith("kumi_"):
         host.calls.forget(tool_call_id)
+        tools.announce(host, tool_name, kwargs.get("result"), status=kwargs.get("status"),
+                       session_id=kwargs.get("session_id"), tool_call_id=tool_call_id)
 
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
