@@ -34,6 +34,8 @@ MCP_PROTOCOL = "2025-11-25"
 SERVER_NAME = "kumi-serve"
 RUNTIME_PROTOCOL = "kumi-serve/1"
 CLIENT_INFO = {"name": "kumi-hermes", "version": "1"}
+# C2's resources, each the snapshot (C3) it's read from: a runtime that offers subscriptions says when one has landed.
+RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history": "history", "kumi://map": "map"}
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -593,6 +595,11 @@ class Runtime:
     # profile, stops this runtime in them, so what it logs lands in this profile's logs (research-1's review, item 12).
     context: contextvars.Context = field(default_factory=contextvars.copy_context)
     gone: threading.Event = field(default_factory=threading.Event)
+    # The snapshots the runtime tells of as they land (its resources, subscribed at the handshake): never polled. Those
+    # it has told of since the watcher last looked, and what wakes it.
+    subscribed: frozenset[str] = frozenset()
+    told: set[str] = field(default_factory=set)
+    wake: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
@@ -720,11 +727,14 @@ class Runtimes:
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
                 holder: dict[str, Runtime] = {}
+                started: dict[str, Runtime] = {}
                 client = self._spawn(serve_argv(install, state, daw, library_roots, media_roots, self._hermes()),
                                      launch_environment(self._environ()),
                                      cwd=str(data_dir), keep_fds=lock.keep(),
-                                     on_exit=lambda reason: self._exited(holder))
+                                     on_exit=lambda reason: self._exited(holder),
+                                     on_notification=lambda method, params: _notified(started, method, params))
                 runtime = Runtime(client, install, data_dir, daw, session_id, lock, profile)
+                started["runtime"] = runtime
                 runtime.info = self._handshake(runtime)
                 holder["runtime"] = runtime
                 with self._lock:  # the mark is checked and the runtime published as one step, so no stop falls between
@@ -850,25 +860,39 @@ class Runtimes:
         if protocol != RUNTIME_PROTOCOL:
             raise Unavailable("wrong_runtime", f"Kumi's runtime speaks {protocol}, not {RUNTIME_PROTOCOL}: set Kumi up "
                                                "again.")
+        capabilities = result.get("capabilities") if isinstance(result.get("capabilities"), dict) else {}
+        offered = capabilities.get("resources")
+        if isinstance(offered, dict) and offered.get("subscribe") is True:
+            for uri in RESOURCES:
+                client.request("resources/subscribe", {"uri": uri}, timeout=left())
+            runtime.subscribed = frozenset(RESOURCES.values())
         return info
 
     def _watch_snapshots(self, runtime: Runtime) -> None:
-        """C5's events from the snapshots the runtime publishes (C3): every `WATCH_EVERY` seconds while it runs, each
-        file that changed since becomes its event. What's there when it starts isn't news."""
+        """C5's events from the snapshots the runtime publishes (C3): one it tells of (its resources, C2) at once, and
+        every `WATCH_EVERY` seconds while it runs, each other file that changed since (a job's, and every snapshot of
+        a runtime that offers no resources). What's there when it starts isn't news."""
         seen: dict[str, tuple] = {}
         try:
             seen = _snapshot_marks(runtime.state_dir)
         except Exception:
             log.exception("Kumi couldn't look at its runtime's snapshots")
-        while not runtime.gone.wait(WATCH_EVERY):
+        while True:
+            runtime.wake.wait(WATCH_EVERY)
+            if runtime.gone.is_set():
+                return
+            runtime.wake.clear()  # before taking what it was told: what's told after wakes it again
+            with runtime._lock:
+                changed, runtime.told = runtime.told, set()
             try:  # one bad pass (a file mid-replace, an unreadable folder) mustn't end the events
                 marks = _snapshot_marks(runtime.state_dir)
-                changed = sorted(name for name, mark in marks.items() if seen.get(name) != mark)
+                changed |= {name for name, mark in marks.items()
+                            if seen.get(name) != mark and name not in runtime.subscribed}
                 seen = marks
-                for name in changed:
-                    self._snapshot_changed(runtime, name)
             except Exception:
                 log.exception("Kumi couldn't look at its runtime's snapshots")
+            for name in sorted(changed):
+                self._snapshot_changed(runtime, name)
 
     def _snapshot_changed(self, runtime: Runtime, name: str) -> None:
         state, profile = runtime.state_dir, runtime.profile
@@ -906,6 +930,7 @@ class Runtimes:
             self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         finally:
             runtime.gone.set()
+            runtime.wake.set()  # its watcher ends now
 
     def _emit(self, event: str, payload: dict) -> None:
         if self._events is not None:
@@ -913,6 +938,18 @@ class Runtimes:
                 self._events(event, payload)
             except Exception:
                 log.exception("Kumi's %s event couldn't be sent", event)
+
+
+def _notified(started: dict[str, Runtime], method: str, params: Any) -> None:
+    """On the client's reader thread: the runtime says a resource's snapshot is on disk anew (C2), and its watcher reads
+    it at once, on its own thread."""
+    runtime = started.get("runtime")
+    name = RESOURCES.get(params.get("uri")) if isinstance(params, dict) else None
+    if method != "notifications/resources/updated" or runtime is None or name is None:
+        return
+    with runtime._lock:
+        runtime.told.add(name)
+    runtime.wake.set()
 
 
 def _read_json(path: Path) -> dict | None:

@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 import support
 from support import eventually
@@ -151,19 +152,49 @@ class Runtimes(unittest.TestCase):
         self.assertIn({"jsonrpc": "2.0", "method": "notifications/cancelled",
                        "params": {"requestId": asked, "reason": "Hermes stopped waiting"}}, received)
 
-    def test_each_snapshot_the_runtime_writes_becomes_a_desktop_event_for_its_profile(self):
+    def snapshot_events(self) -> set[tuple[str, int]]:
+        """The (event, seq) each of status, focus and history has on disk now."""
+        return {(f"{name}.changed", json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"])
+                for name in ("status", "focus", "history")}
+
+    def test_each_snapshot_the_runtime_says_has_landed_is_a_desktop_event_at_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 3600):  # nothing is polled: only what the runtime says
+            live = self.start()  # it offers C2's resources
+            self.events.clear()
+            live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+            expected = self.snapshot_events()
+            self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
+                            self.events)
+            live.call("library", {"action": "scan"}, self.host(), timeout=10)
+            self.assertEqual(live.call("job", {"job_id": "j-scan-1"}, self.host(), timeout=10)["state"], "done")
+            seq = json.loads((self.data / "state" / "map" / "r1.json").read_text(encoding="utf-8"))["seq"]
+            changed = ("map.changed", {"revision": "r1", "seq": seq, "profile": "studio"})
+            self.assertTrue(eventually(lambda: changed in self.events), "the map's pointer flipped to the scan's")
+        self.assertEqual({payload["profile"] for _, payload in self.events}, {"studio"})
+
+    def test_a_snapshot_the_runtime_tells_of_is_never_reported_twice(self):
         live = self.start()
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        seqs = {name: json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"]
-                for name in ("status", "focus", "history")}
-        expected = {(f"{name}.changed", seq) for name, seq in seqs.items()}
+        expected = self.snapshot_events()
+        live.call("library", {"action": "scan"}, self.host(), timeout=10)  # a job's file: only the polling sees it
+        self.assertTrue(eventually(lambda: any(event == "job.progress" for event, _ in self.events)), self.events)
+        told = [(event, payload.get("seq")) for event, payload in self.events if event != "job.progress"]
+        self.assertEqual(sorted(told), sorted(expected), "a pass that polled after them reported none again")
+
+    def test_a_runtime_that_offers_no_resources_has_each_snapshot_it_writes_found_and_reported(self):
+        live = self.start("--no-resources")  # kumi serve before #1047
+        self.events.clear()
+        live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+        expected = self.snapshot_events()
         self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
                         self.events)
         live.call("library", {"action": "scan"}, self.host(), timeout=10)
         job = ("job.progress", {"job_id": "j-scan-1", "state": "running", "progress": {"done": 0, "total": 2},
                                 "profile": "studio"})
         self.assertTrue(eventually(lambda: job in self.events), self.events)
+        live.call("job", {"job_id": "j-scan-1"}, self.host(), timeout=10)
+        self.assertTrue(eventually(lambda: any(event == "map.changed" for event, _ in self.events)), self.events)
         self.assertEqual({payload["profile"] for _, payload in self.events}, {"studio"})
 
     def test_a_runtime_flooding_its_stderr_still_answers(self):
