@@ -349,6 +349,8 @@ impl MapStore {
         .map_err(failed)?
         .map_err(failed)?;
         let previous = self.current.replace(Some(Rc::new(current))).map(|before| before.revision.clone());
+        // The runtime's `kumi://map` resource (C2) is this pointer: its subscribers hear the map changed.
+        ctx.snapshots().touched("map/current");
         let pointer = self.pointer.clone();
         let published = revision.clone();
         // Publication has succeeded even if a held-open old file cannot yet be removed (Windows). Retry it on the

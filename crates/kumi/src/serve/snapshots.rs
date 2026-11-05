@@ -29,9 +29,12 @@ const FLUSH: Duration = Duration::from_secs(5);
 
 /// The writer's result for one write: whether its file is on disk.
 type Written = tokio::sync::oneshot::Sender<std::io::Result<()>>;
+/// Told each snapshot's name once its file is on disk ([`Snapshots::landed`]), from the writer thread.
+type Landed = std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>>;
 
 enum Write {
     File {
+        name: String,
         path: PathBuf,
         snapshot: Value,
         /// Compact JSON whose complete envelope must fit this reader limit; None retains the ordinary pretty format.
@@ -49,12 +52,15 @@ pub struct Snapshots {
     owner: RefCell<Host>,
     /// None when the writer thread couldn't start: writes are done in place then.
     writer: Option<Sender<Write>>,
+    landed: Landed,
 }
 
 impl Snapshots {
     pub fn new(dir: PathBuf) -> Snapshots {
         let (writer, writes) = channel();
-        let writer = match std::thread::Builder::new().name("kumi-serve-snapshots".into()).spawn(move || write_files(writes)) {
+        let landed = Landed::default();
+        let told = landed.clone();
+        let writer = match std::thread::Builder::new().name("kumi-serve-snapshots".into()).spawn(move || write_files(writes, told)) {
             Ok(_) => Some(writer),
             Err(error) => {
                 say(&format!("kumi serve: no snapshot writer ({error}); writing in place"));
@@ -62,7 +68,22 @@ impl Snapshots {
             }
         };
         let seq = Cell::new(newest_seq(&dir));
-        Snapshots { dir, seq, owner: RefCell::new(Host::default()), writer }
+        Snapshots { dir, seq, owner: RefCell::new(Host::default()), writer, landed }
+    }
+
+    /// Each snapshot's name (`status`, `map/r7`) once its file is on disk, in the order they land, and the names
+    /// [`Snapshots::touched`] gives: for the runtime's resources (C2) to say what changed. One listener; a new one
+    /// replaces the last.
+    pub fn landed(&self) -> tokio::sync::mpsc::UnboundedReceiver<String> {
+        let (told, landed) = tokio::sync::mpsc::unbounded_channel();
+        *self.landed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(told);
+        landed
+    }
+
+    /// A file of the state folder that isn't a snapshot (the map's `map/current` pointer) is on disk, replaced: its
+    /// listener ([`Snapshots::landed`]) is told, as of a snapshot.
+    pub fn touched(&self, name: &str) {
+        tell(&self.landed, name);
     }
 
     /// The profile and session the snapshots are for now (from the latest caller's `_host`).
@@ -131,7 +152,7 @@ impl Snapshots {
         snapshot.insert("seq".into(), json!(seq));
         snapshot.insert("at".into(), json!(kumi_common::time::now_ms()));
         snapshot.insert("owner".into(), json!({"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()}));
-        Ok((seq, Write::File { path, snapshot: Value::Object(snapshot), max_bytes, done }))
+        Ok((seq, Write::File { name: name.to_owned(), path, snapshot: Value::Object(snapshot), max_bytes, done }))
     }
 
     /// To the writer thread; written in place only when there's none to take it.
@@ -140,8 +161,11 @@ impl Snapshots {
             Some(writer) => writer.send(write).err().map(|failed| failed.0),
             None => Some(write),
         };
-        if let Some(Write::File { path, snapshot, max_bytes, done }) = unsent {
+        if let Some(Write::File { name, path, snapshot, max_bytes, done }) = unsent {
             let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
+            if written.is_ok() {
+                tell(&self.landed, &name);
+            }
             let failed = written.as_ref().err().map(|error| std::io::Error::new(error.kind(), error.to_string()));
             if let Some(done) = done {
                 let _ = done.send(written);
@@ -208,7 +232,7 @@ fn newest_seq(dir: &Path) -> u64 {
 /// The writer thread: the writes waiting, in the order they were made. A write followed at once by another of the same
 /// file is skipped (the next replaces it straight away) unless someone waits for it; a flush is told once the writes
 /// before it are done.
-fn write_files(writes: Receiver<Write>) {
+fn write_files(writes: Receiver<Write>, landed: Landed) {
     while let Ok(first) = writes.recv() {
         let mut waiting = vec![first];
         while let Ok(more) = writes.try_recv() {
@@ -217,14 +241,15 @@ fn write_files(writes: Receiver<Write>) {
         let mut waiting = waiting.into_iter().peekable();
         while let Some(write) = waiting.next() {
             match write {
-                Write::File { path, snapshot, max_bytes, done } => {
+                Write::File { name, path, snapshot, max_bytes, done } => {
                     let superseded = done.is_none() && matches!(waiting.peek(), Some(Write::File { path: next, .. }) if *next == path);
                     if superseded {
                         continue;
                     }
                     let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
-                    if let Err(error) = &written {
-                        say(&format!("kumi serve: {} not written: {error}", path.display()));
+                    match &written {
+                        Ok(()) => tell(&landed, &name),
+                        Err(error) => say(&format!("kumi serve: {} not written: {error}", path.display())),
                     }
                     if let Some(done) = done {
                         let _ = done.send(written);
@@ -235,6 +260,13 @@ fn write_files(writes: Receiver<Write>) {
                 }
             }
         }
+    }
+}
+
+/// The listener of landed snapshots, told `name` (none listening: nothing).
+fn tell(landed: &Landed, name: &str) {
+    if let Some(told) = landed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        let _ = told.send(name.to_owned());
     }
 }
 

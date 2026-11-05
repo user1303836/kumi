@@ -17,7 +17,7 @@ use kumi_common::abort::{self, Signal};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
@@ -38,6 +38,17 @@ const HEARTBEAT: Duration = Duration::from_secs(3);
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
+/// MCP's "Resource not found".
+const RESOURCE_NOT_FOUND: i64 = -32002;
+
+/// C2's resources: each the snapshot (C3) the runtime keeps of it, read as it's on disk, and the snapshot's name, whose
+/// landing tells a subscriber the resource changed. `kumi://map` is the map's current revision, by its pointer.
+const RESOURCES: [(&str, &str, &str); 4] = [
+    ("kumi://status", "status", "Setup and connection: whether Kumi is connected to the DAW, and to which project."),
+    ("kumi://focus", "focus", "What the producer is looking at in the DAW, the transport, and what changed since the last look."),
+    ("kumi://history", "history", "Kumi's HISTORY for the open project, newest first."),
+    ("kumi://map", "map/current", "The sound map's current revision: its sounds and where each sits."),
+];
 const INVALID_PARAMS: i64 = -32602;
 
 /// Serves the registry's operations on `input` and `output` until `input` ends, the host stops reading, or the
@@ -68,6 +79,7 @@ where
     let mut writer = Some(tokio::task::spawn_local(write_out(output, outgoing)));
     core::publish_status(&ctx, false).await;
     let heartbeat = tokio::task::spawn_local(beat(ctx.clone()));
+    let mut landed = ctx.snapshots().landed();
     let server = Rc::new(Server {
         ctx,
         operations,
@@ -76,7 +88,22 @@ where
         calls: RefCell::new(HashMap::new()),
         settled: Notify::new(),
         seen: RefCell::new(Seen::default()),
+        subscribed: RefCell::new(HashSet::new()),
     });
+    // A subscribed resource whose snapshot is on disk anew: the host hears it changed, and reads it again.
+    let updates = {
+        let server = Rc::downgrade(&server);
+        tokio::task::spawn_local(async move {
+            while let Some(name) = landed.recv().await {
+                let Some(server) = server.upgrade() else { break };
+                if let Some((uri, _, _)) = RESOURCES.iter().find(|(_, snapshot, _)| *snapshot == name) {
+                    if server.subscribed.borrow().contains(*uri) {
+                        server.send(json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": uri}}));
+                    }
+                }
+            }
+        })
+    };
     let mut input = BufReader::new(input);
     tokio::pin!(stop);
     let read = loop {
@@ -118,6 +145,7 @@ where
     server.ctx.set_settling_until(None);
     server.ctx.jobs().interrupt_running(server.ctx.snapshots());
     heartbeat.abort();
+    updates.abort();
     server.ctx.link().close().await;
     core::publish_stopped(&server.ctx).await;
     let _ = server.outbox.send(Out::Close);
@@ -185,6 +213,8 @@ struct Server {
     /// Told when the last call running ends.
     settled: Notify,
     seen: RefCell<Seen>,
+    /// The resources the host subscribed to (`resources/subscribe`), by URI.
+    subscribed: RefCell<HashSet<String>>,
 }
 
 struct InFlight {
@@ -261,7 +291,7 @@ impl Server {
                     id,
                     json!({
                         "protocolVersion": MCP_PROTOCOL,
-                        "capabilities": {"tools": {"listChanged": false}},
+                        "capabilities": {"tools": {"listChanged": false}, "resources": {"subscribe": true, "listChanged": false}},
                         "serverInfo": {"name": "kumi-serve", "version": env!("CARGO_PKG_VERSION")},
                     }),
                 );
@@ -279,6 +309,33 @@ impl Server {
                 self.send_result(id, json!({"tools": tools}));
             }
             "tools/call" => self.call(id, params),
+            "resources/list" => {
+                let resources: Vec<Value> = RESOURCES
+                    .iter()
+                    .map(|(uri, name, description)| json!({"uri": uri, "name": name.split('/').next(), "description": description, "mimeType": "application/json"}))
+                    .collect();
+                self.send_result(id, json!({"resources": resources}));
+            }
+            "resources/read" => match self.resource(params) {
+                Ok((uri, _)) => match read_resource(&self.ctx.paths().state_dir, uri) {
+                    Some(text) => self.send_result(id, json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]})),
+                    None => self.send_error(id, RESOURCE_NOT_FOUND, &format!("{uri} has no snapshot yet")),
+                },
+                Err(message) => self.send_error(id, RESOURCE_NOT_FOUND, &message),
+            },
+            "resources/subscribe" | "resources/unsubscribe" => match self.resource(params) {
+                Ok((uri, _)) => {
+                    let mut subscribed = self.subscribed.borrow_mut();
+                    if method == "resources/subscribe" {
+                        subscribed.insert(uri.to_owned());
+                    } else {
+                        subscribed.remove(uri);
+                    }
+                    drop(subscribed);
+                    self.send_result(id, json!({}));
+                }
+                Err(message) => self.send_error(id, RESOURCE_NOT_FOUND, &message),
+            },
             _ => self.send_error(id, METHOD_NOT_FOUND, &format!("no method \"{method}\"")),
         }
     }
@@ -556,6 +613,17 @@ impl Server {
         let _ = self.outbox.send(Out::Message(message));
     }
 
+    /// The resource a `resources/*` request names: its URI and its snapshot's name.
+    fn resource(&self, params: &Value) -> Result<(&'static str, &'static str), String> {
+        let asked = params.get("uri").and_then(Value::as_str).unwrap_or_default();
+        RESOURCES.iter().find(|(uri, _, _)| *uri == asked).map(|(uri, name, _)| (*uri, *name)).ok_or_else(|| {
+            format!(
+                "no resource \"{}\": kumi://status, kumi://focus, kumi://history and kumi://map are",
+                super::change::one_line(asked, 64)
+            )
+        })
+    }
+
     fn send_result(&self, id: Value, result: Value) {
         self.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
     }
@@ -655,6 +723,20 @@ fn momentary(answer: &Value) -> bool {
 }
 
 /// Writes the messages out, one line each, until told to close (or the host stops reading).
+/// A resource's snapshot as it's on disk: `kumi://map`'s by the revision its pointer names. None before there's one.
+fn read_resource(state_dir: &std::path::Path, uri: &str) -> Option<String> {
+    let name = match uri {
+        "kumi://map" => {
+            let revision = std::fs::read_to_string(state_dir.join("map/current")).ok()?;
+            let revision = revision.trim();
+            let named = !revision.is_empty() && revision.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            format!("map/{}", Some(revision).filter(|_| named)?)
+        }
+        _ => RESOURCES.iter().find(|(known, _, _)| *known == uri)?.1.to_owned(),
+    };
+    std::fs::read_to_string(state_dir.join(format!("{name}.json"))).ok()
+}
+
 async fn write_out<O: AsyncWrite + Unpin>(mut output: O, mut outgoing: UnboundedReceiver<Out>) -> std::io::Result<()> {
     while let Some(Out::Message(message)) = outgoing.recv().await {
         let mut line = serde_json::to_vec(&message).map_err(std::io::Error::other)?;
@@ -959,6 +1041,61 @@ mod tests {
         tokio::task::LocalSet::new().run_until(test).await;
     }
 
+    /// C2's resources: listed, read as their snapshots are on disk, and a subscriber told each time one lands anew
+    /// (the map when its pointer flips), until it unsubscribes.
+    #[tokio::test]
+    async fn a_subscriber_hears_a_resource_changed_once_its_snapshot_is_on_disk() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            session.send(json!({"jsonrpc": "2.0", "id": 1, "method": "resources/list"})).await;
+            let listed = session.next().await.unwrap();
+            let uris: Vec<&str> = listed["result"]["resources"].as_array().unwrap().iter().filter_map(|r| r["uri"].as_str()).collect();
+            assert_eq!(uris, ["kumi://status", "kumi://focus", "kumi://history", "kumi://map"]);
+            // status is on disk from the start: read as it is there.
+            session.ctx.snapshots().flush();
+            session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {"uri": "kumi://status"}})).await;
+            let read = session.next().await.unwrap();
+            let first: Value = serde_json::from_str(read["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(first["seq"], session.state("status.json")["seq"], "{read}");
+            // A map not made yet, or a URI that isn't one: not found.
+            for (id, uri) in [(3, "kumi://map"), (4, "kumi://elsewhere")] {
+                session.send(json!({"jsonrpc": "2.0", "id": id, "method": "resources/read", "params": {"uri": uri}})).await;
+                assert_eq!(session.next().await.unwrap()["error"]["code"], RESOURCE_NOT_FOUND, "{uri}");
+            }
+            for (id, uri) in [(5, "kumi://status"), (6, "kumi://map")] {
+                session.send(json!({"jsonrpc": "2.0", "id": id, "method": "resources/subscribe", "params": {"uri": uri}})).await;
+                assert_eq!(session.next().await.unwrap()["result"], json!({}));
+            }
+            // A new status: its subscriber hears of it once it's on disk, and reads the new one.
+            session.ctx.snapshots().write("status", &json!({"connected": false})).unwrap();
+            let updated = session.next().await.unwrap();
+            assert_eq!(updated, json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "kumi://status"}}));
+            session.send(json!({"jsonrpc": "2.0", "id": 7, "method": "resources/read", "params": {"uri": "kumi://status"}})).await;
+            let read = session.next().await.unwrap();
+            let now: Value = serde_json::from_str(read["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
+            assert!(now["seq"].as_u64() > first["seq"].as_u64(), "{now}");
+            // A map's revision is written, then its pointer flips: the subscriber hears once, and reads that revision.
+            session.ctx.snapshots().write_durably("map/r7", json!({"revision": "r7"})).await.unwrap();
+            crate::serve::snapshots::replace(&session.ctx.paths().state_dir.join("map/current"), b"r7\n").unwrap();
+            session.ctx.snapshots().touched("map/current");
+            let updated = session.next().await.unwrap();
+            assert_eq!(updated["params"]["uri"], "kumi://map", "only when the pointer flips: {updated}");
+            session.send(json!({"jsonrpc": "2.0", "id": 8, "method": "resources/read", "params": {"uri": "kumi://map"}})).await;
+            let read = session.next().await.unwrap();
+            assert_eq!(serde_json::from_str::<Value>(read["result"]["contents"][0]["text"].as_str().unwrap()).unwrap()["revision"], "r7");
+            // Unsubscribed, or never subscribed (history): nothing more is said.
+            session.send(json!({"jsonrpc": "2.0", "id": 9, "method": "resources/unsubscribe", "params": {"uri": "kumi://status"}})).await;
+            assert_eq!(session.next().await.unwrap()["result"], json!({}));
+            session.ctx.snapshots().write("status", &json!({"connected": false})).unwrap();
+            session.ctx.snapshots().write("history", &json!({"items": []})).unwrap();
+            session.ctx.snapshots().flush();
+            session.send(json!({"jsonrpc": "2.0", "id": 10, "method": "ping"})).await;
+            assert_eq!(session.next().await.unwrap()["id"], 10, "no notification came before the ping's answer");
+            session.end().await;
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn a_session_lists_its_tools_and_calls_one_with_progress() {
         local(async {
@@ -967,7 +1104,10 @@ mod tests {
             let initialized = session.next().await.unwrap();
             assert_eq!(initialized["result"]["protocolVersion"], MCP_PROTOCOL, "the one version it speaks");
             assert_eq!(initialized["result"]["serverInfo"], json!({"name": "kumi-serve", "version": env!("CARGO_PKG_VERSION")}));
-            assert_eq!(initialized["result"]["capabilities"], json!({"tools": {"listChanged": false}}));
+            assert_eq!(
+                initialized["result"]["capabilities"],
+                json!({"tools": {"listChanged": false}, "resources": {"subscribe": true, "listChanged": false}})
+            );
             session.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
             session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
             let listed = session.next().await.unwrap();
@@ -1007,7 +1147,7 @@ mod tests {
             assert_eq!((parse["id"].clone(), parse["error"]["code"].clone()), (Value::Null, json!(PARSE_ERROR)));
             session.send_line("[1, 2]").await;
             assert_eq!(session.next().await.unwrap()["error"]["code"], INVALID_REQUEST);
-            session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"})).await;
+            session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "prompts/list"})).await;
             assert_eq!(session.next().await.unwrap()["error"]["code"], METHOD_NOT_FOUND);
             session.send(call(json!(3), "observe", json!({}))).await;
             let unknown = session.next().await.unwrap();
