@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import textwrap
 from typing import Any
 import unicodedata
 
@@ -42,6 +43,12 @@ UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+# Where Hermes shows less than an approval's whole text (v0.22.7): the terminal's approval panel, at most 10 rows of
+# 64 columns (`hermes_cli/cli_tui_mixin.py:205`), and chat apps that cut the reason at a length (`_EA_REASON_BUDGET`).
+# Desktop shows it whole. Setup asks only where every line of its plan is shown (rgzm, #954 LOW 17).
+PANEL_ROWS, PANEL_COLUMNS = 10, 64
+REASON_BUDGETS = {"telegram": 500, "slack": 500, "discord": 300}
+_TELEGRAM_ESCAPED = set(r"_*[]()~`>#+-=|{}.!\\")
 
 
 def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: Any) -> dict | None:
@@ -264,5 +271,30 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     if asked is None:
         return block("Kumi did not set anything up: run kumi_setup plan first."), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
-    decision = {"action": "approve", "message": "\n".join(lines), "rule_key": f"kumi:setup:{asked['digest']}"}
+    message = "\n".join(lines)
+    surface = host.session_surface()
+    if not shows_whole(message, surface):
+        where = "Hermes Desktop or `hermes kumi setup` in a terminal" if surface not in ("cli", "tui") else \
+            "`hermes kumi setup` in a terminal"
+        return block(f"Kumi did not set anything up: this setup step is longer than this window shows, and Kumi asks only "
+                     f"with every line of it in view. Use {where}: it shows the whole plan before it asks."), {}
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}
+
+
+def shows_whole(message: str, surface: str) -> bool:
+    """Whether Hermes shows `message`, an approval's reason, whole on `surface` (`Host.session_surface()`): Desktop
+    and any client without a known limit do; the terminal's panel wraps each line on its own (long words broken) into
+    at most 10 rows of 64 columns; Telegram, Slack and Discord cut it at a length (Telegram's after escaping). An
+    "unknown" surface (Hermes couldn't say) shows nothing whole."""
+    if surface == "unknown":
+        return False
+    if surface in ("cli", "tui"):
+        rows = sum(len(textwrap.wrap(line, PANEL_COLUMNS, replace_whitespace=False, drop_whitespace=False) or [""])
+                   for line in message.splitlines())
+        return rows <= PANEL_ROWS
+    budget = REASON_BUDGETS.get(surface)
+    if budget is None:
+        return True
+    length = sum(2 if char in _TELEGRAM_ESCAPED else 1 for char in message) if surface == "telegram" else len(message)
+    return length <= budget

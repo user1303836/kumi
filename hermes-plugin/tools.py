@@ -55,6 +55,20 @@ class Host:
             return {}
         return config if isinstance(config, dict) else {}
 
+    def session_surface(self) -> str:
+        """The calling session's client (`cli`, `tui`, `desktop`, `acp`) or messaging platform (`telegram`, …), as
+        Hermes names it (`ctx.session_surface()`): "" outside a session or on a Hermes without it, and "unknown" when
+        asking fails, which `policy.shows_whole` takes as a place that shows nothing whole."""
+        ask = getattr(self._ctx, "session_surface", None)
+        if ask is None:
+            return ""
+        try:
+            surface = ask()
+        except Exception:
+            log.warning("Kumi couldn't ask Hermes where this call comes from: taken as unknown", exc_info=True)
+            return "unknown"
+        return surface if isinstance(surface, str) else "unknown"
+
     def hook_timeout(self) -> float | None:
         """Hermes's `plugins.hook_callback_timeout` (default 30 s; 0 or less: none), read on each call."""
         if self._hook_timeout is not None:

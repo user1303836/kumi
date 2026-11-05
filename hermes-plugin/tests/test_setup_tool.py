@@ -31,6 +31,14 @@ def setup_daw_calls(data) -> list[dict]:
             for message in support.requests(data / "state") if message.get("params", {}).get("name") == "setup_daw"]
 
 
+def desktop_host(test, *args, **kwargs):
+    """`support.host`, for a chat in Hermes Desktop, which shows setup's approval whole (the surface tests below cover
+    the others)."""
+    found = support.host(test, *args, **kwargs)
+    found[1].surface = "desktop"
+    return found
+
+
 def setUpModule() -> None:
     """No ffmpeg on the test machine reaches a plan: setup searches only the folders a test gives it."""
     searching = mock.patch.object(setup, "_ffmpeg_search", return_value=[])
@@ -38,9 +46,73 @@ def setUpModule() -> None:
     unittest.addModuleCleanup(searching.stop)
 
 
+class Surface(unittest.TestCase):
+    """Setup asks only where Hermes shows every line of its plan (rgzm, #954 LOW 17): never cut, never summarized."""
+
+    def test_desktop_asks_with_the_whole_plan_and_a_terminal_chat_sends_the_producer_to_hermes_kumi_setup(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        real = setup.approval
+
+        def long_plan(*args, **kwargs):  # longer than the terminal's panel on any machine (temp paths differ)
+            shown = real(*args, **kwargs)
+            return {**shown, "effects": [*shown["effects"], *(f"Writes: /Kumi/part {n}" for n in range(10))]}
+
+        with mock.patch.object(setup, "approval", side_effect=long_plan):
+            shown = long_plan("ableton", data_dir=data)
+            asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
+            self.assertEqual((asked["action"], asked["message"].splitlines()),
+                             ("approve", [shown["title"], *(f"• {line}" for line in shown["effects"])]))
+            for surface in ("cli", "tui"):
+                with self.subTest(surface):
+                    ctx.surface = surface
+                    refused = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
+                                                   tool_call_id=f"c-{surface}")
+                    self.assertEqual(refused["action"], "block")
+                    self.assertIn("Use `hermes kumi setup` in a terminal", refused["message"])
+                    self.assertNotIn("Kumi Ears.amxd", refused["message"], "it doesn't ask with part of the plan")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data), "nothing was installed")
+
+    def test_a_plan_that_fits_the_terminal_panel_is_asked_there_whole(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        real = setup.approval
+
+        def short_plan(*args, **kwargs):  # shorter than the panel on any machine
+            return {**real(*args, **kwargs), "title": "Kumi: install Kumi's part in Live", "effects": ["Writes: /Kumi/part"]}
+
+        ctx.surface = "tui"
+        with mock.patch.object(setup, "approval", side_effect=short_plan):
+            asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
+            self.assertEqual((asked["action"], asked["message"]),
+                             ("approve", "Kumi: install Kumi's part in Live\n• Writes: /Kumi/part"))
+            ctx.surface = RuntimeError("the plugin host's channel is gone")
+            with self.assertLogs(level="WARNING"):
+                unknown = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
+                                               tool_call_id="c2")
+        self.assertEqual(unknown["action"], "block", "where Hermes can't say, nothing is taken as shown whole")
+        self.assertNotIn("Writes:", unknown["message"], "it doesn't ask with part of the plan")
+        self.assertFalse(policy.shows_whole("x", "unknown"))
+
+    def test_a_plan_shown_whole_is_asked_on_every_surface_and_a_chat_app_that_would_cut_it_refuses(self):
+        short = "Kumi: set up Kumi 1.24.67's runtime\n• Download Kumi 1.24.67 (26.0 MB)"
+        for surface in ("cli", "tui", "desktop", "telegram", "discord", "slack", "acp", ""):
+            self.assertTrue(policy.shows_whole(short, surface), surface)
+        rows = "\n".join(f"• line {n} of a plan that says what it writes" for n in range(12))
+        self.assertFalse(policy.shows_whole(rows, "cli"), "more than 10 rows of 64 columns")
+        self.assertTrue(policy.shows_whole(rows, "desktop"))
+        wide = "• Writes: /" + "a" * 70
+        self.assertTrue(policy.shows_whole(wide, "tui"), "a long path wraps onto the next row, still in view")
+        self.assertFalse(policy.shows_whole("• Writes: /" + "a" * 700, "tui"), "one path longer than 10 rows isn't")
+        self.assertTrue(policy.shows_whole("x" * 300, "discord"))
+        self.assertFalse(policy.shows_whole("x" * 301, "discord"))
+        self.assertTrue(policy.shows_whole("x" * 500, "slack"))
+        self.assertFalse(policy.shows_whole("." * 251, "telegram"), "Telegram counts its escapes")
+
+
 class SetupTool(unittest.TestCase):
     def test_planning_the_runtime_names_the_download_and_starts_nothing(self):
-        host, _, data = support.host(self, installed=False)
+        host, _, data = desktop_host(self, installed=False)
         self.assertIsNone(policy.pre_tool_call(host, "kumi_setup", {"action": "plan"}), "a plan needs no approval")
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertEqual((plan["step"], plan["next"]), ("runtime", "kumi_setup install"))
@@ -48,7 +120,7 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(host.runtimes.get(data), "planning the runtime step starts no runtime")
 
     def test_the_daw_step_is_planned_from_the_runtimes_dry_run_with_its_exact_paths(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertEqual((plan["step"], plan["next"]), ("daw_component", "kumi_setup install"))
         self.assertTrue(any(path.endswith("Kumi Ears.amxd") for path in plan["paths"]), plan["paths"])
@@ -64,7 +136,7 @@ class SetupTool(unittest.TestCase):
         self.assertEqual(asked["rule_key"], f"kumi:setup:{plan['digest']}", "'always' covers this exact plan only")
 
     def test_install_or_adopt_without_a_plan_is_blocked_before_anyone_is_asked(self):
-        host, _, _ = support.host(self, installed=False)
+        host, _, _ = desktop_host(self, installed=False)
         for action in ("install", "adopt"):
             with self.subTest(action):
                 decision = policy.pre_tool_call(host, "kumi_setup", {"action": action}, tool_call_id="c1")
@@ -75,14 +147,14 @@ class SetupTool(unittest.TestCase):
                          "a runtime plan is never approved as an adoption")
 
     def test_a_runtime_working_in_another_daw_is_never_asked_to_set_up_this_one(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         support.call(host, "kumi_connect", {"daw": "reaper"}, session_id="s1")
         planned = support.call(host, "kumi_setup", {"action": "plan", "daw": "ableton"}, session_id="s2")
         self.assertEqual(planned["error"]["code"], "other_daw")
         self.assertEqual(setup_daw_calls(data), [])
 
     def test_an_approved_install_carries_out_the_daw_step_it_showed(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
         self.assertTrue(installed["ok"], installed)
@@ -92,7 +164,7 @@ class SetupTool(unittest.TestCase):
                                                                              ("Kumi Ears", "same")])
 
     def test_a_denied_install_or_one_that_skipped_the_hook_changes_nothing(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertIn("blocked", support.call(host, "kumi_setup", {"action": "install"}, session_id="s1", answer="deny"))
         skipped = support.handle(host, "kumi_setup", {"action": "install", "expected_digest": plan["digest"]},
@@ -101,7 +173,7 @@ class SetupTool(unittest.TestCase):
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
     def test_a_plan_another_chat_made_after_the_approval_is_not_installed(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         hook = {"session_id": "s1", "task_id": None, "tool_call_id": "setup-1"}
         self.assertEqual(policy.pre_tool_call(host, tool_name="kumi_setup", args={"action": "install"}, **hook)["action"],
@@ -122,7 +194,7 @@ class SetupTool(unittest.TestCase):
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
     def test_an_approved_install_that_hermes_then_blocks_leaves_nothing_to_run(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         hook = {"session_id": "s1", "task_id": None, "tool_call_id": "setup-blocked"}
         self.assertEqual(policy.pre_tool_call(host, tool_name="kumi_setup", args={"action": "install"}, **hook)["action"],
@@ -137,7 +209,7 @@ class SetupTool(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         owner = Path(folder.name)
-        host, _, data = support.host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
+        host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
                                      daw_component=False)
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertEqual((plan["step"], plan["next"]), ("owned_elsewhere", "kumi_setup adopt"))
@@ -151,7 +223,7 @@ class SetupTool(unittest.TestCase):
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
     def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_the_older_runtime(self):
-        host, _, data = support.host(self)  # Kumi 1.24.66's runtime, set up
+        host, _, data = desktop_host(self)  # Kumi 1.24.66's runtime, set up
         support.call(host, "kumi_connect", {}, session_id="s1")
         older = host.runtimes.get(data)
         self.assertIsNotNone(older, "the older runtime runs")
@@ -176,7 +248,7 @@ class SetupTool(unittest.TestCase):
         self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
 
     def test_allowing_an_ffmpeg_restarts_the_runtime_with_it(self):
-        host, _, data = support.host(self, None, "--component-state", "same")  # set up for Live already
+        host, _, data = desktop_host(self, None, "--component-state", "same")  # set up for Live already
         support.call(host, "kumi_connect", {}, session_id="s1")
         running = host.runtimes.get(data)
         folder = tempfile.TemporaryDirectory()
@@ -206,7 +278,7 @@ class SetupTool(unittest.TestCase):
 
 class Cli(unittest.TestCase):
     def test_it_asks_installs_the_daw_component_and_stops_the_runtime_it_started(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         out = Tty()
         self.assertEqual(commands.cli_setup(host, "ableton", stdin=Tty("y\n"), stdout=out), 0, out.getvalue())
         said = out.getvalue()
@@ -220,7 +292,7 @@ class Cli(unittest.TestCase):
         self.assertEqual([part["name"] for part in state["daw_component"]["parts"]], ["Remote Script", "Kumi Ears"])
 
     def test_a_no_changes_nothing_and_no_terminal_runs_nothing(self):
-        host, _, data = support.host(self, daw_component=False)
+        host, _, data = desktop_host(self, daw_component=False)
         out = Tty()
         self.assertEqual(commands.cli_setup(host, "ableton", stdin=Tty("n\n"), stdout=out), 1)
         self.assertIn("Nothing was changed.", out.getvalue())
