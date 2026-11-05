@@ -455,6 +455,13 @@ impl Wire {
         (answer["result"]["structuredContent"].clone(), answer["result"]["isError"] == true)
     }
 
+    /// [`Wire::call`] by a host call of the chat `session`.
+    async fn call_in(&mut self, name: &str, mut arguments: Value, tool_call_id: Option<&str>, session: &str) -> (Value, bool) {
+        arguments["_host"] = json!({"tool_call_id": tool_call_id, "session_id": session});
+        let answer = self.request("tools/call", json!({"name": name, "arguments": arguments})).await;
+        (answer["result"]["structuredContent"].clone(), answer["result"]["isError"] == true)
+    }
+
     async fn end(mut self) {
         drop(self.to.take());
         let mut rest = String::new();
@@ -993,6 +1000,15 @@ impl ImportLab {
 }
 
 /// A plan placing `sample` in the Simpler.
+/// A canonical path as a DAW gets it: on Windows without the verbatim `\\?\` prefix canonicalizing gives.
+fn daw_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}").into(),
+        None => text.strip_prefix(r"\\?\").map_or(path, std::path::PathBuf::from),
+    }
+}
+
 fn sample_plan(key: &Value, epoch: u64, sample: Value) -> Value {
     plan(key, epoch, json!([{"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": sample}}]))
 }
@@ -1036,8 +1052,9 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (placed, _) = wire.call("change", sample_plan(&key, epoch, file), Some("tc-1")).await;
     assert_eq!(placed["state"], "applied", "{placed}");
     let sent = lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap().to_string();
-    let artifacts = std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap();
+    let artifacts = daw_path(std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap());
     assert!(std::path::Path::new(&sent).starts_with(&artifacts), "{sent}");
+    assert!(!sent.starts_with(r"\\?\"), "the DAW gets a plain path: {sent}");
     let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];
     assert_eq!(
@@ -1073,6 +1090,16 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (switched, _) = wire.call("change", other, Some("tc-5")).await;
     assert_eq!((switched["state"].clone(), switched["code"].clone()), (json!("refused"), json!("stale")), "{switched}");
     assert_eq!(lab.given.borrow().len(), 2);
+    // A preview made by one call binds neither a dispatch with no call id nor the same id in another chat.
+    let mut previewed = unapproved.clone();
+    previewed["preview"] = json!(true);
+    wire.call("change", previewed.clone(), Some("tc-7")).await;
+    let (unnamed_dispatch, _) = wire.call("change", unapproved.clone(), None).await;
+    assert_eq!(unnamed_dispatch["code"], "stale", "{unnamed_dispatch}");
+    wire.call_in("change", previewed, Some("tc-8"), "chat-1").await;
+    let (other_chat, _) = wire.call_in("change", unapproved.clone(), Some("tc-8"), "chat-2").await;
+    assert_eq!(other_chat["code"], "stale", "{other_chat}");
+    assert_eq!(lab.given.borrow().len(), 2);
     // A preview that came with no call id (a hook that had none) binds its dispatch by the plan alone.
     let mut unnamed = unapproved.clone();
     unnamed["preview"] = json!(true);
@@ -1090,6 +1117,26 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     std::fs::write(media.join("Kick.wav"), b"RIFF and something else entirely").unwrap();
     let (stale, _) = wire.call("change", sample_plan(&key, epoch, kick), Some("tc-3")).await;
     assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
+    assert_eq!(lab.given.borrow().len(), 3);
+
+    // A plan with two host's files keeps neither when the second can't be copied (over the artifacts' 50 MiB): every
+    // file is staged before any is kept, so the first isn't left in the artifacts for nothing.
+    let big = media.join("Long Take.wav");
+    std::fs::File::create(&big).unwrap().set_len(51 * 1024 * 1024).unwrap();
+    let artifacts = lab.ctx.paths().state_dir.join("artifacts");
+    let kept_before = std::fs::read_dir(&artifacts).unwrap().count();
+    let two = |n: u64| {
+        json!({"title": "Two samples", "expected_project_key": key, "expected_epoch": n, "steps": [
+            {"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": {"file": media.join("Kick.wav").display().to_string(), "provenance": provenance}}},
+            {"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": {"file": big.display().to_string(), "provenance": provenance}}},
+        ]})
+    };
+    let mut asked = two(epoch);
+    asked["preview"] = json!(true);
+    wire.call("change", asked, Some("tc-two")).await;
+    let (too_long, _) = wire.call("change", two(epoch), Some("tc-two")).await;
+    assert_eq!(too_long["state"], "refused", "{too_long}");
+    assert_eq!(std::fs::read_dir(&artifacts).unwrap().count(), kept_before, "neither file kept");
     assert_eq!(lab.given.borrow().len(), 3);
 
     // 11d, the demo's step: a sound from a scanned library folder, found by its words, placed as it is.
@@ -1112,7 +1159,7 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     assert!(preview["steps"][0]["text"].as_str().is_some_and(|text| text.contains("\"Snare Tone.wav\"")), "{preview}");
     let (from_library, _) = wire.call("change", sample_plan(&key, epoch, from_map), Some("tc-map")).await;
     assert_eq!(from_library["state"], "applied", "{from_library}");
-    let library_file = std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap();
+    let library_file = daw_path(std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap());
     assert_eq!(lab.given.borrow()[3]["steps"][0]["input"]["sample"], json!(library_file.display().to_string()), "in place");
     let row = lab.ctx.history().row(from_library["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];

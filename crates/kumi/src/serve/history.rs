@@ -290,12 +290,13 @@ impl History {
         let rows = self.rows.borrow();
         let mut made: Vec<&Row> = rows
             .iter()
-            // A row from before rows kept the call's profile and session matches whichever: a retry right after an
-            // update isn't run again.
+            // A row an earlier runtime wrote without the call's profile and session (from before rows kept them)
+            // matches whichever: a retry right after an update isn't run again. This runtime's rows match exactly.
             .filter(|row| {
+                let earlier = row.runtime_generation != self.generation;
                 row.tool_call_id.as_deref() == Some(tool_call_id)
-                    && (row.profile_id.is_none() || row.profile_id.as_deref() == call.profile_id)
-                    && (row.session_id.is_none() || row.session_id.as_deref() == call.session_id)
+                    && (row.profile_id.as_deref() == call.profile_id || (earlier && row.profile_id.is_none()))
+                    && (row.session_id.as_deref() == call.session_id || (earlier && row.session_id.is_none()))
             })
             .collect();
         if made.is_empty() {
@@ -433,5 +434,22 @@ mod tests {
         assert!(later.ran(call("tc-9", "d1")).is_none(), "a call no row came from runs");
         let elsewhere = CallIdentity { session_id: Some("chat-2"), ..call("tc-1", "d1") };
         assert!(later.ran(elsewhere).is_none(), "another chat's call_0 is another call");
+    }
+
+    #[test]
+    fn a_row_without_its_chat_matches_any_only_when_an_earlier_runtime_wrote_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let unscoped = |id| CallIdentity { profile_id: None, session_id: None, tool_call_id: Some(id), digest: "d1" };
+        let before = History::new(dir.path(), "g1".into());
+        before.begin_call();
+        before.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
+        before.end_call(unscoped("call_0"), &snapshots);
+        // This runtime's own row without a chat is that call's alone.
+        assert!(before.ran(call("call_0", "d1")).is_none(), "another chat's call_0, in the runtime that wrote the row");
+        snapshots.flush();
+        // A row from before rows kept the chat: a retry right after the update isn't run again.
+        let after = History::new(dir.path(), "g2".into());
+        assert!(after.ran(call("call_0", "d1")).is_some_and(|ran| ran.is_ok()));
     }
 }

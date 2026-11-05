@@ -182,9 +182,14 @@ async fn placed(
     if pinned != named {
         return Err(refused("stale", "A file this plan places changed since it was approved: preview it again."));
     }
+    // Every host's file staged before any is kept: one refused leaves none of the others kept for nothing.
+    let mut staged = Vec::new();
+    for (n, _, found) in &found {
+        staged.push(super::import::stage(ctx, found, signal).await.map_err(|error| at(*n, error))?);
+    }
     let mut sources = Vec::new();
-    for (n, field, found) in found {
-        let (path, mut record) = super::import::keep(ctx, found, signal).await.map_err(|error| at(n, error))?;
+    for ((n, field, found), staged) in found.into_iter().zip(staged) {
+        let (path, mut record) = super::import::keep(ctx, found, staged, signal).await.map_err(|error| at(n, error))?;
         steps[n]["input"][field] = json!(path.display().to_string());
         let tool = steps[n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
         step_takes(ctx, n, &tool, &steps[n]["input"])?;
@@ -231,7 +236,8 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         None
     } else {
         // Its own call's preview, or one that came with no call id (bound by its plan alone).
-        let by_plan = pin_key(&super::ctx::Host::default(), &approved);
+        let session = super::ctx::Host { session_id: call.host.session_id.clone(), ..Default::default() };
+        let by_plan = pin_key(&session, &approved);
         let found = ctx.link().take_pin(&pin).or_else(|| if pin == by_plan { None } else { ctx.link().take_pin(&by_plan) });
         match found {
             Some((plan, files)) if plan == approved => Some(files),
@@ -277,7 +283,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let rows = history.end_call(identity, ctx.snapshots());
     let mut outcome = outcome(ran, &rows);
     // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
-    connection::names_only(&mut outcome.steps);
+    connection::names_only_said(&mut outcome.steps);
     outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
     // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
     // them all.
@@ -317,7 +323,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         "state": outcome.state,
         "history_ids": ids,
         "steps": outcome.steps,
-        "summary": connection::names_only_text(&outcome.summary),
+        "summary": outcome.summary,
         "undo_available": rows.iter().any(|row| row.undo_available),
         "project_key": project_now.key,
         "epoch": project_now.epoch,
@@ -685,7 +691,7 @@ fn loose(args: &Map<String, Value>) -> Map<String, Value> {
 }
 
 /// The call a preview's approval is for: the host call (its profile, session and id), as the hook's preview and the
-/// handler's dispatch both carry it; a call without an id by its plan alone.
+/// handler's dispatch both carry it; a call without an id by its plan, in its session.
 fn pin_key(host: &super::ctx::Host, approved: &str) -> String {
     match &host.tool_call_id {
         Some(id) => format!(
@@ -693,7 +699,7 @@ fn pin_key(host: &super::ctx::Host, approved: &str) -> String {
             host.profile_id.as_deref().unwrap_or_default(),
             host.session_id.as_deref().unwrap_or_default()
         ),
-        None => format!("plan\u{1f}{approved}"),
+        None => format!("plan\u{1f}{}\u{1f}{approved}", host.session_id.as_deref().unwrap_or_default()),
     }
 }
 
