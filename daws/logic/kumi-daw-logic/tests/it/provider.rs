@@ -56,7 +56,7 @@ async fn logics_bridge_is_installed_in_kumis_folder_without_restarting_logic() {
     let mut io = DawIo::new(env.clone());
     io.out = out.clone();
     assert!(!PROVIDER.bridge_installed(&env));
-    assert!(PROVIDER.reads_only());
+    assert!(!PROVIDER.reads_only());
     assert_eq!(PROVIDER.id(), DawId::Logic);
     assert_eq!(PROVIDER.setup_bridge(io.clone(), BridgeCommand::default()).await.unwrap(), 1);
     assert!(out.text().contains("Kumi's own folder"), "{}", out.text());

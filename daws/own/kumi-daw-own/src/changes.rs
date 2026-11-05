@@ -70,6 +70,8 @@ pub struct OwnKind {
     pub picture: Picture,
     /// The DAW's own undo never takes it back (Renoise's mute, solo and loop; REAPER's repeat): only Kumi's undo does.
     pub skipped_by_daw_undo: bool,
+    /// A confirmed change only the producer can take back in the DAW; HISTORY keeps this guidance permanently.
+    pub manual_undo: Option<&'static str>,
 }
 
 /// What HISTORY draws of a change: a value moved within its span (a fader, a pan), a colour's swatches, or one picture
@@ -120,10 +122,15 @@ impl OwnKind {
             wire: &[],
             picture: Picture::None,
             skipped_by_daw_undo: false,
+            manual_undo: None,
         }
     }
     pub const fn skipped_by_daw_undo(mut self) -> Self {
         self.skipped_by_daw_undo = true;
+        self
+    }
+    pub const fn manual_undo(mut self, note: &'static str) -> Self {
+        self.manual_undo = Some(note);
         self
     }
     pub const fn meter(mut self, field: &'static str, min: f64, max: f64) -> Self {
@@ -387,6 +394,27 @@ impl<S: RefScheme> Link<S> {
 /// What HISTORY asks of a DAW of Kumi's own: its refs, its clock, and its way back for one change (the host's undo).
 pub struct OwnChanges<S: RefScheme> {
     pub link: Rc<Link<S>>,
+}
+
+/// A latest manual-only change must explain its limit, instead of undoing an earlier change on `last`.
+pub(crate) fn undo_target<S: RefScheme + 'static>(history: &History<OwnChanges<S>>, target: &str) -> String {
+    if target == "last" {
+        if let Some(entry) = history.entries.borrow().values().rev().find(|entry| {
+            let entry = entry.borrow();
+            matches!(entry.record.state, ChangeState::Applied | ChangeState::Unsure | ChangeState::Kept)
+                && entry.within.as_ref().is_none_or(|within| within.is_empty())
+        }) {
+            let entry = entry.borrow();
+            if entry.permanent == Some(true)
+                && entry.tool.as_deref().is_some_and(|tool| {
+                    history.host.link.daw.changes.kinds.iter().any(|kind| kind.tool == tool && kind.manual_undo.is_some())
+                })
+            {
+                return entry.record.id.clone();
+            }
+        }
+    }
+    target.to_owned()
 }
 
 #[async_trait(?Send)]
@@ -1093,11 +1121,13 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         let skipped = kind.skipped_by_daw_undo
             || applied.pointer("/undo/entry") == Some(&Value::Bool(false))
             || applied.pointer("/undo/covered") == Some(&Value::Bool(false));
-        let note = applied
-            .pointer("/display/note")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| skipped.then(|| format!("{own_undo} can't take this back; Kumi can.")));
+        let note = kind.manual_undo.map(str::to_owned).or_else(|| {
+            applied
+                .pointer("/display/note")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| skipped.then(|| format!("{own_undo} can't take this back; Kumi can.")))
+        });
         if kind.kind == "track-add" {
             self.added.set(self.added.get() + 1);
         }
@@ -1119,7 +1149,8 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             self.link().outside_daw_undo.borrow_mut().insert(transaction.clone());
         }
         let summary = kind.summary(&title, Some(&preview), Some(&applied));
-        let id = self.remember(kind, summary, &transaction, ChangeState::Applied, note.clone());
+        let state = if kind.manual_undo.is_some() { ChangeState::Kept } else { ChangeState::Applied };
+        let id = self.remember(kind, summary, &transaction, state, note.clone());
         // What the listening tools read back: the part a note edit changed (groove takes back its own part's edits), and a
         // track's rename (a judged run follows its track by it).
         if let Some(target) = preview.pointer("/target/ref").and_then(Value::as_str) {
@@ -1657,9 +1688,11 @@ impl<S: RefScheme + 'static> KernelTool for UndoTool<S> {
     fn input_schema(&self) -> JsonObject {
         serde_json::from_str(UNDO_SCHEMA).expect("JSON")
     }
-    async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+    async fn execute(&self, mut input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         // Discard is the own DAWs' (their schema offers it); Live's undo_change never reads it.
         let discard = input.get("discard") == Some(&Value::Bool(true));
+        let target = undo_target(&self.engine.history, input.get("change").and_then(Value::as_str).unwrap_or("last"));
+        input.insert("change".into(), target.into());
         undo_change_with(&self.engine.history, &input, signal, discard).await
     }
 }

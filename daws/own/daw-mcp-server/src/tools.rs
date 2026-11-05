@@ -26,11 +26,11 @@ pub struct Kinds {
 
 pub fn kinds(daw: Daw) -> Kinds {
     match daw {
-        // The native M2 bridge reads these rows and bodies; it has no changes or listening yet.
+        // Logic's native reads and M3 changes; listening is not implemented.
         Daw::Logic => Kinds {
             read: &["project", "track", "region", "note", "plugin", "send", "marker", "tempo"],
             bodies: &["tree", "notes", "timeline", "routing"],
-            outside_undo: &[],
+            outside_undo: crate::logic::OUTSIDE_UNDO,
         },
         Daw::Reaper => Kinds {
             read: &[

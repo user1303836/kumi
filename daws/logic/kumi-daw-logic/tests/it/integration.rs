@@ -103,7 +103,9 @@ async fn logics_look_without_accessibility_says_what_to_allow_and_never_counts_a
             let seen = logic.observe(Signal::new(), None).await.unwrap();
             assert!(seen.label.starts_with("Logic Pro — couldn't look just now: Kumi's helper needs Accessibility"), "{}", seen.label);
             assert!(seen.label.contains("System Settings > Privacy & Security > Accessibility"), "{}", seen.label);
-            assert_eq!(seen.tools.iter().map(|t| t.name().to_string()).collect::<Vec<_>>(), ["logic_read"], "Logic's tools stay");
+            let tools: Vec<String> = seen.tools.iter().map(|t| t.name().to_string()).collect();
+            assert_eq!(tools[0], "logic_read", "{tools:?}");
+            assert!(tools.iter().any(|t| t == "make_changes") && tools.iter().any(|t| t == "undo_change"), "{tools:?}");
             assert!(!states.borrow().contains(&ConnectionState::Disconnected), "lacking a permission isn't gone: {:?}", states.borrow());
             // Granted: the project reads, at Logic's own place, in short refs.
             host.answers.borrow_mut().push(("status", json!({"connected": true, "busy": false, "permission": null}), false));

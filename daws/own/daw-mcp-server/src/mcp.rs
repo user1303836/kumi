@@ -50,7 +50,9 @@ fn tool_list(daw: Daw) -> Value {
             format!("{} Notes require a region already selected in Logic Pro.", body["description"].as_str().unwrap_or_default()).into();
         body["inputSchema"]["properties"]["window"]["description"] =
             "The range to show, in quarter-note beats from the start of the project.".into();
-        return json!([status, discover, read, snapshot_tool(daw, "project", &pick), focus_tool(daw, &pick), body]);
+        let mut tools = vec![status, discover, read, snapshot_tool(daw, "project", &pick), focus_tool(daw, &pick), body];
+        tools.extend(crate::logic::change_tools(&pick));
+        return json!(tools);
     }
     // (SoundCraft's bridge serves ping, status, read, snapshot, focus and focus_body so far: its change and listening tools
     // come as it learns them)

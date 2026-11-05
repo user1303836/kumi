@@ -114,6 +114,14 @@ async fn tui_states(daw: DawId, label: &str, focuses: Vec<(serde_json::Value, Op
     h.type_text("/status\r").await;
     settle(&h).await;
     found.screen("/status", &h);
+    h.emit(json!({"type":"change","change":{"id":"c2","family":"tempo","title":"Tempo 120 → 124 BPM","state":"applied","at":2}}));
+    settle(&h).await;
+    found.screen("a change", &h);
+    *c.undo.borrow_mut() =
+        Some(serde_json::from_value(json!({"id":"c2","family":"tempo","title":"Tempo 120 → 124 BPM","state":"undone","at":2})).unwrap());
+    h.type_text("/undo\r").await;
+    settle(&h).await;
+    found.screen("/undo", &h);
     h.emit(json!({"type":"library","status":{"state":"ready","sounds":1020,"presets":40,"sets":3,"learnedAt":1}}));
     settle(&h).await;
     found.screen("library", &h);
@@ -284,6 +292,7 @@ case!(a_reaper_session_never_speaks_lives_words, async {
         "Watching your changes in REAPER",
         "Kept once the project is saved",
         "A project not saved yet",
+        "Undid: Tempo 120 → 124 BPM",
         "Read your REAPER project again",
         "REAPER connected",
         "REAPER isn't connected",
@@ -486,4 +495,50 @@ case!(a_reconnect_in_renoise_never_gives_rows_lives_note, async {
     assert!(h.screen().iter().any(|s| s.contains("Track 1 muted") && s.contains("no undo")), "{:?}", h.screen());
     h.close().await;
     work_with(DawId::Ableton);
+});
+
+case!(a_logic_session_never_speaks_lives_words, async {
+    let track = json!({"name":"Keys","color":"#5b8def","kind":"midi"});
+    let focuses = vec![
+        (json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"}}), None),
+        (
+            json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"note-editor","label":"Piano Roll"},"item":{"kind":"item","itemRef":"1:region:1","name":"Keys"}}),
+            None,
+        ),
+        // A dialog up in Logic: said in Logic's words; then free again, with the routing shown.
+        (
+            json!({"track":track,"trackRef":"1:track:2","device":"Alchemy","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"device-chain","label":"Plug-in"},"busy":"Logic Pro is showing a dialog"}),
+            None,
+        ),
+        (
+            json!({"track":track,"trackRef":"1:track:2","mainView":{"kind":"timeline","label":"Tracks"},"editorView":{"kind":"routing","label":"Routing"}}),
+            Some(FocusBody::Routing(RoutingView {
+                track_ref: "1:track:2".into(),
+                name: None,
+                routes: vec![],
+                parent_send: None,
+                midi_out: None,
+            })),
+        ),
+    ];
+    // HISTORY over Logic's profile: a change to check, the catch-up, watching, and the producer's /undo, each in
+    // Logic's words.
+    let seen = [
+        "connecting to Logic Pro",
+        "Ask Kumi about your project",
+        "check Logic Pro",
+        "While Logic Pro was away",
+        "Watching your changes in Logic Pro",
+        "Kept once the project is saved",
+        "A project not saved yet",
+        "Read your Logic Pro project again",
+        "Logic Pro connected",
+        "Logic Pro isn't connected",
+        "Logic Pro is busy",
+        "Undid: Tempo 120 → 124 BPM",
+        "Kumi closed. Each project's conversation continues next time.",
+        // (/status: REAPER has no status bar Kumi can write to)
+        "no status bar",
+    ];
+    tui_states(DawId::Logic, "Logic Pro — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("Logic Pro");
 });

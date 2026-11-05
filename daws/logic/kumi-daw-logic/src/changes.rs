@@ -1,14 +1,58 @@
-//! What Kumi can change in Logic Pro: nothing yet. M1 and M2 read Logic; M3 brings its changes and undo, as REAPER's
-//! and Renoise's (`reaper_changes.rs`, `renoise_changes.rs`) came with theirs. An empty set gives the model no change
-//! tools and adds nothing to Logic's instructions.
-use kumi_daw_own::changes::OwnChangeSet;
+//! What Kumi can change in Logic Pro (M3): a track's fader, pan and buttons and its name, tracks added and deleted,
+//! markers, the tempo, a region's notes as Event List rows, and a plug-in's bypass. Each kind is the bridge's
+//! (`daws/logic/logic-kumi/src/changes`), which makes it through one macOS channel and reads it back; what the bridge
+//! found no channel for (the cycle locators, a marker's name, a plug-in inserted, removed or set, a send, a track
+//! moved) isn't declared, and the bridge refuses it saying why. Logic has no undo block, and its own undo keeps a
+//! step for a rename, a track or a marker made or deleted and notes written, none for a header's control, the tempo
+//! or a bypass: `plan_steps` is false, and Kumi restores values as new writes; deleted tracks and markers require the producer's manual Logic undo. Those seven kinds carry
+//! `skipped_by_daw_undo`, as the host's `outside_undo` names them.
+use kumi_daw_own::changes::{OwnAction, OwnChangeSet, OwnKind};
+use kumi_types::contracts::ChangeFamily::*;
+
+const MANUAL_UNDO: &str = "Kumi cannot automatically restore this deletion: Logic Pro's Undo title cannot identify Kumi's specific step. Review the appropriate step in Logic Pro's Undo History and undo manually.";
+
+const PLAN: &str = "Make changes in Logic Pro in one call, in order: each step is one of your change tools or a step below with its input, and \"@name\" in an input stands for what an earlier step marked as: \"name\" made (a new track, a new marker). A wait step ({\"beats\": 8} or {\"seconds\": 4}) pauses between steps. Logic Pro has no undo block: a step that renames, adds or deletes a track, makes, moves or deletes a marker, or writes notes is one step of Logic Pro's own undo (Cmd-Z in Logic Pro takes back the last one only), and a fader, pan, mute, solo, arm, tempo or bypass step is none, since Logic Pro's undo doesn't keep those. It stops at the first step that fails and says what was done. With final: true and every step done, Kumi tells the producer what changed and the answer ends there, with no reply from you: use it when the changes complete the request, even a single change.";
+const UNDO: &str = "Undo one of your changes from this session: pass its change id (such as c3), or \"last\" for the latest one. Kumi puts back exactly what that change set, as a new write in Logic Pro; it only works while nobody changed the same thing in Logic Pro since, and if so, say what happened (discard: true puts it back anyway, only when the producer asks). Kumi cannot automatically restore deleted tracks or markers: Logic Pro's Undo title cannot prove which step is Kumi's. Tell the producer to use Logic Pro's own undo manually. With final: true, when the undo is all that was asked, Kumi tells the producer and the answer ends there, with no reply from you.";
+const INSTRUCTIONS: &str = "Change Logic Pro with your change tools, or several changes at once with make_changes, using the refs your reads gave. Logic Pro's own undo keeps a step for a rename, a track or a marker made or deleted and notes written, and none for a fader, pan, mute, solo, arm, tempo or bypass (its Edit menu stays as it was); undo_change restores value changes as new writes; deleted tracks and markers require the producer to use Logic Pro's own undo manually. Kumi does not press an Undo step identified only by its title. Kumi changes Logic Pro through its own window and reads each value back: a change Logic Pro didn't show is answered as uncertain, so read it before going on. Adding or deleting a track makes Logic Pro's refs new: read again before using older ones (a ref the change made comes back with it). Positions are positionBeats, beats (quarter notes) from the project's start; Logic Pro shows them as bars. Pan runs -1 (left) to 1 (right) here, though Logic Pro's strips show -64 to 63; the tempo takes whole BPM; Logic Pro names markers itself. The observation's kumiChanges lists your latest changes and where each stands (applied, undone, kept, unsure, or expired: Kumi can't undo it any more, and its note says who can); value-backed property and rename reversions can be recognized after the producer uses Logic undo. Marker, note and structural steps have no title-only undo attribution; verify them by reading Logic, not by memory.";
 
 pub static CHANGES: OwnChangeSet = OwnChangeSet {
-    kinds: &[],
-    actions: &[],
-    plan_description: "",
-    undo_description: "",
-    instructions: "",
+    kinds: &KINDS,
+    actions: &ACTIONS,
+    plan_description: PLAN,
+    undo_description: UNDO,
+    instructions: INSTRUCTIONS,
     plan_steps: false,
     most_track_adds: None,
 };
+
+static ACTIONS: [OwnAction; 3] = [
+    OwnAction { tool: "play", method: "transport_play", description: "Start Logic Pro playing from the playhead.", schema: r#"{"type":"object","additionalProperties":false,"properties":{}}"#, core: true, playing: Some(true), title: "Playing" },
+    OwnAction { tool: "stop", method: "transport_stop", description: "Stop Logic Pro's playback and recording.", schema: r#"{"type":"object","additionalProperties":false,"properties":{}}"#, core: true, playing: Some(false), title: "Stopped" },
+    OwnAction { tool: "set_cursor", method: "cursor_set", description: "Move Logic Pro's playhead to positionBeats (beats from the project's start, to the bar and beat) or position (seconds at the project's tempo); playback follows while it plays.", schema: r#"{"type":"object","additionalProperties":false,"properties":{"positionBeats":{"type":"number","minimum":0},"position":{"type":"number","minimum":0}}}"#, core: false, playing: None, title: "Moved the playhead" },
+];
+
+static KINDS: [OwnKind; 16] = [
+    // The header's controls (no step of Logic's undo): the fader, read back as its dB text, the pan knob, the buttons.
+    OwnKind::new("track_volume", "track-volume", Mixer, "Change a track's channel strip fader in dB (-96 or less is silence, at most +6, as far as Logic Pro's fader goes).", r#"{"type":"object","additionalProperties":false,"required":["ref","volumeDb"],"properties":{"ref":{"type":"string","description":"The track"},"volumeDb":{"type":"number","minimum":-96,"maximum":6}}}"#).core().meter("volumeDb", -60.0, 12.0).skipped_by_daw_undo(),
+    OwnKind::new("track_pan", "track-pan", Mixer, "Change a track's pan, -1 (left) to 1 (right); Logic Pro's strips show it as -64 to 63.", r#"{"type":"object","additionalProperties":false,"required":["ref","pan"],"properties":{"ref":{"type":"string","description":"The track"},"pan":{"type":"number","minimum":-1,"maximum":1}}}"#).core().meter("pan", -1.0, 1.0).skipped_by_daw_undo(),
+    OwnKind::new("track_mute", "track-mute", Mixer, "Mute or unmute a track (its header's M button).", r#"{"type":"object","additionalProperties":false,"required":["ref","mute"],"properties":{"ref":{"type":"string","description":"The track"},"mute":{"type":"boolean"}}}"#).core().skipped_by_daw_undo(),
+    OwnKind::new("track_solo", "track-solo", Mixer, "Solo or unsolo a track (its header's S button).", r#"{"type":"object","additionalProperties":false,"required":["ref","solo"],"properties":{"ref":{"type":"string","description":"The track"},"solo":{"type":"boolean"}}}"#).skipped_by_daw_undo(),
+    OwnKind::new("track_arm", "track-arm", Mixer, "Arm a track for recording, or disarm it (its header's R button); audio and software instrument tracks only.", r#"{"type":"object","additionalProperties":false,"required":["ref","arm"],"properties":{"ref":{"type":"string","description":"The track"},"arm":{"type":"boolean"}}}"#).skipped_by_daw_undo(),
+    // The Inspector's name field, confirmed: a step of Logic's undo ("Renaming").
+    OwnKind::new("track_rename", "track-rename", Rename, "Rename a track (the Inspector's name field); Logic Pro names a track itself when its name is cleared, so give one.", r#"{"type":"object","additionalProperties":false,"required":["ref","name"],"properties":{"ref":{"type":"string"},"name":{"type":"string","minLength":1,"maxLength":256}}}"#),
+    // The Track menu: a new track below the selected one, read back from the headers; Delete Track, its sheet answered.
+    OwnKind::new("track_add", "track-add", Structure, "Add a track below the track at index (counted from 1; below the last by default): an audio track by default, or kind instrument (software instrument) or external (external MIDI); named name when given (Logic Pro's Track menu).", r#"{"type":"object","additionalProperties":false,"properties":{"name":{"type":["string","null"],"maxLength":256},"kind":{"type":"string","enum":["audio","instrument","external"],"description":"Audio by default"},"index":{"type":"integer","minimum":1,"description":"The track the new one goes below, counted from 1; the last by default"}}}"#).core().structural(),
+    OwnKind::new("track_delete", "track-delete", Structure, "Delete a track with its regions, plug-ins and sends. Kumi cannot restore it automatically; the producer must use Logic Pro's own undo manually.", r#"{"type":"object","additionalProperties":false,"required":["ref"],"properties":{"ref":{"type":"string"}}}"#).structural().deletes().manual_undo(MANUAL_UNDO),
+    // The Marker List: a marker made at the playhead (moved there and back), its position scrubber, its row's Delete.
+    OwnKind::new("marker_add", "marker-add", Locators, "Add a marker at positionBeats (beats from the project's start, on the beat); Logic Pro names it itself (Marker 1, Marker 2, in order).", r#"{"type":"object","additionalProperties":false,"required":["positionBeats"],"properties":{"positionBeats":{"type":"number","minimum":0}}}"#),
+    OwnKind::new("marker_move", "marker-move", Locators, "Move a marker to positionBeats (beats from the project's start).", r#"{"type":"object","additionalProperties":false,"required":["ref","positionBeats"],"properties":{"ref":{"type":"string","description":"The marker"},"positionBeats":{"type":"number","minimum":0}}}"#),
+    OwnKind::new("marker_delete", "marker-delete", Locators, "Delete a marker. Kumi cannot faithfully restore its name or identify its native Undo step; the producer must use Logic Pro's own undo manually.", r#"{"type":"object","additionalProperties":false,"required":["ref"],"properties":{"ref":{"type":"string","description":"The marker"}}}"#).deletes().manual_undo(MANUAL_UNDO),
+    // The control bar's tempo (no step of Logic's undo).
+    OwnKind::new("tempo_set", "tempo-set", Tempo, "Change the project tempo in BPM (5 to 990, whole numbers: Logic Pro's tempo display takes whole BPM from outside).", r#"{"type":"object","additionalProperties":false,"required":["bpm"],"properties":{"bpm":{"type":"integer","minimum":5,"maximum":990}}}"#).core().skipped_by_daw_undo(),
+    // A region's notes, as Event List rows (fenced on the region's note count and a hash of its rows).
+    OwnKind::new("notes_add", "notes-add", Clip, "Add MIDI notes to a region, as Event List rows: start and length in beats from the region's start, velocity 1 to 127 (100 by default), channel 1 to 16.", r#"{"type":"object","additionalProperties":false,"required":["ref","notes"],"properties":{"ref":{"type":"string","description":"The region"},"notes":{"type":"array","minItems":1,"maxItems":10000,"items":{"type":"object","additionalProperties":false,"required":["pitch","start","length"],"properties":{"pitch":{"type":"integer","minimum":0,"maximum":127},"start":{"type":"number","minimum":0},"length":{"type":"number","exclusiveMinimum":0},"velocity":{"type":"integer","minimum":1,"maximum":127},"channel":{"type":"integer","minimum":1,"maximum":16}}}}}}"#).core(),
+    OwnKind::new("notes_change", "notes-change", Clip, "Change a region's MIDI notes by their index in the region's notes (from 0, as read): only the fields given change.", r#"{"type":"object","additionalProperties":false,"required":["ref","changes"],"properties":{"ref":{"type":"string","description":"The region"},"changes":{"type":"array","minItems":1,"maxItems":10000,"items":{"type":"object","additionalProperties":false,"required":["index"],"properties":{"index":{"type":"integer","minimum":0},"pitch":{"type":"integer","minimum":0,"maximum":127},"start":{"type":"number","minimum":0},"length":{"type":"number","exclusiveMinimum":0},"velocity":{"type":"integer","minimum":1,"maximum":127},"channel":{"type":"integer","minimum":1,"maximum":16}}}}}}"#),
+    OwnKind::new("notes_delete", "notes-delete", Clip, "Delete MIDI notes from a region by their index in the region's notes (from 0, as read).", r#"{"type":"object","additionalProperties":false,"required":["ref","indexes"],"properties":{"ref":{"type":"string","description":"The region"},"indexes":{"type":"array","minItems":1,"maxItems":10000,"items":{"type":"integer","minimum":0}}}}"#).deletes(),
+    // The Mixer strip slot's bypass (no step of Logic's undo).
+    OwnKind::new("fx_bypass", "fx-bypass", Device, "Bypass a plug-in in its insert slot, or turn it back on (the Mixer strip slot's bypass).", r#"{"type":"object","additionalProperties":false,"required":["ref","bypass"],"properties":{"ref":{"type":"string","description":"The plug-in"},"bypass":{"type":"boolean"}}}"#).skipped_by_daw_undo(),
+];

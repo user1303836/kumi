@@ -7,6 +7,7 @@ mod credit;
 mod fx_chain_save;
 mod listening;
 mod logic;
+mod logic_changes;
 mod logic_reads;
 mod logic_tools;
 mod mcp;

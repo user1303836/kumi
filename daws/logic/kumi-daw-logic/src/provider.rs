@@ -32,7 +32,7 @@ pub static PROVIDER: Own = Own {
     bridge_is_folder: true,
     bridge_folder: "bridges/logic",
     lifecycle: OwnLifecycle::Attached,
-    reads_only: true,
+    reads_only: false,
     enable_step: Some(EnableStep {
         label: "Accessibility",
         say: "Allow Kumi's helper under System Settings > Privacy & Security > Accessibility: macOS asks the first time Kumi starts it, and lists the app Kumi runs in (your terminal).",

@@ -1,4 +1,4 @@
-# Logic Pro bridge contract (M2)
+# Logic Pro bridge contract (M2, M3)
 
 What `logic-kumi` answers over `kumi-daw/1`, and which macOS channel each answer comes from. The
 wire, handshake, discovery files and lifecycle are daw-bridge's; this page is only Logic's shapes.
@@ -7,17 +7,22 @@ and, for the rows, on the Scratch project in Logic Pro 12.3.1 during M2. The hos
 the native fixture recordings live under `daws/logic/logic-kumi/tests/fixtures`; where the two
 differ, the vectors are what Logic shows and this page says why.
 
-This port exposes six wire methods: `ping`, `status`, `focus`, `read`, `snapshot`,
-and `focus_body`. It offers reading only; changes, undo, listening, goals, scripts,
-and catch-up are not enabled. The historical lab record is source evidence, not a
-new acceptance result for this build. Run the opt-in `accept_logic` example with a
-scratch project for current native acceptance.
+M2 exposes `ping`, `status`, `focus`, `read`, `snapshot`, and `focus_body`.
+M3 adds `change_preview`, `change_apply`, `change_restore`, `transport_play`,
+`transport_stop`, `cursor_set`, `undo_step_begin`, and `undo_step_end`. Kumi offers
+16 change kinds and by-value undo, with play, stop and cursor actions. Listening,
+goals, scripts, general UI tools and catch-up are not enabled. The historical lab record is source evidence, not a
+new acceptance result for this build. The `accept_logic` example reads by default.
+Its automatic M3 checks require `--changes --scratch-confirmed` and a disposable
+project; a failed undo can leave edits behind. This port still needs a current
+real-Logic acceptance run.
 
 Normal launch does not create MIDI ports. The explicit `logic-kumi --mcu` option
 can install a Mackie Control surface in Logic; use it only for a deliberate lab
 run and check Logic's Control Surfaces setup afterwards. The write, key, menu and
-panel-service helper operations below are available to explicit lab programs,
-not to the six reading methods.
+panel-service helper operations below are used only where declared: M3 changes
+may activate Logic and drive its controls; the six reading methods preserve the
+M2 observation restrictions.
 
 ## Channels
 
@@ -145,3 +150,111 @@ other elements are `{"ref": "role title"}`.
 Events: `{"event": "midi", "hex": "…", "ms": n}` for bytes from the MIDI destination (a long
 SysEx may come in several); `{"event": "app", "state": "launched" | "terminated" | "activated" |
 "deactivated", "pid": n, "bundle": "…"}` for the apps named in the last `apps` request.
+
+## Changes (`change_preview`, `change_apply`, `change_restore`)
+
+M3 lets Kumi change the project and undo. The wire is the REAPER extension's: the host's journal
+(`daws/own/daw-mcp-server/src/changes.rs`) previews a change, keeps it, applies it in one named step
+(`desc`, `Kumi: … (k<nonce>)`) and undoes it as another; the bridge answers `change_preview`,
+`change_apply` and `change_restore` with the same fields REAPER's does. Each kind writes through
+one macOS channel and reads the value back: `applied` only when Logic shows the new value, else
+`uncertain`. A preview writes nothing and fences the ref's epoch and the target's value as read
+now; an apply re-checks the fence and refuses `changed` before it writes; a restore puts the value
+back when the value can be set; deleted tracks and markers require manual Logic undo. A dialog up is `busy`, a missing
+Accessibility grant `failed` in words (never busy). What was measured is the Scratch project in
+Logic Pro 12.3.1; the host's simulated Logic (`simulator/logic.rs`) answers the same shapes.
+
+### The kinds, their channel and readback
+
+| Wire kind | Tool | Channel (the write) | Read back from | Logic undo step |
+| --- | --- | --- | --- | --- |
+| `track-volume` | `track_volume` | the header's Volume slider, stepped to the dB text | the slider's `AXValueDescription` | none |
+| `track-pan` | `track_pan` | the header's pan slider (0–127, 64 centre) | the slider's value | none |
+| `track-mute` | `track_mute` | a click at the header's Mute checkbox's frame | the checkbox | none |
+| `track-solo` | `track_solo` | a click at the header's Solo checkbox | the checkbox | none |
+| `track-arm` | `track_arm` | a click at the header's Record Enable checkbox | the checkbox | none |
+| `track-rename` | `track_rename` | the Inspector's "Track:" field, `AXConfirm` | the header's label | "Renaming" |
+| `track-add` | `track_add` | Track menu (New Audio/Software Instrument/External MIDI Track) | the new header | "Create Track" |
+| `track-delete` | `track_delete` | Track > Delete Track, its sheet's Delete answered | the headers | "Delete Tracks" |
+| `marker-add` | `marker_add` | the playhead moved there, the Marker List's Create new Marker | the list's row | "Create Marker" |
+| `marker-move` | `marker_move` | the row's Position scrubber, a segment at a time | the list | "Value Change" |
+| `marker-delete` | `marker_delete` | the row's Delete action | the list | "Delete" |
+| `tempo-set` | `tempo_set` | the control bar's Tempo slider (whole BPM) | the LCD's tempo | none |
+| `notes-add` | `notes_add` | the Event List's Create new Event, its cells stepped | the list's rows | "Create Event"/"Value Change" |
+| `notes-change` | `notes_change` | the note's row cells (pitch, velocity, length, channel, position) | the list | "Value Change" |
+| `notes-delete` | `notes_delete` | the row's Delete action | the list | "Delete" |
+| `fx-bypass` | `fx_bypass` | the Mixer strip slot's bypass checkbox | the slot | none |
+
+A header's control (volume, pan, mute, solo, arm) and the Mixer slot's bypass take a write without
+the track selected or Logic in front; the mute, solo and arm checkboxes take no `AXPress` or set,
+only a click at their frame, posted at the system's event tap with Logic brought forward first.
+The name field, the Track menu and the lists' presses act only while Logic is the app in front, so
+those kinds activate Logic and refuse `busy` if another app keeps the front. A list read opens its
+pane and tab and puts them back; a marker is made at the playhead, which is moved there and back.
+
+`transport_play`, `transport_stop` and `cursor_set` (the tools `play`, `stop`, `set_cursor`) go
+through the control bar's Play and Stop buttons and the LCD's bar and beat sliders; none is a step
+of Logic's undo, and `cursor_set` takes `positionBeats` or `position` (seconds at the project's
+constant tempo). `undo_step_begin`/`undo_step_end` are counted (Logic has no undo block):
+`undo_step_begin` answers `{stepId: "sN"}`, `undo_step_end` `{desc, entry: false, changes: n}`, and
+each change in the plan stays its own step of Logic's undo.
+
+### The fences and the outcomes
+
+- A header prop fences the value now; a rename the name; a track delete `{name, index, regions}`; a
+  track add `{tracks, names}` (the count and every name); a marker its whole state or the count; the
+  tempo the BPM; notes the region's note count and a hash of their values.
+- `applied` carries the value Logic shows after the write. A write Logic doesn't show back is
+  `uncertain` ("Logic Pro shows … after Kumi asked for …"), and leaves the step unnamed. The apply's
+  `undo` is `{desc, entry}`, with `title` (the Edit menu's Undo title at apply time) and `entry: true`
+  when Logic's history took a step, `entry: false` when it didn't. `track-add` answers the new epoch
+  and `created: {ref: "<new epoch>:track:<n>"}`; `track-delete` answers `material` holding
+  `{name, kind, index, volumeDb, pan, mute, solo, arm, step}` (`step` is the apply's `desc`).
+- Restore is by value for header properties, tempo, marker additions and moves, notes and bypass.
+  `track-delete` and `marker-delete` cannot be restored automatically: an Undo title is not a
+  unique step identity, and recreating a marker cannot recover its original name faithfully.
+  Their native restore returns `failed` with manual Logic undo guidance before any helper call.
+  A confirmed deletion stays recorded as `Kept` in Kumi's HISTORY with a permanent manual-undo
+  note; `/undo` and `undo_change` send no RPC for it. An unconfirmed apply stays `Unsure` and is
+  never promoted to a permanent confirmed deletion. Direct host clients retain an applied
+  transaction after an explicitly refused restore; the host does not claim it was undone.
+- A restore's refs are from the change's own epoch, carried to where the track or region stands now:
+  the bridge watches each epoch move (a header added, deleted, renamed or moved; the M2 observers'
+  rule) and keeps, per move, where each place went, so undoing a fader or a rename after a track was
+  added or deleted does **not** answer `stale`. A preview or an apply still refuses a ref from an
+  earlier epoch as `stale`.
+
+### The undo stack and `undone_in_daw`
+
+Logic's Edit menu exposes Undo/Redo titles, without a unique step token. A producer's edit can
+have the same title as Kumi's. The bridge therefore never presses native Undo automatically,
+and it does not attribute marker, note or structural undos from titles alone.
+
+Positive observations of the full tracked property or renamed value returning to its prior
+value can still yield `undone_in_daw {descs, how, epoch}` (or a redo when it returns to the
+applied value). These are value-backed observations, not proof of which keyboard action the
+producer used. Marker, note and structural states must be read again; their title-only
+attribution is deliberately absent. A selected menu may be cancelled before an authorized
+write; reading never presses the Edit menu merely to validate its title.
+
+`plan_steps` remains false: Logic provides no atomic undo block. A plan has separate native
+steps where Logic records them, and seven value kinds have no native undo step at all.
+
+The historical M3 gate and original transcript are preserved with source hashes. Their old
+automatic deletion restore is not current native parity. The current host fixture refuses the
+same restore without changing the project or pressing any native Undo step.
+
+### Where Logic forces a difference from REAPER
+
+- Logic keeps **no undo step** for a mixer-ish move (volume, pan, mute, solo, arm, tempo, bypass):
+  those answer `undo.entry: false` and are undone by value, never by Logic's own undo.
+- The tempo takes **whole BPM** from the slider; a fractional `bpm` is rounded, with a note.
+- A **marker can't be named** from outside (its name cell isn't a text field): `marker-add` refuses a
+  `name`, and Logic numbers markers itself. `marker-rename` is not made.
+- `loop-range`, `fx-add`, `fx-delete`, `fx-param`, `fx-move`, `send-add`, `send-volume` and
+  `track-move` are **not made**: the cycle locators have no settable field, the slot pop-up menus
+  can't be driven from outside, the plug-in window isn't reached, and the headers can't be dragged.
+  Each is refused `bad-params` saying why.
+- `track-add` places a track **below the selected one** (Logic's New Tracks behaviour), so `index`
+  counts from 1 (0, above every track, is unreachable); a kind (`audio`, `instrument`, `external`)
+  may be given.

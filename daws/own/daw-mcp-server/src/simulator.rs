@@ -59,7 +59,7 @@ impl std::fmt::Debug for SimulatorConfig {
 }
 
 impl SimulatorConfig {
-    /// Logic's identity beside a running app. Add the native M2 read methods through [`logic::LogicScript`];
+    /// Logic's identity beside a running app. Add the native reads and M3 change methods through [`logic::LogicScript`];
     /// this constructor alone answers only ping/status, including its Accessibility permission.
     pub fn logic(secret: Secret, bundle: &str) -> Self {
         Self {
@@ -356,7 +356,24 @@ fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> 
     let state = state.lock().unwrap();
     let logic = state.identity.daw == Daw::Logic.id();
     // Logic checks its grant before busy: a missing permission is a failure, never a temporarily busy project.
-    if logic && state.permission.is_some() && matches!(request.method.as_str(), "read" | "snapshot" | "focus" | "focus_body") {
+    if logic
+        && state.permission.is_some()
+        && matches!(
+            request.method.as_str(),
+            "read"
+                | "snapshot"
+                | "focus"
+                | "focus_body"
+                | "change_preview"
+                | "change_apply"
+                | "change_restore"
+                | "transport_stop"
+                | "transport_play"
+                | "cursor_set"
+                | "undo_step_begin"
+                | "undo_step_end"
+        )
+    {
         return Frame::error(
             request.id,
             code::FAILED,

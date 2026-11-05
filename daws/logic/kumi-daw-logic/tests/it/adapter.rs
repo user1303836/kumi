@@ -5,6 +5,41 @@ use kumi_agent::core::{
 use kumi_daw_logic::{LogicRefs, DAW};
 use serde_json::json;
 
+/// The model can ask for exactly the native M3 kinds, including the seven writes Logic's own undo skips.
+#[test]
+fn the_change_tools_match_the_native_bridge_and_name_its_undo_limits() {
+    use std::{collections::BTreeSet, path::Path};
+    let kinds = &kumi_daw_logic::changes::CHANGES;
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../logic-kumi/src/changes");
+    let pattern = regex::Regex::new(r#"kind: "([a-z]+(?:-[a-z]+)+)"|"([a-z]+(?:-[a-z]+)+)" => Some\(Kind"#).unwrap();
+    let mut native = BTreeSet::new();
+    for entry in std::fs::read_dir(folder).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
+            let text = std::fs::read_to_string(path).unwrap();
+            native.extend(
+                pattern
+                    .captures_iter(&text)
+                    .filter_map(|capture| capture.iter().skip(1).flatten().next().map(|kind| kind.as_str().to_owned())),
+            );
+        }
+    }
+    let ours: BTreeSet<String> = kinds.kinds.iter().map(|kind| kind.kind.to_owned()).collect();
+    assert_eq!(ours.len(), 16);
+    assert_eq!(ours, native);
+    assert_eq!(
+        kinds.kinds.iter().filter(|kind| kind.skipped_by_daw_undo).map(|kind| kind.kind).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["track-volume", "track-pan", "track-mute", "track-solo", "track-arm", "tempo-set", "fx-bypass"])
+    );
+    assert_eq!(
+        kinds.kinds.iter().filter(|kind| kind.manual_undo.is_some()).map(|kind| kind.kind).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["track-delete", "marker-delete"])
+    );
+    assert!(!kinds.plan_steps, "Logic has no atomic undo block for a plan");
+    assert!(kinds.plan_description.contains("no undo block"));
+    assert!(kinds.undo_description.contains("as a new write"));
+}
+
 #[test]
 fn a_track_inserted_moves_the_tracks_after_it_with_their_plugins_and_sends() {
     let refs = LogicRefs;

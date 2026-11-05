@@ -1,6 +1,6 @@
 //! The MCP host for Kumi's own bridges: stdio MCP for Kumi (and any MCP client), the bridge on loopback (`kumi-daw/1`,
 //! see daw-bridge), inside the DAW (REAPER's extension, Renoise's tool) or beside it (SoundCraft's `soundcraft-kumi`,
-//! which the host starts, or Logic's read-only `logic-kumi`). One binary serves any of them:
+//! which the host starts, or Logic's `logic-kumi`). One binary serves any of them:
 //! `daw-mcp-server --daw reaper|renoise|logic|soundcraft`.
 
 pub mod catchup;
@@ -9,6 +9,7 @@ pub mod client;
 pub mod flow;
 pub mod host;
 pub mod listening;
+pub mod logic;
 pub mod mcp;
 mod preset_files;
 pub mod reaper;

@@ -21,7 +21,7 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
-macOS の Logic Pro 12 は `kumi --daw logic` から実験的に選べます。プロジェクトと FOCUS の読み取りに対応し、編集や聴く機能は開発中です。[Logic Pro](docs/ja/DAWS.md#logic-pro実験的な読み取り) を参照してください。
+macOS の Logic Pro 12 は `kumi --daw logic` から実験的に選べます。プロジェクトと FOCUS の読み取り、16種類の変更に対応し、削除したトラックとマーカーは Logic で手動で取り消します。この移植版の実機検証は未完了で、聴く機能は無効です。[Logic Pro](docs/ja/DAWS.md#logic-pro実験的な読み取り) を参照してください。
 
 ## クイックスタート
 

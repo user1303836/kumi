@@ -19,16 +19,30 @@ that step.
 
 Kumi reads the project, tracks, regions, the selected region's notes, plug-ins,
 sends, markers and tempo. FOCUS shows the channel strip, notes, timeline and
-routing. It reports recording state, remembers a saved project's path and can
-open a previously observed saved project. Changes, undo, listening, goals,
-scripts, catch-up and library discovery are not enabled yet. Note reads require
-the requested region to be the only selected region; Kumi leaves selection as
-it is. Normal launch creates no MIDI ports.
+routing. It reports recording state and can reopen a previously observed saved
+project.
+
+Kumi can change track volume, pan, mute, solo, arm and names; add or delete tracks;
+add, move or delete markers; set whole-number tempo; add, change or delete MIDI
+notes; and bypass plug-ins. It can play, stop and move the playhead. Every change
+is read back and listed in HISTORY with Kumi's undo. Logic has no undo block:
+renames, structural changes, markers and notes make native undo steps, while
+volume, pan, mute, solo, arm, tempo and bypass do not. Kumi restores values as
+new writes and refuses a restore if someone changed the same value afterwards.
+Deleted tracks and markers require the producer to use Logic's own undo manually;
+Kumi cannot prove ownership from an Undo title and does not press it. These two
+confirmed deletions remain in HISTORY with a permanent manual-undo note. Native
+marker, note and structural undo attribution is not inferred from titles alone. An uncertain write is kept uncertain and never resent
+blindly. Listening, goals, scripts, catch-up and library discovery remain disabled.
+Note reads still require only the requested region selected; normal launch
+creates no MIDI ports. The change methods may activate Logic and operate its
+controls.
 
 The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
 limits. Replay tests do not establish native acceptance on the current Logic
 version. Developers can build and explicitly run the `accept_logic` example on
-a scratch project to collect a current acceptance report.
+a scratch project to collect a current acceptance report. Automatic change checks
+require `--changes --scratch-confirmed`; failed undo can leave edits behind.
 
 ## At a glance
 

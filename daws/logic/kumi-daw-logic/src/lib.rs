@@ -26,7 +26,7 @@ use serde_json::Value;
 use std::{rc::Rc, sync::LazyLock};
 
 /// The instructions Logic's turns carry (M7 brings the full instruction pack).
-const INSTRUCTIONS: &str = "You work in Logic Pro through Kumi's bridge beside it, which reads Logic through macOS Accessibility. Read the project with logic_read before you describe it: its tracks (audio, software instrument, external MIDI, aux and output channel strips), their regions, a region's notes as the Event List lists them, each strip's plug-ins and sends, the markers, and the tempo and signatures. A ref such as track:3 is this turn's: pass it back as parent (the track for its regions, plug-ins and sends; a region for its notes) to read what's inside. Kumi reads Logic Pro here; changing it comes later.";
+const INSTRUCTIONS: &str = "You work in Logic Pro through Kumi's bridge beside it, which reads and changes Logic through macOS Accessibility. Read the project with logic_read before you describe or change it: its tracks (audio, software instrument, external MIDI, aux and output channel strips), their regions, a region's notes as the Event List lists them, each strip's plug-ins and sends, the markers, and the tempo and signatures. A ref such as track:3 is this turn's: pass it back as parent (the track for its regions, plug-ins and sends; a region for its notes) to read what's inside.";
 
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::LOGIC,
@@ -53,7 +53,7 @@ pub const DAW: OwnDaw = OwnDaw {
     permission_words,
     changes: &changes::CHANGES,
     open_project: Some(provider::open_project),
-    // Required descriptions stay inactive: the profile offers no changes, catch-up, phrases, scripts or listening.
+    // Required descriptions stay inactive: the profile offers no catch-up, phrases, scripts or listening.
     catch_up: &inactive::CATCH_UP,
     phrases: &inactive::PHRASES,
     scripts: &inactive::SCRIPTS,
@@ -418,7 +418,7 @@ impl RefScheme for LogicRefs {
     }
 }
 
-/// Logic's tools as the app shows them (M1 reads; nothing acts).
+/// Logic's read, plan and transport as the app shows them.
 pub const PRESENTATION: ToolPresentation = ToolPresentation {
     label: |tool| match tool {
         "logic_read" => Some("looked at your project"),

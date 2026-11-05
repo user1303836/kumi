@@ -1089,8 +1089,9 @@ impl DawProfile {
     pub const LOGIC: DawProfile = DawProfile {
         id: Some(DawId::Logic),
         words: DawWords { app: "Logic Pro", place: "project", places: "projects", master: "Stereo Out", timeline: "Tracks area" },
-        // Observation only: the native helper can open known projects, but no change, listening or general UI tool is offered.
+        // M3 changes have Kumi's by-value undo; listening, scripts, goals and general UI tools remain disabled.
         caps: Capabilities {
+            undo: true,
             device_tree: true,
             note_view: true,
             timeline_strip: true,
@@ -1441,6 +1442,7 @@ mod tests {
         assert_eq!(
             DawProfile::LOGIC.caps,
             Capabilities {
+                undo: true,
                 device_tree: true,
                 note_view: true,
                 timeline_strip: true,

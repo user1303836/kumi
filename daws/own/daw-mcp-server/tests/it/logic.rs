@@ -1,5 +1,5 @@
-//! Logic attaches beside an already running app and exposes the native M2 read tools. A richer stand-in must not
-//! advertise changes or listening; only a bridge this host started is stopped when its session ends.
+//! Logic attaches beside an already running app and exposes its native reads and M3 changes. A richer stand-in must
+//! not advertise listening or later change kinds; only a bridge this host started is stopped when its session ends.
 use daw_bridge::files::{ensure_secret, read_secret, scan_discovery};
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
@@ -33,7 +33,7 @@ impl SpawnedBridge for Started {
 }
 
 #[tokio::test]
-async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_and_exposes_only_native_reads() {
+async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_and_exposes_only_native_capabilities() {
     let home = tempfile::tempdir().unwrap();
     let paths = BridgePaths::new(home.path(), Daw::Logic);
     let secret = ensure_secret(&paths.secret()).unwrap();
@@ -41,9 +41,9 @@ async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_
     let asked = extra.clone();
     let script = LogicScript::new();
     let recorded = script.respond();
-    // Deliberately richer than the real M2 server: neither extra methods nor arbitrary kinds may become product tools.
+    // Deliberately richer than the native M3 server: extra methods and read kinds must not become product tools.
     let mut config = script.config(secret, "com.apple.mobilelogic").with_methods(
-        &["change_preview", "listen_render"],
+        &["project_save", "listen_render"],
         Arc::new(move |method, params| {
             recorded(method, params).or_else(|| {
                 asked.fetch_add(1, Ordering::SeqCst);
@@ -69,7 +69,23 @@ async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_
     let tools = mcp::tools(&host);
     assert_eq!(
         tools.as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect::<Vec<_>>(),
-        ["status", "discover", "read", "snapshot", "focus", "focus_body"]
+        [
+            "status",
+            "discover",
+            "read",
+            "snapshot",
+            "focus",
+            "focus_body",
+            "change_preview",
+            "change_apply",
+            "change_undo",
+            "transport_stop",
+            "transport_play",
+            "cursor_set",
+            "undo_step_begin",
+            "undo_step_end",
+            "change_release"
+        ]
     );
     assert_eq!(
         tools[2]["inputSchema"]["properties"]["kind"]["enum"],
@@ -77,18 +93,21 @@ async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_
     );
     assert_eq!(tools[5]["inputSchema"]["properties"]["kind"]["enum"], json!(["tree", "notes", "timeline", "routing"]));
     assert!(tools[0]["description"].as_str().unwrap().contains("bridge beside Logic Pro"));
-    assert!(tools.as_array().unwrap().iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+    assert!(tools.as_array().unwrap()[..6].iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+    assert_eq!(tools[6]["inputSchema"]["properties"]["kind"]["enum"], json!(daw_mcp_server::logic::CHANGE_KINDS));
+    assert_eq!(tools[6]["annotations"]["readOnlyHint"], true);
+    assert!(tools.as_array().unwrap()[7..].iter().all(|tool| tool["annotations"]["readOnlyHint"] == false));
     for name in [
-        "change_preview",
-        "change_apply",
-        "change_undo",
+        "change_restore",
         "listen_render",
         "render",
         "hear",
         "scratch",
         "project_save",
-        "transport_stop",
         "select",
+        "catch_up",
+        "baseline_save",
+        "watch_start",
     ] {
         let answer =
             mcp::handle(&host, &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":{}}})).await.unwrap();
