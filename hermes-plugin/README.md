@@ -58,7 +58,8 @@ Kumi needs two things on the machine that runs Hermes, and asks before each:
    unpacks it (82–120 MB) into this profile's plugin data, and refuses anything that doesn't match.
 2. **Its part in your DAW:** Live's Remote Script, REAPER's extension or Renoise's tool, installed only at the location
    shown to you. If another Kumi installation already put it there, setup offers to use that installation instead of
-   replacing it.
+   replacing it. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up another one keeps the
+   current DAW and ends with the step that switches: `hermes kumi setup --daw <daw> --use`, approved like the rest.
 3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
    MP3, FLAC and other compressed audio. Setup is done either way; without it, Kumi reads WAV and AIFF only.
 
@@ -76,7 +77,7 @@ Under Settings → Plugins → Kumi in Hermes Desktop, or `plugins.entries.kumi.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `daw` | Live (`ableton`) | Which DAW Kumi connects to |
+| `daw` | Live (`ableton`) | Which DAW Kumi connects to. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
 | `library_folders` | none | The folders Kumi may read to build your sound map. Nothing else is scanned |
 | `inject_focus` | on | Adds the short FOCUS and catch-up note to each turn while Kumi is connected |
 | `listen_interpretation` | off | Also asks your Hermes model to interpret measurements (see below) |

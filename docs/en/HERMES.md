@@ -38,6 +38,11 @@ Then, in your DAW:
 - **REAPER:** restart REAPER.
 - **Renoise:** enable the Kumi tool.
 
+The first DAW you set up becomes Kumi's DAW (the DAW setting), in the same approval. Setting up another DAW later
+leaves Kumi with the one it has: setup then ends with the step that switches, `hermes kumi setup --daw <daw> --use` in
+a terminal (or ask Hermes to use that DAW), which asks before it changes the setting. Where Hermes's settings can't be
+written, setup says so and where to set the DAW instead.
+
 If Kumi on its own already installed its part in your DAW, setup says so and offers to use that installation instead of
 replacing it. Kumi in Hermes then reads that installation's connection files and writes its own connection state there,
 never its sign-in or settings.
@@ -77,7 +82,7 @@ run without asking there, and Kumi can't tell it from a chat.
 
 | Setting | Default | What it does |
 |---|---|---|
-| DAW | Live | Which DAW Kumi connects to |
+| DAW | Live | Which DAW Kumi connects to. The first DAW you set up becomes it; switch with `hermes kumi setup --daw <daw> --use` |
 | Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | Adds a short FOCUS and catch-up note to each turn while Kumi is connected |
 | Interpret measurements | off | Also sends measurements and a small band-energy image to your Hermes model for a plain-words reading |
