@@ -50,13 +50,21 @@ function seconds(value) {
   if (typeof value !== "number" || !(value >= 0)) return "";
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
-function undoRequest(item) {
-  const title = clean(item.title ?? item.label ?? "", 120);
-  return title ? `Undo Kumi change ${item.id} (“${title}”)` : `Undo Kumi change ${item.id}`;
+var ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+function plainId(value) {
+  return typeof value === "string" && ID.test(value) ? value : null;
 }
-function useSoundRequest(soundId, name) {
+function canUndo(status, item) {
+  return Boolean(item && status?.connected && !status.stale && !status.unsure && item.undo_available === true && plainId(item.id));
+}
+function undoRequest(item) {
+  return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+}
+function soundRequest(soundId, name) {
+  const id = plainId(soundId);
+  if (!id) return null;
   const said = clean(name ?? "", 80);
-  return said ? `Use sound ${soundId} (“${said}”) on the selected track` : `Use sound ${soundId} on the selected track`;
+  return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`;
 }
 function setupRequest(daw) {
   return `Set up Kumi for ${dawName(daw)}`;
@@ -158,6 +166,18 @@ function statusOf(error) {
   const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text);
   return match ? Number(match[1]) : 0;
 }
+function notLive(state) {
+  return {
+    status: state.status && { ...state.status, connected: false, stale: true },
+    focus: state.focus && { ...state.focus, connected: false, stale: true },
+    history: state.history && {
+      ...state.history,
+      connected: false,
+      stale: true,
+      items: state.history.items.map((item) => ({ ...item, undo_available: false }))
+    }
+  };
+}
 var KumiStore = class {
   constructor(fetch, historyLimit = 50) {
     this.fetch = fetch;
@@ -167,7 +187,7 @@ var KumiStore = class {
   historyLimit;
   state = EMPTY;
   listeners = /* @__PURE__ */ new Set();
-  inflight = /* @__PURE__ */ new Map();
+  reads = /* @__PURE__ */ new Map();
   wanted = /* @__PURE__ */ new Map();
   generation = 0;
   get = () => this.state;
@@ -188,19 +208,30 @@ var KumiStore = class {
   /** Forget everything (another profile or connection): what's shown must be that profile's. */
   reset() {
     this.generation += 1;
-    this.inflight.clear();
+    this.reads.clear();
     this.state = EMPTY;
     for (const fn of [...this.listeners]) fn();
   }
+  /** Run read `key`, or, while one is running, run it once more after it: a read never answers with what an
+   *  older one, begun before the change that asked for it, saw. */
   once(key, run) {
-    const running = this.inflight.get(key);
-    if (running) return running;
+    const running = this.reads.get(key);
+    if (running) {
+      running.again = true;
+      return running.promise;
+    }
     const generation = this.generation;
-    const promise = run().catch(() => void 0).finally(() => {
-      if (this.generation === generation) this.inflight.delete(key);
+    const entry = { again: false, promise: Promise.resolve() };
+    entry.promise = (async () => {
+      do {
+        entry.again = false;
+        await run().catch(() => void 0);
+      } while (entry.again && generation === this.generation);
+    })().finally(() => {
+      if (this.reads.get(key) === entry) this.reads.delete(key);
     });
-    this.inflight.set(key, promise);
-    return promise;
+    this.reads.set(key, entry);
+    return entry.promise;
   }
   /** Read /status, then whatever its revisions say moved. */
   refreshStatus() {
@@ -212,19 +243,21 @@ var KumiStore = class {
       } catch (error) {
         if (generation !== this.generation) return;
         if (statusOf(error) === 404) this.set({ available: false, error: null });
-        else this.set({ error: error instanceof Error ? error.message : String(error) });
+        else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
         return;
       }
       if (generation !== this.generation) return;
-      const before = this.state.status?.revisions;
+      const before = this.state.status;
       const after = status.revisions ?? {};
       const first = this.state.available !== true;
+      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
       this.set({ available: true, error: null, status });
-      const moved = (part) => first || !before || before[part] !== after[part];
+      const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
+      const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
       const reads = [];
-      if (moved("focus") || this.state.focus === null) reads.push(this.refresh("focus"));
-      if (moved("history") || this.state.history === null) reads.push(this.refresh("history"));
-      if ((this.wanted.get("map") ?? 0) > 0 && (moved("map") || this.state.map === null)) reads.push(this.refresh("map"));
+      if (liveness || moved("focus")) reads.push(this.refresh("focus"));
+      if (liveness || moved("history")) reads.push(this.refresh("history"));
+      if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
       if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
       await Promise.all(reads);
     });
@@ -644,7 +677,7 @@ function FocusView({ focus, now }) {
       transport?.playing !== void 0 && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
       typeof transport?.position === "string" && /* @__PURE__ */ jsx3(Chip, { children: clean(transport.position, 16) }),
-      focus.stale && /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" })
+      focus.stale && /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: typeof focus.at === "number" ? `not answering · seen ${ago(focus.at, now)}` : "not answering" })
     ] }),
     catchUp.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
       /* @__PURE__ */ jsx3("span", { style: S.faint, children: "Since Kumi last looked" }),
@@ -722,7 +755,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupMessage = typeof state.setup?.message === "string" && state.setup.state !== "ready" ? state.setup.message : null;
-  const undoable = (state.history?.items ?? []).filter((item) => item.undo_available).length;
+  const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
   return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", color: T.text }, children: [
     /* @__PURE__ */ jsxs4("div", { style: { ...S.section, gap: 8 }, children: [
       /* @__PURE__ */ jsxs4("div", { style: { ...S.row, gap: 8 }, children: [
@@ -764,7 +797,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
           {
             history: state.history,
             now,
-            action: (item) => item.undo_available && connected ? /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: `Ask Kumi to undo ${item.label ?? "this change"}`, children: "Undo" }) : null
+            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: "Ask Kumi to undo this change", children: "Undo" }) : null
           }
         )
       }
@@ -1183,18 +1216,21 @@ function MapWorkspace({ ctx, store, audition }) {
   return /* @__PURE__ */ jsx7(
     MapCanvas,
     {
-      actions: (id, sound) => /* @__PURE__ */ jsxs7(Fragment2, { children: [
-        /* @__PURE__ */ jsx7(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
-        /* @__PURE__ */ jsx7(
-          TextButton,
-          {
-            onClick: () => void ask(ctx, useSoundRequest(id, sound.name), { send: false, session: ownerSession(state) }),
-            strong: true,
-            title: "Put a request to use this sound in the chat, to finish and send",
-            children: "Use…"
-          }
-        )
-      ] }),
+      actions: (id, sound) => {
+        const request = soundRequest(id, sound.name);
+        return /* @__PURE__ */ jsxs7(Fragment2, { children: [
+          /* @__PURE__ */ jsx7(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
+          request && /* @__PURE__ */ jsx7(
+            TextButton,
+            {
+              onClick: () => void ask(ctx, request, { send: false, session: ownerSession(state) }),
+              strong: true,
+              title: "Put a request to use this sound in the chat, to finish and send",
+              children: "Use…"
+            }
+          )
+        ] });
+      },
       empty,
       found: state.found,
       map,
@@ -1423,9 +1459,13 @@ var plugin = {
           keywords: ["kumi", "undo", "history", "revert"],
           run: () => {
             const state = store.get();
-            const last = state.status?.connected ? state.history?.items.find((item) => item.undo_available) : void 0;
-            if (!last) {
-              host4.notify({ kind: "info", message: "Kumi has no change it can undo right now." });
+            const last = state.history?.items.find((item) => item.state !== "undone");
+            if (!last || !canUndo(state.status, last)) {
+              const unsure = Boolean(state.status?.unsure) || last?.state === "unsure" || last?.state === "partial";
+              host4.notify({
+                kind: "info",
+                message: unsure ? "Kumi isn't sure of its last change: ask it to look at your project again first." : "Kumi has no change it can undo right now."
+              });
               return;
             }
             void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) });

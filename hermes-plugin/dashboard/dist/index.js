@@ -79,13 +79,21 @@
     if (typeof value !== "number" || !(value >= 0)) return "";
     return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
   }
-  function undoRequest(item) {
-    const title = clean(item.title ?? item.label ?? "", 120);
-    return title ? `Undo Kumi change ${item.id} (“${title}”)` : `Undo Kumi change ${item.id}`;
+  var ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+  function plainId(value) {
+    return typeof value === "string" && ID.test(value) ? value : null;
   }
-  function useSoundRequest(soundId, name) {
+  function canUndo(status, item) {
+    return Boolean(item && status?.connected && !status.stale && !status.unsure && item.undo_available === true && plainId(item.id));
+  }
+  function undoRequest(item) {
+    return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+  }
+  function soundRequest(soundId, name) {
+    const id = plainId(soundId);
+    if (!id) return null;
     const said = clean(name ?? "", 80);
-    return said ? `Use sound ${soundId} (“${said}”) on the selected track` : `Use sound ${soundId} on the selected track`;
+    return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`;
   }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   function cleanupWords(cleanup) {
@@ -274,7 +282,7 @@
         transport?.playing !== void 0 && /* @__PURE__ */ jsx(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
         bpm(transport?.tempo) && /* @__PURE__ */ jsx(Chip, { children: bpm(transport?.tempo) }),
         typeof transport?.position === "string" && /* @__PURE__ */ jsx(Chip, { children: clean(transport.position, 16) }),
-        focus.stale && /* @__PURE__ */ jsx(Chip, { tone: "warn", children: "not answering" })
+        focus.stale && /* @__PURE__ */ jsx(Chip, { tone: "warn", children: typeof focus.at === "number" ? `not answering · seen ${ago(focus.at, now)}` : "not answering" })
       ] }),
       catchUp.length > 0 && /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
         /* @__PURE__ */ jsx("span", { style: S.faint, children: "Since Kumi last looked" }),
@@ -639,6 +647,18 @@
     const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text);
     return match ? Number(match[1]) : 0;
   }
+  function notLive(state) {
+    return {
+      status: state.status && { ...state.status, connected: false, stale: true },
+      focus: state.focus && { ...state.focus, connected: false, stale: true },
+      history: state.history && {
+        ...state.history,
+        connected: false,
+        stale: true,
+        items: state.history.items.map((item) => ({ ...item, undo_available: false }))
+      }
+    };
+  }
   var KumiStore = class {
     constructor(fetch, historyLimit = 50) {
       this.fetch = fetch;
@@ -648,7 +668,7 @@
     historyLimit;
     state = EMPTY;
     listeners = /* @__PURE__ */ new Set();
-    inflight = /* @__PURE__ */ new Map();
+    reads = /* @__PURE__ */ new Map();
     wanted = /* @__PURE__ */ new Map();
     generation = 0;
     get = () => this.state;
@@ -669,19 +689,30 @@
     /** Forget everything (another profile or connection): what's shown must be that profile's. */
     reset() {
       this.generation += 1;
-      this.inflight.clear();
+      this.reads.clear();
       this.state = EMPTY;
       for (const fn of [...this.listeners]) fn();
     }
+    /** Run read `key`, or, while one is running, run it once more after it: a read never answers with what an
+     *  older one, begun before the change that asked for it, saw. */
     once(key, run) {
-      const running = this.inflight.get(key);
-      if (running) return running;
+      const running = this.reads.get(key);
+      if (running) {
+        running.again = true;
+        return running.promise;
+      }
       const generation = this.generation;
-      const promise = run().catch(() => void 0).finally(() => {
-        if (this.generation === generation) this.inflight.delete(key);
+      const entry = { again: false, promise: Promise.resolve() };
+      entry.promise = (async () => {
+        do {
+          entry.again = false;
+          await run().catch(() => void 0);
+        } while (entry.again && generation === this.generation);
+      })().finally(() => {
+        if (this.reads.get(key) === entry) this.reads.delete(key);
       });
-      this.inflight.set(key, promise);
-      return promise;
+      this.reads.set(key, entry);
+      return entry.promise;
     }
     /** Read /status, then whatever its revisions say moved. */
     refreshStatus() {
@@ -693,19 +724,21 @@
         } catch (error) {
           if (generation !== this.generation) return;
           if (statusOf(error) === 404) this.set({ available: false, error: null });
-          else this.set({ error: error instanceof Error ? error.message : String(error) });
+          else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
           return;
         }
         if (generation !== this.generation) return;
-        const before = this.state.status?.revisions;
+        const before = this.state.status;
         const after = status.revisions ?? {};
         const first = this.state.available !== true;
+        const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
         this.set({ available: true, error: null, status });
-        const moved = (part) => first || !before || before[part] !== after[part];
+        const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
+        const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
         const reads = [];
-        if (moved("focus") || this.state.focus === null) reads.push(this.refresh("focus"));
-        if (moved("history") || this.state.history === null) reads.push(this.refresh("history"));
-        if ((this.wanted.get("map") ?? 0) > 0 && (moved("map") || this.state.map === null)) reads.push(this.refresh("map"));
+        if (liveness || moved("focus")) reads.push(this.refresh("focus"));
+        if (liveness || moved("history")) reads.push(this.refresh("history"));
+        if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
         if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
         await Promise.all(reads);
       });
@@ -810,7 +843,7 @@
           /* @__PURE__ */ jsx(Section, { title: "History", children: /* @__PURE__ */ jsx(
             HistoryView,
             {
-              action: (item) => item.undo_available && connected ? /* @__PURE__ */ jsx(CopyButton, { label: "Copy undo", text: undoRequest(item) }) : null,
+              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx(CopyButton, { label: "Copy undo", text: undoRequest(item) }) : null,
               history: state.history,
               now
             }
@@ -819,10 +852,13 @@
         /* @__PURE__ */ jsx("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 420, display: "flex", flexDirection: "column" }, children: /* @__PURE__ */ jsx(
           MapCanvas,
           {
-            actions: (id, sound) => /* @__PURE__ */ jsxs(Fragment2, { children: [
-              /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : void audition.play(id).catch(() => void 0), children: playing === id ? "■ Stop" : "▶ Play" }),
-              /* @__PURE__ */ jsx(CopyButton, { label: "Copy request", text: useSoundRequest(id, sound.name) })
-            ] }),
+            actions: (id, sound) => {
+              const request = soundRequest(id, sound.name);
+              return /* @__PURE__ */ jsxs(Fragment2, { children: [
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : void audition.play(id).catch(() => void 0), children: playing === id ? "■ Stop" : "▶ Play" }),
+                request && /* @__PURE__ */ jsx(CopyButton, { label: "Copy request", text: request })
+              ] });
+            },
             empty: state.map === null ? "Reading the sound map…" : "No sound map yet: add a sample folder in Kumi's settings and ask Kumi to scan it.",
             found: state.found,
             map: state.map,

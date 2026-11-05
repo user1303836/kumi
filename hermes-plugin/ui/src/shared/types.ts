@@ -12,6 +12,8 @@ export interface Liveness {
   stale?: boolean
   age_ms?: number | null
   owner?: Owner | null
+  /** When the runtime wrote this snapshot (ms). */
+  at?: number
 }
 
 export interface Project {
@@ -46,6 +48,7 @@ export interface Focus extends Liveness {
   focus?: { track?: Named; device?: Named; clip?: Named; view?: string | null }
   transport?: Transport
   catch_up?: unknown[]
+  seq?: number | null
 }
 
 export interface HistoryItem {

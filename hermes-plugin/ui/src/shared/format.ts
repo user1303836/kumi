@@ -68,16 +68,33 @@ export function seconds(value: unknown): string {
 }
 
 // The requests the UI puts in the chat (contract C5). Every change goes model → tool → approval like any other
-// request, and names the ids the user is looking at, so nothing is guessed.
+// request, and names the ids the user is looking at, so nothing is guessed. A request that's sent at once carries
+// nothing but our own words and an id: no text from the DAW or a sample pack reaches the model as the user's.
 
-export function undoRequest(item: Pick<HistoryItem, 'id' | 'title' | 'label'>): string {
-  const title = clean(item.title ?? item.label ?? '', 120)
-  return title ? `Undo Kumi change ${item.id} (“${title}”)` : `Undo Kumi change ${item.id}`
+/** Ids as the runtime writes them; anything else is never put in a request. */
+const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
+
+export function plainId(value: unknown): string | null {
+  return typeof value === 'string' && ID.test(value) ? value : null
 }
 
-export function useSoundRequest(soundId: string, name?: string): string {
+/** Whether the UI offers to undo `item` now: Kumi connected and sure of the project (CC-2 R6), the row undoable. */
+export function canUndo(status: Status | null | undefined, item: HistoryItem | null | undefined): boolean {
+  return Boolean(item && status?.connected && !status.stale && !status.unsure && item.undo_available === true && plainId(item.id))
+}
+
+/** Sent as is: the id alone. Only for a row `canUndo` allows. */
+export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
+  return `Undo Kumi change ${plainId(item.id) ?? ''}`.trim()
+}
+
+/** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
+ *  doesn't write. */
+export function soundRequest(soundId: string, name?: string): string | null {
+  const id = plainId(soundId)
+  if (!id) return null
   const said = clean(name ?? '', 80)
-  return said ? `Use sound ${soundId} (“${said}”) on the selected track` : `Use sound ${soundId} on the selected track`
+  return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`
 }
 
 export function setupRequest(daw: unknown): string {

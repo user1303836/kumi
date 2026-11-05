@@ -4,7 +4,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
-import { chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, useSoundRequest } from '../shared/format.ts'
+import { canUndo, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, soundRequest, undoRequest } from '../shared/format.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
@@ -100,7 +100,7 @@ function KumiDashboard() {
           </Section>
           <Section title="History">
             <HistoryView
-              action={item => (item.undo_available && connected ? <CopyButton label="Copy undo" text={undoRequest(item)} /> : null)}
+              action={item => (canUndo(state.status, item) ? <CopyButton label="Copy undo" text={undoRequest(item)} /> : null)}
               history={state.history}
               now={now}
             />
@@ -108,12 +108,15 @@ function KumiDashboard() {
         </div>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 420, display: 'flex', flexDirection: 'column' }}>
           <MapCanvas
-            actions={(id, sound) => (
-              <>
-                <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? '■ Stop' : '▶ Play'}</TextButton>
-                <CopyButton label="Copy request" text={useSoundRequest(id, sound.name)} />
-              </>
-            )}
+            actions={(id, sound) => {
+              const request = soundRequest(id, sound.name)
+              return (
+                <>
+                  <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? '■ Stop' : '▶ Play'}</TextButton>
+                  {request && <CopyButton label="Copy request" text={request} />}
+                </>
+              )
+            }}
             empty={state.map === null ? 'Reading the sound map…' : "No sound map yet: add a sample folder in Kumi's settings and ask Kumi to scan it."}
             found={state.found}
             map={state.map}

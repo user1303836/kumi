@@ -4,7 +4,7 @@ import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
-import { useSoundRequest } from '../shared/format.ts'
+import { soundRequest } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import type { KumiStore } from '../shared/store.ts'
@@ -44,20 +44,25 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         : "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there."
   return (
     <MapCanvas
-      actions={(id, sound) => (
-        <>
-          <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title="Play it here (nothing changes in your DAW)">
-            {playing === id ? '■ Stop' : '▶ Play'}
-          </TextButton>
-          <TextButton
-            onClick={() => void ask(ctx, useSoundRequest(id, sound.name), { send: false, session: ownerSession(state) })}
-            strong
-            title="Put a request to use this sound in the chat, to finish and send"
-          >
-            Use…
-          </TextButton>
-        </>
-      )}
+      actions={(id, sound) => {
+        const request = soundRequest(id, sound.name)
+        return (
+          <>
+            <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title="Play it here (nothing changes in your DAW)">
+              {playing === id ? '■ Stop' : '▶ Play'}
+            </TextButton>
+            {request && (
+              <TextButton
+                onClick={() => void ask(ctx, request, { send: false, session: ownerSession(state) })}
+                strong
+                title="Put a request to use this sound in the chat, to finish and send"
+              >
+                Use…
+              </TextButton>
+            )}
+          </>
+        )
+      }}
       empty={empty}
       found={state.found}
       map={map}

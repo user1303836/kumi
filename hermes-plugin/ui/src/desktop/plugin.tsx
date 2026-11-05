@@ -17,7 +17,7 @@ import type { HermesPlugin, PaletteContribution, PluginContribution, ToolMediaRe
 import * as sdk from '@hermes/plugin-sdk'
 import { host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from '@hermes/plugin-sdk'
 
-import { undoRequest } from '../shared/format.ts'
+import { canUndo, undoRequest } from '../shared/format.ts'
 import { Audition } from '../shared/hooks.ts'
 import { foundSounds, KumiStore } from '../shared/store.ts'
 import { ask } from './actions.ts'
@@ -133,9 +133,14 @@ const plugin: HermesPlugin = {
           keywords: ['kumi', 'undo', 'history', 'revert'],
           run: () => {
             const state = store.get()
-            const last = state.status?.connected ? state.history?.items.find(item => item.undo_available) : undefined
-            if (!last) {
-              host.notify({ kind: 'info', message: 'Kumi has no change it can undo right now.' })
+            // The last change is the newest row not already undone: never an older one past a change Kumi isn't sure of.
+            const last = state.history?.items.find(item => item.state !== 'undone')
+            if (!last || !canUndo(state.status, last)) {
+              const unsure = Boolean(state.status?.unsure) || last?.state === 'unsure' || last?.state === 'partial'
+              host.notify({
+                kind: 'info',
+                message: unsure ? "Kumi isn't sure of its last change: ask it to look at your project again first." : 'Kumi has no change it can undo right now.'
+              })
               return
             }
             void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) })

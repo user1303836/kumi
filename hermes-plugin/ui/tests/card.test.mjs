@@ -83,13 +83,14 @@ test('a HISTORY row Kumi is unsure of says why, what it put back, and offers no 
   assert.ok(!html.includes('Undo'))
 })
 
-test("the pane warns while Kumi isn't sure of the project, until a completed observe clears it", async () => {
+test("the pane warns while Kumi isn't sure of the project and offers no Undo, until a completed observe clears it", async () => {
   const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
   const unsure = { at: Date.now(), op: 'listen_track', reason: 'Live stopped answering during the capture', cleanup: 'restored' }
   const render = async status => {
     const store = new KumiStore(async path => {
-      if (path.startsWith('/status')) return { connected: true, daw: 'ableton', owner: { session_id: 's1' }, revisions: {}, ...status }
+      if (path.startsWith('/status')) return { connected: true, stale: false, daw: 'ableton', owner: { session_id: 's1' }, revisions: { history: 1 }, ...status }
+      if (path.startsWith('/history')) return { seq: 1, items: [{ id: 'h-1', title: 'Drums volume', state: 'applied', undo_available: true }] }
       throw Object.assign(new Error('not here'), { status: 404 })
     })
     await store.refreshStatus()
@@ -99,5 +100,8 @@ test("the pane warns while Kumi isn't sure of the project, until a completed obs
   for (const text of ['listen_track', 'Live stopped answering during the capture', 'Kumi put back what it changed meanwhile.', 'Ask Kumi to look again']) {
     assert.ok(warned.includes(text), `${text} in the pane`)
   }
-  assert.ok(!(await render({ unsure: null })).includes('Ask Kumi to look again'))
+  assert.ok(!warned.includes('>Undo<'))
+  const cleared = await render({ unsure: null })
+  assert.ok(!cleared.includes('Ask Kumi to look again'))
+  assert.ok(cleared.includes('>Undo<'))
 })

@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
+import { canUndo, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
@@ -65,7 +65,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const session = ownerSession(state)
   const connected = Boolean(state.status?.connected)
   const setupMessage = typeof state.setup?.message === 'string' && state.setup.state !== 'ready' ? state.setup.message : null
-  const undoable = (state.history?.items ?? []).filter(item => item.undo_available).length
+  const undoable = (state.history?.items ?? []).filter(item => canUndo(state.status, item)).length
   return (
     <div style={{ height: '100%', overflowY: 'auto', color: T.text }}>
       <div style={{ ...S.section, gap: 8 }}>
@@ -110,8 +110,8 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           history={state.history}
           now={now}
           action={item =>
-            item.undo_available && connected ? (
-              <TextButton onClick={() => void ask(ctx, undoRequest(item), { send: true, session })} title={`Ask Kumi to undo ${item.label ?? 'this change'}`}>
+            canUndo(state.status, item) ? (
+              <TextButton onClick={() => void ask(ctx, undoRequest(item), { send: true, session })} title="Ask Kumi to undo this change">
                 Undo
               </TextButton>
             ) : null

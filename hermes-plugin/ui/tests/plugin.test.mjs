@@ -125,7 +125,7 @@ test("undo puts the newest undoable change's request, with its id, in Kumi's own
   await settle()
   h.registered.find(contribution => contribution.data?.id === 'kumi.undo-last').data.run()
   await settle()
-  assert.deepEqual(h.calls.submit, [[SESSION, 'Undo Kumi change h-p6f1c9e-g2-c14 (“Drums volume −6.0 → −4.0 dB”)']])
+  assert.deepEqual(h.calls.submit, [[SESSION, 'Undo Kumi change h-p6f1c9e-g2-c14']])
 })
 
 test("when Kumi's chat can't take a request, it opens that chat, then leaves the words unsent in the input", async () => {
@@ -137,7 +137,7 @@ test("when Kumi's chat can't take a request, it opens that chat, then leaves the
   await new Promise(resolve => setTimeout(resolve, 800))
   assert.deepEqual(h.calls.sessions, [SESSION])
   assert.equal(h.calls.submit.length, 2)
-  assert.deepEqual(h.calls.insert, [[null, 'Undo Kumi change h-p6f1c9e-g2-c14 (“Drums volume −6.0 → −4.0 dB”)']])
+  assert.deepEqual(h.calls.insert, [[null, 'Undo Kumi change h-p6f1c9e-g2-c14']])
   assert.equal(h.calls.notify.at(-1).kind, 'warning')
 })
 
@@ -150,6 +150,24 @@ test('nothing is undone when Kumi is not connected', async () => {
   await settle()
   assert.equal(h.calls.submit.length, 0)
   assert.equal(h.calls.notify.at(-1).kind, 'info')
+})
+
+test("the palette undoes nothing while Kumi isn't sure of the project, and never past a change it isn't sure of", async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const unsure = { at: 1, op: 'listen_track', reason: 'Live stopped answering', cleanup: 'restored' }
+  const newestUnsure = { ...ROUTES['/history?limit=50'], items: [{ id: 'h-c15', state: 'unsure', undo_available: false }, ...ROUTES['/history?limit=50'].items] }
+  for (const routes of [
+    { ...ROUTES, '/status': { ...ROUTES['/status'], unsure } },
+    { ...ROUTES, '/history?limit=50': newestUnsure }
+  ]) {
+    const h = harness({ routes })
+    plugin.register(h.ctx)
+    await settle()
+    h.registered.find(contribution => contribution.data?.id === 'kumi.undo-last').data.run()
+    await settle()
+    assert.equal(h.calls.submit.length, 0)
+    assert.match(h.calls.notify.at(-1).message, /isn't sure of its last change/)
+  }
 })
 
 test('a kumi_sounds result opens the map on what it found; other tools only refresh', async () => {
