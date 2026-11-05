@@ -10,6 +10,7 @@ import type { KumiState, KumiStore } from '../shared/store.ts'
 import { Dot, S, Section, TextButton } from '../shared/ui.tsx'
 import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
+import { JobsView } from './jobs.tsx'
 
 /** The time, re-read every `every` ms while mounted, for "4 min ago" labels. */
 export function useNow(every = 30_000): number {
@@ -101,6 +102,11 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
       <Section title="Focus">
         <FocusView focus={state.focus} now={now} />
       </Section>
+      {Object.keys(state.jobs).length > 0 && (
+        <Section title="Jobs">
+          <JobsView jobs={state.jobs} />
+        </Section>
+      )}
       <Section
         title={
           <>

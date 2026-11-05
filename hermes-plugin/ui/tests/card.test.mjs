@@ -193,3 +193,16 @@ test('FOCUS says Kumi stopped (not "not answering") once it stopped, and keeps t
   assert.ok(!/>[^<]*\b12\b[^<]*</.test(neutral), 'the line a snapshot was written at is never shown')
   assert.equal(neutral.split('Arrange').length - 1, 2, 'a view and a section of the same name are both shown')
 })
+
+test('the pane shows a running scan with how far it got, and how a finished one ended', async () => {
+  const { JobsView } = await load('src/desktop/jobs.tsx', { react: 'real' })
+  const jobs = {
+    'j-1': { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' }, ended_at: null },
+    'j-2': { job_id: 'j-2', kind: 'scan', state: 'failed', error: { reason: 'the folder went away' }, ended_at: 1 }
+  }
+  const html = renderToStaticMarkup(createElement(JobsView, { jobs }))
+  for (const text of ['Scanning', 'Drums · 412 of 1,200', 'aria-label="Scanning: 34%"', 'width:34%', 'Scan failed', 'the folder went away']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
+})

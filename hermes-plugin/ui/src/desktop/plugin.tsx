@@ -19,7 +19,7 @@ import { host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from '@hermes/plugin-
 
 import { canUndo, undoRequest } from '../shared/format.ts'
 import { Audition } from '../shared/hooks.ts'
-import { foundSounds, KumiStore } from '../shared/store.ts'
+import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
 import { ask } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { FocusHint } from './composer.tsx'
@@ -32,6 +32,8 @@ export const PLUGIN_ID = 'kumi'
 export const MAP_WORKSPACE = 'kumi-sound-map'
 /** How often /status is read while the window is in view: events are faster, but only reach the process that emits. */
 export const POLL_MS = 5000
+/** How often a running job is read while the window is in view (none is read when nothing runs). */
+export const JOB_POLL_MS = 2000
 
 const plugin: HermesPlugin = {
   id: PLUGIN_ID,
@@ -76,7 +78,13 @@ const plugin: HermesPlugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, () => void store.refresh('focus'))
     ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, () => void store.refresh('history'))
     ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, () => void store.refresh('map'))
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, refresh)
+    ctx.setInterval(() => {
+      if (document.visibilityState !== 'hidden') void store.refreshJobs()
+    }, JOB_POLL_MS)
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, event => {
+      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
+      store.trackJob('job_id' in payload ? payload.job_id : undefined)
+    })
     ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
       refresh()
       void store.refresh('setup')
@@ -86,8 +94,11 @@ const plugin: HermesPlugin = {
       const name = 'name' in payload && typeof payload.name === 'string' ? payload.name : ''
       if (!name.startsWith('kumi_')) return
       refresh()
+      const result = 'result' in payload ? payload.result : undefined
+      // A scan (or any call that starts a job) answers with its job's id: follow it.
+      store.trackJob(jobOf(result))
       if (name !== 'kumi_sounds') return
-      const found = foundSounds('result' in payload ? payload.result : undefined)
+      const found = foundSounds(result)
       if (!found?.ids.length) return
       store.found(found.revision, found.ids)
       if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap()

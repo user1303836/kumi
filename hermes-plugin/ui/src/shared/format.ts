@@ -1,5 +1,5 @@
 // Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests.
-import type { Focus, HistoryItem, Named, Status } from './types.ts'
+import type { Focus, HistoryItem, Job, Named, Status } from './types.ts'
 
 const DAWS: Record<string, string> = { ableton: 'Live', live: 'Live', reaper: 'REAPER', renoise: 'Renoise', soundcraft: 'SoundCraft' }
 
@@ -98,6 +98,33 @@ export function ago(at: unknown, now = Date.now()): string {
 export function seconds(value: unknown): string {
   if (typeof value !== 'number' || !(value >= 0)) return ''
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, '0')}`
+}
+
+// A job's kind as a producer says it: running, and once it ended.
+const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'Scanning', noun: 'Scan' } }
+
+/** A background job in words: `Scanning` · `Drums · 412 of 1,200`, how much of it is done (0–1, when it's known),
+ *  and a tone for its state. */
+export function jobWords(job: Job): { title: string; detail: string; fraction: number | null; tone: 'bad' | 'good' | 'muted' | 'warn' } {
+  const kind = typeof job.kind === 'string' && job.kind ? job.kind : ''
+  const named = JOB_KINDS[kind] ?? { running: `${clean(kind || 'Job', 24)} running`, noun: clean(kind || 'Job', 24) }
+  const progress = job.progress ?? {}
+  const done = typeof progress.done === 'number' && Number.isFinite(progress.done) ? progress.done : null
+  const total = typeof progress.total === 'number' && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null
+  const message = typeof progress.message === 'string' ? clean(progress.message, 60) : ''
+  if (job.state === 'running' || job.state === undefined) {
+    const count = done === null ? '' : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`
+    return { title: named.running, detail: [message, count].filter(Boolean).join(' · '), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: 'muted' }
+  }
+  if (job.state === 'done') {
+    const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
+    const sounds = typeof result.sounds === 'number' ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? '' : 's'}` : ''
+    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: 'good' }
+  }
+  if (job.state === 'failed') return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? '', 120), fraction: null, tone: 'bad' }
+  if (job.state === 'cancelled') return { title: `${named.noun} stopped`, detail: '', fraction: null, tone: 'muted' }
+  if (job.state === 'interrupted') return { title: `${named.noun} interrupted`, detail: 'Kumi stopped before it finished.', fraction: null, tone: 'warn' }
+  return { title: named.noun, detail: clean(job.state ?? '', 24), fraction: null, tone: 'muted' }
 }
 
 // The requests the UI puts in the chat (contract C5). Every change goes model → tool → approval like any other

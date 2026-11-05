@@ -322,3 +322,72 @@ test('a runtime that went quiet and then stopped has FOCUS read again, so the ch
   assert.ok(reads.includes('/focus'), reads.join(' '))
   assert.equal(kumi.get().focus.running, false)
 })
+
+test('a tracked job is read while it runs, kept a minute after it ends, and dropped when its runtime knows nothing of it', async () => {
+  const reads = []
+  let job = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' } }
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/job?id=j-1') return job
+    if (path === '/job?id=j-gone') throw new Error('404: {"detail":"Kumi has no job with that id here."}')
+    return {}
+  })
+  kumi.trackJob('j-1')
+  kumi.trackJob('j-gone')
+  kumi.trackJob('not an id')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-1'])
+  assert.equal(kumi.get().jobs['j-1'].ended_at, null)
+  job = { ...job, state: 'done', result: { sounds: 640 } }
+  await kumi.refreshJobs()
+  const ended = kumi.get().jobs['j-1'].ended_at
+  assert.equal(typeof ended, 'number')
+  reads.length = 0
+  await kumi.refreshJobs()
+  assert.deepEqual(reads, [], 'a finished job is never read again')
+  await kumi.refreshJobs(ended + store.JOB_KEPT_MS + 1)
+  assert.deepEqual(kumi.get().jobs, {})
+})
+
+test("a job's words say what it does, how far it got and how it ended", () => {
+  assert.deepEqual(format.jobWords({ kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' } }), {
+    title: 'Scanning',
+    detail: 'Drums · 412 of 1,200',
+    fraction: 412 / 1200,
+    tone: 'muted'
+  })
+  assert.equal(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 640 } }).detail, '640 sounds')
+  assert.deepEqual(format.jobWords({ kind: 'scan', state: 'failed', error: { reason: 'the folder went away' } }).title, 'Scan failed')
+  assert.equal(format.jobWords({ kind: 'scan', state: 'interrupted' }).tone, 'warn')
+  assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')
+})
+
+test('a job shows only once its profile answers for it, never as news when first seen finished, and ends when Kumi stops', async () => {
+  let release
+  let answer = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 1, total: 4 } }
+  const kumi = new store.KumiStore(async path => {
+    if (path === '/status') return { connected: false, stale: true, running: false, revisions: {} }
+    if (path === '/job?id=j-1') {
+      await new Promise(resolve => (release = resolve))
+      return answer
+    }
+    if (path === '/job?id=j-old') return { job_id: 'j-old', kind: 'scan', state: 'done', result: { sounds: 3 } }
+    if (path === '/job?id=j-502') throw new Error('502: bad gateway')
+    return {}
+  })
+  kumi.trackJob('j-1')
+  kumi.trackJob('j-old')
+  kumi.trackJob('j-502')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(kumi.get().jobs, {}, 'nothing shows before its own backend answers, nor a finished one, nor one that failed to read')
+  release()
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-1'])
+  // The runtime stops with the scan still "running" in its file: the pane ends it with Kumi.
+  await kumi.refreshStatus()
+  const last = kumi.refreshJobs()
+  release()
+  await last
+  assert.equal(kumi.get().jobs['j-1'].state, 'interrupted')
+  assert.equal(typeof kumi.get().jobs['j-1'].ended_at, 'number')
+})
