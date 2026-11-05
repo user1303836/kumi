@@ -23,7 +23,7 @@ a DAW to work in.
   before Kumi changes your project and shows exactly what will change; Kumi records the result in its HISTORY, with an
   undo while the Kumi runtime that made the change is running.
 - **Kumi knows what you're looking at.** When what you've selected changes, the chat connected to Kumi gets a short
-  note of the track, device and clip (FOCUS), and what changed since Kumi last looked.
+  note of the track, device and clip (FOCUS), and of what changed in the project while Kumi was away.
 - **Your own sounds, on a map.** Kumi learns the sample folders you list and lays them out by how they sound; in
   Hermes Desktop the map opens in its own tab, where a click auditions a sound and "Use" asks Hermes to place it.
 - **Measured, not imagined.** Loudness, true peak, loudness range, spectrum and tempo are measured on your
@@ -109,7 +109,7 @@ settings:
 |---|---|---|
 | `daw` | Live (`ableton`) | Which DAW Kumi connects to: `ableton`, `reaper` or `renoise`. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
 | `library_folders` | none | The folders Kumi may read to build your sound map: a scan reads only the audio files in them, and nothing else is scanned |
-| `inject_focus` | on | Adds the short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
+| `inject_focus` | on | When what you're looking at changes, adds a short note to the chat connected to Kumi: what you're on (FOCUS), and what changed in the project while Kumi was away |
 | `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes (Vision's, unless you change it; it must accept images) to interpret measurements (see below) |
 
 ## Hermes Desktop and the dashboard
