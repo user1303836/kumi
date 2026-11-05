@@ -189,12 +189,30 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         log.exception("Kumi couldn't tell Desktop about %s", tool)
 
 
+NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so Kumi's changes, track "
+                "listens, folder reads and setup steps run without asking the producer.")
+
+
+def approvals_bypassed(session_key: str | None = None) -> bool | None:
+    """Whether Hermes runs a call it would ask about without asking (`--yolo`, a chat's `/yolo`, or
+    `approvals.mode: off`): Hermes's own check, for this call's chat, or without a chat when `session_key` is "".
+    None when it can't be told (Hermes isn't importable)."""
+    try:
+        from tools.approval import is_approval_bypass_active, is_approval_bypass_active_for_session  # Hermes's
+        return bool(is_approval_bypass_active() if session_key is None
+                    else is_approval_bypass_active_for_session(session_key))
+    except Exception:
+        return None
+
+
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     daw = host.daw()
     data_dir = host.data_dir()
     report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
+    if approvals_bypassed():
+        report["approvals"] = NO_APPROVALS  # say it to the producer before changing anything
     try:
         host.install(data_dir)
     except runtime.Unavailable as failure:

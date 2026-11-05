@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -158,10 +159,36 @@ class Cli(unittest.TestCase):
         self.assertEqual(shown, self.run_cli(host, "status").splitlines(), "`hermes kumi` alone is status")
         self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
-        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}"])
+        self.assertEqual(shown[3:5], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}"])
         host.runtimes.stop_all()
         self.assertRegex(self.run_cli(host).splitlines()[2], r"^Runtime: not running \(last heard \d+ s ago\)\.$",
                          "a runtime that stopped reads as not running at once")
+
+
+class Approvals(unittest.TestCase):
+    """Hermes's approvals off (--yolo, /yolo, approvals.mode: off): kumi_status, /kumi and `hermes kumi status` say
+    plainly that Kumi's changes run without asking. Hermes's own check stands in here."""
+
+    def hermes(self, *, chat: bool, everywhere: bool):
+        approval = SimpleNamespace(is_approval_bypass_active=lambda: chat,
+                                   is_approval_bypass_active_for_session=lambda key: everywhere)
+        return mock.patch.dict("sys.modules", {"tools": SimpleNamespace(approval=approval), "tools.approval": approval})
+
+    def test_a_chat_without_approvals_is_told_and_one_with_them_isnt(self):
+        host, _, _ = support.host(self)
+        with self.hermes(chat=True, everywhere=False):
+            self.assertEqual(support.call(host, "kumi_status", {})["approvals"], support.module("tools").NO_APPROVALS)
+            self.assertTrue(commands.kumi(host, "").endswith(support.module("tools").NO_APPROVALS))
+        with self.hermes(chat=False, everywhere=False):
+            self.assertNotIn("approvals", support.call(host, "kumi_status", {}))
+
+    def test_hermes_kumi_status_says_whether_hermes_asks(self):
+        host, _, _ = support.host(self)
+        with self.hermes(chat=False, everywhere=True):
+            self.assertIn("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without "
+                          "asking.", commands.status_text(host))
+        with self.hermes(chat=False, everywhere=False):
+            self.assertIn("Approvals: Hermes asks before each Kumi change", commands.status_text(host))
 
 
 if __name__ == "__main__":
