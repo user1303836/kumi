@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import re
 import tarfile
 import tempfile
 import unittest
@@ -116,14 +118,16 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(policy.pre_tool_call(host, "kumi_setup", {"action": "plan"}), "a plan needs no approval")
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertEqual((plan["step"], plan["next"]), ("runtime", "kumi_setup install"))
-        self.assertIn("https://github.com/user1303836/kumi/releases/download/", plan["effects"][0])
+        self.assertIn("https://github.com/user1303836/kumi/releases/download/",
+                      setup.approval("ableton", data_dir=data)["effects"][0], "the producer's approval names it")
         self.assertIsNone(host.runtimes.get(data), "planning the runtime step starts no runtime")
 
     def test_the_daw_step_is_planned_from_the_runtimes_dry_run_with_its_exact_paths(self):
         host, _, data = desktop_host(self, daw_component=False)
         plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
         self.assertEqual((plan["step"], plan["next"]), ("daw_component", "kumi_setup install"))
-        self.assertTrue(any(path.endswith("Kumi Ears.amxd") for path in plan["paths"]), plan["paths"])
+        paths = json.loads((data / "setup" / "plan.json").read_text(encoding="utf-8"))["paths"]  # as recorded
+        self.assertTrue(any(path.endswith("Kumi Ears.amxd") for path in paths), paths)
         self.assertEqual(setup_daw_calls(data), [{"daw": "ableton", "dry_run": True}])
         asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
         self.assertEqual(asked["action"], "approve")
@@ -131,7 +135,7 @@ class SetupTool(unittest.TestCase):
         shown = setup.approval("ableton", data_dir=data)
         self.assertEqual(asked["message"].splitlines(), [shown["title"], *(f"• {line}" for line in shown["effects"])],
                          "setup's lines verbatim: nothing cut or collapsed")
-        for path in plan["paths"]:
+        for path in paths:
             self.assertIn(f"• Writes: {path}", asked["message"].splitlines(), "each path it writes, on its own line")
         self.assertEqual(asked["rule_key"], f"kumi:setup:{plan['digest']}", "'always' covers this exact plan only")
 
@@ -274,6 +278,81 @@ class SetupTool(unittest.TestCase):
         self.assertNotIn("--tool", runtime.serve_argv(host.install(data), data / "state", "ableton"))
         self.assertEqual(setup.status(daw="ableton", data_dir=data, plugin_dir=host.plugin_dir)
                          ["compressed_audio"]["state"], "changed", "setup and runtime.py agree it changed")
+
+
+class ModelAnswers(unittest.TestCase):
+    """What kumi_status and kumi_setup give the model names no path on this computer, nor a URL (adversarial review LOW
+    11, rgzm): the approval and `hermes kumi status` show the producer every one."""
+
+    PATHLIKE = re.compile(r"(?<![\w-])/[^\s\"']*/|[A-Za-z]:[\\/]|\\\\|://")  # `/a/b`, `C:\`, `\\server`, a URL
+
+    def assertNoPath(self, answer: dict, *known: Path) -> None:
+        said = json.dumps(answer, ensure_ascii=False)
+        self.assertIsNone(self.PATHLIKE.search(said), said)
+        for path in known:
+            self.assertNotIn(str(path), said)
+            self.assertNotIn(os.path.realpath(path), said)
+
+    def test_every_step_of_setup_and_kumi_status_answer_without_a_path(self):
+        host, _, data = desktop_host(self, installed=False)
+        self.assertNoPath(support.call(host, "kumi_status", {}, session_id="s1"), data, host.plugin_dir)
+        self.assertNoPath(support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1"), data)
+
+        host, _, data = desktop_host(self)  # a newer Kumi to install: the runtime step
+        bundle = io.BytesIO()
+        with tarfile.open(fileobj=bundle, mode="w:xz") as archive:
+            info = tarfile.TarInfo(setup.executable(setup.host_target()))
+            info.size, info.mode = 3, 0o755
+            archive.addfile(info, io.BytesIO(b"#!\n"))
+        support.pin(host.plugin_dir, version="1.24.67")
+        pin = json.loads((host.plugin_dir / "kumi_release.json").read_text())
+        pin["targets"][setup.host_target()].update(sha256=hashlib.sha256(bundle.getvalue()).hexdigest(),
+                                                   size=len(bundle.getvalue()))
+        (host.plugin_dir / "kumi_release.json").write_text(json.dumps(pin))
+        self.assertNoPath(support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1"), data)
+        with mock.patch.object(setup, "_open_url", side_effect=lambda url: io.BytesIO(bundle.getvalue())):
+            installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        self.assertNoPath(installed, data)
+
+        host, _, data = desktop_host(self, daw_component=False)  # the DAW step, then its install
+        self.assertNoPath(support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1"), data)
+        installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        self.assertNoPath(installed, data)
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        self.assertNoPath(support.call(host, "kumi_status", {}, session_id="s1"), data)
+
+        folder = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        program = folder / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        program.write_bytes(b"#!/bin/sh\n")
+        program.chmod(0o755)
+        host, _, data = desktop_host(self, None, "--component-state", "same")  # ffmpeg, the optional last step
+        with mock.patch.object(setup, "_ffmpeg_search", return_value=[str(folder)]):
+            self.assertNoPath(support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1"), data, folder)
+            allowed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(allowed["ok"], allowed)
+        self.assertNoPath(allowed, data, folder)
+
+        owner = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
+                                     daw_component=False)
+        self.assertNoPath(support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1"), data, owner)
+        adopted = support.call(host, "kumi_setup", {"action": "adopt"}, session_id="s1")
+        self.assertTrue(adopted["ok"], adopted)
+        self.assertNoPath(adopted, data, owner)
+
+    def test_a_setup_failure_whose_words_name_a_path_is_said_without_it(self):
+        owner = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner",
+                                     str(owner / "Kumi"), daw_component=False)
+        (owner / "Kumi").mkdir()
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        (owner / "Kumi").rmdir()  # the installation to adopt went away after it was approved
+        failed = support.call(host, "kumi_setup", {"action": "adopt"}, session_id="s1")
+        self.assertEqual(failed["error"]["code"], "not_found")
+        self.assertNoPath(failed, data, owner)
+
 
 
 class Cli(unittest.TestCase):

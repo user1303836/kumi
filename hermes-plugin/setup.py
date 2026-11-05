@@ -474,6 +474,43 @@ def for_model(report: Mapping[str, Any]) -> dict:
     return shown
 
 
+def plan_for_model(plan: Mapping[str, Any]) -> dict:
+    """A plan as `kumi_setup plan` gives it to the model: the step, what it does in words and its size, with no path or
+    URL (adversarial review LOW 11). The producer's approval shows every one of them, from the plan setup recorded
+    (`approval()`); the model has no use for them, and a chat's transcript shouldn't carry them."""
+    shown = {key: plan[key] for key in ("schema", "daw", "target", "version", "step", "optional", "digest")
+             if key in plan}
+    download = plan.get("download") or {}
+    if download:
+        shown.update(download_bytes=download.get("bytes"), unpacked_bytes=download.get("unpacked_bytes"))
+    component = plan.get("component") or {}
+    if component:
+        shown["component"] = {key: component.get(key) for key in ("component", "version", "state")}
+    shown["existing_kumi"] = plan.get("existing_kumi") is not None
+    daw = DAWS.get(str(plan.get("daw")), "the DAW")
+    shown["summary"] = {
+        "runtime": f"Download Kumi {plan.get('version')} ({_mb(int(download.get('bytes') or 0))}), check it against "
+                   "the SHA-256 this plugin pins, and unpack it into this profile's plugin data.",
+        "daw_component": f"Install Kumi's part in {daw}; the approval lists everything it writes.",
+        "owned_elsewhere": f"Another Kumi installation already serves {daw}: adopt it rather than replace it.",
+        "ffmpeg": "Optional: let Kumi's runtime use the ffmpeg already on this computer for compressed audio.",
+        "none": f"Kumi is set up for {daw}.",
+    }.get(str(plan.get("step")), "")
+    return shown
+
+
+# A setup failure's own words can name a path or a URL; the model is told this instead.
+_PATHLIKE = re.compile(r"[/\\]")
+
+
+def reason_for_model(code: str, message: Any) -> str:
+    """A setup failure as `kumi_setup` gives it to the model: its own words, unless they could name a path or a URL
+    (LOW 11), which `hermes kumi setup` in a terminal shows instead."""
+    if isinstance(message, str) and message and not _PATHLIKE.search(message):
+        return message
+    return f"Setup failed ({code}); hermes kumi setup in a terminal says why."
+
+
 def _mb(size: int) -> str:
     return f"{size / 1_000_000:.1f} MB"
 
@@ -738,7 +775,7 @@ def adopt(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], 
                 raise SetupError("not_found", f"{home} isn't a folder any more; plan again.")
             _adopt(approved, daw, home, data_dir)
         return {"ok": True, "step": "adopt",
-                "message": f"Kumi now uses the Kumi installation at {home} for {DAWS[daw]}.",
+                "message": f"Kumi now uses the Kumi installation that already serves {DAWS[daw]}.",
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
@@ -877,7 +914,7 @@ def _install_runtime(approved: dict, data_dir: Path, target: str, progress: Call
     for stale in runtime.iterdir():  # earlier versions this plugin installed; a running one keeps its open files
         if stale.is_dir() and stale.name != version and VERSION.fullmatch(stale.name):
             shutil.rmtree(stale, ignore_errors=True)
-    return f"Kumi {version}'s runtime is installed in {final}."
+    return f"Kumi {version}'s runtime is installed."
 
 
 def _record_component(data_dir: Path, daw: str, component: Mapping[str, Any], *, installed_at: int | None) -> None:
@@ -905,7 +942,7 @@ def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
     receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
     receipt["ffmpeg"] = {**chosen, "at": _now_ms()}
     _write_json(data_dir / "setup" / "receipt.json", receipt)
-    return f"Kumi's runtime will use the ffmpeg at {chosen['path']} for compressed audio from its next start."
+    return "Kumi's runtime will use the ffmpeg you allowed for compressed audio from its next start."
 
 
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:
