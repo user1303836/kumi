@@ -80,9 +80,21 @@ impl std::error::Error for KumiError {}
 /// uncertain. Hosts take cleanup and modified-state evidence from fields, never from prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HearFailure {
-    Refused { code: &'static str, reason: String, marked_modified: bool },
-    Cancelled { marked_modified: bool },
-    Unsure { reason: String, restored: bool, marked_modified: bool },
+    Refused {
+        code: &'static str,
+        reason: String,
+        marked_modified: bool,
+    },
+    Cancelled {
+        marked_modified: bool,
+    },
+    /// A specific native cause, when known, survives the host's cleanup classification.
+    Unsure {
+        code: Option<&'static str>,
+        reason: String,
+        restored: bool,
+        marked_modified: bool,
+    },
 }
 
 impl fmt::Display for HearFailure {

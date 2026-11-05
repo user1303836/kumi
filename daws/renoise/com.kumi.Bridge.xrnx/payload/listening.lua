@@ -798,27 +798,40 @@ local function note_tempo(job, env, song)
     beat_text(transport.bpm), transport.lpb, beat_text(before.bpm), before.lpb)
 end
 
--- Guarded completion is one native compare-and-restore, never a later adapter write.
--- Only a full render has a known final tempo. Any other pair may be the producer's.
-local function restore_guarded_tempo(job, env, song, state)
+-- Guarded completion is one native compare-and-restore on every outcome, never a later adapter write.
+-- The approved end pair is the only known render-owned pair, even for a failed or cancelled render.
+-- A partial render may stop at another pair; without exact ownership evidence that pair must survive.
+-- An identical producer-chosen pair is indistinguishable; any different pair is never overwritten.
+local function restore_guarded_tempo(job, env, song)
   if not job.max_seconds or not job.tempo_before then return true end
-  if not song or env.document() ~= job.document or env.epoch() ~= job.epoch or song.rendering then return false end
+  if not song or env.document() ~= job.document or env.epoch() ~= job.epoch then
+    return false, "tempo_restore_state_changed", "Renoise's document or epoch changed; guarded BPM/LPB restoration was not attempted. Observe again."
+  end
   local transport, before, expected = song.transport, job.tempo_before, job.tempo_expected
+  if song.rendering or transport.playing or transport.edit_mode then
+    return false, "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded BPM/LPB restoration requires a stopped transport. Observe again."
+  end
   if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
-  if state ~= "done" or not job.full_render or not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then return false end
+  if not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then
+    return false, "tempo_restore_ownership_uncertain",
+      "Renoise's BPM/LPB pair is neither the launch pair nor the known render-end pair; ownership is unknown, so it was left unchanged. Observe again."
+  end
   local restored = pcall(env.quiet, function()
     if transport.bpm ~= before.bpm then transport.bpm = before.bpm end
     if transport.lpb ~= before.lpb then transport.lpb = before.lpb end
   end)
-  return restored and transport.bpm == before.bpm and transport.lpb == before.lpb
+  if not restored or transport.bpm ~= before.bpm or transport.lpb ~= before.lpb then
+    return false, "tempo_restore_failed", "Renoise's guarded BPM/LPB restoration failed or did not read back as the launch pair. Observe again."
+  end
+  return true
 end
 
 local function finish(job, env, state, code, message)
   local song = renoise.song()
   restore(job, env, song)
-  if not restore_guarded_tempo(job, env, song, state) then
-    state, code, message = "failed", "uncertain",
-      "Renoise's BPM or LPB could not be restored without overwriting a newer state. Observe again."
+  local restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+  if not restored then
+    state, code, message = "failed", restore_code, restore_message
   end
   note_tempo(job, env, song)
   job.state = state
@@ -895,9 +908,6 @@ local function rendered(job, env, k)
     return finish(job, env, "failed", "failed", string.format("Renoise stopped the render after %.1f of %.1f s", info.seconds, job.range.seconds))
   end
   source.seconds, source.channels, source.rate, source.frames = info.seconds, info.channels, info.rate, info.frames
-  -- Require the complete planned duration, not the short-file acceptance margin, before
-  -- attributing the final BPM/LPB pair to a successful render.
-  job.full_render = info.frames + 1 >= expected
   if not windows() and io.chmod then pcall(io.chmod, source.file, 600) end
   if job.stopping then
     job.notes[#job.notes + 1] = "Renoise finished the render before it could stop."
@@ -934,7 +944,6 @@ start_render = function(job, env, k)
     sample_rate = job.rate, bit_depth = 32, interpolation = "precise", priority = "high",
   }
   job.current, job.rendering = k, { started_ms = now_ms() }
-  job.full_render = false
   local this_job = job
   local started, result, why = pcall(song.render, song, options, source.file, function()
     -- (a callback of Renoise's: nothing raises past here)

@@ -1206,59 +1206,153 @@ test("listening: guarded queued launch uses fresh permissible timing rather than
 end)
 
 test("listening: guarded completion preserves a newer tempo pair and publishes no files", function()
-  for _, field in ipairs({ "bpm", "lpb" }) do
+  for _, outcome in ipairs({ "done", "failed", "cancelled" }) do
+    for _, field in ipairs({ "bpm", "lpb" }) do
+      local setup_env, peer = setup()
+      mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+      mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+      local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+      env.before_render = nil
+      listening.launch(job, env)
+      job.stopping = outcome == "cancelled"
+      local completed = mock.finish_render({ no_callback = true, fraction = outcome == "failed" and 0.5 or nil })
+      local changed = field == "bpm" and 137 or 7
+      mock.data.transport_fields[field] = changed
+      completed.done()
+      eq(job.state, "failed", outcome)
+      eq(job.code, "tempo_restore_ownership_uncertain", outcome)
+      eq(mock.data.transport_fields.bpm, field == "bpm" and changed or 60, "the entire producer pair survives")
+      eq(mock.data.transport_fields.lpb, field == "lpb" and changed or 8, "the entire producer pair survives")
+      ok(not exists(job.sources[1].file), "no non-success audio remains")
+      eq(listening.status({ jobId = job.id }, env).files, nil, "uncertain audio is never published")
+      H.no_dialogs()
+    end
+  end
+end)
+
+test("listening: guarded tempo cleanup requires the same stopped document and verifies restoration", function()
+  for _, fault in ipairs({ "document", "epoch", "rendering", "playing", "edit_mode", "write", "readback" }) do
     local setup_env, peer = setup()
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
     env.before_render = nil
     listening.launch(job, env)
     local completed = mock.finish_render({ no_callback = true })
-    local changed = field == "bpm" and 137 or 7
-    mock.data.transport_fields[field] = changed
-    completed.done()
-    eq(job.state, "failed")
-    eq(job.code, "uncertain")
-    eq(mock.data.transport_fields[field], changed, "the newer producer state survives")
-    ok(not exists(job.sources[1].file), "no non-success audio remains")
-    H.no_dialogs()
-  end
-end)
-
-test("listening: guarded tempo cleanup refuses a changed epoch and reads writes back", function()
-  for _, fault in ipairs({ "epoch", "readback", "partial" }) do
-    local setup_env, peer = setup()
-    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
-    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
-    env.before_render = nil
-    listening.launch(job, env)
-    local completed = mock.finish_render({ no_callback = true, fraction = fault == "partial" and 0.5 or nil })
-    if fault == "epoch" then
+    if fault == "document" then
+      env.document = function() return "another-document" end
+    elseif fault == "epoch" then
       env.epoch = function() return "another-epoch" end
-    elseif fault == "readback" then
+    elseif fault == "rendering" then
+      mock.impl(mock.data.song).rendering = true
+    elseif fault == "playing" or fault == "edit_mode" then
+      mock.data.transport_fields[fault] = true
+    else
+      -- Keep the mute/solo restoration independent of the injected tempo setter fault.
+      local quiet, calls = env.quiet, 0
       env.quiet = function(fn)
-        fn()
-        mock.data.transport_fields.bpm = 60
+        calls = calls + 1
+        if calls > 1 then
+          if fault == "write" then error("tempo setter refused") end
+          fn()
+          mock.data.transport_fields.bpm = 60
+        else
+          quiet(fn)
+        end
       end
     end
     completed.done()
     eq(job.state, "failed", fault)
-    eq(job.code, "uncertain", fault)
+    eq(job.code, (fault == "write" or fault == "readback") and "tempo_restore_failed" or "tempo_restore_state_changed", fault)
     eq(mock.data.transport_fields.bpm, 60, fault)
     ok(not exists(job.sources[1].file), "non-success never retains audio")
+    mock.impl(mock.data.song).rendering = false
+    mock.data.transport_fields.playing, mock.data.transport_fields.edit_mode = false, false
     H.no_dialogs()
   end
 end)
 
-test("listening: a cancelled guarded render leaves an unconfirmed tempo pair alone", function()
+test("listening: a cancelled guarded render restores both values at the owned pair and deletes audio", function()
   local env, peer = setup()
   mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+  mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
   result((start(peer, "jguardcancel", { { id = "mix", what = "master" } }, nil, { maxSeconds = 60 })))
   result(call(peer, "listen_cancel", { jobId = "jguardcancel" }))
-  mock.finish_render()
-  eq(status(peer, "jguardcancel").state, "failed")
-  eq(status(peer, "jguardcancel").code, "uncertain")
+  local completed = mock.finish_render({ no_callback = true })
   eq(mock.data.transport_fields.bpm, 60)
+  eq(mock.data.transport_fields.lpb, 8)
+  completed.done()
+  eq(status(peer, "jguardcancel").state, "cancelled")
+  eq(status(peer, "jguardcancel").files, nil, "cancelled audio is never published")
+  eq(mock.data.transport_fields.bpm, 120)
+  eq(mock.data.transport_fields.lpb, 4)
   ok(not exists(env.listening .. "/jguardcancel-mix.wav"))
+  H.no_dialogs()
+end)
+
+test("listening: a failed guarded render restores both values at the owned pair without publishing audio", function()
+  for _, fault in ipairs({ "missing-file", "partial-file" }) do
+    local env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    result((start(peer, "jguardfail", { { id = "mix", what = "master" } }, nil, { maxSeconds = 60 })))
+    local completed = mock.finish_render({ no_callback = true, no_file = fault == "missing-file",
+      fraction = fault == "partial-file" and 0.5 or nil })
+    eq(mock.data.transport_fields.bpm, 60)
+    eq(mock.data.transport_fields.lpb, 8)
+    completed.done()
+    local failed = status(peer, "jguardfail")
+    eq(failed.state, "failed", fault)
+    eq(failed.code, "failed", "restoration must preserve the original render failure")
+    eq(failed.files, nil, "failed audio is never published")
+    eq(mock.data.transport_fields.bpm, 120)
+    eq(mock.data.transport_fields.lpb, 4)
+    ok(not exists(env.listening .. "/jguardfail-mix.wav"))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: a partial guarded render never guesses ownership of an intermediate tempo pair", function()
+  local setup_env, peer = setup()
+  mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+  mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+  mock.ops.set_effect(2, 1, 1, 1, timing_command("ZT"), 90)
+  local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+  env.before_render = nil
+  listening.launch(job, env)
+  eq(job.tempo_expected.bpm, 90)
+  eq(job.tempo_expected.lpb, 8)
+  local completed = mock.finish_render({ no_callback = true, fraction = 0.25 })
+  -- The mock leaves the end pair even for a short file. Model an earlier render stop explicitly:
+  -- 60/8 is in the score, but the callback/file length cannot prove who left that pair.
+  mock.data.transport_fields.bpm = 60
+  completed.done()
+  eq(job.state, "failed")
+  eq(job.code, "tempo_restore_ownership_uncertain")
+  eq(mock.data.transport_fields.bpm, 60)
+  eq(mock.data.transport_fields.lpb, 8)
+  ok(not exists(job.sources[1].file))
+  H.no_dialogs()
+end)
+
+test("listening: guarded completion never rewrites a pair already restored to the launch snapshot", function()
+  local setup_env, peer = setup()
+  mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+  mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+  local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+  env.before_render = nil
+  listening.launch(job, env)
+  local completed = mock.finish_render({ no_callback = true })
+  mock.data.transport_fields.bpm, mock.data.transport_fields.lpb = 120, 4
+  local quiet, calls = env.quiet, 0
+  env.quiet = function(fn)
+    calls = calls + 1
+    return quiet(fn)
+  end
+  completed.done()
+  eq(job.state, "done")
+  eq(calls, 1, "only mute/solo restoration needs a write action")
+  eq(mock.data.transport_fields.bpm, 120)
+  eq(mock.data.transport_fields.lpb, 4)
   H.no_dialogs()
 end)
 

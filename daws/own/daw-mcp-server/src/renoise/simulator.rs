@@ -83,6 +83,7 @@ struct State {
     render_bpm: Option<f64>,
     render_lpb: Option<u64>,
     guarded_tempo: Option<GuardedTempo>,
+    guarded_failures: std::collections::HashMap<String, &'static str>,
     /// A failed native put-back leaves this actual track mute behind after the next successful render start.
     render_mute_residue: Option<(u64, bool)>,
     /// (M7) What Kumi's variations made: phrases with their lines, slots of variation patterns.
@@ -245,6 +246,7 @@ impl RenoiseScript {
                 render_bpm: None,
                 render_lpb: None,
                 guarded_tempo: None,
+                guarded_failures: Default::default(),
                 render_mute_residue: None,
                 takes: Takes::default(),
                 transport_playing: false,
@@ -1129,7 +1131,7 @@ impl RenoiseScript {
             // Any track of the song's epoch (the sim's song has its tracks numbered from 1).
             let prefix = format!("{epoch}:track:");
             let known = |reference: &str| reference.strip_prefix(&prefix).is_some_and(|n| n.parse::<u32>().is_ok_and(|n| n >= 1));
-            let result = self.listening.answer(method, params, &epoch.to_string(), &known);
+            let mut result = self.listening.answer(method, params, &epoch.to_string(), &known);
             if method == "render_start" && result.as_ref().is_some_and(Result::is_ok) {
                 let mut state = self.state.lock().unwrap();
                 state.guarded_tempo = guarded;
@@ -1145,17 +1147,39 @@ impl RenoiseScript {
                     state.mute.insert(track, muted);
                 }
             }
-            if let Some(Ok(answer)) = &result {
+            if let Some(Ok(answer)) = &mut result {
                 if matches!(answer["state"].as_str(), Some("done" | "cancelled" | "failed")) {
                     let mut state = self.state.lock().unwrap();
                     if state.guarded_tempo.as_ref().is_some_and(|guard| params["jobId"] == guard.job) {
                         let guard = state.guarded_tempo.take().unwrap();
                         let current = [state.song["bpm"].as_f64(), state.song["lpb"].as_f64()];
+                        let before = [guard.before[0].as_f64(), guard.before[1].as_f64()];
                         let expected = [guard.rendered[0].as_f64(), guard.rendered[1].as_f64()];
-                        if state.epoch == guard.epoch && answer["state"] == "done" && current == expected {
+                        let failure = if state.epoch != guard.epoch || state.transport_playing {
+                            Some("tempo_restore_state_changed")
+                        } else if current == before {
+                            None
+                        } else if current == expected {
                             state.song["bpm"] = guard.before[0].clone();
                             state.song["lpb"] = guard.before[1].clone();
+                            None
+                        } else {
+                            Some("tempo_restore_ownership_uncertain")
+                        };
+                        if let Some(code) = failure {
+                            state.guarded_failures.insert(guard.job, code);
                         }
+                    }
+                    if let Some(code) = params["jobId"].as_str().and_then(|id| state.guarded_failures.get(id)) {
+                        if let Some(files) = answer["files"].as_array() {
+                            for path in files.iter().filter_map(|file| file["file"].as_str()) {
+                                let _ = std::fs::remove_file(path);
+                            }
+                        }
+                        answer["state"] = json!("failed");
+                        answer["code"] = json!(code);
+                        answer["error"] = json!("The guarded render could not restore the song's tempo.");
+                        answer.as_object_mut().unwrap().remove("files");
                     }
                 }
             }

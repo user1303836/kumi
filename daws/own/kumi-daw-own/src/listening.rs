@@ -81,11 +81,46 @@ fn after_restoration(mut error: RuntimeError, marked_modified: bool) -> RuntimeE
     error
 }
 
+fn native_tempo_failure(code: Option<&str>, daw: Option<DawId>) -> Option<(&'static str, &'static str)> {
+    if daw != Some(DawId::Renoise) {
+        return None;
+    }
+    match code {
+        Some("tempo_restore_state_changed") => Some((
+            "tempo_restore_state_changed",
+            "Renoise's document or transport changed; tempo restoration could not be verified. Observe again.",
+        )),
+        Some("tempo_restore_ownership_uncertain") => Some((
+            "tempo_restore_ownership_uncertain",
+            "Renoise's BPM/LPB pair could not be attributed to this render and was left unchanged. Observe again.",
+        )),
+        Some("tempo_restore_failed") => Some(("tempo_restore_failed", "Renoise could not verify its BPM/LPB restoration. Observe again.")),
+        _ => None,
+    }
+}
+
+/// Keep the native cause even when the independent full-state comparison also fails.
+/// Native prose and unrecognized codes never cross this boundary.
+fn keep_native_tempo_failure(mut error: RuntimeError, native: Option<&str>, daw: Option<DawId>) -> RuntimeError {
+    if let RuntimeError::Hear(HearFailure::Unsure { code, reason, .. }) = &mut error {
+        if let Some((known, message)) = native_tempo_failure(native, daw) {
+            *code = Some(known);
+            reason.clear();
+            reason.push_str(message);
+        }
+    }
+    error
+}
+
 /// Native error text can contain cache paths and producer-controlled strings. Only its typed
 /// code crosses the restricted boundary; standalone keeps its detailed bridge diagnostics.
 fn native_hear_refused(code: Option<&str>, fallback: &'static str, daw: Option<DawId>) -> RuntimeError {
+    if let Some((code, reason)) = native_tempo_failure(code, daw) {
+        return HearFailure::Unsure { code: Some(code), reason: reason.into(), restored: false, marked_modified: false }.into();
+    }
     if code == Some("uncertain") {
         return HearFailure::Unsure {
+            code: None,
             reason: "The native renderer could not confirm its result. Observe again before another action.".into(),
             restored: false,
             marked_modified: false,
@@ -285,6 +320,7 @@ fn exact_render_seconds(read: &Value, approval: Option<HearApproval>) -> Result<
 fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<bool, RuntimeError> {
     if !render_state_complete(daw, before) || !render_state_complete(daw, after) {
         return Err(HearFailure::Unsure {
+            code: None,
             reason: "The render's touched state could not be read completely after cleanup.".into(),
             restored: false,
             marked_modified: false,
@@ -298,6 +334,7 @@ fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<b
         || expected.iter().any(|(key, value)| !(daw == Some(DawId::Reaper) && key == "dirty") && observed.get(key) != Some(value))
     {
         return Err(HearFailure::Unsure {
+            code: None,
             reason: "The state read after rendering did not match the state before it. Observe again before another action.".into(),
             restored: false,
             marked_modified: false,
@@ -2531,6 +2568,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     async fn restricted_wait(&self, started: &Value, seconds: f64, original: &Signal) -> Result<(Value, bool), RuntimeError> {
         let Some(id) = started.get("jobId").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
             return Err(HearFailure::Unsure {
+                code: None,
                 reason: "The render may have started, but the bridge returned no job identity.".into(),
                 restored: false,
                 marked_modified: false,
@@ -2549,6 +2587,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 _ = tokio::time::sleep_until(deadline) => {
                     self.restricted_cancel(id).await;
                     return Err(HearFailure::Unsure {
+                        code: None,
                         reason: "The offline render exceeded its bounded wait; stopping and restoration could not be verified. Observe again.".into(),
                         restored: false, marked_modified: false,
                     }.into());
@@ -2563,6 +2602,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     _ => {
                         self.restricted_cancel(id).await;
                         return Err(HearFailure::Unsure {
+                            code: None,
                             reason: "The bridge returned an unknown render state; restoration is unverified.".into(),
                             restored: false,
                             marked_modified: false,
@@ -2573,6 +2613,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 _ => {
                     self.restricted_cancel(id).await;
                     return Err(HearFailure::Unsure {
+                        code: None,
                         reason: "The render could not be observed through completion; restoration is unverified. Observe again.".into(),
                         restored: false,
                         marked_modified: false,
@@ -2748,7 +2789,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 deadline_seconds: render_deadline_seconds(seconds),
                 disclosure: match renderer.profile().id {
                     Some(DawId::Reaper) => "REAPER may show the project as modified after a listen.",
-                    Some(DawId::Renoise) => "Renoise's render can change BPM and LPB through the song's tempo commands. Listening verifies them afterwards and never overwrites a newer producer tempo.",
+                    Some(DawId::Renoise) => "Renoise may change BPM/LPB. It attempts restoration only from this render's planned end pair; a different pair is left unchanged. An unverified restoration, including cancellation, can leave tempo changed.",
                     _ => "",
                 },
             },
@@ -2777,6 +2818,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 .map_err(|_| hear_refused("render_unavailable", "The DAW's rendering state could not be read."))?;
             if status["busy"] != false {
                 return Err(HearFailure::Unsure {
+                    code: None,
                     reason: "The DAW still reports busy after the render; restoration is unverified.".into(),
                     restored: false,
                     marked_modified: false,
@@ -2791,6 +2833,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             bounded_hear_transport(&focus["transport"])?;
             if focus_state(focus)? != before.focus {
                 return Err(HearFailure::Unsure {
+                    code: None,
                     reason: "Transport or selection differs from the before-render snapshot. Observe again.".into(),
                     restored: false,
                     marked_modified: false,
@@ -2802,6 +2845,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         match tokio::time::timeout(Duration::from_secs(60), cleanup).await {
             Ok(Ok(marked)) => Ok(marked),
             _ => Err(HearFailure::Unsure {
+                code: None,
                 reason: "The render ended, but complete restoration could not be verified. Observe again before another action.".into(),
                 restored: false,
                 marked_modified: false,
@@ -2874,16 +2918,23 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         args["epoch"] = json!(before.epoch);
         let started = match self.renderer.link.call("render", args, abort::timeout(10_000)).await {
             Ok(Ok(started)) => started,
-            Ok(Err(refused)) if start_refused_before_mutation(self.renderer.profile().id, refused.code.as_deref()) =>
-            {
+            Ok(Err(refused)) if start_refused_before_mutation(self.renderer.profile().id, refused.code.as_deref()) => {
                 return Err(native_hear_refused(refused.code.as_deref(), "render_unavailable", self.renderer.profile().id));
             }
-            _ => {
-                return Err(HearFailure::Unsure {
-                    reason: "The render start could not be resolved; its effects and restoration are unknown. Its staging file may remain in the owning Kumi listening cache. Observe again.".into(),
-                    restored: false, marked_modified: false,
-                }
-                .into())
+            failed => {
+                let native = match &failed {
+                    Ok(Err(refused)) => refused.code.as_deref(),
+                    _ => None,
+                };
+                return Err(keep_native_tempo_failure(
+                    HearFailure::Unsure {
+                        code: None,
+                        reason: "The render start could not be resolved; its effects and restoration are unknown. Its staging file may remain in the owning Kumi listening cache. Observe again.".into(),
+                        restored: false, marked_modified: false,
+                    }.into(),
+                    native,
+                    self.renderer.profile().id,
+                ));
             }
         };
         let (done, cancelled) = match self.restricted_wait(&started, before.preview.seconds, &original).await {
@@ -2906,13 +2957,19 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 if let Some(done) = observed.filter(|done| matches!(done["state"].as_str(), Some("done" | "failed" | "cancelled"))) {
                     self.restricted_discard(&done, &scratch, quarantine_root).await;
                     if let Ok(marked_modified) = self.restricted_restore(&before).await {
-                        return Err(HearFailure::Unsure {
-                            reason: "The render could not be observed normally; a later read-back confirmed restoration.".into(),
-                            restored: true,
-                            marked_modified,
-                        }
-                        .into());
+                        return Err(keep_native_tempo_failure(
+                            HearFailure::Unsure {
+                                code: None,
+                                reason: "The render could not be observed normally; a later read-back confirmed restoration.".into(),
+                                restored: true,
+                                marked_modified,
+                            }
+                            .into(),
+                            done["code"].as_str(),
+                            self.renderer.profile().id,
+                        ));
                     }
+                    error = keep_native_tempo_failure(error, done["code"].as_str(), self.renderer.profile().id);
                 } else {
                     self.renderer.tell_app("The render's terminal state remains unknown. Its per-call staging file may remain in the owning Kumi listening cache; no cache sweep was performed.");
                     if let RuntimeError::Hear(HearFailure::Unsure { reason, .. }) = &mut error {
@@ -2935,6 +2992,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 .await
                 .map_err(|_| {
                     RuntimeError::from(HearFailure::Unsure {
+                        code: None,
                         reason: "The queued render was refused, but its touched state could not be read back. Observe again.".into(),
                         restored: false,
                         marked_modified: false,
@@ -2946,7 +3004,10 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 marked_modified,
             ));
         }
-        let restoration = self.restricted_restore(&before).await;
+        let restoration = self
+            .restricted_restore(&before)
+            .await
+            .map_err(|error| keep_native_tempo_failure(error, done["code"].as_str(), self.renderer.profile().id));
         if restoration.is_err() || cancelled || original.is_cancelled() || done["state"] == "cancelled" {
             self.restricted_discard(&done, &scratch, quarantine_root).await;
             let marked_modified = restoration?;
@@ -3363,9 +3424,13 @@ mod tests {
                 after_restoration(hear_refused("render_failed", "The render failed."), marked_modified),
                 RuntimeError::Hear(HearFailure::Refused { marked_modified: marked, .. }) if marked == marked_modified
             ));
-            let overrun =
-                HearFailure::Unsure { reason: "The rendered audio exceeded its cap.".into(), restored: false, marked_modified: false }
-                    .into();
+            let overrun = HearFailure::Unsure {
+                code: None,
+                reason: "The rendered audio exceeded its cap.".into(),
+                restored: false,
+                marked_modified: false,
+            }
+            .into();
             assert!(matches!(
                 after_restoration(overrun, marked_modified),
                 RuntimeError::Hear(HearFailure::Unsure { restored: true, marked_modified: marked, .. }) if marked == marked_modified
@@ -3404,6 +3469,22 @@ mod tests {
             }
         }
         assert!(!start_refused_before_mutation(Some(DawId::Renoise), Some("failed")));
+        for code in ["tempo_restore_state_changed", "tempo_restore_ownership_uncertain", "tempo_restore_failed"] {
+            assert!(
+                matches!(
+                    native_hear_refused(Some(code), "render_failed", Some(DawId::Renoise)),
+                    RuntimeError::Hear(HearFailure::Unsure { code: Some(known), restored: false, .. }) if known == code
+                ),
+                "a tempo restoration failure is uncertainty, not a safe refusal"
+            );
+            assert!(
+                matches!(
+                    native_hear_refused(Some(code), "render_failed", Some(DawId::Reaper)),
+                    RuntimeError::Hear(HearFailure::Refused { code: "render_failed", .. })
+                ),
+                "another DAW cannot opt into Renoise's failure meanings"
+            );
+        }
         let RuntimeError::Hear(HearFailure::Refused { reason, .. }) =
             native_hear_refused(Some("busy"), "unsupported", Some(DawId::Renoise))
         else {
@@ -4015,6 +4096,7 @@ mod restricted_staging {
             }
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure {
+                    code: None,
                     reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
                     restored: false,
                     marked_modified: false,
@@ -4625,6 +4707,7 @@ mod restricted_staging {
             let warning = source_warning(remove_handle(&source, &before)?, returned);
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure {
+                    code: None,
                     reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
                     restored: false,
                     marked_modified: false,

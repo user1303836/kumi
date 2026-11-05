@@ -124,6 +124,15 @@ async fn listening_maintenance_respects_the_startup_policy_and_keeps_per_call_cl
             let home = tempfile::tempdir().unwrap();
             let paths = BridgePaths::new(home.path(), daw);
             let folder = paths.root.join("listening");
+            #[cfg(windows)]
+            {
+                // Installation creates a private bridge root; an elevated CI tempdir
+                // otherwise defaults to an Administrators-owned, inherited ACL.
+                std::fs::create_dir_all(paths.root.parent().unwrap()).unwrap();
+                daw_bridge::lifecycle::native_acl::create_kumis_folder(&paths.root).unwrap();
+                daw_bridge::lifecycle::native_acl::create_kumis_folder(&folder).unwrap();
+            }
+            #[cfg(not(windows))]
             std::fs::create_dir_all(&folder).unwrap();
             let unrelated = folder.join("unrelated-old.wav");
             let plant = || {

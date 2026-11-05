@@ -147,9 +147,13 @@ fn hearing_error(error: RuntimeError, dispatched: bool) -> Result<Value, OpError
         RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) => {
             Ok(outcome("refused", code, &reason, true, marked_modified))
         }
-        RuntimeError::Hear(HearFailure::Unsure { reason, restored, marked_modified }) => {
-            Ok(outcome("unsure", if restored { "capture_failed" } else { "restoration_unknown" }, &reason, restored, marked_modified))
-        }
+        RuntimeError::Hear(HearFailure::Unsure { code, reason, restored, marked_modified }) => Ok(outcome(
+            "unsure",
+            code.unwrap_or(if restored { "capture_failed" } else { "restoration_unknown" }),
+            &reason,
+            restored,
+            marked_modified,
+        )),
         RuntimeError::Hear(HearFailure::Cancelled { marked_modified }) => {
             Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, marked_modified))
         }

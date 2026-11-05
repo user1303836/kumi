@@ -442,9 +442,10 @@ mod tests {
     #[test]
     fn a_row_without_its_chat_matches_any_only_when_an_earlier_runtime_wrote_it() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         let unscoped = |id| CallIdentity { profile_id: None, session_id: None, tool_call_id: Some(id), digest: "d1" };
-        let before = History::new(dir.path(), "g1".into());
+        let before = History::new(&state, "g1".into());
         before.begin_call();
         before.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         before.end_call(unscoped("call_0"), &snapshots);
@@ -452,7 +453,7 @@ mod tests {
         assert!(before.ran(call("call_0", "d1")).is_none(), "another chat's call_0, in the runtime that wrote the row");
         snapshots.flush();
         // A row from before rows kept the chat: a retry right after the update isn't run again.
-        let after = History::new(dir.path(), "g2".into());
+        let after = History::new(&state, "g2".into());
         assert!(after.ran(call("call_0", "d1")).is_some_and(|ran| ran.is_ok()));
     }
 }
