@@ -127,13 +127,14 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             "capabilities": ["observe", "read", "change", "undo", "history", "listen", "sounds", "library", "map"],
         },
     )
-    # As `kumi serve` writes it (W1, #953): Kumi's `DawFocus` (Live's own fields here) and `Transport` in camelCase,
-    # and `CatchUp` entries. It's rewritten when the focus, the transport's play state, tempo or meter changes.
+    # As CC-7 has `kumi serve` write it: the project as of the last look, Kumi's `DawFocus` in camelCase (Live's own
+    # fields here), the transport with its position in beats and no clock, and `CatchUp` entries. It's rewritten when
+    # the focus, the transport's play state, tempo or meter changes, never for the playhead alone.
     _write_json(
         state / "focus.json",
         {
             **_envelope(88, now),
-            "project": dict(PROJECT),
+            "project": {**PROJECT, "seen_at": now - 2 * 60_000},
             "focus": {
                 "track": {"name": "Drums", "color": "#f59a3c", "kind": "midi"},
                 "trackRef": "t-3",
@@ -142,7 +143,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
                 "view": "Session",
                 "detail": "Device",
             },
-            "transport": {"playing": True, "tempo": 124.0, "beat": 64.0, "at": 0.0, "beatsPerBar": 4.0},
+            "transport": {"playing": True, "tempo": 124.0, "position": 64.0, "beatsPerBar": 4.0},
             "catch_up": [
                 {"set": PROJECT["name"], "lastSeenAt": now - 26 * 60_000, "lines": ["Drums: Drum Rack's pad D1 changed", "Tempo 120 → 124 BPM"], "more": 0},
             ],

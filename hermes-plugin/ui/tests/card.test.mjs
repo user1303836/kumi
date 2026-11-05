@@ -160,7 +160,7 @@ test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the pa
   const live = {
     project: { name: 'Night Drive', key: 'p-1', epoch: 3 },
     focus: { track: { name: 'Drums', color: '#f59e0b', kind: 'midi' }, trackRef: 't-3', device: 'Drum Rack', view: 'Session', scene: 'Verse', parameter: { name: 'Filter Freq', value: '1.20 kHz', owner: 'Auto Filter' } },
-    transport: { playing: false, tempo: 124, beat: 66, at: 912.5, beatsPerBar: 4 },
+    transport: { playing: false, tempo: 124, position: 66, beatsPerBar: 4 },
     catch_up: [
       { set: 'Night Drive', lastSeenAt: 1, lines: ['Drums: pad D1 changed', 'Tempo 120 → 124 BPM'], more: 3 },
       { set: 'Night Drive', lastSeenAt: 2, lines: ['Bass muted'], more: 0, afterReconnect: true }
@@ -170,10 +170,10 @@ test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the pa
   for (const text of ['Drums › Drum Rack', 'Filter Freq 1.20 kHz', 'Night Drive', 'Session', 'Verse', '■ stopped', '124 BPM', 'Drums: pad D1 changed', 'Bass muted', 'and 3 more']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
-  assert.ok(!html.includes('66'), 'the beat a snapshot was written at is never shown')
+  assert.ok(!html.includes('66'), 'the position a snapshot was written at is never shown')
   const reaper = {
     focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, item: { kind: 'item', name: 'Take 3' }, section: { kind: 'marker', name: 'Chorus' }, busy: 'a dialog is open' },
-    transport: { playing: true, tempo: 98, at: 0, meter: '7/8' }
+    transport: { playing: true, tempo: 98, meter: '7/8', line: 12 }
   }
   const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
   for (const text of ['Vox › Take 3', 'Arrange', 'Chorus', '▶ playing', '98 BPM', '7/8', 'a dialog is open']) {

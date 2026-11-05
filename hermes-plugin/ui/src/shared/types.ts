@@ -39,15 +39,16 @@ export interface Status extends Liveness {
   unsure?: { at?: number; op?: string; reason?: string; cleanup?: string } | null
 }
 
-/** The DAW's transport, as Kumi's `Transport` serializes it (W1, #953). `beat` is where the playhead was when the
- *  snapshot was written, so it's never shown: a snapshot isn't written as the playhead moves. */
+/** The DAW's transport in `focus.json` (CC-7). `position` (in beats) and `line` are where the playhead was when the
+ *  snapshot was written, so they're never shown: a snapshot isn't rewritten as the playhead moves. */
 export interface Transport {
   playing?: boolean
   tempo?: number | null
-  beat?: number | null
+  position?: number | null
   beatsPerBar?: number | null
   /** The DAW's words for its time beside the tempo: `7/8`, `LPB 4`. */
   meter?: string | null
+  line?: number | null
 }
 
 /** A view as Kumi names it: its kind (`launcher`, `timeline`, `device-chain`…) and the DAW's own word for it. */
