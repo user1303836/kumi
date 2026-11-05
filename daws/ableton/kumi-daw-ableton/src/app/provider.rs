@@ -74,13 +74,26 @@ impl DawProvider for Ableton {
     fn bridge_config(&self, env: &Env) -> Option<String> {
         super::folders::find_bridge_config(env)
     }
-    /// Live has one Remote Scripts folder, whichever Kumi put the bridge there: its configuration is in that Kumi's
-    /// home, at `<home>/bridge/state/` (as setup places it), so the home is the configuration's folder's grandparent.
+    /// Live has one Remote Scripts folder, whichever Kumi put the bridge there. That Kumi's home is the one whose
+    /// `bridge/<version>/package` holds the server the configuration starts: so for every install, wherever its state
+    /// is kept (setup keeps an earlier install's own folder, `~/.config/ableton-mcp-release-…`, say). Failing that,
+    /// it's the home whose `bridge/state/` holds the configuration, as setup places a new one.
     fn bridge_owner(&self, bridge_config: &str, _env: &Env) -> Option<String> {
-        let config = std::fs::canonicalize(bridge_config).ok()?;
-        let state = config.parent().filter(|state| state.file_name().is_some_and(|name| name == "state"))?;
-        let bridge = state.parent().filter(|bridge| bridge.file_name().is_some_and(|name| name == self.bridge_folder()))?;
-        bridge.parent().map(|home| home.display().to_string())
+        /// The home a folder of its `bridge` folder is in.
+        fn in_home<'a>(folder: &'a std::path::Path, bridge: &str) -> Option<&'a std::path::Path> {
+            folder.parent().filter(|parent| parent.file_name().is_some_and(|name| name == bridge)).and_then(std::path::Path::parent)
+        }
+        let bridge = self.bridge_folder();
+        let by_server =
+            super::folders::read_bridge_server(bridge_config).ok().and_then(|server| server.package_root()).and_then(|package| {
+                let package = std::fs::canonicalize(package).ok()?;
+                in_home(package.parent()?, bridge).map(|home| home.display().to_string())
+            });
+        by_server.or_else(|| {
+            let config = std::fs::canonicalize(bridge_config).ok()?;
+            let state = config.parent().filter(|state| state.file_name().is_some_and(|name| name == "state"))?;
+            in_home(state, bridge).map(|home| home.display().to_string())
+        })
     }
     fn bundled_bridge_version(&self) -> Option<String> {
         bridge_setup::bundled_bridge_version()
