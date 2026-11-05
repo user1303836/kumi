@@ -77,7 +77,7 @@ function harness({ submit = () => true, routes = ROUTES } = {}) {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
-test('it registers the pane, the chip, its palette commands, the listen card and a settings page', async () => {
+test('it registers the pane, the chip, its palette commands, the listen card, the FOCUS hint and a settings page', async () => {
   const { default: plugin } = await load('src/desktop/plugin.tsx')
   const h = harness()
   plugin.register(h.ctx)
@@ -87,17 +87,18 @@ test('it registers the pane, the chip, its palette commands, the listen card and
   assert.equal(byArea['statusBar.right'].length, 1)
   assert.deepEqual(byArea.palette.map(entry => entry.data.id), ['kumi.map', 'kumi.undo-last', 'kumi.settings'])
   assert.deepEqual(byArea['transcript.toolMedia'].map(card => card.data.tools), [['kumi_listen']])
+  assert.deepEqual(byArea['composer.underside'].map(hint => hint.id), ['focus-hint'])
   assert.deepEqual(h.settings.map(page => page.id), ['kumi'])
 })
 
-test('on a Desktop without the tool-media seam it registers everything else and no card', async () => {
-  const { default: plugin } = await load('src/desktop/plugin.tsx', { sdk: sdkStub({ toolMedia: false, settingsHref: false }) })
+test('on a Desktop without the tool-media and composer seams it registers everything else, with no card or hint', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx', { sdk: sdkStub({ toolMedia: false, settingsHref: false, composer: false }) })
   const h = harness()
   delete h.ctx.registerSettingsPage
   plugin.register(h.ctx)
   const areas = h.registered.map(contribution => contribution.area)
   assert.ok(areas.includes('panes') && areas.includes('statusBar.right'))
-  assert.ok(!areas.includes('transcript.toolMedia'))
+  assert.ok(!areas.includes('transcript.toolMedia') && !areas.includes('composer.underside'))
 })
 
 test('it reads /status at once, polls it every 5 s, and listens for what Kumi and its tools say moved', async () => {

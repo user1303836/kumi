@@ -1,5 +1,5 @@
 // Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests.
-import type { HistoryItem, Named, Status } from './types.ts'
+import type { Focus, HistoryItem, Named, Status } from './types.ts'
 
 const DAWS: Record<string, string> = { ableton: 'Live', live: 'Live', reaper: 'REAPER', renoise: 'Renoise', soundcraft: 'SoundCraft' }
 
@@ -13,6 +13,12 @@ export function nameOf(value: Named): string | undefined {
   if (typeof value === 'string') return value.trim() || undefined
   if (value && typeof value === 'object' && typeof value.name === 'string') return value.name.trim() || undefined
   return undefined
+}
+
+/** What's in focus as `track › device` (or `track › clip`), each part cut for display; empty when nothing is. */
+export function focusPath(focus: Focus | null | undefined): string[] {
+  const parts = focus?.focus
+  return [nameOf(parts?.track), nameOf(parts?.device) ?? nameOf(parts?.clip)].filter((part): part is string => Boolean(part)).map(part => clean(part, 40))
 }
 
 /** A track's colour, when FOCUS or HISTORY gives one as `#rrggbb`. */

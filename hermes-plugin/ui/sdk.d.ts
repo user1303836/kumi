@@ -123,6 +123,8 @@ declare module '@hermes/plugin-sdk' {
       profile: ReadableAtom<string>
       connectionId?: ReadableAtom<null | string>
       focusedSessionId?: ReadableAtom<null | string>
+      /** The durable id of the chat whose composer is focused (the id `owner.session_id` holds). */
+      focusedStoredSessionId?: ReadableAtom<null | string>
     }
   }
 
@@ -131,6 +133,7 @@ declare module '@hermes/plugin-sdk' {
   export const PALETTE_AREA: string
   export const STATUSBAR_AREAS: { left: string; right: string }
   export const TOOL_MEDIA_RENDERER_AREA: string | undefined
+  export const COMPOSER_AREAS: { top?: string; bottom?: string; underside?: string } | undefined
   export function useValue<T>(atom: ReadableAtom<T>): T
   export function pluginSettingsHref(pluginId: string, subpage?: string): string
 

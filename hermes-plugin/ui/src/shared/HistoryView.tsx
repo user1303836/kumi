@@ -3,7 +3,7 @@
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { ago, bpm, clean, cleanupWords, colorOf, nameOf } from './format.ts'
+import { ago, bpm, clean, cleanupWords, colorOf, focusPath, nameOf } from './format.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
 import { Chip, Dot, S } from './ui.tsx'
 
@@ -27,12 +27,9 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   if (!focus || (!focus.focus && !focus.project)) {
     return <span style={S.muted}>Nothing in focus yet. Kumi shows what you select in your DAW once it's connected.</span>
   }
-  const track = nameOf(focus.focus?.track)
-  const device = nameOf(focus.focus?.device)
-  const clip = nameOf(focus.focus?.clip)
   const view = typeof focus.focus?.view === 'string' ? focus.focus.view : undefined
   const transport = focus.transport
-  const path = [track, device ?? clip].filter(Boolean).map(part => clean(part, 40))
+  const path = focusPath(focus)
   const catchUp = Array.isArray(focus.catch_up) ? focus.catch_up.filter((line): line is string => typeof line === 'string') : []
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: focus.stale ? 0.6 : 1 }}>
