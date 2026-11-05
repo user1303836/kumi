@@ -188,12 +188,14 @@ impl Artifacts {
         let root = state_dir.join("artifacts");
         // Creating a missing directory is safe; repairing an existing one before validation could chmod a
         // symlink's outside target. The enclosing state folder is already owner-only.
-        let mut builder = std::fs::DirBuilder::new();
+        let builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
-        {
+        let builder = {
             use std::os::unix::fs::DirBuilderExt;
+            let mut builder = builder;
             builder.mode(0o700);
-        }
+            builder
+        };
         match builder.create(&root) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -577,14 +579,10 @@ mod tests {
             std::fs::create_dir(&root).unwrap();
             let root = root.canonicalize().unwrap();
             let ctx = Ctx::new(
-                Args {
-                    state_dir: dir.path().join("state"),
-                    kumi_home: dir.path().join("home"),
-                    daw: DawId::Reaper,
-                    library_roots: vec![root.clone()],
-                    media_roots: Vec::new(),
-                    tools: BTreeMap::new(),
-                },
+                Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
+                library_roots: vec![root.clone()],
+                media_roots: Vec::new(),
+                tools: BTreeMap::new(), },
                 Env::new(),
                 Default::default(),
             )

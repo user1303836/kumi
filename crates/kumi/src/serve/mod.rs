@@ -40,6 +40,7 @@ pub const MCP_PROTOCOL: &str = "2025-11-25";
 pub const DAWS: [DawId; 3] = [DawId::Ableton, DawId::Reaper, DawId::Renoise];
 
 const USAGE: &str = "usage: kumi serve --stdio --state-dir <folder> --kumi-home <folder> --daw <ableton|reaper|renoise>
+                  [--hermes-home <folder>] [--hermes-root <folder>]
                   [--library-root <folder>]... [--media-root <folder>]... [--tool <name>=<path>]...";
 
 /// What `kumi serve` is started with. Every folder and program is an absolute path: the host resolves them.
@@ -49,6 +50,10 @@ pub struct Args {
     pub state_dir: PathBuf,
     /// The Kumi home the DAW bridge's transport files are in.
     pub kumi_home: PathBuf,
+    /// The active Hermes profile; a protected boundary, never a file-reading grant.
+    pub hermes_home: Option<PathBuf>,
+    /// The Hermes root containing all profiles, supplied by the host rather than inferred from its environment.
+    pub hermes_root: Option<PathBuf>,
     pub daw: DawId,
     /// The sample folders the producer approved: the only ones the library reads.
     pub library_roots: Vec<PathBuf>,
@@ -62,14 +67,10 @@ pub struct Args {
 pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut stdio = false;
     let (mut state_dir, mut kumi_home, mut daw) = (None, None, None);
-    let mut parsed = Args {
-        state_dir: PathBuf::new(),
-        kumi_home: PathBuf::new(),
-        daw: DawId::Ableton,
-        library_roots: vec![],
-        media_roots: vec![],
-        tools: BTreeMap::new(),
-    };
+    let mut parsed = Args { state_dir: PathBuf::new(), kumi_home: PathBuf::new(), hermes_home: None, hermes_root: None, daw: DawId::Ableton,
+    library_roots: vec![],
+    media_roots: vec![],
+    tools: BTreeMap::new(), };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let mut value = |flag: &str| rest.next().cloned().ok_or_else(|| format!("{flag} needs a value"));
@@ -77,6 +78,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--stdio" => stdio = true,
             "--state-dir" => state_dir = Some(absolute("--state-dir", &value("--state-dir")?)?),
             "--kumi-home" => kumi_home = Some(absolute("--kumi-home", &value("--kumi-home")?)?),
+            "--hermes-home" => parsed.hermes_home = Some(absolute("--hermes-home", &value("--hermes-home")?)?),
+            "--hermes-root" => parsed.hermes_root = Some(absolute("--hermes-root", &value("--hermes-root")?)?),
             "--daw" => {
                 let name = value("--daw")?;
                 daw = Some(

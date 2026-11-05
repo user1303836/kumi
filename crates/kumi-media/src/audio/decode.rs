@@ -1028,6 +1028,19 @@ mod tests {
         assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
+        // Standalone's external decoder contract stays unchanged: info exposes Duration without changing
+        // PCM conversion, stream selection or the bounded reach; quiet suppresses it and never reads stdin.
+        let said = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, true, None);
+        assert_eq!(
+            said[0].args,
+            [
+                "-hide_banner", "-nostats", "-v", "info", "-nostdin", "-y", "-i", "in.mp3",
+                "-vn", "-t", "31.000", "-acodec", "pcm_f32le", "-f", "wav", "out.wav"
+            ]
+        );
+        let quiet = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, false, None);
+        assert_eq!(said[0].args[6..], quiet[0].args[4..]);
+        assert_eq!(quiet[0].args[..4], ["-v", "error", "-nostdin", "-y"]);
     }
 
     #[tokio::test(flavor = "current_thread")]

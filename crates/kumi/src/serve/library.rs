@@ -363,14 +363,10 @@ mod tests {
 
     fn context_with_tools(dir: &Path, roots: Vec<PathBuf>, tools: BTreeMap<String, PathBuf>) -> Rc<Ctx> {
         Ctx::new(
-            super::super::Args {
-                state_dir: dir.join("state"),
-                kumi_home: dir.join("home"),
-                daw: DawId::Reaper,
-                library_roots: roots,
-                media_roots: Vec::new(),
-                tools,
-            },
+            super::super::Args { state_dir: dir.join("state"), kumi_home: dir.join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
+            library_roots: roots,
+            media_roots: Vec::new(),
+            tools, },
             Env::new(),
             Default::default(),
         )
@@ -783,14 +779,10 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let root = root.canonicalize().unwrap();
         let ctx = Ctx::new(
-            super::super::Args {
-                state_dir: dir.path().join("state"),
-                kumi_home: dir.path().join("home"),
-                daw: DawId::Reaper,
-                library_roots: vec![root.clone()],
-                media_roots: Vec::new(),
-                tools: BTreeMap::new(),
-            },
+            super::super::Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
+            library_roots: vec![root.clone()],
+            media_roots: Vec::new(),
+            tools: BTreeMap::new(), },
             Env::new(),
             Default::default(),
         )

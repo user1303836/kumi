@@ -406,14 +406,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn runtime(state: &Path) -> Rc<Ctx> {
-        let args = Args {
-            state_dir: state.to_path_buf(),
-            kumi_home: state.join("home"),
-            daw: DawId::Reaper,
-            library_roots: vec![],
-            media_roots: vec![],
-            tools: BTreeMap::new(),
-        };
+        let args = Args { state_dir: state.to_path_buf(), kumi_home: state.join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
+        library_roots: vec![],
+        media_roots: vec![],
+        tools: BTreeMap::new(), };
         Ctx::new(args, Env::new(), Default::default()).unwrap()
     }
 

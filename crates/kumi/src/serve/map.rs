@@ -586,14 +586,10 @@ mod tests {
 
     fn context(state: PathBuf, roots: Vec<PathBuf>) -> Rc<Ctx> {
         Ctx::new(
-            super::super::Args {
-                kumi_home: state.join("home"),
-                state_dir: state,
-                daw: kumi_types::daw::DawId::Ableton,
-                library_roots: roots,
-                media_roots: vec![],
-                tools: BTreeMap::new(),
-            },
+            super::super::Args { kumi_home: state.join("home"), state_dir: state, hermes_home: None, hermes_root: None, daw: kumi_types::daw::DawId::Ableton,
+            library_roots: roots,
+            media_roots: vec![],
+            tools: BTreeMap::new(), },
             Default::default(),
             Default::default(),
         )
