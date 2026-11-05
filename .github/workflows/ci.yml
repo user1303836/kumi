@@ -237,6 +237,107 @@ jobs:
           KUMI_REQUIRE_LUALS: "1"
         run: sh daws/renoise/tests/run.sh
 
+  hermes-plugin:
+    # Kumi's Hermes Agent plugin (hermes-plugin/), when it or this workflow changes: its tests on Hermes's own Python, and
+    # the Hermes plugin catalog's admission checks with the Hermes it requires (v0.22.7, pinned by the tag's commit):
+    # `hermes plugins validate --install-deps` (the catalog CI's own command), `hermes plugins doctor --ci`, the catalog's
+    # payload scan (no compiled code in the plugin: its rule 17) and its self-updater check (rule 3). Hermes is prepared
+    # as its plugin-validate action prepares it, in a folder of its own. Then the Desktop and dashboard halves' tests,
+    # once the plugin has them.
+    name: Hermes plugin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Hermes v0.22.7: the plugin's requires_hermes, and the Hermes the catalog's checks of it run on.
+      HERMES_REF: b200f5bc60e31588ba2cb60e288029c4a54ba5fa
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          fetch-depth: 2
+          # The job runs Hermes's plugin checks, which load the plugin's code: no token in .git/config.
+          persist-credentials: false
+      - id: affected
+        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
+      # The plugin's own floor, Python 3.11 (Hermes's v0.22.7 environment is newer).
+      - if: steps.affected.outputs.hermes_plugin == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.11"
+      - name: Hermes v0.22.7 and its locked Python, in a folder of their own
+        id: hermes
+        if: steps.affected.outputs.hermes_plugin == 'true'
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/hermes-agent"
+          git init -q "$source"
+          git -C "$source" fetch -q --depth 1 https://github.com/NousResearch/hermes-agent.git "$HERMES_REF"
+          git -C "$source" checkout -q --detach FETCH_HEAD
+          python3 -S "$source/scripts/ci/setup_toolchain.py" prepare --toolchain python --home "$source/.build/pm"
+          python3 -S "$source/scripts/ci/setup_toolchain.py" install --toolchain python --home "$source/.build/pm"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+      - name: Hermes's own environment, the one its plugin validator runs in
+        id: runtime
+        if: steps.affected.outputs.hermes_plugin == 'true'
+        working-directory: ${{ steps.hermes.outputs.source }}
+        env:
+          SOURCE: ${{ steps.hermes.outputs.source }}
+        run: |
+          "$HERMES_PYTHON" - <<'PY'
+          import os
+          from pathlib import Path
+          from pm import build_environment
+          source = Path(os.environ["SOURCE"])
+          python = build_environment(source=source, out=source / ".build/validator", explicit=True)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"python={python}\n")
+          PY
+      - name: The plugin's tests, on Python 3.11 and on Hermes's own Python
+        if: steps.affected.outputs.hermes_plugin == 'true'
+        env:
+          PYTHON: ${{ steps.runtime.outputs.python }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3.11 -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
+          "$PYTHON" --version
+          "$PYTHON" -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
+      - name: The Hermes catalog's checks (validate --install-deps, doctor --ci, the payload scan, the self-updater check)
+        if: steps.affected.outputs.hermes_plugin == 'true'
+        env:
+          PYTHON: ${{ steps.runtime.outputs.python }}
+          SOURCE: ${{ steps.hermes.outputs.source }}
+          HERMES_HOME: ${{ runner.temp }}/hermes-home
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          "$PYTHON" -I -m hermes_cli.main plugins validate hermes-plugin --install-deps
+          "$PYTHON" -I -m hermes_cli.main plugins doctor hermes-plugin --ci
+          "$PYTHON" -I "$SOURCE/scripts/scan_plugin_payloads.py" hermes-plugin
+          # The catalog CI's own check: a JS or TS file that both fetches from GitHub and writes files updates itself.
+          updater=$(grep -rlZE 'releases/latest|releases/download|raw\.githubusercontent\.com|codeload\.github\.com' \
+              --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' \
+              --include='*.jsx' --include='*.tsx' --include='*.mts' --include='*.cts' hermes-plugin \
+            | xargs -r0 grep -lE 'writeTextFile|renamePath|writeFile\(|writeFileSync|renameSync|copyFileSync|cpSync|createWriteStream' || true)
+          if [ -n "$updater" ]; then
+            echo "::error::self-updating code in the plugin (it fetches from GitHub and writes files): $updater"
+            exit 1
+          fi
+      # The UI halves' sources and build live in hermes-plugin/ui/ (a package.json at the plugin's root would make Hermes
+      # offer to install Node dependencies); their committed bundles are desktop/plugin.js and dashboard/dist/index.js.
+      - if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: hermes-plugin/ui/package-lock.json
+      - name: The Desktop and dashboard halves' types and tests (on stub SDKs), and their committed builds match
+        if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
+        working-directory: hermes-plugin/ui
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm test
+          npm run check
+
   reaper-extension:
     # The extension as it ships: the release build, unstripped by rustc (a rustc strip can misalign its LINKEDIT string
     # pool on macOS 27, and dyld then refuses it), then the platform's own strip; checked as the release script checks
@@ -306,7 +407,8 @@ jobs:
     # branch passed on Linux, macOS and Windows.
     name: Required CI
     if: always()
-    needs: [rust-linux, rust-lint, checks, reaper-extension, rust-macos, rust-windows, remote-script-platforms]
+    needs: [rust-linux, rust-lint, checks, hermes-plugin, reaper-extension, rust-macos, rust-windows, remote-script-platforms,
+            hermes-plugin-platforms]
     runs-on: ubuntu-24.04
     steps:
       - name: Every job passed
@@ -315,11 +417,11 @@ jobs:
         run: |
           set -eu
           for result in "${{ needs.rust-linux.result }}" "${{ needs.rust-lint.result }}" "${{ needs.checks.result }}" \
-            "${{ needs.reaper-extension.result }}"; do
+            "${{ needs.hermes-plugin.result }}" "${{ needs.reaper-extension.result }}"; do
             test "$result" = success
           done
           for result in "${{ needs.rust-macos.result }}" "${{ needs.rust-windows.result }}" \
-            "${{ needs.remote-script-platforms.result }}"; do
+            "${{ needs.remote-script-platforms.result }}" "${{ needs.hermes-plugin-platforms.result }}"; do
             if [ "$EVENT" = pull_request ]; then test "$result" = skipped; else test "$result" = success; fi
           done
 
@@ -478,6 +580,37 @@ jobs:
           python-version: "3.11"
       - run: python -m unittest discover -s . -p 'test_*.py'
       - run: python -m compileall -q AbletonMcpBridge
+
+  hermes-plugin-platforms:
+    # The Hermes plugin's tests on macOS and on Windows, where its one-runtime-per-profile lock is msvcrt's and its
+    # runtime starts without a console (Linux's run in Hermes plugin).
+    name: Hermes plugin / ${{ matrix.os }}
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Stop Windows Defender scanning the workspace
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.11"
+      - name: The plugin's tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
 
   main-failed:
     # macOS and Windows first test a change once it's on main, and a release waits for main's CI on all three systems: a

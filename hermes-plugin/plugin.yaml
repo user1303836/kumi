@@ -1,0 +1,20 @@
+name: kumi
+# The Kumi release the plugin pins (kumi_release.json): the pin pull request sets both.
+version: "1.24.66"
+description: >-
+  Kumi for Hermes: read and make supported typed changes in Ableton Live, REAPER and Renoise.
+  Changes use Hermes approvals and Kumi's HISTORY, with undo when the recorded handle remains valid.
+  Measure audio locally and map approved sample folders to find, audition and place sounds.
+author: Kumi
+homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
+license: MIT
+requires_hermes: ">=0.22.7"
+provides_tools: [kumi_status, kumi_connect]
+provides_hooks: [on_session_finalize]
+config_schema:
+  daw:
+    type: str
+    choices: [ableton, reaper, renoise]
+    default: ableton
+    label: DAW
+    description: "The DAW Kumi connects to: ableton is Ableton Live."
