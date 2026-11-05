@@ -603,7 +603,10 @@ fn component_startup_upgrades_only_its_existing_owned_listening_directory() {
     let folder = bridge.join("listening");
     let unrelated = bridge.join("unrelated");
     std::fs::create_dir(&folder).unwrap();
-    native_acl::shapes::own_mine(&folder);
+    assert!(native_acl::shapes::has_default_owner(&folder));
+    if std::env::var_os("CI").is_some() {
+        assert!(!native_acl::shapes::default_owner_is_user(), "elevated CI must exercise the actual TokenOwner");
+    }
     use native_acl::shapes::{self, Ace, Whose};
     shapes::write(
         &folder,
@@ -623,6 +626,7 @@ fn component_startup_upgrades_only_its_existing_owned_listening_directory() {
     let listening = super::Listening::new(Arc::new(super::Board::default()));
     listening.set_folder(folder.clone());
     assert!(native_acl::is_kumis_shape(&folder));
+    assert!(shapes::has_default_owner(&folder), "component startup must not take ownership");
     assert!(super::guarded_folder(&folder, false).is_ok());
     assert!(!native_acl::is_kumis_shape(&unrelated));
     assert_eq!(std::fs::read(&old).unwrap(), b"keep");
@@ -661,15 +665,17 @@ fn component_directory_upgrade_refuses_replaced_and_foreign_owned_handles() {
     drop(replacement);
     drop(original);
 
-    // Assigning a foreign owner requires a token privilege; exercise the real boundary
-    // when Windows permits it, without granting privileges or changing account settings.
-    if native_acl::shapes::own(&folder, "S-1-5-32-544") {
+    // Enable only the test process's existing restore privilege, restoring it afterwards,
+    // to assign a truly foreign user rather than the elevated token's default owner.
+    if native_acl::shapes::own_foreign_user(&folder) {
         let foreign = open(&folder, 3);
         let refused = native_acl::protect_owned_directory(&foreign, &foreign).is_err();
         drop(foreign);
         native_acl::shapes::own_mine(&folder);
         assert!(refused, "the startup helper must not take ownership of a foreign directory");
         assert!(!native_acl::is_kumis_shape(&folder), "refusal must not change its inherited ACL");
+    } else {
+        assert!(std::env::var_os("CI").is_none(), "CI must exercise foreign-owner refusal");
     }
     assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
 }

@@ -207,6 +207,14 @@ fn frame_vectors() {
     let heartbeat = |ms: &str| format!("{{\"type\":\"heartbeat\",\"ms\":{ms}}}");
     let event = |data: &str| format!("{{\"type\":\"event\",\"seq\":1,\"name\":\"x\",\"data\":{data}}}");
     let lines = [
+        (
+            "a guarded render from a client without deferred-finalization metadata",
+            r#"{"type":"request","id":1,"method":"render_start","params":{"jobId":"job1","sources":[{"id":"bounded","what":"master"}],"range":{"fromBeat":0,"beats":4},"preRollBeats":0,"maxSeconds":2,"epoch":"1"}}"#.to_string(),
+        ),
+        (
+            "a guarded render carrying its original native phase deadline",
+            r#"{"type":"request","id":1,"method":"render_start","params":{"jobId":"job1","sources":[{"id":"bounded","what":"master"}],"range":{"fromBeat":0,"beats":4},"preRollBeats":0,"maxSeconds":2,"deadlineUnixMs":1793894400000,"epoch":"1"}}"#.to_string(),
+        ),
         ("an event whose data nests to the limit", event(&nest(MAX_PAYLOAD_DEPTH))),
         ("an event whose data nests one level past the limit", event(&nest(MAX_PAYLOAD_DEPTH + 1))),
         ("an event whose data nests past serde_json's own limit", event(&nest(300))),

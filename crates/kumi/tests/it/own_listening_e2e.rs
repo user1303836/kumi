@@ -2358,6 +2358,7 @@ impl RestrictedFixture {
         };
         let preview = self.integration.preview_hear(&request, Signal::new()).await.unwrap();
         request.approval = Some(HearApproval { seconds: preview.seconds, deadline_seconds: preview.deadline_seconds as u16 });
+        request.native_deadline_unix_ms = Some(kumi_common::time::now_ms() as u64 + preview.deadline_seconds * 1000);
         request
     }
 }

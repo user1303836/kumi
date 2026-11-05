@@ -3,6 +3,16 @@
   "maxJsonDepth": 64,
   "parse": [
     {
+      "name": "a guarded render from a client without deferred-finalization metadata",
+      "line": "{\"type\":\"request\",\"id\":1,\"method\":\"render_start\",\"params\":{\"jobId\":\"job1\",\"sources\":[{\"id\":\"bounded\",\"what\":\"master\"}],\"range\":{\"fromBeat\":0,\"beats\":4},\"preRollBeats\":0,\"maxSeconds\":2,\"epoch\":\"1\"}}",
+      "ok": true
+    },
+    {
+      "name": "a guarded render carrying its original native phase deadline",
+      "line": "{\"type\":\"request\",\"id\":1,\"method\":\"render_start\",\"params\":{\"jobId\":\"job1\",\"sources\":[{\"id\":\"bounded\",\"what\":\"master\"}],\"range\":{\"fromBeat\":0,\"beats\":4},\"preRollBeats\":0,\"maxSeconds\":2,\"deadlineUnixMs\":1793894400000,\"epoch\":\"1\"}}",
+      "ok": true
+    },
+    {
       "name": "an event whose data nests to the limit",
       "line": "{\"type\":\"event\",\"seq\":1,\"name\":\"x\",\"data\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
       "ok": true

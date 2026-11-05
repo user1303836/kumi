@@ -508,6 +508,17 @@ impl Host {
                     return Err("bounded listening does not permit preroll".into());
                 }
                 params.insert("maxSeconds".into(), cap.into());
+                // Internal runtime metadata, deliberately absent from the model-facing schema.
+                // Older clients omit it; only Renoise's deferred guarded cleanup consumes it.
+                if self.daw() == daw_bridge::Daw::Renoise {
+                    if let Some(deadline) = arguments.get("deadlineUnixMs") {
+                        let deadline = deadline
+                            .as_u64()
+                            .filter(|value| (1..=9_007_199_254_740_991).contains(value))
+                            .ok_or("the guarded render deadline must be a positive exact Unix millisecond")?;
+                        params.insert("deadlineUnixMs".into(), deadline.into());
+                    }
+                }
             }
             params.insert("preRollBeats".into(), pre_roll.into());
             match arguments.get("sampleRate") {

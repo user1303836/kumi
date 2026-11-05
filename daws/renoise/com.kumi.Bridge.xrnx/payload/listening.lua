@@ -28,8 +28,8 @@ M.MAX_SOURCES = 18
 M.MAX_SECONDS = 3600
 M.RATES = { [44100] = true, [48000] = true, [88200] = true, [96000] = true }
 M.DEFAULT_RATE = 48000
--- How long a render may read as ended with no callback before it counts as stopped (the callback comes as `rendering` turns
--- false: measured).
+-- How long a render may read as ended with no callback before it counts as stopped. Callback ordering relative to
+-- `song.rendering` is not assumed for deadline-carrying guarded callbacks: they wait for the next idle/request pulse.
 M.STOPPED_GRACE_MS = 1000
 -- Ended jobs kept for listen_status, and the files a job rendered, kept for audition (where each came from).
 M.KEEP_ENDED = 16
@@ -670,6 +670,10 @@ end
 
 local function now_ms() return os.clock() * 1000 end
 
+local function deadline_expired(job)
+  return job.deadline_ms and now_ms() >= job.deadline_ms
+end
+
 local function ended(job)
   return job.state == "done" or job.state == "failed" or job.state == "cancelled"
 end
@@ -799,18 +803,27 @@ local function note_tempo(job, env, song)
 end
 
 -- Guarded completion is one native compare-and-restore on every outcome, never a later adapter write.
+-- Deferred completion checks before *any* cleanup writes, including mute/solo; legacy requests retain their cleanup path.
+local function guarded_restore_problem(job, env, song)
+  if not job.max_seconds or not job.tempo_before then return end
+  if job.document_closed or not song or env.document() ~= job.document or env.epoch() ~= job.epoch then
+    return "tempo_restore_state_changed", "Renoise's document or epoch changed; guarded restoration was not attempted. Observe again."
+  end
+  if deadline_expired(job) then
+    return "tempo_restore_state_changed", "The approved native deadline expired before Renoise's guarded restoration; no cleanup writes were attempted. Observe again."
+  end
+  if song.rendering or song.transport.playing or song.transport.edit_mode then
+    return "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded restoration requires a stopped transport. Observe again."
+  end
+end
+
 -- The approved end pair is the only known render-owned pair, even for a failed or cancelled render.
 -- A partial render may stop at another pair; without exact ownership evidence that pair must survive.
 -- An identical producer-chosen pair is indistinguishable; any different pair is never overwritten.
+-- Called synchronously after guarded_restore_problem, with no yield between comparison, setters and readback.
 local function restore_guarded_tempo(job, env, song)
   if not job.max_seconds or not job.tempo_before then return true end
-  if not song or env.document() ~= job.document or env.epoch() ~= job.epoch then
-    return false, "tempo_restore_state_changed", "Renoise's document or epoch changed; guarded BPM/LPB restoration was not attempted. Observe again."
-  end
   local transport, before, expected = song.transport, job.tempo_before, job.tempo_expected
-  if song.rendering or transport.playing or transport.edit_mode then
-    return false, "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded BPM/LPB restoration requires a stopped transport. Observe again."
-  end
   if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
   if not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then
     return false, "tempo_restore_ownership_uncertain",
@@ -828,8 +841,16 @@ end
 
 local function finish(job, env, state, code, message)
   local song = renoise.song()
-  restore(job, env, song)
-  local restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+  if not job.deadline_ms then restore(job, env, song) end
+  local restore_code, restore_message = guarded_restore_problem(job, env, song)
+  local restored = restore_code == nil
+  if restored then
+    if job.deadline_ms then restore(job, env, song) end
+    restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+  elseif job.deadline_ms then
+    job.restored = false
+  end
+  if job.max_seconds then job.tempo_restored = restored end
   if not restored then
     state, code, message = "failed", restore_code, restore_message
   end
@@ -919,6 +940,14 @@ local function rendered(job, env, k)
   start_render(job, env, k + 1)
 end
 
+local function complete_render(job, env, k)
+  local fine, problem = xpcall(rendered, debug.traceback, job, env, k)
+  if not fine then
+    log.write("error", "listening: " .. tostring(problem))
+    if not ended(job) then finish(job, env, "failed", "failed", "Kumi's tool failed after the render: " .. tostring(problem):match("^[^\n]*")) end
+  end
+end
+
 -- Starts the render of source `k`. A failure ends the job (everything put back, files deleted).
 start_render = function(job, env, k)
   local song = renoise.song()
@@ -946,12 +975,14 @@ start_render = function(job, env, k)
   job.current, job.rendering = k, { started_ms = now_ms() }
   local this_job = job
   local started, result, why = pcall(song.render, song, options, source.file, function()
-    -- (a callback of Renoise's: nothing raises past here)
-    local fine, problem = xpcall(rendered, debug.traceback, this_job, env, k)
-    if not fine then
-      log.write("error", "listening: " .. tostring(problem))
-      if not ended(this_job) then finish(this_job, env, "failed", "failed", "Kumi's tool failed after the render: " .. tostring(problem):match("^[^\n]*")) end
+    -- Updated clients provide the existing native deadline. Their callbacks do not assume rendering=false:
+    -- check() validates files, restores state and publishes audio only on a later stopped pulse.
+    if this_job.deadline_ms and not ended(this_job) and not this_job.dead then
+      this_job.rendering.completed = k
+      return
     end
+    -- (a callback of Renoise's: nothing raises past here)
+    complete_render(this_job, env, k)
   end)
   if not started or result == false then
     local text = not started and tostring(result) or tostring(why)
@@ -968,7 +999,7 @@ function M.check_room(free, needed, what)
     math.ceil(needed / 1000000)))
 end
 
--- render_start {jobId, sources, range, preRollBeats, sampleRate, epoch, layout?, freeBytes?}
+-- render_start {jobId, sources, range, preRollBeats, sampleRate, epoch, layout?, freeBytes?, maxSeconds?, deadlineUnixMs?}
 
 local function need_id(value, name, prefix)
   if type(value) ~= "string" or not value:match("^" .. prefix .. "[0-9a-z]+$") or #value > 32 then
@@ -1105,12 +1136,22 @@ local function plan(params, env, kind)
   if rate == nil or rate == json.null then rate = M.DEFAULT_RATE end
   if not M.RATES[rate] then bad("sampleRate is 44100, 48000, 88200 or 96000") end
   local cap = params.maxSeconds
+  local deadline_ms
   if cap ~= nil then
     cap = number(cap, "maxSeconds")
     if cap <= 0 or cap > 60 then bad("maxSeconds must be more than 0 and at most 60") end
     if params.epoch ~= env.epoch() then fail("stale", "guarded listening needs the current epoch: read focus again") end
     if params.range == nil then bad("maxSeconds needs range") end
     stopped(song)
+    if params.deadlineUnixMs ~= nil then
+      local deadline_unix_ms = number(params.deadlineUnixMs, "deadlineUnixMs")
+      -- This private, additive field carries the host's existing native deadline, never a fresh allowance.
+      -- Translate os.time's conservative upper bound once; later wall-clock corrections must not change the budget.
+      local now = now_ms()
+      local remaining = deadline_unix_ms - (os.time() + 1) * 1000
+      if remaining <= 0 then fail("stale", "the approved native deadline expired before guarded listening started; nothing changed") end
+      deadline_ms = now + remaining
+    end
   end
   local sources = params.sources
   if kind == "render" then sources = read_sources(song, env, params.sources) end
@@ -1148,7 +1189,7 @@ local function plan(params, env, kind)
     id = job_id, kind = "render", state = "running", sources = sources, order = render_order(sources), range = range,
     rate = rate, epoch = env.epoch(), layout = env.layout(), document = env.document(), notes = {}, done = 0, others = {},
     irregular = timeline.irregular, line_seconds = M.line_seconds(timeline, range.state.bpm, range.state.lpb), started_ms = now_ms(),
-    requested_range = requested, max_seconds = cap,
+    requested_range = requested, max_seconds = cap, deadline_ms = deadline_ms,
   }
 end
 M.plan = plan
@@ -1157,6 +1198,7 @@ M.plan = plan
 function M.launch(job, env)
   local song = rows.the_song()
   M.refresh_restricted(job, env, song)
+  if deadline_expired(job) then fail("stale", "the approved native deadline expired before guarded listening started; nothing changed") end
   if job.range.clipped then job.notes[#job.notes + 1] = "The song ends before the end of the part: the render stops there." end
   if job.irregular then job.notes[#job.notes + 1] = "The part has pattern breaks or delays (ZB, ZD), or the song keeps Renoise's old speed timing: its times are Renoise's." end
   if song.transport.playing then
@@ -1213,9 +1255,20 @@ function M.check(env)
     job.dead = true
     return finish(job, env, "failed", "stale", "the song was closed during the render")
   end
+  if job.deadline_ms and env.epoch() ~= job.epoch then
+    job.dead = true
+    return finish(job, env, "failed", "stale", "the epoch changed during the render")
+  end
+  if deadline_expired(job) then
+    job.dead = true
+    return finish(job, env, "failed", "tempo_restore_state_changed", "The approved native deadline expired before guarded restoration. Observe again.")
+  end
   if song.rendering then
     job.rendering.quiet_since = nil
     return
+  end
+  if job.rendering.completed then
+    return complete_render(job, env, job.rendering.completed)
   end
   local since = job.rendering.quiet_since
   if not since then
@@ -1254,6 +1307,7 @@ function M.status(params, env)
   if job.error then answer.error, answer.code = job.error, job.code end
   if #job.notes > 0 then answer.notes = json.array(job.notes) end
   if job.tempo then answer.tempo = job.tempo end
+  if job.max_seconds and ended(job) then answer.restored = job.tempo_restored end
   return answer
 end
 
@@ -1270,7 +1324,7 @@ function M.cancel(params, env)
   end
   job.dead = true
   finish(job, env, "cancelled")
-  return { jobId = job.id, state = "cancelled" }
+  return { jobId = job.id, state = job.deadline_ms and job.state or "cancelled" }
 end
 
 -- The tool is stopped or reloaded during a job: what it changed goes back now, its files go, and a render still in flight is
@@ -1287,6 +1341,7 @@ function M.song_closed(env)
   local job = M.active()
   if not job then return end
   job.dead = true
+  job.document_closed = job.deadline_ms ~= nil
   job.restored = true
   finish(job, env, "failed", "stale", "the song was closed during the render")
 end

@@ -223,21 +223,18 @@ fn a_first_install_on_windows_runs_one_powershell_and_what_follows_none() {
     assert_eq!(runs(), checked, "an uninstall: no PowerShell");
 }
 
-/// Windows' own reading of Kumi's shapes (`lifecycle::native_acl`) held to owner.rs's PowerShell checks, on the shapes a
-/// DACL can take: whatever the fast path calls owner-only the check passes, and the files and folders Kumi makes take
-/// the fast path. The matrix is kumi-ai's and Live's bridge's (their tests/it/auth.rs and tests/it/delivery.rs), with
-/// folders.
+/// The user-owned DACL matrix stays in parity with the legacy PowerShell checks.
+/// The token's default owner is also accepted natively, covered separately below.
 #[cfg(windows)]
 mod windows_acl_shapes {
     use daw_bridge::lifecycle::native_acl::{
         is_kumis_shape, make_kumis_folder_shape, make_kumis_shape,
-        shapes::{own, own_mine, write, write_raw, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
+        shapes::{own_foreign_user, own_mine, write, write_raw, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
     };
     use daw_bridge::owner;
     use std::path::{Path, PathBuf};
 
     const EVERYONE: &str = "S-1-1-0";
-    const ADMINISTRATORS: &str = "S-1-5-32-544";
     const READ: u32 = 0x0012_0089;
     const WRITE: u32 = 0x0012_0116;
     const GENERIC_ALL: u32 = 0x1000_0000;
@@ -314,6 +311,61 @@ mod windows_acl_shapes {
         let looked = runs();
         assert!(!is_owner_only(&paths.secret()), "a secret everyone may read isn't owner-only");
         assert_eq!(runs() - looked, 1, "the doctor's look at it is owner.rs's check");
+    }
+
+    #[test]
+    fn the_tokens_default_owner_is_accepted_but_only_the_users_single_ace_is_private() {
+        use daw_bridge::lifecycle::native_acl::shapes;
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("default-owner");
+        std::fs::create_dir(&folder).unwrap();
+        let file = root.path().join("default-owner.json");
+        std::fs::write(&file, "{}").unwrap();
+        if std::env::var_os("CI").is_some() {
+            assert!(!shapes::default_owner_is_user(), "elevated CI must cover a distinct TokenOwner");
+        }
+        for (path, flags) in [(&folder, INHERITABLE), (&file, 0)] {
+            assert!(shapes::has_default_owner(path));
+            write(path, Some(&[allow(flags, FULL, Whose::Me)]), true);
+            assert!(is_kumis_shape(path), "the actual TokenOwner is accepted: {}", path.display());
+            assert!(shapes::has_default_owner(path), "checking must not take ownership");
+            write(path, Some(&[allow(flags, FULL, Whose::Sid("S-1-5-32-544"))]), true);
+            let administrators_ace = is_kumis_shape(path);
+            write(path, Some(&[allow(flags, FULL, Whose::Me)]), true);
+            assert!(!administrators_ace, "accepting TokenOwner must not authorize an Administrators ACE");
+        }
+    }
+
+    #[test]
+    fn a_default_owned_render_keeps_its_owner_when_its_inherited_user_rule_is_protected() {
+        use daw_bridge::lifecycle::native_acl::{is_kumis_shape_handle, protect_inherited_render, shapes};
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), Some(&[allow(INHERITABLE, FULL, Whose::Me)]), true);
+        let path = root.path().join("render.wav");
+        std::fs::write(&path, b"render").unwrap();
+        assert!(shapes::has_default_owner(&path));
+        assert!(!is_kumis_shape(&path), "the render starts with an inherited, unprotected DACL");
+        let open = || std::fs::OpenOptions::new().access_mode(0x0006_0001).share_mode(1).open(&path).unwrap();
+        let file = open();
+        protect_inherited_render(&file).unwrap();
+        assert!(is_kumis_shape_handle(&file, false));
+        drop(file);
+        assert!(is_kumis_shape(&path));
+        assert!(shapes::has_default_owner(&path), "protection must not take ownership");
+        if own_foreign_user(&path) {
+            let before = shapes::descriptor(&path);
+            let file = open();
+            let refused = protect_inherited_render(&file).is_err();
+            assert!(!is_kumis_shape_handle(&file, false));
+            drop(file);
+            let after = shapes::descriptor(&path);
+            own_mine(&path);
+            assert!(refused, "a foreign user must not pass the already-protected fast path");
+            assert_eq!(before, after);
+        } else {
+            assert!(std::env::var_os("CI").is_none(), "CI must exercise a foreign render owner");
+        }
     }
 
     #[test]
@@ -419,17 +471,17 @@ mod windows_acl_shapes {
             write(&path, aces.as_deref(), protected);
             shapes.push((name, path, code, fast));
         }
-        // Owned by Administrators, where this account may hand them over: CI's elevated runners can.
+        // A foreign user remains foreign even on elevated runners whose default owner is Administrators.
         let handed = made("handed-over.json");
         write(&handed, Some(&[allow(0, FULL, Whose::Me)]), true);
         let handed_folder = made_folder("handed-over");
         write(&handed_folder, Some(&[allow(INHERITABLE, FULL, Whose::Me)]), true);
-        if own(&handed, ADMINISTRATORS) && own(&handed_folder, ADMINISTRATORS) {
-            shapes.push(("owned by Administrators", handed, Some(2), Some(false)));
-            shapes.push(("a folder owned by Administrators", handed_folder, Some(2), Some(false)));
+        if own_foreign_user(&handed) && own_foreign_user(&handed_folder) {
+            shapes.push(("owned by a foreign user", handed, Some(2), Some(false)));
+            shapes.push(("a folder owned by a foreign user", handed_folder, Some(2), Some(false)));
         } else {
-            assert!(std::env::var_os("CI").is_none(), "this account couldn't hand a file and a folder to Administrators");
-            println!("skipped: owned by Administrators (this account may not hand a file over)");
+            assert!(std::env::var_os("CI").is_none(), "CI must exercise foreign-user ownership");
+            println!("skipped: foreign user owner (this account lacks SeRestorePrivilege)");
         }
         // Every shape in one PowerShell, owner.rs's own checks, held to `owner::is_owner_only` (one PowerShell a path)
         // on a file, a folder, one Kumi made and the last; then the whole matrix before any assertion.

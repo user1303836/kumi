@@ -1089,7 +1089,7 @@ test("listening: preflight and guarded render refuse live playback, recording an
 end)
 
 -- Exercise the real plan/launch boundary without the bridge dispatch running launch immediately after plan.
-local function queued_plan(peer, range, cap)
+local function queued_plan(peer, range, cap, deadline)
   local listening = T.load_payload_module("listening")
   local state = {}
   listening.init(state)
@@ -1105,7 +1105,7 @@ local function queued_plan(peer, range, cap)
     before_render = function() error("guarded refusal reached before_render") end,
   }
   local params = { jobId = "jqueued", epoch = epoch, sources = { { id = "kick", what = "track", ref = track_ref(epoch, 1) } },
-    range = range, maxSeconds = cap, preRollBeats = 0 }
+    range = range, maxSeconds = cap, preRollBeats = 0, deadlineUnixMs = deadline }
   return listening, listening.plan(params, env, "render"), env, state
 end
 
@@ -1354,6 +1354,266 @@ test("listening: guarded completion never rewrites a pair already restored to th
   eq(mock.data.transport_fields.bpm, 120)
   eq(mock.data.transport_fields.lpb, 4)
   H.no_dialogs()
+end)
+
+test("listening: guarded callback waits for stopped idle before restoring on every render outcome", function()
+  for _, outcome in ipairs({ "done", "missing-file", "partial-file", "cancelled" }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    local before = states()
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true, no_file = outcome == "missing-file",
+      fraction = outcome == "partial-file" and 0.5 or nil })
+    -- Native ordering is deliberately unproven: callback first, rendering/playing clear on a later pulse.
+    mock.impl(mock.data.song).rendering = true
+    mock.data.transport_fields.playing = true
+    local writes, during = mock.api_writes, states()
+    completed.done()
+    eq(job.state, "running", outcome)
+    local pending = listening.status({ jobId = job.id }, env)
+    eq(pending.state, "running", outcome)
+    eq(pending.files, nil, "pending audio is never published")
+    eq(pending.restored, nil, "pending is not a restoration claim")
+    eq(listening.origin(job.sources[1].file), nil)
+    eq(mock.api_writes, writes, "no DAW writes from callback or pending check")
+    eq(states(), during)
+    eq(mock.data.transport_fields.bpm, 60)
+    eq(mock.data.transport_fields.lpb, 8)
+    if outcome == "cancelled" then
+      local cancelled = listening.cancel({ jobId = job.id }, env)
+      eq(cancelled.state, "running")
+      eq(cancelled.stopping, true)
+    end
+    mock.impl(mock.data.song).rendering = false
+    mock.data.transport_fields.playing = false
+    listening.check(env)
+    local done = listening.status({ jobId = job.id }, env)
+    eq(done.state, outcome == "done" and "done" or outcome == "cancelled" and "cancelled" or "failed", outcome)
+    eq(done.restored, true, outcome)
+    eq(mock.data.transport_fields.bpm, 120)
+    eq(mock.data.transport_fields.lpb, 4)
+    eq(states(), before, "mute/solo restoration waits for the same stopped pulse")
+    if outcome == "done" then
+      ok(done.files and #done.files == 1)
+    else
+      eq(done.files, nil)
+      ok(not exists(job.sources[1].file))
+    end
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded deferred completion expires within the original deadline without any cleanup writes", function()
+  for _, callback in ipairs({ false, true }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    mock.impl(mock.data.song).rendering = true
+    mock.data.transport_fields.playing = true
+    local deadline, writes, during = job.deadline_ms, mock.api_writes, states()
+    -- Spending native time before the callback must not give deferral a fresh allowance.
+    mock.time = deadline - 2000
+    if callback then completed.done() end
+    listening.check(env)
+    eq(job.state, "running")
+    eq(job.deadline_ms, deadline)
+    mock.time = deadline
+    local failed = listening.status({ jobId = job.id }, env)
+    eq(failed.state, "failed")
+    eq(failed.code, "tempo_restore_state_changed")
+    eq(failed.restored, false)
+    eq(job.restored, false, "no mute/solo restoration is claimed either")
+    eq(failed.files, nil)
+    eq(listening.origin(job.sources[1].file), nil)
+    eq(mock.api_writes, writes, "deadline expiry must make no DAW writes")
+    eq(states(), during)
+    eq(mock.data.transport_fields.bpm, 60)
+    eq(mock.data.transport_fields.lpb, 8)
+    ok(not exists(job.sources[1].file))
+    mock.impl(mock.data.song).rendering = false
+    mock.data.transport_fields.playing = false
+    completed.done()
+    listening.check(env)
+    eq(job.state, "failed", "a late callback cannot revive or restore the expired job")
+    eq(mock.api_writes, writes)
+    eq(mock.data.transport_fields.bpm, 60)
+    eq(mock.data.transport_fields.lpb, 8)
+    H.no_dialogs()
+  end
+end)
+
+test("listening: a producer pair changed during guarded deferral is never overwritten", function()
+  for _, field in ipairs({ "bpm", "lpb" }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    mock.impl(mock.data.song).rendering = true
+    completed.done()
+    listening.check(env)
+    eq(job.state, "running")
+    local changed = field == "bpm" and 137 or 7
+    mock.data.transport_fields[field] = changed
+    mock.impl(mock.data.song).rendering = false
+    local failed = listening.status({ jobId = job.id }, env)
+    eq(failed.state, "failed")
+    eq(failed.code, "tempo_restore_ownership_uncertain")
+    eq(failed.restored, false)
+    eq(mock.data.transport_fields.bpm, field == "bpm" and changed or 60)
+    eq(mock.data.transport_fields.lpb, field == "lpb" and changed or 8)
+    eq(failed.files, nil)
+    ok(not exists(job.sources[1].file))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded deferred cleanup never writes into a changed document or an active render", function()
+  for _, change in ipairs({ "document", "epoch", "abort", "song-closed" }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    mock.impl(mock.data.song).rendering = true
+    completed.done()
+    listening.check(env)
+    eq(job.state, "running")
+    local writes, during = mock.api_writes, states()
+    if change == "document" then
+      env.document = function() return "another-document" end
+      mock.impl(mock.data.song).rendering = false
+      listening.check(env)
+    elseif change == "epoch" then
+      env.epoch = function() return "another-epoch" end
+      mock.impl(mock.data.song).rendering = false
+      listening.check(env)
+    elseif change == "abort" then
+      listening.abort(env, "the tool stopped during deferral")
+    else
+      listening.song_closed(env)
+    end
+    local failed = listening.status({ jobId = job.id }, env)
+    eq(failed.state, "failed", change)
+    eq(failed.code, "tempo_restore_state_changed", change)
+    eq(failed.restored, false, change)
+    eq(failed.files, nil)
+    eq(mock.api_writes, writes, change)
+    eq(states(), during)
+    eq(mock.data.transport_fields.bpm, 60)
+    ok(not exists(job.sources[1].file))
+    mock.impl(mock.data.song).rendering = false
+    completed.done()
+    eq(mock.api_writes, writes, "late callback cannot undo uncertainty")
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded planning validates an optional host deadline before folder preparation or DAW writes", function()
+  for _, deadline in ipairs({ json.null, "later", true, 0 }) do
+    local env, peer = setup()
+    local epoch = place(peer)
+    local params = { jobId = "jdeadline", epoch = epoch, sources = { { id = "mix", what = "master" } },
+      range = { fromBeat = 0, beats = 4 }, maxSeconds = 60 }
+    params.deadlineUnixMs = deadline
+    local writes = mock.api_writes
+    failure(call(peer, "render_start", params), deadline == 0 and "stale" or "bad-params")
+    eq(mock.api_writes, writes)
+    eq(#mock.renders, 0)
+    ok(not exists(env.listening))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: queued guarded launch never restarts an expired native deadline", function()
+  local setup_env, peer = setup()
+  local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+  local writes, before, deadline = mock.api_writes, states(), job.deadline_ms
+  mock.time = deadline
+  local fine, problem = pcall(listening.launch, job, env)
+  eq(fine, false)
+  eq(type(problem), "table")
+  eq(problem.code, "stale")
+  eq(job.deadline_ms, deadline)
+  eq(mock.api_writes, writes)
+  eq(states(), before)
+  eq(#mock.renders, 0)
+  eq(state.listen.job, nil)
+  eq(job.tempo_before, nil)
+  ok(not exists(job.sources[1].file))
+  H.no_dialogs()
+end)
+
+test("listening: guarded requests without a private deadline retain immediate callback completion", function()
+  for _, rendering in ipairs({ false, true }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+    eq(job.deadline_ms, nil, "legacy clients do not opt in to deferral")
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    mock.impl(mock.data.song).rendering = rendering
+    completed.done()
+    eq(job.state, rendering and "failed" or "done", "no idle/request pulse is needed for legacy completion")
+    eq(mock.data.transport_fields.bpm, rendering and 60 or 120)
+    if rendering then
+      eq(job.code, "tempo_restore_state_changed")
+      ok(not exists(job.sources[1].file))
+    end
+    mock.impl(mock.data.song).rendering = false
+    H.no_dialogs()
+  end
+end)
+
+test("listening: wall-clock corrections after anchoring neither shorten nor extend guarded deferral", function()
+  for _, adjustment in ipairs({ 3600, -3600 }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    mock.impl(mock.data.song).rendering = true
+    completed.done()
+    local deadline, writes = job.deadline_ms, mock.api_writes
+    local wall_time = os.time
+    os.time = function(t)
+      if t then return wall_time(t) end
+      return wall_time() + adjustment
+    end
+    local fine, problem = pcall(function()
+      listening.check(env)
+      eq(job.state, "running", "a forward wall-clock correction cannot expire the anchored budget")
+      mock.time = deadline - 1
+      listening.check(env)
+      eq(job.state, "running")
+      eq(job.deadline_ms, deadline)
+      mock.time = deadline
+      local failed = listening.status({ jobId = job.id }, env)
+      eq(failed.state, "failed", "a backward wall-clock correction cannot extend the anchored budget")
+      eq(failed.code, "tempo_restore_state_changed")
+      eq(failed.restored, false)
+      eq(failed.files, nil)
+      eq(mock.api_writes, writes)
+      eq(mock.data.transport_fields.bpm, 60)
+      ok(not exists(job.sources[1].file))
+    end)
+    os.time = wall_time
+    mock.impl(mock.data.song).rendering = false
+    ok(fine, tostring(problem))
+    H.no_dialogs()
+  end
 end)
 
 test("listening: standalone still renders fractional clipped ranges and stops existing playback", function()

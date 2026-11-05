@@ -6,12 +6,12 @@
 //! Its twins are kumi-ai's `auth/windows_acl.rs` and Live's bridge's `lifecycle/delivery/native_acl.rs` (each uses
 //! nothing of the others'): keep the three in step. This one also knows a folder's shape.
 //!
-//! Only Kumi's own shapes are judged here. A file's: this account owns it, and its protected DACL holds one explicit
-//! allow ACE, for this account, with full control and no flags (what owner.rs's `SECURE_FILE` writes). A folder's: the
-//! same, its one ACE handed down to what's made inside it (ContainerInherit and ObjectInherit, what `SECURE_DIRECTORY`
-//! writes). Each is a shape owner.rs's PowerShell check (`FILE_CHECKS`, `DIRECTORY_CHECKS`) passes too. For other shapes,
-//! lifecycle and doctor use that check: .NET canonicalizes the ACEs it counts (it merges and drops some), so only it
-//! can say no. Guarded listening instead refuses an unrecognized shape without a PowerShell fallback.
+//! Only Kumi's own shapes are judged here. The owner must be the current token's user or default owner
+//! (which can be Administrators for an elevated token), but the single full-control allow ACE must
+//! always name the token's user. The DACL is protected; a file's ACE has no flags, and a folder's
+//! has ContainerInherit and ObjectInherit. The legacy PowerShell checks accept only the user as owner;
+//! lifecycle and doctor use them for other shapes. Guarded listening refuses an unrecognized shape
+//! without a PowerShell fallback.
 use std::{ffi::c_void, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};
 
 type Handle = *mut c_void;
@@ -135,6 +135,7 @@ const ACL_REVISION: u32 = 2;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 const TOKEN_QUERY: u32 = 0x8;
 const TOKEN_USER: u32 = 1;
+const TOKEN_OWNER: u32 = 4;
 /// FileSystemRights.FullControl, what `SECURE_FILE` and `SECURE_DIRECTORY` grant and `FILE_CHECKS` asks for.
 const FULL_CONTROL: u32 = 0x001F_01FF;
 /// A file's one ACE has no flags; a folder's is handed down to the folders and files made inside it
@@ -154,29 +155,54 @@ thread_local! {
     static RENDER_PROBE: std::cell::RefCell<Option<RenderProbe>> = const { std::cell::RefCell::new(None) };
 }
 
-/// This process's account (TOKEN_USER, whose SID points into the same buffer).
-struct Account(Vec<u64>);
+/// The current process token's user and default owner; each SID points into its own aligned buffer.
+struct Account {
+    user: Vec<u64>,
+    owner: Vec<u64>,
+}
 
 impl Account {
     fn current() -> Option<Self> {
-        // SAFETY: the token is checked before use and closed once; the second call writes at most `needed` bytes into a
-        // buffer at least that long, aligned for TOKEN_USER's pointer.
+        // SAFETY: both queries use the same live token, closed even when either query fails.
         unsafe {
             let mut token = null_mut();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
                 return None;
             }
-            let mut needed = 0u32;
-            GetTokenInformation(token, TOKEN_USER, null_mut(), 0, &mut needed);
-            let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
-            let read = GetTokenInformation(token, TOKEN_USER, buffer.as_mut_ptr().cast(), (buffer.len() * 8) as u32, &mut needed);
+            let user = Self::information(token, TOKEN_USER);
+            let owner = Self::information(token, TOKEN_OWNER);
             CloseHandle(token);
-            (read != 0).then_some(Self(buffer))
+            Some(Self { user: user?, owner: owner? })
         }
     }
+
+    unsafe fn information(token: Handle, class: u32) -> Option<Vec<u64>> {
+        // SAFETY: the caller holds the token; the buffer is pointer-aligned and sized by Windows.
+        unsafe {
+            let mut needed = 0u32;
+            GetTokenInformation(token, class, null_mut(), 0, &mut needed);
+            if (needed as usize) < std::mem::size_of::<Sid>() {
+                return None;
+            }
+            let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+            let read = GetTokenInformation(token, class, buffer.as_mut_ptr().cast(), (buffer.len() * 8) as u32, &mut needed);
+            (read != 0).then_some(buffer)
+        }
+    }
+
     fn sid(&self) -> Sid {
-        // SAFETY: the buffer holds the TOKEN_USER the token gave.
-        unsafe { (*self.0.as_ptr().cast::<SidAndAttributes>()).sid }
+        // SAFETY: the buffer holds TOKEN_USER, whose first field is SID_AND_ATTRIBUTES.
+        unsafe { (*self.user.as_ptr().cast::<SidAndAttributes>()).sid }
+    }
+
+    fn owner_sid(&self) -> Sid {
+        // SAFETY: TOKEN_OWNER consists of one pointer to a SID in the same live buffer.
+        unsafe { *self.owner.as_ptr().cast::<Sid>() }
+    }
+
+    unsafe fn owns(&self, owner: Sid) -> bool {
+        // SAFETY: the caller supplies a live descriptor's owner; both token buffers remain live.
+        unsafe { !owner.is_null() && (EqualSid(owner, self.sid()) != 0 || EqualSid(owner, self.owner_sid()) != 0) }
     }
 }
 
@@ -243,20 +269,18 @@ fn is_shaped(path: &Path, flags: u8) -> bool {
         {
             return false;
         }
-        let shaped = shaped(account.sid(), owner, dacl, descriptor, flags);
+        let shaped = shaped(&account, owner, dacl, descriptor, flags);
         LocalFree(descriptor);
         shaped
     }
 }
 
-/// Kumi's shape, as `FILE_CHECKS` reads a file: owned by `account`; the DACL protected (AreAccessRulesProtected); one ACE
-/// (Access.Count), for `account`, an allow ACE, with full control exactly, and its flags `flags` exactly (none for a
-/// file, so not inherited; handed down for a folder): what SECURE_FILE and SECURE_DIRECTORY write, and nothing more.
-/// (`DIRECTORY_CHECKS` asks only for the owner and the protection, which this shape has.)
+/// Kumi's shape: the current token's user or default owner owns it, with a protected DACL
+/// containing exactly one full-control allow ACE for the token's user and exactly `flags`.
 ///
 /// # Safety
 /// `owner`, `dacl` and `descriptor` come from one GetNamedSecurityInfoW that succeeded, and are still allocated.
-unsafe fn shaped(account: Sid, owner: Sid, dacl: Acl, descriptor: *mut c_void, flags: u8) -> bool {
+unsafe fn shaped(account: &Account, owner: Sid, dacl: Acl, descriptor: *mut c_void, flags: u8) -> bool {
     unsafe {
         let (mut control, mut revision) = (0u16, 0u32);
         GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) != 0
@@ -265,12 +289,12 @@ unsafe fn shaped(account: Sid, owner: Sid, dacl: Acl, descriptor: *mut c_void, f
     }
 }
 
-/// The single full-control owner ACE, shared by protected and inherited-file checks.
+/// The single full-control TokenUser ACE, shared by protected and inherited-file checks.
 /// # Safety
 /// The owner and DACL point into a live security descriptor supplied by Windows.
-unsafe fn owner_rule(account: Sid, owner: Sid, dacl: Acl, flags: u8) -> bool {
+unsafe fn owner_rule(account: &Account, owner: Sid, dacl: Acl, flags: u8) -> bool {
     unsafe {
-        if owner.is_null() || EqualSid(owner, account) == 0 {
+        if !account.owns(owner) {
             return false;
         }
         // A null DACL lets everyone in.
@@ -291,7 +315,7 @@ unsafe fn owner_rule(account: Sid, owner: Sid, dacl: Acl, flags: u8) -> bool {
             return false;
         }
         let ace = ace.cast::<MaskAce>();
-        (*ace).mask == FULL_CONTROL && EqualSid((&raw mut (*ace).sid_start).cast(), account) != 0
+        (*ace).mask == FULL_CONTROL && EqualSid((&raw mut (*ace).sid_start).cast(), account.sid()) != 0
     }
 }
 
@@ -531,7 +555,7 @@ pub fn is_kumis_shape_handle(file: &std::fs::File, directory: bool) -> bool {
         {
             return false;
         }
-        let private = shaped(account.sid(), owner, dacl, descriptor, if directory { FOLDER_FLAGS } else { FILE_FLAGS });
+        let private = shaped(&account, owner, dacl, descriptor, if directory { FOLDER_FLAGS } else { FILE_FLAGS });
         LocalFree(descriptor);
         private
     }
@@ -598,14 +622,14 @@ fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Pr
         if GetSecurityInfo(handle, SE_FILE_OBJECT, information, &mut owner, null_mut(), &mut dacl, null_mut(), &mut descriptor) != 0 {
             return Err("the pinned staging entry's owner could not be read".into());
         }
-        let owned = !owner.is_null() && EqualSid(owner, account.sid()) != 0;
-        let private = inherited && shaped(account.sid(), owner, dacl, descriptor, FILE_FLAGS);
+        let owned = account.owns(owner);
+        let private = inherited && shaped(&account, owner, dacl, descriptor, FILE_FLAGS);
         let (mut control, mut revision) = (0u16, 0u32);
         let accepted = !inherited
             || private
             || (GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) != 0
                 && control & SE_DACL_PROTECTED == 0
-                && owner_rule(account.sid(), owner, dacl, 0x10)); // INHERITED_ACE only
+                && owner_rule(&account, owner, dacl, 0x10)); // INHERITED_ACE only
         LocalFree(descriptor);
         if !owned {
             return Err("the pinned staging entry belongs to another account".into());
@@ -648,7 +672,7 @@ fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Pr
         {
             return Err("the pinned staging entry's protection could not be read back".into());
         }
-        let private = shaped(account.sid(), owner, dacl, descriptor, flags);
+        let private = shaped(&account, owner, dacl, descriptor, flags);
         LocalFree(descriptor);
         private.then_some(()).ok_or_else(|| "the pinned staging entry is not owner-only".into())
     }
@@ -745,6 +769,108 @@ pub mod shapes {
     pub const INHERITED: u32 = 0x10;
     pub const INHERITABLE: u32 = 0x3;
     pub const INHERIT_ONLY: u32 = 0x8;
+
+    /// Whether Windows created this entry with this token's actual default owner.
+    pub fn has_default_owner(path: &Path) -> bool {
+        let account = Account::current().unwrap();
+        owned_by(&wide(path), account.owner_sid())
+    }
+
+    /// Elevated CI must exercise distinct TokenUser and TokenOwner SIDs.
+    pub fn default_owner_is_user() -> bool {
+        let account = Account::current().unwrap();
+        unsafe { EqualSid(account.sid(), account.owner_sid()) != 0 }
+    }
+
+    /// Assigns a foreign user SID for refusal tests. Elevated runners have SeRestorePrivilege;
+    /// non-elevated developer accounts may not. Restore its previous state before returning.
+    pub fn own_foreign_user(path: &Path) -> bool {
+        #[repr(C)]
+        struct Luid {
+            low: u32,
+            high: i32,
+        }
+        #[repr(C)]
+        struct Privileges {
+            count: u32,
+            luid: Luid,
+            attributes: u32,
+        }
+        #[link(name = "advapi32")]
+        unsafe extern "system" {
+            fn LookupPrivilegeValueW(system: *const u16, name: *const u16, luid: *mut Luid) -> i32;
+            fn AdjustTokenPrivileges(
+                token: Handle,
+                disable_all: i32,
+                new: *const Privileges,
+                length: u32,
+                previous: *mut Privileges,
+                returned: *mut u32,
+            ) -> i32;
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetLastError() -> u32;
+        }
+        struct RestorePrivilege {
+            token: Handle,
+            previous: Option<Privileges>,
+        }
+        impl Drop for RestorePrivilege {
+            fn drop(&mut self) {
+                // SAFETY: this guard owns the live token and the previous ABI buffer.
+                unsafe {
+                    let restored = self
+                        .previous
+                        .as_ref()
+                        .is_none_or(|previous| AdjustTokenPrivileges(self.token, 0, previous, 0, null_mut(), null_mut()) != 0);
+                    CloseHandle(self.token);
+                    assert!(restored, "the foreign-owner fixture must restore SeRestorePrivilege");
+                }
+            }
+        }
+        static PRIVILEGE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PRIVILEGE.lock().unwrap();
+        let name: Vec<u16> = "SeRestorePrivilege".encode_utf16().chain([0]).collect();
+        let sid = sid_of("S-1-5-21-0-0-0-424242");
+        let path = wide(path);
+        // SAFETY: the token and ABI buffers remain live. Restore the prior privilege state
+        // and free the SID before any assertion; failure to assign an owner changes nothing.
+        unsafe {
+            let mut token = null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | 0x20, &mut token) == 0 {
+                LocalFree(sid);
+                return false;
+            }
+            let mut restore = RestorePrivilege { token, previous: None };
+            let mut privilege = Privileges { count: 1, luid: Luid { low: 0, high: 0 }, attributes: 2 };
+            if LookupPrivilegeValueW(std::ptr::null(), name.as_ptr(), &mut privilege.luid) == 0 {
+                LocalFree(sid);
+                return false;
+            }
+            let mut previous = Privileges { count: 0, luid: Luid { low: 0, high: 0 }, attributes: 0 };
+            let mut returned = 0;
+            let enabled =
+                AdjustTokenPrivileges(token, 0, &privilege, std::mem::size_of::<Privileges>() as u32, &mut previous, &mut returned) != 0;
+            let assigned = enabled && GetLastError() == 0;
+            if enabled {
+                restore.previous = Some(previous);
+            }
+            let changed = assigned
+                && SetNamedSecurityInfoW(
+                    path.as_ptr(),
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION,
+                    sid,
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                ) == 0;
+            LocalFree(sid);
+            drop(restore);
+            changed
+        }
+    }
 
     /// Makes this thread's writes fail, as one of Windows' calls can, so that owner.rs's PowerShell steps take them.
     pub fn refuse_on_this_thread(refused: bool) {

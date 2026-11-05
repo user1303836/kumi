@@ -222,6 +222,9 @@ pub struct HearRequest {
     /// The host's approved native window and budget. A restricted capture never invents these.
     #[serde(skip)]
     pub approval: Option<HearApproval>,
+    /// The existing host native-phase deadline, carried privately to deferred native cleanup.
+    #[serde(skip)]
+    pub native_deadline_unix_ms: Option<u64>,
 }
 
 /// Internal approval for one bounded capture; never accepted through the listening tool's schema.

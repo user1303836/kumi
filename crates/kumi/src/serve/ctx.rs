@@ -918,7 +918,7 @@ fn make_private_state_root(path: &Path) -> std::io::Result<()> {
     {
         make_private_windows_dir(path, WindowsDirectoryPolicy::BootstrapStateRoot).map_err(|error| {
             std::io::Error::other(format!(
-                "cannot secure the runtime state root (it must belong to the current account, not another account or Administrators, and contain no reparse components): {error}"
+                "cannot secure the runtime state root (it must belong to the current account's token user or default owner, and contain no reparse components): {error}"
             ))
         })
     }
@@ -1077,7 +1077,10 @@ mod tests {
         // The host creates state/ and holds runtime.lock before it spawns kumi serve.
         let state = parent.join("state");
         std::fs::create_dir(&state).unwrap();
-        shapes::own_mine(&state);
+        assert!(shapes::has_default_owner(&state), "exercise the owner Windows actually assigns");
+        if std::env::var_os("CI").is_some() {
+            assert!(!shapes::default_owner_is_user(), "elevated Windows CI must exercise the distinct TokenOwner case");
+        }
         let lock = state.join("runtime.lock");
         let _held_lock = std::fs::File::create(&lock).unwrap();
         assert!(!is_kumis_shape(&state), "the host's inherited ACL needs bootstrap");
@@ -1088,6 +1091,7 @@ mod tests {
         assert_eq!(shapes::stored_descriptor(&state), state_before);
         make_private_state_root(&state).unwrap();
         assert!(is_kumis_shape(&state));
+        assert!(shapes::has_default_owner(&state), "bootstrap must not take ownership");
         let secured = shapes::stored_descriptor(&state);
         make_private_state_root(&state).unwrap();
         assert_eq!(shapes::stored_descriptor(&state), secured, "an already-private root needs no repair");
@@ -1224,7 +1228,7 @@ mod tests {
             ]),
             true,
         );
-        if !shapes::own(&root, "S-1-5-32-544") {
+        if !shapes::own_foreign_user(&root) {
             assert!(std::env::var_os("CI").is_none(), "CI must exercise foreign-root refusal");
             return;
         }
@@ -1243,11 +1247,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         make_private_dir(&state).unwrap();
-        if !shapes::own(&state, "S-1-5-32-544") {
+        if !shapes::own_foreign_user(&state) {
             assert!(std::env::var_os("CI").is_none(), "CI must exercise foreign-owner refusal");
-            return; // A non-elevated developer account cannot assign Administrators as owner.
+            return; // A non-elevated developer account may lack SeRestorePrivilege.
         }
         let before = shapes::descriptor(&state);
+        assert!(!daw_bridge::lifecycle::native_acl::is_kumis_shape(&state));
         let result = make_private_dir(&state);
         let bootstrap = make_private_state_root(&state);
         let after = shapes::descriptor(&state);

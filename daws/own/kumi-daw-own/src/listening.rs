@@ -70,8 +70,9 @@ fn hear_refused(code: &'static str, reason: impl Into<String>) -> RuntimeError {
 
 fn after_restoration(mut error: RuntimeError, marked_modified: bool) -> RuntimeError {
     match &mut error {
-        RuntimeError::Hear(HearFailure::Unsure { restored, marked_modified: marked, .. }) => {
-            *restored = true;
+        RuntimeError::Hear(HearFailure::Unsure { code, restored, marked_modified: marked, .. }) => {
+            // A later matching snapshot cannot erase the native restorer's explicit failure.
+            *restored = native_tempo_failure(*code, Some(DawId::Renoise)).is_none();
             *marked = marked_modified;
         }
         RuntimeError::Hear(HearFailure::Refused { marked_modified: marked, .. }) => *marked = marked_modified,
@@ -102,9 +103,10 @@ fn native_tempo_failure(code: Option<&str>, daw: Option<DawId>) -> Option<(&'sta
 /// Keep the native cause even when the independent full-state comparison also fails.
 /// Native prose and unrecognized codes never cross this boundary.
 fn keep_native_tempo_failure(mut error: RuntimeError, native: Option<&str>, daw: Option<DawId>) -> RuntimeError {
-    if let RuntimeError::Hear(HearFailure::Unsure { code, reason, .. }) = &mut error {
+    if let RuntimeError::Hear(HearFailure::Unsure { code, reason, restored, .. }) = &mut error {
         if let Some((known, message)) = native_tempo_failure(native, daw) {
             *code = Some(known);
+            *restored = false;
             reason.clear();
             reason.push_str(message);
         }
@@ -2911,6 +2913,11 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             "sources": [before.source], "range": {"fromBeat": before.window.from, "beats": before.window.beats}, "preRollBeats": 0,
             "maxSeconds": approval.seconds,
         });
+        if self.renderer.profile().id == Some(DawId::Renoise) {
+            if let Some(deadline) = request.native_deadline_unix_ms {
+                args["deadlineUnixMs"] = deadline.into();
+            }
+        }
         // Preserve the normal layout placement, but never let the focus watcher's mutable
         // bookkeeping replace the exact observation epoch that this capture validated.
         let input = args.as_object().expect("render arguments are an object").clone();
@@ -3007,6 +3014,16 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         let restoration = self
             .restricted_restore(&before)
             .await
+            .and_then(|marked_modified| {
+                if native_tempo_failure(done["code"].as_str(), self.renderer.profile().id).is_some() {
+                    Err(after_restoration(
+                        native_hear_refused(done["code"].as_str(), "render_failed", self.renderer.profile().id),
+                        marked_modified,
+                    ))
+                } else {
+                    Ok(marked_modified)
+                }
+            })
             .map_err(|error| keep_native_tempo_failure(error, done["code"].as_str(), self.renderer.profile().id));
         if restoration.is_err() || cancelled || original.is_cancelled() || done["state"] == "cancelled" {
             self.restricted_discard(&done, &scratch, quarantine_root).await;
@@ -3436,6 +3453,16 @@ mod tests {
                 RuntimeError::Hear(HearFailure::Unsure { restored: true, marked_modified: marked, .. }) if marked == marked_modified
             ));
         }
+    }
+
+    #[test]
+    fn a_matching_later_snapshot_does_not_override_native_restoration_failure() {
+        use super::{after_restoration, native_hear_refused, DawId, HearFailure, RuntimeError};
+        let error = native_hear_refused(Some("tempo_restore_failed"), "render_failed", Some(DawId::Renoise));
+        assert!(matches!(
+            after_restoration(error, false),
+            RuntimeError::Hear(HearFailure::Unsure { code: Some("tempo_restore_failed"), restored: false, .. })
+        ));
     }
 
     #[test]

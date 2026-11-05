@@ -235,6 +235,8 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     // Each adapter runs the same pure preflight again inside `hear`, checking this approval
     // before changing anything. Do not spend the native allowance on a duplicate preflight.
     let _settling = ctx.settling(native.deadline_seconds)?;
+    // Translate once, before starting the monotonic phase clock; native cleanup gets no new allowance.
+    request.native_deadline_unix_ms = Some((kumi_common::time::now_ms() as u64).saturating_add(u64::from(native.deadline_seconds) * 1000));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(u64::from(native.deadline_seconds));
     let scratch = ctx.scratch("listen")?;
     request.scratch_dir = Some(scratch.path().to_path_buf());
