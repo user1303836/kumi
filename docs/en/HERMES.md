@@ -102,8 +102,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "What am I looking at?" Kumi reads the track, device and clip you have selected.
 - "Make the bass 3 dB quieter." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to
   HISTORY.
-- "Send the bass's output to the Drum Bus." Kumi routes a track's input and output. In Live it never arms a track,
-  changes its monitoring or takes Main as an input.
+- "Send the bass's output to the Drum Bus." Kumi routes where a track's output goes. In Live it doesn't change a
+  track's input, arm it or change its monitoring: those are for recording.
 - "Add a chain to the Instrument Rack on the keys track." In Live, adding a chain to a rack is a change only Live's own
   Undo takes back (see [Limits](#limits)).
 - "Compare these two bounces." Kumi measures both files: loudness, true peak, spectrum.
