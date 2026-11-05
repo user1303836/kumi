@@ -869,28 +869,38 @@ impl Own {
         let receipt = life.receipt().map_err(|why| why.to_string())?.filter(|receipt| receipt.status == "installed");
         let there = std::fs::symlink_metadata(&path).is_ok();
         let placed_here = receipt.as_ref().is_some_and(|receipt| Path::new(&receipt.target) == path);
-        let owner = if there && !placed_here { reference_owner(&reference, self.daw) } else { None };
-        let theirs = there && !placed_here && !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home));
-        let planned = life.plan(&source).map_err(|why| why.to_string())?;
-        // The version of the copy there: its receipt's, else (a copy of this home's whose receipt is gone, or that the
-        // DAW copied into a newer folder of its own) its own files'.
-        let installed = match receipt.as_ref().filter(|_| placed_here) {
-            Some(receipt) => receipt.version.clone(),
-            None if there && !theirs => self.version_of(&path),
-            None => None,
+        // Whose the copy there is: what its reference says now, before any receipt (another Kumi may have put its copy
+        // in since this home's). A receipt of this home's speaks only for a copy whose reference is gone (a repair).
+        let named = if there { named_by(&reference, self.daw) } else { Named::Nothing };
+        let this_home = |owner: &str| Path::new(owner) == home || same_folder(Path::new(owner), home);
+        let (theirs, owner) = match &named {
+            Named::Home(owner) if this_home(owner) => (false, None),
+            Named::Home(owner) => (true, Some(owner.clone())),
+            Named::Unknown => (there, None),
+            Named::Nothing => (there && !placed_here, None),
         };
+        let planned = life.plan(&source).map_err(|why| why.to_string())?;
+        // Each copy of this home's it would replace, with its version: its own files' (Renoise's tool says it), else what
+        // the receipt knows of those files (REAPER's extension doesn't). Never a downgrade, and never one that can't be
+        // ordered: such a copy stays.
+        let version_of_copy = |copy: &Path| self.version_of(copy).or_else(|| life.known_version(copy));
         let newer_than_ours = |version: &str| bundled.as_deref().is_some_and(|bundled| kumi_daw::provider::newer(version, bundled));
-        // Never a downgrade: another copy of this home's it would replace that says it's newer than this Kumi's.
-        let newer_copy =
-            planned.replaced.iter().filter(|copy| **copy != path).find_map(|copy| self.version_of(copy).filter(|v| newer_than_ours(v)));
+        let installed = if there && !theirs { version_of_copy(&path) } else { None };
+        let kept = planned
+            .replaced
+            .iter()
+            .map(|copy| (copy, version_of_copy(copy)))
+            .find(|(_, version)| version.as_deref().is_none_or(newer_than_ours));
+        let newer_copy = kept
+            .as_ref()
+            .filter(|(copy, _)| **copy != path)
+            .map(|(_, version)| version.clone().unwrap_or_else(|| "a version it doesn't say".into()));
         let state = match &installed {
             _ if theirs => PartState::OtherOwner,
             _ if planned.in_place => PartState::Same,
             _ if newer_copy.is_some() => PartState::Newer,
             _ if !there => PartState::Missing,
-            Some(installed) if newer_than_ours(installed) => PartState::Newer,
-            // Older only when known: a copy with no receipt that doesn't say its version may be newer, and stays.
-            None if !placed_here => PartState::Newer,
+            _ if kept.is_some() => PartState::Newer,
             _ => PartState::Older,
         };
         let (name, shown) = (self.name(), path.display().to_string());
@@ -969,13 +979,27 @@ impl Own {
     }
 }
 
-/// The Kumi home whose secret a bridge's reference names (`<home>/bridges/<daw>/bridge.secret`): the lifecycle writes it
-/// beside the bridge for the home that put it in. None when it can't be read, or names no home's secret.
-fn reference_owner(reference: &Path, daw: Daw) -> Option<String> {
-    let reference = files::Reference::read(reference).ok()?;
-    let secret = Path::new(&reference.secret_file);
-    let home = secret.parent()?.parent()?.parent()?;
-    (BridgePaths::new(home, daw).secret() == secret).then(|| home.display().to_string())
+/// What a bridge's reference says of whose it is.
+enum Named {
+    /// There's no reference.
+    Nothing,
+    /// It names this Kumi home's secret (`<home>/bridges/<daw>/bridge.secret`): the lifecycle writes it beside the bridge
+    /// for the home that put it in.
+    Home(String),
+    /// It can't be read, or names no home's secret: nothing says whose the copy is.
+    Unknown,
+}
+
+fn named_by(reference: &Path, daw: Daw) -> Named {
+    if std::fs::symlink_metadata(reference).is_err() {
+        return Named::Nothing;
+    }
+    let home = files::Reference::read(reference).ok().and_then(|reference| {
+        let secret = PathBuf::from(&reference.secret_file);
+        let home = secret.parent()?.parent()?.parent()?.to_path_buf();
+        (BridgePaths::new(&home, daw).secret() == secret).then(|| home.display().to_string())
+    });
+    home.map_or(Named::Unknown, Named::Home)
 }
 
 /// A rollback's step for a DAW whose bridge is Kumi's own: once Kumi is back, the bridge goes to the copy that Kumi

@@ -56,7 +56,10 @@ pub struct ComponentPlan {
     pub state: PartState,
     /// The Kumi home the part belongs to when it's another's (`OtherOwner`), when the DAW's files say.
     pub owner: Option<String>,
-    /// Every path putting it in writes or removes, each whole: nothing when there's nothing to put in, or it must stay.
+    /// Every path putting it in leaves changed (written or removed), each whole: nothing when there's nothing to put in,
+    /// or it must stay. While it works it may also make temporary files beside these, each named for what it replaces
+    /// with a random suffix, and removes them before it's done (one an interruption leaves, the next setup removes):
+    /// the effects say where.
     pub paths: Vec<String>,
     /// What putting it in does, in plain sentences naming those paths.
     pub effects: Vec<String>,

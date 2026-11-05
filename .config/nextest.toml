@@ -106,7 +106,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^library_search::/))
   | (binary_id(kumi::it) & test(/^session::/))
   | (binary_id(kumi-daw-ableton::it) & test(/^agent::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(lifecycle_release|delivery|delivery_cli)::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^(lifecycle_release|lifecycle_binary|delivery|delivery_cli)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(extension_launcher|extension_channel|stdio|fixture_paths|project)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))

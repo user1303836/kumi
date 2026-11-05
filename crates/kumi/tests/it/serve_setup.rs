@@ -99,17 +99,16 @@ fn bundle(root: &Path) -> PathBuf {
     prepared
 }
 
-/// A tar archive of `files` by their paths in it (each a regular file, owner-only), as the bridge's release fixture
-/// writes one.
-fn tar(files: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
+/// A tar archive of `files` by their paths in it, each a regular file with its mode, as a release writes one.
+fn tar(files: &BTreeMap<String, (Vec<u8>, u32)>) -> Vec<u8> {
     let mut tar = Vec::new();
-    for (name, content) in files {
+    for (name, (content, mode)) in files {
         let mut header = [0u8; 512];
         let mut field = |offset: usize, size: usize, value: &[u8]| {
             header[offset..offset + value.len().min(size)].copy_from_slice(&value[..value.len().min(size)]);
         };
         field(0, 100, name.as_bytes());
-        field(100, 8, b"0000600\0");
+        field(100, 8, format!("{mode:07o}\0").as_bytes());
         field(108, 8, b"0000000\0");
         field(116, 8, b"0000000\0");
         field(124, 12, format!("{:011o}\0", content.len()).as_bytes());
@@ -128,12 +127,11 @@ fn tar(files: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
     tar
 }
 
-/// A runtime's bundle of Live's bridge as a release makes it: a strict native release package (its manifest binding
-/// every file, the Remote Script among them) at this Kumi's bundled version, in the tarball `prepared.json` names. The
-/// bridge's own lifecycle installs it as it would a release's.
-fn release(root: &Path) -> PathBuf {
+/// A strict native release package of Live's bridge at `version` (its manifest binding every file, the Remote Script
+/// among them, the programs executable), as a release makes it: its tarball (`<dir>/bridge.tgz`, which holds
+/// `package/`), and, with `unpacked`, the package itself in `<dir>/package`. The tarball's SHA-256.
+fn release_package(dir: &Path, version: &str, unpacked: bool) -> String {
     use std::io::Write;
-    let prepared = at(root, "runtime/bridge");
     let (binary, worker) = (executable_name("ableton-mcp-server"), executable_name("ableton-mcp-analysis-worker"));
     let target = if cfg!(windows) {
         "x86_64-pc-windows-msvc"
@@ -142,16 +140,15 @@ fn release(root: &Path) -> PathBuf {
     } else {
         "x86_64-unknown-linux-gnu"
     };
-    let version = bundled();
     let metadata = json!({"name": "@ableton-mcp/mcp-server", "version": version, "private": true, "license": "MIT", "type": "module",
                           "runtime": "rust-native", "target": target, "bin": {"ableton-mcp-server": binary, "ableton-mcp-analysis-worker": worker}});
     let mut files = BTreeMap::<String, Vec<u8>>::new();
     files.insert("package.json".into(), metadata.to_string().into_bytes());
     files.insert("LICENSE.md".into(), include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/LICENSE.md")).to_vec());
-    files.insert(binary.clone(), b"the bridge\n".to_vec());
+    files.insert(binary.clone(), format!("the bridge {version}\n").into_bytes());
     files.insert(worker.clone(), b"the analysis worker\n".to_vec());
     files.insert("remote-script/AbletonMcpBridge/__init__.py".into(), b"def create_instance(c_instance):\n    return None\n".to_vec());
-    files.insert("remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py".into(), b"class AbletonMcpBridge:\n    pass\n".to_vec());
+    files.insert("remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py".into(), format!("marker = '{version}'\n").into_bytes());
     for n in 0..9 {
         files.insert(format!("release-docs/doc-{n}.md"), format!("# {n}\n").into_bytes());
     }
@@ -179,13 +176,35 @@ fn release(root: &Path) -> PathBuf {
         "roles": files.keys().map(|name| (name.clone(), json!(role(name)))).collect::<serde_json::Map<_, _>>(),
     });
     files.insert("release-manifest.json".into(), manifest.to_string().into_bytes());
-    let packed: BTreeMap<String, Vec<u8>> = files.into_iter().map(|(name, bytes)| (format!("package/{name}"), bytes)).collect();
+    // The programs are executable, as a release's are; everything else is the owner's to read and write.
+    let mode = |name: &str| if name == binary || name == worker { 0o755 } else { 0o644 };
+    let packed: BTreeMap<String, (Vec<u8>, u32)> =
+        files.iter().map(|(name, bytes)| (format!("package/{name}"), (bytes.clone(), mode(name)))).collect();
     let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gzip.write_all(&tar(&packed)).unwrap();
-    std::fs::create_dir_all(&prepared).unwrap();
-    let artifact = prepared.join("bridge.tgz");
-    std::fs::write(&artifact, gzip.finish().unwrap()).unwrap();
-    std::fs::write(prepared.join("prepared.json"), json!({"artifact": "bridge.tgz", "sha256": sha256(&artifact)}).to_string()).unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("bridge.tgz"), gzip.finish().unwrap()).unwrap();
+    if unpacked {
+        for (name, bytes) in &files {
+            let path = at(&dir.join("package"), name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, bytes).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode(name))).unwrap();
+            }
+        }
+    }
+    sha256(&dir.join("bridge.tgz"))
+}
+
+/// A runtime's bundle of Live's bridge as a release lays it out: a strict release package at this Kumi's bundled version,
+/// in the tarball `prepared.json` names. The bridge's own lifecycle installs it as it would a release's.
+fn release(root: &Path) -> PathBuf {
+    let prepared = at(root, "runtime/bridge");
+    let sha = release_package(&prepared, &bundled(), false);
+    std::fs::write(prepared.join("prepared.json"), json!({"artifact": "bridge.tgz", "sha256": sha}).to_string()).unwrap();
     prepared
 }
 
@@ -423,7 +442,7 @@ case!(setup_daw_plans_lives_part_from_files_alone_and_writes_nothing, async {
     assert_eq!(lab.tree(), before, "a dry run writes nothing, not even the lease's file");
     assert!(lab.calls.borrow().is_empty(), "and runs nothing");
     let script = lab.scripts().join("AbletonMcpBridge");
-    assert_eq!(plan["paths"], strings(&[&script, &lab.home.join("bridge"), &lab.ears()]));
+    assert_eq!(plan["paths"], strings(&[&script, &lab.home.join("bridge"), &lab.ears(), &lab.home.join("kumi-ears.json")]));
     assert_eq!((plan["state"].as_str(), plan["after"].as_str()), (Some("missing"), Some("choose_control_surface")));
     assert_eq!((plan["component"].as_str(), plan["version"].as_str()), (Some("Live Remote Script"), Some(bundled().as_str())));
     assert_eq!((&plan["owner"], &plan["keep_identity"]), (&Value::Null, &json!(false)));
@@ -581,11 +600,34 @@ case!(setup_daw_puts_lives_part_in_through_the_bridges_own_lifecycle_writing_onl
     let done = lab.install(&plan["digest"]).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
     assert_eq!((done["state"].as_str(), &done["paths"]), (Some("same"), &plan["paths"]), "{done}");
+    // Every folder the lifecycle was given is one the plan named.
+    let named: Vec<PathBuf> = plan["paths"].as_array().unwrap().iter().filter_map(Value::as_str).map(PathBuf::from).collect();
+    for call in lab.calls.borrow().iter() {
+        for flag in ["--state-dir", "--remote-scripts-dir", "--config"] {
+            if let Some(at) = call.iter().position(|arg| arg == flag) {
+                let given = Path::new(&call[at + 1]);
+                let folder = if flag == "--config" { given.parent().unwrap() } else { given };
+                assert!(
+                    named.iter().any(|path| folder.starts_with(path)) || named.iter().any(|path| path.starts_with(folder)),
+                    "{flag} {}",
+                    folder.display()
+                );
+            }
+        }
+    }
     let script = lab.scripts().join("AbletonMcpBridge");
     assert!(script.join("ableton_mcp_remote_script.py").is_file(), "the release's Remote Script is in Live's folder");
     assert!(script.join("bridge-reference.json").is_file());
     assert!(at(&lab.home, "bridge/state/install-receipt.json").is_file(), "the lifecycle's receipt is in the home's bridge folder");
     assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let package =
+            PathBuf::from(&lab.calls.borrow()[1][lab.calls.borrow()[1].iter().position(|arg| arg == "--package-root").unwrap() + 1]);
+        let mode = std::fs::metadata(package.join("ableton-mcp-server")).unwrap().permissions().mode();
+        assert_ne!(mode & 0o111, 0, "the server unpacked from the release can run: {mode:o}");
+    }
     let again = lab.setup(true).await.unwrap();
     assert_eq!((again["state"].as_str(), &again["paths"]), (Some("same"), &json!([])), "{again}");
 });
@@ -593,19 +635,92 @@ case!(setup_daw_puts_lives_part_in_through_the_bridges_own_lifecycle_writing_onl
 case!(setup_daw_installs_only_the_plan_that_was_approved_and_never_another_kumis_ears, async {
     let lab = Lab::new(DawId::Ableton, false);
     let approved = lab.setup(true).await.unwrap();
-    // Before the install, another Kumi's Kumi Ears (a newer one, perhaps) turns up in the User Library.
+    // Before the install, another Kumi's Kumi Ears (a newer one, perhaps) turns up in the User Library, and an earlier
+    // Kumi's in its old place.
     std::fs::create_dir_all(lab.ears().parent().unwrap()).unwrap();
     std::fs::write(lab.ears(), b"another Kumi's Kumi Ears").unwrap();
+    let legacy = lab.path("User Library/Kumi/Kumi Ears.amxd");
+    let mut earlier = kumi_daw_ableton::ears::device::ears_file();
+    earlier.extend_from_slice(b"\n");
+    std::fs::write(&legacy, &earlier).unwrap();
     let before = lab.tree();
     assert_eq!(refused(lab.install(&approved["digest"]).await).0, "changed", "what's there isn't what was approved");
     within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
     assert!(lab.calls.borrow().is_empty(), "nothing ran");
+    for round in ["the Remote Script goes in", "it's in: this home's now"] {
+        let plan = lab.setup(true).await.unwrap();
+        assert_eq!(plan["parts"][1]["state"], "other_owner", "{round}: a Kumi Ears this home didn't put there isn't its to replace");
+        assert!(!plan["paths"].to_string().contains("Kumi Ears.amxd"), "{round}: {plan}");
+        let effects: Vec<&str> = plan["effects"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(effects.iter().any(|effect| effect.contains("isn't one this Kumi put there: it stays as it is")), "{round}: {effects:?}");
+        lab.install(&plan["digest"]).await.unwrap();
+        assert_eq!(std::fs::read(lab.ears()).unwrap(), b"another Kumi's Kumi Ears", "{round}: it stays as it is");
+        assert_eq!(std::fs::read(&legacy).unwrap(), earlier, "{round}: the earlier copy stays too");
+    }
+});
+
+case!(setup_daw_updates_a_kumi_ears_this_home_put_there, async {
+    let lab = Lab::new(DawId::Ableton, false);
     let plan = lab.setup(true).await.unwrap();
-    assert_eq!(plan["parts"][1]["state"], "other_owner", "with no Remote Script of this home's, it isn't this Kumi's to replace");
-    assert!(!plan["paths"].to_string().contains("Kumi Ears.amxd"), "{plan}");
-    assert!(plan["effects"].to_string().contains("isn't this Kumi's copy: it stays as it is"), "{}", plan["effects"]);
     lab.install(&plan["digest"]).await.unwrap();
-    assert_eq!(std::fs::read(lab.ears()).unwrap(), b"another Kumi's Kumi Ears", "it stays as it is");
+    // The device this home wrote, as an earlier Kumi made it: its record names those bytes.
+    let old = b"Kumi Ears as an earlier Kumi made it".to_vec();
+    std::fs::write(lab.ears(), &old).unwrap();
+    let sha = Sha256::digest(&old).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let record = lab.home.join("kumi-ears.json");
+    let mut noted: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    noted["sha256"] = json!(sha);
+    std::fs::write(&record, noted.to_string()).unwrap();
+    let plan = lab.setup(true).await.unwrap();
+    assert_eq!(plan["parts"][1]["state"], "older", "{plan}");
+    let before = lab.tree();
+    lab.install(&plan["digest"]).await.unwrap();
+    within(&differ(&before, &lab.tree()), &plan, &lab.lease());
+    assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file());
+});
+
+case!(setup_daw_upgrades_an_earlier_install_through_the_bridges_lifecycle_in_the_folders_its_receipt_names, async {
+    let lab = Lab::with(DawId::Ableton, false, true);
+    // An earlier install of this home's: its package in `<home>/bridge/0.9.0-1`, its state and configuration in the
+    // earlier layout's own folder, put in by the bridge's own lifecycle (receipt and all).
+    let generation = at(&lab.home, "bridge/0.9.0-1");
+    let sha = release_package(&generation, "0.9.0", true);
+    let earlier = lab.path(".config/ableton-mcp-release-a8a291e");
+    let free = || std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
+    let args: Vec<String> = vec![
+        "lifecycle".into(),
+        "install".into(),
+        "--remote-scripts-dir".into(),
+        lab.scripts().display().to_string(),
+        "--state-dir".into(),
+        earlier.display().to_string(),
+        "--package-root".into(),
+        generation.join("package").display().to_string(),
+        "--artifact".into(),
+        generation.join("bridge.tgz").display().to_string(),
+        "--artifact-sha256".into(),
+        sha,
+        "--apply".into(),
+        "--confirm-live-stopped".into(),
+        "--port".into(),
+        free(),
+        "--realtime-port".into(),
+        free(),
+    ];
+    let installed = ableton_mcp_server::cli::auxiliary_command(&args).await.unwrap();
+    assert_eq!(installed.code, 0, "{}{}", installed.stdout, installed.stderr);
+    assert!(earlier.join("install-receipt.json").is_file());
+    let plan = lab.setup(true).await.unwrap();
+    assert_eq!(plan["parts"][0]["state"], "older", "{plan}");
+    let paths: Vec<&str> = plan["paths"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(paths.contains(&earlier.display().to_string().as_str()), "{paths:?}");
+    let before = lab.tree();
+    let done = lab.install(&plan["digest"]).await.unwrap();
+    within(&differ(&before, &lab.tree()), &plan, &lab.lease());
+    assert_eq!(done["parts"][0]["state"], "same", "{done}");
+    let calls = lab.calls.borrow();
+    let flag = |name: &str| calls[1].iter().position(|arg| arg == name).map(|at| calls[1][at + 1].clone()).unwrap();
+    assert_eq!((calls[1][2].as_str(), flag("--state-dir")), ("upgrade", earlier.display().to_string()), "the receipt's own folder");
 });
 
 case!(setup_daw_names_the_folders_an_earlier_install_keeps_its_bridge_settings_in, async {
@@ -726,25 +841,88 @@ case!(setup_daw_puts_back_what_renoises_tool_needs_and_clears_what_an_interrupte
 });
 
 #[cfg(windows)]
-case!(setup_daw_wont_replace_reapers_extension_while_reaper_holds_it_open, async {
-    use std::os::windows::fs::OpenOptionsExt;
+case!(setup_daw_wont_replace_reapers_extension_while_reaper_has_it_loaded, async {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LoadLibraryW(name: *const u16) -> *mut std::ffi::c_void;
+        fn FreeLibrary(module: *mut std::ffi::c_void) -> i32;
+    }
+    // Any DLL serves: REAPER's extension isn't built here. This one goes in, then REAPER loads it.
+    let dll = std::fs::read(PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32").join("version.dll")).unwrap();
+    let mut updated = dll.clone();
+    updated.push(0);
     let lab = Lab::new(DawId::Reaper, false);
-    let plan = lab.setup(true).await.unwrap();
-    lab.install(&plan["digest"]).await.unwrap();
-    // A newer runtime brings other bytes at the same version: an update, while REAPER has the DLL loaded.
+    carried(lab.root.path(), "loadable", None, &dll);
+    let env = || env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+    let first = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env(), carrying(&lab, "loadable"));
+    setup_on(&first, false).await.unwrap();
     let extension = lab.path("REAPER/UserPlugins").join(daw_bridge::install::reaper_extension_name(daw_bridge::detect::Os::current()));
-    carried(lab.root.path(), "update", None, b"the updated extension");
-    let env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
-    let update = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env, carrying(&lab, "update"));
+    // A runtime with other bytes at the same version: an update, while REAPER has the DLL loaded.
+    carried(lab.root.path(), "update", None, &updated);
+    let update = runtime(lab.root.path(), "plugin/state-3", &lab.home, DawId::Reaper, env(), carrying(&lab, "update"));
     let plan = setup_on(&update, true).await.unwrap();
     assert_eq!(plan["state"], "older", "{plan}");
-    // (Taken before the DLL is held: a held file can't be read either.)
     let before = lab.tree();
-    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&extension).unwrap();
-    match call(&update, json!({"daw": "reaper", "dry_run": false, "expected": plan["digest"]})).await {
+    let wide: Vec<u16> = extension.as_os_str().encode_wide().chain(Some(0)).collect();
+    let held = unsafe { LoadLibraryW(wide.as_ptr()) };
+    assert!(!held.is_null(), "{}", std::io::Error::last_os_error());
+    let refused = call(&update, json!({"daw": "reaper", "dry_run": false, "expected": plan["digest"]})).await;
+    assert_ne!(unsafe { FreeLibrary(held) }, 0);
+    match refused {
         Err(OpError::Refused { code: "in_use", .. }) => {}
-        other => panic!("replaced while held: {other:?}"),
+        other => panic!("replaced while loaded: {other:?}"),
     }
-    drop(held);
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+});
+
+case!(setup_daw_leaves_a_copy_another_home_put_in_over_this_homes_even_with_this_homes_receipt, async {
+    let lab = Lab::new(DawId::Renoise, false);
+    lab.setup(false).await.unwrap();
+    // Another Kumi (`kumi bridge` in a standalone home) has since put the same tool in, over this home's: its reference
+    // names that home, while this home's receipt still says the tool is this home's.
+    let tools = lab.path("Renoise/V3.5.4/Scripts/Tools");
+    let target = daw_bridge::lifecycle::Target {
+        daw: daw_bridge::Daw::Renoise,
+        dir: tools.clone(),
+        name: "com.kumi.Bridge.xrnx".into(),
+        folder: true,
+        reference: at(&tools, "com.kumi.Bridge.xrnx/bridge-reference.json"),
+    };
+    let other = lab.path("standalone/.kumi");
+    daw_bridge::lifecycle::Lifecycle::new(&other, target.clone())
+        .install(&lab.path("runtime/daws/renoise/com.kumi.Bridge.xrnx"), "1.0.0")
+        .unwrap();
+    let theirs = std::fs::read(&target.reference).unwrap();
+    let plan = lab.setup(true).await.unwrap();
+    assert_eq!((plan["state"].as_str(), &plan["paths"]), (Some("other_owner"), &json!([])), "{plan}");
+    let before = lab.tree();
+    assert_eq!(refused(lab.setup(false).await).0, "owned_elsewhere");
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+    assert_eq!(std::fs::read(&target.reference).unwrap(), theirs, "it still names the other home");
+    // A reference that names no home (a folder where the file was) says nothing of whose the copy is: it stays too.
+    std::fs::remove_file(&target.reference).unwrap();
+    std::fs::create_dir(&target.reference).unwrap();
+    assert_eq!(lab.setup(true).await.unwrap()["state"], "other_owner");
+});
+
+case!(setup_daw_never_downgrades_reapers_extension_this_home_left_in_another_resource_folder, async {
+    let lab = Lab::new(DawId::Reaper, false);
+    // This home put in a newer extension (99.0.0) in this REAPER's resource folder...
+    carried(lab.root.path(), "newer", Some("99.0.0"), b"the newer extension");
+    let env = |resources: &str| {
+        let mut env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+        env.insert("KUMI_REAPER_RESOURCE_DIR".into(), lab.path(resources).display().to_string());
+        env
+    };
+    let newer = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env("REAPER"), carrying(&lab, "newer"));
+    setup_on(&newer, false).await.unwrap();
+    // ...and a runtime carrying an older one now sets up another (a portable REAPER's), where there's none yet.
+    std::fs::create_dir_all(lab.path("REAPER-2/UserPlugins")).unwrap();
+    let older = runtime(lab.root.path(), "plugin/state-3", &lab.home, DawId::Reaper, env("REAPER-2"), carrying(&lab, "runtime"));
+    let plan = setup_on(&older, true).await.unwrap();
+    assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("99.0.0"), &json!([])), "{plan}");
+    let before = lab.tree();
+    assert_eq!(refused(setup_on(&older, false).await).0, "newer_installed");
     within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
 });

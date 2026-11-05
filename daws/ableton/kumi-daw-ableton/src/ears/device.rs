@@ -41,11 +41,19 @@ pub struct InstalledEars {
 /// Write the device only when missing or different, so an untouched file keeps its modification time. The copy an
 /// older Kumi kept straight in the Kumi folder goes.
 pub async fn install_ears(user_library: impl AsRef<Path>) -> std::io::Result<InstalledEars> {
+    install_ears_with(user_library, true).await
+}
+
+/// [`install_ears`], removing the copy an older Kumi kept straight in the Kumi folder only when `remove_earlier` says
+/// so: an agent host's setup never does, since its product marker says nothing of which Kumi put it there.
+pub async fn install_ears_with(user_library: impl AsRef<Path>, remove_earlier: bool) -> std::io::Result<InstalledEars> {
     let older = user_library.as_ref().join("Kumi").join(format!("{EARS_NAME}.amxd"));
-    if let Ok(bytes) = tokio::fs::read(&older).await {
-        let ours = crate::devices::amxd::decode_amxd(&bytes).is_some_and(|device| device.patcher.to_string().contains("---kumiears"));
-        if ours {
-            let _ = tokio::fs::remove_file(&older).await;
+    if remove_earlier {
+        if let Ok(bytes) = tokio::fs::read(&older).await {
+            let ours = crate::devices::amxd::decode_amxd(&bytes).is_some_and(|device| device.patcher.to_string().contains("---kumiears"));
+            if ours {
+                let _ = tokio::fs::remove_file(&older).await;
+            }
         }
     }
     let folder = user_library.as_ref().join("Kumi").join("Audio Effects");

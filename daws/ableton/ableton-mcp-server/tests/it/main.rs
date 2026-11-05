@@ -88,6 +88,7 @@ mod json_diagnostics;
 mod key_estimation;
 mod library_search;
 mod lifecycle;
+mod lifecycle_binary;
 mod lifecycle_migration;
 mod lifecycle_release;
 mod live;

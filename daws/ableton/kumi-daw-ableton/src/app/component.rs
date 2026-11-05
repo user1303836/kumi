@@ -9,8 +9,7 @@ use super::{
     folders::{find_bridge_config, read_bridge_server, remote_scripts_dir},
     provider::Ableton,
 };
-use crate::devices::amxd::decode_amxd;
-use crate::ears::device::{ears_file, install_ears, EARS_NAME};
+use crate::ears::device::{ears_file, install_ears_with, EARS_NAME};
 use kumi_common::time::now_ms;
 use kumi_daw::{
     component::{same_folder, After, ApplyError, ComponentPlan, Part, PartState},
@@ -19,6 +18,7 @@ use kumi_daw::{
     provider::{newer, DawProvider},
 };
 use kumi_library::sources::{dirname, join};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 pub const COMPONENT: &str = "Live Remote Script";
@@ -54,8 +54,9 @@ struct Look {
     /// The User Library the Remote Scripts folder is in, when it's one (a folder named Remote Scripts that's there).
     library: Option<String>,
     ears: PartState,
-    /// The copy of Kumi Ears an earlier Kumi kept straight in the Kumi folder, when it's there and Kumi's.
-    earlier_ears: Option<String>,
+    /// Where this home records the Kumi Ears it wrote (`<home>/kumi-ears.json`: its path and SHA-256), so a device that
+    /// differs from this Kumi's is replaced only when it's the one this home put there.
+    ears_record: String,
 }
 
 impl Look {
@@ -86,20 +87,18 @@ impl Look {
         let parent = dirname(&scripts);
         let library =
             (Path::new(&scripts).file_name().is_some_and(|name| name == "Remote Scripts") && Path::new(&parent).is_dir()).then_some(parent);
-        // Kumi Ears follows the Remote Script's owner: one that isn't this Kumi's, with no Remote Script of this home's
-        // to say it is, is another Kumi's device (perhaps a newer one), and stays.
-        let ears = match library.as_deref().map(|library| std::fs::read(ears_path(library))) {
-            Some(Ok(bytes)) if bytes == ears_file() => PartState::Same,
-            Some(Ok(_)) if matches!(script, PartState::Same | PartState::Older) => PartState::Older,
-            Some(Ok(_)) => PartState::OtherOwner,
+        // Kumi Ears follows the Remote Script's owner, and is this home's only when this home wrote it (its record): one
+        // that differs from this Kumi's otherwise is another Kumi's device (perhaps a newer one), and stays, before and
+        // after this home's Remote Script goes in.
+        let ears_record = join(&home.display().to_string(), EARS_RECORD);
+        let ears = match library.as_deref().map(|library| (ears_path(library), std::fs::read(ears_path(library)))) {
+            Some((_, Ok(bytes))) if bytes == ears_file() => PartState::Same,
+            Some((path, Ok(bytes))) if matches!(script, PartState::Same | PartState::Older) && wrote(&ears_record, &path, &bytes) => {
+                PartState::Older
+            }
+            Some((_, Ok(_))) => PartState::OtherOwner,
             _ => PartState::Missing,
         };
-        let earlier_ears = library.as_deref().map(|library| join(library, &format!("Kumi/{EARS_NAME}.amxd"))).filter(|earlier| {
-            std::fs::read(earlier)
-                .ok()
-                .and_then(|bytes| decode_amxd(&bytes))
-                .is_some_and(|device| device.patcher.to_string().contains("---kumiears"))
-        });
         let prepared =
             io.answers.get::<PreparedBridge>().map(|prepared| prepared.0.clone()).unwrap_or_else(|| join(&executable_dir(), "bridge"));
         let artifact = prepared_artifact(&prepared);
@@ -117,7 +116,7 @@ impl Look {
             script,
             library,
             ears,
-            earlier_ears,
+            ears_record,
         };
         if look.script_writes() {
             if look.artifact.is_none() {
@@ -225,13 +224,16 @@ impl Look {
                 PartState::Older => format!("Update Kumi Ears, the Max for Live device Kumi listens to a track through, at {ears}"),
                 _ => format!("Copy Kumi Ears, the Max for Live device Kumi listens to a track through, to {ears}"),
             });
-            paths.push(ears);
-            if let Some(earlier) = &self.earlier_ears {
-                effects.push(format!("Remove the earlier copy of Kumi Ears at {earlier}"));
-                paths.push(earlier.clone());
-            }
-        } else if self.script == PartState::Missing && self.ears == PartState::OtherOwner {
-            effects.push(format!("The Kumi Ears at {} isn't this Kumi's copy: it stays as it is", ears.clone().unwrap_or_default()));
+            effects.push(format!("Note that this Kumi put it there, in {}", self.ears_record));
+            paths.extend([ears, self.ears_record.clone()]);
+        } else if self.ears == PartState::OtherOwner {
+            effects.push(format!("The Kumi Ears at {} isn't one this Kumi put there: it stays as it is", ears.clone().unwrap_or_default()));
+        }
+        if !paths.is_empty() {
+            effects.push(format!(
+                "While it works it makes temporary copies beside these (in {}, and in Kumi Ears' folder), each named for what it replaces, and removes them before it's done",
+                self.scripts
+            ));
         }
         let mut parts = vec![Part { name: SCRIPT, path: script, state: self.script }];
         parts.extend(ears.map(|path| Part { name: EARS, path, state: self.ears }));
@@ -264,6 +266,16 @@ fn ears_path(library: &str) -> String {
     join(library, &format!("Kumi/Audio Effects/{EARS_NAME}.amxd"))
 }
 
+/// This home's record of the Kumi Ears it wrote, in the home.
+const EARS_RECORD: &str = "kumi-ears.json";
+
+/// Whether the record at `record` says this home wrote these `bytes` at `path`.
+fn wrote(record: &str, path: &str, bytes: &[u8]) -> bool {
+    let Ok(text) = std::fs::read(record) else { return false };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&text) else { return false };
+    value["path"].as_str() == Some(path) && value["sha256"].as_str() == Some(hex::encode(sha2::Sha256::digest(bytes)).as_str())
+}
+
 /// Live's part for the Kumi home `home`: see [`DawProvider::component_plan`].
 pub fn plan(io: &DawIo, home: &Path) -> Result<ComponentPlan, String> {
     Look::read(io, home).map(|look| look.plan())
@@ -283,7 +295,12 @@ pub async fn apply(io: &DawIo, home: &Path, plan: &ComponentPlan) -> Result<(), 
     }
     if look.ears_writes() {
         let library = look.library.as_deref().unwrap_or_default();
-        install_ears(library).await.map_err(|error| {
+        let written = async {
+            // The legacy copy (`Kumi/Kumi Ears.amxd`) stays: nothing says it's this home's.
+            install_ears_with(library, false).await?;
+            record_ears(&look.ears_record, &ears_path(library))
+        };
+        written.await.map_err(|error| {
             ApplyError::Failed(match look.script_writes() {
                 // Each part goes in whole or not at all: the next setup puts in the one that's missing.
                 true => {
@@ -294,6 +311,22 @@ pub async fn apply(io: &DawIo, home: &Path, plan: &ComponentPlan) -> Result<(), 
         })?;
     }
     Ok(())
+}
+
+/// Notes that this home wrote the Kumi Ears at `file` (its path, as plans name it, and its SHA-256): written beside the
+/// record and renamed into place, or not at all.
+fn record_ears(record: &str, file: &str) -> std::io::Result<()> {
+    let bytes = std::fs::read(file)?;
+    let body = serde_json::json!({"path": file, "sha256": hex::encode(Sha256::digest(&bytes))});
+    if let Some(folder) = Path::new(record).parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let temporary = format!("{record}.{}.tmp", std::process::id());
+    let written = std::fs::write(&temporary, body.to_string()).and_then(|()| std::fs::rename(&temporary, record));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    written
 }
 
 async fn live_running(io: &DawIo) -> bool {
