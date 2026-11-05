@@ -206,3 +206,22 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   }
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
 })
+
+test('Settings says whether Kumi can read compressed audio, in setup\'s own words (CC-10), and nothing when setup says nothing', async () => {
+  const { SettingsPage } = await load('src/desktop/settings.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const page = async setup => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/setup')) return setup
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refresh('setup')
+    const ctx = { storage: { get: (_key, fallback) => fallback, set: () => {} } }
+    return renderToStaticMarkup(createElement(SettingsPage, { ctx, store, onOpenMap: () => {} }))
+  }
+  const message = 'Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only; to let Kumi use the ffmpeg at /opt/homebrew/bin/ffmpeg, run hermes kumi setup (or ask Hermes to set up Kumi).'
+  const html = await page({ state: 'ready', compressed_audio: { state: 'not_allowed', ffmpeg: null, found: '/opt/homebrew/bin/ffmpeg', message } })
+  assert.ok(html.includes('Audio formats'), html)
+  assert.ok(html.includes('Kumi reads WAV and AIFF only; to let Kumi use the ffmpeg at /opt/homebrew/bin/ffmpeg'), html)
+  assert.ok(!(await page({ state: 'ready' })).includes('Audio formats'))
+})

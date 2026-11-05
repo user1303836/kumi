@@ -1570,7 +1570,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         setup?.existing_kumi?.path && /* @__PURE__ */ jsxs10(Line, { label: "Standalone Kumi", children: [
           clean(setup.existing_kumi.path, 120),
           /* @__PURE__ */ jsx10("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
-        ] })
+        ] }),
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx10(Line, { label: "Audio formats", children: /* @__PURE__ */ jsx10("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
       /* @__PURE__ */ jsxs10("div", { children: [
         /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
