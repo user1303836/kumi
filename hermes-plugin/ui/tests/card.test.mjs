@@ -118,7 +118,7 @@ test("a device load only Live's own undo can take back (#1101) says how, by its 
   const draw = how => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(how)] }, daw: 'ableton', live: true, action: () => createElement('button', null, 'Undo') }))
   const next = draw('next')
   assert.ok(next.includes(shown), next)
-  assert.ok(/Undo in Live \((Cmd|Ctrl)\+Z\)/.test(next), next)
+  assert.ok(/Undo in Live \((Cmd|Ctrl)\+Z\), if nothing has changed there since/.test(next), next)
   assert.ok(!next.includes('<button'), 'words, never a request Kumi would refuse')
   // Something changed since: Live's undo would take the producer's later work back first, so no key is offered.
   const buried = draw('buried')
