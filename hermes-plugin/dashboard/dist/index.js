@@ -83,6 +83,7 @@
       undoable: (n) => `· ${n} can be undone`,
       undo: "Undo",
       undoTitle: "Ask Hermes to undo this change",
+      undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
       undoLabel: (change) => `Undo ${change}`,
       openMap: "Open the sound map",
       undoNeedsConnection: "Undo needs a connected Kumi."
@@ -164,6 +165,8 @@
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
       useTitle: "Put a request to use this sound in the chat, to finish and send",
+      moreLike: "More like this",
+      moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
       playFailed: (error) => `Kumi couldn't play that sound: ${error}`
     },
     measurements: {
@@ -194,6 +197,20 @@
       crest: "Crest",
       tempo: "Tempo",
       key: "Key",
+      peakToLoudness: "Peak to loudness",
+      tilt: "Tilt",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "Stereo width",
+      lowEnd: "Low end",
+      mono: "mono",
+      notMono: "not mono",
+      overlay: "Band levels, level-matched",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name} (${hz2} Hz): this ${mine} dB, reference ${reference} dB, ${difference} dB`,
+      round: (number) => `Round ${number}`,
+      roundTitle: "Each comparison with this reference since this window opened, oldest first: this minus reference",
+      loudnessGap: (trend) => `loudness ${trend} LU`,
+      tiltGap: (trend) => `tilt ${trend} dB/oct`,
+      widthGap: (trend) => `width ${trend}`,
       interpretation: "Interpretation",
       noInterpretation: (why) => `No model interpretation: ${why}`,
       more: "More",
@@ -355,6 +372,7 @@
       undoable: (n) => `· ${n} 件取り消せます`,
       undo: "取り消す",
       undoTitle: "この変更の取り消しを Hermes に頼む",
+      undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
       undoLabel: (change) => `${change} を取り消す`,
       openMap: "サンプルマップを開く",
       undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -436,6 +454,8 @@
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
       useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+      moreLike: "似たサウンド",
+      moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
       playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
     },
     measurements: {
@@ -466,6 +486,20 @@
       crest: "クレスト",
       tempo: "テンポ",
       key: "キー",
+      peakToLoudness: "ピーク対ラウドネス",
+      tilt: "ティルト",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "ステレオ幅",
+      lowEnd: "低域",
+      mono: "モノ",
+      notMono: "モノではない",
+      overlay: "帯域レベル（レベル合わせ済み）",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）: これ ${mine} dB、リファレンス ${reference} dB、差 ${difference} dB`,
+      round: (number) => `ラウンド ${number}`,
+      roundTitle: "このウィンドウを開いてからの、このリファレンスとの各比較（古い順、これ − リファレンス）",
+      loudnessGap: (trend) => `ラウドネス ${trend} LU`,
+      tiltGap: (trend) => `ティルト ${trend} dB/oct`,
+      widthGap: (trend) => `幅 ${trend}`,
       interpretation: "解釈",
       noInterpretation: (why) => `モデルによる解釈なし: ${why}`,
       more: "もっと見る",
@@ -626,6 +660,7 @@
       undoable: (n) => `· ${n} 项可撤销`,
       undo: "撤销",
       undoTitle: "让 Hermes 撤销这次改动",
+      undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
       undoLabel: (change) => `撤销 ${change}`,
       openMap: "打开采样地图",
       undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -707,6 +742,8 @@
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
       useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+      moreLike: "更多类似的",
+      moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
       playFailed: (error) => `Kumi 无法播放这个声音：${error}`
     },
     measurements: {
@@ -737,6 +774,20 @@
       crest: "峰值因数",
       tempo: "速度",
       key: "调性",
+      peakToLoudness: "峰值响度比",
+      tilt: "倾斜",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "立体声宽度",
+      lowEnd: "低频",
+      mono: "单声道",
+      notMono: "非单声道",
+      overlay: "频段电平（已对齐电平）",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）：当前 ${mine} dB，参考 ${reference} dB，差 ${difference} dB`,
+      round: (number) => `第 ${number} 轮`,
+      roundTitle: "本窗口打开以来与此参考的每次比较（从旧到新，当前减参考）",
+      loudnessGap: (trend) => `响度 ${trend} LU`,
+      tiltGap: (trend) => `倾斜 ${trend} dB/oct`,
+      widthGap: (trend) => `宽度 ${trend}`,
       interpretation: "解读",
       noInterpretation: (why) => `没有模型解读：${why}`,
       more: "展开",
@@ -956,6 +1007,22 @@
   }
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+  }
+  function changesOf(items) {
+    const byChange = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const key = typeof item.change_id === "string" && item.change_id ? `change:${item.change_id}` : `row:${item.id}`;
+      const rows = byChange.get(key);
+      if (rows) rows.push(item);
+      else byChange.set(key, [item]);
+    }
+    return [...byChange.values()];
+  }
+  function undoRowOf(rows) {
+    return rows.find((row) => row.state !== "undone");
+  }
+  function canUndoChange(status, rows) {
+    return canUndo(status, undoRowOf(rows));
   }
   var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
   function quotable(name, max = 80) {
@@ -1777,7 +1844,8 @@
           }
         )
       ] }),
-      selected && chosen && /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+      selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+      /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
         /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
           /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
           /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
@@ -1787,15 +1855,55 @@
             chosen.folder && /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
           ] })
         ] }),
-        /* @__PURE__ */ jsx("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+        /* @__PURE__ */ jsx("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions?.(selected, chosen) })
       ] })
     ] });
+  }
+
+  // src/shared/listen.ts
+  var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
+  function parseListen(result) {
+    let value = result;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+    const state = "state" in value ? value.state : void 0;
+    if (typeof state === "string" && NOT_MEASURED[state]) return null;
+    return value;
+  }
+  var finite = (value) => typeof value === "number" && Number.isFinite(value);
+  function referenceKey(result) {
+    const reference = result.compare?.metrics;
+    if (!reference) return null;
+    const lufs = reference.loudness?.integratedLufs;
+    return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+  }
+  function gapsOf(result) {
+    const mine = result.metrics ?? {};
+    const reference = result.compare?.metrics;
+    if (!reference) return {};
+    const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
+    const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
+    const out = {};
+    if (loudness !== void 0) out.loudness = loudness;
+    const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
+    if (tilt !== void 0) out.tilt = tilt;
+    const width = gap(mine.stereo?.width, reference.stereo?.width);
+    if (width !== void 0) out.width = width;
+    return out;
   }
 
   // src/shared/store.ts
   var JOB_KEPT_MS = 6e4;
   var MOST_JOBS = 20;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
+  var MOST_ROUNDS = 6;
+  var MOST_REFERENCES = 8;
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
   }
@@ -1835,6 +1943,9 @@
     generation = 0;
     /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
     cards = /* @__PURE__ */ new Map();
+    /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+     *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+    started = /* @__PURE__ */ new Set();
     get = () => this.state;
     subscribe = (fn) => {
       this.listeners.add(fn);
@@ -1855,6 +1966,7 @@
       this.generation += 1;
       this.reads.clear();
       this.cards.clear();
+      this.started.clear();
       this.state = EMPTY;
       for (const fn of [...this.listeners]) fn();
     }
@@ -1929,10 +2041,29 @@
     measure(toolCallId, result) {
       this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
     }
-    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-    trackJob(id) {
+    /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+     *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+    noteListen(result) {
+      const parsed = parseListen(result);
+      const key = parsed ? referenceKey(parsed) : null;
+      const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
+      if (!parsed || !key || !id) return;
+      const before = this.state.rounds[key] ?? [];
+      if (before.some((round) => round.id === id)) return;
+      const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) };
+      const keys = Object.keys(rounds);
+      if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
+      this.set({ rounds });
+    }
+    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+     *  the source says it was running: a call that started it, or an event that reported it running. */
+    trackJob(id, started = false) {
       const jobId = plainId(id);
       if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+      if (started) {
+        this.started.add(jobId);
+        if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
+      }
       void this.refreshJob(jobId);
     }
     /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
@@ -1968,8 +2099,8 @@
           const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
           if (generation !== this.generation) return;
           const before = this.state.jobs[id];
-          const waiting = this.cards.has(id);
-          if (!before && finished(read) && !waiting) return;
+          const news = this.started.delete(id) || this.cards.has(id);
+          if (!before && finished(read) && !news) return;
           const card = before?.card ?? this.cards.get(id);
           this.cards.delete(id);
           const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
@@ -2093,7 +2224,10 @@
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
             {
-              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null,
+              action: (item) => {
+                const rows = changesOf(state.history?.items ?? []).find((change) => change.includes(item));
+                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null;
+              },
               daw: state.status?.daw,
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,

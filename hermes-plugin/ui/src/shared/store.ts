@@ -2,6 +2,7 @@
 // reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
 import { plainId } from './format.ts'
+import { gapsOf, parseListen, referenceKey, type Gaps } from './listen.ts'
 import type { Focus, History, Job, SetupStatus, SoundMap, Status } from './types.ts'
 
 export type Fetch = <T>(path: string) => Promise<T>
@@ -25,6 +26,10 @@ export interface KumiState {
   /** The latest `kumi_listen` result a `listen.done` event brought when the transcript showed none (CC-9); `result`
    *  is null when the event left it out for its size. */
   measured: { tool_call_id: string; result: unknown; at: number } | null
+  /** Comparisons against each reference this window saw arrive (a mastering pass's rounds), oldest first, by
+   *  `referenceKey`: each one's own audio id and its gaps. Only what arrived while the window was open, so a round is
+   *  never numbered from a partial past. */
+  rounds: Record<string, { id: string; gaps: Gaps }[]>
 }
 
 export interface TrackedJob extends Job {
@@ -37,8 +42,11 @@ export interface TrackedJob extends Job {
 /** How long a finished job stays in view, and how many jobs are followed at once (ids come from events). */
 export const JOB_KEPT_MS = 60_000
 export const MOST_JOBS = 20
+/** Comparisons kept per reference, and references kept: a mastering pass is three rounds at most. */
+const MOST_ROUNDS = 6
+const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} }
 
 function finished(job: Job): boolean {
   return typeof job.state === 'string' && job.state !== 'running'
@@ -81,6 +89,9 @@ export class KumiStore {
   private generation = 0
   /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
   private cards = new Map<string, unknown>()
+  /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+   *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+  private started = new Set<string>()
 
   constructor(private readonly fetch: Fetch, private readonly historyLimit = 50) {}
 
@@ -108,6 +119,7 @@ export class KumiStore {
     this.generation += 1
     this.reads.clear()
     this.cards.clear()
+    this.started.clear()
     this.state = EMPTY
     for (const fn of [...this.listeners]) fn()
   }
@@ -191,12 +203,33 @@ export class KumiStore {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } })
   }
 
-  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-  trackJob(id: unknown): void {
+  /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+   *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+  noteListen(result: unknown): void {
+    const parsed = parseListen(result)
+    const key = parsed ? referenceKey(parsed) : null
+    const id = typeof parsed?.artifact_id === 'string' ? parsed.artifact_id : null
+    if (!parsed || !key || !id) return
+    const before = this.state.rounds[key] ?? []
+    if (before.some(round => round.id === id)) return
+    // A few references, each with a few rounds: a pass is three at most, and older ones drop off.
+    const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) }
+    const keys = Object.keys(rounds)
+    if (keys.length > MOST_REFERENCES) delete rounds[keys[0]]
+    this.set({ rounds })
+  }
+
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+   *  the source says it was running: a call that started it, or an event that reported it running. */
+  trackJob(id: unknown, started = false): void {
     const jobId = plainId(id)
     // Shown only once this profile's backend answers for it (another profile's job 404s and never shows, even from an
     // event that names no profile), and at most MOST_JOBS at a time.
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return
+    if (started) {
+      this.started.add(jobId)
+      if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value as string)
+    }
     void this.refreshJob(jobId)
   }
 
@@ -236,10 +269,11 @@ export class KumiStore {
         const read = await this.fetch<Job>(`/job?id=${encodeURIComponent(id)}`)
         if (generation !== this.generation) return
         const before = this.state.jobs[id]
-        // A job first seen finished isn't news: it isn't shown as if it had just ended. One a generation event
-        // reported is (its card waits here until the first read), whichever read gets there first.
-        const waiting = this.cards.has(id)
-        if (!before && finished(read) && !waiting) return
+        // A job first seen finished isn't news: it isn't shown as if it had just ended. One a call started or an event
+        // reported running is, and so is one a generation event reported (its card waits here until the first read),
+        // whichever read gets there first.
+        const news = this.started.delete(id) || this.cards.has(id)
+        if (!before && finished(read) && !news) return
         const card = before?.card ?? this.cards.get(id)
         this.cards.delete(id)
         const job: Job = stopped && !finished(read) ? { ...read, state: 'interrupted' } : read

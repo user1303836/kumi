@@ -22,6 +22,9 @@ export interface ListenView {
   bands: { name: string; value: number }[]
   /** `difference` when the bands are current minus reference (level-normalized), `level` when they're one file's. */
   bandsAre: 'difference' | 'level'
+  /** With a reference: both files' band levels, each a share of its own file's energy, so their shapes overlay
+   *  level-matched. Empty when either file lacks them or their bands don't line up. */
+  overlay: { name: string; hz: string; mine: number; reference: number }[]
   headlines: string[]
   verdict?: string
   interpretation?: { label: string; text: string }
@@ -30,6 +33,14 @@ export interface ListenView {
   capture?: string
   /** The runtime's one-line note about the capture, as plain untrusted text. */
   captureNote?: string
+}
+
+/** How far a comparison is from its reference: current minus reference, where measured. A mastering pass's rounds
+ *  show these narrowing. */
+export interface Gaps {
+  loudness?: number
+  tilt?: number
+  width?: number
 }
 
 // A track listen that didn't complete (CC-2): no measurements, no file, nothing the card could draw.
@@ -101,12 +112,17 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
   const rows = [
     row(t('listen.loudness'), mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), v => `${num(v)} LUFS`, differences?.loudness?.differenceLu, v => `${signed(v)} LU`),
     row(t('listen.truePeak'), mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), v => `${num(v)} dBTP`, undefined, v => `${signed(v)} dB`),
-    row(t('listen.brightness'), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, undefined, v => `${signed(v, 0)} Hz`),
     row(t('listen.range'), mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), v => `${num(v)} LU`, undefined, v => `${signed(v)} LU`),
     row(t('listen.crest'), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), v => `${num(v)} dB`, undefined, v => `${signed(v)} dB`),
+    row(t('listen.peakToLoudness'), mine.dynamics?.peakToLoudnessDb, theirs(reference?.dynamics?.peakToLoudnessDb), v => `${num(v)} dB`, undefined, v => `${signed(v)} dB`),
+    row(t('listen.tilt'), mine.balance?.tiltDbPerOctave, theirs(reference?.balance?.tiltDbPerOctave), v => t('listen.perOctave', num(v)), undefined, v => t('listen.perOctave', signed(v))),
+    row(t('listen.brightness'), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, undefined, v => `${signed(v, 0)} Hz`),
+    row(t('listen.width'), mine.stereo?.width, theirs(reference?.stereo?.width), v => num(v, 2), undefined, v => signed(v, 2)),
+    lowEnd(t, mine.stereo?.lowEndMono, compare ? (reference?.stereo?.lowEndMono ?? null) : undefined),
     row(t('listen.tempo'), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), v => `${num(v)} BPM`, undefined, v => `${signed(v)} BPM`)
   ].filter((value): value is MetricRow => value !== null)
-  const key = mine.key?.name
+  // A key is a passage's: one sound (a snare, a one-shot) has none worth naming, whatever the estimator returned.
+  const key = mine.sound ? undefined : mine.key?.name
   if (typeof key === 'string' && key) {
     const otherKey = reference?.key?.name
     rows.push({ label: t('listen.key'), mine: clean(key, 20), ...(compare ? { reference: typeof otherKey === 'string' && otherKey ? clean(otherKey, 20) : '—' } : {}), direction: 0 })
@@ -117,14 +133,19 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
   const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(band =>
     band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? '', 16), value: band.db }] : []
   )
+  const headlines = Array.isArray(differences?.headlines) ? differences.headlines.filter(line => typeof line === 'string').map(line => clean(line, 140)) : []
+  // The runtime's verdict is its summary line, then the headlines (serve's `retain`): the card lists those, so with
+  // them the verdict is the summary alone, rather than every difference said twice.
+  const said = typeof result.verdict_text === 'string' ? (headlines.length ? result.verdict_text.split('\n')[0] : result.verdict_text) : ''
   const view: ListenView = {
     title: fileName(mine, t('listen.measuredAudio')),
     mineId: typeof result.artifact_id === 'string' ? result.artifact_id : undefined,
     rows,
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? 'difference' : 'level',
-    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter(line => typeof line === 'string').map(line => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === 'string' && result.verdict_text ? clean(result.verdict_text, 400) : undefined,
+    overlay: compare ? overlayOf(mine, reference) : [],
+    headlines,
+    verdict: said.trim() ? clean(said, 400) : undefined,
     capture: captureWords(result.capture, t),
     // CC-2 A3: one line of at most 200 characters, shown as it is and never read for a decision.
     captureNote: typeof result.capture?.note === 'string' && result.capture.note.trim() ? clean(result.capture.note, 200) : undefined
@@ -142,4 +163,69 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
     view.interpretationError = clean(result.interpretation_error, 200)
   }
   return view
+}
+
+/** Both files' band levels, band by band, when every band lines up by name. */
+function overlayOf(mine: Analysis, reference: Analysis | undefined): ListenView['overlay'] {
+  const ours = Array.isArray(mine.balance?.bands) ? mine.balance.bands : []
+  const theirs = Array.isArray(reference?.balance?.bands) ? reference.balance.bands : []
+  if (!ours.length || ours.length !== theirs.length) return []
+  const overlay: ListenView['overlay'] = []
+  for (const [index, band] of ours.entries()) {
+    const other = theirs[index]
+    if (!band || !other || band.name !== other.name || !finite(band.db) || !finite(other.db)) return []
+    overlay.push({ name: clean(band.name ?? '', 16), hz: clean(band.hz ?? '', 16), mine: band.db, reference: other.db })
+  }
+  return overlay
+}
+
+/** `mono` or `not mono` below about 120 Hz, beside the reference's: no difference to compute. */
+function lowEnd(t: Translate, mine: unknown, reference: unknown): MetricRow | null {
+  const words = (value: unknown) => (value === true ? t('listen.mono') : value === false ? t('listen.notMono') : '—')
+  if (typeof mine !== 'boolean' && typeof reference !== 'boolean') return null
+  return { label: t('listen.lowEnd'), mine: words(mine), ...(reference === undefined ? {} : { reference: words(reference) }), direction: 0 }
+}
+
+/** What makes two comparisons ones against the same reference: its file's name and what Kumi measured of it, which
+ *  are the same each time the same file is measured (its retained copy gets a new id each time). Null without one. */
+export function referenceKey(result: ListenResult): string | null {
+  const reference = result.compare?.metrics
+  if (!reference) return null
+  const lufs = reference.loudness?.integratedLufs
+  return [reference.file ?? '', finite(lufs) ? lufs.toFixed(1) : '', finite(reference.seconds) ? reference.seconds.toFixed(1) : ''].join('|')
+}
+
+/** A comparison's gaps to its reference. */
+export function gapsOf(result: ListenResult): Gaps {
+  const mine = result.metrics ?? {}
+  const reference = result.compare?.metrics
+  if (!reference) return {}
+  const gap = (a: unknown, b: unknown) => (finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : undefined)
+  const loudness = finite(result.compare?.differences?.loudness?.differenceLu)
+    ? result.compare.differences.loudness.differenceLu
+    : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs)
+  const out: Gaps = {}
+  if (loudness !== undefined) out.loudness = loudness
+  const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave)
+  if (tilt !== undefined) out.tilt = tilt
+  const width = gap(mine.stereo?.width, reference.stereo?.width)
+  if (width !== undefined) out.width = width
+  return out
+}
+
+/** `Round 3 · loudness −4.1 → −1.2 → −0.4 LU · tilt +0.9 → +0.3 → +0.1 dB/oct`: comparison `number` against a
+ *  reference and the gaps of up to the last three, oldest first and ending with this one's. Nothing for the first. */
+export function roundWords(number: number, rounds: Gaps[], t: Translate = english): string | undefined {
+  if (number < 2 || rounds.length < 2) return undefined
+  const trend = (pick: (gaps: Gaps) => number | undefined, digits: number) => {
+    const values = rounds.map(pick)
+    return values.every(finite) ? values.map(value => signed(value as number, digits)).join(' → ') : undefined
+  }
+  const parts = [
+    [trend(gaps => gaps.loudness, 1), (text: string) => t('listen.loudnessGap', text)],
+    [trend(gaps => gaps.tilt, 1), (text: string) => t('listen.tiltGap', text)],
+    [trend(gaps => gaps.width, 2), (text: string) => t('listen.widthGap', text)]
+  ] as const
+  const said = parts.flatMap(([text, words]) => (text ? [words(text)] : []))
+  return [t('listen.round', number), ...said].join(' · ')
 }

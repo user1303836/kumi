@@ -1,6 +1,9 @@
 """The tools' schemas as Hermes registers them (RESEARCH.md C1): what the model reads to choose and call a tool."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 # Kumi's names for the DAWs it works in (its settings' and the runtime's): `ableton` is Ableton Live.
 DAWS = ("ableton", "reaper", "renoise")
 DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
@@ -79,14 +82,16 @@ KUMI_READ = _tool(
     "values a change needs. Reads only; never runs code.",
     {"action": {"type": "string", "enum": ["data", "schema"]},
      "query": {"type": "object", "description": "action data: what to read, in the DAW's read schema."},
-     "tool": {"type": "string", "description": "action schema: the step to describe, e.g. set_track_volume."}},
+     "tool": {"type": "string", "description": "action schema: the step to describe, e.g. set_mixer (Live) or "
+                                               "track_volume (REAPER, Renoise)."}},
     ("action",))
 
 KUMI_CHANGE = _tool(
     "kumi_change",
     "Change the open project with a bounded, typed plan of up to 20 steps, each one of the DAW's own change steps "
     "(look one up with kumi_read action schema), as one entry in Kumi's HISTORY. The producer approves the exact change "
-    "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read: a changed project is "
+    "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read, or the ones a done "
+    "kumi_change returned (its project_key and epoch serve the next change in the same turn): a changed project is "
     "refused, not guessed. A file goes in through the DAW's own file step (Live replace_sample or import_audio, REAPER "
     "item_import, Renoise sample_load), whose file field holds a source: {sound_id, map_revision}, {artifact_id} or "
     "{file, provenance}, never a path. "
@@ -120,36 +125,60 @@ KUMI_HISTORY = _tool(
     "job delivers.",
     {"limit": {"type": "integer", "minimum": 1, "maximum": 200}})
 
-# A listen's source: a file, a sound or an artifact as _SOURCE, or one track or the mix over a beat window (CC-2).
+
+def _track_listen_daws() -> tuple[str, ...]:
+    """The DAWs whose pinned runtime listens to a track or the mix: kumi_release.json's `listen_sources` (CC-16),
+    which scripts/hermes_pin.py reads from that runtime. None on a pin from before them: files only. Read here, beside
+    the plugin, since Hermes registers a tool's schema once (and the dashboard loads this file on its own)."""
+    try:
+        pin = json.loads((Path(__file__).resolve().parent / "kumi_release.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    sources = pin.get("listen_sources") if isinstance(pin, dict) else None
+    if not isinstance(sources, dict):
+        return ()
+    return tuple(daw for daw in DAWS if isinstance(sources.get(daw), list) and "track" in sources[daw])
+
+
+TRACK_LISTEN_DAWS = _track_listen_daws()
+_TRACK_WHERE = " or ".join(DAW_NAMES[daw] for daw in TRACK_LISTEN_DAWS)
+# A listen's source: a file, a sound or an artifact as _SOURCE; and, where the pinned runtime takes one, one track or
+# the mix over a beat window (CC-2, CC-16).
 _LISTEN_SOURCE = {
     "type": "object",
-    "description": (_SOURCE["description"] + " Or a track of the open project, or its mix, over a beat window: "
-                    "{\"track\": {\"ref\": \"<track ref from kumi_observe>\"} or {\"mix\": true}, \"from_beat\", "
-                    "\"beats\"}. That plays the window in the DAW (60 s at most, only while it's stopped), so the "
-                    "producer approves it."),
-    "properties": {**_SOURCE["properties"],
-                   "track": {"type": "object",
-                             "description": "{\"ref\": \"…\"} for one track, {\"mix\": true} for the mix.",
-                             "properties": {"ref": {"type": "string"}, "mix": {"type": "boolean"}},
-                             "additionalProperties": False},
-                   "from_beat": {"type": "number", "minimum": 0,
-                                 "description": "The beat to start at (0 is the first)."},
-                   "beats": {"type": "number", "minimum": 0, "maximum": 256,
-                             "description": "How many beats to listen to: more than 0, at most 256 and 60 s."}},
+    "description": _SOURCE["description"] + (
+        f" Or, in {_TRACK_WHERE}, a track of the open project, or its mix, over a beat window: "
+        "{\"track\": {\"ref\": \"<track ref from kumi_observe>\"} or {\"mix\": true}, \"from_beat\", \"beats\"}. "
+        "That plays the window in the DAW (60 s at most, only while it's stopped), so the producer approves it."
+        if TRACK_LISTEN_DAWS else ""),
+    "properties": {**_SOURCE["properties"], **({
+        "track": {"type": "object", "description": "{\"ref\": \"…\"} for one track, {\"mix\": true} for the mix.",
+                  "properties": {"ref": {"type": "string"}, "mix": {"type": "boolean"}},
+                  "additionalProperties": False},
+        "from_beat": {"type": "number", "minimum": 0, "description": "The beat to start at (0 is the first)."},
+        "beats": {"type": "number", "minimum": 0, "maximum": 256,
+                  "description": "How many beats to listen to: more than 0, at most 256 and 60 s."}}
+        if TRACK_LISTEN_DAWS else {})},
     "additionalProperties": False,
 }
 
 KUMI_LISTEN = _tool(
     "kumi_listen",
-    "Measure audio: a file on this computer, or a track or the mix of the open project over a beat window: loudness "
-    "(LUFS), loudness range, true peak, spectral balance and centroid, tempo and key, and, with compare_to, the "
-    "differences from a file. Returns the measurements and the audio as MEDIA:. Nothing is heard: these are "
-    "measurements, so report them as such. A file only reads; a track or the mix plays that window in the DAW while "
-    "it's stopped, and the producer approves it first. For a track or the mix, pass the project key and epoch "
-    "kumi_observe gave, and refs from it.",
+    "Measure audio: a file on this computer"
+    + (f", or, in {_TRACK_WHERE}, a track or the mix of the open project over a beat window" if TRACK_LISTEN_DAWS
+       else " (a bounce, a sample, or a file Kumi made)")
+    + ": loudness (LUFS), loudness range, true peak, spectral balance and centroid, tempo and key, and, with "
+    "compare_to, the differences from a file. Returns the measurements and the audio as MEDIA:. Nothing is heard: "
+    "these are measurements, so report them as such. A file only reads"
+    + ("; a track or the mix plays that window in the DAW while it's stopped, and the producer approves it first. "
+       "For a track or the mix, pass the project key and epoch kumi_observe gave, and refs from it."
+       if TRACK_LISTEN_DAWS else ". This version of Kumi can't listen to a track or the mix in the DAW: to measure "
+       "part of the project, ask the producer to bounce it to a file."),
     {"source": _LISTEN_SOURCE, "compare_to": _SOURCE,
-     "expected_project_key": {"type": "string", "description": "For a track or the mix: kumi_observe's project_key."},
-     "expected_epoch": {"type": "string", "description": "For a track or the mix: kumi_observe's epoch."}},
+     **({"expected_project_key": {"type": "string", "description": "For a track or the mix: kumi_observe's "
+                                                                    "project_key."},
+         "expected_epoch": {"type": "string", "description": "For a track or the mix: kumi_observe's epoch."}}
+        if TRACK_LISTEN_DAWS else {})},
     ("source",))
 
 KUMI_SOUNDS = _tool(

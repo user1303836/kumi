@@ -145,6 +145,15 @@ impl Lab {
         Lab { home, _elsewhere: elsewhere, ctx, simulator }
     }
 
+    /// The DAW back after it quit, with `config` (its project as the producer left it), on the transport home's
+    /// discovery folder, as Lab::new starts it.
+    async fn restart(&mut self, config: impl FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig, bridge: Daw) {
+        let paths = BridgePaths::new(&self.home.path().join("kumi-home"), bridge);
+        let mut config = config(ensure_secret(&paths.secret()).unwrap());
+        config.discovery_dir = Some(paths.discovery());
+        self.simulator = Some(Rc::new(Simulator::start(config).await.unwrap()));
+    }
+
     /// The methods Kumi's host sent the DAW, each once.
     fn methods_sent(&self) -> Vec<String> {
         let mut methods: Vec<String> = self
@@ -266,6 +275,54 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
     let sent = lab.methods_sent();
     assert!(!sent.is_empty() && sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
+    lab.ctx.link().close().await;
+});
+
+case!(what_changed_while_reaper_was_away_reaches_the_note_and_waits_for_the_look_that_asks_for_it, async {
+    // REAPER quits while the runtime is connected; the producer opens the project again and changes it.
+    let script = ReaperScript::new(3, 0);
+    script.set_project_id(Some("0123456789abcdef0123456789abcdef"));
+    let (again, restarted) = (script.clone(), script.clone());
+    let mut lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    lab.call("connect", json!({"daw": "reaper"})).await.unwrap();
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    // As own_catchup_e2e: the integration keeps the project as it saw it just after the look.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    lab.simulator.as_ref().unwrap().stop();
+    for _ in 0..1000 {
+        if lab.state("focus.json")["connected"] == false {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    again.restart();
+    again.set_volume(3, -12.0);
+    lab.restart(move |secret| restarted.config(secret, "/lab/REAPER"), Daw::Reaper).await;
+    // Kumi comes back to REAPER (connect again until REAPER answers it); what changed meanwhile then reaches focus.json
+    // as soon as Kumi is told, with no look asking, so the chat's note has it.
+    for _ in 0..1000 {
+        if lab.call("connect", json!({"daw": "reaper"})).await.is_ok_and(|status| status["connected"] == true) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let mut note = Value::Null;
+    for _ in 0..1000 {
+        note = lab.state("focus.json");
+        if note["catch_up"].as_array().is_some_and(|told| !told.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let told = |value: &Value| value.to_string().contains("Track 3");
+    assert!(told(&note["catch_up"]), "{note}");
+    // A look at FOCUS shows it and leaves it; the look that asks for it gives it, once.
+    let focus = lab.call("observe", json!({"scope": "focus"})).await.unwrap();
+    assert!(told(&focus["catch_up"]), "{focus}");
+    let caught_up = lab.call("observe", json!({"scope": "catch_up"})).await.unwrap();
+    assert!(caught_up["text"].as_str().unwrap().contains("Track 3"), "{caught_up}");
+    let after = lab.call("observe", json!({"scope": "catch_up"})).await.unwrap();
+    assert!(after["text"].as_str().unwrap().starts_with("Nothing has changed"), "{after}");
     lab.ctx.link().close().await;
 });
 
@@ -555,6 +612,7 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         (first["history_ids"][0].clone(), json!("mixer"), key.clone())
     );
     assert!(row.get("tool_call_id").is_none() && row.get("digest").is_none(), "{row}");
+    assert!(row["change_id"].is_string(), "the change it's part of, for an undo of it whole: {row}");
     let kept = lab.state("history.json");
     assert_eq!(kept["items"][0]["tool_call_id"], "tc-1");
     assert_eq!(kept["items"][0]["digest"].as_str().map(str::len), Some(64));
@@ -621,7 +679,13 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     let kept = lab.state("history.json");
     let audit = kept["items"].as_array().unwrap().iter().find(|row| row["family"] == "unsure").unwrap().clone();
     assert_eq!((audit["undo_available"].clone(), audit["tool_call_id"].clone()), (json!(false), json!("tc-1")));
-    assert!(changed["history_ids"].as_array().unwrap().contains(&audit["id"]));
+    let ids = changed["history_ids"].as_array().unwrap();
+    assert!(ids.contains(&audit["id"]));
+    // What the call recorded, its audit row among it, is one change.
+    let mut changes: Vec<Value> =
+        kept["items"].as_array().unwrap().iter().filter(|row| ids.contains(&row["id"])).map(|row| row["change_id"].clone()).collect();
+    changes.dedup();
+    assert!(changes.len() == 1 && changes[0].is_string(), "{changes:?}");
     assert_eq!(lab.state("status.json")["unsure"]["op"], "change");
     let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
     assert_eq!(stale["code"], "stale");

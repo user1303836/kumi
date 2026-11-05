@@ -48,6 +48,29 @@ class TrackListen(unittest.TestCase):
         self.assertEqual([args.get("preview") for args in asked(self.data)], [True])
         self.assertEqual(played(self.data), [])
 
+    def test_a_track_listen_is_offered_only_where_the_pinned_runtime_takes_one(self):
+        """CC-16: kumi_release.json records the sources each DAW's pinned runtime listens to; a pin without them (from
+        before CC-16) listens to files alone. A source the producer's DAW doesn't list is refused before anyone is
+        asked or anything plays, in the hook and again at dispatch."""
+        files = ["artifact", "file", "sound"]
+        sound = {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}}
+        for sources in (None, {**support.LISTEN_ALL, "ableton": files}):
+            with self.subTest(sources=sources):
+                support.pin(self.host.plugin_dir, listen_sources=sources)
+                before = len(asked(self.data))
+                decision = self.hook(track())
+                self.assertEqual(decision["action"], "block")
+                self.assertIn("can't listen to a track or the mix in Live", decision["message"])
+                answer = tools.kumi_listen(self.host, track(), session_id="s1", tool_call_id="l2")
+                self.assertEqual(answer["error"]["code"], "unsupported")
+                self.assertEqual(len(asked(self.data)), before, "nothing reached the runtime, not even a preview")
+                self.assertIsNone(self.hook(sound), "a file, a sound or an artifact is measured as before")
+        support.pin(self.host.plugin_dir, listen_sources={**support.LISTEN_ALL, "ableton": []})
+        self.assertIn("can't measure a sound in Live", self.hook(sound)["message"], "a DAW that lists nothing")
+        self.ctx.settings["daw"] = "reaper"
+        support.pin(self.host.plugin_dir, listen_sources={**support.LISTEN_ALL, "ableton": files})
+        self.assertIsNone(tools.listen_unsupported(self.host, track()), "REAPER's runtime takes a track listen")
+
     def test_the_mix_and_a_window_written_as_text_are_previewed_as_numbers(self):
         args = {"source": {"track": {"mix": "true"}, "from_beat": "4", "beats": "16"}, **PROJECT}
         decision = self.hook(args)

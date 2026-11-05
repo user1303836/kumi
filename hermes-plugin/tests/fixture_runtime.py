@@ -66,6 +66,7 @@ class Fixture:
         self.generations: dict[str, dict] = {}  # generation jobs it created
         self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
         self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
+        self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
         self.seq = 0
         self.connected = False
         self.daw = options.daw
@@ -410,14 +411,15 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     first = steps[0]["input"]
     track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
     ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
-    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
-    # (tool_call_id, digest, call_outcome), which the plugin never passes on.
+    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note), CC-5's
+    # (tool_call_id, digest, call_outcome) and CC-3 A2's change_id, which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
                             "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                            "call_outcome": "applied", "before": before})
+                            "call_outcome": "applied", "change_id": f"x-{fixture.generation}-{len(fixture.history) + 1}",
+                            "before": before})
     fixture.publish("history", "focus")
     done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
     return {"state": "applied", "history_ids": [ident],
@@ -491,11 +493,46 @@ def listen(fixture: Fixture, args: dict, host: dict) -> dict:
     source = args.get("source") or {}
     if "track" in source:
         return listen_track(fixture, args, host)
+    if "file" in source and isinstance(args.get("compare_to"), dict) and "file" in args["compare_to"]:
+        return listen_bounce(fixture, source["file"], args["compare_to"]["file"])
     if source.get("sound_id") not in {sound["sound_id"] for sound in SOUNDS}:
         return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
     return {"metrics": analysis(lufs=-14.2, peak=-1.3, centroid=1840.0, seconds=0.42), "artifact_id": "a-1",
             "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
             "media_tag": kept(fixture, "a-1")}
+
+
+# A bounce of the mix after each mastering pass (flow A): integrated LUFS, tilt and stereo width, coming closer to the
+# reference's -8.6 LUFS, -3.1 dB/oct and 0.31.
+PASSES = ((-12.7, -3.9, 0.22), (-10.2, -3.4, 0.27), (-9.0, -3.2, 0.30))
+
+
+def listen_bounce(fixture: Fixture, bounce: str, reference: str) -> dict:
+    """A bounce measured against a reference file, as kumi serve's `retain` answers: the bounce's measurements, its
+    audio and the reference's kept as two new artifacts, and the differences (current minus reference)."""
+    fixture.bounces += 1
+    lufs, tilt, width = PASSES[min(fixture.bounces, len(PASSES)) - 1]
+    mine = analysis(lufs=lufs, peak=-1.0, centroid=2050.0 + 120 * fixture.bounces, seconds=30.0)
+    mine["file"] = Path(bounce).name
+    mine["balance"]["tiltDbPerOctave"] = tilt
+    mine["balance"]["bands"] = [{**band, "db": band["db"] - 1.2 / fixture.bounces} for band in mine["balance"]["bands"]]
+    mine["stereo"]["width"] = width
+    theirs = analysis(lufs=-8.6, peak=-0.2, centroid=2450.0, seconds=30.0)
+    theirs["file"] = Path(reference).name
+    theirs["balance"]["tiltDbPerOctave"] = -3.1
+    theirs["stereo"] = {"correlation": 0.5, "width": 0.31, "lowEndMono": True}
+    theirs["dynamics"]["peakToLoudnessDb"] = 8.4
+    difference = round(lufs + 8.6, 1)
+    bands = [{"band": ours["name"], "hz": ours["hz"], "difference": round(ours["db"] - other["db"], 1)}
+             for ours, other in zip(mine["balance"]["bands"], theirs["balance"]["bands"])]
+    headlines = [f"{abs(difference)} LU quieter overall ({lufs} vs -8.6 LUFS)"]
+    mine_id, reference_id = f"a-bounce-{fixture.bounces}", f"a-reference-{fixture.bounces}"
+    kept(fixture, reference_id)
+    return {"metrics": mine, "artifact_id": mine_id, "media_tag": kept(fixture, mine_id),
+            "verdict_text": "\n".join([f"{lufs} LUFS", *headlines]),
+            "compare": {"artifact_id": reference_id, "metrics": theirs,
+                        "differences": {"headlines": headlines, "loudness": {"differenceLu": difference},
+                                        "balance": bands}}}
 
 
 # A short silent WAV (44-byte header, 4 samples), standing in for a measured file.

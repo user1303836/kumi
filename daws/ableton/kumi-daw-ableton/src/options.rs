@@ -107,6 +107,10 @@ impl AbletonOptions {
     pub fn with_context(context: IntegrationContext) -> Self {
         let mut options = Self::new(context.on_connection);
         options.policy = context.policy;
+        // A host that doesn't let Kumi drive Live's menus gets no Hands at all.
+        if !options.policy.menus {
+            options.hands = Some(HandsSetup::Disabled);
+        }
         options.now = context.now;
         options.generation = context.generation;
         options.on_dispatch = context.on_dispatch;

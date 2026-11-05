@@ -98,6 +98,26 @@ def pinned_version(plugin_dir: Path | None = None) -> str | None:
     return version if isinstance(version, str) and VERSION.fullmatch(version) else None
 
 
+# What a listen's source is, as the pin names it (CC-16): a track of the project or its mix, a file, a map sound, or
+# a Kumi artifact. A pin that doesn't record its runtime's sources is taken to listen to files alone.
+LISTEN_KINDS = ("artifact", "file", "sound", "track")
+FILES_ONLY = frozenset({"artifact", "file", "sound"})
+
+
+def listen_sources(daw: str, plugin_dir: Path | None = None) -> frozenset[str]:
+    """The sources the pinned runtime listens to in `daw` (kumi_release.json's `listen_sources`, which
+    scripts/hermes_pin.py reads from that runtime): files only when the pin doesn't say, or can't be read."""
+    try:
+        pin = json.loads(((plugin_dir or Path(__file__).resolve().parent) / PIN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return FILES_ONLY
+    sources = pin.get("listen_sources") if isinstance(pin, dict) else None
+    kinds = sources.get(daw) if isinstance(sources, dict) else None
+    if not isinstance(kinds, list) or not all(kind in LISTEN_KINDS for kind in kinds):
+        return FILES_ONLY
+    return frozenset(kinds)
+
+
 def executable(target: str) -> str:
     return "kumi.exe" if "windows" in target else "kumi"
 

@@ -386,8 +386,10 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
 
 
 # What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
-# said the same everywhere (research-1's copy review, P3).
-UNASKED = "Kumi's changes, undos, track listens, sample-folder adds and scans, and setup steps"
+# said the same everywhere (research-1's copy review, P3). Paid generations and their uploads are among them: only a
+# turn with nobody in it refuses them (policy._paid, policy._upload), and the credit cap bounds what they spend (#1079).
+UNASKED = ("Kumi's changes, undos, track listens, sample-folder adds and scans, setup steps, and paid Mirelo generations "
+           "and the files they send to Mirelo (up to the credit cap)")
 NO_APPROVALS = (f"Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so {UNASKED} run without "
                 "asking first.")
 UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
@@ -702,6 +704,34 @@ def listen_refusal(args: dict) -> str | None:
     return None
 
 
+def source_kind(source: Any) -> str | None:
+    """A listen source's kind, as kumi_release.json's `listen_sources` names them (CC-16)."""
+    if not isinstance(source, dict):
+        return None
+    for key, kind in (("track", "track"), ("file", "file"), ("sound_id", "sound"), ("artifact_id", "artifact")):
+        if key in source:
+            return kind
+    return None
+
+
+def listen_unsupported(host: Host, args: dict) -> str | None:
+    """Why the pinned runtime can't take this listen in the producer's DAW, or None (CC-16: the pin records what each
+    DAW's runtime listens to; one that doesn't say listens to files alone). Refused before anything is asked or
+    played, in the hook and again here."""
+    daw = host.daw()
+    kinds = setup.listen_sources(daw, host.plugin_dir)
+    name = schemas.DAW_NAMES.get(daw, daw)
+    for field in ("source", "compare_to"):
+        kind = source_kind(args.get(field))
+        if kind is None or kind in kinds:
+            continue
+        if kind == "track":
+            return (f"this version of Kumi can't listen to a track or the mix in {name}. Measure a file instead: "
+                    "a bounce of the part, or the sample it plays.")
+        return f"this version of Kumi can't measure a {kind} in {name}."
+    return None
+
+
 def _file_source(source: Any) -> bool:
     return isinstance(source, dict) and bool(source) and set(source) <= SOURCE_KEYS
 
@@ -757,6 +787,9 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     refusal = listen_refusal(args)  # the approval hook checks this too; a dispatch without it mustn't play the DAW
     if refusal:
         return {"error": {"code": "invalid", "reason": refusal}}
+    unsupported = listen_unsupported(host, args)
+    if unsupported:
+        return {"error": {"code": "unsupported", "reason": f"Kumi didn't listen: {unsupported}"}}
     if not is_track_listen(args):
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
         return interpreted(host, kept_media(host, result))

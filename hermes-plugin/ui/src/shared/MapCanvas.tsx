@@ -427,7 +427,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         )}
       </div>
       {selected && chosen && (
-        <div style={{ ...S.row, justifyContent: 'space-between', gap: 8, padding: '8px 10px', borderTop: `1px solid ${T.border}` }}>
+        // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+        <div style={{ ...S.row, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 10px', borderTop: `1px solid ${T.border}` }}>
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600 }}>{clean(chosen.name, 80)}</span>
             <span style={{ ...S.row, gap: 4, marginTop: 2 }}>
@@ -437,7 +438,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               {chosen.folder && <span style={{ ...S.faint, ...S.ellipsis }}>{clean(chosen.folder, 60)}</span>}
             </span>
           </div>
-          <div style={{ ...S.row, gap: 6 }}>{actions?.(selected, chosen)}</div>
+          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>{actions?.(selected, chosen)}</div>
         </div>
       )}
     </div>
