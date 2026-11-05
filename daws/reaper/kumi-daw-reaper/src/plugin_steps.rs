@@ -146,7 +146,7 @@ pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
     ("automation_override", "It changes REAPER's global automation override, a setting outside the project's undo."),
     ("items_delete", "It deletes items with their takes."),
     ("item_delete", "It deletes an item with its takes."),
-    ("take_add", "It plays a media file given by its full path."),
+    ("take_add", "It adds a take from a media file given by its full path."),
     ("take_delete", "It deletes a take."),
     ("stretch_markers_delete", "It deletes stretch markers."),
     ("take_markers_delete", "It deletes take markers."),
