@@ -39,18 +39,26 @@ class Approvals(unittest.TestCase):
         self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"},
                                                     "compare_to": {"file": "/Samples/a.wav"}}))
 
-    def test_a_scheduled_job_never_starts_connects_or_sets_up_kumi(self):
+    def test_a_scheduled_job_never_starts_kumi_nor_runs_what_the_producer_approves_first(self):
         try:
             import gateway.session_context  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
         except ImportError:
             self.skipTest("Hermes isn't importable here")
+        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
+        asked = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
+                 "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS}}
+        before = len(support.requests(self.data / "state"))
         with mock.patch.dict(os.environ, {"HERMES_CRON_SESSION": "1"}):  # Hermes's cron marks its runs so
-            for tool in ("kumi_connect", "kumi_setup"):
-                decision = self.hook(tool, {})
+            for tool, args in asked.items():  # with the producer's chat's runtime running, whatever cron_mode says
+                decision = self.hook(tool, args)
                 self.assertEqual(decision["action"], "block", tool)
                 self.assertIn("from a scheduled job", decision["message"])
+            self.assertEqual([m["params"]["name"] for m in support.requests(self.data / "state")[before:]
+                              if m.get("method") == "tools/call"], ["listen"], "only the track listen's preview")
             self.assertIsNone(self.hook("kumi_history", {}), "a scheduled job still reads")
+            self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}}))
         self.assertIsNone(self.hook("kumi_connect", {}), "in a chat, connecting needs no approval")
+        self.assertEqual(self.hook("kumi_change", change())["action"], "approve", "and a chat's change is asked")
 
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
