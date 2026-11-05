@@ -105,7 +105,7 @@ impl Jobs {
     /// Refused `busy` while [`RUNNING`] jobs run.
     pub(crate) fn start<W, F>(&self, ctx: Rc<Ctx>, kind: &'static str, work: W) -> Result<String, OpError>
     where
-        W: FnOnce(Rc<Ctx>, JobHandle) -> F,
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
         F: Future<Output = Result<Value, OpError>> + 'static,
     {
         if self.running.get() >= RUNNING {
@@ -129,10 +129,11 @@ impl Jobs {
         self.running.set(self.running.get() + 1);
         write(ctx.snapshots(), &id, &job);
         let handle = JobHandle { id: id.clone(), job: job.clone(), ctx: ctx.clone(), signal: abort::any([own, ctx.shutdown().clone()]) };
-        let future = work(ctx.clone(), handle);
         let started = id.clone();
+        let worker = ctx.clone();
         tokio::task::spawn_local(async move {
-            let outcome = AssertUnwindSafe(future).catch_unwind().await.unwrap_or_else(|_| {
+            // `work` is called in here, so a panic before its own future starts fails this job too, never the slot.
+            let outcome = AssertUnwindSafe(async move { work(worker, handle).await }).catch_unwind().await.unwrap_or_else(|_| {
                 super::say(&format!("kumi serve: job {started} ({kind}) failed unexpectedly"));
                 Err(OpError::Failed { reason: format!("the {kind} failed unexpectedly; nothing more is known") })
             });
@@ -387,6 +388,20 @@ mod tests {
             assert_eq!(file(&ctx, &id)["state"], "interrupted");
             assert!(ctx.jobs().get("j0-404", dir.path()).is_none());
             assert!(ctx.jobs().get("../status", dir.path()).is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_job_whose_work_panics_before_it_starts_fails_alone_and_frees_its_place() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path());
+            let broken =
+                ctx.start_job("scan", |_ctx, _job| -> std::future::Ready<Result<Value, OpError>> { panic!("before its future") }).unwrap();
+            ctx.jobs().all_settled().await;
+            assert_eq!(ctx.jobs().get(&broken, dir.path()).unwrap()["state"], "failed");
+            assert_eq!(ctx.jobs().running(), 0, "its place is free again");
         })
         .await;
     }

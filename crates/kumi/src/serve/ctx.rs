@@ -378,7 +378,7 @@ impl Ctx {
     /// `jobs/<id>.json`); what it returns is the job's result. Refused `busy` while [`super::jobs::RUNNING`] jobs run.
     pub fn start_job<W, F>(&self, kind: &'static str, work: W) -> Result<String, OpError>
     where
-        W: FnOnce(Rc<Ctx>, JobHandle) -> F,
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
         F: Future<Output = Result<Value, OpError>> + 'static,
     {
         let ctx = self.me.upgrade().ok_or_else(|| OpError::Failed { reason: "the runtime is stopping".into() })?;
