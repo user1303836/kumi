@@ -26,6 +26,9 @@ PROMPT_MAX = 500
 # W3's frozen layout: the ledger is <plugin-data>/ledger.json, beside its lock. Opening it makes it, so a profile that
 # never used Mirelo has none, and kumi_job doesn't open it there.
 LEDGER_FILE = "ledger.json"
+# How long each ledger call waits for the ledger's lock before it's ledger_unavailable (amendment B-c): the approval
+# hook makes at most four such calls, within Hermes's hook timeout (policy._generate).
+LEDGER_WAIT = 2.0
 # The card event (13a): the public result, MIDI `notes` left out; one over this goes without its card.
 CARD_BYTES = 256 * 1024
 _SOURCE_KEYS = ({"artifact_id"}, {"sound_id", "map_revision"}, {"file", "provenance"})

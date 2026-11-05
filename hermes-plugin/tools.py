@@ -120,11 +120,10 @@ class Host:
         generate.LedgerUnavailable when it can't be had."""
         settings = self.generation()
         try:
-            if self._ledger is not None:
-                ledger = self._ledger(Path(self.data_dir()), credit_cap=settings["cap"])
-            else:
-                from .ledger import Ledger  # W3's
-                ledger = Ledger(Path(self.data_dir()), credit_cap=settings["cap"])
+            opener = self._ledger
+            if opener is None:
+                from .ledger import Ledger as opener  # W3's
+            ledger = opener(Path(self.data_dir()), credit_cap=settings["cap"], lock_timeout=generate.LEDGER_WAIT)
             ledger.configure(acknowledged=settings["acknowledged"], enabled=settings["enabled"])
             return ledger
         except Exception as failure:

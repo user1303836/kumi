@@ -359,7 +359,12 @@ def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     Mirelo is asked first, in the words of the runtime's own description of the file it resolved (13-R2), keyed by that
     file's identity. A create is asked from the stored quote alone, never the model's words (13-R1), keyed by its
     quote_id; its approval binds the quote's digest and estimate, which the handler checks again before it reserves.
-    Where nobody can answer, both are refused (decide, 13-R6)."""
+    Where nobody can answer, both are refused (decide, 13-R6).
+
+    Its worst case stays within 15 s of Hermes's 30 s hook timeout (a timed-out hook blocks every tool for a minute):
+    each ledger call waits at most generate.LEDGER_WAIT (2 s) for its lock (amendment B-c). A create makes four (open,
+    configure, the quote, the totals): 8 s. An upload makes two, then the runtime's preview, at most PREVIEW_TIMEOUT
+    (10 s): 14 s."""
     refusal = generate.refusal(args)
     if refusal is not None:
         return block(f"Kumi didn't run: {refusal}"), {}
