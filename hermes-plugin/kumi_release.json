@@ -70,5 +70,21 @@
     "--state-dir",
     "--stdio",
     "--tool"
-  ]
+  ],
+  "serve_operations": [
+    "change",
+    "connect",
+    "history",
+    "job",
+    "library",
+    "listen",
+    "observe",
+    "read",
+    "setup_daw",
+    "sounds",
+    "status",
+    "undo"
+  ],
+  "generate_kinds": [],
+  "ledger_policy_keys": []
 }
