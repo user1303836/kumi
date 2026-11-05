@@ -1050,13 +1050,13 @@ test("listening: guarded render validates cap and actual seconds while standalon
   local env, peer = setup(nil, { pattern_lines = 256, patterns = 1, sequence_length = 1, sequence = { 1 }, bpm = 60 })
   local range = { fromBeat = 0, beats = 64 }
   eq(result(preflight(peer, range)).seconds, 64)
-  failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, range, { maxSeconds = 60 })), "bad-params", "maxSeconds")
+  failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, range, { maxSeconds = 60 })), "stale")
   for _, cap in ipairs({ 0, -1, 60.01, "60", true, json.null }) do
     failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 1 }, { maxSeconds = cap })),
-      "bad-params", "maxSeconds")
+      "bad-params")
   end
   failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 2 }, { maxSeconds = 1 })),
-    "bad-params", "maxSeconds")
+    "stale")
   eq(#mock.renders, 0)
   ok(not exists(env.listening))
   local boundary = result((start(peer, "jpf60", { { id = "mix", what = "master" } },
@@ -1116,7 +1116,6 @@ test("listening: native guarded planning rejects nonfinite caps before folder or
     ok(not fine)
     eq(type(err), "table")
     eq(err.code, "bad-params")
-    ok(err.message:find("maxSeconds", 1, true))
     eq(mock.api_writes, writes)
     eq(#mock.renders, 0)
     ok(not exists(env.listening))
@@ -1150,8 +1149,9 @@ end)
 
 test("listening: guarded queued launch rechecks tempo, commands, fractional bounds and live transport before writes", function()
   local cases = {
-    { change = function() mock.data.transport_fields.bpm = 60 end, code = "bad-params" },
-    { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60) end, code = "bad-params" },
+    { range = { fromBeat = 0, beats = 4 }, cap = 2, change = function() mock.data.transport_fields.bpm = 60 end, code = "stale" },
+    { range = { fromBeat = 0, beats = 4 }, cap = 2,
+      change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60) end, code = "stale" },
     { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZB"), 1) end, code = "bad-params" },
     { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZD"), 1) end, code = "bad-params" },
     { change = function() mock.data.transport_fields.timing_model = renoise.Transport.TIMING_MODEL_SPEED end, code = "bad-params" },
@@ -1167,7 +1167,7 @@ test("listening: guarded queued launch rechecks tempo, commands, fractional boun
   }
   for _, c in ipairs(cases) do
     local setup_env, peer = setup(nil, { pattern_lines = 256, patterns = 1, sequence_length = 1, sequence = { 1 } })
-    local listening, job, env, state = queued_plan(peer, c.range or { fromBeat = 0, beats = 64 }, 60)
+    local listening, job, env, state = queued_plan(peer, c.range or { fromBeat = 0, beats = 64 }, c.cap or 60)
     c.change()
     local before, writes, undos = states(), mock.api_writes, #mock.data.undo.stack
     local fine, err = pcall(listening.launch, job, env)

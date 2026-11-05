@@ -162,7 +162,11 @@ fn focus_state(mut focus: Value) -> Result<Value, RuntimeError> {
     Ok(focus)
 }
 
-fn exact_render_seconds(read: &Value) -> Result<f64, RuntimeError> {
+fn render_deadline_seconds(seconds: f64) -> u64 {
+    (seconds * 4.).max(120.).ceil() as u64 + 120
+}
+
+fn exact_render_seconds(read: &Value, approval: Option<HearApproval>) -> Result<f64, RuntimeError> {
     if read["schema"].as_u64() != Some(1) || !read["aligned"].is_boolean() || !read["irregular"].is_boolean()
         || !read["clipped"].is_boolean() || !finite(&read["offset"]) {
         return Err(hear_refused("unsupported", "The bridge did not return render preflight schema 1."));
@@ -172,6 +176,9 @@ fn exact_render_seconds(read: &Value) -> Result<f64, RuntimeError> {
     }
     let seconds = read["seconds"].as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.)
         .ok_or_else(|| hear_refused("unsupported", "The bridge did not provide a finite positive exact render duration."))?;
+    if approval.is_some_and(|approved| !approved.covers(seconds, render_deadline_seconds(seconds))) {
+        return Err(hear_refused("stale", "The current window exceeds its approved duration or deadline; preview again before listening."));
+    }
     if seconds > 60. {
         return Err(hear_refused("window_too_long", "The requested interval exceeds 60 seconds on the current tempo map."));
     }
@@ -2584,11 +2591,11 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         }
         let focus = focus_state(focus)?;
         let mut read = self.render_preflight_read(window, &epoch, signal.clone()).await?;
-        let seconds = exact_render_seconds(&read)?;
+        let seconds = exact_render_seconds(&read, request.approval)?;
         signal.check()?;
         Ok(RestrictedPreflight {
             preview: HearPreview {
-                label, seconds, method: HearMethod::Offline, deadline_seconds: (seconds * 4.).max(120.).ceil() as u64 + 120,
+                label, seconds, method: HearMethod::Offline, deadline_seconds: render_deadline_seconds(seconds),
                 disclosure: if self.renderer.daw == Daw::Reaper { "REAPER may show the project as modified after a listen." } else { "" },
             },
             window, source, epoch, state: read.get_mut("render_state").expect("validated preflight state").take(), focus,
@@ -2657,6 +2664,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     async fn restricted_hear(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _held = self.hold(&original).await?;
         let before = self.restricted_preflight(request, original.clone()).await?;
+        let approval = request.approval.ok_or_else(|| hear_refused("not_approved", "A restricted render needs the host's approved window and native deadline."))?;
         let scratch = self.policy.scratch_dir(request).await?;
         let ListeningPolicy::Restricted { quarantine_root, .. } = &self.policy else {
             return Err(hear_refused("unsupported", "Restricted listening requires an explicit host policy."));
@@ -2671,6 +2679,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         // during dispatch can still stop and settle that exact job. There is no busy retry.
         let mut args = json!({
             "sources": [before.source], "range": {"fromBeat": before.window.from, "beats": before.window.beats}, "preRollBeats": 0,
+            "maxSeconds": approval.seconds,
         });
         // Preserve the normal layout placement, but never let the focus watcher's mutable
         // bookkeeping replace the exact observation epoch that this capture validated.
@@ -2679,6 +2688,9 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         args["epoch"] = json!(before.epoch);
         let started = match self.renderer.link.call("render", args, abort::timeout(10_000)).await {
             Ok(Ok(started)) => started,
+            Ok(Err(refused)) if refused.code.as_deref() == Some("stale") => {
+                return Err(hear_refused("stale", "The native renderer refused a changed window or project before starting; preview again."));
+            }
             _ => return Err(HearFailure::Unsure { reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into() }.into()),
         };
         let (done, cancelled) = self.restricted_wait(&started, before.preview.seconds, &original).await?;
@@ -2690,7 +2702,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         }
         let marked_modified = restoration?;
         if done["state"] != "done" {
-            return Err(hear_refused("render_failed", done["error"].as_str().unwrap_or("The offline render failed after its state was restored.")));
+            let code = if done["code"] == "stale" { "stale" } else { "render_failed" };
+            return Err(hear_refused(code, done["error"].as_str().unwrap_or("The offline render failed after its state was restored.")));
         }
         let files = done["files"].as_array().filter(|files| files.len() == 1)
             .ok_or_else(|| hear_refused("invalid_render_result", "The completed render did not return exactly this call's one source."))?;
@@ -3015,7 +3028,7 @@ mod tests {
     fn restricted_exact_duration_rejects_hidden_preroll_irregular_clipped_and_long_audio() {
         use super::exact_render_seconds;
         let exact = json!({"schema": 1, "seconds": 60., "offset": 0., "aligned": true, "irregular": false, "clipped": false});
-        assert_eq!(exact_render_seconds(&exact).unwrap(), 60.);
+        assert_eq!(exact_render_seconds(&exact, None).unwrap(), 60.);
         for (key, value) in [
             ("seconds", json!(60.001)), ("seconds", json!(0.)), ("seconds", Value::Null),
             ("offset", json!(0.001)), ("aligned", json!(false)), ("irregular", json!(true)),
@@ -3023,12 +3036,12 @@ mod tests {
         ] {
             let mut invalid = exact.clone();
             invalid[key] = value;
-            assert!(exact_render_seconds(&invalid).is_err(), "{invalid}");
+            assert!(exact_render_seconds(&invalid, None).is_err(), "{invalid}");
         }
         for key in ["schema", "seconds", "offset", "aligned", "irregular", "clipped"] {
             let mut incomplete = exact.clone();
             incomplete.as_object_mut().unwrap().remove(key);
-            assert!(exact_render_seconds(&incomplete).is_err(), "{key}");
+            assert!(exact_render_seconds(&incomplete, None).is_err(), "{key}");
         }
     }
 

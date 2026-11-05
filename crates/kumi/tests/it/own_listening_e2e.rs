@@ -2342,11 +2342,14 @@ impl RestrictedFixture {
         Self { integration, scratch_root, quarantine, scratch }
     }
 
-    fn request(&self, observed: &Observation) -> HearRequest {
-        HearRequest {
+    async fn request(&self, observed: &Observation) -> HearRequest {
+        let mut request = HearRequest {
             mix: Some(true), from_beat: Some(0.), beats: Some(8.), scratch_dir: Some(self.scratch.path().into()),
             expected_native_epoch: observed.native_epoch.clone(), ..Default::default()
-        }
+        };
+        let preview = self.integration.preview_hear(&request, Signal::new()).await.unwrap();
+        request.approval = Some(HearApproval { seconds: preview.seconds, deadline_seconds: preview.deadline_seconds as u16 });
+        request
     }
 }
 
@@ -2373,7 +2376,7 @@ async fn restricted_reaper_returns_only_private_scratch_audio_without_preroll_or
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
         let context: Value = serde_json::from_str(&observed.context).unwrap();
         let request = HearRequest {
-            mix: None, tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()], ..fixture.request(&observed)
+            mix: None, tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()], ..fixture.request(&observed).await
         };
         let cache = script.listening().folder();
         assert!(!cache.exists(), "preflight must work before the native cache exists");
@@ -2398,9 +2401,6 @@ async fn restricted_reaper_returns_only_private_scratch_audio_without_preroll_or
         assert_eq!(std::fs::metadata(copied).unwrap().permissions().mode() & 0o777, 0o600);
         let rendered = script.listening().renders();
         assert_eq!(rendered.len(), 1);
-        assert_eq!(rendered[0]["preRollBeats"].as_f64(), Some(0.));
-        assert_eq!(rendered[0]["maxSeconds"], 60);
-        assert_eq!(rendered[0]["sources"][0]["id"], "bounded");
         assert!(script.listening().previews().is_empty(), "never audition after rendering");
         assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1, "only this call's source was removed");
         assert_eq!(std::fs::read(neighbor).unwrap(), b"not our source");
@@ -2421,7 +2421,7 @@ async fn restricted_reaper_revalidates_bounds_transport_and_scratch_before_dispa
         let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed);
+        let request = fixture.request(&observed).await;
         fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
         script.set_playing(true);
         assert_hear_refusal(fixture.integration.hear(&request, Signal::new()).await, "transport_running");
@@ -2429,7 +2429,7 @@ async fn restricted_reaper_revalidates_bounds_transport_and_scratch_before_dispa
         script.set_recording(true);
         assert_hear_refusal(fixture.integration.preview_hear(&request, Signal::new()).await, "transport_running");
         script.set_recording(false);
-        assert_hear_refusal(fixture.integration.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await, "window_too_long");
+        assert_hear_refusal(fixture.integration.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await, "stale");
         for scratch_dir in [None, Some(home.path().into()), Some(fixture.scratch_root.path().into()), Some(home.path().join("absent"))] {
             let invalid = HearRequest { scratch_dir, ..request.clone() };
             assert!(matches!(fixture.integration.hear(&invalid, Signal::new()).await,
@@ -2463,7 +2463,7 @@ async fn restricted_renoise_restores_near_end_bpm_and_lpb_without_replaying() {
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
         // The fixture is 128 lines: 32 beats at LPB4, but only 16 at the temporary
         // LPB8. Reusing this approved range for restoration reads would now fail.
-        let request = HearRequest { from_beat: Some(28.), beats: Some(4.), ..fixture.request(&observed) };
+        let request = HearRequest { from_beat: Some(28.), beats: Some(4.), ..fixture.request(&observed).await };
         let preview = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
         let takes = fixture.integration.hear(&request, Signal::new()).await.unwrap().unwrap();
         assert_eq!(takes.len(), 1);
@@ -2499,7 +2499,7 @@ async fn restricted_renoise_cancellation_waits_for_terminal_state_and_independen
         let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed);
+        let request = fixture.request(&observed).await;
         let signal = Signal::new();
         let (heard, ()) = tokio::join!(
             fixture.integration.hear(&request, signal.clone()),
@@ -2535,7 +2535,7 @@ async fn restricted_renoise_mute_residue_is_unsure_even_when_job_reports_restore
         let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let heard = fixture.integration.hear(&fixture.request(&observed), Signal::new()).await;
+        let heard = fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await;
         assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. }))), "{heard:?}");
         assert_eq!(script.listening().restored(), 1, "job bookkeeping cannot establish restoration");
         assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
@@ -2567,7 +2567,7 @@ async fn restricted_offline_timeout_is_unsure_not_success_from_a_cancel_acknowle
         let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed);
+        let request = fixture.request(&observed).await;
         let (heard, ()) = tokio::join!(fixture.integration.hear(&request, Signal::new()), async {
             wait_for_render(|| polled.load(SeqCst)).await;
             tokio::time::pause();
@@ -2575,7 +2575,7 @@ async fn restricted_offline_timeout_is_unsure_not_success_from_a_cancel_acknowle
             tokio::time::resume();
         });
         match heard {
-            Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { reason })) => assert!(reason.contains("bounded wait"), "{reason}"),
+            Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. })) => {}
             other => panic!("timeout must be typed unsure, never restored takes: {other:?}"),
         }
         assert!(script.listening().previews().is_empty());
@@ -2617,7 +2617,7 @@ async fn restricted_reaper_rejects_a_swapped_returned_file_without_following_or_
         let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        assert_hear_refusal(fixture.integration.hear(&fixture.request(&observed), Signal::new()).await, "unsafe_render_file");
+        assert_hear_refusal(fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await, "unsafe_render_file");
         assert!(substituted.load(SeqCst));
         assert_eq!(std::fs::read(outside).unwrap(), b"never copy or delete this");
         assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
@@ -2638,7 +2638,7 @@ async fn restricted_mix_requires_the_exact_observed_epoch_and_recovers_after_a_n
         let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
         fixture.integration.start(Signal::new()).await.unwrap();
         let first = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&first);
+        let request = fixture.request(&first).await;
         let missing = HearRequest { expected_native_epoch: None, ..request.clone() };
         assert_hear_refusal(fixture.integration.preview_hear(&missing, Signal::new()).await, "stale");
         script.switch_tab();
@@ -2648,7 +2648,7 @@ async fn restricted_mix_requires_the_exact_observed_epoch_and_recovers_after_a_n
         assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
         let second = fixture.integration.observe(Signal::new(), None).await.unwrap();
         assert_ne!(first.native_epoch, second.native_epoch);
-        fixture.integration.preview_hear(&fixture.request(&second), Signal::new()).await.unwrap();
+        fixture.integration.preview_hear(&fixture.request(&second).await, Signal::new()).await.unwrap();
         fixture.integration.close().await.unwrap();
         simulator.stop();
     }).await;

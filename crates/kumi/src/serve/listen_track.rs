@@ -3,10 +3,11 @@
 use super::change::one_line;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture};
 use super::listen;
-use kumi_types::contracts::{HearMethod, HearPreview, HearRequest};
+use kumi_common::abort::{self, Signal};
+use kumi_types::contracts::{HearApproval, HearMethod, HearPreview, HearRequest};
 use kumi_types::errors::{HearFailure, RuntimeError};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 pub fn schema() -> Value {
     json!({"type":"object","oneOf": [
@@ -58,7 +59,45 @@ fn request(args: &JsonObject) -> Result<HearRequest, OpError> {
         let reference = track.get("ref").and_then(Value::as_str).filter(|value| !value.trim().is_empty() && value.len() <= 256).ok_or_else(invalid)?;
         (vec![reference.to_owned()], None)
     };
-    Ok(HearRequest { tracks, mix, from_beat: Some(from), beats: Some(beats), seconds: None, whole: None, scratch_dir: None, expected_native_epoch: None })
+    Ok(HearRequest { tracks, mix, from_beat: Some(from), beats: Some(beats), ..Default::default() })
+}
+
+fn approval(call: &Call) -> Result<(HearApproval, u64), OpError> {
+    let missing = || OpError::Refused { code: "not_approved", reason: "This capture has no host-approved window and deadlines; preview it again.".into(), owner: None };
+    let invalid = || OpError::Invalid { reason: "_listen requires estimated_seconds in (0, 60], integer prepare_seconds in 0–120 and integer deadline_seconds in 1–360.".into() };
+    let given = call.host.private.get("_listen").ok_or_else(missing)?
+        .as_object().filter(|given| given.len() == 3).ok_or_else(invalid)?;
+    let seconds = given.get("estimated_seconds").and_then(Value::as_f64)
+        .filter(|seconds| seconds.is_finite() && *seconds > 0. && *seconds <= 60.).ok_or_else(invalid)?;
+    let deadline = given.get("deadline_seconds").and_then(Value::as_u64)
+        .filter(|deadline| (1..=360).contains(deadline)).ok_or_else(invalid)?;
+    let prepare = given.get("prepare_seconds").and_then(Value::as_u64)
+        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || *prepare == 0)).ok_or_else(invalid)?;
+    Ok((HearApproval { seconds, deadline_seconds: deadline as u16 }, prepare))
+}
+
+/// Preparation cannot spend any of the approved native phase. Its cancellation reaches both
+/// the converter and the DSP worker before the unpublished stage is dropped.
+async fn prepare_reference(ctx: &Ctx, source: &Value, original: &Signal, seconds: u64) -> Result<listen::MeasuredAudio, OpError> {
+    let stop = Signal::new();
+    let signal = abort::any([original.clone(), stop.clone()]);
+    let work = async {
+        let path = listen::resolve_source(ctx, source, &signal).await?;
+        let staged = listen::stage_source(ctx, source, &signal).await?;
+        listen::measure(ctx, staged, &path, &signal).await
+    };
+    tokio::select! {
+        biased;
+        _ = tokio::time::sleep(Duration::from_secs(seconds)) => {
+            stop.cancel();
+            Err(OpError::Refused { code: "prepare_timeout", reason: "The reference exceeded its preparation deadline; nothing was captured or rendered.".into(), owner: None })
+        }
+        _ = original.cancelled() => {
+            stop.cancel();
+            Err(OpError::Refused { code: "cancelled", reason: "Reference preparation was cancelled; nothing was captured or rendered.".into(), owner: None })
+        }
+        measured = work => measured,
+    }
 }
 
 fn outcome(state: &str, code: &str, reason: &str, restored: bool) -> Value {
@@ -109,9 +148,21 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     request.expected_native_epoch = project.native_epoch;
     let connection = ctx.connection()?;
     if call.signal.is_cancelled() { return hearing_error(ctx, RuntimeError::Aborted, false); }
+    let preview_only = call.args.get("preview") == Some(&Value::Bool(true));
+    let approved = if !preview_only || call.host.private.get("_listen").is_some() { Some(approval(&call)?) } else { None };
+    if !preview_only { request.approval = approved.map(|(native, _)| native); }
     let reference = match call.args.get("compare_to") {
-        Some(value) => Some((value, listen::resolve_source(ctx, value, &call.signal).await?)),
+        Some(source) if preview_only => {
+            listen::resolve_source(ctx, source, &call.signal).await?;
+            None
+        }
+        Some(source) => Some(prepare_reference(ctx, source, &call.signal, approved.expect("actual capture requires approval").1).await?),
         None => None,
+    };
+    ctx.link().expect(key, epoch)?;
+    // The plain shutdown bound applies to preparation. Only the native phase extends it.
+    let _settling = if preview_only { None } else {
+        Some(ctx.settling(approved.expect("actual capture requires approval").0.deadline_seconds)?)
     };
     let preview = match connection.integration.preview_hear(&request, call.signal.clone()).await {
         Ok(preview) => preview,
@@ -120,19 +171,16 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60.
         || !(1..=360).contains(&preview.deadline_seconds)
     { return Err(OpError::Refused { code:"unsupported", reason:"The DAW did not provide a bounded capture plan.".into(), owner:None }); }
-    if call.args.get("preview") == Some(&Value::Bool(true)) {
+    if preview_only {
         return Ok(json!({"state":"preview","project":{"key":project.key,"epoch":project.epoch.to_string()},
             "text":preview_text(&request, &preview),"estimated_seconds":preview.seconds,
-            "method":preview.method,"deadline_seconds":preview.deadline_seconds}));
+            "method":preview.method,"deadline_seconds":preview.deadline_seconds,
+            "prepare_seconds":if call.args.contains_key("compare_to") {120} else {0}}));
     }
-    // A bad reference cannot spend an approved playback. Measurement remains unpublished.
-    let reference = match reference {
-        Some((source, path)) => {
-            let staged = listen::stage_source(ctx, source, &call.signal).await?;
-            Some(listen::measure(ctx, staged, &path, &call.signal).await?)
-        }
-        None => None,
-    };
+    let native = approved.expect("actual capture requires approval").0;
+    if !native.covers(preview.seconds, preview.deadline_seconds) {
+        return Ok(outcome("refused", "stale", "The current window exceeds its approved duration or deadline; preview again before listening.", true));
+    }
     ctx.link().expect(key, epoch)?;
     let scratch = ctx.scratch("listen")?;
     request.scratch_dir = Some(scratch.path().to_path_buf());
@@ -149,7 +197,6 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             Err(_) => return Err(OpError::Failed { reason: "The runtime could not prepare its private quarantine; no capture started.".into() }),
         }
     }
-    let _settling = ctx.settling(preview.deadline_seconds as u16)?;
     call.progress.report(0., Some(3.), Some("Capturing the approved window; temporary DAW state will be restored."));
     let takes = match connection.integration.hear(&request, call.signal.clone()).await {
         Ok(Ok(takes)) => takes,

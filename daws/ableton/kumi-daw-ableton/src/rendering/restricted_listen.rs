@@ -30,7 +30,8 @@ struct CaptureState {
 }
 
 enum CaptureTransport {
-    Seek { position: f64, looped: bool },
+    Prepare,
+    Restore,
     Continue,
     Stop,
 }
@@ -41,6 +42,7 @@ struct Ready {
     label: String,
     window: Window,
     seconds: f64,
+    seconds_limit: f64,
 }
 
 fn refused(code: &'static str, reason: impl Into<String>) -> RuntimeError {
@@ -113,6 +115,9 @@ impl LiveRenderer {
             return Err(refused("back_to_arrangement", "Live is not following the Arrangement. Resolve Back to Arrangement yourself, then observe again."));
         }
         let seconds = window.beats * 60.0 / state.tempo;
+        if request.approval.is_some_and(|approval| !approval.covers(seconds, CALL_DEADLINE_SECONDS)) {
+            return Err(refused("stale", "The current window exceeds its approved duration or deadline; preview again before listening."));
+        }
         if !seconds.is_finite() || seconds <= 0.0 || seconds > 60.0 {
             return Err(refused("window_too_long", "The approved beat window must be at most 60 seconds at the current tempo."));
         }
@@ -127,7 +132,7 @@ impl LiveRenderer {
                 return Err(refused("ears_missing", "The preinstalled Kumi Ears device is missing. It requires Max for Live; listening never installs it."));
             }
         }
-        Ok(Ready { state, target, label, window, seconds })
+        Ok(Ready { state, target, label, window, seconds, seconds_limit: request.approval.map_or(seconds, |approval| approval.seconds) })
     }
 
     /// Validate the exact observed Set before any rows from this response enter the ref book.
@@ -149,10 +154,15 @@ impl LiveRenderer {
 
     /// Only these transport steps belong to a capture. Native transactions fence the preview
     /// through apply; never accept a preview from a newer Set or fall back to an emergency stop.
-    async fn capture_transport(&self, state: &CaptureState, step: CaptureTransport, signal: Signal) -> Result<(), RuntimeError> {
+    async fn capture_transport(&self, ready: &Ready, step: CaptureTransport, signal: Signal) -> Result<(), RuntimeError> {
+        let state = &ready.state;
+        let begins = matches!(step, CaptureTransport::Prepare | CaptureTransport::Continue);
         let needs_stopped = !matches!(step, CaptureTransport::Stop);
         let (preview_name, apply_name, input) = match step {
-            CaptureTransport::Seek { position, looped } => ("live_transport_preview", "live_transport_apply", json!({"position":position,"loopEnabled":looped})),
+            CaptureTransport::Prepare => ("live_transport_preview", "live_transport_apply", json!({"position":ready.window.from,"loopEnabled":false})),
+            CaptureTransport::Restore => ("live_transport_preview", "live_transport_apply", json!({
+                "position":state.transport["position"],"loopEnabled":state.transport["loop"]["enabled"],
+            })),
             CaptureTransport::Continue => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"continue"})),
             CaptureTransport::Stop => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"stop"})),
         };
@@ -165,7 +175,11 @@ impl LiveRenderer {
         }
         let transaction = preview.get("transactionId").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(unreadable)?;
         if preview.get("confirmation").and_then(Value::as_str) != Some("apply") { return Err(unreadable()); }
-        self.capture_set_at(state.epoch, &state.identity, signal.clone()).await?;
+        let set = self.capture_set_at(state.epoch, &state.identity, signal.clone()).await?;
+        let seconds = ready.window.beats * 60.0 / number(&set, "tempo")?;
+        if begins && (!seconds.is_finite() || seconds <= 0. || seconds > ready.seconds_limit) {
+            return Err(refused("stale", "Live's tempo changed beyond the approved window before playback; preview again."));
+        }
         // Read AFTER preview: the native playback revision advances when recording/playing
         // state changes, and apply fences that revision again on Live's main thread.
         let (playback, song) = futures::try_join!(
@@ -266,6 +280,9 @@ impl LiveRenderer {
     pub(super) async fn hear_restricted(
         self: &Rc<Self>, request: &HearRequest, original: Signal,
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
+        if request.approval.is_none() {
+            return Err(refused("not_approved", "A restricted capture needs the host's approved window and native deadline."));
+        }
         let directory = self.listening_policy.scratch_dir(request).await?;
         let signal = abort::any([original.clone(), self.connection().lifetime.clone(), abort::timeout(120_000)]);
         let ready = self.restricted_preflight(request, signal.clone()).await?;
@@ -305,14 +322,11 @@ impl LiveRenderer {
         if same_set {
             for tap in rig.ears.as_ref().expect("per-call Ears").taps.values() { link.stop(tap); }
             if started {
-                let _ = self.capture_transport(&ready.state, CaptureTransport::Stop, cleanup.clone()).await;
+                let _ = self.capture_transport(&ready, CaptureTransport::Stop, cleanup.clone()).await;
             }
             self.close_rig(&mut rig).await;
             if transport_touched {
-                let _ = self.capture_transport(&ready.state, CaptureTransport::Seek {
-                    position: ready.state.transport["position"].as_f64().expect("validated position"),
-                    looped: ready.state.transport["loop"]["enabled"].as_bool().expect("validated loop state"),
-                }, cleanup.clone()).await;
+                let _ = self.capture_transport(&ready, CaptureTransport::Restore, cleanup.clone()).await;
             }
         }
         link.close().await;
@@ -349,13 +363,13 @@ impl LiveRenderer {
             return Err(refused("capture_too_large", "This window at Live's sample rate would exceed the private audio size limit."));
         }
         *transport_touched = true;
-        self.capture_transport(&ready.state, CaptureTransport::Seek { position: ready.window.from, looped: false }, signal.clone()).await?;
+        self.capture_transport(ready, CaptureTransport::Prepare, signal.clone()).await?;
         link.arm(tap, cap, false, Some(signal.clone())).await.map_err(|_| refused("ears_unavailable", "Kumi Ears did not arm."))?;
         *started = true;
         let deadline = Instant::now() + Duration::from_secs_f64(cap);
         let end = ready.window.from + ready.window.beats;
         let played = tokio::time::timeout_at(deadline, async {
-            self.capture_transport(&ready.state, CaptureTransport::Continue, signal.clone()).await?;
+            self.capture_transport(ready, CaptureTransport::Continue, signal.clone()).await?;
             loop {
                 signal.check()?;
                 if let Some(now) = link.transport(tap, Some(signal.clone())).await.map_err(|_| unreadable())? {
@@ -368,7 +382,7 @@ impl LiveRenderer {
         let stop_signal = abort::any([self.connection().lifetime.clone(), abort::timeout(5_000)]);
         if !self.capture_set_matches(&ready.state, stop_signal.clone()).await { return Err(unsure()); }
         // Keep `started` true until the independent after-read proves a stopped transport.
-        self.capture_transport(&ready.state, CaptureTransport::Stop, stop_signal).await?;
+        self.capture_transport(ready, CaptureTransport::Stop, stop_signal).await?;
         played.map_err(|_| refused("capture_deadline", "The capture reached its independent deadline."))??;
         let raw = RawFile(directory.join(format!("{}.raw", uuid::Uuid::new_v4())));
         let written = link.write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal.clone())).await

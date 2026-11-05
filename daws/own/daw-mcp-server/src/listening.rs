@@ -417,11 +417,18 @@ impl Host {
             if !(0. ..=MAX_PRE_ROLL_BEATS).contains(&pre_roll) {
                 return Err(format!("preRollBeats: from 0 to {MAX_PRE_ROLL_BEATS}"));
             }
-            if self.listening_mode == ListeningMode::Restricted {
-                if pre_roll != 0.0 {
-                    return Err("restricted listening does not permit preroll".into());
+            let max_seconds = number(arguments, "maxSeconds")?;
+            if self.listening_mode == ListeningMode::Restricted && max_seconds.is_none() {
+                return Err("restricted listening requires its approved maxSeconds".into());
+            }
+            if let Some(cap) = max_seconds {
+                if !cap.is_finite() || cap <= 0. || cap > 60. {
+                    return Err("maxSeconds: a finite number greater than 0 and at most 60".into());
                 }
-                params.insert("maxSeconds".into(), json!(60));
+                if pre_roll != 0.0 {
+                    return Err("bounded listening does not permit preroll".into());
+                }
+                params.insert("maxSeconds".into(), cap.into());
             }
             params.insert("preRollBeats".into(), pre_roll.into());
             match arguments.get("sampleRate") {

@@ -983,7 +983,8 @@ local function restricted_range(song, requested, cap, mark_of)
     bad("guarded listening requires regular timing and an unclipped range aligned at both line boundaries")
   end
   number(range.seconds, "render seconds")
-  if range.seconds <= 0 or range.seconds > cap then bad("render exceeds maxSeconds") end
+  if range.seconds <= 0 then bad("render duration must be positive") end
+  if range.seconds > cap then fail("stale", "the approved render exceeds maxSeconds; nothing changed") end
   return timeline, range
 end
 

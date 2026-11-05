@@ -219,6 +219,26 @@ pub struct HearRequest {
     /// The native epoch of the host's exact observation, not a fresh probe or a model argument.
     #[serde(skip)]
     pub expected_native_epoch: Option<String>,
+    /// The host's approved native window and budget. A restricted capture never invents these.
+    #[serde(skip)]
+    pub approval: Option<HearApproval>,
+}
+
+/// Internal approval for one bounded capture; never accepted through the listening tool's schema.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HearApproval {
+    pub seconds: f64,
+    pub deadline_seconds: u16,
+}
+
+impl HearApproval {
+    /// A fresh plan must fit the approved duration and native budget, even after a tempo change.
+    pub fn covers(&self, seconds: f64, deadline_seconds: u64) -> bool {
+        self.seconds.is_finite() && self.seconds > 0. && self.seconds <= 60.
+            && (1..=360).contains(&self.deadline_seconds)
+            && seconds.is_finite() && seconds > 0. && seconds <= self.seconds
+            && deadline_seconds > 0 && deadline_seconds <= u64::from(self.deadline_seconds)
+    }
 }
 
 /// A read-only preflight for hearing a bounded part; it starts no capture and creates no files.

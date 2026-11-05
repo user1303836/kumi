@@ -376,16 +376,17 @@ fn guarded_render_rechecks_queued_tempo_and_transport_before_any_execution_effec
         let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
         rig.ask("render_start", json!({
             "jobId": "queued-cap", "sources": [{"id": "mix", "what": "master"}],
-            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 0.5,
         })).unwrap();
         fake::with(|s| {
-            if play_bits == 0 { s.bpm = 0.5; } else { s.play_bits = play_bits; }
+            if play_bits == 0 { s.bpm = 60.; } else { s.play_bits = play_bits; }
         });
         let writes = crate::reaper::writes();
         let settings = render_settings();
         let files = files_in(&rig.folder());
         rig.tick();
         assert_eq!(rig.status("queued-cap")["state"], "failed");
+        if play_bits == 0 { assert_eq!(rig.status("queued-cap")["code"], "stale"); }
         assert_eq!(crate::reaper::writes(), writes);
         assert_eq!(render_settings(), settings);
         assert_eq!(files_in(&rig.folder()), files);

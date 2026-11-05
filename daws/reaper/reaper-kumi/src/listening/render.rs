@@ -409,7 +409,7 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value, folder: &Path) -> Re
     }
     let seconds = end - start;
     if max_seconds.is_some_and(|cap| seconds > cap) {
-        return Err(bad("that stretch exceeds maxSeconds; nothing changed"));
+        return Err(stale("the approved stretch exceeds maxSeconds; nothing changed"));
     }
     if let Some(free) = params.get("freeBytes").and_then(Value::as_u64) {
         let needed = (seconds * rate.unwrap_or(48_000) as f64 * 8.0 * sources.len() as f64 * 1.5) as u64;
@@ -516,7 +516,7 @@ impl Plan {
         stopped(reaper, self.proj)?;
         let (start, at, end) = beat_times(reaper, self.proj, from, beats, 0.0)?;
         if end - start > cap {
-            return Err(bad("that stretch now exceeds maxSeconds; nothing changed"));
+            return Err(stale("the approved stretch now exceeds maxSeconds; nothing changed"));
         }
         super::guarded_folder(&self.folder, false)?;
         self.start = start;

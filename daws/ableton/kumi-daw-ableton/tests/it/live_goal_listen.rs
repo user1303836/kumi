@@ -189,6 +189,7 @@ async fn bounded(ears: bool) -> (Live, Rc<State>, HearRequest) {
     let mut request: HearRequest = serde_json::from_value(json!({"tracks":[reference],"fromBeat":8,"beats":4})).unwrap();
     request.scratch_dir = Some(live._folder.path().join("listen/native-call"));
     request.expected_native_epoch = Some("7".into());
+    request.approval = Some(kumi_types::contracts::HearApproval { seconds: 2., deadline_seconds: 300 });
     (live, state, request)
 }
 
@@ -207,7 +208,7 @@ fn preview_reads_only_and_names_a_bounded_ears_capture() {
         let preview = live.rendering.preview_hear(&request, Signal::new()).await.unwrap();
         assert_eq!(preview.seconds, 2.);
         assert_eq!(preview.method, HearMethod::Ears);
-        assert!((65..=900).contains(&preview.deadline_seconds));
+        assert!((1..=360).contains(&preview.deadline_seconds));
         assert_eq!(state.opened.get(), 0);
         assert_eq!(live.set.next.get(), 0, "no mutation preview or apply during a listen preview");
         restored(&live, &state);
@@ -283,6 +284,9 @@ fn an_unmoving_transport_reaches_the_independent_capture_cap_without_replay() {
         state.tempo.set(60.);
         state.advancing.set(false);
         request.beats = Some(60.);
+        request.approval = None;
+        let preview = live.rendering.preview_hear(&request, Signal::new()).await.unwrap();
+        request.approval = Some(kumi_types::contracts::HearApproval { seconds: preview.seconds, deadline_seconds: preview.deadline_seconds as u16 });
         let started = tokio::time::Instant::now();
         assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
             Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_deadline", .. }))));
@@ -472,6 +476,41 @@ fn whole_mix_capture_uses_main_and_restores_its_device_chain() {
         assert_eq!(locations.len(), 1);
         assert!(locations[0].starts_with("live_set master_track devices "), "{locations:?}");
         assert_eq!(live.set.chain("Main"), ["Limiter"]);
+        restored(&live, &state);
+    });
+}
+
+#[test]
+fn a_slower_tempo_after_approval_is_stale_before_any_device_or_transport_change() {
+    on_a_paused_clock(async {
+        for mix in [false, true] {
+            let (live, state, mut request) = bounded(true).await;
+            if mix { request.tracks.clear(); request.mix = Some(true); }
+            state.tempo.set(60.);
+            assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
+                Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))));
+            assert_eq!(state.starts.get(), 0);
+            assert_eq!(state.opened.get(), 0);
+            assert_eq!(live.set.next.get(), 0);
+            assert_eq!(state.tempo.get(), 60., "the producer's tempo change is preserved");
+            restored(&live, &state);
+        }
+    });
+}
+
+#[test]
+fn a_capture_requires_approval_with_room_for_its_native_cleanup() {
+    on_a_paused_clock(async {
+        let (live, state, mut request) = bounded(true).await;
+        request.approval = None;
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "not_approved", .. }))));
+        request.approval = Some(kumi_types::contracts::HearApproval { seconds: 2., deadline_seconds: 299 });
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))));
+        assert_eq!(state.opened.get(), 0);
+        assert_eq!(state.starts.get(), 0);
+        assert_eq!(live.set.next.get(), 0);
         restored(&live, &state);
     });
 }

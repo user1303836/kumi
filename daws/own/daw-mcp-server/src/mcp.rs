@@ -539,6 +539,7 @@ fn listening_tools(daw: Daw, pick: &Value) -> Vec<Value> {
                 }, "required": ["id", "what"], "additionalProperties": false}},
                 "range": {"type": "object", "properties": {"fromBeat": {"type": "number", "minimum": 0}, "beats": {"type": "number", "exclusiveMinimum": 0}}, "required": ["fromBeat", "beats"], "additionalProperties": false, "description": "Quarter notes from the project's start."},
                 "preRollBeats": {"type": "number", "minimum": 0, "maximum": MAX_PRE_ROLL_BEATS, "description": "Rendered before the part so effects are warm; each file's start says where the part begins."},
+                "maxSeconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60, "description": "Optional exact-duration cap, required in restricted-listening mode. Requires zero preroll; rechecked before native rendering starts, refusing stale if the window grew."},
                 "sampleRate": {"enum": SAMPLE_RATES},
                 "epoch": {"type": "string"},
                 "layout": {"type": "integer", "minimum": 0},

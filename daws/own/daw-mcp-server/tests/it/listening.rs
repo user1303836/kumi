@@ -156,7 +156,8 @@ async fn listening_maintenance_respects_the_startup_policy_and_keeps_per_call_cl
             assert!(unrelated.exists(), "startup does not prune the listening folder");
 
             let snapshot = host.call("snapshot", json!({}), &Pick::default(), std::time::Duration::from_secs(5)).await.unwrap();
-            let render = json!({"sources": [{"id": "mix", "what": "master"}], "range": {"fromBeat": 0, "beats": 0.25}, "epoch": snapshot["epoch"]});
+            let render = json!({"sources": [{"id": "mix", "what": "master"}], "range": {"fromBeat": 0, "beats": 0.25},
+                "maxSeconds": 0.25, "epoch": snapshot["epoch"]});
             let (job, failed) = host.render(&render).await;
             assert!(!failed, "{job}");
             check();

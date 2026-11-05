@@ -839,8 +839,11 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     assert_eq!(seen["project_key"], a, "the look read A: {seen}");
     assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-1"), "A's key keeps A's epoch, never B's");
     assert!(!lab.ctx.link().page_is_looked(Some("sim-2")));
+    let retained = lab.ctx.link().project().unwrap();
     let (stale, error) = wire.call("read", track.clone(), None).await;
     assert!(error && stale["error"]["code"] == "stale", "B's page passed as A's: {stale}");
+    let after = lab.ctx.link().project().unwrap();
+    assert_eq!((after.key, after.epoch, after.native_epoch), (retained.key, retained.epoch, retained.native_epoch));
 
     // The next look is B's, with B's epoch: B's rows are B's.
     let (b, _) = wire.call("observe", json!({"scope": "focus"}), None).await;

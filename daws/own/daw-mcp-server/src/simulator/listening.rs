@@ -556,7 +556,7 @@ impl SimListening {
                 return Err(bad("Restricted renders do not permit preroll."));
             }
             if !state.tempo.is_finite() || state.tempo <= 0.0 || beats * 60.0 / state.tempo > cap {
-                return Err(bad("The render exceeds maxSeconds."));
+                return Err(("stale".into(), "The approved render exceeds maxSeconds.".into()));
             }
             if state.playing_now || state.playing.is_some() {
                 return Err(("busy".into(), "Playback started before the restricted render.".into()));
