@@ -97,9 +97,60 @@ class Tools(unittest.TestCase):
         self.assertNotIn("preview", self.received("change")[0], "a preview is the approval hook's, never the model's")
         [row] = support.call(self.host, "kumi_history", {"limit": 5})["items"]
         self.assertEqual((row["id"], row["title"], row["family"]), (applied["history_ids"][0], "Louder drums", "mixer"))
+        self.assertLessEqual(set(row), set(tools.HISTORY_FIELDS), "a live answer says C1's fields only too")
         undone = support.call(self.host, "kumi_undo", {"history_id": row["id"]}, session_id="s1")
         self.assertEqual(undone["state"], "undone")
         self.assertEqual(support.call(self.host, "kumi_read", {"action": "data"})["rows"][0]["volume_db"], -6.0)
+
+    def test_without_a_runtime_here_history_is_as_last_published_c1s_fields_and_nothing_undoable(self):
+        self.assertEqual(support.call(self.host, "kumi_history", {}),
+                         {"items": [], "from": "last_published", "note": "Kumi hasn't run in this profile yet."})
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        applied = support.call(self.host, "kumi_change", LOUDER, session_id="s1")
+        elsewhere = tools.Host(self.ctx, runtime.Runtimes(), data_dir=lambda: self.data, pinned=lambda: support.VERSION)
+        another = support.call(elsewhere, "kumi_history", {"limit": 5})  # another Hermes process: its own runtimes
+        [row] = another["items"]
+        self.assertEqual(row["id"], applied["history_ids"][0])
+        self.assertLessEqual(set(row), set(tools.HISTORY_FIELDS), "C1's fields only, never CC-5's (12a)")
+        self.assertEqual((row["undo_available"], another["stale"]), (False, False), "running elsewhere (12b)")
+        self.assertIn("another Hermes process", another["note"])
+        self.host.runtimes.stop_all()
+        stopped = support.call(self.host, "kumi_history", {"limit": 5})
+        self.assertIsNone(self.host.runtimes.get(self.data), "reading HISTORY starts nothing")
+        self.assertEqual((stopped["items"][0]["id"], stopped["running"]), (applied["history_ids"][0], False))
+        self.assertNotIn("unexpectedly", stopped["note"], "a clean stop isn't a crash")
+        self.assertIsInstance(stopped["as_of"], int)
+
+    def test_published_history_shows_whatever_setup_says_and_says_when_it_cant_be_read(self):
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        applied = support.call(self.host, "kumi_change", LOUDER, session_id="s1")
+        self.host.runtimes.stop_all()
+        repinned = tools.Host(self.ctx, runtime.Runtimes(), data_dir=lambda: self.data, pinned=lambda: "9.9.9")
+        self.assertEqual([row["id"] for row in support.call(repinned, "kumi_history", {})["items"]],
+                         applied["history_ids"], "a setup that needs redoing doesn't hide HISTORY")
+        (self.data / "state" / "history.json").write_text(json.dumps({"schema": 2, "items": []}), encoding="utf-8")
+        self.assertEqual(support.call(self.host, "kumi_history", {})["note"], "Kumi's published HISTORY can't be read.")
+
+    def test_history_after_kumi_died_says_its_last_change_may_be_missing(self):
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        support.call(self.host, "kumi_change", LOUDER, session_id="s1")
+        self.host.runtimes.stop_all()
+        owner = self.data / "state" / "owner.json"  # as a runtime that died leaves it: running, its last beat long ago
+        owner.write_text(json.dumps({**json.loads(owner.read_text(encoding="utf-8")), "running": True, "heartbeat": 1,
+                                     "at": 1}), encoding="utf-8")
+        published = support.call(self.host, "kumi_history", {})
+        self.assertTrue(published["stale"])
+        self.assertIn("Kumi stopped unexpectedly; its last change may be missing here or unsure.", published["note"])
+
+    def test_a_scheduled_job_reads_published_history_even_with_kumi_running_here(self):
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        support.call(self.host, "kumi_change", LOUDER, session_id="s1")
+        asked = len(self.received("history"))
+        self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
+        published = support.call(self.host, "kumi_history", {}, session_id="cron-1")
+        self.assertEqual((published["from"], len(published["items"])), ("last_published", 1))
+        self.assertIn("scheduled job", published["note"])
+        self.assertEqual(len(self.received("history")), asked, "the runtime was never asked (12d)")
 
     def test_a_write_whose_answer_never_came_is_unsure_and_never_sent_again(self):
         host, _, data = support.host(self, None, "--slow", "change=2")

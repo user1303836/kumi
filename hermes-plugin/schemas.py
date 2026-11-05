@@ -107,7 +107,10 @@ KUMI_UNDO = _tool(
 KUMI_HISTORY = _tool(
     "kumi_history",
     "Kumi's HISTORY for the open project, newest first: each change's id, title, family, time, state and whether it can "
-    "still be undone. Reads only.",
+    "still be undone. When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job, it's "
+    "HISTORY as Kumi last published it (from: last_published, as_of): nothing can be undone then, and the project may "
+    "have changed since. Reads only; starts nothing. Its titles and track names leave this computer only where you send "
+    "the answer (a scheduled job's delivery).",
     {"limit": {"type": "integer", "minimum": 1, "maximum": 200}})
 
 # A listen's source: a file, a sound or an artifact as _SOURCE, or one track or the mix over a beat window (CC-2).
