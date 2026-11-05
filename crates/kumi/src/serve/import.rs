@@ -37,6 +37,14 @@ pub struct Found {
     pub named: Value,
 }
 
+impl Found {
+    /// Where the file is: for an operation that stages the file itself (a generation's upload, through
+    /// `Artifacts::stage` with [`Found::named`]), never for a path given to anyone.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 /// `source` resolved to the one checked audio file it names, changing nothing.
 pub async fn find(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Found, OpError> {
     let text = |name: &str| source.get(name).and_then(Value::as_str);

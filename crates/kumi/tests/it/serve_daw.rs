@@ -882,6 +882,7 @@ impl kumi_agent::core::contracts::Integration for PlanLive {
         let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone() };
         let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![Rc::new(plan), Rc::new(SampleStep)];
         Ok(kumi_agent::core::contracts::Observation {
+            native_epoch: None,
             key: "live:demo".into(),
             revision: None,
             label: "Live — Demo".into(),
@@ -983,6 +984,8 @@ impl ImportLab {
             library_roots: vec![library.path().to_path_buf()],
             media_roots: vec![media.path().to_path_buf()],
             tools: BTreeMap::new(),
+            hermes_home: None,
+            hermes_root: None,
         };
         let ctx = Ctx::new(args, env, kumi_daw::io::Answers::default().with(factory)).unwrap();
         ImportLab { _home: home, media, library, ctx, given }
