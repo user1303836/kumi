@@ -42,6 +42,10 @@ pub struct Row {
     /// What the call that made it came to (`applied`, `partial`, `unsure`), as it answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_outcome: Option<String>,
+    /// The files the call placed (CC-11): each source as it named the file, the file's name and the identity of the
+    /// file the DAW got.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<Value>>,
 }
 
 pub struct History {
@@ -116,6 +120,7 @@ impl History {
             tool_call_id: None,
             digest: None,
             call_outcome: None,
+            sources: None,
         };
         let row = {
             let mut rows = self.rows.borrow_mut();
@@ -123,9 +128,15 @@ impl History {
                 Some(row) => {
                     // Its state since: the project, the call, what the call came to and when it was made stay as first
                     // recorded.
-                    let (project_key, tool_call_id, digest, call_outcome, at) =
-                        (row.project_key.clone(), row.tool_call_id.clone(), row.digest.clone(), row.call_outcome.clone(), row.at);
-                    *row = Row { project_key, tool_call_id, digest, call_outcome, at, ..fresh };
+                    let (project_key, tool_call_id, digest, call_outcome, sources, at) = (
+                        row.project_key.clone(),
+                        row.tool_call_id.clone(),
+                        row.digest.clone(),
+                        row.call_outcome.clone(),
+                        row.sources.clone(),
+                        row.at,
+                    );
+                    *row = Row { project_key, tool_call_id, digest, call_outcome, sources, at, ..fresh };
                     row.clone()
                 }
                 None => {
@@ -169,6 +180,21 @@ impl History {
             self.publish(snapshots);
         }
         made.iter().filter_map(|id| rows.iter().find(|row| &row.id == id).cloned()).collect()
+    }
+
+    /// The files the call whose rows are `ids` placed (CC-11), kept with them.
+    pub fn placed(&self, ids: &[String], sources: &[Value], snapshots: &Snapshots) {
+        if sources.is_empty() {
+            return;
+        }
+        let mut marked = false;
+        for row in self.rows.borrow_mut().iter_mut().filter(|row| ids.contains(&row.id)) {
+            row.sources = Some(sources.to_vec());
+            marked = true;
+        }
+        if marked {
+            self.publish(snapshots);
+        }
     }
 
     /// What the call whose rows are `ids` came to: kept with them, for a retry answered from HISTORY.
@@ -217,6 +243,7 @@ impl History {
             tool_call_id: identity.tool_call_id.map(str::to_string),
             digest: Some(identity.digest.to_string()),
             call_outcome: None,
+            sources: None,
         };
         {
             let mut rows = self.rows.borrow_mut();

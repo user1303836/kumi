@@ -505,8 +505,7 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         json!([{"tool": "run_lua", "input": {"code": "x = 1"}}]),
         json!([{"tool": "take_add", "input": {"ref": reference, "path": "/Users/me/Samples/kick.wav"}}]),
         json!([{"tool": "wait", "input": {"seconds": 1800}}]),
-        // A file goes in only through the import step: not in this runtime yet, whatever the field holds.
-        json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]),
+        // A file step's field takes only a source, never a search of folders.
         json!([{"tool": "item_import", "input": {"ref": reference, "path": {"folders": ["/Users/me/Private"], "random": true}}}]),
     ]
     .into_iter()
@@ -515,6 +514,11 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
     }
+
+    // A sound from a map this runtime hasn't made: stale, and nothing runs.
+    let sound = json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]);
+    let (unmapped, _) = wire.call("change", plan(&key, epoch, sound), Some("tc-unmapped")).await;
+    assert_eq!((unmapped["state"].clone(), unmapped["code"].clone()), (json!("refused"), json!("stale")), "{unmapped}");
 
     // Once per host call: it runs, and the same call asked again gets that answer without running again.
     let (first, _) = wire.call("change", plan(&key, epoch, down.clone()), Some("tc-1")).await;
@@ -660,15 +664,15 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, label) = looked(&mut wire).await;
 
-    // What a change may use (the allowlist's steps the plan offers), with their families, and the readers. A step that
-    // places a file isn't one until the import step is in the runtime.
+    // What a change may use (the allowlist's steps the plan offers), with their families, and the readers.
     let (offered, _) = wire.call("read", json!({"action": "schema", "max_chars": 20000}), None).await;
     let names = |list: &str| -> Vec<String> {
         offered[list].as_array().unwrap().iter().map(|entry| entry["tool"].as_str().unwrap().to_string()).collect()
     };
     let (steps, readers) = (names("steps"), names("readers"));
     assert!(steps.iter().any(|step| step == "track_volume"), "{steps:?}");
-    for unlisted in ["run_lua", "take_add", "wait", "track_delete", "save_project", "item_import"] {
+    assert!(steps.iter().any(|step| step == "item_import"), "the import step's: {steps:?}");
+    for unlisted in ["run_lua", "take_add", "wait", "track_delete", "save_project"] {
         assert!(!steps.iter().any(|step| step == unlisted), "{unlisted}: {steps:?}");
     }
     assert_eq!(readers, ["reaper_read"]);
@@ -676,8 +680,10 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     assert_eq!(volume["family"], "mixer");
     let (whole, _) = wire.call("read", json!({"action": "schema", "tool": "track_volume"}), None).await;
     assert_eq!((whole["kind"].clone(), whole["input_schema"]["required"].clone()), (json!("step"), json!(["ref", "volumeDb"])));
-    let (import, error) = wire.call("read", json!({"action": "schema", "tool": "item_import"}), None).await;
-    assert!(error && import["error"]["reason"].as_str().unwrap().contains("import step"), "{import}");
+    // A file step's field takes a source (CC-11), never a path.
+    let (import, _) = wire.call("read", json!({"action": "schema", "tool": "item_import"}), None).await;
+    assert_eq!((import["kind"].clone(), import["file_field"]["field"].clone()), (json!("step"), json!("path")), "{import}");
+    assert!(import["input_schema"]["properties"]["path"]["anyOf"].is_array(), "{import}");
     let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
     assert!(error && lua["error"]["code"] == "invalid", "{lua}");
 
@@ -778,5 +784,246 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     assert_eq!(lab.ctx.link().observed_native_epoch(), None);
     let (unpinned, error) = wire.call("read", track, None).await;
     assert!(error && unpinned["error"]["code"] == "stale", "{unpinned}");
+    wire.end().await;
+});
+
+/// Live as far as a plan needs it: a look that offers the plan tool and its `replace_sample` step. The plan tool records
+/// every plan it's given and Kumi's change record for it, as Live's would.
+struct PlanLive {
+    on_connection: kumi_agent::core::contracts::ConnectionListener,
+    on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
+    given: Rc<std::cell::RefCell<Vec<Value>>>,
+}
+
+struct PlanTool {
+    on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
+    given: Rc<std::cell::RefCell<Vec<Value>>>,
+}
+
+struct SampleStep;
+
+#[async_trait(?Send)]
+impl kumi_types::contracts::KernelTool for PlanTool {
+    fn name(&self) -> &str {
+        "make_changes"
+    }
+    fn description(&self) -> &str {
+        "Make changes in one call."
+    }
+    fn input_schema(&self) -> JsonObject {
+        let schema = json!({"type": "object", "required": ["steps"], "properties": {"steps": {"type": "array", "items": {
+            "type": "object", "properties": {"tool": {"type": "string", "enum": ["replace_sample", "wait"]}, "input": {"type": "object"}}
+        }}}});
+        schema.as_object().unwrap().clone()
+    }
+    async fn execute(&self, input: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
+        self.given.borrow_mut().push(Value::Object(input));
+        let n = self.given.borrow().len();
+        if let Some(on_change) = &self.on_change {
+            on_change(kumi_types::contracts::ChangeRecord {
+                id: format!("c{n}"),
+                family: kumi_types::contracts::ChangeFamily::Device,
+                title: "Simpler sample replaced".into(),
+                track: None,
+                from: None,
+                to: None,
+                range: None,
+                colors: None,
+                clip: None,
+                devices: None,
+                state: kumi_types::contracts::ChangeState::Applied,
+                score: None,
+                note: None,
+                at: 1_700_000_000_000,
+                picture: None,
+                batch: None,
+            });
+        }
+        Ok(kumi_types::contracts::ToolResult::text(json!({"done": [{"step": 1, "changed": true, "change": format!("c{n}")}]}).to_string()))
+    }
+}
+
+#[async_trait(?Send)]
+impl kumi_types::contracts::KernelTool for SampleStep {
+    fn name(&self) -> &str {
+        "replace_sample"
+    }
+    fn description(&self) -> &str {
+        "Swap the sample in a Simpler for another."
+    }
+    fn input_schema(&self) -> JsonObject {
+        let schema = json!({"type": "object", "additionalProperties": false, "required": ["deviceRef", "sample"], "properties": {
+            "deviceRef": {"type": "string", "minLength": 1}, "sample": {"type": "string", "minLength": 1}
+        }});
+        schema.as_object().unwrap().clone()
+    }
+    async fn execute(&self, _: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
+        Ok(kumi_types::contracts::ToolResult::error("run through make_changes"))
+    }
+}
+
+#[async_trait(?Send)]
+impl kumi_agent::core::contracts::Integration for PlanLive {
+    async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
+        (self.on_connection)(kumi_agent::core::contracts::ConnectionState::Connected, None);
+        Ok(())
+    }
+    async fn observe(
+        &self,
+        _: Signal,
+        _: Option<kumi_agent::core::contracts::ObserveHints>,
+    ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
+        let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone() };
+        let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![Rc::new(plan), Rc::new(SampleStep)];
+        Ok(kumi_agent::core::contracts::Observation {
+            key: "live:demo".into(),
+            revision: None,
+            label: "Live — Demo".into(),
+            context: "Drums: Drum Rack with a Simpler".into(),
+            instructions: String::new(),
+            tools,
+            project: None,
+            set: Some("set-1".into()),
+            tracks: None,
+            saved_at: None,
+            identity: None,
+        })
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// A runtime for Live (its own home's bridge) whose look offers [`PlanLive`]'s plan, with a media root holding a sound,
+/// a note and another sound; and what the plan tool was given.
+struct ImportLab {
+    _home: tempfile::TempDir,
+    media: tempfile::TempDir,
+    ctx: Rc<Ctx>,
+    given: Rc<std::cell::RefCell<Vec<Value>>>,
+}
+
+impl ImportLab {
+    fn new() -> ImportLab {
+        let home = tempfile::tempdir().unwrap();
+        let media = tempfile::tempdir().unwrap();
+        let wav = |bytes: usize| {
+            let mut data =
+                b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data"
+                    .to_vec();
+            data.extend(std::iter::repeat_n(0u8, bytes));
+            data
+        };
+        std::fs::write(media.path().join("Dusty Snare 04.wav"), wav(64)).unwrap();
+        std::fs::write(media.path().join("Kick.wav"), wav(32)).unwrap();
+        std::fs::write(media.path().join("notes.txt"), b"not audio").unwrap();
+        let transport = home.path().join("kumi-home");
+        let config = transport.join("bridge/state/bridge-config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "{}").unwrap();
+        let scripts = home.path().join("Remote Scripts");
+        std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
+        std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
+        let env = Env::from([
+            ("HOME".into(), home.path().display().to_string()),
+            ("KUMI_HOME".into(), transport.display().to_string()),
+            ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
+            ("KUMI_PROCESSES".into(), "none".into()),
+        ]);
+        let given = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let factory = {
+            let given = given.clone();
+            AbletonFactory(Rc::new(move |options| {
+                Rc::new(PlanLive {
+                    on_connection: options.on_connection.clone(),
+                    on_change: options.on_change.clone(),
+                    given: given.clone(),
+                }) as Rc<dyn kumi_agent::core::contracts::Integration>
+            }))
+        };
+        let args = Args {
+            state_dir: home.path().join("state"),
+            kumi_home: transport,
+            daw: DawId::Ableton,
+            library_roots: vec![],
+            media_roots: vec![media.path().to_path_buf()],
+            tools: BTreeMap::new(),
+        };
+        let ctx = Ctx::new(args, env, kumi_daw::io::Answers::default().with(factory)).unwrap();
+        ImportLab { _home: home, media, ctx, given }
+    }
+}
+
+/// A plan placing `sample` in the Simpler.
+fn sample_plan(key: &Value, epoch: u64, sample: Value) -> Value {
+    plan(key, epoch, json!([{"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": sample}}]))
+}
+
+case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pins, async {
+    let lab = ImportLab::new();
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let (key, epoch) = (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap());
+    let media = std::fs::canonicalize(lab.media.path()).unwrap();
+    let provenance = json!({"host_tool": "elevenlabs_sound_effect", "tool_call_id": "call-9"});
+
+    // Refused before anything runs: a path, a search of folders, a file outside the approved roots, a file that isn't
+    // audio, a map sound with no map.
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("Private.wav"), b"RIFF").unwrap();
+    for (n, sample) in [
+        json!(media.join("Dusty Snare 04.wav").display().to_string()),
+        json!({"folders": [media.display().to_string()], "random": true}),
+        json!({"file": outside.path().join("Private.wav").display().to_string(), "provenance": provenance}),
+        json!({"file": media.join("notes.txt").display().to_string(), "provenance": provenance}),
+        json!({"sound_id": "s-r1-1", "map_revision": "r1"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (refused, _) = wire.call("change", sample_plan(&key, epoch, sample.clone()), Some(&format!("tc-no-{n}"))).await;
+        assert_eq!(refused["state"], "refused", "{sample}: {refused}");
+    }
+    assert!(lab.given.borrow().is_empty(), "nothing ran");
+
+    // A host's file: the approval names it, and the DAW gets a copy in Kumi's artifacts, never the host's folder.
+    let file = json!({"file": media.join("Dusty Snare 04.wav").display().to_string(), "provenance": provenance});
+    let mut asked = sample_plan(&key, epoch, file.clone());
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("change", asked, Some("tc-1")).await;
+    let text = preview["steps"][0]["text"].as_str().unwrap_or_else(|| panic!("{preview}"));
+    assert!(text.contains("\"Dusty Snare 04.wav\"") && !text.contains(&media.display().to_string()), "{text}");
+    let (placed, _) = wire.call("change", sample_plan(&key, epoch, file), Some("tc-1")).await;
+    assert_eq!(placed["state"], "applied", "{placed}");
+    let sent = lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap().to_string();
+    let artifacts = std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap();
+    assert!(std::path::Path::new(&sent).starts_with(&artifacts), "{sent}");
+    let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
+    let source = &row.sources.unwrap()[0];
+    assert_eq!(
+        (source["field"].clone(), source["file"].clone(), source["host_tool"].clone()),
+        (json!("sample"), json!("Dusty Snare 04.wav"), json!("elevenlabs_sound_effect"))
+    );
+    let artifact = source["artifact_id"].as_str().unwrap().to_string();
+    assert!(source["identity"]["size"].as_u64().is_some());
+
+    // The artifact it became places again, as it is.
+    let epoch = placed["epoch"].as_u64().unwrap();
+    let (again, _) = wire.call("change", sample_plan(&key, epoch, json!({"artifact_id": artifact})), Some("tc-2")).await;
+    assert_eq!(again["state"], "applied", "{again}");
+    assert_eq!(lab.given.borrow()[1]["steps"][0]["input"]["sample"], json!(sent));
+
+    // 11b: the file changes between the approval and the dispatch: stale, and nothing runs.
+    let epoch = again["epoch"].as_u64().unwrap();
+    let kick = json!({"file": media.join("Kick.wav").display().to_string(), "provenance": provenance});
+    let mut asked = sample_plan(&key, epoch, kick.clone());
+    asked["preview"] = json!(true);
+    wire.call("change", asked, Some("tc-3")).await;
+    std::fs::write(media.join("Kick.wav"), b"RIFF and something else entirely").unwrap();
+    let (stale, _) = wire.call("change", sample_plan(&key, epoch, kick), Some("tc-3")).await;
+    assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
+    assert_eq!(lab.given.borrow().len(), 2);
     wire.end().await;
 });

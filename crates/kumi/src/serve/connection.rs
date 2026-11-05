@@ -120,7 +120,13 @@ pub struct Link {
     /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
     /// pair the looked project's key with another's epoch.
     native_epoch: RefCell<Option<String>>,
+    /// The files each previewed plan named (CC-11's 11b), by the digest of what it asked: its dispatch must find the
+    /// same ones. The newest [`PINNED`] plans.
+    pinned: RefCell<std::collections::VecDeque<(String, Vec<Value>)>>,
 }
+
+/// The most previewed plans whose files are kept for their dispatch.
+const PINNED: usize = 64;
 
 impl Link {
     /// No connection yet. Epochs count up from `base` (the runtime's start, ms), so no plan made in an earlier
@@ -136,6 +142,7 @@ impl Link {
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
             native_epoch: RefCell::new(None),
+            pinned: RefCell::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -186,6 +193,21 @@ impl Link {
 
     pub fn unsure(&self) -> Option<Value> {
         self.unsure.borrow().clone()
+    }
+
+    /// A preview named these files for the plan `asked` digests: its dispatch must find the same ones.
+    pub fn pin_files(&self, asked: &str, files: Vec<Value>) {
+        let mut pinned = self.pinned.borrow_mut();
+        pinned.retain(|(plan, _)| plan != asked);
+        pinned.push_back((asked.to_string(), files));
+        while pinned.len() > PINNED {
+            pinned.pop_front();
+        }
+    }
+
+    /// The files a preview named for the plan `asked` digests, when one did.
+    pub fn pinned_files(&self, asked: &str) -> Option<Vec<Value>> {
+        self.pinned.borrow().iter().find(|(plan, _)| plan == asked).map(|(_, files)| files.clone())
     }
 
     /// An `observe` completed: the model sees the project as it is now, so nothing is unsure any more (R6).

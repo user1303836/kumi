@@ -1558,6 +1558,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_runtime_whose_host_exits_mid_call_settles_on_its_own_and_stops() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            session.send(call(json!(1), "wait", json!({}))).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            // The host exits with the call still running: its ends of both pipes close, and nobody reads the answer.
+            drop(session.to.take());
+            let (_, gone) = tokio::io::duplex(1);
+            session.from = BufReader::new(gone);
+            let served = tokio::time::timeout(Duration::from_secs(30), &mut session.served).await.expect("stopped within its bound");
+            served.expect("no panic").expect("a clean stop");
+            assert!(SETTLED.with(Cell::get), "the call settled first");
+            assert_eq!(session.state("status.json")["stale"], true);
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn an_overlong_line_is_refused_whole_and_the_next_is_read() {
         let mut input: &[u8] = b"abcdef\n{\"ok\":1}\r\nlast";
         assert_eq!(read_line(&mut input, 4).await.unwrap(), Some(Line::TooLong));

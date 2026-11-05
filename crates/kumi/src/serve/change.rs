@@ -101,15 +101,20 @@ fn refusal(error: OpError) -> Value {
     refused(error.code(), error.reason())
 }
 
+/// A plan's steps as checked: each one's HISTORY family, and its file field when it places a file (CC-11).
+struct Checked {
+    families: Vec<&'static str>,
+    files: Vec<(usize, &'static str)>,
+}
+
 /// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for, and what the step
-/// takes: their families, in order.
-fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Vec<&'static str>, Value> {
+/// takes. A file step's field holds a source, so its input is checked once the source is resolved to a file.
+fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Checked, Value> {
     let Some(provider) = crate::daw::provider(ctx.daw()) else {
         return Err(refused("unsupported", "This runtime's DAW isn't one this build integrates."));
     };
     let offered = offered_steps(&plan.input_schema());
-    let tools = ctx.link().tools();
-    let mut families = Vec::new();
+    let mut checked = Checked { families: Vec::new(), files: Vec::new() };
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
@@ -122,28 +127,73 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Vec<
         if let Some(why) = provider.plugin_refuses(tool, &input) {
             return Err(refused("not_allowed", format!("Step {at} ({tool}): {why}")));
         }
-        // A file goes in only through the import step (CC-11), which resolves its source to a checked file: until then a
-        // file step isn't run, whatever its field holds.
-        if allowed.file_field.is_some() {
-            let why = "places a file, which needs the import step (a sound, an artifact or an approved file), not in this runtime yet.";
-            return Err(refused("not_allowed", format!("Step {at}: {tool} {why}")));
+        match allowed.file_field {
+            Some(field) if input.get(field).is_some() => checked.files.push((n, field)),
+            _ => step_takes(ctx, n, tool, &input)?,
         }
-        // What the step takes, as its own tool says: a step with none to check it against isn't run.
-        let Some(own) = tools.iter().find(|candidate| candidate.name() == tool) else {
-            return Err(refused("invalid", format!("Step {at}: {tool}'s input can't be checked here, so it isn't run.")));
-        };
-        if let Some(problem) = kumi_agent::kernel::schema::problem(&Value::Object(own.input_schema()), &input) {
-            return Err(refused("invalid", format!("Step {at} ({tool}): {problem}")));
-        }
-        families.push(allowed.family);
+        checked.families.push(allowed.family);
     }
-    Ok(families)
+    Ok(checked)
+}
+
+/// Step `n` (`tool`) takes `input`, as its own tool says: a step with none to check it against isn't run.
+fn step_takes(ctx: &Ctx, n: usize, tool: &str, input: &Value) -> Result<(), Value> {
+    let at = n + 1;
+    let tools = ctx.link().tools();
+    let Some(own) = tools.iter().find(|candidate| candidate.name() == tool) else {
+        return Err(refused("invalid", format!("Step {at}: {tool}'s input can't be checked here, so it isn't run.")));
+    };
+    match kumi_agent::kernel::schema::problem(&Value::Object(own.input_schema()), input) {
+        Some(problem) => Err(refused("invalid", format!("Step {at} ({tool}): {problem}"))),
+        None => Ok(()),
+    }
+}
+
+/// Each file step's source resolved (CC-11) and put in its field: the file's name for a preview, its path for the
+/// dispatch, each step's input then checked as it'll be run. A dispatch whose files aren't the ones its preview pinned
+/// (11b) places nothing; otherwise a host's file is copied into the artifacts first. With the sources as HISTORY keeps
+/// them, and the identity of each file they named.
+async fn placed(
+    ctx: &Ctx,
+    steps: &mut [Value],
+    files: &[(usize, &'static str)],
+    dispatch: Option<Option<Vec<Value>>>,
+    signal: &kumi_common::abort::Signal,
+) -> Result<(Vec<Value>, Vec<Value>), Value> {
+    let at = |n: usize, error: OpError| refused(error.code(), format!("Step {}: {}", n + 1, error.reason()));
+    let mut found = Vec::new();
+    for (n, field) in files {
+        let source = steps[*n]["input"][*field].clone();
+        found.push((*n, *field, super::import::find(ctx, &source, signal).await.map_err(|error| at(*n, error))?));
+    }
+    let named: Vec<Value> = found.iter().map(|(_, _, found)| found.named.clone()).collect();
+    let Some(pinned) = dispatch else {
+        for (n, field, found) in &found {
+            steps[*n]["input"][*field] = json!(found.name);
+            let tool = steps[*n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
+            step_takes(ctx, *n, &tool, &steps[*n]["input"])?;
+        }
+        return Ok((Vec::new(), named));
+    };
+    if pinned.is_some_and(|pinned| pinned != named) {
+        return Err(refused("stale", "A file this plan places changed since it was approved: preview it again."));
+    }
+    let mut sources = Vec::new();
+    for (n, field, found) in found {
+        let (path, mut record) = super::import::keep(ctx, found, signal).await.map_err(|error| at(n, error))?;
+        steps[n]["input"][field] = json!(path.display().to_string());
+        let tool = steps[n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
+        step_takes(ctx, n, &tool, &steps[n]["input"])?;
+        record["field"] = json!(field);
+        sources.push(record);
+    }
+    Ok((sources, named))
 }
 
 async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let args = &call.args;
     let title = args.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
-    let steps: Vec<Value> = args.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut steps: Vec<Value> = args.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
     let key = args.get("expected_project_key").and_then(Value::as_str).unwrap_or_default();
     let Some(epoch) = epoch_of(args, "expected_epoch") else {
         return Ok(refused("invalid", "expected_epoch is the epoch an observe gave: a whole number, or its digits."));
@@ -158,15 +208,30 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let Some(plan) = ctx.link().plan_tool() else {
         return Ok(refused("unsupported", "This DAW's integration offers no plan of changes here."));
     };
-    let families = match checked(ctx, &plan, &steps) {
-        Ok(families) => families,
+    let checked = match checked(ctx, &plan, &steps) {
+        Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
     };
-    if previewing(args) {
+    // The plan as the host's approval saw it, whatever `preview` says: its files must be the same at its dispatch.
+    let approved = {
+        let mut asked = args.clone();
+        asked.remove("preview");
+        super::mcp::digest(CHANGE.name, &asked)
+    };
+    let dispatch = (!previewing(args)).then(|| ctx.link().pinned_files(&approved));
+    let previewed = dispatch.is_none();
+    let (sources, named) = match placed(ctx, &mut steps, &checked.files, dispatch, &call.signal).await {
+        Ok(placed) => placed,
+        Err(refusal) => return Ok(refusal),
+    };
+    if previewed {
+        if !named.is_empty() {
+            ctx.link().pin_files(&approved, named);
+        }
         let names = ctx.link().ref_names();
         let described: Vec<Value> = steps
             .iter()
-            .zip(&families)
+            .zip(&checked.families)
             .map(|(step, family)| {
                 let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
                 describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null))
@@ -186,6 +251,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     history.begin_call();
     let ran = plan.execute(input, call.signal.clone()).await;
     let rows = history.end_call(identity, ctx.snapshots());
+    history.placed(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>(), &sources, ctx.snapshots());
     let outcome = outcome(ran, &rows);
     let mut ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
     if outcome.state == "unsure" {
@@ -541,6 +607,7 @@ mod tests {
             tool_call_id: None,
             digest: None,
             call_outcome: None,
+            sources: None,
         }
     }
 
