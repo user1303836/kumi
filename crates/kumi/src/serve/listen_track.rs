@@ -106,7 +106,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let key = call.args.get("expected_project_key").and_then(Value::as_str).filter(|key| !key.is_empty() && key.len() <= 64).ok_or_else(invalid)?;
     let epoch = epoch_of(&call.args, "expected_epoch").ok_or_else(invalid)?;
     let project = ctx.link().expect(key, epoch)?;
-    request.expected_native_epoch = ctx.link().observed_native_epoch();
+    request.expected_native_epoch = project.native_epoch;
     let connection = ctx.connection()?;
     if call.signal.is_cancelled() { return hearing_error(ctx, RuntimeError::Aborted, false); }
     let reference = match call.args.get("compare_to") {

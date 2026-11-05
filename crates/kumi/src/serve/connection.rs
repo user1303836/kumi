@@ -257,10 +257,6 @@ impl Link {
         self.native_epoch.borrow().clone()
     }
 
-    /// The native epoch retained with the last observation, never refreshed by a capture preview.
-    pub(super) fn observed_native_epoch(&self) -> Option<String> {
-        self.page_epoch.borrow().clone()
-    }
 
     /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
     /// the same.
