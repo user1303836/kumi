@@ -184,9 +184,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
           style={{ flex: '1 1 180px', minWidth: 140, font: 'inherit', fontSize: 12, padding: '3px 8px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
           value={query}
         />
-        <span style={S.faint}>
+        {/* The revision is an id (`r` and 32 hex digits): there for anyone who looks, not in the line itself. */}
+        <span style={S.faint} title={model.revision ? t('map.revision', model.revision) : undefined}>
           {shown === model.points.length ? t('map.count', num(model.points.length, 0)) : t('map.countOf', num(shown, 0), num(model.points.length, 0))}
-          {model.revision ? ` · ${t('map.revision', model.revision)}` : ''}
         </span>
       </div>
       <div style={{ ...S.row, flexWrap: 'wrap', gap: 4, padding: '6px 10px' }}>

@@ -1394,10 +1394,7 @@
             value: query
           }
         ),
-        /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
-          shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
-          model.revision ? ` · ${t("map.revision", model.revision)}` : ""
-        ] })
+        /* @__PURE__ */ jsx("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
       ] }),
       /* @__PURE__ */ jsx("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
         const off = hidden.has(group.key);
@@ -1703,6 +1700,14 @@
       });
     }
   };
+  function dawPartWorks(state) {
+    const setup = state.setup;
+    const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
+    if (!onlyDawPart || !state.status?.connected) return false;
+    const component = state.status.setup?.component;
+    if (!component) return true;
+    return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
+  }
   function jobOf(result) {
     let value = result;
     if (typeof value === "string") {
@@ -1784,7 +1789,7 @@
           "Kumi ",
           state.status.runtime.version
         ] }),
-        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
+        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && !dawPartWorks(state) && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
       ] }),
       state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
         /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [
