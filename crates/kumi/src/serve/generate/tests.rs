@@ -419,6 +419,48 @@ async fn a_charged_download_failure_recovers_by_get_under_the_same_id_even_when_
 }
 
 #[tokio::test]
+async fn recovery_keeps_retained_outputs_when_a_later_delivery_fails() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = Server::new().await;
+            let mut fixture = Fixture::new(&server);
+            let quote = fixture.call(sfx(), "quote-call", None).await.unwrap();
+            fixture.reserve(&quote, "r-one", "create-call");
+            let created =
+                fixture.call(json!({"action": "create", "quote_id": quote["quote_id"]}), "create-call", Some(("r-one", 15))).await.unwrap();
+            let id = created["job_id"].as_str().unwrap();
+            let completed = fixture.done(id).await;
+            let retained = completed["result"]["outputs"].clone();
+            let artifact = completed["result"]["artifact_id"].as_str().unwrap();
+            fixture.ledger["reservations"]["r-one"]["job_id"] = json!(id);
+            fixture.ledger["reservations"]["r-one"]["provider_job_id"] = json!("sfx-job");
+            fixture.ledger["reservations"]["r-one"]["submission"] = json!("submitted");
+            fixture.save();
+            // A settled operation can lose its final successful answer after its files were kept.
+            fixture
+                .ctx
+                .resume_job(id, "generate", |_, _| async {
+                    Err(refused("interrupted", "The final generation answer was lost after retention."))
+                })
+                .unwrap();
+            assert_eq!(fixture.done(id).await["state"], "failed");
+            server.download_fails.store(true, Ordering::SeqCst);
+            fixture.call(json!({"action": "job", "job_id": id}), "recover-fails", None).await.unwrap();
+            let failed = fixture.done(id).await;
+            assert_eq!(failed["state"], "failed");
+            assert_eq!(failed["result"]["outputs"], retained);
+            assert_eq!(failed["result"]["artifact_id"], artifact);
+            assert_eq!(failed["result"]["credits"]["actual"], 12);
+            assert_eq!(std::fs::read(fixture.ctx.artifacts().resolve(&fixture.ctx, artifact).unwrap()).unwrap(), wav());
+            server.download_fails.store(false, Ordering::SeqCst);
+            fixture.call(json!({"action": "job", "job_id": id}), "recover-works", None).await.unwrap();
+            assert_eq!(fixture.done(id).await["state"], "done");
+            assert_eq!(server.creates(), 1);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn midi_approval_hashes_without_copying_then_uploads_exact_bytes_and_keeps_authoritative_notes() {
     tokio::task::LocalSet::new()
         .run_until(async {
