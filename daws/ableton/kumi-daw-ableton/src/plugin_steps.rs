@@ -38,8 +38,18 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_song", "tempo"),
     PluginStep::new("set_scale", "tempo"),
     PluginStep::new("set_groove", "tempo"),
-    PluginStep::new("replace_sample", "device").file("sample"),
-    PluginStep::new("import_audio", "clip").file("sample"),
+    PluginStep::new("replace_sample", "device").file(
+        "sample",
+        "Swap the sample in a Simpler for another: deviceRef (the Simpler), and sample, where the file comes from: a \
+         sound from the map, a file Kumi made, or an approved file, never a path.",
+    ),
+    PluginStep::new("import_audio", "clip").file(
+        "sample",
+        "Put an audio file into the Set as a clip: into an empty Session slot (trackRef, an audio track, and sceneIndex) \
+         or into an Arrangement take lane (takeLaneRef, position in beats, past the lane's last clip: Live would cut a \
+         take the file lands on, and its API can't put one back). sample is where the file comes from: a sound from the \
+         map, a file Kumi made, or an approved file, never a path.",
+    ),
     PluginStep::new("set_warp_markers", "clip").refusing(&[("action", &["delete"])]),
     PluginStep::new("write_arrangement_clip", "clip"),
     // Slices removed or cleared, and the slices reset, don't come back as they were; resend's effect isn't described.

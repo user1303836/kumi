@@ -163,7 +163,7 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
                 "tool": name,
                 "kind": "step",
                 "family": step.family,
-                "description": tool.description(),
+                "description": step.description(tool.description()),
                 "input_schema": plugin_schema(step, &tool.input_schema(), &source_schema()),
             });
             if let Some(field) = step.file_field {
@@ -193,7 +193,7 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
             .map(|step| {
                 let mut row = json!({"tool": step.tool, "family": step.family});
                 if let Some(tool) = tool_of(step.tool).filter(|_| with_what) {
-                    row["what"] = json!(first_clause(tool.description()));
+                    row["what"] = json!(first_clause(step.description(tool.description())));
                 }
                 row
             })
