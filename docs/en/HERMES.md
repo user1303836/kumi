@@ -157,6 +157,8 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 - Listening to a REAPER or Renoise track says Kumi's part in the DAW is too old: run setup again, then restart the DAW.
 - Nothing from Kumi in Hermes Desktop: check Kumi's **Agent** and **Desktop** switches under Capabilities → Plugins,
   and that it's enabled in Hermes (`hermes plugins enable kumi`).
+- No Kumi tab in the web dashboard: if the dashboard was already running when you installed Kumi, restart it
+  (`hermes dashboard`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
 - Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi for Hermes uses another Kumi's
   installation, set Live up again with that Kumi (`kumi --daw ableton bridge` for a standalone Kumi, or setup in its

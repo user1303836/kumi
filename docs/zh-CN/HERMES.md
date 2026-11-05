@@ -93,5 +93,6 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - `/kumi`（在终端中用 `hermes kumi status`）会告诉你设置还缺什么，以及 Kumi 能否读取压缩音频。当 `plugins.isolation` 为 `host` 时，Hermes 不会加载 `hermes kumi` 这类插件命令，请改在 Hermes Desktop 的对话中设置。
 - 聆听 REAPER 或 Renoise 音轨时提示 Kumi 的 DAW 组件太旧：再运行一次设置，然后重启 DAW。
 - Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
+- 网页仪表盘中没有 Kumi 标签页：如果安装 Kumi 时仪表盘已经在运行，请重启它（`hermes dashboard`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
 - 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Kumi for Hermes 使用的是另一套 Kumi 的安装，请用那套 Kumi 重新设置 Live（单独的 Kumi 运行 `kumi --daw ableton bridge`，另一个 Hermes 配置则在那个配置中运行设置）。Kumi Ears 需要 Max for Live。
