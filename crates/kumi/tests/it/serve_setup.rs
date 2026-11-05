@@ -6,13 +6,13 @@
 use futures::FutureExt;
 use kumi::serve::ctx::{Call, Ctx, Host as HostCall, OpError, Progress};
 use kumi::serve::lease::Lease;
-use kumi::serve::{registry, Args};
+use kumi::serve::{Args, registry};
 use kumi_common::abort::Signal;
-use kumi_daw::process::{executable_name, Ran, Run};
+use kumi_daw::process::{Ran, Run, executable_name};
 use kumi_daw_ableton::app::answers::{LiveRunning, PreparedBridge};
 use kumi_daw_own::provider::CarriedBy;
 use kumi_types::{daw::DawId, system::Env};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -352,6 +352,8 @@ fn runtime(root: &Path, state: &str, home: &Path, daw: DawId, env: Env, answers:
         media_roots: vec![],
         tools: BTreeMap::new(),
     };
+    // The Python host creates the plugin data folder before it starts the runtime.
+    std::fs::create_dir_all(args.state_dir.parent().unwrap()).unwrap();
     Ctx::new(args, env, answers).unwrap()
 }
 

@@ -2,16 +2,16 @@
 //! arguments, the host's identity for it, its cancel signal and its progress) and the runtime it runs in ([`Ctx`]).
 //! Every stream's operations are written against these; each module adds its own to [`super::registry`].
 
+use super::Args;
 use super::connection::Link;
 use super::jobs::{JobHandle, Jobs};
 use super::snapshots::Snapshots;
-use super::Args;
 use futures::future::LocalBoxFuture;
 use kumi_common::abort::Signal;
 use kumi_types::daw::DawId;
 use kumi_types::system::Env;
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -972,11 +972,11 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
         path::{Component, Prefix},
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
     };
 
-    let unsafe_path = || std::io::Error::other("a private runtime folder must be a local, owned directory without reparse points");
+    let unsafe_path = |check: &str| std::io::Error::other(format!("private runtime directory check failed: {check}"));
     let fresh = matches!(policy, WindowsDirectoryPolicy::Fresh);
     let path = if path.is_absolute() { path.to_path_buf() } else { std::env::current_dir()?.join(path) };
     if path.as_os_str().encode_wide().any(|unit| unit == 0)
@@ -984,19 +984,22 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
         || path.file_name().is_none()
         || !path.has_root()
     {
-        return Err(unsafe_path());
+        return Err(unsafe_path("absolute directory path, no NUL or parent component"));
     }
     let drive = match path.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
             Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
-            _ => return Err(unsafe_path()),
+            _ => return Err(unsafe_path("plain local drive prefix")),
         },
-        _ => return Err(unsafe_path()),
+        _ => return Err(unsafe_path("drive prefix missing")),
     };
     let root: Vec<u16> = format!("{}:\\", char::from(drive)).encode_utf16().chain([0]).collect();
     // SAFETY: the local drive root is NUL-terminated; reject remote/unknown drives before any filesystem lookup.
-    if unsafe { GetDriveTypeW(root.as_ptr()) } != 3 {
-        return Err(unsafe_path());
+    let drive_type = unsafe { GetDriveTypeW(root.as_ptr()) };
+    #[cfg(debug_assertions)]
+    eprintln!("WINDOWS_STATE path={path:?} drive_type={drive_type} fixed_local={}", drive_type == 3);
+    if drive_type != 3 {
+        return Err(unsafe_path("volume is not a fixed local drive"));
     }
     let mut components = path.components().peekable();
     let mut at = PathBuf::new();
@@ -1007,6 +1010,8 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
             continue;
         }
         let target = components.peek().is_none();
+        #[cfg(debug_assertions)]
+        eprintln!("WINDOWS_STATE component={at:?} target={target}");
         let (created, file) = if matches!(component, Component::RootDir) {
             let file = OpenOptions::new()
                 .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
@@ -1015,34 +1020,42 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
                 .open(&at)?;
             (false, file)
         } else {
-            let parent = pins.last().ok_or_else(unsafe_path)?;
+            let parent = pins.last().ok_or_else(|| unsafe_path("pinned ancestor missing"))?;
             match native_acl::open_directory_at(parent, component.as_os_str(), target && fresh, target) {
                 Ok(file) => (target && fresh, file),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound && !(target && fresh) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("WINDOWS_STATE component_open=not_found component={at:?} target={target}");
                     if !target && matches!(policy, WindowsDirectoryPolicy::BootstrapStateRoot) {
                         // Startup authorizes the selected root, not creating missing ancestors.
-                        return Err(unsafe_path());
+                        return Err(unsafe_path("state-root ancestor does not exist; bootstrap cannot create ancestors"));
                     }
                     (true, native_acl::open_directory_at(parent, component.as_os_str(), true, target)?)
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("WINDOWS_STATE component_open_error component={at:?} error={error}");
+                    return Err(error);
+                }
             }
         };
+        #[cfg(debug_assertions)]
+        native_acl::diagnose_handle(&file);
         let metadata = file.metadata()?;
         if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(unsafe_path());
+            return Err(unsafe_path("pinned component is not a directory or has FILE_ATTRIBUTE_REPARSE_POINT"));
         }
         if created {
             if !native_acl::is_kumis_shape_handle(&file, true) {
-                return Err(unsafe_path());
+                return Err(unsafe_path("new directory owner or DACL is not Kumi's exact private shape"));
             }
         } else if target && !native_acl::is_kumis_shape_handle(&file, true) {
             // Only startup's explicit state-root selection authorizes bootstrapping an existing root.
             // Generic targets, like the owning DAW caches, need an independently verified private parent.
             if !matches!(policy, WindowsDirectoryPolicy::BootstrapStateRoot) {
-                let parent = pins.last().ok_or_else(unsafe_path)?;
+                let parent = pins.last().ok_or_else(|| unsafe_path("private parent pin missing"))?;
                 if !native_acl::is_kumis_shape_handle(parent, true) {
-                    return Err(unsafe_path());
+                    return Err(unsafe_path("existing target's parent does not have Kumi's exact private shape"));
                 }
             }
             // Relative opens bind the target to that parent. Change only this pinned object's DACL, without
@@ -1633,6 +1646,7 @@ mod tests {
         let generated = home.join("cache/generated/audio");
         let private = home.join("cache/other/later");
         let transport = home.join("plugin-data/kumi/home");
+        std::fs::create_dir_all(transport.parent().unwrap()).unwrap();
         let ctx = Ctx::new(
             Args {
                 state_dir: home.join("plugin-data/kumi/state"),

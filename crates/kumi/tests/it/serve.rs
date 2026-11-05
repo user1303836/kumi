@@ -1,7 +1,7 @@
 //! `kumi serve --stdio`, the binary as a host starts it: MCP on stdio, branching off before the app reads anything of
 //! the producer's own Kumi.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -29,6 +29,7 @@ impl Folders {
         for folder in [&user, &producers_kumi, &user.join(".kumi"), &transport] {
             std::fs::create_dir_all(folder).unwrap();
         }
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
         Folders { _dir: dir, user, producers_kumi, transport, state }
     }
 

@@ -1,14 +1,14 @@
 use super::*;
-use crate::serve::ctx::{Host, Private, Progress, CALL_PRIVATE};
 use crate::serve::Args;
+use crate::serve::ctx::{CALL_PRIVATE, Host, Private, Progress};
 use kumi_types::{daw::DawId, system::Env};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -201,6 +201,7 @@ impl Fixture {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
+        std::fs::create_dir_all(args.state_dir.parent().unwrap()).unwrap();
         let answers = kumi_daw::io::Answers::default().with(FixtureEndpoint(server.url.clone()));
         Ctx::new(args, Env::new(), answers).unwrap()
     }
