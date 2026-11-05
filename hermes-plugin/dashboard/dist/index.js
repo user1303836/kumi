@@ -1964,7 +1964,7 @@
             }
           ) })
         ] }),
-        /* @__PURE__ */ jsx("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 420, display: "flex", flexDirection: "column" }, children: /* @__PURE__ */ jsx(
+        /* @__PURE__ */ jsx("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 640, display: "flex", flexDirection: "column" }, children: /* @__PURE__ */ jsx(
           MapCanvas,
           {
             actions: (id, sound) => {

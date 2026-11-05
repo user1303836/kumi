@@ -127,7 +127,9 @@ function Dashboard() {
             />
           </Section>
         </div>
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 420, display: 'flex', flexDirection: 'column' }}>
+        {/* Tall enough that a search's list (six rows) and a picked sound's row still leave the map most of the card:
+            at 420 the canvas shrank to its 160 px floor. The page scrolls, so the height costs nothing. */}
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 640, display: 'flex', flexDirection: 'column' }}>
           <MapCanvas
             actions={(id, sound) => {
               const request = soundRequest(id, sound.name, state.map?.revision)
