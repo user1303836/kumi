@@ -81,6 +81,9 @@ export class KumiStore {
   private generation = 0
   /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
   private cards = new Map<string, unknown>()
+  /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+   *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+  private started = new Set<string>()
 
   constructor(private readonly fetch: Fetch, private readonly historyLimit = 50) {}
 
@@ -108,6 +111,7 @@ export class KumiStore {
     this.generation += 1
     this.reads.clear()
     this.cards.clear()
+    this.started.clear()
     this.state = EMPTY
     for (const fn of [...this.listeners]) fn()
   }
@@ -191,12 +195,17 @@ export class KumiStore {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } })
   }
 
-  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-  trackJob(id: unknown): void {
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+   *  the source says it was running: a call that started it, or an event that reported it running. */
+  trackJob(id: unknown, started = false): void {
     const jobId = plainId(id)
     // Shown only once this profile's backend answers for it (another profile's job 404s and never shows, even from an
     // event that names no profile), and at most MOST_JOBS at a time.
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return
+    if (started) {
+      this.started.add(jobId)
+      if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value as string)
+    }
     void this.refreshJob(jobId)
   }
 
@@ -236,10 +245,11 @@ export class KumiStore {
         const read = await this.fetch<Job>(`/job?id=${encodeURIComponent(id)}`)
         if (generation !== this.generation) return
         const before = this.state.jobs[id]
-        // A job first seen finished isn't news: it isn't shown as if it had just ended. One a generation event
-        // reported is (its card waits here until the first read), whichever read gets there first.
-        const waiting = this.cards.has(id)
-        if (!before && finished(read) && !waiting) return
+        // A job first seen finished isn't news: it isn't shown as if it had just ended. One a call started or an event
+        // reported running is, and so is one a generation event reported (its card waits here until the first read),
+        // whichever read gets there first.
+        const news = this.started.delete(id) || this.cards.has(id)
+        if (!before && finished(read) && !news) return
         const card = before?.card ?? this.cards.get(id)
         this.cards.delete(id)
         const job: Job = stopped && !finished(read) ? { ...read, state: 'interrupted' } : read

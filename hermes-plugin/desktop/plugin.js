@@ -1212,7 +1212,7 @@ function listenView(result, t = english) {
     row(t("listen.crest"), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
     row(t("listen.tempo"), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
   ].filter((value) => value !== null);
-  const key = mine.key?.name;
+  const key = mine.sound ? void 0 : mine.key?.name;
   if (typeof key === "string" && key) {
     const otherKey = reference?.key?.name;
     rows.push({ label: t("listen.key"), mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
@@ -1292,6 +1292,9 @@ var KumiStore = class {
   generation = 0;
   /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
   cards = /* @__PURE__ */ new Map();
+  /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+   *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+  started = /* @__PURE__ */ new Set();
   get = () => this.state;
   subscribe = (fn) => {
     this.listeners.add(fn);
@@ -1312,6 +1315,7 @@ var KumiStore = class {
     this.generation += 1;
     this.reads.clear();
     this.cards.clear();
+    this.started.clear();
     this.state = EMPTY;
     for (const fn of [...this.listeners]) fn();
   }
@@ -1386,10 +1390,15 @@ var KumiStore = class {
   measure(toolCallId, result) {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
   }
-  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-  trackJob(id) {
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+   *  the source says it was running: a call that started it, or an event that reported it running. */
+  trackJob(id, started = false) {
     const jobId = plainId(id);
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+    if (started) {
+      this.started.add(jobId);
+      if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
+    }
     void this.refreshJob(jobId);
   }
   /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
@@ -1425,8 +1434,8 @@ var KumiStore = class {
         const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
         if (generation !== this.generation) return;
         const before = this.state.jobs[id];
-        const waiting = this.cards.has(id);
-        if (!before && finished(read) && !waiting) return;
+        const news = this.started.delete(id) || this.cards.has(id);
+        if (!before && finished(read) && !news) return;
         const card = before?.card ?? this.cards.get(id);
         this.cards.delete(id);
         const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
@@ -3169,6 +3178,7 @@ function WithT({ children }) {
     children
   ] });
 }
+var besideTheChat = (open) => open ? { pane: `plugin-workspace:${open}`, pos: "center" } : { pane: "workspace", pos: "right" };
 var plugin = {
   id: PLUGIN_ID,
   name: "Kumi",
@@ -3179,12 +3189,15 @@ var plugin = {
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;
+    let closeMeasurements = null;
+    let measurementsPane = null;
     const mapView = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
           title: wordsOf(ctx)("map.tab"),
           minWidth: "26rem",
+          dock: besideTheChat(closeMeasurements ? MEASUREMENTS_WORKSPACE : null),
           render: mapView,
           onClose: () => {
             closeMap = null;
@@ -3200,8 +3213,6 @@ var plugin = {
         render: mapView
       });
     };
-    let closeMeasurements = null;
-    let measurementsPane = null;
     const openMeasurements = () => {
       const render = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MeasurementsWorkspace, { audition, store }) });
       const title = wordsOf(ctx)("measurements.tab");
@@ -3209,6 +3220,7 @@ var plugin = {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
           title,
           minWidth: "24rem",
+          dock: besideTheChat(closeMap ? MAP_WORKSPACE : null),
           render,
           onClose: () => {
             closeMeasurements = null;
@@ -3235,7 +3247,7 @@ var plugin = {
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id, payload.state === "running")));
     ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, (event) => {
       const payload = payloadOf(event);
       if (forThisProfile(payload)) store.noteGeneration(payload.card);
@@ -3287,7 +3299,7 @@ var plugin = {
       const name = typeof payload.name === "string" ? payload.name : "";
       if (!name.startsWith("kumi_")) return;
       refresh();
-      store.trackJob(jobOf(payload.result));
+      store.trackJob(jobOf(payload.result), name !== "kumi_job");
       const id = callId(payload.tool_id);
       if (name === "kumi_listen" && id) {
         calls.add(id);

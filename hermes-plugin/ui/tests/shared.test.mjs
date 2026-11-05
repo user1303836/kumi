@@ -123,6 +123,14 @@ test('the listen card shows measured numbers beside the reference, with differen
   assert.equal(view.interpretation, undefined)
 })
 
+test("a passage's key shows; one sound's, which the runtime's own summary never names, doesn't", () => {
+  const keyed = { ...analysis(-14, -1, 900, '/s/Loop.wav'), key: { name: 'F# major', confidence: 0.4 } }
+  const keyOf = metrics => listen.listenView({ metrics }).rows.find(row => row.label === 'Key')?.mine
+  assert.equal(keyOf(keyed), 'F# major')
+  // D3 on Live: a 909 snare measured as "unpitched · attack 0 ms" came with a key estimate.
+  assert.equal(keyOf({ ...keyed, sound: { pitch: null, envelope: { attack_ms: 0 } } }), undefined)
+})
+
 test("a model's reading shows only when given, under a plain heading with the model it reports", () => {
   const withModel = listen.listenView({ ...compared, interpretation: { text: 'Less 2–6 kHz energy.', model: 'm-1' } })
   assert.equal(withModel.interpretation.label, 'Interpretation · m-1')
@@ -524,7 +532,7 @@ test("a job's words say what it does, how far it got and how it ended", () => {
   assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')
 })
 
-test('a job shows only once its profile answers for it, never as news when first seen finished, and ends when Kumi stops', async () => {
+test('a job shows only once its profile answers for it, as news when first seen finished only if reported running, and ends when Kumi stops', async () => {
   let release
   let answer = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 1, total: 4 } }
   const kumi = new store.KumiStore(async path => {
@@ -534,17 +542,21 @@ test('a job shows only once its profile answers for it, never as news when first
       return answer
     }
     if (path === '/job?id=j-old') return { job_id: 'j-old', kind: 'scan', state: 'done', result: { sounds: 3 } }
+    // A rescan of folders already indexed: done before the pane's first read (D3, on Live).
+    if (path === '/job?id=j-quick') return { job_id: 'j-quick', kind: 'scan', state: 'done', result: { sounds: 6 } }
     if (path === '/job?id=j-502') throw new Error('502: bad gateway')
     return {}
   })
   kumi.trackJob('j-1')
   kumi.trackJob('j-old')
+  kumi.trackJob('j-quick', true)
   kumi.trackJob('j-502')
   await new Promise(resolve => setTimeout(resolve, 10))
-  assert.deepEqual(kumi.get().jobs, {}, 'nothing shows before its own backend answers, nor a finished one, nor one that failed to read')
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-quick'], 'nothing shows before its own backend answers, nor one first seen finished that nothing reported running, nor one that failed to read')
+  assert.equal(kumi.get().jobs['j-quick'].state, 'done')
   release()
   await new Promise(resolve => setTimeout(resolve, 10))
-  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-1'])
+  assert.deepEqual(Object.keys(kumi.get().jobs).sort(), ['j-1', 'j-quick'])
   // The runtime stops with the scan still "running" in its file: the pane ends it with Kumi.
   await kumi.refreshStatus()
   const last = kumi.refreshJobs()
