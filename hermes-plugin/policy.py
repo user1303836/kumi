@@ -8,6 +8,11 @@ current names, values as just read), and a plan the runtime would refuse is bloc
 producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt in the
 words of the plan they carry out (C8). Anything else of Kumi's is blocked.
 
+Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
+approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
+what Kumi last published: it never starts, connects, sets up or calls the runtime, which a gateway's chats share with
+it. Where nobody can answer an approval (a one-shot `hermes -q`, a webhook), nothing that needs one runs.
+
 The hook runs for every tool call in Hermes, and one that's slow or blocked stops them all: a call that isn't Kumi's
 returns at once, the runtime is never waited for, and a preview gets at most half of Hermes's hook timeout.
 """
@@ -30,6 +35,10 @@ LINE = 120
 PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
+# What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
+ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
+UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
+              "in a chat.")
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -69,6 +78,21 @@ def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **k
 
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """The decision for one Kumi call. In a scheduled job, only a published read passes, before anything else is
+    looked at. Where nobody can answer an approval, a call that needs one is blocked whatever Hermes's settings or an
+    earlier "Always" say: before the runtime is asked when it always needs one, else after its decision."""
+    unattended = host.unattended()
+    if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
+        return block(tools.SCHEDULED), {}
+    if unattended and tool in ASKED:
+        return block(UNATTENDED), {}
+    decision, extra = _decide(host, tool, args, kwargs)
+    if unattended and decision is not None and decision["action"] == "approve":
+        return block(UNATTENDED), {}
+    return decision, extra
+
+
+def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     if tool in PASS:
         return None, {}
     if tool == "kumi_listen":

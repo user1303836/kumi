@@ -85,6 +85,18 @@ class Context:
         self.aux_tasks: dict[str, dict] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
+        self.cron_execution: Any = None  # what ctx.current_cron_execution() answers: the cron run executing now
+        self.surface = "tui"  # what ctx.session_surface() answers: the calling session's client or platform
+
+    def current_cron_execution(self):
+        if isinstance(self.cron_execution, Exception):
+            raise self.cron_execution
+        return self.cron_execution
+
+    def session_surface(self) -> str:
+        if isinstance(self.surface, Exception):
+            raise self.surface
+        return self.surface
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False,
                       description="", emoji="", override=False):
