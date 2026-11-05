@@ -500,8 +500,11 @@ adding a rack chain). HISTORY marks them **kept**, and Live's own undo still
 takes them back. Kumi deletes things when you ask, or when the request implies
 it ("start over", "replace the drums").
 
-**Known issue.** Kumi can't take back a device it loaded yet: use Live's own undo
-(Cmd-Z, or Ctrl-Z on Windows) right away (#1101).
+**Known issue.** Kumi can't take back a device it loaded yet (#1101). Right
+after the change, Live's own undo (Cmd-Z, or Ctrl-Z on Windows) takes back
+Kumi's whole change, since Live keeps it as one undo step. If anything changed
+in Live since, Live's undo would take that back first, so remove the device by
+hand instead (select it and press Delete).
 
 **A copy before big changes.** When a plan reaches its third step, or a step
 that deletes something, Kumi copies the Set as last saved next to it
