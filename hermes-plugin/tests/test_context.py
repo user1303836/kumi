@@ -8,6 +8,8 @@ import contextlib
 import io
 import json
 import os
+from pathlib import Path
+import tempfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -19,6 +21,16 @@ context = support.module("context")
 commands = support.module("commands")
 policy = support.module("policy")
 snapshots = support.module("snapshots")
+setup = support.module("setup")
+SEARCHING = mock.patch.object(setup, "_ffmpeg_search", return_value=[])  # status never looks at this computer's ffmpeg
+
+
+def setUpModule():
+    SEARCHING.start()
+
+
+def tearDownModule():
+    SEARCHING.stop()
 
 
 def fenced(note: str) -> str:
@@ -161,10 +173,30 @@ class Cli(unittest.TestCase):
         self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
         self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}",
+                                     "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: there's no "
+                                     "ffmpeg on this computer.",
                                      "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that)."])
         host.runtimes.stop_all()
         self.assertRegex(self.run_cli(host).splitlines()[2], r"^Runtime: not running \(last heard \d+ s ago\)\.$",
                          "a runtime that stopped reads as not running at once")
+
+    def test_status_says_kumi_reads_compressed_audio_only_while_the_allowed_ffmpeg_is_unchanged(self):
+        host, ctx, data = support.host(self)
+        folder = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        ffmpeg = folder / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ffmpeg.write_bytes(b"#!/bin/sh\n")
+        ffmpeg.chmod(0o755)
+        current = data / "runtime" / "current.json"
+        current.write_text(json.dumps({**json.loads(current.read_text(encoding="utf-8")),
+                                       "tools": {"ffmpeg": setup._identity(str(ffmpeg))}}), encoding="utf-8")
+
+        def compressed() -> str:
+            return next(line for line in self.run_cli(host).splitlines() if line.startswith("Compressed audio"))
+
+        self.assertEqual(compressed(), f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg at {ffmpeg}.")
+        ffmpeg.write_bytes(b"#!/bin/sh\n# another program at the same path\n")
+        self.assertTrue(compressed().startswith(
+            f"Compressed audio (MP3, FLAC…): no. The ffmpeg at {ffmpeg} changed since you allowed it"))
 
 
 class Approvals(unittest.TestCase):
