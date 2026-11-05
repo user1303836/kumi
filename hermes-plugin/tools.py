@@ -38,7 +38,8 @@ class Host:
 
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
-                 hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None):
+                 hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None,
+                 hermes_config: Callable[[], dict] | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
@@ -46,6 +47,18 @@ class Host:
         self._pinned = pinned
         self._hook_timeout = hook_timeout
         self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
+        self._hermes_config = hermes_config
+
+    def hermes_config(self) -> dict:
+        """Hermes's own settings (its config.yaml, as Hermes reads it), for the few Kumi follows; read on each use."""
+        if self._hermes_config is not None:
+            return self._hermes_config()
+        try:
+            from hermes_cli.config import load_config_readonly  # Hermes's
+            config = load_config_readonly()
+        except Exception:
+            return {}
+        return config if isinstance(config, dict) else {}
 
     def hook_timeout(self) -> float | None:
         """Hermes's `plugins.hook_callback_timeout` (default 30 s; 0 or less: none), read on each call."""
@@ -90,11 +103,7 @@ class Host:
         (`auxiliary.kumi_listen.timeout`, else the task's default) split over Hermes's attempts, 1 plus
         `auxiliary.transient_retries` (default 2, at most 6)."""
         total, retries = float(listening.AUX_TASK["defaults"]["timeout"]), 2
-        try:
-            from hermes_cli.config import load_config_readonly  # Hermes's
-            auxiliary = load_config_readonly().get("auxiliary") or {}
-        except Exception:
-            auxiliary = {}
+        auxiliary = self.hermes_config().get("auxiliary")
         task = auxiliary.get(listening.AUX_TASK_KEY) if isinstance(auxiliary, dict) else None
         configured = task.get("timeout") if isinstance(task, dict) else None
         if isinstance(configured, (int, float)) and not isinstance(configured, bool) and 0 < configured < math.inf:

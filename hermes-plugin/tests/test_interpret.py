@@ -3,10 +3,8 @@ its numbers, or why there's none, and keeps its measurements either way; off, or
 no model is asked."""
 from __future__ import annotations
 
-import json
-import unittest
 from types import SimpleNamespace
-from unittest import mock
+import unittest
 
 import support
 
@@ -77,13 +75,12 @@ class Interpretation(unittest.TestCase):
         self.assertEqual(model.calls, [])
 
     def test_the_producers_task_settings_set_each_attempts_time(self):
-        self.ctx.settings["listen_interpretation"] = True
-        settings = {"auxiliary": {"kumi_listen": {"timeout": 90}, "transient_retries": 5}}
-        hermes = {"hermes_cli": SimpleNamespace(),
-                  "hermes_cli.config": SimpleNamespace(load_config_readonly=lambda: settings)}
-        with mock.patch.dict("sys.modules", hermes):  # Hermes's config, as its loader reads it
-            self.listen()
-        self.assertEqual(self.model.calls[-1]["timeout"], 15.0, "90 s over 1 + 5 attempts")
+        hermes = {"auxiliary": {"kumi_listen": {"timeout": 90}, "transient_retries": 5}}
+        host, ctx, _ = support.host(self, {"daw": "ableton", "listen_interpretation": True}, hermes_config=hermes)
+        ctx.llm = model = Model()
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        support.call(host, "kumi_listen", SOUND, session_id="s1")
+        self.assertEqual(model.calls[-1]["timeout"], 15.0, "90 s over 1 + 5 attempts")
 
 
 if __name__ == "__main__":
