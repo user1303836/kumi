@@ -278,6 +278,15 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
                          [f"Copy Kumi's extension to {named}", f"Make the folder {longer}", f"Writes: {longer[:-5]}"],
                          "a path an effect already names whole isn't said twice (F10); the start of a longer one is")
+        backup = f"{named}.bak"
+        self.plan(setup_daw=Runtime(paths=[named, backup], effects=[f"Copy Kumi's extension to {named}.",
+                                                                    f"Keep the old one as {backup}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Copy Kumi's extension to {named}.", f"Keep the old one as {backup}"],
+                         "a path that ends a sentence is named (rgzm's NIT)")
+        self.plan(setup_daw=Runtime(paths=[named], effects=[f"Keep the old one as {backup}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Keep the old one as {backup}", f"Writes: {named}"], "never the start of a longer name")
 
     def test_runtime_text_setup_couldnt_show_as_it_is_is_refused_not_cleaned(self) -> None:
         self.install_runtime()

@@ -786,8 +786,9 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
 
 def _names(text: str, path: str) -> bool:
     """Whether `text` shows `path` whole (not as the start of a longer path), so the approval needn't say it again
-    (fresh-user run 1, F10: REAPER's step named each path twice)."""
-    return re.search(re.escape(path) + r"(?![^\s,;:)\]'\"])", text) is not None
+    (fresh-user run 1, F10: REAPER's step named each path twice). A full stop ends it when a space or the line's end
+    follows (`…/kumi.dylib.`), never inside a name (`…/kumi.dylib.bak`)."""
+    return re.search(re.escape(path) + r"(?=$|[\s,;:)\]'\"]|\.(?:$|\s))", text, re.MULTILINE) is not None
 
 
 def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:
