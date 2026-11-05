@@ -34,6 +34,8 @@ pub enum Busy {
     Away,
     /// The main window has no title yet: a project is loading.
     Loading,
+    /// The main window's AXIdentifier is Logic's project chooser, not a project's controls.
+    ChoosingProject,
 }
 
 impl Busy {
@@ -42,6 +44,7 @@ impl Busy {
             Busy::Modal => "modal",
             Busy::Away => "away",
             Busy::Loading => "loading",
+            Busy::ChoosingProject => "modal",
         }
     }
 
@@ -59,6 +62,7 @@ impl Busy {
             Busy::Modal => "Logic Pro is showing a dialog",
             Busy::Away => "Logic Pro's windows aren't on this Space",
             Busy::Loading => "Logic Pro is loading a project",
+            Busy::ChoosingProject => "Logic Pro is showing Choose a Project; choose or close it, then ask again",
         }
     }
 }

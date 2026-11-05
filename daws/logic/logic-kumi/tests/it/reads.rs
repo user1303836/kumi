@@ -214,6 +214,38 @@ fn the_other_scenes_change_the_selection_the_transport_and_the_busy_state() {
 }
 
 #[test]
+fn the_original_project_chooser_is_refused_before_any_controls_behind_it_are_read() {
+    use logic_kumi::{ax::Root, fixtures::Recorder, project::Project, serve};
+    use std::sync::{Arc, Mutex};
+
+    let scene = Scene::load(&fixtures().join("scratch-dialog")).unwrap();
+    let pid = scene.logic["pid"].as_u64().unwrap() as u32;
+    for (root, cached) in
+        [(Root::Main, false), (Root::Title("Scratch.logicx - Tracks".into()), false), (Root::Title("Scratch.logicx - Tracks".into()), true)]
+    {
+        for (method, params) in [("read", json!({"kind":"project"})), ("snapshot", json!({})), ("focus_body", json!({"kind":"tree"}))] {
+            let hands = SceneHands::new(&scene);
+            let helper = Launch::launch(&mut hands.clone()).unwrap();
+            let trace = Arc::new(Mutex::new(Scene::new("chooser requests")));
+            let mut helper = Recorder::new(helper, trace.clone());
+            let mut project = Project::new(Strings::english());
+            project.set_root(root.clone());
+            if cached {
+                project.layout.control_bar = Some("the previous project's control bar".into());
+            }
+            let (code, message) = serve::answer(&mut project, &mut helper, pid, method, &params).unwrap_err();
+            assert_eq!(code, "busy", "{method}, {root:?}, cached={cached}");
+            assert!(message.contains("Choose a Project") && message.contains("nothing changed"), "{message}");
+            let trace = trace.lock().unwrap();
+            assert_eq!(trace.calls.len(), 1, "only the identifying main-window read ran: {:?}", trace.counts());
+            assert_eq!(trace.calls[0].op, "tree");
+            assert_eq!(trace.calls[0].params.get("root"), Some(&json!("main")));
+            assert!(hands.unrecorded().is_empty(), "the refusal uses the original native recording unchanged");
+        }
+    }
+}
+
+#[test]
 fn the_native_recordings_and_vector_keep_the_original_m2_source_bytes() {
     let source: Value = serde_json::from_str(include_str!("../fixtures/sources.json")).unwrap();
     assert_eq!(source["commit"], "d821e6690c06f9b983ca63ac98e37ba40eb50c7e");

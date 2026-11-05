@@ -151,6 +151,7 @@ impl Project {
         self.identity = name.to_string();
         if changed {
             self.forget();
+            self.layout = Layout::default();
             self.sample_rate = path.and_then(sample_rate_of);
         }
     }
@@ -172,7 +173,11 @@ impl Project {
 
     /// Where the window's parts are: one walk of the main window two levels down (some forty nodes).
     pub fn find_layout(&mut self, ax: &mut Ax) -> Result<(), AxError> {
+        if self.root != Root::Main {
+            self.check_project_chooser(ax)?;
+        }
         let window = ax.tree(&self.root, "", 2, 60, Some(BRIEF))?;
+        Self::refuse_project_chooser(&window)?;
         let parts = Window::of(&window, &self.strings);
         let mut layout = Layout {
             control_bar: parts.control_bar.map(|n| n.path.clone()),
@@ -200,6 +205,20 @@ impl Project {
         }
         self.layout = layout;
         Ok(())
+    }
+
+    /// A project may still be visible behind the chooser. Its controls must not be read or selected through it.
+    fn check_project_chooser(&self, ax: &mut Ax) -> Result<(), AxError> {
+        let main = ax.tree(&Root::Main, "", 2, 60, Some(BRIEF))?;
+        Self::refuse_project_chooser(&main)
+    }
+
+    fn refuse_project_chooser(window: &Node) -> Result<(), AxError> {
+        if window.id == "newProjectDialog" {
+            Err(AxError::ChoosingProject)
+        } else {
+            Ok(())
+        }
     }
 
     fn need(&self, part: &Option<String>, what: &str) -> Result<String, AxError> {
@@ -482,6 +501,9 @@ impl Project {
 
     /// One focus refresh: the transport from the control bar, the selected header and region, which panes are open.
     pub fn look(&mut self, ax: &mut Ax, busy: Option<&'static str>) -> Result<(Look, Vec<Header>, Vec<(usize, Region)>), AxError> {
+        if self.root != Root::Main && self.layout.control_bar.is_some() {
+            self.check_project_chooser(ax)?;
+        }
         if self.layout.control_bar.is_none() {
             self.find_layout(ax)?;
         }
@@ -656,6 +678,9 @@ impl Project {
 
     /// A read's own failure, in the wire's words.
     pub fn fault(error: &AxError) -> Fault {
+        if matches!(error, AxError::ChoosingProject) {
+            return (daw_bridge::wire::code::BUSY.into(), format!("{error}; nothing changed"));
+        }
         if crate::ax::untrusted(error) {
             return failed("Kumi's helper isn't allowed under Accessibility, so nothing of Logic Pro can be read");
         }
@@ -768,5 +793,8 @@ mod tests {
         };
         assert_eq!(Marker::from_row(&marker.to_row()), marker);
         assert_eq!(sample_rate_of("/nowhere/Nothing.logicx"), None);
+        project.layout.control_bar = Some("the old project's controls".into());
+        project.set_identity(None, None, "Another unsaved project");
+        assert_eq!(project.layout, Layout::default(), "a project switch finds its own window layout again");
     }
 }

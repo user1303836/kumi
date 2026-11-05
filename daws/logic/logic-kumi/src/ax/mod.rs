@@ -27,6 +27,8 @@ pub enum AxError {
     Helper(HelperError),
     /// The element a reader looked for isn't where Logic was expected to keep it.
     Missing(String),
+    /// Logic's stable AXIdentifier identifies its project chooser, even though macOS reports a standard window.
+    ChoosingProject,
 }
 
 impl std::fmt::Display for AxError {
@@ -34,6 +36,7 @@ impl std::fmt::Display for AxError {
         match self {
             AxError::Helper(error) => write!(f, "{error}"),
             AxError::Missing(what) => write!(f, "Logic Pro's window doesn't show {what}"),
+            AxError::ChoosingProject => f.write_str(crate::logic::Busy::ChoosingProject.reason()),
         }
     }
 }

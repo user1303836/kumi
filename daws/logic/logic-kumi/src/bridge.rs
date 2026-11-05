@@ -319,6 +319,10 @@ impl Attached {
         let look = match self.project.look(&mut ax, None) {
             Ok((look, _, _)) => look,
             Err(error) => {
+                if matches!(error, AxError::ChoosingProject) {
+                    lock(&self.model).busy = Some(logic::Busy::ChoosingProject);
+                    lock(&self.focus).busy = Some(logic::Busy::ChoosingProject.code());
+                }
                 if matches!(error, AxError::Missing(_)) {
                     // The window changed shape (a pane opened, a project loaded): find its parts again next time.
                     self.project.layout = Default::default();
