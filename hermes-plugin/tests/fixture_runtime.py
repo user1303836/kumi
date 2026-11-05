@@ -8,13 +8,13 @@ with a resource update after each. Standard library only.
 
     python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton [--library-root DIR]...
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
-        [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
+        [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
         [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media] [--listen-deadline SECONDS]
         [--component-state missing|same|older|newer|other_owner] [--component-owner DIR]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
-refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends; and say how a
-track listen ends (`unsure-with-media` is a runtime that wrongly sends a MEDIA: line with an unsure result).
+floods its stderr, closes its output and stays, or stays after its stdin ends; and say how a track listen ends
+(`unsure-with-media` is a runtime that wrongly sends a MEDIA: line with an unsure result).
 
 It writes what it was started with (`fixture-start.json`: its arguments and environment's names) and every message it
 received (`fixture-requests.jsonl`) into the state directory, for tests to read.
@@ -33,7 +33,6 @@ import time
 VERSION = "1.24.66"
 PROTOCOL = "kumi-serve/1"
 MCP = "2025-11-25"
-RESOURCES = {"status": "kumi://status", "focus": "kumi://focus", "history": "kumi://history"}
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`).
 STEPS = {"set_track_volume", "replace_sample"}
 SET = {
@@ -59,7 +58,6 @@ class Fixture:
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
         self.history: list[dict] = []
-        self.subscribed: set[str] = set()
         self.owner: dict | None = None
         self.running = True
         self.since = now()
@@ -114,16 +112,9 @@ class Fixture:
     def answer(self, method: str, params: dict) -> dict:
         if method == "initialize":
             return {"protocolVersion": MCP, "serverInfo": {"name": "kumi-serve", "version": self.options.server_version},
-                    "capabilities": {"tools": {}, "resources": {"subscribe": True}}}
+                    "capabilities": {"tools": {}}}
         if method == "tools/list":
             return {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in TOOLS]}
-        if method == "resources/list":
-            return {"resources": [{"uri": uri, "name": name} for name, uri in RESOURCES.items()]}
-        if method == "resources/subscribe":
-            if params.get("uri") in self.options.refuse_subscribe:
-                raise LookupError(f"no subscription to {params.get('uri')}")
-            self.subscribed.add(params["uri"])
-            return {}
         if method == "tools/call":
             return self.call(params["name"], dict(params.get("arguments") or {}))
         raise LookupError(f"no method {method}")
@@ -163,9 +154,6 @@ class Fixture:
             seq = self.next_seq()
             body = {"status": self.status, "focus": self.focus, "history": self.history_snapshot}[name]()
             self.record(f"{name}.json", {"schema": 1, "seq": seq, "at": now(), "owner": self.owner, **body})
-            if RESOURCES[name] in self.subscribed:
-                self.send({"jsonrpc": "2.0", "method": "notifications/resources/updated",
-                           "params": {"uri": RESOURCES[name]}})
 
     def project(self) -> dict | None:
         return {"name": self.set["name"], "key": self.set["key"], "epoch": self.epoch} if self.connected else None
@@ -368,7 +356,9 @@ SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", 
 def library(fixture: Fixture, args: dict, host: dict) -> dict:
     if args.get("action") == "add_folder":
         fixture.options.library_root.append(args["folder"])
-    if args.get("action") == "scan":
+    if args.get("action") == "scan":  # a scan job, its file written as kumi serve writes jobs/<id>.json
+        fixture.record("jobs/j-scan-1.json", {"schema": 1, "seq": fixture.seq + 1, "at": now(), "job_id": "j-scan-1",
+                                              "kind": "scan", "state": "running", "progress": {"done": 0, "total": 2}})
         return {"job_id": "j-scan-1"}
     return {"folders": list(fixture.options.library_root), "sounds": len(SOUNDS), "map_revision": "r1"}
 
@@ -503,7 +493,6 @@ def main() -> None:
     parser.add_argument("--exit-on")
     parser.add_argument("--slow", action="append", default=[])
     parser.add_argument("--leased-by", help="refuse changes as another chat's lease would")
-    parser.add_argument("--refuse-subscribe", action="append", default=[])
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")

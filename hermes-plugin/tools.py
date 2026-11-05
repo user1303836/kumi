@@ -223,7 +223,7 @@ def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dic
                 f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; set Kumi up for "
                 f"{schemas.DAW_NAMES[daw]} once the chat that started it ends."))
         live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                           library_roots=host.library_folders())
+                                           library_roots=host.library_folders(), profile=host.profile())
         timeout = READ_TIMEOUT if args.get("dry_run") else SETUP_TIMEOUT
         return live.call("setup_daw", args, host.identity(kwargs), timeout=timeout)
 
@@ -279,7 +279,7 @@ def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
             f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; it works in "
             f"{schemas.DAW_NAMES[daw]} once the chat that started it ends.")}}
     live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                       library_roots=host.library_folders())
+                                       library_roots=host.library_folders(), profile=host.profile())
     return live.call("connect", {"daw": daw}, host.identity(kwargs), timeout=CONNECT_TIMEOUT)
 
 

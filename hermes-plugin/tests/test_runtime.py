@@ -57,7 +57,8 @@ class Runtimes(unittest.TestCase):
 
     def start(self, *fixture_args: str, session: str | None = "s1", runtimes=None, daw: str = "ableton"):
         support.install(self.data, *fixture_args)
-        return (runtimes or self.runtimes).start(self.data, runtime.installed(self.data, support.VERSION), daw, session)
+        return (runtimes or self.runtimes).start(self.data, runtime.installed(self.data, support.VERSION), daw, session,
+                                                 profile="studio")
 
     def host(self, session: str = "s1") -> dict:
         return {"profile_id": "default", "session_id": session, "task_id": "t1", "tool_call_id": None,
@@ -129,7 +130,9 @@ class Runtimes(unittest.TestCase):
         changes = [m for m in support.requests(self.data / "state") if m.get("params", {}).get("name") == "change"]
         self.assertEqual(len(changes), 1, "the change was sent once and never again")
         self.assertIsNone(self.runtimes.get(self.data))
-        self.assertTrue(eventually(lambda: self.events == [("status.changed", {"seq": None})]), self.events)
+        stopped = ("status.changed", {"seq": None, "profile": "studio"})
+        self.assertTrue(eventually(lambda: [event for event in self.events if event[1]["seq"] is None] == [stopped]),
+                        self.events)
 
     def test_a_call_past_its_time_is_cancelled_and_reported_unknown(self):
         live = self.start("--slow", "history=1.5")
@@ -143,22 +146,20 @@ class Runtimes(unittest.TestCase):
         self.assertIn({"jsonrpc": "2.0", "method": "notifications/cancelled",
                        "params": {"requestId": asked, "reason": "Hermes stopped waiting"}}, received)
 
-    def test_each_snapshot_the_runtime_updates_becomes_a_desktop_event_with_its_seq(self):
+    def test_each_snapshot_the_runtime_writes_becomes_a_desktop_event_for_its_profile(self):
         live = self.start()
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        seqs = {json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"]
+        seqs = {name: json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"]
                 for name in ("status", "focus", "history")}
-        self.assertEqual({event for event, _ in self.events}, {"status.changed", "focus.changed", "history.changed"})
-        self.assertEqual({payload["seq"] for _, payload in self.events}, seqs)
-
-    def test_a_refused_subscription_leaves_the_others_and_the_runtime_starts(self):
-        with self.assertLogs(runtime.log, "WARNING") as logged:
-            live = self.start("--refuse-subscribe", "kumi://focus")
-        self.assertIn("refused a subscription to kumi://focus", logged.output[0])
-        self.events.clear()
-        live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        self.assertEqual({event for event, _ in self.events}, {"status.changed", "history.changed"})
+        expected = {(f"{name}.changed", seq) for name, seq in seqs.items()}
+        self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
+                        self.events)
+        live.call("library", {"action": "scan"}, self.host(), timeout=10)
+        job = ("job.progress", {"job_id": "j-scan-1", "state": "running", "progress": {"done": 0, "total": 2},
+                                "profile": "studio"})
+        self.assertTrue(eventually(lambda: job in self.events), self.events)
+        self.assertEqual({payload["profile"] for _, payload in self.events}, {"studio"})
 
     def test_a_runtime_flooding_its_stderr_still_answers(self):
         live = self.start("--stderr-flood", str(4 * 1024 * 1024))
@@ -172,7 +173,8 @@ class Runtimes(unittest.TestCase):
         self.runtimes.stop_session("s1")
         self.assertIsNone(self.runtimes.get(self.data))
         self.assertFalse(live.client.running)
-        self.assertEqual(self.events, [("status.changed", {"seq": None})], "one event a stop")
+        self.assertEqual([event for event in self.events if event[1]["seq"] is None],
+                         [("status.changed", {"seq": None, "profile": "studio"})], "one stop event")
 
     def test_an_idle_runtime_stops_even_with_no_chat_but_never_with_a_call_in_flight(self):
         runtimes = self.make(idle_after=0.3)
