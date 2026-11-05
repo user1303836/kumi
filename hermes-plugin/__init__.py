@@ -43,7 +43,11 @@ def register(ctx) -> None:
 
     def focus(**kwargs):
         policy.turn_started(host, **kwargs)  # a turn Hermes forks in the background never comes through here
+        policy.chat_turn(host, **kwargs)  # CC-19: a chat's first turn starts it clean
         return context.pre_llm_call(host, **kwargs)
+
+    def subagent(**kwargs):
+        policy.subagent_started(host, **kwargs)
 
     def kumi_command(raw_args: str = "", **kwargs):
         return commands.kumi(host, raw_args, **kwargs)
@@ -55,6 +59,7 @@ def register(ctx) -> None:
     ctx.register_hook("post_compaction", context.post_compaction)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
     ctx.register_hook("agent_loop_stopped", host.on_loop_stopped)  # the producer's Stop cancels a call in flight
+    ctx.register_hook("subagent_start", subagent)  # CC-19: a delegated subagent never runs a script
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION, args_hint=commands.ARGS_HINT)
     commands.register_cli(ctx, host)
     ctx.register_auxiliary_task(listening.AUX_TASK_KEY, **listening.AUX_TASK)  # CC-1; ctx.llm is read only per call
