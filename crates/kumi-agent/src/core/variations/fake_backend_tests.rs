@@ -844,13 +844,14 @@ async fn takes_that_dont_all_have_an_empty_place_are_refused_never_trimmed() {
     let tool = hosted(&daw, state.path());
     daw.room.set(Some(2));
     let ask = json!({"action": "make", "source": {"steps": BEAT}, "count": 4, "seed": 13});
-    let refusal = json!({"state": "refused", "code": "no_room",
+    let refusal = json!({"state": "refused", "code": "no_room", "fits": 2,
         "reason": "Only 2 of the 4 takes fit: the fake has 2 empty places. Ask for 2, or make room in Fake first."});
     assert_eq!(run(&tool, with(&ask, json!({"preview": true}))).await.unwrap(), refusal);
     assert_eq!(run(&tool, with(&ask, json!({"expect_takes": "0".repeat(64)}))).await.unwrap(), refusal);
     daw.room.set(Some(0));
     let none = run(&tool, with(&ask, json!({"preview": true}))).await.unwrap();
     assert_eq!(none["reason"], "No take fits: the fake has 0 empty places. Make room in Fake first.", "{none}");
+    assert_eq!(none["fits"], 0, "{none}");
     assert_eq!(daw.changes.get(), 0, "nothing written");
 
     daw.room.set(Some(2));

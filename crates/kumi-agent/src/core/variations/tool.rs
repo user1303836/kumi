@@ -972,7 +972,10 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let room = self.backend.room(&set, signal).await?;
         let fits = room.as_ref().map_or(drawn.len(), |room| room.fits.min(drawn.len()));
         if let Some(room) = room.filter(|room| room.fits < drawn.len()) {
-            return Ok(refused("no_room", no_room(&room, drawn.len(), self.backend.words().app)));
+            // (how many fit, as a number too, so the model can ask for that many)
+            let mut refusal = refused("no_room", no_room(&room, drawn.len(), self.backend.words().app));
+            refusal["fits"] = json!(room.fits);
+            return Ok(refusal);
         }
         if previewing {
             return Ok(
