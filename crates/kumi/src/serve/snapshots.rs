@@ -95,7 +95,11 @@ impl Snapshots {
         };
         let seq = Cell::new(newest_seq(&dir));
         Snapshots {
-            dir, seq, owner: RefCell::new(Host::default()), writer, landed,
+            dir,
+            seq,
+            owner: RefCell::new(Host::default()),
+            writer,
+            landed,
             #[cfg(test)]
             next_gate: RefCell::new(None),
         }
@@ -205,11 +209,18 @@ impl Snapshots {
                 None
             }
         };
-        Ok((seq, Write::File(FileWrite {
-            name: name.to_owned(), path, snapshot: Value::Object(snapshot), max_bytes, done,
-            #[cfg(test)]
-            gate,
-        })))
+        Ok((
+            seq,
+            Write::File(FileWrite {
+                name: name.to_owned(),
+                path,
+                snapshot: Value::Object(snapshot),
+                max_bytes,
+                done,
+                #[cfg(test)]
+                gate,
+            }),
+        ))
     }
 
     /// To the writer thread; written in place only when there's none to take it.

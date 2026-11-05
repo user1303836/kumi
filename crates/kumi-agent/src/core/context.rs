@@ -86,7 +86,11 @@ impl HostPolicy {
     }
 
     pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf) -> Self {
-        Self { persist_identity: false, guards_undo: true, listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root } }
+        Self {
+            persist_identity: false,
+            guards_undo: true,
+            listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root },
+        }
     }
 }
 

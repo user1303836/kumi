@@ -353,4 +353,3 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     call.progress.report(3., Some(3.), Some("Capture retained; temporary DAW state is restored."));
     Ok(result)
 }
-
