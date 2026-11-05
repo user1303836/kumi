@@ -106,7 +106,7 @@ enum Live {
 }
 
 /// Kits of each of `counts` drums, built as the instructions say (a track, a Drum Rack, its samples with no note), each
-/// checked and its pads undone: what each left on its pads. On real Live, the kit of 4 also gets a clip written by
+/// checked and its unsafe pad undo refused without changing the kit. On real Live, the kit of 4 also gets a clip written by
 /// General MIDI's names of its drums.
 async fn kits(integration: &Ableton, counts: &[usize], live: Live) -> Vec<Value> {
     let connection = integration.connection.clone();
@@ -138,6 +138,7 @@ async fn kits(integration: &Ableton, counts: &[usize], live: Live) -> Vec<Value>
         let named = integration.mutations.names.borrow().clone();
         let pads = notes::drum_pads(&connection, &named["rack"], &Signal::new()).await.expect("the rack's pads read");
         let held: Vec<(u8, String)> = pads.iter().filter(|pad| pad.holds).map(|pad| (pad.note, pad.name.clone())).collect();
+        let before_pads: Vec<_> = pads.iter().map(|pad| (pad.note, pad.name.clone(), pad.holds)).collect();
         let asked: Vec<(u8, String)> = SOUNDS[..count].iter().enumerate().map(|(at, name)| (36 + at as u8, name.to_string())).collect();
         if live == Live::Real {
             assert_eq!(held, asked, "a kit of {count}: its sounds on its first pads, in the order asked");
@@ -159,15 +160,45 @@ async fn kits(integration: &Ableton, counts: &[usize], live: Live) -> Vec<Value>
             pitches(&serde_json::from_str::<Value>(&read.text).unwrap(), &mut played);
             assert_eq!(played, BTreeSet::from([36, 37, 38, 39]), "kick, clap, hat and openhat play the kit's pads");
             row["clipPitches"] = json!(played);
-            // (the clip first: its undo is the last change's)
-            assert!(!integration.history.undo("last", Signal::new(), false).await.unwrap().is_error);
+            // Undo only the clip, leaving the kit's grouped sample loads for the refusal below.
+            let clip_change = integration
+                .history
+                .entries
+                .borrow()
+                .values()
+                .rev()
+                .find(|entry| entry.borrow().tool.as_deref() == Some("write_midi_clip"))
+                .expect("the clip's own change")
+                .borrow()
+                .record
+                .id
+                .clone();
+            assert!(!integration.history.undo(&clip_change, Signal::new(), false).await.unwrap().is_error);
         }
-        // The pads' change undone: every pad empty again.
+        // The bridge cannot prove unchanged pad content, so even an unedited kit must stay intact. This exercises
+        // the real integration/host refusal rather than weakening the guard for its deterministic simulator.
+        let records = || {
+            integration
+                .history
+                .entries
+                .borrow()
+                .iter()
+                .map(|(id, entry)| (id.clone(), serde_json::to_value(&entry.borrow().record).unwrap()))
+                .collect::<Vec<_>>()
+        };
+        let before_records = records();
         let undone = integration.history.undo("last", Signal::new(), false).await.unwrap();
-        assert!(!undone.is_error, "{}", undone.text);
+        assert!(undone.is_error && undone.refused && undone.stopped, "{}", undone.text);
+        assert!(undone.record.is_none(), "a first no-write refusal publishes no new change");
+        assert_eq!(records(), before_records, "refusal preserves every kit history record");
         let pads = notes::drum_pads(&connection, &named["rack"], &Signal::new()).await.expect("the rack's pads read");
-        assert!(pads.iter().all(|pad| !pad.holds), "undo clears a kit of {count}");
-        row["undoneEmpty"] = json!(true);
+        assert_eq!(
+            pads.iter().map(|pad| (pad.note, pad.name.clone(), pad.holds)).collect::<Vec<_>>(),
+            before_pads,
+            "refusal preserves the complete pad occupancy and names for a kit of {count}"
+        );
+        row["undoRefused"] = json!(true);
+        row["padsPreserved"] = json!(true);
         report.push(row);
     }
     report
