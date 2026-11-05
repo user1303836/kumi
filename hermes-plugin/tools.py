@@ -173,6 +173,28 @@ def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "undo", {key: value for key, value in args.items() if key != "preview"}, kwargs)
 
 
+SOURCE_KEYS = {"file", "sound_id", "map_revision", "artifact_id"}
+
+
+def listen_refusal(args: dict) -> str | None:
+    """Why `kumi_listen` can't measure this, or None: a source is a file, a sound or an artifact. (A DAW track plays the
+    project, so it needs its own approval: CC-2.)"""
+    for name in ("source", "compare_to"):
+        source = args.get(name)
+        if source is None and name == "compare_to":
+            continue
+        if not isinstance(source, dict) or not source or not set(source) <= SOURCE_KEYS:
+            return f"{name} is a file, a sound or an artifact here."
+    return None
+
+
+def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
+    refusal = listen_refusal(args)  # the approval hook checks this too; a dispatch without it mustn't play the DAW
+    if refusal:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    return host.live().call("listen", args, host.identity(kwargs), timeout=WRITE_TIMEOUT)
+
+
 def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
     """The runtime's sound search, as the model may see it: sound ids and what the map says of each, never a file's
     path (CC-4: a path is the media route's alone)."""
@@ -229,7 +251,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_change", schemas.KUMI_CHANGE, kumi_change, "🎚️"),
     ("kumi_undo", schemas.KUMI_UNDO, kumi_undo, "↩️"),
     ("kumi_history", schemas.KUMI_HISTORY, _forward("history", READ_TIMEOUT), "🕘"),
-    ("kumi_listen", schemas.KUMI_LISTEN, _forward("listen", WRITE_TIMEOUT), "📈"),
+    ("kumi_listen", schemas.KUMI_LISTEN, kumi_listen, "📈"),
     ("kumi_sounds", schemas.KUMI_SOUNDS, kumi_sounds, "🔎"),
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
     ("kumi_job", schemas.KUMI_JOB, _forward("job", READ_TIMEOUT), "⏳"),

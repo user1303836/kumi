@@ -24,7 +24,6 @@ PREVIEW_TIMEOUT = 10.0
 STEP_LINES = 18
 LINE = 120
 EFFECTS = {"write", "import", "playback"}
-SOURCE_KEYS = {"file", "sound_id", "map_revision", "artifact_id"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
@@ -51,6 +50,13 @@ def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: An
 def post_approval_response(host: Any, tool_call_id: Any = None, choice: Any = None, **kwargs: Any) -> None:
     """Hermes's `post_approval_response`: a Kumi call the producer denied, or nobody answered, loses its record."""
     if choice not in APPROVED:
+        host.calls.forget(tool_call_id)
+
+
+def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **kwargs: Any) -> None:
+    """Hermes's `post_tool_call`, after every call however it ended, a blocked one included (another plugin's veto, or
+    no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it."""
+    if isinstance(tool_name, str) and tool_name.startswith("kumi_"):
         host.calls.forget(tool_call_id)
 
 
@@ -119,13 +125,8 @@ def _reason(failure: Exception) -> str:
 def _listen(args: dict) -> dict | None:
     """Measuring a file, a sound or an artifact is a read. Any other source (a DAW track, which plays the project:
     CC-2) isn't approved here yet, so it doesn't run."""
-    for name in ("source", "compare_to"):
-        source = args.get(name)
-        if source is None and name == "compare_to":
-            continue
-        if not isinstance(source, dict) or not source or not set(source) <= SOURCE_KEYS:
-            return block(f"Kumi didn't measure anything: {name} is a file, a sound or an artifact here.")
-    return None
+    refusal = tools.listen_refusal(args)
+    return block(f"Kumi didn't measure anything: {refusal}") if refusal else None
 
 
 def _change(host: Any, args: dict, kwargs: dict) -> dict:

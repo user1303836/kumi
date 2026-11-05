@@ -34,11 +34,15 @@ def register(ctx) -> None:
     def approval_outcome(**kwargs):
         policy.post_approval_response(host, **kwargs)
 
+    def call_ended(**kwargs):
+        policy.post_tool_call(host, **kwargs)
+
     def kumi_command(raw_args: str = "", **kwargs):
         return commands.kumi(host, raw_args, **kwargs)
 
     ctx.register_hook("pre_tool_call", approval)
     ctx.register_hook("post_approval_response", approval_outcome)
+    ctx.register_hook("post_tool_call", call_ended)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
     for skill in ("daw", "sounds", "listening"):

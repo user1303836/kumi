@@ -230,6 +230,27 @@ class CallIds(unittest.TestCase):
                                       task_id="t1")
         self.assertEqual(with_preview["state"], "applied", "the hook's record matches without `preview`")
 
+    def test_a_call_hermes_blocked_leaves_nothing_a_later_dispatch_could_run_on(self):
+        self.hook("kumi_change", change(), "vetoed")  # Kumi approved; another plugin's hook, or no human, blocked it
+        policy.post_tool_call(self.host, tool_name="kumi_change", tool_call_id="vetoed", status="blocked")
+        self.assertEqual(support.handle(self.host, "kumi_change", change(), session_id="s1", task_id="t1")
+                         ["error"]["code"], "not_approved")
+        self.hook("kumi_change", change(), "next")
+        policy.post_approval_response(self.host, tool_call_id="next", choice="once")
+        self.assertEqual(support.handle(self.host, "kumi_change", change(), session_id="s1", task_id="t1")["state"],
+                         "applied")
+        self.assertEqual([args["_host"]["tool_call_id"] for args in self.received("change")], ["next"])
+
+    def test_hermess_coercion_of_the_arguments_keeps_their_record(self):
+        self.hook("kumi_history", {"limit": "5"}, "coerced")  # the model wrote "5"; Hermes's handler gets 5
+        support.handle(self.host, "kumi_history", {"limit": 5}, session_id="s1", task_id="t1")
+        self.assertEqual(self.received("history")[-1]["_host"]["tool_call_id"], "coerced")
+
+    def test_a_listen_on_a_track_never_runs_even_without_the_hook(self):
+        refused = support.handle(self.host, "kumi_listen", {"source": {"track": {"ref": "t1"}}}, session_id="s1")
+        self.assertEqual(refused["error"]["code"], "invalid")
+        self.assertEqual(self.received("listen"), [])
+
 
 class ThroughHermes(unittest.TestCase):
     """Hermes's own gate (v0.22.7) with Kumi's hook: a denied or unanswered approval sends no change."""
@@ -250,6 +271,9 @@ class ThroughHermes(unittest.TestCase):
         details = self.directive(action="approve", message=decision["message"], rule_key=decision["rule_key"])
         blocked = self.resolve(details, "kumi_change", tool_call_id="h1", session_id="s1")
         self.assertIsNotNone(blocked, "no one is here to approve, so Hermes blocks")
+        policy.post_tool_call(self.host, tool_name="kumi_change", tool_call_id="h1", status="blocked")  # as Hermes does
+        late = support.handle(self.host, "kumi_change", change(), session_id="s1")
+        self.assertEqual(late["error"]["code"], "not_approved", "a later dispatch without the hook can't run it")
         sent = [m for m in support.requests(self.data / "state")
                 if m.get("params", {}).get("name") == "change" and not m["params"]["arguments"].get("preview")]
         self.assertEqual(sent, [])

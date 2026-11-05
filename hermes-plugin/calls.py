@@ -23,10 +23,28 @@ TOTAL = 512
 
 
 def digest(args: dict) -> str:
-    """SHA-256 of the arguments as Hermes hands them to the hook and the handler, without `preview` (C5-2)."""
-    clean = {key: value for key, value in args.items() if key != "preview"}
+    """SHA-256 of the arguments without `preview` (C5-2). Hermes's agent loop hands the hook the model's arguments as
+    written, and the handler the same arguments after its own coercion ("5" → 5, "true" → True), so numbers and truth
+    values count by how they read: a coerced call matches the call the hook saw."""
+    clean = {key: _plain(value) for key, value in args.items() if key != "preview"}
     text = json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower()
+    return value
 
 
 @dataclass
