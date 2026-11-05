@@ -8,7 +8,7 @@ preview (CC-2), and the C3 snapshot files in `--state-dir`, with a resource upda
     python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton [--library-root DIR]...
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
-        [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media]
+        [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media] [--listen-deadline SECONDS]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
 refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends; and say how a
@@ -356,7 +356,8 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
             "through Kumi Ears and measure it; routing and the transport change for a moment and are put back")
     if args.get("preview"):
         return {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
-                "estimated_seconds": round(seconds, 2), "method": "ears"}
+                "estimated_seconds": round(seconds, 2), "method": "ears",
+                "deadline_seconds": fixture.options.listen_deadline}
     with open(fixture.state / "fixture-listens.jsonl", "a", encoding="utf-8") as log:
         log.write(json.dumps({"args": args, "host": host}) + "\n")
     measured = {"metrics": {"lufsIntegrated": -11.8, "truePeakDb": -0.6, "centroidHz": 2210.0},
@@ -409,6 +410,8 @@ def main() -> None:
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
+    parser.add_argument("--listen-deadline", type=float, default=75.0,
+                        help="the preview's deadline_seconds: the capture's 65 s cap, restoring and measuring")
     Fixture(parser.parse_args()).serve()
 
 

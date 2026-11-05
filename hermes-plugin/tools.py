@@ -21,8 +21,11 @@ STATUS_TIMEOUT = 15.0
 CONNECT_TIMEOUT = 60.0
 READ_TIMEOUT = 30.0
 WRITE_TIMEOUT = 120.0
-# A track listen: the capture's own cap (65 s, CC-2's R2), with setting the DAW up, restoring it and measuring.
-TRACK_TIMEOUT = 180.0
+# A track listen waits for the runtime's own deadline, which its preview gives (`deadline_seconds`: capture or render,
+# restore and measure), plus a margin; without one, for CC-2's longest: an offline render's 240 s, restore and measure.
+TRACK_TIMEOUT = 300.0
+TRACK_MARGIN = 30.0
+TRACK_LONGEST = 900.0  # a preview's deadline past this isn't believed
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
 
@@ -263,8 +266,12 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     if not is_track_listen(args):
         return host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
+    call = kwargs.get("kumi_call")
+    deadline = call.extra.get("deadline") if isinstance(call, calls.Entry) else None
+    timeout = (deadline + TRACK_MARGIN if isinstance(deadline, (int, float)) and not isinstance(deadline, bool)
+               and 0 < deadline <= TRACK_LONGEST else TRACK_TIMEOUT)
     try:
-        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=TRACK_TIMEOUT)
+        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout)
     except runtime.Unavailable as failure:
         if failure.code not in ("timeout", "stopped", "protocol"):
             raise

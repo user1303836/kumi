@@ -112,12 +112,17 @@ class Outcomes(unittest.TestCase):
                 if state == "unsure":
                     self.assertEqual((result["cleanup"], result["hint"]), ("unsure", tools.UNSURE_HINT))
 
-    def test_an_answer_that_never_came_is_unsure_and_never_sent_again(self):
-        with mock.patch.object(tools, "TRACK_TIMEOUT", 0.5):
-            result, data = self.listen("--slow", "listen=2")
+    def test_an_answer_past_the_runtimes_own_deadline_is_unsure_and_never_sent_again(self):
+        with mock.patch.object(tools, "TRACK_MARGIN", 0.3):  # the preview says 0.2 s; the answer takes 2 s
+            result, data = self.listen("--slow", "listen=2", "--listen-deadline", "0.2")
         self.assertEqual((result["state"], result["code"], result["cleanup"]), ("unsure", "timeout", "unsure"))
         self.assertEqual(result["hint"], tools.UNSURE_HINT)
         self.assertEqual([args.get("preview") for args in asked(data)], [True, None], "previewed, then sent once")
+
+    def test_a_slow_listen_within_the_runtimes_deadline_is_waited_for(self):
+        with mock.patch.object(tools, "TRACK_TIMEOUT", 0.5):  # what a preview without a deadline would get
+            result, _ = self.listen("--slow", "listen=1", "--listen-deadline", "5")
+        self.assertEqual(result["capture"]["cleanup"], "restored")
 
 
 if __name__ == "__main__":
