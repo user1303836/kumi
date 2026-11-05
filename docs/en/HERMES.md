@@ -25,7 +25,7 @@ Ask Hermes to "set up Kumi for Live" (or REAPER, or Renoise), or run `hermes kum
 steps and an optional third, and Hermes asks before each:
 
 1. **Kumi's runtime:** Kumi's official release for your computer, 26–33 MB, from Kumi's GitHub releases. It's checked
-   against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (82–120 MB).
+   against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (82–121 MB).
 2. **Kumi's part in your DAW:** Live's Remote Script (with the Kumi Ears device, for listening to tracks), REAPER's
    extension or Renoise's tool, at the exact paths setup shows you. Quit Live first: its Remote Script can't be
    installed while Live runs. REAPER and Renoise can stay open; restart them after (on Windows, quit REAPER to update
