@@ -347,6 +347,40 @@ class Installed(unittest.TestCase):
         self.receipt(kumi_home="someone/.kumi")
         self.assertIn("full path", self.reason())
 
+    def test_the_ffmpeg_setup_allowed_is_passed_only_while_it_is_the_same_file(self):
+        support.install(self.data)
+        tools = tempfile.TemporaryDirectory()
+        self.addCleanup(tools.cleanup)
+        folder = Path(os.path.realpath(tools.name)) / "bin"  # setup records the canonical path
+        folder.mkdir()
+        ffmpeg = folder / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ffmpeg.write_bytes(b"#!/bin/sh\n")
+        ffmpeg.chmod(stat.S_IRWXU)
+        found = ffmpeg.stat()
+        allowed = {"path": str(ffmpeg), "size": found.st_size, "mtime_ns": found.st_mtime_ns, "ino": found.st_ino}
+        self.receipt(tools={"ffmpeg": allowed})
+
+        def argv() -> list[str]:
+            return runtime.serve_argv(runtime.installed(self.data, support.VERSION), self.data / "state", "ableton")
+
+        self.assertEqual(argv()[-2:], ["--tool", f"ffmpeg={ffmpeg}"])
+        ffmpeg.write_bytes(b"#!/bin/sh\n# upgraded in place\n")  # same path, another program
+        self.assertNotIn("--tool", argv())
+        for record in ({**allowed, "path": "ffmpeg"}, {**allowed, "size": str(found.st_size)}, "/usr/bin/ffmpeg"):
+            with self.subTest(record=record):
+                self.receipt(tools={"ffmpeg": record})
+                self.assertNotIn("--tool", argv())
+        moved = folder.with_name("moved")  # the folder becomes a link to another one with the very same file
+        folder.rename(moved)
+        try:
+            folder.symlink_to(moved, target_is_directory=True)
+        except OSError:  # Windows, without the right to make links
+            return
+        found = (moved / ffmpeg.name).stat()
+        self.receipt(tools={"ffmpeg": {**allowed, "size": found.st_size, "mtime_ns": found.st_mtime_ns,
+                                       "ino": found.st_ino}})
+        self.assertNotIn("--tool", argv(), "an allowed path that now leads through a link is changed")
+
 
 if __name__ == "__main__":
     unittest.main()

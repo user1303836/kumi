@@ -19,6 +19,7 @@ import logging
 import os
 from pathlib import Path
 import queue
+import stat
 import subprocess
 import threading
 import time
@@ -80,11 +81,13 @@ class Refused(Exception):
 
 @dataclass(frozen=True)
 class Install:
-    """The runtime setup installed: its version and target, the `kumi` to start, and Kumi's transport home."""
+    """The runtime setup installed: its version and target, the `kumi` to start, Kumi's transport home, and the ffmpeg
+    the producer allowed at setup, as setup recorded it (CC-10: `{path, size, mtime_ns, ino}`), if any."""
     version: str
     target: str
     kumi: Path
     kumi_home: Path
+    ffmpeg: dict | None = None
 
 
 def installed(data_dir: Path, pinned: str | None, target: str | None = None) -> Install:
@@ -116,7 +119,26 @@ def installed(data_dir: Path, pinned: str | None, target: str | None = None) -> 
     if home is not None and not (isinstance(home, str) and Path(home).is_absolute()):
         raise Unavailable("setup_needed", "Kumi's setup record names a transport home that isn't a full path: set "
                                           "Kumi up again.")
-    return Install(version, target, program, Path(home) if home else data_dir / "kumi-home")
+    tools = receipt.get("tools") if isinstance(receipt.get("tools"), dict) else {}
+    ffmpeg = tools.get("ffmpeg") if isinstance(tools.get("ffmpeg"), dict) else None
+    return Install(version, target, program, Path(home) if home else data_dir / "kumi-home", ffmpeg)
+
+
+def allowed_tool(record: dict | None) -> str | None:
+    """The program setup recorded (CC-10), while it's still the one the producer allowed: the absolute, canonical path
+    setup recorded (none of its folders since swapped for a link, to a share or anywhere else), naming a regular,
+    executable file whose size, modification time and inode are as recorded. Anything else is None: a program that
+    was upgraded, swapped, moved behind a link or removed since needs setup again, and Kumi never looks for another."""
+    path = record.get("path") if isinstance(record, dict) else None
+    if not isinstance(path, str) or not os.path.isabs(path) or os.path.realpath(path) != path:
+        return None
+    try:
+        found = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    same = all(isinstance(record.get(key), int) and record[key] == getattr(found, f"st_{key}")
+               for key in ("size", "mtime_ns", "ino"))
+    return path if same and stat.S_ISREG(found.st_mode) and os.access(path, os.X_OK) else None
 
 
 def launch_environment(environ: Mapping[str, str], windows: bool = os.name == "nt") -> dict[str, str]:
@@ -127,12 +149,15 @@ def launch_environment(environ: Mapping[str, str], windows: bool = os.name == "n
 
 
 def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = ()) -> list[str]:
-    """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, and each sample
-    folder the producer approved (`--library-root`, the runtime's only grant to read them)."""
+    """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, each sample folder
+    the producer approved (`--library-root`, the runtime's only grant to read them), and the ffmpeg they allowed at
+    setup while it's unchanged (`--tool ffmpeg=`, CC-10). Read at each start."""
     argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
             "--daw", daw]
     for root in library_roots:
         argv += ["--library-root", root]
+    if ffmpeg := allowed_tool(install.ffmpeg):
+        argv += ["--tool", f"ffmpeg={ffmpeg}"]
     return argv
 
 
