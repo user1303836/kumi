@@ -95,7 +95,7 @@ pub fn validate(op: &str, input: &JsonObject) -> Result<(), String> {
     if op == "plugin.parameters_set" {
         let mut seen = std::collections::HashSet::new();
         for parameter in input["parameters"].as_array().into_iter().flatten() {
-            if !seen.insert(parameter["index"].as_u64().unwrap()) {
+            if !seen.insert(parameter["index"].as_f64().unwrap() as u64) {
                 return Err("Each parameter index may occur only once in a transaction".into());
             }
         }
@@ -143,8 +143,8 @@ pub fn validate(op: &str, input: &JsonObject) -> Result<(), String> {
                 return Err("An update needs at least one changed clip property".into());
             }
         }
-        if let (Some(start), Some(length)) = (edit.get("start").and_then(Value::as_u64), edit.get("length").and_then(Value::as_u64)) {
-            if start.saturating_add(length) > 1_000_000_000 {
+        if let (Some(start), Some(length)) = (edit.get("start").and_then(Value::as_f64), edit.get("length").and_then(Value::as_f64)) {
+            if start + length > 1_000_000_000. {
                 return Err("A Playlist clip extends beyond the native tick bound".into());
             }
         }

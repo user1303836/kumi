@@ -96,7 +96,7 @@ fn validate_object(input: &JsonObject, schema: &Value) -> Result<(), String> {
         }
         if name == "notes" {
             for note in value.as_array().into_iter().flatten() {
-                if note["start"].as_u64().unwrap_or(0).saturating_add(note["length"].as_u64().unwrap_or(0)) > 1_000_000_000 {
+                if note["start"].as_f64().unwrap_or(0.) + note["length"].as_f64().unwrap_or(0.) > 1_000_000_000. {
                     return Err("A note extends beyond the native tick bound".into());
                 }
             }
@@ -320,6 +320,7 @@ mod tests {
         )
         .is_err());
         assert!(check_extension("plugin.parameters_set", json!({"target":target,"parameters":[]})).is_err());
+        assert!(check_extension("plugin.parameters_set", json!({"target":target,"parameters":[{"index":3.0,"value":0.7,"expectedValue":0.2},{"index":3,"value":0.3,"expectedValue":0.2}]})).is_err());
         assert!(check_extension("plugin.parameters_set", json!({"target":{"kind":"effect","mixerIndex":6,"effectIndex":1},"parameters":[{"index":3,"value":0.7,"expectedValue":0.2},{"index":4,"value":0.1,"expectedValue":0.6}]})).is_ok());
         assert!(check_extension("plugin.inspect", json!({"target":{"kind":"effect","mixerIndex":6},"limit":128})).is_err());
         assert!(check_extension("plugin.inspect", json!({"limit":257})).is_err());
