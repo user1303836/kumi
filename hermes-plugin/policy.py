@@ -200,8 +200,8 @@ def _variations(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]
     takes = [take for take in answer.get("takes") or [] if isinstance(take, dict) and isinstance(take.get("take"), str)]
     if not takes:
         return block("Kumi didn't make any takes: its runtime drew none."), {}
-    named = answer.get("source")
-    source = quoted(named, 60) if isinstance(named, str) and named.strip() else "the source"
+    named = answer.get("source")  # serve's label, its name already quoted ("“Bassline” on Bass")
+    source = one_line(named, 60) if isinstance(named, str) and named.strip() else "the source"
     if action == "keep":
         lines = [f"Kumi: keep {len(takes)} take{'s' if len(takes) != 1 else ''} of {source}, renamed",
                  *(f"• {one_line(take['take'], 10)} → {quoted(take.get('name_after'), 80)}" for take in takes)]
@@ -210,13 +210,20 @@ def _variations(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]
         return block("Kumi didn't make any takes: its runtime didn't say how it drew them."), {}
     verb = "make" if action == "make" else "rewrite"
     lines = [f"Kumi: {verb} {len(takes)} take{'s' if len(takes) != 1 else ''} of {source}, each its own, never over it",
-             *(f"• {one_line(take['take'], 10)} ({one_line(take.get('direction') or 'a take', 50)}): "
-               f"{one_line(take.get('line') or '', 120)}" for take in takes)]
+             *(f"• {one_line(_take_line(take), STEP_LINE - 2)}" for take in takes)]
     decision = approve(lines, "kumi:write:clip", footer=FOOTER)
     if decision["action"] == "approve":
         decision[_COMPACT] = [lines[0], "• " + "; ".join(
             f"{one_line(take['take'], 10)} {one_line(take.get('direction') or 'a take', 80)}" for take in takes)]
     return decision, {"seed": answer["seed"], "takes_digest": answer["takes_digest"]}
+
+
+def _take_line(take: dict) -> str:
+    """A drawn take in the runtime's words ("V3 (busier): …", its name and direction first), or by its name and
+    direction when the runtime gave no line."""
+    line = take.get("line")
+    return line if isinstance(line, str) and line.strip() else f"{take['take']} ({take.get('direction') or 'a take'})"
+
 
 
 def preview_timeout(hook_timeout: float | None) -> float:

@@ -30,11 +30,16 @@ class Variations(unittest.TestCase):
         decision = self.hook(args)
         self.assertEqual(decision["rule_key"], "kumi:write:clip:s1")
         self.assertEqual(decision["message"].splitlines()[:3], [
-            'Kumi: make 2 takes of "Bassline", each its own, never over it',
-            "• V1 (busier hats): busier hats, 8 bars, 31 notes",
-            "• V2 (half-time feel): half-time feel, 8 bars, 31 notes"])
+            "Kumi: make 2 takes of “Bassline” on Bass, each its own, never over it",
+            "• V1 (busier hats): 8 bars, 31 notes",
+            "• V2 (half-time feel): 8 bars, 31 notes"])
         made = support.call(self.host, "kumi_variations", args, session_id="s1")
         self.assertEqual((made["state"], len(made["history_ids"])), ("applied", 2), "one HISTORY row per take")
+        keep = {"action": "keep", "names": ["V1"], "expected_project_key": made["project"]["key"],
+                "expected_epoch": str(made["project"]["epoch"])}
+        asked = self.hook(keep)
+        self.assertEqual((asked["rule_key"], asked["message"].splitlines()[:2]), (
+            "kumi:write:clip:s1", ["Kumi: keep 1 take of the source, renamed", '• V1 → "V1 · Bassline · kept"']))
 
     def test_takes_that_would_come_out_differently_after_the_approval_are_never_written(self):
         approved = make(count=2)
@@ -47,7 +52,7 @@ class Variations(unittest.TestCase):
     def test_the_runtimes_refusal_is_said_before_anyone_is_asked(self):
         decision = self.hook(make(count=8))
         self.assertEqual(decision["action"], "block")
-        self.assertIn("Only 6 empty places are left for takes", decision["message"], "24-r2: refused, never trimmed")
+        self.assertIn("Only 6 of the 8 takes fit", decision["message"], "24-r2: refused, never trimmed")
 
     def test_list_reads_and_drop_and_extract_never_run(self):
         self.assertIsNone(self.hook({"action": "list"}))
