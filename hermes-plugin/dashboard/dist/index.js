@@ -802,11 +802,15 @@
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
   }
+  var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g;
+  function quotable(name, max = 80) {
+    return clean(typeof name === "string" ? name.replace(QUOTE_MARKS, " ") : name, max).replace(QUOTE_MARKS, " ").replace(/\s+/g, " ").trim();
+  }
   function soundRequest(soundId, name, revision) {
     const id = plainId(soundId);
     if (!id) return null;
     const from = revision ? plainId(revision) : null;
-    const said = clean(name ?? "", 80);
+    const said = quotable(name);
     const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
     return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
   }
