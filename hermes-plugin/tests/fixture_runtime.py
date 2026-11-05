@@ -222,7 +222,7 @@ class Fixture:
         project = self.project()
         return {"project": {**project, "epoch": int(project["epoch"]), "seen_at": self.seen_at} if project else None,
                 "focus": {"track": {"name": drums["name"]}, "trackRef": drums["ref"], "device": "Drum Rack",
-                          "view": "Arrangement"},
+                          "deviceRef": drums["devices"][0]["ref"], "view": "Arrangement"},
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
