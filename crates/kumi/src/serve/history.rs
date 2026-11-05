@@ -341,10 +341,12 @@ impl History {
     /// The `script` call ends: its one row, in `state` (`applied`, `failed` or `unsure`) with `note` (every script row
     /// has one: why Kumi can't undo it), marked with its host call. That's the row the DAW's executor made for it
     /// (REAPER's and Renoise's run_lua), or, when it made none (Live's run_python never does, and nothing may have run),
-    /// a row of the runtime's own.
+    /// a row of the runtime's own. A run is Kumi's write in its project: a change only the DAW's own Undo takes back made
+    /// there before it is no longer the DAW's latest step (CC-20).
     pub fn end_script(&self, identity: CallIdentity, project_key: &str, state: &str, note: String, snapshots: &Snapshots) -> Row {
         let made = self.collecting.borrow_mut().take().unwrap_or_default();
         let (title, script) = self.scripting.borrow_mut().take().unwrap_or_default();
+        self.wrote(project_key);
         let mark = |row: &mut Row| {
             row.state = state.to_string();
             row.undo_available = false;
@@ -694,6 +696,24 @@ mod tests {
         let after = History::new(dir.path(), "g2".into());
         let old = after.row("h-g1-c1").unwrap();
         assert_eq!((old.reason.as_deref(), after.daw_undo_place(&old)), (Some(DAW_UNDO), None));
+    }
+
+    #[test]
+    fn a_script_run_buries_a_change_only_the_daws_undo_takes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let history = History::new(dir.path(), "g1".into());
+        history.begin_call();
+        history.daw_undo_call("Live's own Undo takes it back.".into());
+        history.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
+        history.end_call(call("tc-1", "d1"), &snapshots);
+        let place = || history.daw_undo_place(&history.row("h-g1-c1").unwrap());
+        assert_eq!(place(), Some("next"));
+        let run = ScriptRun { sha256: "a".repeat(64), language: "python".into() };
+        history.begin_script("Script: Name the drums", &run);
+        let row = history.end_script(call("tc-2", "d2"), "p-1", "applied", "Kumi can't undo a script.".into(), &snapshots);
+        assert_eq!((row.family.as_str(), row.reason.as_deref(), history.daw_undo_place(&row)), ("script", None, None));
+        assert_eq!(place(), Some("buried"), "the script's step is the DAW's latest now");
     }
 
     #[test]
