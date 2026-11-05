@@ -149,14 +149,16 @@ export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
 }
 
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
- *  doesn't write. It names the map revision the sound is from, so the model can hand CC-11's
- *  `{sound_id, map_revision}` source to a file step without searching again. */
+ *  doesn't write. The name leads, as the producer would say it; the ids follow in parentheses, with the map revision
+ *  the sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
+ *  again. */
 export function soundRequest(soundId: string, name?: string, revision?: string | null): string | null {
   const id = plainId(soundId)
   if (!id) return null
   const from = revision ? plainId(revision) : null
   const said = clean(name ?? '', 80)
-  return `Use sound ${id}${from ? ` from map ${from}` : ''}${said ? ` (“${said}”)` : ''} on the selected track`
+  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
+  return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
 }
 
 export function setupRequest(daw: unknown): string {
