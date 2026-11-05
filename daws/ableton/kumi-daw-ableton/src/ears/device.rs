@@ -59,8 +59,12 @@ pub async fn install_ears_with(user_library: impl AsRef<Path>, remove_earlier: b
     let folder = user_library.as_ref().join("Kumi").join("Audio Effects");
     let file = folder.join(format!("{EARS_NAME}.amxd"));
     let bytes = ears_file();
-    if tokio::fs::read(&file).await.is_ok_and(|current| current == bytes) {
-        return Ok(InstalledEars { file: file.to_string_lossy().into_owned(), written: false });
+    match tokio::fs::read(&file).await {
+        Ok(current) if current == bytes => return Ok(InstalledEars { file: file.to_string_lossy().into_owned(), written: false }),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        // A device that's there but can't be read isn't known to be Kumi's: it stays, and the error says why.
+        Err(error) => return Err(error),
     }
     let mut builder = tokio::fs::DirBuilder::new();
     builder.recursive(true);

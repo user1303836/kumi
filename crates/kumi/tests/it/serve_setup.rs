@@ -28,12 +28,13 @@ macro_rules! case {
     };
 }
 
-/// Every file under a folder and its bytes (a link as the path it names): what a step wrote is what differs. The
-/// runtimes' own state folders (`plugin/state…`, where their snapshots are written as they go) are left out.
+/// Every file, folder and link under a folder (a file by its bytes, a folder by a mark, a link by the path it names):
+/// what a step wrote or made is what differs. The runtimes' own state folders (`plugin/state…`, where their snapshots
+/// are written as they go) are left out.
 type Tree = BTreeMap<PathBuf, Vec<u8>>;
 
 fn tree(root: &Path) -> Tree {
-    let mut files = Tree::new();
+    let mut found = Tree::new();
     let mut folders = vec![root.to_path_buf()];
     let runtimes = root.join("plugin");
     while let Some(folder) = folders.pop() {
@@ -42,18 +43,19 @@ fn tree(root: &Path) -> Tree {
             if kind.is_dir() && folder == runtimes && entry.file_name().to_string_lossy().starts_with("state") {
                 continue;
             } else if kind.is_dir() {
+                found.insert(path.clone(), b"<folder>".to_vec());
                 folders.push(path);
             } else if kind.is_symlink() {
-                files.insert(path.clone(), std::fs::read_link(&path).unwrap().display().to_string().into_bytes());
+                found.insert(path.clone(), std::fs::read_link(&path).unwrap().display().to_string().into_bytes());
             } else {
-                files.insert(path.clone(), std::fs::read(&path).unwrap());
+                found.insert(path.clone(), std::fs::read(&path).unwrap());
             }
         }
     }
-    files
+    found
 }
 
-/// The files added, changed or gone between two looks.
+/// What was added, changed or gone between two looks.
 fn differ(before: &Tree, after: &Tree) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = before.keys().chain(after.keys()).filter(|path| before.get(*path) != after.get(*path)).cloned().collect();
     paths.sort();
@@ -61,11 +63,18 @@ fn differ(before: &Tree, after: &Tree) -> Vec<PathBuf> {
     paths
 }
 
-/// Each file a step wrote lies in one of the paths its plan named (or is the lease's own file).
+/// Each file or folder a step wrote, made or removed lies in one of the paths its plan named, or is the lease's own
+/// file, or a folder of the Kumi home's on the way to one of those (the home's own folders, which plans leave out).
 fn within(written: &[PathBuf], plan: &Value, lease: &Path) {
     let named: Vec<PathBuf> = plan["paths"].as_array().unwrap().iter().map(|path| PathBuf::from(path.as_str().unwrap())).collect();
+    let home = lease.parent().and_then(Path::parent).unwrap();
     for path in written {
-        assert!(path == lease || named.iter().any(|named| path.starts_with(named)), "{} isn't in the plan's {named:?}", path.display());
+        let on_the_way = path.starts_with(home) && (lease.starts_with(path) || named.iter().any(|named| named.starts_with(path)));
+        assert!(
+            path == lease || on_the_way || named.iter().any(|named| path.starts_with(named)),
+            "{} isn't in the plan's {named:?}",
+            path.display()
+        );
     }
 }
 
@@ -442,7 +451,9 @@ case!(setup_daw_plans_lives_part_from_files_alone_and_writes_nothing, async {
     assert_eq!(lab.tree(), before, "a dry run writes nothing, not even the lease's file");
     assert!(lab.calls.borrow().is_empty(), "and runs nothing");
     let script = lab.scripts().join("AbletonMcpBridge");
-    assert_eq!(plan["paths"], strings(&[&script, &lab.home.join("bridge"), &lab.ears(), &lab.home.join("kumi-ears.json")]));
+    // Kumi Ears' folders aren't in the User Library yet: the outermost one it makes is named too.
+    let made = lab.path("User Library/Kumi");
+    assert_eq!(plan["paths"], strings(&[&script, &lab.home.join("bridge"), &lab.ears(), &lab.home.join("kumi-ears.json"), &made]));
     assert_eq!((plan["state"].as_str(), plan["after"].as_str()), (Some("missing"), Some("choose_control_surface")));
     assert_eq!((plan["component"].as_str(), plan["version"].as_str()), (Some("Live Remote Script"), Some(bundled().as_str())));
     assert_eq!((&plan["owner"], &plan["keep_identity"]), (&Value::Null, &json!(false)));
@@ -659,10 +670,19 @@ case!(setup_daw_installs_only_the_plan_that_was_approved_and_never_another_kumis
     }
 });
 
-case!(setup_daw_updates_a_kumi_ears_this_home_put_there, async {
+case!(setup_daw_updates_a_kumi_ears_this_home_put_there_and_never_an_earlier_kumis, async {
     let lab = Lab::new(DawId::Ableton, false);
+    // An earlier Kumi's device in its old place: Kumi's own, as `kumi bridge` would remove it. Setup leaves it.
+    let legacy = lab.path("User Library/Kumi/Kumi Ears.amxd");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, kumi_daw_ableton::ears::device::ears_file()).unwrap();
     let plan = lab.setup(true).await.unwrap();
+    assert_eq!(plan["parts"][1]["state"], "missing", "{plan}");
+    let before = lab.tree();
     lab.install(&plan["digest"]).await.unwrap();
+    within(&differ(&before, &lab.tree()), &plan, &lab.lease());
+    assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "installed");
+    assert_eq!(std::fs::read(&legacy).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "the earlier copy stays");
     // The device this home wrote, as an earlier Kumi made it: its record names those bytes.
     let old = b"Kumi Ears as an earlier Kumi made it".to_vec();
     std::fs::write(lab.ears(), &old).unwrap();
@@ -676,7 +696,32 @@ case!(setup_daw_updates_a_kumi_ears_this_home_put_there, async {
     let before = lab.tree();
     lab.install(&plan["digest"]).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
-    assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file());
+    assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "updated");
+    assert_eq!(std::fs::read(&legacy).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "the earlier copy still stays");
+});
+
+#[cfg(unix)]
+case!(setup_daw_leaves_a_kumi_ears_it_cant_read_as_it_is, async {
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new(DawId::Ableton, false);
+    let plan = lab.setup(true).await.unwrap();
+    lab.install(&plan["digest"]).await.unwrap();
+    // Another Kumi's device, which this user can't read (its folder is theirs to write).
+    std::fs::write(lab.ears(), b"another Kumi's Kumi Ears").unwrap();
+    let mode = |mode: u32| std::fs::set_permissions(lab.ears(), std::fs::Permissions::from_mode(mode)).unwrap();
+    mode(0o000);
+    if std::fs::read(lab.ears()).is_ok() {
+        // (root reads it anyway: nothing here to prove)
+        return mode(0o644);
+    }
+    let plan = lab.setup(true).await.unwrap();
+    let done = lab.install(&plan["digest"]).await;
+    mode(0o644);
+    assert_eq!(plan["parts"][1]["state"], "other_owner", "an Ears that can't be read isn't missing: {plan}");
+    assert!(!plan["paths"].to_string().contains("Kumi Ears.amxd"), "{plan}");
+    assert!(plan["effects"].to_string().contains("can't read the Kumi Ears"), "{}", plan["effects"]);
+    done.unwrap();
+    assert_eq!(std::fs::read(lab.ears()).unwrap(), b"another Kumi's Kumi Ears", "it stays as it is");
 });
 
 case!(setup_daw_upgrades_an_earlier_install_through_the_bridges_lifecycle_in_the_folders_its_receipt_names, async {
@@ -767,13 +812,15 @@ case!(setup_daw_puts_reapers_extension_in_exactly_as_planned_and_never_into_an_a
 });
 
 case!(setup_daw_takes_reapers_and_renoises_parts_only_from_the_runtimes_release_bundle, async {
-    let lab = Lab::new(DawId::Renoise, false);
-    let env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
-    // A runtime with nothing laid out as a release lays it out: never this checkout's build.
-    let bare = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Renoise, env, kumi_daw::io::Answers::default());
-    match setup_on(&bare, true).await {
-        Err(OpError::Failed { reason }) => assert!(reason.contains("doesn't carry"), "{reason}"),
-        other => panic!("planned without a bundle: {other:?}"),
+    for daw in [DawId::Reaper, DawId::Renoise] {
+        let lab = Lab::new(daw, false);
+        let env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+        // A runtime with nothing laid out as a release lays it out: never this checkout's build.
+        let bare = runtime(lab.root.path(), "plugin/state-2", &lab.home, daw, env, kumi_daw::io::Answers::default());
+        match setup_on(&bare, true).await {
+            Err(OpError::Failed { reason }) => assert!(reason.contains("doesn't carry"), "{reason}"),
+            other => panic!("{daw:?} planned without a bundle: {other:?}"),
+        }
     }
 });
 
@@ -924,5 +971,68 @@ case!(setup_daw_never_downgrades_reapers_extension_this_home_left_in_another_res
     assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("99.0.0"), &json!([])), "{plan}");
     let before = lab.tree();
     assert_eq!(refused(setup_on(&older, false).await).0, "newer_installed");
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+});
+
+case!(setup_daw_takes_reapers_extensions_version_from_its_receipt_never_a_stale_file_beside_it, async {
+    let lab = Lab::new(DawId::Reaper, false);
+    // This home put in a newer extension (99.0.0); a version file an earlier install left beside it says 0.0.1.
+    carried(lab.root.path(), "newer", Some("99.0.0"), b"the newer extension");
+    let env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+    let newer = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env, carrying(&lab, "newer"));
+    setup_on(&newer, false).await.unwrap();
+    std::fs::write(lab.path("REAPER/UserPlugins/reaper_kumi.version"), "0.0.1\n").unwrap();
+    let plan = lab.setup(true).await.unwrap();
+    assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("99.0.0"), &json!([])), "{plan}");
+    let before = lab.tree();
+    assert_eq!(refused(lab.install(&plan["digest"]).await).0, "newer_installed");
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+});
+
+case!(setup_daw_never_replaces_a_copy_whose_version_cant_be_ordered, async {
+    let lab = Lab::new(DawId::Reaper, false);
+    // This home put in a development build (no version file: recorded as "dev") in this REAPER's resource folder...
+    carried(lab.root.path(), "dev", None, b"a development extension");
+    std::fs::remove_file(lab.path("dev/daws/reaper/reaper_kumi.version")).unwrap();
+    let env = |resources: &str| {
+        let mut env = env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+        env.insert("KUMI_REAPER_RESOURCE_DIR".into(), lab.path(resources).display().to_string());
+        env
+    };
+    let dev = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env("REAPER"), carrying(&lab, "dev"));
+    setup_on(&dev, false).await.unwrap();
+    // ...and a released runtime now sets up a portable REAPER's, where there's none yet: the dev copy can't be ordered
+    // against it, so it stays.
+    std::fs::create_dir_all(lab.path("REAPER-2/UserPlugins")).unwrap();
+    let released = runtime(lab.root.path(), "plugin/state-3", &lab.home, DawId::Reaper, env("REAPER-2"), carrying(&lab, "runtime"));
+    let plan = setup_on(&released, true).await.unwrap();
+    assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("dev"), &json!([])), "{plan}");
+    assert!(plan["effects"].to_string().contains("can't be ordered"), "{}", plan["effects"]);
+    let before = lab.tree();
+    assert_eq!(refused(setup_on(&released, false).await).0, "newer_installed");
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+});
+
+#[cfg(unix)]
+case!(setup_daw_leaves_a_copy_whose_reference_it_cant_look_at_as_it_is, async {
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new(DawId::Renoise, false);
+    lab.setup(false).await.unwrap();
+    // The tool's folder can't be opened any more, so its reference can't be looked at: this home's receipt still says
+    // the tool is this home's, but nothing there says so now.
+    let tool = lab.path("Renoise/V3.5.4/Scripts/Tools/com.kumi.Bridge.xrnx");
+    let mode = |mode: u32| std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(mode)).unwrap();
+    let before = lab.tree();
+    mode(0o000);
+    if std::fs::read_dir(&tool).is_ok() {
+        // (root opens it anyway: nothing here to prove)
+        return mode(0o755);
+    }
+    let plan = lab.setup(true).await.unwrap();
+    let done = lab.install(&plan["digest"]).await;
+    mode(0o755);
+    let unknown = json!({"kumi_home": null});
+    assert_eq!((plan["state"].as_str(), &plan["paths"], &plan["owner"]), (Some("other_owner"), &json!([]), &unknown), "{plan}");
+    assert_eq!(refused(done).0, "owned_elsewhere");
     within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
 });

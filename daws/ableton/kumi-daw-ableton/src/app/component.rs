@@ -12,7 +12,7 @@ use super::{
 use crate::ears::device::{ears_file, install_ears_with, EARS_NAME};
 use kumi_common::time::now_ms;
 use kumi_daw::{
-    component::{same_folder, After, ApplyError, ComponentPlan, Part, PartState},
+    component::{folders_made, same_folder, After, ApplyError, ComponentPlan, Part, PartState},
     io::DawIo,
     process::{executable_dir, executable_name},
     provider::{newer, DawProvider},
@@ -57,6 +57,8 @@ struct Look {
     /// Where this home records the Kumi Ears it wrote (`<home>/kumi-ears.json`: its path and SHA-256), so a device that
     /// differs from this Kumi's is replaced only when it's the one this home put there.
     ears_record: String,
+    /// Whether a Kumi Ears is there that can't be read: nothing says it's this home's, so it stays.
+    ears_unreadable: bool,
 }
 
 impl Look {
@@ -91,12 +93,15 @@ impl Look {
         // that differs from this Kumi's otherwise is another Kumi's device (perhaps a newer one), and stays, before and
         // after this home's Remote Script goes in.
         let ears_record = join(&home.display().to_string(), EARS_RECORD);
-        let ears = match library.as_deref().map(|library| (ears_path(library), std::fs::read(ears_path(library)))) {
+        let found = library.as_deref().map(|library| (ears_path(library), std::fs::read(ears_path(library))));
+        let ears_unreadable = matches!(&found, Some((_, Err(error))) if error.kind() != std::io::ErrorKind::NotFound);
+        let ears = match found {
             Some((_, Ok(bytes))) if bytes == ears_file() => PartState::Same,
             Some((path, Ok(bytes))) if matches!(script, PartState::Same | PartState::Older) && wrote(&ears_record, &path, &bytes) => {
                 PartState::Older
             }
             Some((_, Ok(_))) => PartState::OtherOwner,
+            _ if ears_unreadable => PartState::OtherOwner,
             _ => PartState::Missing,
         };
         let prepared =
@@ -117,6 +122,7 @@ impl Look {
             library,
             ears,
             ears_record,
+            ears_unreadable,
         };
         if look.script_writes() {
             if look.artifact.is_none() {
@@ -227,7 +233,15 @@ impl Look {
             effects.push(format!("Note that this Kumi put it there, in {}", self.ears_record));
             paths.extend([ears, self.ears_record.clone()]);
         } else if self.ears == PartState::OtherOwner {
-            effects.push(format!("The Kumi Ears at {} isn't one this Kumi put there: it stays as it is", ears.clone().unwrap_or_default()));
+            let ears = ears.clone().unwrap_or_default();
+            effects.push(match self.ears_unreadable {
+                true => format!("Kumi can't read the Kumi Ears at {ears}, so nothing says it's this Kumi's: it stays as it is"),
+                false => format!("The Kumi Ears at {ears} isn't one this Kumi put there: it stays as it is"),
+            });
+        }
+        for folder in folders_made(&paths, Path::new(&self.home)) {
+            effects.push(format!("Make the folder {folder}: it isn't there yet"));
+            paths.push(folder);
         }
         if !paths.is_empty() {
             effects.push(format!(

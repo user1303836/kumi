@@ -56,10 +56,17 @@ pub struct ComponentPlan {
     pub state: PartState,
     /// The Kumi home the part belongs to when it's another's (`OtherOwner`), when the DAW's files say.
     pub owner: Option<String>,
-    /// Every path putting it in leaves changed (written or removed), each whole: nothing when there's nothing to put in,
-    /// or it must stay. While it works it may also make temporary files beside these, each named for what it replaces
-    /// with a random suffix, and removes them before it's done (one an interruption leaves, the next setup removes):
-    /// the effects say where.
+    /// Every path putting it in leaves changed, each whole: written, removed, or a folder made on the way to one (the
+    /// outermost not there yet; inside the Kumi home, the folders on the way are the home's own). Nothing when there's
+    /// nothing to put in, or it must stay. While it works it may also make temporary files beside these, each named for
+    /// what it replaces with a random suffix, and removes them before it returns, done or failed: the effects say where.
+    /// One an interruption (a crash, a kill) leaves stays, except the own bridges' staged copies
+    /// (`.<name>.kumi-new-…`), which the next plan names and removes.
+    ///
+    /// Known limits (#1025): Kumi Ears is replaced when this home's record says it wrote the bytes there, whatever their
+    /// version, so a runtime older than the one that wrote them can replace them; and the device is written before its
+    /// record, so one whose record couldn't be written stays this home's in fact but not on record, and setup no longer
+    /// updates it.
     pub paths: Vec<String>,
     /// What putting it in does, in plain sentences naming those paths.
     pub effects: Vec<String>,
@@ -85,4 +92,21 @@ pub enum ApplyError {
 /// Whether `a` and `b` are the same folder on disk (links resolved); false when either isn't there.
 pub fn same_folder(a: &Path, b: &Path) -> bool {
     matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+/// The folders putting `paths` in makes on the way to them: for each path, the outermost folder above it that isn't
+/// there yet, each once, and none that a path names or holds. Folders inside the Kumi home `home` are the home's own
+/// and left out. A folder that can't be looked at counts as there: nothing can be made in its place.
+pub fn folders_made(paths: &[String], home: &Path) -> Vec<String> {
+    let mut made: Vec<String> = vec![];
+    for path in paths.iter().map(Path::new).filter(|path| !path.starts_with(home)) {
+        let missing =
+            |folder: &&Path| matches!(std::fs::symlink_metadata(folder), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+        let Some(outermost) = path.ancestors().skip(1).take_while(missing).last() else { continue };
+        let shown = outermost.display().to_string();
+        if !made.contains(&shown) && !paths.iter().any(|named| outermost.starts_with(named)) {
+            made.push(shown);
+        }
+    }
+    made
 }

@@ -1368,6 +1368,33 @@ mod tests {
         assert!(beside.iter().all(|name| !name.contains(".tmp-")), "{beside:?}");
     }
 
+    // A copy's version is what the receipt knows of exactly its files: the one in place, else a generation kept with
+    // the same files (an earlier version's copy left in another folder); files it doesn't know have none.
+    #[test]
+    fn a_copys_version_is_the_one_the_receipt_knows_its_files_by() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("REAPER").join("UserPlugins");
+        let target = Target {
+            daw: Daw::Reaper,
+            dir: plugins.clone(),
+            name: "reaper_kumi.dylib".into(),
+            folder: false,
+            reference: plugins.join("kumi-bridge-reference.json"),
+        };
+        let life = Lifecycle::new(&root.path().join("kumi"), target.clone());
+        let source = root.path().join("reaper_kumi.dylib");
+        std::fs::write(&source, b"one").unwrap();
+        life.install(&source, "1.0.0").unwrap();
+        std::fs::write(&source, b"two").unwrap();
+        life.install(&source, "2.0.0").unwrap();
+        assert_eq!(life.known_version(&target.path()).as_deref(), Some("2.0.0"));
+        let copy = root.path().join("elsewhere.dylib");
+        std::fs::write(&copy, b"one").unwrap();
+        assert_eq!(life.known_version(&copy).as_deref(), Some("1.0.0"), "a kept generation's files");
+        std::fs::write(&copy, b"three").unwrap();
+        assert_eq!(life.known_version(&copy), None, "files the receipt doesn't know");
+    }
+
     #[test]
     fn a_file_target_is_replaced_by_rename_and_a_changed_one_is_kept_on_uninstall() {
         let root = tempfile::tempdir().unwrap();

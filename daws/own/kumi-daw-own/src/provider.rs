@@ -867,7 +867,8 @@ impl Own {
         let (path, reference, dir) = (target.path(), target.reference.clone(), target.dir.clone());
         let life = Lifecycle::new(home, target).with_elsewhere((self.elsewhere)(env));
         let receipt = life.receipt().map_err(|why| why.to_string())?.filter(|receipt| receipt.status == "installed");
-        let there = std::fs::symlink_metadata(&path).is_ok();
+        // Only a copy that's surely not there is missing: one that can't be looked at may be anyone's.
+        let there = std::fs::symlink_metadata(&path).map_or_else(|error| error.kind() != std::io::ErrorKind::NotFound, |_| true);
         let placed_here = receipt.as_ref().is_some_and(|receipt| Path::new(&receipt.target) == path);
         // Whose the copy there is: what its reference says now, before any receipt (another Kumi may have put its copy
         // in since this home's). A receipt of this home's speaks only for a copy whose reference is gone (a repair).
@@ -880,17 +881,21 @@ impl Own {
             Named::Nothing => (there && !placed_here, None),
         };
         let planned = life.plan(&source).map_err(|why| why.to_string())?;
-        // Each copy of this home's it would replace, with its version: its own files' (Renoise's tool says it), else what
-        // the receipt knows of those files (REAPER's extension doesn't). Never a downgrade, and never one that can't be
-        // ordered: such a copy stays.
-        let version_of_copy = |copy: &Path| self.version_of(copy).or_else(|| life.known_version(copy));
-        let newer_than_ours = |version: &str| bundled.as_deref().is_some_and(|bundled| kumi_daw::provider::newer(version, bundled));
+        // Each copy of this home's it would replace, with its version as its files bind it: what the receipt knows of
+        // exactly those files (the copy in place, or a generation kept with the same SHA-256), else what the copy says
+        // inside itself (Renoise's tool does). A version file beside a copy (REAPER's extension's) isn't the copy's own:
+        // nothing replaces it with the copy, so it can be stale. A copy is replaced only when its version is one this
+        // Kumi's can be ordered against and isn't newer; any other (newer, "dev", or none at all) stays.
+        let inside = |copy: &Path| (self.version_file)(copy).starts_with(copy).then(|| self.version_of(copy)).flatten();
+        let version_of_copy = |copy: &Path| life.known_version(copy).or_else(|| inside(copy));
+        let orderable = |version: &str| detect::Version::parse(version).is_some();
+        let replaceable = |version: Option<&str>| {
+            version
+                .zip(bundled.as_deref())
+                .is_some_and(|(version, bundled)| orderable(version) && !kumi_daw::provider::newer(version, bundled))
+        };
         let installed = if there && !theirs { version_of_copy(&path) } else { None };
-        let kept = planned
-            .replaced
-            .iter()
-            .map(|copy| (copy, version_of_copy(copy)))
-            .find(|(_, version)| version.as_deref().is_none_or(newer_than_ours));
+        let kept = planned.replaced.iter().map(|copy| (copy, version_of_copy(copy))).find(|(_, version)| !replaceable(version.as_deref()));
         let newer_copy = kept
             .as_ref()
             .filter(|(copy, _)| **copy != path)
@@ -944,27 +949,37 @@ impl Own {
                 paths.extend(planned.writes.iter().chain(&planned.leftovers).map(|written| written.display().to_string()));
                 paths.push(ours.display().to_string());
             }
-            PartState::Newer => effects.push(match (&installed, &newer_copy) {
-                (_, Some(copy)) => format!(
-                    "A copy of {} in {name} is {copy}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
-                    self.bridge
-                ),
-                (Some(installed), None) => format!(
-                    "{} in {name} ({shown}) is {installed}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
-                    self.bridge
-                ),
-                (None, None) => format!(
-                    "{} in {name} ({shown}) has no receipt and doesn't say its version, so it stays as it is: run {} --daw {} bridge to replace it",
-                    self.bridge,
-                    *kumi_types::command::KUMI,
-                    self.id.as_str()
-                ),
-            }),
+            PartState::Newer => {
+                // The copy that stays: one elsewhere, else the one there.
+                let (copy, found) = kept.as_ref().map(|(copy, found)| (copy.display().to_string(), found.clone())).unwrap_or_default();
+                effects.push(match found.as_deref() {
+                    Some(found) if orderable(found) => format!(
+                        "{} in {name} ({copy}) is {found}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
+                        self.bridge
+                    ),
+                    Some(found) => format!(
+                        "{} in {name} ({copy}) says it's {found}, which can't be ordered against this Kumi's {version}: it stays as it is. Run {} --daw {} bridge to replace it",
+                        self.bridge,
+                        *kumi_types::command::KUMI,
+                        self.id.as_str()
+                    ),
+                    None => format!(
+                        "{} in {name} ({copy}) has no receipt and doesn't say its version, so it stays as it is: run {} --daw {} bridge to replace it",
+                        self.bridge,
+                        *kumi_types::command::KUMI,
+                        self.id.as_str()
+                    ),
+                });
+            }
             PartState::OtherOwner => effects.push(match &owner {
                 Some(owner) => format!("{} in {name} ({shown}) belongs to the Kumi at {owner}: it stays as it is", self.bridge),
                 None => format!("The copy in {name} at {shown} doesn't say which Kumi it belongs to: it stays as it is"),
             }),
             PartState::Same => {}
+        }
+        for folder in kumi_daw::component::folders_made(&paths, home) {
+            effects.push(format!("Make the folder {folder}: it isn't there yet"));
+            paths.push(folder);
         }
         let version = match state {
             PartState::Newer => newer_copy.clone().or(installed.clone()),
@@ -991,8 +1006,11 @@ enum Named {
 }
 
 fn named_by(reference: &Path, daw: Daw) -> Named {
-    if std::fs::symlink_metadata(reference).is_err() {
-        return Named::Nothing;
+    match std::fs::symlink_metadata(reference) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Named::Nothing,
+        // One that can't be looked at (its folder can't be read) says nothing of whose the copy is.
+        Err(_) => return Named::Unknown,
     }
     let home = files::Reference::read(reference).ok().and_then(|reference| {
         let secret = PathBuf::from(&reference.secret_file);

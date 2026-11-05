@@ -105,8 +105,8 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             }
             PartState::Newer => {
                 let reason = format!(
-                    "Kumi's part in {app} ({}) is newer than this runtime's: update Kumi for Hermes to match it. Kumi never puts an older one in.",
-                    plan.version.as_deref().unwrap_or("newer")
+                    "Kumi's part in {app} ({}) is newer than this runtime's, or says a version Kumi can't order against it: update Kumi for Hermes to match it. Kumi never puts in one that might be older.",
+                    plan.version.as_deref().unwrap_or("a version it doesn't say")
                 );
                 return Err(OpError::Refused { code: "newer_installed", reason, owner: None });
             }
