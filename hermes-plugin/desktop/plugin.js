@@ -818,7 +818,8 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const step = nextStep(state);
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
-  const setupMessage = typeof state.setup?.message === "string" && state.setup.state !== "ready" ? state.setup.message : null;
+  const setupState = state.setup?.state;
+  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
   return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", color: T.text }, children: [
     /* @__PURE__ */ jsxs4("div", { style: { ...S.section, gap: 8 }, children: [

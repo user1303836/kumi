@@ -81,7 +81,9 @@ function KumiDashboard() {
         <Dot color={tone} size={9} />
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
-        {state.setup?.message && state.setup.state !== 'ready' && <span style={S.muted}>{state.setup.message}</span>}
+        {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && (
+          <span style={S.muted}>{state.setup.message}</span>
+        )}
       </div>
       {state.status?.unsure && (
         <div style={{ ...S.row, gap: 10, padding: '0 2px', alignItems: 'flex-start' }}>

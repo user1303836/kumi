@@ -859,7 +859,7 @@
           "Kumi ",
           state.status.runtime.version
         ] }),
-        state.setup?.message && state.setup.state !== "ready" && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
+        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
       ] }),
       state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
         /* @__PURE__ */ jsxs("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [
