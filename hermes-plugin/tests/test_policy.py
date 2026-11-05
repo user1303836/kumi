@@ -128,10 +128,28 @@ class Approvals(unittest.TestCase):
         self.assertNotIn("\x1b", decision["message"])
         self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
 
-    def test_a_long_plan_shows_eighteen_steps_how_many_more_and_always_the_footer(self):
-        lines = self.hook("kumi_change", change(*[volume("t1", -db) for db in range(1, 21)]))["message"].splitlines()
-        self.assertEqual(len(lines), 22)
-        self.assertEqual(lines[-3:], ["… and 2 more steps", policy.FOOTER, policy.CHAT_ONLY])
+    def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
+        plan = change(*[volume("t1", -db) for db in range(1, 21)])
+        self.assertEqual(self.hook("kumi_change", plan), {"action": "block", "message": policy.TOO_LONG},
+                         "twenty steps don't fit the terminal's panel: refused, the model told to split it")
+        self.ctx.surface = "desktop"
+        lines = self.hook("kumi_change", plan)["message"].splitlines()
+        self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows every step")
+        self.assertEqual(lines[-2:], [policy.FOOTER, policy.CHAT_ONLY])
+
+    def test_the_terminals_panel_shows_a_change_undo_or_listen_whole_at_its_longest_step(self):
+        def message(lines, footer=None):
+            return policy.chat_scoped(policy.approve(lines, "kumi:write:mixer", footer), {}, {"session_id": "s1"})
+
+        longest = message(["T" * 300, "• " + "e" * (policy.STEP_LINE - 2)], policy.FOOTER)["message"]
+        self.assertTrue(policy.shows_whole(longest, "cli"), "a one-step change, title and step at their longest")
+        self.assertTrue(policy.shows_whole(message(["Kumi: Undo " + "t" * 300])["message"], "cli"))
+        listen = message(["Kumi: play the track " + "d" * 200 + " of " + "s" * 40])["message"]
+        self.assertTrue(policy.shows_whole(listen, "cli"), "a track listen with its names at their longest")
+        two = message(["T", "• " + "e" * (policy.STEP_LINE - 2), "• " + "e" * (policy.STEP_LINE - 2)], policy.FOOTER)
+        self.assertFalse(policy.shows_whole(two["message"], "cli"), "so a longer plan is refused, never cut")
+        self.assertEqual(policy.approve(["T", "• " + "e" * policy.STEP_LINE], "kumi:write:mixer")["action"], "block",
+                         "a step longer than the runtime ever writes is refused, never cut")
 
     def test_a_plans_families_make_its_rule_key_so_always_covers_only_that_kind_in_this_chat(self):
         sample = {"tool": "replace_sample", "input": {"track_ref": "t1", "sample": "Dusty Snare 04.wav"}}

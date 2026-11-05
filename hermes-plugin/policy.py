@@ -29,8 +29,12 @@ from . import calls, runtime, setup, tools
 log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
-STEP_LINES = 18
 LINE = 120
+# The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
+# line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
+STEP_LINE = 200
+TOO_LONG = ("Kumi didn't run this: its approval is longer than this window shows whole, and Kumi asks only with every "
+            "line in view. Split it into smaller changes, or approve it in Hermes Desktop.")
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
@@ -45,7 +49,7 @@ APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
 # Where Hermes shows less than an approval's whole text (v0.22.7): the terminal's approval panel, at most 10 rows of
 # 64 columns (`hermes_cli/cli_tui_mixin.py:205`), and chat apps that cut the reason at a length (`_EA_REASON_BUDGET`).
-# Desktop shows it whole. Setup asks only where every line of its plan is shown (rgzm, #954 LOW 17).
+# Desktop shows it whole. Kumi asks only where every line is shown (rgzm, #954 LOW 17; research-1's review, item 3).
 PANEL_ROWS, PANEL_COLUMNS = 10, 64
 REASON_BUDGETS = {"telegram": 500, "slack": 500, "discord": 300}
 _TELEGRAM_ESCAPED = set(r"_*[]()~`>#+-=|{}.!\\")
@@ -96,8 +100,10 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     decision, extra = _decide(host, tool, args, kwargs)
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
-    if decision is not None and decision["action"] == "approve":
+    if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
         decision = chat_scoped(decision, args, kwargs)
+        if not shows_whole(decision["message"], host.session_surface()):
+            return block(TOO_LONG), {}
     return decision, extra
 
 
@@ -107,13 +113,12 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
 # family alone. A one-shot run that resumes a chat (`hermes chat -q --resume`) is that chat, and its approvals apply
 # there. Setup's key is its plan's digest already (and a paid call's will be its quote's). Hermes keeps an "always" in
 # its config's command allowlist; Kumi never edits that.
-CHAT_ONLY = "(Session and Always apply to this chat only, including a one-shot run that resumes it.)"
+CHAT_ONLY = ("Kumi's approvals apply to one chat, including a one-shot run that resumes it (hermes chat -q --resume); a "
+             "scheduled job, a new one-shot run or another chat always asks or is refused.")
 
 
 def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
     rule_key = decision["rule_key"]
-    if rule_key.startswith("kumi:setup:"):
-        return decision
     session = kwargs.get("session_id")
     scope = session.strip() if isinstance(session, str) and session.strip() else f"plan-{calls.digest(args)}"
     return {**decision, "rule_key": f"{rule_key}:{scope}", "message": f"{decision['message']}\n{CHAT_ONLY}"}
@@ -158,12 +163,13 @@ def one_line(text: Any, limit: int = LINE) -> str:
 
 
 def approve(lines: list[str], rule_key: str, footer: str | None = None) -> dict:
-    """`lines[0]` is the title; the rest are effects, of which at most 18 are shown, then the footer."""
-    title, effects = one_line(lines[0]), [one_line(line) for line in lines[1:]]
-    shown = effects[:STEP_LINES]
-    if len(effects) > STEP_LINES:
-        shown.append(f"… and {len(effects) - STEP_LINES} more steps")
-    message = [title, *shown, *([footer] if footer else [])]
+    """`lines[0]` is the agent's title, one line of at most 120 characters (its own words); the rest are Kumi's
+    effects, every one shown whole, then the footer. An effect longer than a preview line ever is blocks the approval
+    rather than being cut, so nothing the change does is hidden."""
+    title, effects = one_line(lines[0]), [one_line(line, limit=STEP_LINE + 1) for line in lines[1:]]
+    if any(len(effect) > STEP_LINE for effect in effects):
+        return block("Kumi didn't run this: one of its steps can't be described in a line Kumi shows whole.")
+    message = [title, *effects, *([footer] if footer else [])]
     return {"action": "approve", "message": "\n".join(message), "rule_key": rule_key}
 
 
