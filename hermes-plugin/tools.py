@@ -275,7 +275,8 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
             planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir)
         except setup.SetupError as error:
             return {"error": {"code": error.code, "reason": error.message}}
-        next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt"}.get(planned["step"])
+        next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt",
+                       "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
         return {**planned, "next": f"kumi_setup {next_action}" if next_action else None}
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
@@ -291,8 +292,8 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
     if not result.get("ok"):
         error = result.get("error") or {}
         return {"error": {"code": error.get("code") or "failed", "reason": error.get("message") or "Setup failed."}}
-    if action == "adopt" or result.get("step") == "runtime":
-        host.runtimes.stop(data_dir)  # the next start uses the new runtime, or the adopted --kumi-home
+    if action == "adopt" or result.get("step") in ("runtime", "ffmpeg"):
+        host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home or the ffmpeg
     return result
 
 

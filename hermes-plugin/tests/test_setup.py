@@ -20,6 +20,8 @@ from unittest import mock
 SPEC = importlib.util.spec_from_file_location("kumi_setup", Path(__file__).resolve().parents[1] / "setup.py")
 setup = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(setup)
+SEARCH = setup._ffmpeg_search  # the real one; each test searches only the folders it gives (see SetupTest.setUp)
+FFMPEG = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
 TARGET, VERSION = "aarch64-apple-darwin", "1.24.67"
 URL = f"https://github.com/user1303836/kumi/releases/download/v{VERSION}/kumi-{TARGET}.tar.xz"
@@ -67,6 +69,13 @@ class Served:
         return io.BytesIO(self.data)
 
 
+class Tty(io.StringIO):
+    """A terminal, for `hermes kumi setup`."""
+
+    def isatty(self) -> bool:
+        return True
+
+
 class Runtime:
     """The runtime's setup_daw as W1 answers it: a dry run names the paths; a real install does exactly that."""
 
@@ -98,6 +107,10 @@ class SetupTest(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {"KUMI_HOME": str(root / "no-standalone-kumi")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Nor an ffmpeg on the test machine: setup searches only the folders a test puts here.
+        searching = mock.patch.object(setup, "_ffmpeg_search", return_value=[])
+        self.search = searching.start()
+        self.addCleanup(searching.stop)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -131,6 +144,19 @@ class SetupTest(unittest.TestCase):
     def adopt(self, runtime) -> dict:
         return setup.adopt("ableton", expected_digest=self.approved(), setup_daw=runtime, data_dir=self.data,
                            plugin_dir=self.plugin, target=TARGET)
+
+    def ffmpeg(self, folder: str = "bin", content: bytes = b"#!/bin/sh\nexit 0\n") -> Path:
+        """A stand-in ffmpeg (never run) in a folder setup searches; its canonical path."""
+        where = self.data.parent / folder
+        where.mkdir(parents=True, exist_ok=True)
+        program = where / FFMPEG
+        program.write_bytes(content)
+        program.chmod(0o755)
+        self.search.return_value = [str(where)]
+        return Path(os.path.realpath(program))
+
+    def current(self) -> dict:
+        return json.loads((self.data / "runtime" / "current.json").read_text())
 
     def test_host_target_names_kumis_bundles_and_nothing_else(self) -> None:
         self.assertEqual(setup.host_target("Darwin", "arm64"), "aarch64-apple-darwin")
@@ -443,11 +469,143 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(setup.runtime_state(self.data, VERSION, TARGET)[0], "damaged",
                          "a binary that is a link out of the data folder isn't trusted")
 
-    def test_the_cli_asks_before_each_step_and_refuses_without_a_terminal(self) -> None:
-        class Tty(io.StringIO):
-            def isatty(self) -> bool:
-                return True
+    def test_setup_looks_for_ffmpeg_only_in_local_absolute_folders(self) -> None:
+        tools = "/opt/tools/bin"  # the search is text only, so a POSIX path, whatever system runs the test
+        self.assertEqual(SEARCH({"PATH": ":".join([".", "", "relative/bin", tools, "//server/share/bin"])}, "darwin"),
+                         [tools, "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"],
+                         "never the working folder, a relative or empty entry, or a network path")
+        self.assertEqual(SEARCH({"PATH": ";".join([".", "bin", r"\\server\share\bin", r"\\?\C:\ffmpeg\bin",
+                                                    r"\\.\C:\ffmpeg\bin", r"\ffmpeg\bin", "C:ffmpeg",
+                                                    r'"C:\Program Files\ffmpeg\bin"'])}, "win32"),
+                         [r"C:\Program Files\ffmpeg\bin"],
+                         "Windows: a drive and a root only, never UNC or a device namespace, which could reach the "
+                         "network before anything is approved")
+        project = self.data.parent / "downloaded project"
+        (project / "bin").mkdir(parents=True)
+        for where in (project, project / "bin"):
+            (where / FFMPEG).write_bytes(b"#!/bin/sh\n")
+            (where / FFMPEG).chmod(0o755)
+        here = os.getcwd()
+        os.chdir(project)
+        try:
+            with mock.patch.object(setup, "_ffmpeg_search", SEARCH), mock.patch.dict(setup._FFMPEG_FOLDERS, clear=True):
+                self.assertIsNone(setup.find_ffmpeg({"PATH": os.pathsep.join(["", ".", "bin"])}),
+                                  "an ffmpeg in the working folder is never found")
+        finally:
+            os.chdir(here)
 
+    def test_a_mapped_network_drive_or_an_automount_folder_is_never_touched(self) -> None:
+        kinds = {"C": setup._DRIVE_FIXED, "Z": 4}  # 4: DRIVE_REMOTE, a mapped network drive
+        with mock.patch.object(setup, "_drive_type", side_effect=lambda root: kinds[root[0]]):
+            self.assertTrue(setup._on_this_computer(r"C:\ffmpeg\bin\ffmpeg.exe", windows=True))
+            self.assertFalse(setup._on_this_computer(r"Z:\ffmpeg\bin\ffmpeg.exe", windows=True),
+                             "a mapped drive can make Windows authenticate to its server")
+            self.assertFalse(setup._on_this_computer(r"\\server\share\ffmpeg.exe", windows=True))
+        for path in ("/net/server/bin/ffmpeg", "/Network/Servers/server/ffmpeg", "/NET/server/ffmpeg"):
+            self.assertFalse(setup._on_this_computer(path, windows=False), f"{path} mounts a server's share")
+        self.assertTrue(setup._on_this_computer("/opt/homebrew/bin/ffmpeg", windows=False))
+
+    @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
+    def test_links_are_followed_only_to_this_computer_from_the_root_down(self) -> None:
+        cellar = self.data.parent / "Cellar" / "ffmpeg" / "8.1" / "bin"
+        cellar.mkdir(parents=True)
+        (cellar / FFMPEG).write_bytes(b"#!/bin/sh\n")
+        (cellar / FFMPEG).chmod(0o755)
+        brew = self.data.parent / "brew-bin"
+        brew.mkdir()
+        (brew / FFMPEG).symlink_to(Path("..") / "Cellar" / "ffmpeg" / "8.1" / "bin" / FFMPEG)
+        self.search.return_value = [str(brew)]
+        self.assertEqual(setup.find_ffmpeg()["path"], os.path.realpath(cellar / FFMPEG), "Homebrew's link is resolved")
+        (brew / FFMPEG).unlink()
+        (brew / FFMPEG).symlink_to("//server/share/ffmpeg")
+        self.assertIsNone(setup.find_ffmpeg(), "a link to a network path is never followed")
+        tools = self.data.parent / "tools"
+        tools.symlink_to("//server/share")  # a folder above the candidate, linked to a share
+        self.search.return_value = [str(tools / "bin")]
+        touched = []
+        islink = os.path.islink
+        with mock.patch.object(setup.os.path, "islink", side_effect=lambda path: touched.append(path) or islink(path)):
+            self.assertIsNone(setup.find_ffmpeg())
+        self.assertTrue(touched, "the candidate's folders were looked at")
+        under = tuple(os.path.join(parent, "tools") + os.sep  # as given, and with the temp folder's own links resolved
+                      for parent in (str(self.data.parent), os.path.realpath(self.data.parent)))
+        self.assertFalse([path for path in touched if path.startswith(under)], "nothing under the linked folder")
+
+    def test_allowing_ffmpeg_is_an_optional_last_step_that_binds_the_program(self) -> None:
+        self.install_runtime()
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "no ffmpeg here: setup is done")
+        audio = self.status()["compressed_audio"]
+        self.assertEqual((audio["state"], audio["found"]), ("not_allowed", None))
+        self.assertIn("WAV and AIFF only: there's no ffmpeg on this computer", audio["message"])
+        program = self.ffmpeg()
+        planned = self.plan(setup_daw=Runtime("same"))
+        self.assertEqual((planned["step"], planned["optional"]), ("ffmpeg", True))
+        self.assertEqual(self.status()["state"], "ready", "Kumi is set up without it")
+        self.assertEqual(self.status()["compressed_audio"]["found"], str(program))
+        asked = setup.approval("ableton", data_dir=self.data)
+        self.assertEqual(asked["title"], "Kumi: let Kumi's runtime run the ffmpeg already on this computer")
+        self.assertIn(f"Kumi's runtime will run {program} to decode MP3, FLAC", asked["message"])
+        self.assertIn("doesn't download or install ffmpeg", asked["message"])
+        done = self.install(None, setup_daw=Runtime("same"))
+        self.assertTrue(done["ok"], done)
+        info = os.stat(program)
+        self.assertEqual(self.current()["tools"]["ffmpeg"], {"path": str(program), "size": info.st_size,
+                                                             "mtime_ns": info.st_mtime_ns, "ino": info.st_ino})
+        self.assertEqual(self.status()["compressed_audio"]["state"], "available")
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "it isn't offered again")
+        (self.data / "runtime" / VERSION / "kumi").unlink()  # the runtime is set up again
+        self.assertEqual(self.plan()["step"], "runtime")
+        self.assertTrue(self.install(Served(BUNDLE))["ok"])
+        self.assertEqual(self.current()["tools"]["ffmpeg"]["path"], str(program), "a new runtime keeps it")
+
+    def test_an_ffmpeg_that_changed_after_planning_or_allowing_isnt_used(self) -> None:
+        self.install_runtime()
+        program = self.ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        program.write_bytes(b"#!/bin/sh\necho another program at the same path\n")
+        self.assertEqual(self.install(None, setup_daw=Runtime("same"))["error"]["code"], "plan_changed")
+        self.assertNotIn("tools", self.current(), "the program that was approved isn't the one there now")
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        program.write_bytes(b"#!/bin/sh\necho swapped after it was allowed\n")
+        audio = self.status()["compressed_audio"]
+        self.assertEqual(audio["state"], "changed")
+        self.assertIn("changed since you allowed it; to allow it again, run hermes kumi setup", audio["message"])
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "ffmpeg", "setup offers it again")
+        program.unlink()
+        self.assertEqual(self.status()["compressed_audio"]["state"], "gone")
+
+    @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
+    def test_an_allowed_ffmpeg_whose_folder_became_a_link_isnt_used(self) -> None:
+        self.install_runtime()
+        program = self.ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        folder = program.parent
+        folder.rename(folder.with_name("bin-elsewhere"))
+        folder.symlink_to(folder.with_name("bin-elsewhere"))  # the same file, now reached through a link
+        self.assertEqual(self.status()["compressed_audio"]["state"], "changed", "its path now leads through a link")
+
+    def test_in_the_terminal_ffmpeg_is_asked_last_and_no_keeps_wav_and_aiff(self) -> None:
+        self.install_runtime()
+        program = self.ffmpeg()
+
+        def cli(answers: str) -> tuple[int, str]:
+            out = Tty()
+            code = setup.cli_main("ableton", setup_daw=Runtime("same"), data_dir=self.data, plugin_dir=self.plugin,
+                                  target=TARGET, stdin=Tty(answers), stdout=out)
+            return code, out.getvalue()
+
+        code, said = cli("n\n")
+        self.assertEqual(code, 0, "setup is done without it")
+        self.assertIn(f"Kumi's runtime will run {program}", said)
+        self.assertIn("Kumi reads WAV and AIFF only", said)
+        self.assertNotIn("tools", self.current())
+        code, said = cli("y\n")
+        self.assertEqual(code, 0, said)
+        self.assertIn(f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg at {program}.", said)
+
+    def test_the_cli_asks_before_each_step_and_refuses_without_a_terminal(self) -> None:
         def cli(answers: str, stdin_is_tty: bool = True, setup_daw=None) -> tuple[int, str]:
             out = Tty()
             stdin = Tty(answers) if stdin_is_tty else io.StringIO(answers)

@@ -16,6 +16,7 @@ import support
 kumi = support.plugin()
 commands = support.module("commands")
 policy = support.module("policy")
+runtime = support.module("runtime")
 setup = support.module("setup")
 
 
@@ -28,6 +29,13 @@ def setup_daw_calls(data) -> list[dict]:
     """The setup_daw calls the fixture runtime received, without Hermes's `_host`."""
     return [{key: value for key, value in message["params"]["arguments"].items() if key != "_host"}
             for message in support.requests(data / "state") if message.get("params", {}).get("name") == "setup_daw"]
+
+
+def setUpModule() -> None:
+    """No ffmpeg on the test machine reaches a plan: setup searches only the folders a test gives it."""
+    searching = mock.patch.object(setup, "_ffmpeg_search", return_value=[])
+    searching.start()
+    unittest.addModuleCleanup(searching.stop)
 
 
 class SetupTool(unittest.TestCase):
@@ -166,6 +174,34 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(host.runtimes.get(data), "the older runtime is stopped: the next start is the newer one")
         self.assertFalse(older.client.running)
         self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
+
+    def test_allowing_an_ffmpeg_restarts_the_runtime_with_it(self):
+        host, _, data = support.host(self, None, "--component-state", "same")  # set up for Live already
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        running = host.runtimes.get(data)
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        program = Path(folder.name) / ("ffmpeg.exe" if setup.os.name == "nt" else "ffmpeg")
+        program.write_bytes(b"#!/bin/sh\n")
+        program.chmod(0o755)
+        with mock.patch.object(setup, "_ffmpeg_search", return_value=[folder.name]):
+            plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+            self.assertEqual((plan["step"], plan["optional"], plan["next"]),
+                             ("ffmpeg", True, "kumi_setup install (optional: ask the producer; setup is done either way)"))
+            self.assertIn(f"Kumi's runtime will run {setup.os.path.realpath(program)}",
+                          setup.approval("ableton", data_dir=data)["message"])
+            installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        self.assertIsNone(host.runtimes.get(data), "stopped, so the next start passes --tool ffmpeg")
+        self.assertFalse(running.client.running)
+        self.assertEqual(installed["status"]["compressed_audio"]["state"], "available")
+        argv = runtime.serve_argv(host.install(data), data / "state", "ableton")
+        self.assertEqual(argv[-2:], ["--tool", f"ffmpeg={setup.os.path.realpath(program)}"],
+                         "what setup recorded is what the next start passes (runtime.py, #962)")
+        program.write_bytes(b"#!/bin/sh\necho upgraded\n")
+        self.assertNotIn("--tool", runtime.serve_argv(host.install(data), data / "state", "ableton"))
+        self.assertEqual(setup.status(daw="ableton", data_dir=data, plugin_dir=host.plugin_dir)
+                         ["compressed_audio"]["state"], "changed", "setup and runtime.py agree it changed")
 
 
 class Cli(unittest.TestCase):
