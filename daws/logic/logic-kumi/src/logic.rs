@@ -60,7 +60,7 @@ impl Busy {
     pub fn reason(self) -> &'static str {
         match self {
             Busy::Modal => "Logic Pro is showing a dialog",
-            Busy::Away => "Logic Pro's windows aren't on this Space",
+            Busy::Away => "Logic Pro's window isn't on this Space (or is minimized)",
             Busy::Loading => "Logic Pro is loading a project",
             Busy::ChoosingProject => "Logic Pro is showing Choose a Project; choose or close it, then ask again",
         }
@@ -283,6 +283,10 @@ fn busy_of(windows: &[Window], project_window: Option<&Window>) -> Option<Busy> 
     }
     if project_window.is_some_and(|window| window.title.trim().is_empty() && window.document.is_none()) {
         return Some(Busy::Loading);
+    }
+    // A minimized project window is in the Dock, not on the Space: nothing of it can be read (`AXMainWindow` is nil).
+    if project_window.is_some_and(|window| window.minimized && !window.main) {
+        return Some(Busy::Away);
     }
     None
 }
@@ -561,6 +565,10 @@ mod tests {
         assert!(!model.look(&[], &["Song - Tracks".into()]));
         assert_eq!(model.busy, Some(Busy::Away));
         assert!(model.project.is_some());
+        // Minimized into the Dock: away too, and still the project.
+        let minimized = Window { minimized: true, main: false, focused: false, ..song.clone() };
+        assert!(!model.look(&[minimized], &["Song - Tracks".into()]));
+        assert_eq!(model.busy, Some(Busy::Away));
 
         // A dialog as the main window, the project window behind it: modal, project kept.
         let dialog = Window {

@@ -159,7 +159,13 @@ impl Client {
             match handshake.on_line(&read_line(&mut reader).expect("a handshake line")).unwrap() {
                 ClientStep::Send(bytes) => stream.write_all(&bytes).unwrap(),
                 ClientStep::Welcome(welcome) => {
-                    return Client { stream, reader, welcome: serde_json::to_value(*welcome).unwrap(), next_id: 1, events: VecDeque::new() }
+                    return Client {
+                        stream,
+                        reader,
+                        welcome: serde_json::to_value(*welcome).unwrap(),
+                        next_id: 1,
+                        events: VecDeque::new(),
+                    };
                 }
             }
         }
@@ -283,8 +289,8 @@ fn a_saved_project_is_identified_by_its_path_in_status_the_welcome_and_the_disco
     assert_eq!(client.welcome["pid"], me());
     assert_eq!(client.welcome["resource"], "com.apple.logic10");
     assert_eq!((client.welcome["bridge"].as_str(), client.welcome["dawVersion"].as_str()), (Some(BRIDGE_VERSION), Some("12.3.1")));
-    assert_eq!(client.welcome["methods"], json!(["ping", "status", "focus", "read", "snapshot", "focus_body"]));
-    assert_eq!(client.welcome["events"], json!(["project", "transport", "tracks", "selection"]));
+    assert_eq!(client.welcome["methods"], json!(logic_kumi::server::METHODS));
+    assert_eq!(client.welcome["events"], json!(logic_kumi::server::EVENTS));
     assert_eq!(client.welcome["project"], serde_json::to_value(&project).unwrap());
     assert_eq!(client.call("ping")["result"], json!({}));
     let status = client.status();
@@ -293,7 +299,7 @@ fn a_saved_project_is_identified_by_its_path_in_status_the_welcome_and_the_disco
     // A read goes to the run loop, which reads the request before Logic: no kind is refused as the simulator refuses it.
     let read = client.call("read");
     assert_eq!((read["error"]["code"].as_str(), read["error"]["message"].as_str()), (Some("bad-params"), Some("kind: one of the kinds")));
-    assert_eq!(client.call("change_apply")["error"]["code"], "unknown-method");
+    assert_eq!(client.call("bogus")["error"]["code"], "unknown-method");
 
     // The helper was asked as the contract says: the apps by both bundle ids, then the permission and the windows.
     let calls = hands.calls();

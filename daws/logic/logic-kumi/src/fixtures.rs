@@ -115,9 +115,11 @@ impl Scene {
         Scene::from_json(&value)
     }
 
-    /// Writes the scene to `dir/scene.json.gz`: compact JSON with a final newline, gzipped.
+    /// Writes the scene to `dir/scene.json.gz`: compact JSON with a final newline, naming no home of the Mac it was
+    /// recorded on (`redacted`), gzipped.
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
-        let mut text = serde_json::to_string(&self.to_json())?;
+        let scene = self.to_json();
+        let mut text = redacted(&serde_json::to_string(&scene)?, &scene);
         text.push('\n');
         write_scene_text(dir, &text)
     }
@@ -132,6 +134,76 @@ impl Scene {
             }
         }
         counts
+    }
+}
+
+/// A scene's text with no home of the Mac it was recorded on: `/Users/<name>` becomes `/Users/me` in every string, paths
+/// and file URLs alike, and a project's id, the hash of its path (`logic::project_id`), becomes the hash of the redacted
+/// path wherever it appears, so the bridge computes the same id over the replayed scene as the recording holds.
+pub fn redacted(text: &str, scene: &Value) -> String {
+    let mut ids = vec![];
+    project_ids(scene, &mut ids);
+    let mut text = redacted_homes(text);
+    for (recorded, redacted) in ids {
+        text = text.replace(&recorded, &redacted);
+    }
+    text
+}
+
+/// `text` with every `/Users/<name>` made `/Users/me`.
+pub fn redacted_homes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(HOMES) {
+        let (before, from) = rest.split_at(at + HOMES.len());
+        out.push_str(before);
+        out.push_str(STAND_IN);
+        rest = &from[home_name_end(from)..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The names after `/Users/` in `text` other than the stand-in: the homes a recording names. A guard for files a
+/// recorder didn't write.
+pub fn homes_named(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = vec![];
+    let mut rest = text;
+    while let Some(at) = rest.find(HOMES) {
+        rest = &rest[at + HOMES.len()..];
+        let name = &rest[..home_name_end(rest)];
+        if !name.is_empty() && name != STAND_IN && !names.iter().any(|known| known == name) {
+            names.push(name.to_string());
+        }
+        rest = &rest[name.len()..];
+    }
+    names
+}
+
+const HOMES: &str = "/Users/";
+const STAND_IN: &str = "me";
+
+/// Where the account name after `/Users/` ends in `from`: at the next slash, quote, backslash or space.
+fn home_name_end(from: &str) -> usize {
+    from.find(|c: char| c == '/' || c == '"' || c == '\\' || c.is_whitespace()).unwrap_or(from.len())
+}
+
+/// Every project in `value` (an object whose `id` is the hash of its `path`) as (recorded id, id of the redacted path).
+fn project_ids(value: &Value, ids: &mut Vec<(String, String)>) {
+    match value {
+        Value::Object(map) => {
+            if let (Some(Value::String(id)), Some(Value::String(path))) = (map.get("id"), map.get("path")) {
+                if *id == crate::logic::project_id(path) {
+                    let redacted = crate::logic::project_id(&redacted_homes(path));
+                    if redacted != *id && !ids.iter().any(|(recorded, _)| recorded == id) {
+                        ids.push((id.clone(), redacted));
+                    }
+                }
+            }
+            map.values().for_each(|inner| project_ids(inner, ids));
+        }
+        Value::Array(items) => items.iter().for_each(|inner| project_ids(inner, ids)),
+        _ => {}
     }
 }
 
@@ -344,5 +416,34 @@ mod tests {
         helper.quit();
         assert!(!helper.alive());
         assert!(matches!(helper.call("apps", json!({})), Err(HelperError::Gone(_))));
+    }
+
+    #[test]
+    fn a_saved_scene_names_no_home_and_its_project_ids_are_of_the_redacted_paths() {
+        let path = "/Users/someone/Music/Logic/Song.logicx";
+        let id = crate::logic::project_id(path);
+        let mut scene = Scene::new("home");
+        scene.logic.insert("project".into(), json!({"id": id, "name": "Song", "path": path}));
+        scene.calls.push(Call {
+            op: "windows".into(),
+            params: Map::new(),
+            reply: json!({"ok": true, "windows": [{"title": "Song - Tracks", "document": format!("file://{path}/")}]}),
+        });
+        scene.events.push(json!({"event": "project", "project": {"id": id, "name": "Song", "path": path}}));
+        let dir = tempfile::tempdir().unwrap();
+        scene.save(dir.path()).unwrap();
+        let text = scene_text(dir.path()).unwrap();
+        assert_eq!(homes_named(&text), Vec::<String>::new(), "{text}");
+        assert!(!text.contains(&id), "{text}");
+
+        let redacted = "/Users/me/Music/Logic/Song.logicx";
+        let loaded = Scene::load(dir.path()).unwrap();
+        assert_eq!(loaded.logic["project"], json!({"id": crate::logic::project_id(redacted), "name": "Song", "path": redacted}));
+        assert_eq!(loaded.calls[0].reply["windows"][0]["document"], format!("file://{redacted}/"));
+        assert_eq!(loaded.events[0]["project"]["id"], crate::logic::project_id(redacted));
+
+        // The scan behind the guards: names end at a slash, a quote, a backslash or a space; the stand-in isn't one.
+        assert_eq!(homes_named("/Users/me/x, \"/Users/a\", file:///Users/b/y /Users/a/z"), ["a", "b"]);
+        assert_eq!(redacted_homes("file:///Users/b/y and /Users/c"), "file:///Users/me/y and /Users/me");
     }
 }

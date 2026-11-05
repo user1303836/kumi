@@ -3,12 +3,13 @@
 //! MIDI), and serves Kumi's bridge wire (`kumi-daw/1`, daw-bridge) on loopback as the REAPER extension and the Renoise
 //! tool do from inside their DAWs.
 //!
-//! M2 adds native Accessibility readers, cached focus, snapshots and the four focus bodies. Only read methods are
-//! exposed on the wire; project changes, listening and application registration are later stages.
+//! M2 adds native Accessibility readers, cached focus, snapshots and the four focus bodies. M3 adds fenced project
+//! changes, value restores and observation of Logic's own undo. Listening remains a later stage.
 
 pub mod ax;
 pub mod bodies;
 pub mod bridge;
+pub mod changes;
 pub mod fixtures;
 pub mod focus;
 pub mod helper;

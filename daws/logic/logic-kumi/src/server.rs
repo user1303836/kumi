@@ -46,11 +46,39 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 const WRITER_POLL: Duration = Duration::from_millis(50);
 
 /// The methods served: `ping`, `status` and `focus` answered from the last look and never waiting for Logic, the rest
-/// read through the helper on the run loop; and the events sent.
-pub const METHODS: [&str; 6] = ["ping", "status", "focus", "read", "snapshot", "focus_body"];
-pub const EVENTS: [&str; 4] = [wire::event::PROJECT, wire::event::TRANSPORT, wire::event::TRACKS, wire::event::SELECTION];
+/// read or written through the helper on the run loop; and the events sent.
+pub const METHODS: [&str; 14] = [
+    "ping",
+    "status",
+    "focus",
+    "read",
+    "snapshot",
+    "focus_body",
+    "change_preview",
+    "change_apply",
+    "change_restore",
+    "transport_stop",
+    "transport_play",
+    "cursor_set",
+    "undo_step_begin",
+    "undo_step_end",
+];
+pub const EVENTS: [&str; 5] =
+    [wire::event::PROJECT, wire::event::TRANSPORT, wire::event::TRACKS, wire::event::SELECTION, wire::event::UNDONE_IN_DAW];
 /// The methods the run loop answers.
-const QUEUED_METHODS: [&str; 3] = ["read", "snapshot", "focus_body"];
+const QUEUED_METHODS: [&str; 11] = [
+    "read",
+    "snapshot",
+    "focus_body",
+    "change_preview",
+    "change_apply",
+    "change_restore",
+    "transport_stop",
+    "transport_play",
+    "cursor_set",
+    "undo_step_begin",
+    "undo_step_end",
+];
 /// How long a queued request waits for the run loop without a deadline of its own, and the most it may ask for.
 const DEFAULT_WAIT: Duration = Duration::from_secs(10);
 const MAX_WAIT: Duration = Duration::from_secs(60);
@@ -1073,8 +1101,26 @@ mod tests {
         assert_eq!(welcome["resource"], "com.apple.logic10");
         assert_eq!(welcome["dawVersion"], "12.3.1");
         assert_eq!(welcome["project"], json!({"id": "a".repeat(32), "name": "Song", "path": "/m/Song.logicx"}));
-        assert_eq!(welcome["methods"], json!(["ping", "status", "focus", "read", "snapshot", "focus_body"]));
-        assert_eq!(welcome["events"], json!(["project", "transport", "tracks", "selection"]));
+        assert_eq!(
+            welcome["methods"],
+            json!([
+                "ping",
+                "status",
+                "focus",
+                "read",
+                "snapshot",
+                "focus_body",
+                "change_preview",
+                "change_apply",
+                "change_restore",
+                "transport_stop",
+                "transport_play",
+                "cursor_set",
+                "undo_step_begin",
+                "undo_step_end"
+            ])
+        );
+        assert_eq!(welcome["events"], json!(["project", "transport", "tracks", "selection", "undone_in_daw"]));
         assert_eq!(welcome.get("creditBytes"), None);
 
         assert_eq!(request(&mut stream, &mut reader, 1, "ping")["result"], json!({}));
@@ -1091,7 +1137,7 @@ mod tests {
         let status = request(&mut stream, &mut reader, 3, "status")["result"].clone();
         assert_eq!((&status["busy"], &status["permission"]), (&json!("modal"), &json!("accessibility")));
         // A method the bridge doesn't have is refused by name, not queued.
-        let refused = request(&mut stream, &mut reader, 4, "change_apply");
+        let refused = request(&mut stream, &mut reader, 4, "bogus");
         assert_eq!(refused["error"]["code"], code::UNKNOWN_METHOD);
         // Without the Accessibility grant a read fails, in words, and is never busy; so does the focus.
         let refused = request(&mut stream, &mut reader, 5, "read");

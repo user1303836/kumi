@@ -83,12 +83,21 @@ pub fn db_of(description: &str) -> Option<f64> {
     first_number(description).map(|db| round(db, 1))
 }
 
-/// A header's pan from its knob's description ("0 Pan", "-12 Pan") else from its value, which runs 0 to 127 with 64
-/// in the middle.
+/// A header's pan knob runs 0 to 127 with 64 in the middle, so its pan is the value less 64; without a value, its
+/// description ("0 Pan", "-12 Pan", "12 of 64, Left Channel Pan") is read, left being negative.
+pub const PAN_CENTRE: i64 = 64;
+
 pub fn pan_of(knob: &Node) -> i64 {
-    match first_number(&knob.value_desc) {
-        Some(pan) if !knob.value_desc.trim().is_empty() => pan as i64,
-        _ => knob.number().map_or(0, |value| value as i64 - 64),
+    if let Some(value) = knob.number() {
+        return value as i64 - PAN_CENTRE;
+    }
+    let text = knob.value_desc.trim();
+    let Some(pan) = first_number(text) else { return 0 };
+    let left = text.contains("Left");
+    if left {
+        -(pan.abs() as i64)
+    } else {
+        pan as i64
     }
 }
 
@@ -106,6 +115,23 @@ impl Position {
 
     pub fn to_json(&self) -> Value {
         json!({"bar": self.bar, "beat": self.beat, "division": self.division, "tick": self.tick})
+    }
+
+    /// The position `beats` from the project's start, in bars of `beats_per_bar` beats, to the nearest tick.
+    pub fn from_beats(beats: f64, beats_per_bar: u32) -> Position {
+        let beats_per_bar = beats_per_bar.max(1);
+        let ticks = (beats.max(0.0) * TICKS_PER_BEAT as f64).round() as u64;
+        let bar_ticks = u64::from(beats_per_bar) * u64::from(TICKS_PER_BEAT);
+        let bar = ticks / bar_ticks;
+        let in_bar = ticks % bar_ticks;
+        let beat = in_bar / u64::from(TICKS_PER_BEAT);
+        let in_beat = in_bar % u64::from(TICKS_PER_BEAT);
+        Position {
+            bar: bar as u32 + 1,
+            beat: beat as u32 + 1,
+            division: (in_beat / u64::from(TICKS_PER_DIVISION)) as u32 + 1,
+            tick: (in_beat % u64::from(TICKS_PER_DIVISION)) as u32 + 1,
+        }
     }
 
     /// Beats from the project's start, in a bar of `beats_per_bar` beats.
@@ -604,6 +630,9 @@ mod tests {
         let knob = node(json!({"role": "AXSlider", "value": 64, "valueDesc": "0 Pan"}));
         assert_eq!(pan_of(&knob), 0);
         assert_eq!(pan_of(&node(json!({"role": "AXSlider", "value": 52}))), -12);
+        assert_eq!(pan_of(&node(json!({"role": "AXSlider", "value": 62, "valueDesc": "2 of 64, Left Channel Pan"}))), -2);
+        assert_eq!(pan_of(&node(json!({"role": "AXSlider", "valueDesc": "2 of 64, Left Channel Pan"}))), -2);
+        assert_eq!(pan_of(&node(json!({"role": "AXSlider", "valueDesc": "12 Pan"}))), 12);
     }
 
     #[test]
@@ -617,6 +646,10 @@ mod tests {
         assert_eq!(position.beats(4), 1.0);
         assert_eq!(Position { bar: 9, beat: 1, division: 1, tick: 1 }.beats(4), 32.0);
         assert_eq!(Position { bar: 2, beat: 2, division: 3, tick: 121 }.beats(3), 4.0 + 0.5 + 0.125);
+        assert_eq!(Position::from_beats(4.625, 3), Position { bar: 2, beat: 2, division: 3, tick: 121 });
+        assert_eq!(Position::from_beats(32.0, 4), Position { bar: 9, ..Position::START });
+        assert_eq!(Position::from_beats(0.0, 4), Position::START);
+        assert_eq!(Position::from_beats(1.0, 4).beats(4), 1.0);
         // Without sliders, the description's numbers serve.
         let bare = node(json!({"role": "AXGroup", "desc": "9 1 1 1 "}));
         assert_eq!(position_of(&bare).map(|p| p.bar), Some(9));

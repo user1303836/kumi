@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 
 use crate::ax::strings::{self, Strings};
 use crate::ax::{Ax, AxError};
+use crate::changes::Changes;
 use crate::focus::{self, Focus};
 use crate::helper::Helper;
 use crate::log;
@@ -128,6 +129,8 @@ struct Attached {
     server: Server,
     hub: Hub,
     project: Project,
+    /// The change side: the undo watch and the counted plan steps.
+    changes: Changes,
     mcu: Mcu,
     /// When the Mackie Control's ports were opened, and whether the install was logged.
     mcu_opened: Option<Instant>,
@@ -246,6 +249,7 @@ fn attach(config: &Config, app: &App, notes: &mut Notes) -> Option<Attached> {
                 server,
                 hub,
                 project: Project::new(strings_for(app, config)),
+                changes: Changes::default(),
                 mcu: Mcu::default(),
                 mcu_opened: None,
                 mcu_said: false,
@@ -297,8 +301,8 @@ impl Attached {
                     if self.first_epoch_at.is_some() {
                         self.project.epoch += 1;
                     }
-                    self.project.shape = None;
-                    self.project.layout = Default::default();
+                    self.project.new_project();
+                    self.changes.new_project();
                 }
             }
             Err(error) => notes.say("helper", format!("the helper didn't answer `windows`: {error}")),
@@ -316,8 +320,8 @@ impl Attached {
         let root = lock(&self.model).window_root();
         self.project.set_root(root);
         let mut ax = Ax::new(helper, self.pid);
-        let look = match self.project.look(&mut ax, None) {
-            Ok((look, _, _)) => look,
+        let (look, headers) = match self.project.look(&mut ax, None) {
+            Ok((look, headers, _)) => (look, headers),
             Err(error) => {
                 if matches!(error, AxError::ChoosingProject) {
                     lock(&self.model).busy = Some(logic::Busy::ChoosingProject);
@@ -339,6 +343,19 @@ impl Attached {
         self.refreshed_at = Some(Instant::now());
         let epoch = look.epoch;
         let (selection, transport) = (look.selection.to_json(epoch), look.transport.to_json());
+        // The producer's own undo of Kumi's changes, named back: the probes against this look, the Edit menu's titles.
+        {
+            let hub = &self.hub;
+            let project = &self.project;
+            self.changes.watch.poll(
+                &mut ax,
+                &project.strings,
+                &look,
+                &headers,
+                &mut |data| hub.event(wire::event::UNDONE_IN_DAW, data),
+                &|from, place| project.carry_track(from, place),
+            );
+        }
         lock(&self.focus).update(look);
         if epoch != self.last_epoch {
             self.last_epoch = epoch;
@@ -372,6 +389,9 @@ impl Attached {
         }
         let root = lock(&self.model).window_root();
         self.project.set_root(root);
+        if crate::serve::CHANGE_METHODS.contains(&method) {
+            return crate::serve::answer_change(&mut self.project, &mut self.changes, helper, self.pid, method, params);
+        }
         crate::serve::answer(&mut self.project, helper, self.pid, method, params)
     }
 
@@ -547,6 +567,7 @@ pub fn run(config: Config, mut helper: Box<dyn Helper>, stop: Arc<AtomicBool>) -
         }
     };
     if let Some(attached) = attached.as_mut() {
+        attached.changes.stop();
         if !stop.load(Ordering::Acquire) {
             attached.mcu.close(helper.as_mut());
         }
