@@ -41,7 +41,7 @@ Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renois
 
 ## どこに何があるか
 
-- **すべての画面:** Kumi のツール、スキル（`kumi:daw`、`kumi:sounds`、`kumi:listening`）、状態を見る `/kumi`。
+- **すべての画面:** Kumi のツール、スキル（`kumi:daw`、`kumi:sounds`、`kumi:listening`）、状態を見る `/kumi`。メッセージに `@kumi:focus`、`@kumi:history`、`@kumi:status` と書くと、Kumi が最後に見た内容を添えられます。
 - **Hermes Desktop:** ステータスチップ、FOCUS と HISTORY のサイドペイン、専用タブのサウンドマップ、測定した音声のカード、パレットのコマンド。ボタンはチャットに依頼を入れるだけで、ボタンだけでプロジェクトが変わることはありません。
 - **Web ダッシュボード:** HISTORY、状態、マップのある Kumi タブ。
 

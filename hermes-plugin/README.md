@@ -35,7 +35,9 @@ a DAW to work in.
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan) | no |
 
-Three skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds` and `kumi:listening`.
+Three skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds` and `kumi:listening`. In any message, write
+`@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the DAW, its recent
+changes, or its connection. They only read what Kumi has already published, so nothing asks first.
 
 ## Install
 

@@ -49,7 +49,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 ## Where things are
 
-- **Every surface:** Kumi's tools, its skills (`kumi:daw`, `kumi:sounds`, `kumi:listening`) and `/kumi` for status.
+- **Every surface:** Kumi's tools, its skills (`kumi:daw`, `kumi:sounds`, `kumi:listening`), `/kumi` for status, and
+  `@kumi:focus`, `@kumi:history` or `@kumi:status` in a message to attach what Kumi last saw.
 - **Hermes Desktop:** a status chip, a side pane with FOCUS and HISTORY, the sound map in its own tab, cards for
   measured audio, and palette commands. Buttons put a request into the chat; they never change your project by
   themselves.

@@ -41,7 +41,7 @@ hermes plugins enable kumi
 
 ## 东西在哪里
 
-- **所有界面：** Kumi 的工具、技能（`kumi:daw`、`kumi:sounds`、`kumi:listening`）以及查看状态的 `/kumi`。
+- **所有界面：** Kumi 的工具、技能（`kumi:daw`、`kumi:sounds`、`kumi:listening`）以及查看状态的 `/kumi`。在消息中写 `@kumi:focus`、`@kumi:history` 或 `@kumi:status`，即可附上 Kumi 最后看到的内容。
 - **Hermes Desktop：** 状态标签、显示 FOCUS 和 HISTORY 的侧边栏、单独标签页中的声音地图、测量结果卡片和命令面板中的命令。按钮只会把请求放进对话，不会自己修改你的工程。
 - **网页仪表盘：** 一个包含 HISTORY、状态和地图的 Kumi 标签页。
 
