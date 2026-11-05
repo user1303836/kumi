@@ -94,8 +94,10 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
         let project = ctx.link().saw(&observation);
         ctx.link().clear_unsure();
-        let (focus, transport, catch_up) = (connection.focus(), connection.transport(), connection.take_catch_up());
         let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
+        // A look at FOCUS leaves what changed for the look that asks for it (catch_up, or the whole project).
+        let catch_up = if scope == "focus" { connection.catch_up() } else { connection.take_catch_up() };
+        let (focus, transport) = (connection.focus(), connection.transport());
         let text = match scope {
             "focus" => focus_text(&project, focus.as_ref(), transport.as_ref()),
             "catch_up" if catch_up.is_empty() => format!("Nothing has changed in {} since the last look.", project.name),

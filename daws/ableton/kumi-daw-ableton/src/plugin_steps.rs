@@ -13,7 +13,8 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("write_midi_clip", "clip"),
     PluginStep::new("load_device", "device"),
     PluginStep::new("set_device_parameter", "parameter"),
-    PluginStep::new("edit_rack", "device").refusing(&[("action", &["remove-macro", "delete-variation", "insert-chain"])]),
+    // add-chain is the step's own word for insert-chain: Live gives Kumi no way to take a chain away again.
+    PluginStep::new("edit_rack", "device").refusing(&[("action", &["remove-macro", "delete-variation", "insert-chain", "add-chain"])]),
     PluginStep::new("set_chain_mixer", "mixer"),
     PluginStep::new("set_locators", "locators"),
     PluginStep::new("set_track_color", "color"),
@@ -144,7 +145,7 @@ mod tests {
         assert!(check(PLUGIN_STEPS, "change_structure", &json!({"action":"create-return","name":"Verb"})).is_ok());
         assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"delete-variation","index":0})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"remove-macro"})).is_err());
-        assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"add-chain"})).is_ok());
+        assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"add-chain"})).is_err(), "no undo takes a chain away");
         assert!(check(PLUGIN_STEPS, "edit_device", &json!({"deviceRef":"d1","action":"slice-clear"})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_device", &json!({"deviceRef":"d1","action":"resend"})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_clip", &json!({"clipRef":"c1","action":"duplicate-loop"})).is_err());

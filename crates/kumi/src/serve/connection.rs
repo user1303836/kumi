@@ -80,6 +80,11 @@ impl Connection {
     pub fn take_catch_up(&self) -> Vec<CatchUp> {
         bounded_catch_up(std::mem::take(&mut *self.reported.catch_up.borrow_mut()))
     }
+
+    /// The same, kept for the look that asks for it.
+    pub fn catch_up(&self) -> Vec<CatchUp> {
+        bounded_catch_up(self.reported.catch_up.borrow().clone())
+    }
 }
 
 /// The most catch-ups (projects) kept and given, the newest; and the most lines given for each (the rest counted in
@@ -426,9 +431,10 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     });
     context.on_catch_up = Some({
-        let reported = Rc::downgrade(&reported);
+        let (reported, ctx) = (Rc::downgrade(&reported), ctx.handle());
         Rc::new(move |catch_up| {
-            if let Some(reported) = reported.upgrade() {
+            let Some(reported) = reported.upgrade() else { return };
+            {
                 let mut kept = reported.catch_up.borrow_mut();
                 kept.push(catch_up);
                 if kept.len() > CATCH_UPS {
@@ -436,6 +442,8 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
                     kept.drain(..older);
                 }
             }
+            // focus.json carries it too, so the note the chat gets before its next turn tells it.
+            publish_focus(&ctx);
         })
     });
     // Each change Kumi records (made, undone, kept, unsure) becomes or updates a HISTORY row, on the project open now.

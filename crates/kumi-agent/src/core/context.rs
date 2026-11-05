@@ -24,6 +24,9 @@ pub struct HostPolicy {
     /// DAW is asked, and refuses when it's changed since (`Integration::guarded_undo`): the plugin host's.
     pub guards_undo: bool,
     pub listening: ListeningPolicy,
+    /// May drive the DAW's own menus and dialogs (Live's Hands). A plugin host never does: no step reaches them, and the
+    /// integration doesn't offer them either.
+    pub menus: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -37,11 +40,16 @@ pub enum ListeningPolicy {
 
 impl HostPolicy {
     pub fn standalone() -> Self {
-        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone }
+        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone, menus: true }
     }
 
     pub fn plugin(listen_root: PathBuf) -> Self {
-        Self { persist_identity: false, guards_undo: true, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
+        Self {
+            persist_identity: false,
+            guards_undo: true,
+            listening: ListeningPolicy::Restricted { scratch_root: listen_root },
+            menus: false,
+        }
     }
 }
 

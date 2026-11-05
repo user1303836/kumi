@@ -4,7 +4,7 @@ kumi_testkit::fixture_paths!();
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::{
-    core::contracts::Integration,
+    core::{context::HostPolicy, contracts::Integration},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -16,8 +16,16 @@ use kumi_common::{
 };
 use kumi_daw_ableton::history::Audible;
 use kumi_daw_ableton::{
-    actions::ACTIONS, arrange::ArrangeHost, changes::CHANGES, connection::LiveConnection, integration::Ableton, mutations::Mutations,
-    observation::ObservationHost, options::AbletonOptions, remember::CurrentProject, watch::Watch,
+    actions::ACTIONS,
+    arrange::ArrangeHost,
+    changes::CHANGES,
+    connection::LiveConnection,
+    integration::Ableton,
+    mutations::Mutations,
+    observation::ObservationHost,
+    options::{AbletonOptions, HandsSetup, IntegrationContext},
+    remember::CurrentProject,
+    watch::Watch,
 };
 use kumi_types::{
     contracts::{JsonObject, ToolResult},
@@ -849,6 +857,61 @@ async fn new_tracks_have_their_picture_and_a_plans_run_is_marked() {
             let [Some(made), Some(first), Some(second)] = batches.as_slice() else { panic!("{batches:?}") };
             assert_eq!(first, second, "one run across the two tracks");
             assert!(first.ends_with(":set_mixer") && made.ends_with(":add_tracks_and_scenes") && made != first, "{batches:?}");
+        })
+        .await;
+}
+
+/// A bridge listing what Live's menus (Hands) are offered with.
+struct MenusFixture;
+#[async_trait(?Send)]
+impl McpEndpoint for MenusFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        let tools = ["live_status", "live_selection_preview"].map(|name| json!({"name":name,"inputSchema":{"type":"object"}}));
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        assert_eq!(name, "live_status", "only a look");
+        let body = json!({"connected":true,"adapter":"real-live","epoch":7});
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+/// A plugin host never drives Live's menus: live_command isn't offered to it even with Hands able to open, as it is to
+/// standalone Kumi.
+#[tokio::test(flavor = "current_thread")]
+async fn a_plugin_host_is_never_offered_lives_menus() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (policy, offered) in [(HostPolicy::standalone(), true), (HostPolicy::plugin(std::env::temp_dir()), false)] {
+                let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+                context.policy = policy;
+                let mut options = AbletonOptions::with_context(context);
+                options.connect = Some(Rc::new(|_| async { Ok(Rc::new(MenusFixture) as Rc<dyn McpEndpoint>) }.boxed_local()));
+                options.hands = Some(HandsSetup::Open(Rc::new(|| async { Ok(None) }.boxed_local())));
+                let integration = Ableton::new(options);
+                let connection = integration.connection.clone();
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                let names: Vec<String> = integration.definitions().iter().map(|tool| tool.name().to_string()).collect();
+                assert_eq!(names.iter().any(|name| name == "live_command"), offered, "{names:?}");
+            }
         })
         .await;
 }
