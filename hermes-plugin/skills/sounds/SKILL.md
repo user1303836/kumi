@@ -12,6 +12,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
   - Ask which folder to add. Never suggest scanning a whole disk or home folder.
 - **`action: scan` builds or refreshes the map.**
   - The producer approves it, and it runs as a job: follow it with `kumi_job`.
+  - To stop it, when the producer asks: `action: cancel` with the scan's `job_id`. That only asks: the scan has stopped once `kumi_job` says `cancelled`, and only then can another scan start. The map stays as it was.
   - `action: status` says what's there.
 
 ## Finding sounds

@@ -53,6 +53,7 @@ class Fixture:
         self.state = Path(options.state_dir)
         self.state.mkdir(parents=True, exist_ok=True)
         self.artifacts: dict[str, dict] = {}  # artifacts.json's table, as W3's runtime keeps a measured file
+        self.scans: dict[str, str] = {}  # job id -> running, cancelling, cancelled or done (CC-14)
         self.seq = 0
         self.connected = False
         self.daw = options.daw
@@ -359,12 +360,25 @@ SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", 
 
 
 def library(fixture: Fixture, args: dict, host: dict) -> dict:
-    if args.get("action") == "add_folder":
+    """The library tool. One scan runs at a time (the busy guard, held until it settles); cancel answers only for the
+    scan running or still settling from a cancel, again on a repeat (CC-14's 14a), and `not_running` for any other."""
+    action = args.get("action")
+    if action == "add_folder":
         fixture.options.library_root.append(args["folder"])
-    if args.get("action") == "scan":  # a scan job, its file written as kumi serve writes jobs/<id>.json
-        fixture.record("jobs/j-scan-1.json", {"schema": 1, "seq": fixture.seq + 1, "at": now(), "job_id": "j-scan-1",
-                                              "kind": "scan", "state": "running", "progress": {"done": 0, "total": 2}})
-        return {"job_id": "j-scan-1"}
+    if action == "scan":  # a scan job, its file written as kumi serve writes jobs/<id>.json
+        if any(state in ("running", "cancelling") for state in fixture.scans.values()):
+            return error("busy", "a scan is already running")
+        job_id = f"j-scan-{len(fixture.scans) + 1}"
+        fixture.scans[job_id] = "running"
+        fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.seq + 1, "at": now(), "job_id": job_id,
+                                               "kind": "scan", "state": "running", "progress": {"done": 0, "total": 2}})
+        return {"job_id": job_id}
+    if action == "cancel":
+        job_id = args.get("job_id")
+        if fixture.scans.get(job_id) not in ("running", "cancelling"):
+            return error("not_running", f"no scan {job_id!r} is running")
+        fixture.scans[job_id] = "cancelling"
+        return {"job_id": job_id, "cancel_requested": True}
     return {"folders": list(fixture.options.library_root), "sounds": len(SOUNDS), "map_revision": "r1"}
 
 
@@ -469,8 +483,14 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
-    if args.get("job_id") != "j-scan-1":
-        return error("not_found", f"no job {args.get('job_id')!r}")
+    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done."""
+    job_id = args.get("job_id")
+    state = fixture.scans.get(job_id)
+    if state is None:
+        return error("not_found", f"no job {job_id!r}")
+    fixture.scans[job_id] = "cancelled" if state in ("cancelling", "cancelled") else "done"
+    if fixture.scans[job_id] == "cancelled":
+        return {"state": "cancelled"}
     return {"state": "done", "progress": 1.0, "result": {"sounds": len(SOUNDS), "map_revision": "r1"}}
 
 

@@ -734,12 +734,35 @@ def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
     return result
 
 
+LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")
+
+
+def library_refusal(args: dict) -> str | None:
+    """What's wrong with a kumi_library call's arguments, or None; the hook checks this, and the handler again, before
+    anything reaches the runtime (CC-14): the action, a cancel's job id in the runtime's job-id form, a folder never
+    with cancel and a job id only with it."""
+    action = args.get("action")
+    if action not in LIBRARY_ACTIONS:
+        return "kumi_library's action is status, add_folder, scan or cancel."
+    if action != "cancel":
+        return "job_id goes only with cancel." if args.get("job_id") is not None else None
+    if args.get("folder") is not None:
+        return "cancel takes the scan's job_id, never a folder."
+    if snapshots.file_id(args.get("job_id")) is None:
+        return "cancel needs the scan's job_id, as the scan returned it."
+    return None
+
+
 def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     """The library tool; a folder the producer approved adding is also kept in the plugin's library_folders setting, so
-    the next runtime starts with it (`--library-root`)."""
-    action = args.get("action")
-    if action not in ("status", "add_folder", "scan"):
-        return {"error": {"code": "invalid", "reason": "action is status, add_folder or scan."}}
+    the next runtime starts with it (`--library-root`). A cancel asks the runtime to stop the scan it names (CC-14): the
+    reply acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
+    refusal = library_refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    action = args["action"]
+    if action == "cancel":
+        args = {"action": "cancel", "job_id": args["job_id"]}
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
