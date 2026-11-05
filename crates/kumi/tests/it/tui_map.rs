@@ -456,6 +456,7 @@ case!(space_plays_the_point_chosen_and_again_stops_it, async {
     h.type_text(" ").await;
     h.wait_for("▶ playing").await;
     // Half a second of it (or its whole length, shorter), in both channels.
+    given(&started, 1).await;
     let length = started.borrow()[0];
     assert!(length > 0 && length <= 48_000, "{length}");
     h.type_text(" ").await;
