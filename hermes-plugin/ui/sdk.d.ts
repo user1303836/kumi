@@ -79,6 +79,15 @@ declare module '@hermes/plugin-sdk' {
     storage: PluginStorage
     os?: PluginOs
     i18n?: PluginI18n
+    /** A line in the core pet's speech bubble, labelled with the plugin's name. Older Desktops have none. */
+    pet?: PluginPet
+  }
+
+  export interface PluginPet {
+    say: (text: string, options?: { id?: string; tone?: 'error' | 'info' | 'wait'; ttlMs?: number }) => () => void
+    clear: (id?: string) => void
+    /** Whether a pet is on screen: none adopted, or turned off, and nothing shows. */
+    visible: { get: () => boolean }
   }
 
   export interface HermesPlugin {

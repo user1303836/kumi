@@ -230,6 +230,7 @@
       agentSettings: "Agent settings",
       thisWindow: "This window",
       openOnFind: "Open the sound map when Kumi finds sounds",
+      petLines: "Let the pet say when Kumi finishes a change or a job",
       states: {
         ready: "Ready",
         needs_runtime: "Not set up yet",
@@ -269,6 +270,9 @@
       placeTitle: "Put a request to place this file in your project in the chat, to finish and send",
       planNotes: "Plan notes…",
       planNotesTitle: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send"
+    },
+    pet: {
+      undone: (change) => `Undone: ${change}`
     },
     palette: {
       map: "Kumi: open the sound map",
@@ -480,6 +484,7 @@
       agentSettings: "エージェント設定",
       thisWindow: "このウィンドウ",
       openOnFind: "Kumi がサウンドを見つけたらサンプルマップを開く",
+      petLines: "Kumi が変更やジョブを終えたら、ペットの吹き出しで知らせる",
       states: {
         ready: "準備完了",
         needs_runtime: "まだセットアップされていません",
@@ -519,6 +524,9 @@
       placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
       planNotes: "ノートの配置を計画…",
       planNotesTitle: "プロジェクト自身のタイミングから、これらのノートをどこに置くか計画する依頼をチャットに入れます。仕上げて送信してください"
+    },
+    pet: {
+      undone: (change) => `取り消しました: ${change}`
     },
     palette: {
       map: "Kumi: サンプルマップを開く",
@@ -730,6 +738,7 @@
       agentSettings: "智能体设置",
       thisWindow: "此窗口",
       openOnFind: "Kumi 找到声音时打开采样地图",
+      petLines: "Kumi 完成改动或任务时，让宠物在气泡里说一声",
       states: {
         ready: "就绪",
         needs_runtime: "尚未设置",
@@ -769,6 +778,9 @@
       placeTitle: "把放入这个文件的请求放进对话，补充完整后发送",
       planNotes: "规划音符…",
       planNotesTitle: "把根据项目自身的节拍规划这些音符放在哪里的请求放进对话，补充完整后发送"
+    },
+    pet: {
+      undone: (change) => `已撤销：${change}`
     },
     palette: {
       map: "Kumi：打开采样地图",

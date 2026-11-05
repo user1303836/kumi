@@ -1,6 +1,7 @@
 // Kumi's entry under Settings → Plugins: where setup stands (the runtime, the DAW part, what's next), the connection,
-// and this window's own preference. Kumi's agent settings (the DAW, sample folders, FOCUS for the agent) are the
-// form Hermes draws from the plugin's settings schema, one link away.
+// and this window's own preferences (open the map on a find; the pet's word on a finished change or job). Kumi's agent
+// settings (the DAW, sample folders, FOCUS for the agent) are the form Hermes draws from the plugin's settings schema,
+// one link away.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
@@ -13,6 +14,7 @@ import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
+import { PET_LINES } from './pet.ts'
 
 export const OPEN_MAP_ON_FIND = 'openMapOnFind'
 
@@ -40,6 +42,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
   useWant(store, 'setup')
   const state = useKumi(store)
   const [openOnFind, setOpenOnFind] = useState(() => ctx.storage.get(OPEN_MAP_ON_FIND, true))
+  const [petLines, setPetLines] = useState(() => ctx.storage.get(PET_LINES, false))
   const setup = state.setup
   const step = nextStep(state, t)
   const daw = state.status?.daw ?? setup?.daw
@@ -141,6 +144,21 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           />
           <span style={S.text}>{t('settings.openOnFind')}</span>
         </label>
+        {/* Only where Desktop has a pet to speak (ctx.pet); off until the producer turns it on. */}
+        {ctx.pet && (
+          <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, cursor: 'pointer' }}>
+            <input
+              checked={petLines}
+              className={FOCUSABLE}
+              onChange={event => {
+                setPetLines(event.target.checked)
+                ctx.storage.set(PET_LINES, event.target.checked)
+              }}
+              type="checkbox"
+            />
+            <span style={S.text}>{t('settings.petLines')}</span>
+          </label>
+        )}
       </div>
     </div>
   )

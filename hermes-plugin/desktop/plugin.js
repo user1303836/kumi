@@ -191,6 +191,7 @@ var en = {
     agentSettings: "Agent settings",
     thisWindow: "This window",
     openOnFind: "Open the sound map when Kumi finds sounds",
+    petLines: "Let the pet say when Kumi finishes a change or a job",
     states: {
       ready: "Ready",
       needs_runtime: "Not set up yet",
@@ -230,6 +231,9 @@ var en = {
     placeTitle: "Put a request to place this file in your project in the chat, to finish and send",
     planNotes: "Plan notes…",
     planNotesTitle: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send"
+  },
+  pet: {
+    undone: (change) => `Undone: ${change}`
   },
   palette: {
     map: "Kumi: open the sound map",
@@ -441,6 +445,7 @@ var ja = {
     agentSettings: "エージェント設定",
     thisWindow: "このウィンドウ",
     openOnFind: "Kumi がサウンドを見つけたらサンプルマップを開く",
+    petLines: "Kumi が変更やジョブを終えたら、ペットの吹き出しで知らせる",
     states: {
       ready: "準備完了",
       needs_runtime: "まだセットアップされていません",
@@ -480,6 +485,9 @@ var ja = {
     placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
     planNotes: "ノートの配置を計画…",
     planNotesTitle: "プロジェクト自身のタイミングから、これらのノートをどこに置くか計画する依頼をチャットに入れます。仕上げて送信してください"
+  },
+  pet: {
+    undone: (change) => `取り消しました: ${change}`
   },
   palette: {
     map: "Kumi: サンプルマップを開く",
@@ -691,6 +699,7 @@ var zh = {
     agentSettings: "智能体设置",
     thisWindow: "此窗口",
     openOnFind: "Kumi 找到声音时打开采样地图",
+    petLines: "Kumi 完成改动或任务时，让宠物在气泡里说一声",
     states: {
       ready: "就绪",
       needs_runtime: "尚未设置",
@@ -730,6 +739,9 @@ var zh = {
     placeTitle: "把放入这个文件的请求放进对话，补充完整后发送",
     planNotes: "规划音符…",
     planNotesTitle: "把根据项目自身的节拍规划这些音符放在哪里的请求放进对话，补充完整后发送"
+  },
+  pet: {
+    undone: (change) => `已撤销：${change}`
   },
   palette: {
     map: "Kumi：打开采样地图",
@@ -2749,6 +2761,26 @@ function MeasurementsWorkspace({ store, audition }) {
   ] }) });
 }
 
+// src/desktop/pet.ts
+var PET_LINES = "petLines";
+function petLine(before, after, t) {
+  const was = before.history?.items;
+  const items = after.history?.items ?? [];
+  if (was && items.length) {
+    const title = (item) => clean(item.title ?? item.label ?? item.id, 110);
+    const top = items[0];
+    if (!was.some((item) => item.id === top.id) && (top.state === "applied" || top.state === void 0)) return { id: "change", text: title(top), tone: "info" };
+    const undone = items.find((item) => item.state === "undone" && was.some((old) => old.id === item.id && old.state !== "undone"));
+    if (undone) return { id: "change", text: t("pet.undone", title(undone)), tone: "info" };
+  }
+  for (const [id, job] of Object.entries(after.jobs)) {
+    if (job.ended_at === null || before.jobs[id]?.ended_at !== null) continue;
+    const words = job.kind === "generate" ? generationJobWords(job, t) : jobWords(job, t);
+    return { id: "job", text: [words.title, words.detail].filter(Boolean).join(" · "), tone: words.tone === "bad" ? "error" : "info" };
+  }
+  return null;
+}
+
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState5 } from "react";
@@ -2771,6 +2803,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   useWant(store, "setup");
   const state = useKumi(store);
   const [openOnFind, setOpenOnFind] = useState5(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
+  const [petLines, setPetLines] = useState5(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
   const step2 = nextStep(state, t);
   const daw = state.status?.daw ?? setup?.daw;
@@ -2861,6 +2894,21 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           }
         ),
         /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.openOnFind") })
+      ] }),
+      ctx.pet && /* @__PURE__ */ jsxs12("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx12(
+          "input",
+          {
+            checked: petLines,
+            className: FOCUSABLE,
+            onChange: (event) => {
+              setPetLines(event.target.checked);
+              ctx.storage.set(PET_LINES, event.target.checked);
+            },
+            type: "checkbox"
+          }
+        ),
+        /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.petLines") })
       ] })
     ] })
   ] });
@@ -3029,6 +3077,18 @@ var plugin = {
       closeMeasurements?.();
       audition.dispose();
     });
+    const pet = ctx.pet;
+    if (pet && typeof pet.say === "function") {
+      let last = store.get();
+      ctx.onDispose(
+        store.subscribe(() => {
+          const now = store.get();
+          const line = ctx.storage.get(PET_LINES, false) && pet.visible.get() ? petLine(last, now, wordsOf(ctx)) : null;
+          last = now;
+          if (line) pet.say(line.text, { id: line.id, tone: line.tone, ttlMs: 8e3 });
+        })
+      );
+    }
     const contributions = [
       {
         id: "pane",
