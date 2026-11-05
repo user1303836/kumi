@@ -16,6 +16,7 @@ import support
 kumi = support.plugin()
 commands = support.module("commands")
 policy = support.module("policy")
+runtime = support.module("runtime")
 setup = support.module("setup")
 
 
@@ -174,7 +175,7 @@ class SetupTool(unittest.TestCase):
         self.assertFalse(older.client.running)
         self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
 
-    def test_allowing_an_ffmpeg_stops_the_profiles_runtime(self):
+    def test_allowing_an_ffmpeg_restarts_the_runtime_with_it(self):
         host, _, data = support.host(self, None, "--component-state", "same")  # set up for Live already
         support.call(host, "kumi_connect", {}, session_id="s1")
         running = host.runtimes.get(data)
@@ -194,6 +195,13 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(host.runtimes.get(data), "stopped, so the next start passes --tool ffmpeg")
         self.assertFalse(running.client.running)
         self.assertEqual(installed["status"]["compressed_audio"]["state"], "available")
+        argv = runtime.serve_argv(host.install(data), data / "state", "ableton")
+        self.assertEqual(argv[-2:], ["--tool", f"ffmpeg={setup.os.path.realpath(program)}"],
+                         "what setup recorded is what the next start passes (runtime.py, #962)")
+        program.write_bytes(b"#!/bin/sh\necho upgraded\n")
+        self.assertNotIn("--tool", runtime.serve_argv(host.install(data), data / "state", "ableton"))
+        self.assertEqual(setup.status(daw="ableton", data_dir=data, plugin_dir=host.plugin_dir)
+                         ["compressed_audio"]["state"], "changed", "setup and runtime.py agree it changed")
 
 
 class Cli(unittest.TestCase):
