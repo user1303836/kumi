@@ -227,8 +227,9 @@ def _reason(failure: Exception) -> str:
 def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     """Measuring a file, a sound or an artifact is a read. A track or the mix plays the project (CC-2): it's asked in
     the words of the runtime's own preview (which track or the mix, the exact beats, what changes for a moment and is
-    put back) and how long it plays, and blocked unasked when the runtime would refuse it. The preview's own deadline
-    for the real call goes to the handler with the approval (CC-5's record)."""
+    put back) and how long it plays, and blocked unasked when the runtime would refuse it. The preview's bounds for
+    the real call (CC-2's A2: the window's seconds, getting `compare_to` ready, the native deadline) go to the handler
+    with the approval (CC-5's record); a preview without valid ones is blocked."""
     refusal = tools.listen_refusal(args)
     if refusal:
         return block(f"Kumi didn't listen: {refusal}"), {}
@@ -241,17 +242,16 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
         answer = _ask(host, "listen", {**tools.listen_args(args), "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(f"Kumi didn't play anything: {_reason(failure)}"), {}
-    text, deadline = answer.get("text"), tools.track_deadline(answer.get("deadline_seconds"))
+    text = answer.get("text")
     if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
         return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused this listen.'}"), {}
-    if deadline is None:  # its own bound for the real call (CC-2); nothing is guessed in its place
+    bounds = tools.track_bounds(answer, args)
+    if bounds is None:  # its own bounds for the real call (CC-2); nothing is guessed in their place
         return block("Kumi didn't play anything: its runtime didn't say how long this listen may take."), {}
-    seconds = answer.get("estimated_seconds")
-    about = (f" (about {seconds:.3g} s)" if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
-             and seconds > 0 else "")
-    decision = {"action": "approve", "message": one_line(f"Kumi: {text}{about}", PLAYBACK_LINE),
+    decision = {"action": "approve", "message": one_line(f"Kumi: {text} (about {bounds['estimated_seconds']:.3g} s)",
+                                                         PLAYBACK_LINE),
                 "rule_key": "kumi:playback:listen"}
-    return decision, {"deadline": deadline}
+    return decision, {"listen": bounds}
 
 
 def _change(host: Any, args: dict, kwargs: dict) -> dict:

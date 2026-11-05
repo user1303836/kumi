@@ -680,12 +680,28 @@ def is_track_listen(args: dict) -> bool:
     return isinstance(source, dict) and "track" in source
 
 
-def track_deadline(value: Any) -> int | None:
-    """A track listen preview's `deadline_seconds` (CC-2's A2: the runtime's whole bound for the real call) when it's a
-    whole number of seconds from 1 to 360; None otherwise, and then the listen isn't approved."""
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= runtime.TRACK_DEADLINE_MAX:
+def track_bounds(answer: Any, args: dict) -> dict | None:
+    """A track listen's bounds (CC-2's A2 and its clarification), as its preview gave them, when each is what the
+    runtime may give: `estimated_seconds`, the window (finite, over 0, at most 60); `prepare_seconds`, getting
+    `compare_to` ready before anything plays (0 without one, else a whole number up to 120); `deadline_seconds`, the
+    native call (a whole number from 1 to 360). None otherwise, and then the listen isn't approved: nothing is guessed.
+    The approval keeps them, the handler waits for the two bounds and a margin, and the runtime gets them as `_listen`."""
+    if not isinstance(answer, dict):
         return None
-    return value
+    seconds, prepare, deadline = (answer.get(name) for name in ("estimated_seconds", "prepare_seconds",
+                                                               "deadline_seconds"))
+
+    def whole(value: Any, most: int) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= most
+
+    if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds)
+            or not 0 < seconds <= runtime.TRACK_SECONDS_MAX):
+        return None
+    if not whole(prepare, runtime.TRACK_PREPARE_MAX if args.get("compare_to") is not None else 0):
+        return None
+    if not whole(deadline, runtime.TRACK_DEADLINE_MAX) or deadline < 1:
+        return None
+    return {"estimated_seconds": seconds, "prepare_seconds": prepare, "deadline_seconds": deadline}
 
 
 def listen_refusal(args: dict) -> str | None:
@@ -795,14 +811,14 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         return interpreted(host, kept_media(host, result))
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
-    deadline = track_deadline(call.extra.get("deadline")) if isinstance(call, calls.Entry) else None
-    if deadline is None:  # approved_only let it through, so the hook approved it with its deadline; never guess one
+    bounds = track_bounds(call.extra.get("listen"), args) if isinstance(call, calls.Entry) else None
+    if bounds is None:  # approved_only let it through, so the hook approved it with its bounds; never guess them
         return {"error": {"code": "not_approved", "reason": "Kumi didn't play anything: this listen came without "
                                                             "its runtime's deadline."}}
-    timeout = deadline + runtime.TRACK_MARGIN
+    timeout = bounds["prepare_seconds"] + bounds["deadline_seconds"] + runtime.TRACK_MARGIN
     try:
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
-                                  interrupted=host.stop_watch())
+                                  interrupted=host.stop_watch(), private={"_listen": bounds})
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise

@@ -89,15 +89,29 @@ class TrackListen(unittest.TestCase):
         self.assertIn("kumi_connect", decision["message"])
         self.assertEqual(played(self.data), [])
 
-    def test_a_preview_that_names_no_deadline_isnt_asked_and_nothing_plays(self):
-        for deadline in ("0", "-5", "361"):  # outside CC-2's A2 (whole seconds, 1 to 360): no deadline Kumi waits for
-            with self.subTest(deadline=deadline):
-                host, _, data = support.host(self, None, "--listen-deadline", deadline)
+    def test_a_preview_without_valid_bounds_isnt_asked_and_nothing_plays(self):
+        reference = {"compare_to": {"sound_id": "s-r1-1", "map_revision": "r1"}}
+        cases = [*((("--listen-deadline", value), {}) for value in ("0", "-5", "361", "75.5", "true", "null", "missing")),
+                 *((("--listen-prepare", value), {}) for value in ("5", "-1", "0.0", "true", "missing")),  # none to get
+                 *((("--listen-prepare", value), reference) for value in ("121", "-1", "2.5", "null", "missing")),
+                 *((("--listen-estimated", value), {}) for value in ("0", "-1", "61", "NaN", "Infinity", "true",
+                                                                     "missing"))]
+        for fixture_args, extra in cases:  # CC-2's A2: Kumi waits only for bounds the runtime may give
+            with self.subTest(fixture_args=fixture_args, extra=extra):
+                host, _, data = support.host(self, None, *fixture_args)
                 support.call(host, "kumi_connect", {}, session_id="s1")
-                decision = policy.pre_tool_call(host, tool_name="kumi_listen", args=track(), session_id="s1")
-                self.assertEqual(decision, policy.block(
-                    "Kumi didn't play anything: its runtime didn't say how long this listen may take."))
+                decision = policy.pre_tool_call(host, tool_name="kumi_listen", args=track(**extra), session_id="s1")
+                self.assertEqual(decision["action"], "block")
                 self.assertEqual(played(data), [])
+
+    def test_the_runtime_gets_the_approved_bounds_privately_and_only_on_the_real_call(self):
+        approved = {"estimated_seconds": 3.87, "prepare_seconds": 0, "deadline_seconds": 75}
+        forged = {"estimated_seconds": 60, "prepare_seconds": 120, "deadline_seconds": 360}
+        heard = support.call(self.host, "kumi_listen", {**track(), "_listen": forged}, session_id="s1")
+        self.assertEqual(heard["capture"]["cleanup"], "restored")
+        [run] = played(self.data)
+        self.assertEqual(run["args"]["_listen"], approved, "the bounds the producer approved, never the model's")
+        self.assertEqual(["_listen" in args for args in asked(self.data)], [False, True], "a preview carries none")
 
     def test_a_window_or_source_kumi_doesnt_take_is_blocked_without_asking_the_runtime(self):
         for args in (track(beats=0), track(beats=257), track(beats=float("nan")), track(from_beat=-1),
@@ -157,6 +171,14 @@ class Outcomes(unittest.TestCase):
     def test_a_slow_listen_within_the_runtimes_deadline_is_waited_for(self):
         result, _ = self.listen("--slow", "listen=1", "--listen-deadline", "5")
         self.assertEqual(result["capture"]["cleanup"], "restored")
+
+    def test_getting_a_reference_ready_has_its_own_time_beside_the_runtimes_deadline(self):
+        reference = {"compare_to": {"sound_id": "s-r1-1", "map_revision": "r1"}}
+        host, _, _ = support.host(self, None, "--slow", "listen=2", "--listen-deadline", "1", "--listen-prepare", "4")
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        with mock.patch.object(runtime, "TRACK_MARGIN", 0):  # 4 s to prepare, then 1 s for the native call
+            result = support.call(host, "kumi_listen", track(**reference), session_id="s1")
+        self.assertEqual(result["capture"]["cleanup"], "restored", "a 2 s answer is waited for, not cut off at 1 s")
 
     def test_a_track_listen_recorded_without_its_runtimes_deadline_never_plays(self):
         host, _, data = support.host(self)

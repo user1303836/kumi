@@ -10,6 +10,7 @@ with a resource update after each. Standard library only.
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
         [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media] [--listen-deadline SECONDS]
+        [--listen-prepare SECONDS] [--listen-estimated SECONDS]
         [--component-state missing|same|older|newer|other_owner] [--component-owner DIR]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
@@ -592,9 +593,19 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
     text = (f"play {what} of {fixture.set['name']} from beat {start:g} to beat {start + beats:g} (Arrangement) "
             "through Kumi Ears and measure it; routing and the transport change for a moment and are put back")
     if args.get("preview"):
-        return {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
-                "estimated_seconds": round(seconds, 2), "method": "ears",
-                "deadline_seconds": fixture.options.listen_deadline}
+        preview = {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
+                   "method": "ears"}
+        for name, given, default in (("estimated_seconds", fixture.options.listen_estimated, round(seconds, 2)),
+                                     ("prepare_seconds", fixture.options.listen_prepare,
+                                      120 if args.get("compare_to") else 0),
+                                     ("deadline_seconds", fixture.options.listen_deadline, 75)):
+            if given != "missing":  # a runtime that doesn't give this bound at all
+                preview[name] = default if given is None else json.loads(given)
+        return preview
+    bounds = args.get("_listen")
+    if not isinstance(host, dict) or not host or not isinstance(bounds, dict) or sorted(bounds) != [
+            "deadline_seconds", "estimated_seconds", "prepare_seconds"]:
+        return error("invalid", "_listen")  # the runtime's own refusal (CC-2's A2): only the host's approved bounds play
     with open(fixture.state / "fixture-listens.jsonl", "a", encoding="utf-8") as log:
         log.write(json.dumps({"args": args, "host": host}) + "\n")
     measured = {"metrics": analysis(lufs=-11.8, peak=-0.6, centroid=2210.0, seconds=round(seconds, 2)),
@@ -781,9 +792,12 @@ def main() -> None:
     parser.add_argument("--media-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
-    parser.add_argument("--listen-deadline", type=int, default=75,
-                        help="the preview's deadline_seconds (whole seconds): the capture's 65 s cap, restoring and "
-                             "measuring")
+    parser.add_argument("--listen-deadline", help="the preview's deadline_seconds, as JSON, or missing (default: 75, "
+                                                  "the capture's 65 s cap, restoring and measuring)")
+    parser.add_argument("--listen-prepare", help="the preview's prepare_seconds, as JSON, or missing (default: 0, or "
+                                                 "120 with compare_to)")
+    parser.add_argument("--listen-estimated", help="the preview's estimated_seconds, as JSON, or missing (default: "
+                                                   "the window's)")
     parser.add_argument("--component-state", default="missing",
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")
