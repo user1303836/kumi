@@ -105,12 +105,15 @@ and installs under this profile's plugin-data folder; setup shows the download a
 Live Remote Script with its Kumi Ears device, a REAPER extension or a Renoise tool, only at the locations you approve.
 Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on loopback only, and stop
 when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps running. Kumi reads the open
-project, the sample folders you list, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
+project, the sample folders you list (never a whole drive or volume, your home folder or above, or inside or above
+HERMES_HOME), and finished audio other Hermes plugins saved in Hermes's generated-audio folder
 (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it. Changes to your project go
-through Hermes's approval (unless Hermes's approvals are off: `--yolo`, a chat's `/yolo` or `approvals.mode: off`
-run them without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't tell it apart,
-while a `hermes -q` turn refuses them by default),
-and HISTORY records what actually happened, including when an outcome is uncertain; undo is available only while the
+through Hermes's approval. Kumi's approvals apply to one chat, including a one-shot run that resumes it
+(`hermes chat -q --resume`); a scheduled job, a new one-shot run or another chat always asks or is refused. Choosing
+Always leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that Kumi never edits; to remove
+it, delete the `plugin_rule:kumi:` entries there. When Hermes's approvals are off (`--yolo`, a chat's `/yolo` or
+`approvals.mode: off`), Hermes runs them without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo
+too, and Kumi can't tell it apart. HISTORY records what actually happened, including when an outcome is uncertain; undo is available only while the
 recorded change can still be reversed. Listening to a track or the mix also asks first: it plays only the beat window
 you approve (60 seconds at most), only while the DAW is stopped, and may change routing and transport briefly,
 restoring them after. Live captures
@@ -127,7 +130,8 @@ runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi
 ffmpeg file you allowed before each start (not the libraries it loads, which an upgrade can change). Audio is measured
 on this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you
 ask Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
-and the measurements it returns, go to the model you use in Hermes as part of the conversation. With
+and the measurements it returns, go to the model you use in Hermes as part of the conversation; Kumi's status names no
+folder on this computer to it. With
 `listen_interpretation` on, Kumi also sends the measurements and a small image of the measured band energy (never the
 audio or file paths) through Hermes's own model access: to the auxiliary model you choose for the `kumi_listen` task in
 Hermes (it must accept images), or to the fallback providers Hermes is configured to try for that task. Hermes retries

@@ -30,6 +30,9 @@ steps and an optional third, and Hermes asks before each:
 3. **Optional, ffmpeg:** if an ffmpeg is already on your computer, setup offers to let Kumi use it to read MP3, FLAC
    and other compressed audio. Setup is done either way; without it, Kumi reads WAV and AIFF only.
 
+Hermes Desktop shows each step's approval whole. A terminal chat or a chat app can show less of it, so there Kumi never
+asks with part of a step: it asks you to run `hermes kumi setup` in a terminal, or to use Hermes Desktop.
+
 Then, in your DAW:
 - **Live:** choose **AbletonMcpBridge** as a Control Surface in Settings → Link, Tempo & MIDI.
 - **REAPER:** restart REAPER.
@@ -49,10 +52,15 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Is it actually darker?" Kumi measures both files: loudness, true peak, spectrum.
 - "Undo the snare change." Kumi undoes that entry while it can still be undone.
 
-Hermes asks before each change because its approvals are on. With `--yolo`, a chat's `/yolo` or `approvals.mode: off`,
-Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi` says so. A one-shot `hermes -z` turn
-is yolo too: Kumi's changes run without asking there, and Kumi can't tell it from a chat. A `hermes -q` turn refuses
-them by default.
+Hermes asks before each change because its approvals are on. Kumi's approvals apply to one chat, including a one-shot
+run that resumes it (`hermes chat -q --resume`); a scheduled job, a new one-shot run or another chat always asks or is
+refused. Choosing **Always** leaves an entry in Hermes's `command_allowlist` (your profile's config.yaml) that Kumi
+never edits: to remove it, delete the `plugin_rule:kumi:` entries there.
+
+With `--yolo`, a chat's `/yolo` or `approvals.mode: off`, Hermes runs Kumi's changes, track listens and setup steps
+without asking; `/kumi` says so, as `hermes kumi status` does when `approvals.single_query_mode` or
+`delegation.subagent_auto_approve` lets changes pass unasked. A one-shot `hermes -z` turn is yolo too: Kumi's changes
+run without asking there, and Kumi can't tell it from a chat.
 
 ## Where things are
 
@@ -68,7 +76,7 @@ them by default.
 | Setting | Default | What it does |
 |---|---|---|
 | DAW | Live | Which DAW Kumi connects to |
-| Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned |
+| Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works |
 | Tell the agent what you're looking at | on | Adds a short FOCUS and catch-up note to each turn while Kumi is connected |
 | Interpret measurements | off | Also sends measurements and a small band-energy image to your Hermes model for a plain-words reading |
 
@@ -76,7 +84,8 @@ them by default.
 
 - **Setup** downloads Kumi's runtime from Kumi's GitHub releases, once per Kumi version.
 - **Your conversation:** the project details Kumi notes (FOCUS, what changed) and its measurements go to the model you
-  use in Hermes, as part of the chat.
+  use in Hermes, as part of the chat. Kumi's status tells it where setup stands without naming any folder on your
+  computer.
 - **Interpret measurements** (off unless you turn it on) sends the measured numbers and a small image of the measured
   band energy, never the audio or file paths, to the model you choose for Kumi's listening task in Hermes, or to the
   fallback providers Hermes is set to try for that task. Retries and fallbacks can add time and token cost.
@@ -109,6 +118,8 @@ them by default.
   file you allowed (not the libraries it loads, which an upgrade can change). A file it measures can be up to 50 MB.
 - Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its Renoise tool one for
   each song in the song's tool data, saved with them.
+- On Windows, a sample in a network folder (`\\server\share`, or a share reached through a link) can't be played in
+  Hermes Desktop or the dashboard: they play only files on this computer's own drives.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 
@@ -116,7 +127,7 @@ them by default.
 
 - `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs, and whether Kumi can read compressed
   audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
-  chat instead.
+  chat in Hermes Desktop instead.
 - Listening to a REAPER or Renoise track says Kumi's part in the DAW is too old: run setup again, then restart the DAW.
 - Nothing from Kumi in Hermes Desktop: check that Kumi is switched on under Capabilities → Plugins, and enabled in
   Hermes (`hermes plugins enable kumi`).
