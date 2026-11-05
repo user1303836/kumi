@@ -372,8 +372,11 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
         return block(f"Kumi didn't undo anything: {_reason(failure)}"), {}
     if answer.get("state") != "preview" or not answer.get("undo_available"):
         reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
+        note = answer.get("note") if isinstance(answer.get("note"), str) and answer["note"].strip() else None
+        # CC-3's codes have Kumi's words; any other (CC-20's `daw_undo`, CC-19's `not_undoable`) comes with the
+        # runtime's own, which the DAW and the producer's system decide.
         words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
-                 else reason or "that change can no longer be undone.")
+                 else one_line(note, 400) if note else reason or "that change can no longer be undone.")
         return block(f"Kumi didn't undo anything: {words}"), {}
     if asked.get("whole_change") is not True:
         return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo"), {}
