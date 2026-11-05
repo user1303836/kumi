@@ -38,14 +38,14 @@ TITLE = LINE - len("".join(TITLE_LABEL))
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
-TOO_LONG = ("Kumi didn't run this: its approval doesn't fit this window whole, even with like steps grouped, and Kumi "
-            "asks only with every step in view. Split it into smaller changes, each its own approval (by track, or by "
-            "kind of step), or approve it in Hermes Desktop.")
+TOO_LONG = ("Kumi didn't run this: its approval doesn't fit this window, even with like steps grouped, and Kumi asks only "
+            "when every step is in view. Split it into smaller changes, each approved on its own (by track, or by kind "
+            "of step), or approve it in Hermes Desktop.")
 # Where a change's plain approval (one line per step) doesn't show whole, a compact one is tried: adjacent steps of
 # one kind share a bullet, every step's own words whole and in plan order. Steps are never grouped across another
 # kind's, since the order carries meaning (beastmode). The footer and the chat note share one row. Nothing is dropped
 # or cut: if even that doesn't show whole, the plan isn't asked (TOO_LONG).
-COMPACT_CLOSING = "(Values Kumi just read; its approvals cover this chat only.)"
+COMPACT_CLOSING = "(Values read just now. Kumi's approvals cover this chat only.)"
 _COMPACT = "_compact"
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
