@@ -18,6 +18,7 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 """
 from __future__ import annotations
 
+import collections
 import itertools
 import logging
 import re
@@ -274,10 +275,36 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
     families = sorted({one_line(step["family"], 40) for step in steps})
     title = agents_title(answer.get("title") or args.get("title") or "a change")
     rule_key = f"kumi:{'+'.join(effects)}:{'+'.join(families)}"
-    decision = approve([title, *(f"• {step['text']}" for step in steps)], rule_key, footer=FOOTER)
+    warning = daw_undo_lines(answer, steps)
+    if warning:
+        rule_key += ":daw-undo"  # an "Always" for a change Kumi can undo never covers one it can't, nor the reverse
+    decision = approve([title, *warning, *(f"• {step['text']}" for step in steps)], rule_key, footer=FOOTER)
     if decision["action"] == "approve" and (lines := compact_lines(title, steps)):
-        decision[_COMPACT] = lines
+        decision[_COMPACT] = [lines[0], *warning, *lines[1:]]
     return decision
+
+
+# CC-20's 20c, when the runtime's preview doesn't give its own words (it does, with the right key for the producer's
+# system: Cmd+Z or Ctrl+Z).
+DAW_UNDO = ("Kumi can't undo this change. The DAW's own Undo takes all of it back while it's still the DAW's latest "
+            "step.")
+
+
+def daw_undo_lines(answer: dict, steps: list[dict]) -> list[str]:
+    """CC-20's 20d: a change with a step only the DAW's own Undo takes back (`undo: "daw"`: a Live rack's added chain,
+    a sample loaded onto a pad) says so before its steps, in the runtime's words (20c), and names the change's other
+    steps, which lose Kumi's undo with it: Kumi never undoes part of such a change, since its own undo would then sit
+    on top in the DAW's history. Empty for a change Kumi can undo."""
+    if answer.get("undo") != "daw" and not any(step.get("undo") == "daw" for step in steps):
+        return []
+    note = answer.get("undo_note")
+    lines = [one_line(note, STEP_LINE) if isinstance(note, str) and note.strip() else DAW_UNDO]
+    others = collections.Counter(one_line(step["family"], 40) for step in steps if step.get("undo") != "daw")
+    if others:
+        counted = [f"{count} {family} change{'s' if count != 1 else ''}" for family, count in sorted(others.items())]
+        listed = counted[0] if len(counted) == 1 else f"{', '.join(counted[:-1])} and {counted[-1]}"
+        lines.append(f"Kumi can't undo this change, including its {listed}.")
+    return lines
 
 
 def compact_lines(title: str, steps: list[dict]) -> list[str] | None:
@@ -362,8 +389,11 @@ def _undo(host: Any, args: dict, kwargs: dict) -> dict:
         return block(f"Kumi didn't undo anything: {_reason(failure)}")
     if answer.get("state") != "preview" or not answer.get("undo_available"):
         reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
+        note = answer.get("note") if isinstance(answer.get("note"), str) and answer["note"].strip() else None
+        # CC-3's codes have Kumi's words; any other (CC-20's `daw_undo`, CC-19's `not_undoable`) comes with the
+        # runtime's own, which the DAW and the producer's system decide.
         words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
-                 else reason or "that change can no longer be undone.")
+                 else one_line(note, 400) if note else reason or "that change can no longer be undone.")
         return block(f"Kumi didn't undo anything: {words}")
     return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo")
 

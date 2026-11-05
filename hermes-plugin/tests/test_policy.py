@@ -247,6 +247,38 @@ class Approvals(unittest.TestCase):
         self.assertEqual((decision["action"], decision["message"]),
                          ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
 
+    def test_a_change_only_lives_undo_takes_back_says_so_first_and_names_the_steps_that_lose_kumis_undo(self):
+        add_chain = {"tool": "edit_rack", "input": {"deviceRef": "t1/d1", "action": "add-chain"}}
+        words = "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
+        decision = self.hook("kumi_change", change(add_chain, volume("t1", -4), volume("t2", -6), title="Layer drums"))
+        lines = decision["message"].splitlines()
+        self.assertEqual(lines[1:3], [words, "Kumi can't undo this change, including its 2 mixer changes."],
+                         "20c's words before the steps, then the steps that lose Kumi's undo with it")
+        self.assertEqual(decision["rule_key"], "kumi:write:device+mixer:daw-undo:s1")
+        undoable = self.hook("kumi_change", change(
+            {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1", "sample": {"sound_id": "s-r1-1",
+                                                                                        "map_revision": "r1"}}},
+            volume("t1", -4)))
+        self.assertEqual(undoable["rule_key"], "kumi:write:device+mixer:s1",
+                         "an Always for either key never covers the other: the same families, two keys")
+        self.assertEqual(self.hook("kumi_change", change(add_chain))["message"].splitlines()[1:3],
+                         [words, '• Edit rack: action add-chain — on "Drum Rack (Drums)"'], "no other steps: no count")
+        crowded = self.hook("kumi_change", change(add_chain, *(volume("t1", -float(db)) for db in range(1, 13))))
+        self.assertEqual(crowded["action"], "approve")
+        self.assertTrue(policy.shows_whole(crowded["message"], "tui"))
+        self.assertEqual(crowded["message"].splitlines()[1:3],
+                         [words, "Kumi can't undo this change, including its 12 mixer changes."],
+                         "the terminal's compact form never drops them")
+
+    def test_the_undo_of_a_change_only_lives_undo_takes_back_is_refused_in_its_words(self):
+        applied = support.call(self.host, "kumi_change", change(
+            {"tool": "edit_rack", "input": {"deviceRef": "t1/d1", "action": "add-chain"}}, volume("t1", -4)),
+            session_id="s1")
+        decision = self.hook("kumi_undo", {"history_id": applied["history_ids"][0]})
+        self.assertEqual(decision, {"action": "block", "message": (
+            "Kumi didn't undo anything: Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back "
+            "while it's still Live's latest step.")})
+
     def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
         undo = {"history_id": applied["history_ids"][0]}

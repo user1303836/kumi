@@ -42,7 +42,9 @@ RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo
 RESOURCES = ("kumi://status", "kumi://focus", "kumi://history", "kumi://map")  # C2's, as #1047's kumi serve offers
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
 # the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
-STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
+STEPS = {"set_track_volume": "mixer", "replace_sample": "device", "edit_rack": "device"}
+# CC-20's 20c, as serve words it on macOS: the approval's first line, a row's note and every refusal of its undo.
+DAW_UNDO = "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
 SET = {
     "name": "Night Drive", "key": "live:night-drive", "tempo": 124.0,
     "tracks": [
@@ -239,6 +241,11 @@ class Fixture:
         return next(((track, pad) for track in self.set["tracks"] for device in track["devices"]
                      for pad in device.get("pads", []) if pad["ref"] == ref), None)
 
+    def rack(self, ref: str) -> tuple[dict, dict] | None:
+        """The track and the rack device with ref `ref` (CC-20's add-chain target)."""
+        return next(((track, device) for track in self.set["tracks"] for device in track["devices"]
+                     if device["ref"] == ref and device["name"].endswith("Rack")), None)
+
 
 def now() -> int:
     return int(time.time() * 1000)
@@ -330,6 +337,9 @@ def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
                 return "invalid", f"no track {target.get('track_ref')!r} in the project"
             if not isinstance(target.get("volume_db"), (int, float)):
                 return "invalid", "set_track_volume needs volume_db, a number"
+        elif step["tool"] == "edit_rack":
+            if target.get("action") != "add-chain" or fixture.rack(target.get("deviceRef", "")) is None:
+                return "invalid", "edit_rack here adds a chain to a rack in the project"
         elif step["tool"] == "replace_sample":
             if fixture.simpler(target.get("deviceRef", "")) is None:
                 return "invalid", f"no Simpler {target.get('deviceRef')!r} in the project"
@@ -378,6 +388,10 @@ def describe(fixture: Fixture, step: dict) -> dict:
     if step["tool"] == "set_track_volume":
         name = fixture.track(target["track_ref"])["name"]
         text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
+    elif step["tool"] == "edit_rack":
+        track, rack = fixture.rack(target["deviceRef"])
+        text = f"Edit rack: action add-chain — on {quoted(f'{rack['name']} ({track['name']})')}"
+        return {"tool": step["tool"], "family": STEPS[step["tool"]], "effect": "write", "text": text, "undo": "daw"}
     else:
         track, pad = fixture.simpler(target["deviceRef"])
         name = f"{pad['device']} ({track['name']} > {track['devices'][0]['name']} pad {pad['pad']})"
@@ -397,26 +411,33 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     if refusal is not None:
         return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
     if args.get("preview"):
+        described = [describe(fixture, step) for step in args["steps"]]
+        daw_undo = {"undo": "daw", "undo_note": DAW_UNDO} if any(step.get("undo") for step in described) else {}
         return {"state": "preview", "title": args.get("title"),
-                "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
-                "steps": [describe(fixture, step) for step in args["steps"]]}
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "steps": described, **daw_undo}
     steps = args["steps"]
     before = copy.deepcopy(fixture.set)
     for step in steps:
         target = step["input"]
         if step["tool"] == "set_track_volume":
             fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
+        elif step["tool"] == "edit_rack":
+            fixture.rack(target["deviceRef"])[1]["chains"] = fixture.rack(target["deviceRef"])[1].get("chains", 1) + 1
         else:
             fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
     first = steps[0]["input"]
-    track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
+    track = (fixture.track(first["track_ref"]) if "track_ref" in first
+             else fixture.rack(first["deviceRef"])[0] if steps[0]["tool"] == "edit_rack"
+             else fixture.simpler(first["deviceRef"])[0])
+    daw_undo = any(step["tool"] == "edit_rack" for step in steps)
     ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
     # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
     # (tool_call_id, digest, call_outcome), which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
                             "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
-                            "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
+                            "undo_available": not daw_undo, "track": track["name"], "daw_undo": daw_undo,
+                            "note": DAW_UNDO if daw_undo else "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
                             "call_outcome": "applied", "before": before})
     fixture.publish("history", "focus")
@@ -436,6 +457,9 @@ def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     if args.get("preview"):
         if row is None:
             return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
+        if row.get("daw_undo"):  # CC-20's 20e: refused in 20c's words, before the DAW is asked anything
+            return {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": False,
+                    "reason": "daw_undo", "note": DAW_UNDO}
         preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
         return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:

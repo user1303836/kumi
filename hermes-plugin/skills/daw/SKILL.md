@@ -155,6 +155,9 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
 - **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means it can't be undone any more.
+- **Some changes only the DAW's own Undo takes back** (in Live: a chain added to a rack). The approval says so first, in Kumi's words, and `kumi_undo` refuses them in the same words, before anything is undone: relay them.
+  - **Put such a step in a change of its own,** unless the producer asked for those steps together. Kumi never undoes part of a change, so every other step in it loses Kumi's undo too, and the approval counts them.
+  - Live's Undo (Cmd+Z, or Ctrl+Z on Windows) takes the whole change back while it's still Live's latest step. Never try another way to take it out.
 - **Kumi restarted since the change** (`kumi_undo` says so, and `@kumi:history` marks it): Kumi's undo for it went with the runtime that made it. Tell the producer just that, and that they can undo it in the DAW if it's still the latest step there, or ask you to set it back. Setting it back is a new change: observe first, take what HISTORY says the change was, and the producer approves it like any other.
 - **When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job,** `kumi_history` answers with HISTORY as Kumi last published it (`from: last_published`, `as_of`, and a note on why). Nothing in it can be undone from there, and the project may have changed since: say when it's from, and never act on it without connecting and observing first.
 
