@@ -269,10 +269,11 @@ same restore without changing the project or pressing any native Undo step.
 - The tempo takes **whole BPM** from the slider; a fractional `bpm` is rounded, with a note.
 - A **marker can't be named** from outside (its name cell isn't a text field): `marker-add` refuses a
   `name`, and Logic numbers markers itself. `marker-rename` is not made.
-- `loop-range`, `fx-add`, `fx-delete`, `fx-param`, `fx-move`, `send-add`, `send-volume` and
-  `track-move` are **not made**: the cycle locators have no settable field, the slot pop-up menus
-  can't be driven from outside, the plug-in window isn't reached, and the headers can't be dragged.
-  Each is refused `bad-params` saying why.
+- `loop-range` uses guarded scrubber actions because the locators have no settable field;
+  it requires the complete state and preconditions described above.
+- `fx-add`, `fx-delete`, `fx-param`, `fx-move`, `send-add`, `send-volume` and `track-move`
+  remain unavailable in this port. The slot menus, plug-in window and header dragging
+  are not implemented; requests are refused with `bad-params`.
 - `track-add` places a track **below the selected one** (Logic's New Tracks behaviour), so `index`
   counts from 1 (0, above every track, is unreachable); a kind (`audio`, `instrument`, `external`)
   may be given.

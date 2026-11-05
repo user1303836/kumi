@@ -1,4 +1,4 @@
-# Logic Pro ブリッジ契約（M2、M3）
+# Logic Pro ブリッジ契約（M2、M3、Loop Range プレビュー）
 
 M2 の読み取りメソッドは `ping`、`status`、`focus`、`read`、`snapshot`、`focus_body` の六つです。M3 は `change_preview`、`change_apply`、`change_restore`、`transport_play`、`transport_stop`、`cursor_set`、`undo_step_begin`、`undo_step_end` を追加します。
 

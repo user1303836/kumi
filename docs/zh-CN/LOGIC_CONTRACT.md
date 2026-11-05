@@ -1,4 +1,4 @@
-# Logic Pro 桥接协议（M2、M3）
+# Logic Pro 桥接协议（M2、M3 与 Loop Range 预览）
 
 M2 的六个读取方法为 `ping`、`status`、`focus`、`read`、`snapshot`、`focus_body`。M3 添加 `change_preview`、`change_apply`、`change_restore`、`transport_play`、`transport_stop`、`cursor_set`、`undo_step_begin`、`undo_step_end`。
 
