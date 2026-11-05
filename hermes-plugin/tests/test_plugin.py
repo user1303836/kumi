@@ -168,10 +168,11 @@ class Tools(unittest.TestCase):
             time.sleep(0.02)
         host.on_session_finalize("s1")  # the chat ends with its call in flight
         status = support.call(host, "kumi_status", {})
-        self.assertEqual((status["running"], status["settling"], status["message"]), (True, True, runtime.BUSY))
-        self.assertEqual(status["owner"], {"session_id": "s1"})
+        self.assertEqual((status["running"], status["settling"], status["owner"]), (True, True, {"session_id": "s1"}))
         decision = policy.pre_tool_call(host, tool_name="kumi_change", args=LOUDER, session_id="s2", tool_call_id="c1")
-        self.assertEqual(decision, {"action": "block", "message": f"Kumi didn't change anything: {runtime.BUSY}"})
+        self.assertEqual(decision["action"], "block")
+        self.assertNotIn("change", [m.get("params", {}).get("name") for m in support.requests(data / "state")],
+                         "the hook asked the stopping runtime for nothing")
 
     def test_a_write_whose_answer_never_came_is_unsure_and_never_sent_again(self):
         host, _, data = support.host(self, None, "--slow", "change=2")

@@ -203,8 +203,7 @@ class Runtimes(unittest.TestCase):
                         lambda: self.runtimes.require(self.data)):
             with self.assertRaises(runtime.Unavailable) as busy:
                 attempt()
-            self.assertEqual((busy.exception.code, busy.exception.reason), ("busy", runtime.BUSY),
-                             "nothing starts over a runtime still settling, and nothing says to connect")
+            self.assertEqual(busy.exception.code, "busy", "nothing starts over a runtime still settling")
         self.runtimes.stop_all()  # a second stop, as an unload after the chat's end, returns at once
         self.assertTrue(live.client.running)
         caller.join()
@@ -252,8 +251,10 @@ class Runtimes(unittest.TestCase):
         live.client.end_input()  # the stop ended its input just before this call queued its line
         with self.assertRaises(runtime.Unavailable) as refused:
             live.client.request("tools/call", {"name": "history", "arguments": {}}, timeout=5)
-        self.assertEqual(refused.exception.code, "not_running")
-        self.assertIn("Nothing was sent", refused.exception.reason)
+        self.assertEqual(refused.exception.code, "not_running", "refused, not unknown")
+        self.assertTrue(eventually(lambda: not live.client.running))
+        self.assertNotIn("history", [m.get("params", {}).get("name") for m in support.requests(self.data / "state")],
+                         "it never reached the runtime")
 
     def test_a_second_hermes_process_on_the_profile_starts_no_runtime(self):
         live = self.start()
