@@ -1640,7 +1640,7 @@ async fn a_live_parameter_given_in_a_patch_is_left_out_and_controls_is_named_as_
     // again. Re-sending the open answer's patch preserves it; replacing it explicitly removes the old parameter first.
     let mut legacy = downloaded_echo();
     let legacy_dial = json!({ "box": { "id": "obj-legacy", "maxclass": "newobj", "varname": "mix_dial",
-        "text": "live.dial @parameter_longname Mix", "numinlets": 1, "numoutlets": 2, "patching_rect": [500., 300., 100., 22.] } });
+        "text": "live.dial @parameter_longname Mix", "numinlets": 1, "numoutlets": 2, "patching_rect": [500, 300, 100, 22] } });
     legacy["patcher"]["boxes"].as_array_mut().unwrap().push(legacy_dial.clone());
     let legacy_file = downloads.path().join("Legacy.amxd");
     std::fs::write(&legacy_file, encode_amxd(DeviceType::MidiEffect, &legacy)).unwrap();
