@@ -31,7 +31,7 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '9rem 1fr', gap: 8, alignItems: 'baseline', padding: '5px 0', borderTop: `1px solid ${T.border}` }}>
       <span style={S.muted}>{label}</span>
-      <span style={{ ...S.text, minWidth: 0, overflowWrap: 'anywhere' }}>{children}</span>
+      <span style={{ ...S.text, minWidth: 0 }}>{children}</span>
     </div>
   )
 }
@@ -98,9 +98,10 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           <div>
             <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Connection</span>
             <Line label="Now">
-              <Chip tone={state.status?.connected ? 'good' : state.status?.stale && state.status?.owner ? 'warn' : undefined}>
-                {chipWords(state.status, state.focus?.transport?.tempo).text}
-              </Chip>
+              {(() => {
+                const words = chipWords(state.status, state.focus?.transport?.tempo)
+                return <Chip tone={words.tone === 'muted' ? undefined : words.tone}>{words.text}</Chip>
+              })()}
             </Line>
             {state.status?.owner?.session_id && <Line label="Kumi's chat">{clean(state.status.owner.session_id, 80)}</Line>}
           </div>

@@ -43,6 +43,7 @@ test('numbers carry a true minus and the chip says what is connected, stale or m
   const live = { connected: true, daw: 'ableton', project: { name: 'Night Drive' } }
   assert.deepEqual(format.chipWords(live, 124), { tone: 'good', text: 'Live · Night Drive · 124 BPM' })
   assert.deepEqual(format.chipWords({ ...live, connected: false, stale: true, owner: { pid: 1 } }), { tone: 'warn', text: 'Live · Night Drive · not answering' })
+  assert.deepEqual(format.chipWords({ ...live, connected: false, stale: true, running: false, owner: { pid: 1 } }), { tone: 'muted', text: 'Live · Night Drive · Kumi stopped' })
   assert.deepEqual(format.chipWords({ connected: false, stale: true, daw: 'reaper' }), { tone: 'muted', text: 'Kumi · REAPER not connected' })
   assert.equal(format.ago(Date.now() - 4 * 60_000), '4 min ago')
 })
@@ -300,4 +301,24 @@ test('a second play, even one made while the first still loads, leaves one sound
   } finally {
     delete globalThis.Audio
   }
+})
+
+test('a runtime that went quiet and then stopped has FOCUS read again, so the chip and FOCUS agree', async () => {
+  const reads = []
+  let status = { connected: true, stale: false, running: true, revisions: { focus: 1, history: 1 } }
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/status') return status
+    if (path === '/focus') return { seq: 1, stale: status.stale, running: status.running }
+    if (path === '/setup') return { state: 'ready' }
+    return { seq: 1, items: [] }
+  })
+  await kumi.refreshStatus()
+  status = { ...status, connected: false, stale: true }
+  await kumi.refreshStatus()
+  reads.length = 0
+  status = { ...status, running: false }
+  await kumi.refreshStatus()
+  assert.ok(reads.includes('/focus'), reads.join(' '))
+  assert.equal(kumi.get().focus.running, false)
 })

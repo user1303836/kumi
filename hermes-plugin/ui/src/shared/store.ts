@@ -127,7 +127,8 @@ export class KumiStore {
       const before = this.state.status
       const after = status.revisions ?? {}
       const first = this.state.available !== true
-      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale
+      // Any change of liveness (answering, quiet, or stopped) re-reads what the routes judge by it.
+      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running
       this.set({ available: true, error: null, status: heard(status) })
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null }
       const moved = (part: 'focus' | 'history' | 'map'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]

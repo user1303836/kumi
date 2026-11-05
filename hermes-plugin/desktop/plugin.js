@@ -16,7 +16,27 @@ function nameOf(value) {
 }
 function focusPath(focus) {
   const parts = focus?.focus;
-  return [nameOf(parts?.track), nameOf(parts?.device) ?? nameOf(parts?.clip)].filter((part) => Boolean(part)).map((part) => clean(part, 40));
+  const inner = nameOf(parts?.device) ?? nameOf(parts?.item?.name) ?? nameOf(parts?.clip);
+  return [nameOf(parts?.track), inner].filter((part) => Boolean(part)).map((part) => clean(part, 40));
+}
+function focusPlace(focus) {
+  const parts = focus?.focus;
+  const view = nameOf(parts?.mainView?.label) ?? nameOf(parts?.view);
+  const section = nameOf(parts?.section?.name) ?? nameOf(parts?.scene);
+  return [view && clean(view, 20), section && clean(section, 24)].filter((part) => Boolean(part));
+}
+function focusParameter(focus) {
+  const parameter = focus?.focus?.parameter;
+  const name = nameOf(parameter?.name);
+  if (!name) return void 0;
+  const value = nameOf(parameter?.value ?? void 0);
+  return clean(value ? `${name} ${value}` : name, 60);
+}
+function catchUpLines(focus, most = 4) {
+  const entries = Array.isArray(focus?.catch_up) ? focus.catch_up : [];
+  const all = entries.flatMap((entry) => entry && Array.isArray(entry.lines) ? entry.lines.filter((line) => typeof line === "string") : []);
+  const unlisted = entries.reduce((sum, entry) => sum + (entry && typeof entry.more === "number" && entry.more > 0 ? Math.floor(entry.more) : 0), 0);
+  return { lines: all.slice(0, most).map((line) => clean(line, 120)), more: Math.max(0, all.length - most) + unlisted };
 }
 function colorOf(value) {
   const color = value && typeof value === "object" ? value.color : void 0;
@@ -90,6 +110,7 @@ function chipWords(status, tempo) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean);
     return { tone: "good", text: parts.join(" · ") };
   }
+  if (status.stale && status.running === false) return { tone: "muted", text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` };
   if (status.stale && status.owner) return { tone: "warn", text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` };
   return { tone: "muted", text: `Kumi · ${daw} not connected` };
 }
@@ -300,7 +321,7 @@ var KumiStore = class {
       const before = this.state.status;
       const after = status.revisions ?? {};
       const first = this.state.available !== true;
-      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
+      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
       this.set({ available: true, error: null, status: heard(status) });
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
       const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
@@ -519,8 +540,9 @@ var S = {
   section: { display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${T.border}` },
   heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
   row: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
-  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45 },
-  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45 },
+  // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
+  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
+  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: "anywhere" },
   faint: { fontSize: 11.5, color: T.faint },
   ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }
 };
@@ -737,29 +759,34 @@ function stateOf(item) {
 }
 var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function FocusView({ focus, now }) {
-  if (!focus || !focus.focus && !focus.project) {
+  const catchUp = catchUpLines(focus);
+  if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
   }
-  const view = typeof focus.focus?.view === "string" ? focus.focus.view : void 0;
   const transport = focus.transport;
   const path = focusPath(focus);
-  const catchUp = Array.isArray(focus.catch_up) ? focus.catch_up.filter((line) => typeof line === "string") : [];
+  const parameter = focusParameter(focus);
+  const busy = nameOf(focus.focus?.busy ?? void 0);
+  const meter = nameOf(transport?.meter ?? void 0);
   return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 7 }, children: [
       /* @__PURE__ */ jsx3(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
       /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: path.length ? path.join(" › ") : "Nothing selected" })
     ] }),
+    parameter && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
       focus.project?.name && /* @__PURE__ */ jsx3(Chip, { title: "The open project", children: clean(focus.project.name, 40) }),
-      view && /* @__PURE__ */ jsx3(Chip, { children: clean(view, 20) }),
-      transport?.playing !== void 0 && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
+      focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx3(Chip, { children: place }, index)),
+      typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
-      typeof transport?.position === "string" && /* @__PURE__ */ jsx3(Chip, { children: clean(transport.position, 16) }),
-      focus.stale && /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" })
+      meter && /* @__PURE__ */ jsx3(Chip, { children: clean(meter, 12) }),
+      busy && /* @__PURE__ */ jsx3(Chip, { tone: "warn", title: "The DAW answers late while this lasts, so what's shown may be behind", children: clean(busy, 40) }),
+      focus.stale && (focus.running === false ? /* @__PURE__ */ jsx3(Chip, { children: "Kumi stopped" }) : /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" }))
     ] }),
-    catchUp.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
+    catchUp.lines.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
       /* @__PURE__ */ jsx3("span", { style: S.faint, children: "Since Kumi last looked" }),
-      catchUp.slice(0, 4).map((line, index) => /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: clean(line, 120) }, index))
+      catchUp.lines.map((line, index) => /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: line }, index)),
+      catchUp.more > 0 && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `and ${catchUp.more} more` })
     ] }),
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `Last heard ${ago(focus.heard_at, now)}.` })
   ] });
@@ -831,7 +858,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const setupState = state.setup?.state;
   const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
-  return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", color: T.text }, children: [
+  return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs4("div", { style: { ...S.section, gap: 8 }, children: [
       /* @__PURE__ */ jsxs4("div", { style: { ...S.row, gap: 8 }, children: [
         /* @__PURE__ */ jsx4(Dot, { color: TONE2[words.tone], size: 8 }),
@@ -1376,7 +1403,7 @@ var STATE_WORDS = {
 function Line({ label, children }) {
   return /* @__PURE__ */ jsxs9("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
     /* @__PURE__ */ jsx9("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx9("span", { style: { ...S.text, minWidth: 0, overflowWrap: "anywhere" }, children })
+    /* @__PURE__ */ jsx9("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -1437,7 +1464,10 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       ] }),
       /* @__PURE__ */ jsxs9("div", { children: [
         /* @__PURE__ */ jsx9("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
-        /* @__PURE__ */ jsx9(Line, { label: "Now", children: /* @__PURE__ */ jsx9(Chip, { tone: state.status?.connected ? "good" : state.status?.stale && state.status?.owner ? "warn" : void 0, children: chipWords(state.status, state.focus?.transport?.tempo).text }) }),
+        /* @__PURE__ */ jsx9(Line, { label: "Now", children: (() => {
+          const words = chipWords(state.status, state.focus?.transport?.tempo);
+          return /* @__PURE__ */ jsx9(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+        })() }),
         state.status?.owner?.session_id && /* @__PURE__ */ jsx9(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
       ] }),
       /* @__PURE__ */ jsxs9("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [

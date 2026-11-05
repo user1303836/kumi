@@ -118,7 +118,7 @@ test('"Last heard" counts from when the runtime was last heard, so it keeps movi
 test("under the composer, the FOCUS hint shows what Kumi sees only in Kumi's own chat", async () => {
   const { FocusHint } = await load('src/desktop/composer.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
-  const focus = { focus: { track: { name: 'Drums', color: '#f59e0b' }, device: { name: 'Drum Rack' } }, transport: { tempo: 124, playing: true } }
+  const focus = { focus: { track: { name: 'Drums', color: '#f59e0b' }, device: 'Drum Rack' }, transport: { tempo: 124, playing: true } }
   const store = new KumiStore(async path => {
     if (path.startsWith('/status')) return { connected: true, daw: 'ableton', owner: { session_id: 's1' }, revisions: { focus: 3 } }
     if (path.startsWith('/focus')) return focus
@@ -143,7 +143,7 @@ test("while Kumi isn't sure of the project, the hint says what it last saw, dimm
   const unsure = { op: 'listen_track', reason: 'Live stopped answering', cleanup: 'unsure' }
   const store = new KumiStore(async path => {
     if (path.startsWith('/status')) return { connected: true, daw: 'ableton', owner: { session_id: 's1' }, revisions: { focus: 3 }, unsure }
-    if (path.startsWith('/focus')) return { focus: { track: { name: 'Drums' }, device: { name: 'Drum Rack' } } }
+    if (path.startsWith('/focus')) return { focus: { track: { name: 'Drums' }, device: 'Drum Rack' } }
     throw Object.assign(new Error('not here'), { status: 404 })
   })
   store.want('focus')
@@ -153,4 +153,43 @@ test("while Kumi isn't sure of the project, the hint says what it last saw, dimm
   const html = renderToStaticMarkup(createElement(FocusHint, { store }))
   assert.ok(html.includes('Kumi last saw Drums › Drum Rack'), html)
   assert.ok(html.includes('opacity:0.5'), html)
+})
+
+test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the parameter, a busy DAW and every catch-up', async () => {
+  const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const live = {
+    project: { name: 'Night Drive', key: 'p-1', epoch: 3 },
+    focus: { track: { name: 'Drums', color: '#f59e0b', kind: 'midi' }, trackRef: 't-3', device: 'Drum Rack', view: 'Session', scene: 'Verse', parameter: { name: 'Filter Freq', value: '1.20 kHz', owner: 'Auto Filter' } },
+    transport: { playing: false, tempo: 124, position: 66, beatsPerBar: 4 },
+    catch_up: [
+      { set: 'Night Drive', lastSeenAt: 1, lines: ['Drums: pad D1 changed', 'Tempo 120 → 124 BPM'], more: 3 },
+      { set: 'Night Drive', lastSeenAt: 2, lines: ['Bass muted'], more: 0, afterReconnect: true }
+    ]
+  }
+  const html = renderToStaticMarkup(createElement(FocusView, { focus: live, now: 0 }))
+  for (const text of ['Drums › Drum Rack', 'Filter Freq 1.20 kHz', 'Night Drive', 'Session', 'Verse', '■ stopped', '124 BPM', 'Drums: pad D1 changed', 'Bass muted', 'and 3 more']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.ok(!html.includes('66'), 'the position a snapshot was written at is never shown')
+  const reaper = {
+    focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, item: { kind: 'item', name: 'Take 3' }, section: { kind: 'marker', name: 'Chorus' }, busy: 'a dialog is open' },
+    transport: { playing: true, tempo: 98, meter: '7/8', line: 12 }
+  }
+  const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
+  for (const text of ['Vox › Take 3', 'Arrange', 'Chorus', '▶ playing', '98 BPM', '7/8', 'a dialog is open']) {
+    assert.ok(neutral.includes(text), `${text} in ${neutral}`)
+  }
+})
+
+test('FOCUS says Kumi stopped (not "not answering") once it stopped, and keeps the catch-up when the DAW reports no focus', async () => {
+  const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const stopped = renderToStaticMarkup(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } } }, now: 0 }))
+  assert.ok(stopped.includes('Kumi stopped') && !stopped.includes('not answering'), stopped)
+  const closed = { project: { name: 'Night Drive' }, focus: null, catch_up: [{ set: 'Night Drive', lines: ['Bass muted'], more: 0 }] }
+  const html = renderToStaticMarkup(createElement(FocusView, { focus: closed, now: 0 }))
+  for (const text of ['Nothing selected', 'Night Drive', 'Since Kumi last looked', 'Bass muted']) assert.ok(html.includes(text), `${text} in ${html}`)
+  const reaper = { focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, section: { kind: 'marker', name: 'Arrange' } }, transport: { playing: true, line: 12 } }
+  const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
+  assert.ok(!/>[^<]*\b12\b[^<]*</.test(neutral), 'the line a snapshot was written at is never shown')
+  assert.equal(neutral.split('Arrange').length - 1, 2, 'a view and a section of the same name are both shown')
 })

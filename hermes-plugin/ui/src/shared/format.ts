@@ -15,10 +15,37 @@ export function nameOf(value: Named): string | undefined {
   return undefined
 }
 
-/** What's in focus as `track › device` (or `track › clip`), each part cut for display; empty when nothing is. */
+/** What's in focus as `track › device`, else `track › item` (a clip, a media item, a pattern), each part cut for
+ *  display; empty when nothing is. Live names its clip in `clip`; REAPER and Renoise their item in `item`. */
 export function focusPath(focus: Focus | null | undefined): string[] {
   const parts = focus?.focus
-  return [nameOf(parts?.track), nameOf(parts?.device) ?? nameOf(parts?.clip)].filter((part): part is string => Boolean(part)).map(part => clean(part, 40))
+  const inner = nameOf(parts?.device) ?? nameOf(parts?.item?.name) ?? nameOf(parts?.clip)
+  return [nameOf(parts?.track), inner].filter((part): part is string => Boolean(part)).map(part => clean(part, 40))
+}
+
+/** The FOCUS chips beyond the path: the view the producer works in, and the section selected (a scene, a marker). */
+export function focusPlace(focus: Focus | null | undefined): string[] {
+  const parts = focus?.focus
+  const view = nameOf(parts?.mainView?.label) ?? nameOf(parts?.view)
+  const section = nameOf(parts?.section?.name) ?? nameOf(parts?.scene)
+  return [view && clean(view, 20), section && clean(section, 24)].filter((part): part is string => Boolean(part))
+}
+
+/** The parameter last touched, `Filter Freq 1.20 kHz`, or nothing. */
+export function focusParameter(focus: Focus | null | undefined): string | undefined {
+  const parameter = focus?.focus?.parameter
+  const name = nameOf(parameter?.name)
+  if (!name) return undefined
+  const value = nameOf(parameter?.value ?? undefined)
+  return clean(value ? `${name} ${value}` : name, 60)
+}
+
+/** What changed while Kumi wasn't looking: every catch-up's lines, and how many more weren't listed. */
+export function catchUpLines(focus: Focus | null | undefined, most = 4): { lines: string[]; more: number } {
+  const entries = Array.isArray(focus?.catch_up) ? focus.catch_up : []
+  const all = entries.flatMap(entry => (entry && Array.isArray(entry.lines) ? entry.lines.filter((line): line is string => typeof line === 'string') : []))
+  const unlisted = entries.reduce((sum, entry) => sum + (entry && typeof entry.more === 'number' && entry.more > 0 ? Math.floor(entry.more) : 0), 0)
+  return { lines: all.slice(0, most).map(line => clean(line, 120)), more: Math.max(0, all.length - most) + unlisted }
 }
 
 /** A track's colour, when FOCUS or HISTORY gives one as `#rrggbb`. */
@@ -130,6 +157,8 @@ export function chipWords(status: Status | null, tempo?: unknown): { tone: 'bad'
     const parts = [daw, project, bpm(tempo)].filter(Boolean)
     return { tone: 'good', text: parts.join(' · ') }
   }
+  // Its last word was that it stopped (its chat ended, or it sat idle): nothing's wrong, it just isn't running.
+  if (status.stale && status.running === false) return { tone: 'muted', text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` }
   if (status.stale && status.owner) return { tone: 'warn', text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` }
   return { tone: 'muted', text: `Kumi · ${daw} not connected` }
 }

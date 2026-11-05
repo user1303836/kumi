@@ -69,7 +69,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const setupMessage = typeof state.setup?.message === 'string' && setupState && setupState !== 'ready' && setupState !== 'unknown' ? state.setup.message : null
   const undoable = (state.history?.items ?? []).filter(item => canUndo(state.status, item)).length
   return (
-    <div style={{ height: '100%', overflowY: 'auto', color: T.text }}>
+    <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>
       <div style={{ ...S.section, gap: 8 }}>
         <div style={{ ...S.row, gap: 8 }}>
           <Dot color={TONE[words.tone]} size={8} />
