@@ -133,6 +133,24 @@ impl Checked {
         }
         Some(said.join(" "))
     }
+
+    /// A change holding a step only the DAW's own Undo takes back holds no other kind of step (CC-20's 20-r1): Live
+    /// keeps a device load as an undo step of its own, outside the plan's (20g's trace), so the DAW's Undo would take a
+    /// mixed change back one part at a time, not all of it as Kumi says. The refusal names the first such step.
+    fn alone(&self, steps: &[Value]) -> Result<(), Value> {
+        let (Some(first), true) = (self.daw_undo.iter().position(|marked| *marked), self.daw_undo.contains(&false)) else {
+            return Ok(());
+        };
+        let tool = steps.get(first).and_then(|step| step.get("tool")).and_then(Value::as_str).unwrap_or_default();
+        let app = self.app;
+        Err(refused(
+            "not_allowed",
+            format!(
+                "Step {} ({tool}) is a change only {app}'s own Undo takes back, so it goes in a change of its own: ask for the other steps separately.",
+                first + 1
+            ),
+        ))
+    }
 }
 
 /// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for (unless the step is
@@ -159,6 +177,7 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
             checked.because.extend(allowed.daw_undo_because);
         }
     }
+    checked.alone(steps)?;
     Ok(checked)
 }
 
@@ -1155,6 +1174,28 @@ mod tests {
         let pads = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
         assert_eq!(pads.undo_note("macos"), Some(format!("{note} Kumi can't tell.")));
         assert_eq!(Checked { daw_undo: vec![false, false], ..pads }.undo_note("macos"), None, "no marked step, no note");
+    }
+
+    #[test]
+    fn a_change_only_the_daws_undo_takes_back_holds_no_other_kind_of_step() {
+        let chain = json!({"tool": "edit_rack", "input": {"rackRef": "7:device:1", "action": "add-chain"}});
+        let load = json!({"tool": "load_device", "input": {"trackRef": "7:track:1", "itemId": "audio_effects/Utility"}});
+        let checked = |daw_undo: Vec<bool>| Checked {
+            families: vec!["device"; daw_undo.len()],
+            files: Vec::new(),
+            daw_undo,
+            because: Vec::new(),
+            app: "Live",
+        };
+        // Live keeps a load as an undo step of its own, so its Undo would take a mixed change back one part at a time.
+        let refused = checked(vec![false, true]).alone(&[load.clone(), chain.clone()]).unwrap_err();
+        assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")));
+        assert!(
+            refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (edit_rack) is a change only Live's own Undo")),
+            "{refused}"
+        );
+        assert!(checked(vec![true, true]).alone(&[chain.clone(), chain]).is_ok(), "chains alone");
+        assert!(checked(vec![false, false]).alone(&[load.clone(), load]).is_ok(), "nothing marked");
     }
 
     #[test]
