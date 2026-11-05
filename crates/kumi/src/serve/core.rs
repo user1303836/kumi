@@ -110,7 +110,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             "epoch": project.epoch,
             "project": project_value(&project),
             "focus": focus,
-            "transport": transport,
+            "transport": transport.as_ref().map(connection::transport_value),
             "catch_up": catch_up,
             "refs": refs,
             "age_ms": kumi_common::time::now_ms() - project.seen_at,

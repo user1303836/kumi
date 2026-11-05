@@ -61,18 +61,30 @@ impl McpEndpoint for InProcess {
     }
 }
 
-/// A runtime for `bridge`'s DAW with Kumi's part in it (as its receipt says, when `installed`) and `simulator`
-/// answering as the DAW behind Kumi's host.
+/// A runtime for `bridge`'s DAW with Kumi's part in it (as its receipt says, when `config` gives a simulator) and that
+/// simulator answering as the DAW behind Kumi's host. Its transport home is the plugin's own, beside its state folder,
+/// or (`adopted`) one elsewhere, as setup's adoption gives it.
 struct Lab {
     home: tempfile::TempDir,
+    _elsewhere: tempfile::TempDir,
     ctx: Rc<Ctx>,
-    _simulator: Option<Rc<Simulator>>,
+    simulator: Option<Rc<Simulator>>,
 }
 
 impl Lab {
     async fn new(daw: DawId, bridge: Daw, config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>) -> Lab {
+        Lab::with(daw, bridge, config, false).await
+    }
+
+    async fn with(
+        daw: DawId,
+        bridge: Daw,
+        config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
+        adopted: bool,
+    ) -> Lab {
         let home = tempfile::tempdir().unwrap();
-        let transport = home.path().join("transport");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let transport = if adopted { elsewhere.path().join(".kumi") } else { home.path().join("kumi-home") };
         let paths = BridgePaths::new(&transport, bridge);
         let simulator = match config {
             Some(config) => {
@@ -126,7 +138,23 @@ impl Lab {
             tools: BTreeMap::new(),
         };
         let ctx = Ctx::new(args, env, answers).unwrap();
-        Lab { home, ctx, _simulator: simulator }
+        Lab { home, _elsewhere: elsewhere, ctx, simulator }
+    }
+
+    /// The methods Kumi's host sent the DAW, each once.
+    fn methods_sent(&self) -> Vec<String> {
+        let mut methods: Vec<String> = self
+            .simulator
+            .as_ref()
+            .map(|simulator| simulator.transcript())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|line| line.from_host)
+            .filter_map(|line| serde_json::from_str::<Value>(&line.text).ok()?.get("method")?.as_str().map(str::to_string))
+            .collect();
+        methods.sort();
+        methods.dedup();
+        methods
     }
 
     /// The runtime's operation `name` with these arguments.
@@ -166,17 +194,22 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     assert_eq!(connected["connected"], true, "{connected}");
     let first = connected["project"].clone();
     let key = first["key"].as_str().unwrap().to_string();
-    assert!(key.starts_with("p-") && first["epoch"] == 1, "{first}");
+    let epoch = first["epoch"].as_u64().unwrap();
+    assert!(key.starts_with("p-") && epoch > 1_000_000_000_000, "an epoch no earlier runtime gave out: {first}");
 
     let seen = lab.call("observe", json!({"scope": "project"})).await.unwrap();
-    assert_eq!((seen["project_key"].as_str(), seen["epoch"].clone()), (Some(key.as_str()), json!(1)), "the same project, the same epoch");
+    assert_eq!(
+        (seen["project_key"].as_str(), seen["epoch"].as_u64()),
+        (Some(key.as_str()), Some(epoch)),
+        "the same project, the same epoch"
+    );
     assert!(!seen["text"].as_str().unwrap().is_empty());
     let refs = seen["refs"].as_array().unwrap();
     assert!(refs.iter().filter(|candidate| candidate["kind"] == "track").count() >= 3, "{refs:?}");
     assert!(refs.iter().all(|candidate| candidate["reference"]["kind"] == "daw"), "only the project's things: {refs:?}");
     let focus = lab.call("observe", json!({"scope": "focus", "max_chars": 200})).await.unwrap();
-    assert!(focus["text"].as_str().unwrap().contains("(epoch 1)"), "{focus}");
-    assert!(lab.ctx.link().expect(&key, 1).is_ok());
+    assert!(focus["text"].as_str().unwrap().contains(&format!("(epoch {epoch})")), "{focus}");
+    assert!(lab.ctx.link().expect(&key, epoch).is_ok());
 
     // Another project in REAPER's tab: another key and the next epoch; a plan made on the first is stale.
     tab.switch_tab();
@@ -189,20 +222,46 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert_ne!(other["project_key"], key, "{other}");
-    assert_eq!(other["epoch"], 2);
-    let Err(OpError::Refused { code, .. }) = lab.ctx.link().expect(&key, 1) else { panic!("a plan made on the first project") };
+    assert_eq!(other["epoch"].as_u64(), Some(epoch + 1));
+    let Err(OpError::Refused { code, .. }) = lab.ctx.link().expect(&key, epoch) else { panic!("a plan made on the first project") };
     assert_eq!(code, "stale");
-    let Err(OpError::Refused { code, .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), 1) else {
+    let Err(OpError::Refused { code, .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch) else {
         panic!("a plan made at an earlier epoch")
     };
     assert_eq!(code, "stale");
 
     let focus_file = lab.state("focus.json");
-    assert_eq!((focus_file["project"]["key"].clone(), focus_file["project"]["epoch"].clone()), (other["project_key"].clone(), json!(2)));
+    assert_eq!(
+        (focus_file["project"]["key"].clone(), focus_file["project"]["epoch"].as_u64()),
+        (other["project_key"].clone(), Some(epoch + 1))
+    );
     let status = lab.state("status.json");
-    assert_eq!((status["connected"].clone(), status["project"]["epoch"].clone()), (json!(true), json!(2)));
+    assert_eq!((status["connected"].clone(), status["project"]["epoch"].as_u64()), (json!(true), Some(epoch + 1)));
     let Err(OpError::Refused { code, .. }) = lab.call("connect", json!({"daw": "renoise"})).await else { panic!("another DAW") };
     assert_eq!(code, "other_daw");
+    // REAPER goes away: status and focus say so at once, and no plan holds.
+    lab.simulator.as_ref().unwrap().stop();
+    let mut gone = Value::Null;
+    for _ in 0..1000 {
+        gone = lab.state("focus.json");
+        if gone["connected"] == false {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        (gone["connected"].clone(), gone["project"].clone(), gone["focus"].clone()),
+        (json!(false), Value::Null, Value::Null),
+        "{gone}"
+    );
+    assert_eq!(lab.state("status.json")["connected"], false);
+    let Err(OpError::NotConnected { .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch + 1) else {
+        panic!("a plan while REAPER is away")
+    };
+    // Nothing but reads reached REAPER: connecting and looking write nothing into the project.
+    let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
+    let sent = lab.methods_sent();
+    assert!(!sent.is_empty() && sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
     lab.ctx.link().close().await;
 });
 
@@ -212,4 +271,47 @@ case!(serve_wont_connect_before_kumis_part_is_in_the_daw, async {
     assert_eq!(code, "not_set_up");
     assert!(reason.contains("REAPER"), "{reason}");
     assert_eq!(lab.call("status", json!({})).await.unwrap()["connected"], false);
+});
+
+case!(serve_wont_use_reaper_through_an_adopted_home_yet, async {
+    let script = ReaperScript::new(3, 0);
+    let lab = Lab::with(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))), true).await;
+    let Err(OpError::Refused { code, .. }) = lab.call("connect", json!({})).await else { panic!("connected through an adopted home") };
+    assert_eq!(code, "adopted_home");
+    assert!(lab.methods_sent().is_empty(), "nothing reached REAPER");
+});
+
+case!(serve_wont_take_over_lives_bridge_when_another_kumi_installed_it, async {
+    let home = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    // The producer's own Kumi put the bridge in Live: the Remote Script's reference names a configuration in its home.
+    let config = other.path().join("bridge/state/bridge-config.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "{}").unwrap();
+    let scripts = home.path().join("Remote Scripts");
+    std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
+    std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
+    let transport = home.path().join("kumi-home");
+    std::fs::create_dir_all(&transport).unwrap();
+    let env = Env::from([
+        ("HOME".into(), home.path().display().to_string()),
+        ("KUMI_HOME".into(), transport.display().to_string()),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
+        ("KUMI_PROCESSES".into(), "none".into()),
+    ]);
+    let answers = kumi_daw::io::Answers::default().with(AbletonFactory(Rc::new(|_| panic!("another Kumi's bridge isn't started"))));
+    let args = Args {
+        state_dir: home.path().join("state"),
+        kumi_home: transport,
+        daw: DawId::Ableton,
+        library_roots: vec![],
+        media_roots: vec![],
+        tools: BTreeMap::new(),
+    };
+    let ctx = Ctx::new(args, env, answers).unwrap();
+    let connect = registry::OPERATIONS.iter().find(|operation| operation.name == "connect").unwrap();
+    let call = Call { args: Default::default(), host: HostCall::default(), signal: Signal::new(), progress: Progress::none() };
+    let Err(OpError::Refused { code, owner, .. }) = (connect.run)(&ctx, call).await else { panic!("took over another Kumi's bridge") };
+    assert_eq!(code, "owned_elsewhere");
+    assert_eq!(owner.unwrap()["kumi_home"], std::fs::canonicalize(other.path()).unwrap().display().to_string());
 });

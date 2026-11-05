@@ -314,7 +314,7 @@ impl Ctx {
             scratches: Cell::new(0),
             started: kumi_common::time::now_ms(),
             answers,
-            link: Link::default(),
+            link: Link::new(kumi_common::time::now_ms().max(0) as u64),
         });
         ctx.project_library_roots();
         Ok(ctx)
