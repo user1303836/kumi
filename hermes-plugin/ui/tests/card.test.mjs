@@ -268,6 +268,37 @@ test('Settings says whether Kumi can read compressed audio, in setup\'s own word
   assert.ok(!(await page({ state: 'ready' })).includes('Audio formats'))
 })
 
+test("Settings doesn't tell a producer connected through a current Live part to install it, and still does for an older one", async () => {
+  const { SettingsPage } = await load('src/desktop/settings.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  // An adopted Kumi's part: setup didn't install it, so setup says it's missing.
+  const setup = {
+    state: 'needs_daw_component',
+    next_step: 'install_daw_component',
+    message: "Kumi's runtime is ready; next, install Kumi's part in Live.",
+    daw: 'ableton',
+    daw_component: { name: 'DAW component', state: 'not_installed' }
+  }
+  const page = async component => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/status')) return { connected: true, daw: 'ableton', revisions: {}, setup: { component } }
+      if (path.startsWith('/setup')) return setup
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refreshStatus()
+    await store.refresh('setup')
+    const ctx = { storage: { get: (_key, fallback) => fallback, set: () => {} } }
+    // The words as a producer reads them: markup escapes the apostrophe in "Kumi's".
+    return renderToStaticMarkup(createElement(SettingsPage, { ctx, store, onOpenMap: () => {} })).replaceAll('&#x27;', "'")
+  }
+  const current = await page({ installed: true, version: '1.0.104', bundled: '1.0.104' })
+  assert.ok(current.includes('Ready') && current.includes('DAW component: in use (Kumi is connected through it)'), current)
+  assert.ok(!current.includes('Needs its DAW part') && !current.includes("install Kumi's part"), current)
+  // Right after a bridge bump the part Kumi is connected through is older than the one it ships: installing it is next.
+  const older = await page({ installed: true, version: '1.0.99', bundled: '1.0.104' })
+  assert.ok(older.includes('Needs its DAW part') && older.includes("install Kumi's part in Live") && older.includes('DAW component: not installed'), older)
+})
+
 test('what the agent found, or a search, is also listed by name above the map, for the keyboard', async () => {
   const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
   const ids = Array.from({ length: 8 }, (_, index) => `s-r7-00${10 + index}`)

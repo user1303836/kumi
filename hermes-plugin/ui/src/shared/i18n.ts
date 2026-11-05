@@ -215,7 +215,8 @@ const en = {
       installed: 'installed',
       outdated: 'outdated',
       unknown: 'unknown'
-    }
+    },
+    partInUse: 'in use (Kumi is connected through it)'
   },
   generate: {
     generated: 'generated',
@@ -468,7 +469,8 @@ const ja: Shape<typeof en> = {
       installed: 'インストール済み',
       outdated: '古い版',
       unknown: '不明'
-    }
+    },
+    partInUse: '使用中（Kumi はこれを通じて接続しています）'
   },
   generate: {
     generated: '生成',
@@ -718,7 +720,8 @@ const zh: Shape<typeof en> = {
       installed: '已安装',
       outdated: '版本过旧',
       unknown: '未知'
-    }
+    },
+    partInUse: '使用中（Kumi 正通过它连接）'
   },
   generate: {
     generated: '生成',

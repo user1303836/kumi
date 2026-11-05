@@ -9,7 +9,7 @@ import { useState } from 'react'
 
 import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
-import type { KumiStore } from '../shared/store.ts'
+import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
@@ -45,7 +45,10 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
   const daw = state.status?.daw ?? setup?.daw
   const runtime = setup?.runtime
   const component = setup?.daw_component
-  const setupState = setup?.state ?? 'unknown'
+  // Connected through a current part setup didn't install (an adopted Kumi's): setup's "needs its DAW part" and its
+  // "install Kumi's part" aren't the state of things, so the page says ready and the part is in use (#1019's rule).
+  const partWorks = dawPartWorks(state)
+  const setupState = partWorks ? 'ready' : (setup?.state ?? 'unknown')
   const componentState = component?.state ?? 'unknown'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 640, color: T.text }}>
@@ -60,7 +63,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           <div>
             <h3 style={HEADING}>{t('settings.setup')}</h3>
             <Line label={t('settings.state')}>{STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40)}</Line>
-            {setup?.message && <Line label={t('settings.next')}>{clean(setup.message, 300)}</Line>}
+            {setup?.message && !partWorks && <Line label={t('settings.next')}>{clean(setup.message, 300)}</Line>}
             {runtime && (
               <Line label={t('settings.runtime')}>
                 {runtime.installed ? t('settings.installed', clean(runtime.version ?? '', 20)) : t('settings.notInstalled')}
@@ -79,7 +82,11 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
                 {t(
                   'settings.componentLine',
                   clean(component.name ?? t('settings.dawComponent'), 40),
-                  COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace('_', ' ')
+                  partWorks
+                    ? t('settings.partInUse')
+                    : COMPONENT_STATES.has(componentState)
+                      ? t(`settings.componentStates.${componentState}`)
+                      : clean(componentState, 20).replace('_', ' ')
                 )}
                 {component.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
               </Line>

@@ -206,7 +206,8 @@ var en = {
       installed: "installed",
       outdated: "outdated",
       unknown: "unknown"
-    }
+    },
+    partInUse: "in use (Kumi is connected through it)"
   },
   generate: {
     generated: "generated",
@@ -455,7 +456,8 @@ var ja = {
       installed: "インストール済み",
       outdated: "古い版",
       unknown: "不明"
-    }
+    },
+    partInUse: "使用中（Kumi はこれを通じて接続しています）"
   },
   generate: {
     generated: "生成",
@@ -704,7 +706,8 @@ var zh = {
       installed: "已安装",
       outdated: "版本过旧",
       unknown: "未知"
-    }
+    },
+    partInUse: "使用中（Kumi 正通过它连接）"
   },
   generate: {
     generated: "生成",
@@ -1580,20 +1583,25 @@ function Rows({ view }) {
   const t = useT();
   const compared = view.referenceTitle !== void 0;
   const cell = { padding: "2px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-  return /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, color: T.text, width: "100%" }, children: [
-    compared && /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { style: { color: T.muted, fontSize: 11 }, children: [
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, textAlign: "left", fontWeight: 400 } }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.this") }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.reference") }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.difference") })
-    ] }) }),
-    /* @__PURE__ */ jsx2("tbody", { children: view.rows.map((row2) => /* @__PURE__ */ jsxs2("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsx2("td", { style: { ...cell, textAlign: "left", color: T.muted }, children: row2.label }),
-      /* @__PURE__ */ jsx2("td", { style: cell, children: row2.mine }),
-      compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: T.muted }, children: row2.reference ?? "—" }),
-      compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: row2.direction === 0 ? T.muted : T.text, fontWeight: 600 }, children: row2.delta ?? "—" })
-    ] }, row2.label)) })
-  ] });
+  return (
+    // The card sits in the chat's markdown, whose prose styles reach any table in it: a 2em margin above and below,
+    // a taller line, and a bright line under each row and the header. The table sets its own, so only its rows' quiet
+    // lines show.
+    /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, color: T.text, width: "100%", margin: 0 }, children: [
+      compared && /* @__PURE__ */ jsx2("thead", { style: { border: "none" }, children: /* @__PURE__ */ jsxs2("tr", { style: { color: T.muted, fontSize: 11, border: "none" }, children: [
+        /* @__PURE__ */ jsx2("th", { style: { ...cell, textAlign: "left", fontWeight: 400 } }),
+        /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.this") }),
+        /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.reference") }),
+        /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.difference") })
+      ] }) }),
+      /* @__PURE__ */ jsx2("tbody", { children: view.rows.map((row2) => /* @__PURE__ */ jsxs2("tr", { style: { border: "none", borderTop: `1px solid ${T.border}` }, children: [
+        /* @__PURE__ */ jsx2("td", { style: { ...cell, textAlign: "left", color: T.muted }, children: row2.label }),
+        /* @__PURE__ */ jsx2("td", { style: cell, children: row2.mine }),
+        compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: T.muted }, children: row2.reference ?? "—" }),
+        compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: row2.direction === 0 ? T.muted : T.text, fontWeight: 600 }, children: row2.delta ?? "—" })
+      ] }, row2.label)) })
+    ] })
+  );
 }
 function Bands({ view }) {
   const t = useT();
@@ -2768,7 +2776,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
-  const setupState = setup?.state ?? "unknown";
+  const partWorks = dawPartWorks(state);
+  const setupState = partWorks ? "ready" : setup?.state ?? "unknown";
   const componentState = component?.state ?? "unknown";
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
@@ -2779,7 +2788,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsxs12("div", { children: [
         /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        setup?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        setup?.message && !partWorks && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
           setup?.pinned_version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
@@ -2802,7 +2811,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           t(
             "settings.componentLine",
             clean(component.name ?? t("settings.dawComponent"), 40),
-            COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
+            partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
           ),
           component.path && /* @__PURE__ */ jsx12("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
