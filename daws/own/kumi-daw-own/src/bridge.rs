@@ -1773,6 +1773,9 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         }
         Ok(self.changes.history.stop_everything(signal).await)
     }
+    fn open_set(&self) -> Option<String> {
+        self.file.borrow().clone()
+    }
     /// Whether the DAW records now, as its transport says: playing and recording (REAPER's record, Renoise's edit mode while
     /// it plays). None when it can't say.
     async fn recording(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {

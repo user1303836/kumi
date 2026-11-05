@@ -103,7 +103,9 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
             let reaper = create_reaper_integration(options(host.clone(), states.clone()));
             reaper.start(Signal::new()).await.unwrap();
             assert_eq!(*states.borrow(), [ConnectionState::Connecting, ConnectionState::Connected]);
+            assert_eq!(reaper.open_set(), None, "no saved project is guessed before the first look");
             let seen = reaper.observe(Signal::new(), None).await.unwrap();
+            assert_eq!(reaper.open_set().as_deref(), Some("/Users/someone/Music/Night Drive.rpp"), "setup can reopen the actual file");
             assert_eq!(seen.label, "REAPER — Night Drive");
             assert_eq!(seen.project.as_ref().map(|p| p.id.as_str()), Some(format!("reaper-{PROJECT_ID}").as_str()));
             assert_eq!(seen.set.as_deref(), Some("4242:0x7f01"));
@@ -190,6 +192,7 @@ async fn an_unsaved_project_is_the_dawss_unsaved_place_and_a_daw_not_there_is_sa
         .run_until(async {
             let mut snapshot = reaper_snapshot();
             snapshot["project"]["id"] = Value::Null;
+            snapshot["project"]["path"] = json!("");
             let host = Rc::new(Host {
                 answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("snapshot", snapshot, false)]),
                 asked: RefCell::default(),
@@ -200,6 +203,7 @@ async fn an_unsaved_project_is_the_dawss_unsaved_place_and_a_daw_not_there_is_sa
             let seen = reaper.observe(Signal::new(), None).await.unwrap();
             assert!(seen.project.is_none());
             assert_eq!(seen.set.as_deref(), Some("4242:0x7f01"));
+            assert_eq!(reaper.open_set(), None, "an unsaved title is not a file to reopen");
 
             // REAPER quits: the host says so, and Kumi carries on without it, in REAPER's words.
             host.answers.borrow_mut().push((
@@ -1072,6 +1076,7 @@ async fn a_song_reopened_after_a_restart_keeps_its_conversation_not_the_empty_so
             let renoise = create_renoise_integration(options);
             renoise.start(Signal::new()).await.unwrap();
             let before = renoise.observe(Signal::new(), None).await.unwrap().key;
+            assert_eq!(renoise.open_set().as_deref(), Some("/songs/Acid.xrns"));
             // KUMI_TRACE shows the key each look took the song to be.
             assert_eq!(traced.borrow().last().cloned(), Some(format!("look: {before}")));
             // Renoise quits.
@@ -1086,6 +1091,7 @@ async fn a_song_reopened_after_a_restart_keeps_its_conversation_not_the_empty_so
             });
             let after = renoise.observe(Signal::new(), None).await.unwrap();
             assert_eq!(after.key, before, "the same song, the same conversation");
+            assert_eq!(renoise.open_set().as_deref(), Some("/songs/Acid.xrns"));
             // A song still unsaved once Renoise has settled is a new one.
             host.answers.borrow_mut().push(("snapshot", json!({"error": "Renoise closed", "connected": false}), true));
             renoise.observe(Signal::new(), None).await.unwrap();
@@ -1093,6 +1099,7 @@ async fn a_song_reopened_after_a_restart_keeps_its_conversation_not_the_empty_so
             let started = tokio::time::Instant::now();
             let fresh = renoise.observe(Signal::new(), None).await.unwrap();
             assert_ne!(fresh.key, before);
+            assert_eq!(renoise.open_set(), None, "the new unsaved song cannot reopen the previous song's file");
             assert!(started.elapsed() >= std::time::Duration::from_millis(2_500), "waited for a file that never came");
             // Settled: the next look doesn't wait.
             let started = tokio::time::Instant::now();

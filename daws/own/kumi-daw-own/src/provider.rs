@@ -1146,7 +1146,7 @@ pub(crate) async fn closed(daw: Daw, env: &Env, stop: &Signal) -> bool {
     }
 }
 
-/// Opens the supplied saved project, never an unsaved project's title or a path guessed from it. Each path is one
+/// The command to open a supplied saved project, never an unsaved project's title or a path guessed from it. Each path is one
 /// argument: spaces, quotes and non-ASCII names go to the app unchanged.
 fn app_command(os: Os, app: &Path, set: Option<&Path>) -> Option<std::process::Command> {
     if set.is_some_and(|set| !set.is_absolute() || !set.is_file()) {
