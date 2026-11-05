@@ -72,7 +72,7 @@ Where new code goes:
 ## 3. Conventions
 
 Working:
-- One task, one branch, one PR, in its own worktree: `python3 scripts/dev.py worktree new <name> --lean` makes `../kumi-<name>` from origin/main, without the oracles only Extended reads. Branches are `<topic>/<name>`; `willington/` is the owner's.
+- One task, one branch, one PR, in its own worktree: `python3 scripts/dev.py worktree new <name>` makes `../kumi-<name>` from origin/main. Branches are `<topic>/<name>`; `willington/` is the owner's.
 - On long tasks, open the PR early and push regularly. A branch begun before a move: `python3 scripts/dev.py rebase-moves`.
 - Before pushing: `python3 scripts/dev.py check` runs what Required CI runs for your change (whitespace, fmt, the gating lint, layers, the affected tests; `--dry-run` lists them). `python3 scripts/dev.py affected --base origin/main` says what a branch affects.
 - Run tests only through the isolated runner (a home of its own; needs cargo-nextest): `sh scripts/test-isolated.sh --profile ci -p <crate>`, one file with `-E 'test(/^<module>::/)'` (Windows: `scripts/test-isolated.ps1`).

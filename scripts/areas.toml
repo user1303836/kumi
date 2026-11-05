@@ -80,8 +80,7 @@ feeds = ["kumi"]
 paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
 feeds = ["kumi-agent", "kumi-library", "kumi-daw-ableton", "daw-mcp-server"]
 
-# The recorded oracles, which the tests of the crates their folders name read (through kumi-testkit), and the list of
-# those only Extended's tests read.
+# The recorded oracles, which the tests of the crates their folders name read (through kumi-testkit).
 [oracles]
 paths = ["testdata/oracles/**"]
 feeds = ["ableton-mcp-server", "kumi-common", "kumi-library", "kumi-agent", "kumi-daw-ableton", "kumi"]

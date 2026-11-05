@@ -56,6 +56,16 @@ const RESOURCES: [(&str, &str, &str); 4] = [
 ];
 const INVALID_PARAMS: i64 = -32602;
 
+pub(super) fn tool_descriptor(operation: &Operation) -> Value {
+    let mut tool = json!({
+        "name": operation.name, "description": operation.description, "inputSchema": (operation.schema)()
+    });
+    if operation.name == super::generate::GENERATE.name {
+        tool["_meta"] = json!({"kumi/ledger_policy_keys": super::generate_ledger::POLICY_KEYS});
+    }
+    tool
+}
+
 /// Serves the registry's operations on `input` and `output` until `input` ends, the host stops reading, or the
 /// process is told to stop.
 pub async fn serve<I, O>(ctx: Rc<Ctx>, input: I, output: O) -> std::io::Result<()>
@@ -316,13 +326,7 @@ impl Server {
             "ping" => self.send_result(id, json!({})),
             _ if !self.initialized.get() => self.send_error(id, INVALID_REQUEST, "initialize first"),
             "tools/list" => {
-                let tools: Vec<Value> = self
-                    .operations
-                    .iter()
-                    .map(|operation| {
-                        json!({"name": operation.name, "description": operation.description, "inputSchema": (operation.schema)()})
-                    })
-                    .collect();
+                let tools: Vec<Value> = self.operations.iter().map(|operation| tool_descriptor(operation)).collect();
                 self.send_result(id, json!({"tools": tools}));
             }
             "tools/call" => self.call(id, params),

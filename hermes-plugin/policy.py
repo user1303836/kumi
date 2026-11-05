@@ -24,7 +24,7 @@ import textwrap
 from typing import Any
 import unicodedata
 
-from . import calls, runtime, setup, snapshots, tools
+from . import calls, generate, runtime, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,8 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
-        decision = chat_scoped(decision, args, kwargs)
+        if not decision["rule_key"].startswith(ONE_THING):
+            decision = chat_scoped(decision, args, kwargs)
         if not shows_whole(decision["message"], host.session_surface()):
             return block(TOO_LONG), {}
     return decision, extra
@@ -132,6 +133,11 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
     return {**decision, "rule_key": f"{rule_key}:{scope}", "message": f"{decision['message']}\n{CHAT_ONLY}"}
 
 
+# A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
+# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c).
+ONE_THING = ("kumi:paid:",)
+
+
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     if tool in PASS:
         return None, {}
@@ -145,6 +151,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _library(host, args, kwargs), {}
     if tool == "kumi_setup":
         return _setup(host, args)
+    if tool == "kumi_generate":
+        return _generate(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -344,6 +352,121 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
                      f"with every line of it in view. Use {where}: it shows the whole plan before it asks."), {}
     decision = {"action": "approve", "message": message, "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}
+
+
+def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """Paid generation (CC-13). A sound effect's quote is a read: an estimate costs nothing. Sending an audio file to
+    Mirelo is asked first, in the words of the runtime's own description of the file it resolved (13-R2), keyed by that
+    file's identity. A create is asked from the stored quote alone, never the model's words (13-R1), keyed by its
+    quote_id; its approval binds the quote's digest and estimate, which the handler checks again before it reserves.
+    Where nobody can answer, both are refused (decide, 13-R6).
+
+    Its worst case stays within 15 s of Hermes's 30 s hook timeout (a timed-out hook blocks every tool for a minute):
+    each ledger call waits at most generate.LEDGER_WAIT (2 s) for its lock (amendment B-c). A create makes four (open,
+    configure, the quote, the totals): 8 s. An upload makes two, then the runtime's preview, at most PREVIEW_TIMEOUT
+    (10 s): 14 s."""
+    refusal = generate.refusal(args)
+    if refusal is not None:
+        return block(f"Kumi didn't run: {refusal}"), {}
+    if args["action"] == "quote":
+        return (None, {}) if args["kind"] == "sfx" else _upload(host, args, kwargs)
+    return _paid(host, args)
+
+
+def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """Sending an audio file to Mirelo (13-R2, amendment A). Where nobody can answer, it's refused before the runtime
+    looks at the file. The ledger is opened first, so the producer's current policy is in it before the runtime's
+    preview, a bounded local read (no network, copy or DSP); the approval names the file as that preview describes it,
+    under a key naming its content (A-a), in this chat (A-c)."""
+    if host.unattended():
+        return block(UNATTENDED), {}
+    not_ready = generate.ready(host, "audio_to_midi", host.mirelo_key())
+    if not_ready is not None:
+        return block(f"Kumi didn't send anything: {not_ready['error']['reason']}"), {}
+    try:
+        host.ledger()
+    except generate.LedgerUnavailable as failure:
+        return block(f"Kumi didn't send anything: {failure.reason}"), {}
+    try:
+        preview = _ask(host, "generate", {**args, "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't send anything: {_reason(failure)}"), {}
+    upload = preview.get("upload") if isinstance(preview.get("upload"), dict) else {}
+    name, size, identity = upload.get("file"), upload.get("bytes"), upload.get("identity_sha256")
+    if (preview.get("state") != "preview" or not isinstance(name, str) or not name.strip() or isinstance(size, bool)
+            or not isinstance(size, int) or size < 0 or not isinstance(identity, str)
+            or not _SHA256.fullmatch(identity)):
+        return block("Kumi didn't send anything: its runtime couldn't describe the file."), {}
+    decision = approve([f"Kumi: send {quoted(name)} ({_size(size)}) to Mirelo, to turn it into MIDI notes",
+                        "• Mirelo quotes it in credits first; nothing is paid until that quote is approved too."],
+                       f"kumi:upload:{identity}")
+    return decision, {}
+
+
+# A-a: a file's identity is its content's SHA-256, as lowercase hex.
+_SHA256 = re.compile("[0-9a-f]{64}")
+
+
+def _size(size: int) -> str:
+    """A file's size as people read it: bytes under a kilobyte, kilobytes under a megabyte, else megabytes."""
+    if size < 1_000:
+        return f"{size} bytes"
+    if size < 1_000_000:
+        return f"{size / 1_000:.0f} KB"
+    return f"{size / 1_000_000:.1f} MB"
+
+
+def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
+    """A create (13-R1), refused before anyone is asked, and before the ledger is opened where nobody can answer: a
+    used or expired quote, a kind switched off or no key, a ledger that doesn't add up, a cap of 0 (which refuses
+    every paid generation, a zero estimate's too), a freeze, or an estimate over what's left."""
+    if host.unattended():
+        return block(UNATTENDED), {}
+    quote_id = args["quote_id"]
+    try:
+        ledger = host.ledger()
+        record = ledger.quote(quote_id)
+        totals = ledger.snapshot()
+    except Exception as failure:
+        said = getattr(failure, "message", None) or getattr(failure, "reason", None)
+        why = said if isinstance(said, str) and said else "its credit ledger refused this quote."
+        return block(f"Kumi didn't create anything: {why}"), {}
+    if record.get("consumed"):
+        return block("Kumi didn't create anything: that quote was already used. Quote again."), {}
+    if generate.expired(record):
+        return block("Kumi didn't create anything: that quote expired. Quote again."), {}
+    not_ready = generate.ready(host, record.get("kind"), host.mirelo_key())
+    if not_ready is not None:
+        return block(f"Kumi didn't create anything: {not_ready['error']['reason']}"), {}
+    estimate = record.get("estimate") if isinstance(record.get("estimate"), dict) else {}
+    most, left, cap = estimate.get("max_credits"), totals.get("left"), totals.get("cap")
+    if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in (most, left, cap)):
+        return block("Kumi didn't create anything: its quote or credit ledger doesn't add up."), {}
+    if cap == 0:
+        return block("Kumi didn't create anything: the producer's credit cap is 0, which refuses every paid "
+                     "generation. They set one in Kumi's settings in Hermes."), {}
+    if totals.get("frozen"):
+        return block("Kumi didn't create anything: new paid generations are paused, since a charge came in above its "
+                     "estimate. The producer checks Mirelo, then runs hermes kumi credits unfreeze."), {}
+    if most > left:
+        return block(f"Kumi didn't create anything: its estimate ({most} credits) is more than the {left} left under "
+                     "the producer's credit cap."), {}
+    sfx = record.get("kind") == "sfx"
+    seconds = record.get("seconds")
+    lines = [f"Kumi: a paid Mirelo {'sound effect' if sfx else 'audio-to-MIDI job'}, from quote {quote_id}",
+             f"• Prompt: {quoted(record.get('prompt'))}" if sfx
+             else f"• From {quoted(record.get('file'))}, sent to Mirelo",
+             *([f"• {seconds:g} seconds"] if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
+               else []),
+             f"• Reserves up to {most} credits now (an estimate, not a price); {left - most} of the {cap} left after"]
+    bound = {"quote_id": quote_id, "request_sha256": record.get("request_sha256"), "max_credits": most}
+    return approve(lines, f"kumi:paid:{quote_id}"), bound
+
+
+def quoted(text: Any, limit: int = LINE) -> str:
+    """Untrusted words in an approval, as one quoted line: every mark that reads as a quote made plain (#1014's
+    `_QUOTE_MARKS`), so none can seem to close it early."""
+    return f"\"{_QUOTE_MARKS.sub(chr(39), one_line(text if isinstance(text, str) else '', limit))}\""
 
 
 def shows_whole(message: str, surface: str) -> bool:

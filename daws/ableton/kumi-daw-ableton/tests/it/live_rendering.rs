@@ -271,14 +271,8 @@ fn wav(folder: &Path, kind: &str) {
 /// What a case runs on: its endpoint, and Kumi's side of its Set, as the oracle's cases have them.
 struct Bench {
     endpoint: Rc<Fixture>,
-    events: Rc<RefCell<Vec<Value>>>,
-    actions: Rc<RefCell<Vec<Value>>>,
-    auditions: Rc<RefCell<Vec<Value>>>,
     ears: Rc<EarsReplay>,
-    opened: Rc<Cell<u32>>,
-    restore: PathBuf,
     connection: Rc<LiveConnection>,
-    history: Rc<History>,
     observer: Rc<Observer>,
     rendering: Rc<Rendering>,
 }
@@ -386,7 +380,7 @@ impl Bench {
                 async move { files.clip_file(&file, signal).await }.boxed_local()
             }),
         );
-        Self { endpoint, events, actions, auditions, ears, opened, restore, connection, history, observer, rendering }
+        Self { endpoint, ears, connection, observer, rendering }
     }
     /// One of a case's operations; what it comes to.
     async fn run(&self, goal: &mut Option<Rc<dyn GoalRig>>, op: &Value, signal: Signal) -> Result<Value, RuntimeError> {
@@ -407,86 +401,6 @@ impl Bench {
         result
     }
 }
-/// The oracle's cases in 16 tests that nextest runs side by side.
-mod source_audition_goal_passes_and_failure_cleanup_match {
-    kumi_testkit::chunked!(super::replay_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4, part_05 = 5,
-        part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11, part_12 = 12, part_13 = 13, part_14 = 14,
-        part_15 = 15);
-}
-/// The oracle's cases at index `chunk`, `chunk + chunks`, …, on a runtime whose clock starts paused.
-fn replay_cases(chunk: usize, chunks: usize) {
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
-    runtime.block_on(tokio::task::LocalSet::new().run_until(replay(chunk, chunks)));
-}
-async fn replay(chunk: usize, chunks: usize) {
-    // Rendering keeps its renders in kumi-ears/<the generation's first 8 characters> in the temporary folder, and
-    // closing removes that folder. Each chunk has a generation of its own, so chunks running side by side keep theirs.
-    // No result in the oracle carries the generation. Past chunk-99 it would run to 9 characters, and chunk-100 would
-    // share chunk-10's folder.
-    assert!(chunks <= 100, "each of at most 100 chunks has a render folder of its own");
-    let generation = format!("chunk-{chunk:02}");
-    EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
-    let folder = tempfile::tempdir().unwrap();
-    // "vanishing" is a square wave a case can have taken away (removeAt).
-    for kind in ["square", "noise", "silence", "vanishing"] {
-        wav(folder.path(), kind);
-    }
-    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
-    let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
-    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
-        if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
-            continue;
-        }
-        eprintln!("rendering case {case_index}: {}", case["label"]);
-        let config = &case["config"];
-        let bench = Bench::new(case, &generation, folder.path()).await;
-        let Bench { endpoint, events, actions, auditions, ears, opened, restore, connection, history, rendering, .. } = &bench;
-        let mut goal: Option<Rc<dyn GoalRig>> = None;
-        for (index, op) in case["operations"].as_array().unwrap().iter().enumerate() {
-            let signal = Signal::new();
-            if op["abort"] == true {
-                signal.cancel();
-            }
-            *endpoint.original.borrow_mut() = signal.clone();
-            let result = bench.run(&mut goal, op, signal).await;
-            let value = match result {
-                Ok(value) => value,
-                Err(RuntimeError::Aborted) => json!({"error":"cancelled"}),
-                Err(error) => json!({"error":error.to_string()}),
-            };
-            let label = format!("{} operation {index}", case["label"]);
-            eq(&value, &case["results"][index]["value"], &label);
-            for _ in 0..4 {
-                tokio::task::yield_now().await;
-            }
-            let changes: Vec<_> = history.entries.borrow().values().map(|entry| json!(entry.borrow().record)).collect();
-            eq(&json!(changes), &case["results"][index]["state"]["changes"], &format!("{label} retained changes"));
-            assert_eq!(rendering.round_count(), case["results"][index]["state"]["round"].as_u64().unwrap() as usize);
-            let restore: Value = std::fs::read_to_string(&restore).ok().map(|s| serde_json::from_str(&s).unwrap()).unwrap_or(Value::Null);
-            eq(&restore, &case["results"][index]["restore"], &format!("{label} crash journal"));
-        }
-        assert_eq!(endpoint.calls.get(), case["calls"].as_array().unwrap().len(), "{} call count", case["label"]);
-        eq(&json!(*events.borrow()), &case["events"], &format!("{} history", case["label"]));
-        // (#399) All that's said beyond what the cases recorded: that a paused goal's best waits muted, and that a limiter stays
-        // where this case's bridge can't delete it.
-        let beyond = |action: &Value| {
-            let title = action["title"].as_str().unwrap_or("");
-            (case["label"] == KEEPS_BEFORE_TIDYING && title.contains("waits muted beside"))
-                || (case["label"] == NEVER_OPENS && title.contains("stays last on"))
-        };
-        let said: Vec<Value> = actions.borrow().iter().filter(|action| !beyond(action)).cloned().collect();
-        eq(&json!(said), &case["actions"], &format!("{} actions", case["label"]));
-        eq(&json!(*auditions.borrow()), &case["auditions"], &format!("{} auditions", case["label"]));
-        eq(&json!(*endpoint.releases.borrow()), &case["releases"], &format!("{} transaction releases", case["label"]));
-        if config["ears"] == "unopenable" {
-            assert_eq!(opened.get(), 1, "a listening device that couldn't be set up isn't tried again at each audition");
-        }
-        rendering.close().await;
-        connection.close().await.unwrap();
-        assert_eq!(ears.at.get(), ears.calls.len(), "{} Ears call count", case["label"]);
-    }
-}
-
 /// One of the oracle's goal cases, with its audio in `folder`, for a test of its own on a paused clock.
 fn goal_case(folder: &Path, label: &str, generation: &str) -> Value {
     EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(generation));

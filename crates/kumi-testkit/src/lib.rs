@@ -43,11 +43,5 @@ pub fn oracle(name: &str) -> String {
 /// A recorded oracle's bytes (see [`oracle_path`]), for the gzipped ones.
 pub fn oracle_bytes(name: &str) -> Vec<u8> {
     let path = oracle_path(name);
-    std::fs::read(&path).unwrap_or_else(|error| {
-        panic!(
-            "{}: {error}. A lean worktree (dev.py worktree new --lean) leaves out the oracles only Extended's tests read; \
-             `git sparse-checkout disable` brings them back",
-            path.display()
-        )
-    })
+    std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }

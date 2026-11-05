@@ -103,14 +103,63 @@ USAGE = (f'kumi serve: unknown argument "{pin.PROBE}" (try --help)\n'
          "Kumi's runtime for a host such as Hermes; see --verbose\n")
 OPTIONS = ["--daw", "--hermes-home", "--hermes-root", "--kumi-home", "--library-root", "--media-root", "--state-dir",
            "--stdio", "--tool"]
+LISTING = {"serve_operations": ["change", "connect", "generate", "status"],
+           "generate_kinds": ["audio_to_midi", "sfx"], "ledger_policy_keys": ["audio_to_midi", "sfx"]}
 
 
-def run(github: FakeGitHub, *args: str, probe=None) -> tuple[int, str]:
-    """hermes_pin.py's main on `github`, with `probe` standing in for running the runtime (USAGE by default)."""
+def run(github: FakeGitHub, *args: str, probe=None, lister=None) -> tuple[int, str]:
+    """hermes_pin.py's main on `github`, with `probe` and `lister` standing in for running the runtime (USAGE and
+    LISTING by default)."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
-        code = pin.main(list(args), github=github, probe=probe or (lambda kumi, scratch: USAGE))
+        code = pin.main(list(args), github=github, probe=probe or (lambda kumi, scratch: USAGE),
+                        lister=lister or (lambda kumi, scratch, version: LISTING))
     return code, err.getvalue()
+
+
+def generate(kinds: list[str] | None, keys: list[str] | None) -> dict:
+    """A `generate` tool as tools/list describes it: its input schema's `kind` enum and its `_meta` ledger policy keys
+    (`None`: left out)."""
+    tool: dict = {"name": "generate", "inputSchema": {"type": "object", "properties": {}}}
+    if kinds is not None:
+        tool["inputSchema"]["properties"]["kind"] = {"type": "string", "enum": kinds}
+    if keys is not None:
+        tool["_meta"] = {"kumi/ledger_policy_keys": keys}
+    return tool
+
+
+# Each DAW lists something the others don't, so only a union over the three gets it all.
+TOOLS = {"ableton": [{"name": "status"}, {"name": "change"}],
+         "reaper": [{"name": "status"}, {"name": "connect"}, generate(["sfx", "audio_to_midi"], ["sfx", "audio_to_midi"])],
+         "renoise": [{"name": "status"}, generate(["video_to_sfx", "sfx"], ["video_to_sfx"])]}
+
+
+def stand_in(version: str = VERSION, tools: dict[str, list[dict]] | None = None) -> bytes:
+    """A POSIX stand-in for the pinned `kumi`: `serve <unknown>` prints USAGE and exits 2; `serve --stdio … --daw D`
+    answers MCP's initialize as kumi-serve `version` and tools/list with `tools[D]`. Either way it exits 9 unless it
+    runs with the scratch HOME and no update check."""
+    tools = TOOLS if tools is None else tools
+    return f"""#!/usr/bin/env python3
+import json, os, sys
+if not os.environ.get("HOME", "").endswith("probe-home") or os.environ.get("KUMI_NO_UPDATE_CHECK") != "1":
+    sys.exit(9)
+args = sys.argv[1:]
+if args[:2] == ["serve", {pin.PROBE!r}]:
+    sys.stderr.write({USAGE!r})
+    sys.exit(2)
+if args[:2] != ["serve", "--stdio"]:
+    sys.exit(9)
+daw = args[args.index("--daw") + 1]
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("id") == 1:
+        result = {{"protocolVersion": {pin.MCP_PROTOCOL!r}, "serverInfo": {{"name": "kumi-serve", "version": {version!r}}}}}
+    elif message.get("id") == 2:
+        result = {{"tools": {tools!r}.get(daw, [])}}
+    else:
+        continue
+    print(json.dumps({{"jsonrpc": "2.0", "id": message["id"], "result": result}}), flush=True)
+""".encode()
 
 
 class PinTest(unittest.TestCase):
@@ -184,17 +233,32 @@ class PinTest(unittest.TestCase):
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out))[0], 0)
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--check")[0], 0)
         written = json.loads(self.out.read_text())
-        for edit in ("sha256", "serve_options"):
+        for edit in ("sha256", "serve_options", "serve_operations", "generate_kinds", "ledger_policy_keys"):
             with self.subTest(edit):
                 edited = copy.deepcopy(written)
                 if edit == "sha256":
                     edited["targets"]["x86_64-apple-darwin"]["sha256"] = "e" * 64
-                else:
+                elif edit == "serve_options":
                     edited["serve_options"] = [*OPTIONS, "--newer-than-the-release"]
+                else:
+                    edited[edit] = [*LISTING[edit], "newer_than_the_release"]
                 self.out.write_text(json.dumps(edited))
                 code, err = run(self.github, VERSION, "--out", str(self.out), "--check")
                 self.assertEqual(code, 1)
                 self.assertIn("doesn't match the published v1.24.66", err)
+
+    def test_the_pin_records_what_kumi_serve_lists_from_this_computers_runtime(self) -> None:
+        given: list[tuple[bytes, str]] = []
+
+        def lister(kumi: Path, scratch: Path, version: str) -> dict[str, list[str]]:
+            given.append((kumi.read_bytes(), version))
+            return LISTING
+
+        code, err = run(self.github, VERSION, "--out", str(self.out), lister=lister)
+        self.assertEqual(code, 0, err)
+        written = json.loads(self.out.read_text())
+        self.assertEqual({key: written[key] for key in LISTING}, LISTING)
+        self.assertEqual(given, [(f"kumi for {pin.host_target()}".encode(), VERSION)], "run once, told its version")
 
     def test_the_pin_records_the_options_kumi_serve_takes_from_its_usage_lines_only(self) -> None:
         given: list[bytes] = []
@@ -219,16 +283,49 @@ class PinTest(unittest.TestCase):
                 self.assertIn(said, err)
                 self.assertFalse(self.out.exists(), "a refused release must leave no pin behind")
 
-    @unittest.skipIf(os.name == "nt", "the stand-in runtime is a POSIX shell script")
-    def test_the_runtime_itself_is_run_with_a_scratch_home_to_read_its_usage(self) -> None:
+    @unittest.skipIf(os.name == "nt", "the stand-in runtime is a POSIX script")
+    def test_the_runtime_itself_is_run_with_a_scratch_home_for_its_usage_and_each_daws_listing(self) -> None:
         target = pin.host_target()
-        stand_in = (f'#!/bin/sh\n[ "$1 $2" = "serve {pin.PROBE}" ] || exit 9\n'
-                    'case "$HOME" in *probe-home) ;; *) exit 8 ;; esac\n'
-                    f"cat >&2 <<'USAGE'\n{USAGE}USAGE\nexit 2\n").encode()
-        self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): stand_in}))
-        code, err = run(self.github, VERSION, "--out", str(self.out), probe=pin.serve_usage)
+        self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): stand_in()}))
+        code, err = run(self.github, VERSION, "--out", str(self.out), probe=pin.serve_usage, lister=pin.serve_listing)
         self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(self.out.read_text())["serve_options"], OPTIONS)
+        written = json.loads(self.out.read_text())
+        self.assertEqual(written["serve_options"], OPTIONS)
+        self.assertEqual((written["serve_operations"], written["generate_kinds"], written["ledger_policy_keys"]),
+                         (["change", "connect", "generate", "status"], ["audio_to_midi", "sfx", "video_to_sfx"],
+                          ["audio_to_midi", "sfx", "video_to_sfx"]),
+                         "sorted unions over the DAWs: what one DAW lists counts")
+        self.github = FakeGitHub()
+        self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): stand_in(
+            tools={daw: [{"name": "status"}] for daw in pin.DAWS})}))
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out), probe=pin.serve_usage,
+                             lister=pin.serve_listing)[0], 0)
+        written = json.loads(self.out.read_text())
+        self.assertEqual((written["generate_kinds"], written["ledger_policy_keys"]), ([], []), "no generate: none")
+
+    @unittest.skipIf(os.name == "nt", "the stand-in runtime is a POSIX script")
+    def test_a_runtime_that_isnt_the_pinned_one_or_doesnt_list_its_operations_kinds_and_keys_is_refused(self) -> None:
+        target = pin.host_target()
+        status = [{"name": "status"}]
+        for runtime, said in ((stand_in(version="1.24.65"), "not kumi-serve 1.24.66"),
+                              (stand_in(tools={}), "listed no operations"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, generate(None, ["sfx"])]}),
+                               "generate enumerates no kinds"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, generate([], ["sfx"])]}),
+                               "generate enumerates no kinds"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, generate(["sfx"], None)]}),
+                               "names no kumi/ledger_policy_keys"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, generate(["sfx"], [])]}),
+                               "names no kumi/ledger_policy_keys")):
+            with self.subTest(said):
+                self.github = FakeGitHub()
+                self.out.unlink(missing_ok=True)
+                self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): runtime}))
+                code, err = run(self.github, VERSION, "--out", str(self.out), probe=pin.serve_usage,
+                                lister=pin.serve_listing)
+                self.assertEqual(code, 1, err)
+                self.assertIn(said, err)
+                self.assertFalse(self.out.exists(), "a refused release must leave no pin behind")
 
     def test_a_downloaded_bundle_that_differs_from_the_records_is_refused(self) -> None:
         self.github.files["kumi-x86_64-apple-darwin.tar.xz"] = tar_xz({"kumi": b"tampered"})

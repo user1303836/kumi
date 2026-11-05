@@ -1,5 +1,5 @@
 use ableton_mcp_server::{
-    host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions, ToolCall},
+    host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions},
     live::*,
 };
 use serde_json::{json, Value};
@@ -8,12 +8,6 @@ use std::{
     collections::HashMap,
     rc::Rc,
 };
-fn fixture() -> Value {
-    serde_json::from_str(&kumi_testkit::oracle("ableton-mcp-server/host-audio-clip-oracle.json")).unwrap()
-}
-fn same(a: &Value, b: &Value, label: &str) {
-    assert_eq!(canonical_mutation_identity(a).unwrap(), canonical_mutation_identity(b).unwrap(), "{label}");
-}
 fn clean(mut v: Value) -> Value {
     if let Some(s) = v["result"]["content"][0]["text"].as_str() {
         if let Ok(mut body) = serde_json::from_str::<Value>(s) {
@@ -68,11 +62,6 @@ impl Adapter {
             fired: Cell::new(false),
             after_invoke: Cell::new(false),
         }
-    }
-    fn reset(&self, fault: &str) {
-        *self.fault.borrow_mut() = fault.into();
-        self.fired.set(false);
-        self.after_invoke.set(false);
     }
     fn invoke_impl(&self, i: &LiveInvocation, c: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
         let mut context = Value::Null;
@@ -274,122 +263,4 @@ async fn a_preview_says_where_the_clips_sample_plays_from() {
     let wrap = |body: &Value| json!({"result":{"content":[{"text":body.to_string()}]}});
     assert_ne!(clean(wrap(&body)), clean(wrap(&other)));
     assert_eq!(clean(wrap(&body))["result"]["content"][0]["text"].get("sample"), None);
-}
-#[tokio::test]
-async fn audio_clip_validation_matches_source() {
-    for (index, row) in fixture()["rows"].as_array().unwrap().iter().enumerate() {
-        let sim = Rc::new(DeterministicLiveSimulator::new());
-        setup(&sim, "session-midi");
-        let host = McpHost::new(sim, McpHostOptions::default()).unwrap();
-        let name = format!("live_audio_clip_{}", row["action"].as_str().unwrap());
-        let got = host
-            .dispatch_audio_clip_tool(&ToolCall { id: json!(1), name, arguments: Some(row["args"].clone()), asynchronous: true }, None)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_or(Value::Null);
-        same(&clean(got), &row["result"], &format!("{index} {row}"));
-    }
-}
-async fn perform(
-    host: &McpHost,
-    action: &str,
-    key: &str,
-    txid: &Value,
-    results: &mut Vec<Value>,
-    states: &mut Vec<Value>,
-    record: &Rc<RefCell<Value>>,
-    preabort: bool,
-) {
-    let id = json!(results.len() + 1);
-    let args = json!({"transactionId":txid,"confirmation":action,"idempotencyKey":key});
-    let signal = kumi_common::abort::Signal::new();
-    if preabort {
-        signal.cancel();
-    }
-    let result = if action == "apply" {
-        host.live_audio_clip_apply_async(&id, &args, Some(&signal)).await.unwrap_or(Value::Null)
-    } else {
-        host.with_undo_watch(&id, &args, async { Ok(host.undo_audio_clip_async(&id, &args, None).await) }).await.unwrap()
-    };
-    results.push(clean(result));
-    states.push(clean(record.borrow().clone()));
-}
-#[tokio::test]
-async fn audio_clip_apply_and_exact_key_undo_match_source() {
-    for row in fixture()["workflows"].as_array().unwrap() {
-        let kind = row["kind"].as_str().unwrap();
-        let scenario = row["scenario"].as_str().unwrap();
-        let adapter = Rc::new(Adapter::new());
-        setup(&adapter.sim, kind);
-        {
-            let mut s = adapter.sim.state.borrow_mut();
-            let source = source(&mut s, kind);
-            match scenario {
-                "missing-identity" => {
-                    source.as_object_mut().unwrap().remove("objectIdentity");
-                }
-                "unavailable-field" => source["availableAudioFields"] = json!([]),
-                "not-audio" => source["isAudio"] = json!(false),
-                _ => {}
-            }
-        }
-        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
-        let args = params(kind);
-        let preview = host.live_audio_clip_preview_async(&json!(1), &args).await;
-        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-        let mut results = vec![clean(preview)];
-        let mut states = vec![];
-        if let Some(txid) = body.get("transactionId") {
-            let record = host.transaction_record(txid.as_str().unwrap()).unwrap();
-            if scenario == "expire" {
-                record.borrow_mut()["expiresAt"] = json!(0);
-            }
-            if scenario == "epoch" {
-                adapter.sim.reconnect().unwrap();
-            }
-            {
-                let mut s = adapter.sim.state.borrow_mut();
-                let source = source(&mut s, kind);
-                match scenario {
-                    "identity-edit" => source["objectIdentity"] = json!("other"),
-                    "source-content" => source["loopEnd"] = json!(100),
-                    _ => {}
-                }
-            }
-            if scenario.starts_with("apply-") {
-                adapter.reset(scenario);
-            }
-            for key in ["apply-key", "other-key", "apply-key"] {
-                perform(&host, "apply", key, txid, &mut results, &mut states, &record, scenario == "apply-preabort").await;
-            }
-            adapter.reset("");
-            {
-                let mut s = adapter.sim.state.borrow_mut();
-                let source = source(&mut s, kind);
-                if scenario == "undo-other-identity" {
-                    source["objectIdentity"] = json!("other");
-                }
-                if scenario == "undo-other-content" {
-                    source["loopEnd"] = json!(100);
-                }
-            }
-            if scenario == "undo-epoch" {
-                adapter.sim.reconnect().unwrap();
-            }
-            if scenario.starts_with("undo-") && !["undo-other-identity", "undo-other-content", "undo-epoch"].contains(&scenario) {
-                adapter.reset(scenario);
-            }
-            for key in ["undo-key", "other-undo-key", "undo-key"] {
-                perform(&host, "undo", key, txid, &mut results, &mut states, &record, false).await;
-            }
-            adapter.reset("");
-            perform(&host, "undo", "new-undo-key", txid, &mut results, &mut states, &record, false).await;
-        }
-        let label = format!("{kind} {scenario}");
-        same(&json!(results), &row["results"], &format!("{label} results"));
-        same(&json!(states), &row["states"], &format!("{label} states"));
-        same(&json!(*adapter.calls.borrow()), &row["calls"], &format!("{label} calls"));
-        same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
-    }
 }

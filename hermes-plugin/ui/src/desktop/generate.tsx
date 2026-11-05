@@ -6,8 +6,7 @@ import type { PluginContext, ToolMediaRendererProps } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { seconds } from '../shared/format.ts'
-import { capWords, costWords, generationRequest, generationTitle, outputKind, parseGeneration } from '../shared/generate.ts'
+import { capWords, costWords, generationRequest, generationTitle, lengthWords, outputKind, parseGeneration } from '../shared/generate.ts'
 import type { Audition } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
 import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
@@ -27,6 +26,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
   const kind = outputKind(made)
   const cost = costWords(made, t)
   const left = capWords(made, t)
+  const length = lengthWords(made, t)
   const offer = generationRequest(made, t)
   return (
     <div
@@ -40,7 +40,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
         <span style={{ ...S.row, gap: 4, flexShrink: 0 }}>
           {made.outputType && OUTPUTS.has(made.outputType) && <Chip>{t(`generate.outputs.${made.outputType}`)}</Chip>}
           {made.noteCount !== null && <Chip>{t('generate.notes', made.noteCount, String(made.noteCount))}</Chip>}
-          {made.seconds !== null && <Chip>{seconds(made.seconds)}</Chip>}
+          {length && <Chip>{length}</Chip>}
           {ENDED.has(made.state) ? (
             <Chip tone="bad">{t(`generate.states.${made.state}`)}</Chip>
           ) : (

@@ -242,9 +242,9 @@ class Doctor(unittest.TestCase):
         self.assertEqual(self.item(items, "Connection")["state"], doctor.CHECK)
         self.assertEqual(self.item(items, "Project")["state"], doctor.OFF)
 
-    def test_mirelo_is_checked_only_where_the_host_reports_it_and_its_key_is_never_shown(self):
+    def test_mirelo_says_what_paid_generation_still_needs_and_its_key_is_never_shown(self):
         host, _, _ = self.ready()
-        self.assertNotIn("Mirelo", [item["name"] for item in doctor.checks(host)])
+        self.assertEqual(self.item(doctor.checks(host), "Mirelo")["state"], doctor.OFF, "no key: Mirelo is off")
         for ready, state, said in (({"key": False}, doctor.OFF, "never contacts Mirelo"),
                                    ({"key": True, "acknowledged": True, "task": True, "cap": False}, doctor.FIX,
                                     "mirelo_credit_cap above 0"),

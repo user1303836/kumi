@@ -623,6 +623,37 @@ test('only a job that ended never sent says nothing was charged; a raw overrun i
   assert.ok(generate.generationJobWords({ ...fixtures.RAW_FROZEN, card: fixtures.FROZEN }).detail.endsWith('New paid generations are paused: a charge came in above its estimate'))
 })
 
+test("CC-15's kinds name their window, never their billed seconds as the returned file's length", () => {
+  const words = value => generate.lengthWords(generate.parseGeneration(value))
+  assert.equal(words(fixtures.VIDEO.DONE), 'Sound for video · first 6 s')
+  assert.equal(words(fixtures.EXTEND.DONE), 'Extended by 3 s (source 12 s)')
+  assert.equal(words(fixtures.INPAINT.RUNNING), 'Replaced 2–4 s of 12 s')
+  assert.equal(words(fixtures.DONE), '5 s', "an sfx's seconds are its length, as before")
+  // A window that doesn't hold (W4-b) shows nothing: no guess, and never the bare seconds.
+  const broken = (fixture, change) => ({ ...fixture, result: { ...fixture.result, ...change } })
+  for (const bad of [
+    broken(fixtures.INPAINT.DONE, { region_end_seconds: 13 }),
+    broken(fixtures.INPAINT.DONE, { region_start_seconds: 4, region_end_seconds: 2 }),
+    broken(fixtures.INPAINT.DONE, { seconds: 3 }),
+    broken(fixtures.EXTEND.DONE, { append_seconds: 10 }),
+    broken(fixtures.VIDEO.DONE, { seconds: 20 }),
+    broken(fixtures.VIDEO.DONE, { source_seconds: 0.0004 }),
+    broken(fixtures.EXTEND.DONE, { source_seconds: undefined })
+  ]) {
+    assert.equal(words(bad), '', JSON.stringify(bad.result))
+  }
+  // A window past a minute keeps both ends in the same form.
+  assert.equal(words(broken(fixtures.INPAINT.DONE, { source_seconds: 90, region_start_seconds: 70, region_end_seconds: 72 })), 'Replaced 1:10–1:12 of 1:30')
+  // The same words in a Jobs row, and audio before its output is known, with the kind's title when nothing was asked.
+  assert.equal(generate.generationJobWords(fixtures.EXTEND.DONE).detail, 'a-extend.wav · Extended by 3 s (source 12 s) · 18 credits (est. 20)')
+  const running = generate.parseGeneration(fixtures.EXTEND.CREATE)
+  assert.deepEqual([generate.outputKind(running), generate.generationTitle(running)], ['audio', 'Extended audio'])
+  assert.equal(generate.generationTitle(generate.parseGeneration(fixtures.VIDEO.DONE)), 'rain on glass')
+  assert.equal(generate.lengthWords(generate.parseGeneration(fixtures.INPAINT.DONE), i18n.translator('ja')), '12 s のうち 2–4 s を差し替え')
+  // Its one offer is the ordinary Place… of the new artifact, never the source.
+  assert.equal(generate.generationRequest(generate.parseGeneration(fixtures.INPAINT.DONE)).request, 'Place “a cleaner snare” (artifact a-inpaint) in my project')
+})
+
 test("a generation an event reports shows even when first read finished, keeps the event's card, and a card-less or foreign one leaves nothing", async () => {
   const kumi = new store.KumiStore(async path => {
     if (path === '/job?id=native-job-id') return fixtures.RAW_DONE

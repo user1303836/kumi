@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any, TextIO
 
 from . import doctor, policy, runtime, schemas, setup, snapshots, tools
@@ -115,6 +116,13 @@ def cli_parser(parser: argparse.ArgumentParser) -> None:
     setup_parser.add_argument("--daw", choices=schemas.DAWS, help="the DAW to set up for (default: the DAW setting)")
     setup_parser.add_argument("--use", action="store_true",
                               help="make that DAW Kumi's DAW in this profile, even when another one is set up")
+    credits_parser = actions.add_parser("credits", help="Mirelo credits: what's spent, reserved and left, and your "
+                                                        "own fixes (each asks you first)")
+    choices = credits_parser.add_subparsers(dest="credits_action")
+    choices.add_parser("unfreeze", help="let new paid generations be created again, after checking Mirelo")
+    release = choices.add_parser("release", help="release a reservation whose charge stayed unknown, after checking "
+                                                 "Mirelo's dashboard")
+    release.add_argument("reservation_id")
 
 
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
@@ -124,7 +132,81 @@ def cli(host: tools.Host, args: argparse.Namespace) -> int:
         items = doctor.checks(host)
         print(doctor.report(items))
         return 1 if doctor.needs_fixing(items) else 0
+    if getattr(args, "kumi_action", None) == "credits":
+        return cli_credits(host, getattr(args, "credits_action", None), getattr(args, "reservation_id", None))
     print(status_text(host))  # `status`, or no action at all
+    return 0
+
+
+def credits_line(totals: Any) -> str:
+    """The credit ledger's totals in a line (CC-13): Mirelo API credits, never money."""
+    if not isinstance(totals, dict):
+        return "Mirelo credits: Kumi can't read its credit ledger."
+    line = (f"Mirelo credits: {totals.get('spent')} spent and {totals.get('reserved')} reserved, of a cap of "
+            f"{totals.get('cap')}; {totals.get('left')} left.")
+    if totals.get("frozen"):
+        line += " New paid generations are paused: a charge came in above its estimate."
+    return line
+
+
+KIND_WORDS = {"sfx": "sound effect", "audio_to_midi": "audio to MIDI"}
+
+
+def reservation_lines(held: Any) -> list[str]:
+    """The ledger's unsettled reservations, one line each, with the id `release` takes (W3's `reservations()`): those
+    still held, then those the producer released by hand, which hold nothing now (CC-13 B-b amendment: a charge Mirelo
+    reports for one later is still counted)."""
+    rows = [row for row in held if isinstance(row, dict)] if isinstance(held, list) else []
+    lines = []
+    for released, heading in ((False, "Reserved, not settled yet:"),
+                              (True, "Released by you, so nothing is held; a charge Mirelo reports later still "
+                                     "counts:")):
+        group = [row for row in rows if (row.get("settlement") == "manual_release") is released]
+        if group:
+            lines.append(heading)
+        for row in group:
+            job = row.get("job_id")
+            amount = f"was {_said(row.get('reserved_credits'), 20)}" if released else _said(row.get("reserved_credits"), 20)
+            lines.append(f"• {_said(row.get('reservation_id'), 80)}: {KIND_WORDS.get(row.get('kind'), 'a generation')}, "
+                         f"{amount} credits, {f'job {_said(job, 80)}' if isinstance(job, str) and job else 'no job'}, "
+                         f"submitted: {_said(row.get('submission') or 'unknown', 40)}")
+    return lines
+
+
+def cli_credits(host: tools.Host, action: str | None, reservation_id: str | None = None, *,
+                stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
+    """`hermes kumi credits [unfreeze | release <reservation_id>]` (CC-13's 13-R5): the ledger's totals and its
+    unsettled reservations, and the two things only the producer may do, in a terminal, after an interactive yes. No
+    tool reaches them."""
+    stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
+    try:
+        ledger = host.ledger()
+        print(credits_line(ledger.snapshot()), file=stdout)
+        for line in reservation_lines(ledger.reservations()):
+            print(line, file=stdout)
+    except Exception as failure:
+        print(credits_line(None), _said(getattr(failure, "reason", None) or ""), file=stdout)
+        return 1
+    if action is None:
+        return 0
+    if not (stdin.isatty() and stdout.isatty()):
+        print(f"hermes kumi credits {action} asks you first, so it needs a terminal.", file=stdout)
+        return 1
+    question = ("Let new paid generations be created again? Check Mirelo's dashboard for the charge first."
+                if action == "unfreeze" else
+                f"Release reservation {_said(reservation_id, 80)}? Only when Mirelo's dashboard shows that job wasn't "
+                "charged; Kumi can't tell.")
+    print(question, "Go ahead? [y/N] ", end="", file=stdout, flush=True)
+    if stdin.readline().strip().lower() not in ("y", "yes"):
+        print("Nothing was changed.", file=stdout)
+        return 1
+    try:
+        totals = ledger.unfreeze() if action == "unfreeze" else ledger.release(reservation_id)
+    except Exception as failure:
+        print("Nothing was changed:", _said(getattr(failure, "message", None) or "the credit ledger refused it."),
+              file=stdout)
+        return 1
+    print(credits_line(totals), file=stdout)
     return 0
 
 
