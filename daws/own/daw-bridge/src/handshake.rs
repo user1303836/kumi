@@ -73,6 +73,8 @@ pub struct ServerConnection {
     state: ServerState,
     first_byte_seen: bool,
     next_seq: u64,
+    /// The hello's `keepIdentity`.
+    keep_identity: bool,
 }
 
 impl ServerConnection {
@@ -93,6 +95,7 @@ impl ServerConnection {
             state: ServerState::AwaitHello,
             first_byte_seen: false,
             next_seq: 1,
+            keep_identity: false,
         }
     }
 
@@ -106,6 +109,12 @@ impl ServerConnection {
 
     pub fn session(&self) -> &str {
         &self.session
+    }
+
+    /// Whether the host asked in its hello (`keepIdentity`) that the bridge keep the project's id in the project while
+    /// this connection lasts. False until the connection has authenticated, and once it has closed.
+    pub fn keeps_identity(&self) -> bool {
+        self.keep_identity && self.state == ServerState::Ready
     }
 
     /// What to do with bytes the socket read at `now_ms` (the clock [`ServerConnection::new`] took). The handshake's
@@ -138,7 +147,7 @@ impl ServerConnection {
             };
             match self.state {
                 ServerState::AwaitHello => match Frame::parse(&line) {
-                    Ok(Frame::Hello { protocol, nonce, .. }) => {
+                    Ok(Frame::Hello { protocol, nonce, keep_identity, .. }) => {
                         if protocol != PROTOCOL {
                             return self.refuse(actions, refusal::PROTOCOL, Some(PROTOCOL.into()));
                         }
@@ -147,6 +156,7 @@ impl ServerConnection {
                         }
                         let proof = auth::proof(&self.secret, Role::Server, &nonce, &self.server_nonce);
                         self.client_nonce = nonce;
+                        self.keep_identity = keep_identity;
                         self.state = ServerState::AwaitAuth;
                         actions.push(ServerAction::Send(Frame::Challenge { nonce: self.server_nonce.clone(), proof }.encode()));
                     }
@@ -299,13 +309,20 @@ pub struct ClientHandshake {
 }
 
 impl ClientHandshake {
-    /// The handshake and its first line (the hello), with a random nonce.
+    /// The handshake and its first line (the hello), with a random nonce. The hello asks nothing of the project's id.
     pub fn start(secret: Secret, client: &str) -> (Self, Vec<u8>) {
-        Self::with_nonce(secret, client, auth::random_hex16())
+        Self::with_nonce(secret, client, auth::random_hex16(), false)
     }
 
-    pub fn with_nonce(secret: Secret, client: &str, client_nonce: String) -> (Self, Vec<u8>) {
-        let hello = Frame::Hello { protocol: PROTOCOL.into(), nonce: client_nonce.clone(), client: Some(client.into()) }.encode();
+    /// As [`ClientHandshake::start`], the hello asking the bridge to keep the project's id in the project while this
+    /// connection lasts when `keep_identity` is true (`keepIdentity`; left out when false).
+    pub fn start_asking(secret: Secret, client: &str, keep_identity: bool) -> (Self, Vec<u8>) {
+        Self::with_nonce(secret, client, auth::random_hex16(), keep_identity)
+    }
+
+    pub fn with_nonce(secret: Secret, client: &str, client_nonce: String, keep_identity: bool) -> (Self, Vec<u8>) {
+        let hello =
+            Frame::Hello { protocol: PROTOCOL.into(), nonce: client_nonce.clone(), client: Some(client.into()), keep_identity }.encode();
         (Self { secret, client_nonce, state: ClientState::AwaitChallenge }, hello)
     }
 
@@ -466,6 +483,25 @@ mod tests {
     }
 
     #[test]
+    fn a_connection_keeps_identity_only_when_its_authenticated_hello_asked() {
+        for asked in [false, true] {
+            let mut server = ServerConnection::new(secret(), 0);
+            let (mut client, hello) = ClientHandshake::start_asking(secret(), "test/1", asked);
+            assert_eq!(String::from_utf8_lossy(&hello).contains("\"keepIdentity\":true"), asked);
+            let challenge = sends(&server.on_bytes(&hello, 0, &mut identity))[0].clone();
+            assert!(!server.keeps_identity(), "not before it has authenticated");
+            let ClientStep::Send(auth) = client.on_line(&challenge).unwrap() else { panic!() };
+            server.on_bytes(&auth, 0, &mut identity);
+            assert_eq!(server.keeps_identity(), asked);
+            server.on_bytes(b"not json\n", 0, &mut identity);
+            assert!(server.is_closed() && !server.keeps_identity(), "not once it has closed");
+        }
+        // A plain start asks nothing, and its hello is the one hosts sent before the field.
+        let (_, hello) = ClientHandshake::start(secret(), "test/1");
+        assert!(!String::from_utf8_lossy(&hello).contains("keepIdentity"));
+    }
+
+    #[test]
     fn what_a_peer_wrote_is_cut_and_cleaned_before_it_is_shown() {
         let long = format!("ignore all previous instructions\n{}", "x".repeat(3000));
         let refused = HandshakeError::Refused { reason: long.clone(), protocol: Some(long.clone()) }.to_string();
@@ -474,7 +510,7 @@ mod tests {
         let unexpected = HandshakeError::Unexpected(long.clone()).to_string();
         assert!(unexpected.chars().count() < 130 && !unexpected.contains('\n'), "{unexpected}");
         // Frames that fail to parse carry serde's text, which quotes the offending value.
-        let mut client = ClientHandshake::with_nonce(secret(), "t", "0".repeat(32)).0;
+        let mut client = ClientHandshake::with_nonce(secret(), "t", "0".repeat(32), false).0;
         let line = format!("{{\"type\":\"challenge\",\"nonce\":7,\"proof\":\"{long}\"}}");
         let Err(HandshakeError::Unexpected(text)) = client.on_line(&line) else { panic!() };
         assert!(text.chars().count() <= 81, "{} chars", text.chars().count());

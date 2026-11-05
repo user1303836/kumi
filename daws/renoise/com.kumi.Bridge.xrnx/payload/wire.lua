@@ -226,7 +226,11 @@ end
 
 -- Each takes the frame and the text of its top-level numbers.
 local CHECKS = {
-  hello = function(f) return is_string(f.protocol) and is_string(f.nonce) and optional_string(f.client) end,
+  -- (keepIdentity: left out, or a boolean, as serde reads it)
+  hello = function(f)
+    return is_string(f.protocol) and is_string(f.nonce) and optional_string(f.client)
+      and (f.keepIdentity == nil or type(f.keepIdentity) == "boolean")
+  end,
   challenge = function(f) return is_string(f.nonce) and is_string(f.proof) end,
   auth = function(f) return is_string(f.proof) end,
   welcome = function(f, n)
@@ -354,6 +358,8 @@ function Connection:on_bytes(bytes, now_ms, identity)
       if not M.valid_nonce(frame.nonce) then return self:refuse(actions, "handshake") end
       local proof = M.proof(self.secret, "server", frame.nonce, self.server_nonce)
       self.client_nonce = frame.nonce
+      -- (the hello's keepIdentity: the host asks that the song's id be kept in the song while this connection lasts)
+      self.keep_identity = frame.keepIdentity == true
       self.state = "auth"
       actions[#actions + 1] = { send = M.encode_frame("challenge", { nonce = self.server_nonce, proof = proof }) }
     elseif self.state == "auth" then

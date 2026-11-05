@@ -32,6 +32,8 @@ const METHODS: [&str; 6] = ["read", "snapshot", "focus", "focus_body", "show_sta
 const KEPT_BY_DEVICES: [&str; 9] = ["song", "track", "ptrack", "slot", "seq", "pattern", "instrument", "sample", "phrase"];
 /// What a song made to be changed answers besides (`config_with_changes`).
 const CHANGE_METHODS: [&str; 4] = ["change_preview", "change_apply", "change_restore", "project_save"];
+/// Where the song is saved (`project_save`).
+const SAVED_TO: &str = "/lab/Renoise/Sim.xrns";
 
 struct Case {
     method: String,
@@ -86,6 +88,11 @@ struct State {
     takes: Takes,
     /// Renoise plays, as its focus says (a test sets it).
     transport_playing: bool,
+    /// Whether a connected client asks that the song's id be kept in the song (a hello's `keepIdentity`).
+    keep_identity: bool,
+    /// The files the song was saved to with its id written into its `tool_data`, in order: the tool writes it as the song
+    /// is saved, only while a client asks.
+    ids_written: Vec<String>,
 }
 
 /// A song that answers like the tool. Clones share the song.
@@ -232,6 +239,8 @@ impl RenoiseScript {
                 render_mute_residue: None,
                 takes: Takes::default(),
                 transport_playing: false,
+                keep_identity: false,
+                ids_written: vec![],
             })),
             listening: SimListening::new(daw_bridge::Daw::Renoise),
         }
@@ -990,6 +999,8 @@ impl RenoiseScript {
             more.insert("demo".into(), listening.demo().into());
             more
         }));
+        let state = self.state.clone();
+        config.on_keep_identity = Some(Arc::new(move |asked| state.lock().unwrap().keep_identity = asked));
         config
     }
 
@@ -1001,6 +1012,11 @@ impl RenoiseScript {
     /// The lines shown in Renoise's status bar, oldest first.
     pub fn statuses(&self) -> Vec<String> {
         self.state.lock().unwrap().statuses.clone()
+    }
+
+    /// The files the song was saved to with its id written into it (its `tool_data`): only while a connected client asked.
+    pub fn ids_written(&self) -> Vec<String> {
+        self.state.lock().unwrap().ids_written.clone()
     }
 
     fn answer(&self, method: &str, params: &Value) -> Option<Result<Value, (String, String)>> {
@@ -1148,7 +1164,11 @@ impl RenoiseScript {
             } else if params.get("version").is_some_and(|v| !v.is_null()) {
                 Err(("bad-params".into(), "Renoise keeps no versions of a song: save it, or under path".into()))
             } else {
-                Ok(json!({"epoch": epoch, "saved": "/lab/Renoise/Sim.xrns", "dirty": false}))
+                // (the tool's on_will_save: the song's id goes into its tool_data only while a client asks)
+                if state.keep_identity {
+                    state.ids_written.push(SAVED_TO.to_string());
+                }
+                Ok(json!({"epoch": epoch, "saved": SAVED_TO, "dirty": false}))
             });
         }
         let restarts = state.restarts;

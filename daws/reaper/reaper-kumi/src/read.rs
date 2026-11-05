@@ -341,6 +341,7 @@ impl Reads {
     /// (m6-places) A saved project with no id of its own (none, or the template's it came with) gets the id Kumi names it
     /// by, its path's, written into it: REAPER keeps it with the project and saves it with the producer's next save, so a
     /// Save As or a moved file stays the same place. It marks nothing changed (7.82 lab). An unsaved project gets none.
+    /// The extension calls it only while a connected client asks it to keep the id ([`crate::extension::Outbox::keeps_identity`]).
     pub fn keep_project_id(&self, reaper: &Reaper, proj: Project, info: &crate::reaper::ProjectInfo) {
         if info.path.is_empty() {
             return;

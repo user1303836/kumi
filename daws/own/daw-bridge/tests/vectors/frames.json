@@ -153,6 +153,16 @@
       "ok": false
     },
     {
+      "name": "a hello asking the bridge to keep the project's identity",
+      "line": "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"client\":\"kumi/1\",\"keepIdentity\":true}",
+      "ok": true
+    },
+    {
+      "name": "a hello whose keepIdentity isn't a boolean",
+      "line": "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"keepIdentity\":\"yes\"}",
+      "ok": false
+    },
+    {
       "name": "a name with a surrogate pair",
       "line": "{\"type\":\"event\",\"seq\":1,\"name\":\"\\ud83d\\ude00\"}",
       "ok": true

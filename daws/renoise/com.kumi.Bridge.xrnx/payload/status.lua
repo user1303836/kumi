@@ -179,7 +179,8 @@ function M.identity(memory, bundle_path)
   }
 end
 
--- status: the identity plus busy.
+-- status: the identity plus busy, and keep_identity: the tool keeps the song's id in its tool_data only while a connected
+-- host asks (the hello's keepIdentity).
 function M.status(memory, bundle_path)
   local status = M.identity(memory, bundle_path)
   status.heartbeatMs, status.methods, status.events = nil, nil, nil
@@ -191,6 +192,7 @@ function M.status(memory, bundle_path)
   local kumi = M.kumi_busy and M.kumi_busy() or nil
   if kumi then status.busy, status.busyReason = "rendering", kumi end
   if M.listening then status.listening = M.listening() end
+  status.keep_identity = true
   return status
 end
 

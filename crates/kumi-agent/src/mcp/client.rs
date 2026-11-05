@@ -233,6 +233,8 @@ pub struct Options {
     pub cwd: Option<PathBuf>,
     /// Which DAW's bridge to start and hear; Live's when not given.
     pub bridge: Option<BridgeDescriptor>,
+    /// Variables the bridge gets beside the ones it always does (`KUMI_KEEP_IDENTITY` for Kumi's own host).
+    pub env: Vec<(String, String)>,
 }
 
 /// How long the transport waits, after the bridge exits, for its output to end before it counts as closed anyway.
@@ -315,7 +317,7 @@ pub async fn connect_mcp(options: Options) -> Result<Rc<dyn McpEndpoint>, Runtim
         command.arg("--config").arg(config);
     }
     command.args(&options.args);
-    command.env_clear().envs(child_environment(&bridge, &entry, &options.allow_tools));
+    command.env_clear().envs(child_environment(&bridge, &entry, &options.allow_tools)).envs(options.env.iter().cloned());
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     // The standalone bridge resolves protocol assets from the repository root.
     command.current_dir(options.cwd.clone().unwrap_or_else(|| dirname(&bridge.entry())));

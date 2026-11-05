@@ -117,6 +117,8 @@ struct Conn {
     stream: TcpStream,
     /// Set once the welcome is queued: events and heartbeats go out only after it.
     authenticated: AtomicBool,
+    /// Set with `authenticated` when the hello asked that the project's id be kept in the project (`keepIdentity`).
+    keeps_identity: AtomicBool,
     /// Held while the reader queues the welcome and sets `authenticated`, and while the main thread sends an event or
     /// a heartbeat: nothing goes out before the welcome, and none is missed by a host that has read it.
     opening: Mutex<()>,
@@ -172,11 +174,21 @@ impl Hub {
     pub fn connections(&self) -> usize {
         lock(&self.inner.conns).len()
     }
+
+    /// Whether an authenticated connection open now asked in its hello that the project's id be kept in the project.
+    /// A connection that closes is removed from the hub, so its ask ends with it.
+    pub fn keeps_identity(&self) -> bool {
+        lock(&self.inner.conns).iter().any(|c| c.authenticated.load(Ordering::Acquire) && c.keeps_identity.load(Ordering::Acquire))
+    }
 }
 
 impl Outbox for Hub {
     fn attended(&self) -> bool {
         self.counts().1 > 0
+    }
+
+    fn keeps_identity(&self) -> bool {
+        Hub::keeps_identity(self)
     }
 
     fn event(&self, name: &str, data: Value) {
@@ -770,6 +782,7 @@ fn spawn_connection(id: u64, stream: TcpStream, state: ServerConnection, started
         out,
         stream: stream.try_clone()?,
         authenticated: AtomicBool::new(false),
+        keeps_identity: AtomicBool::new(false),
         opening: Mutex::new(()),
         next_seq: AtomicU64::new(1),
         opened: Instant::now(),
@@ -863,6 +876,7 @@ fn serve(conn: &Arc<Conn>, mut state: ServerConnection, mut stream: TcpStream, s
                     }
                     #[cfg(test)]
                     thread::sleep(Duration::from_millis(shared.hub.inner.welcome_pause_ms.load(Ordering::Relaxed)));
+                    conn.keeps_identity.store(state.keeps_identity(), Ordering::Release);
                     conn.authenticated.store(true, Ordering::Release);
                     actions.next();
                 }
@@ -875,7 +889,10 @@ fn serve(conn: &Arc<Conn>, mut state: ServerConnection, mut stream: TcpStream, s
                     log::line(&format!("connection {} closed: {reason:?}", conn.id));
                     return;
                 }
-                ServerAction::Authenticated => conn.authenticated.store(true, Ordering::Release),
+                ServerAction::Authenticated => {
+                    conn.keeps_identity.store(state.keeps_identity(), Ordering::Release);
+                    conn.authenticated.store(true, Ordering::Release);
+                }
                 ServerAction::Request(request) => {
                     let response = shared.answer(conn.id, request);
                     if conn.out.send(response.encode()).is_err() {
@@ -971,8 +988,13 @@ mod tests {
         }
 
         fn authenticated(&mut self) -> (TcpStream, BufReader<TcpStream>, Value) {
+            self.authenticated_asking(false)
+        }
+
+        /// An authenticated connection whose hello asks that the project's id be kept when `keep_identity` is true.
+        fn authenticated_asking(&mut self, keep_identity: bool) -> (TcpStream, BufReader<TcpStream>, Value) {
             let (mut stream, mut reader) = self.connect();
-            let (mut handshake, hello) = ClientHandshake::start(Secret::new(VECTOR_SECRET).unwrap(), "test");
+            let (mut handshake, hello) = ClientHandshake::start_asking(Secret::new(VECTOR_SECRET).unwrap(), "test", keep_identity);
             stream.write_all(&hello).unwrap();
             loop {
                 match handshake.on_line(&read_line(&mut reader).unwrap()).unwrap() {
@@ -1605,6 +1627,28 @@ mod tests {
         assert!(response["error"]["message"].as_str().unwrap().contains("closing"));
         assert_eq!(read_frame(&mut reader), json!({"type": "bye", "reason": "quit"}));
         assert_eq!(read_line(&mut reader), None);
+    }
+
+    /// Only an open, authenticated connection whose hello asked (`keepIdentity`) has the project's id kept: none
+    /// connected, or one that didn't ask, and it isn't; the asking one gone, it isn't any more.
+    #[test]
+    fn the_id_is_kept_only_while_a_connection_that_asked_is_open() {
+        let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+        let settled = |hub: &Hub, want: bool| {
+            let until = Instant::now() + Duration::from_secs(5);
+            while hub.keeps_identity() != want && Instant::now() < until {
+                thread::sleep(Duration::from_millis(5));
+            }
+            hub.keeps_identity() == want
+        };
+        assert!(!lab.hub.keeps_identity(), "nobody connected");
+        let (_plain, _plain_reader, _) = lab.authenticated();
+        assert!(!Outbox::keeps_identity(&lab.hub), "a host that didn't ask");
+        let (asking, _asking_reader, _) = lab.authenticated_asking(true);
+        assert!(settled(&lab.hub, true), "a host that asked");
+        asking.shutdown(Shutdown::Both).unwrap();
+        assert!(settled(&lab.hub, false), "the host that asked has gone");
+        assert_eq!(lab.hub.counts().1, 1, "the one that didn't ask is still there");
     }
 
     #[test]
