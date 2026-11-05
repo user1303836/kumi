@@ -108,8 +108,11 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
   The DAW renders it into the listening folder of the Kumi installation that owns its part, and Kumi copies that one
   file and removes it. It needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the DAW.
   Renoise listens only to a window that starts and ends on whole pattern lines inside the song, and refuses any other
-  rather than play more than you approved. REAPER may show the project as modified after a track listen, since only
-  saving clears that flag; Kumi never saves.
+  rather than play more than you approved. Rendering can leave Renoise's BPM and lines per beat at the values the
+  song's own tempo commands reach by the window's end. When the listen ends, fails or is cancelled, Kumi sets both back
+  if they still have exactly those values. If either is different, Kumi leaves both as they are and says it couldn't
+  restore the tempo. REAPER may show the project as modified after a track listen, since only saving clears that
+  flag; Kumi never saves.
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
   track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by
   default.

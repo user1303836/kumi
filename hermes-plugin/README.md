@@ -129,9 +129,12 @@ everything.
   The DAW renders it into the listening folder of the Kumi installation that owns Kumi's part in that DAW, and Kumi
   copies the file it asked for and removes exactly that file. It needs Kumi's newer part in that DAW: when Kumi says
   so, run setup again and restart the DAW. Renoise listens only to a window that starts and ends on whole pattern
-  lines inside the song, and refuses any other rather than play more than you approved. REAPER may show the project as
-  modified after a track listen, since only saving clears that flag; Kumi never saves. In Live, Kumi for Hermes
-  doesn't listen to a track or the mix yet: it says so and plays nothing.
+  lines inside the song, and refuses any other rather than play more than you approved. Rendering can leave Renoise's
+  BPM and lines per beat at the values the song's own tempo commands reach by the window's end. When the listen ends,
+  fails or is cancelled, Kumi sets both back if they still have exactly those values. If either is different, Kumi
+  leaves both as they are and says it couldn't restore the tempo. REAPER may show the project as modified after a
+  track listen, since only saving clears that flag; Kumi never saves. In Live, Kumi for Hermes doesn't listen to a
+  track or the mix yet: it says so and plays nothing.
 - **Project ids:** Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its
   Renoise tool one for each song in the song's tool data, saved with them.
 - **ffmpeg:** with your approval at setup, Kumi's runtime runs an ffmpeg already on this computer to decode compressed
