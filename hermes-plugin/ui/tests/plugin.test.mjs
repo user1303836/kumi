@@ -17,7 +17,7 @@ const ROUTES = {
     runtime: { version: '1.24.70', protocol: 'kumi-serve/1' },
     revisions: { status: 12, focus: 88, history: 9, map: 'r7' }
   },
-  '/focus': { connected: true, focus: { track: { name: 'Drums' }, device: { name: 'Drum Rack' } }, transport: { playing: true, tempo: 124 } },
+  '/focus': { connected: true, focus: { track: { name: 'Drums', kind: 'midi' }, trackRef: 't-3', device: 'Drum Rack', view: 'Session' }, transport: { playing: true, tempo: 124, beat: 66, at: 0 } },
   '/history?limit=50': {
     connected: true,
     items: [

@@ -16,7 +16,27 @@ function nameOf(value) {
 }
 function focusPath(focus) {
   const parts = focus?.focus;
-  return [nameOf(parts?.track), nameOf(parts?.device) ?? nameOf(parts?.clip)].filter((part) => Boolean(part)).map((part) => clean(part, 40));
+  const inner = nameOf(parts?.device) ?? nameOf(parts?.item?.name) ?? nameOf(parts?.clip);
+  return [nameOf(parts?.track), inner].filter((part) => Boolean(part)).map((part) => clean(part, 40));
+}
+function focusPlace(focus) {
+  const parts = focus?.focus;
+  const view = nameOf(parts?.mainView?.label) ?? nameOf(parts?.view);
+  const section = nameOf(parts?.section?.name) ?? nameOf(parts?.scene);
+  return [view && clean(view, 20), section && clean(section, 24)].filter((part) => Boolean(part));
+}
+function focusParameter(focus) {
+  const parameter = focus?.focus?.parameter;
+  const name = nameOf(parameter?.name);
+  if (!name) return void 0;
+  const value = nameOf(parameter?.value ?? void 0);
+  return clean(value ? `${name} ${value}` : name, 60);
+}
+function catchUpLines(focus, most = 4) {
+  const entries = Array.isArray(focus?.catch_up) ? focus.catch_up : [];
+  const all = entries.flatMap((entry) => entry && Array.isArray(entry.lines) ? entry.lines.filter((line) => typeof line === "string") : []);
+  const unlisted = entries.reduce((sum, entry) => sum + (entry && typeof entry.more === "number" && entry.more > 0 ? Math.floor(entry.more) : 0), 0);
+  return { lines: all.slice(0, most).map((line) => clean(line, 120)), more: Math.max(0, all.length - most) + unlisted };
 }
 function colorOf(value) {
   const color = value && typeof value === "object" ? value.color : void 0;
@@ -740,26 +760,31 @@ function FocusView({ focus, now }) {
   if (!focus || !focus.focus && !focus.project) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
   }
-  const view = typeof focus.focus?.view === "string" ? focus.focus.view : void 0;
   const transport = focus.transport;
   const path = focusPath(focus);
-  const catchUp = Array.isArray(focus.catch_up) ? focus.catch_up.filter((line) => typeof line === "string") : [];
+  const parameter = focusParameter(focus);
+  const busy = nameOf(focus.focus?.busy ?? void 0);
+  const meter = nameOf(transport?.meter ?? void 0);
+  const catchUp = catchUpLines(focus);
   return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 7 }, children: [
       /* @__PURE__ */ jsx3(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
       /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: path.length ? path.join(" › ") : "Nothing selected" })
     ] }),
+    parameter && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
       focus.project?.name && /* @__PURE__ */ jsx3(Chip, { title: "The open project", children: clean(focus.project.name, 40) }),
-      view && /* @__PURE__ */ jsx3(Chip, { children: clean(view, 20) }),
-      transport?.playing !== void 0 && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
+      focusPlace(focus).map((place) => /* @__PURE__ */ jsx3(Chip, { children: place }, place)),
+      typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
-      typeof transport?.position === "string" && /* @__PURE__ */ jsx3(Chip, { children: clean(transport.position, 16) }),
+      meter && /* @__PURE__ */ jsx3(Chip, { children: clean(meter, 12) }),
+      busy && /* @__PURE__ */ jsx3(Chip, { tone: "warn", title: "The DAW answers late while this lasts, so what's shown may be behind", children: clean(busy, 40) }),
       focus.stale && /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" })
     ] }),
-    catchUp.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
+    catchUp.lines.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
       /* @__PURE__ */ jsx3("span", { style: S.faint, children: "Since Kumi last looked" }),
-      catchUp.slice(0, 4).map((line, index) => /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: clean(line, 120) }, index))
+      catchUp.lines.map((line, index) => /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: line }, index)),
+      catchUp.more > 0 && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `and ${catchUp.more} more` })
     ] }),
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `Last heard ${ago(focus.heard_at, now)}.` })
   ] });

@@ -27,7 +27,7 @@ export type Named = string | { name?: string; color?: string; kind?: string } | 
 
 export interface Status extends Liveness {
   daw?: string
-  project?: Project
+  project?: Project | null
   runtime?: { version?: string; protocol?: string }
   /** What `kumi serve` sees of its DAW part (W1); where setup stands is `/setup`'s answer instead. */
   setup?: { component?: { installed?: boolean; version?: string | null; bundled?: string | null }; daw_open?: boolean }
@@ -37,17 +37,55 @@ export interface Status extends Liveness {
   unsure?: { at?: number; op?: string; reason?: string; cleanup?: string } | null
 }
 
+/** The DAW's transport, as Kumi's `Transport` serializes it (W1, #953). `beat` is where the playhead was when the
+ *  snapshot was written, so it's never shown: a snapshot isn't written as the playhead moves. */
 export interface Transport {
   playing?: boolean
-  tempo?: number
-  position?: string
+  tempo?: number | null
+  beat?: number | null
+  beatsPerBar?: number | null
+  /** The DAW's words for its time beside the tempo: `7/8`, `LPB 4`. */
+  meter?: string | null
+}
+
+/** A view as Kumi names it: its kind (`launcher`, `timeline`, `device-chain`…) and the DAW's own word for it. */
+export interface FocusViewName {
+  kind?: string
+  label?: string
+}
+
+/** What the producer is looking at, as Kumi's `DawFocus` serializes it (camelCase). Live fills its own fields (`view`,
+ *  `scene`, `clip`); REAPER and Renoise the neutral ones (`mainView`, `section`, `item`). Names are data. */
+export interface DawFocus {
+  track?: Named
+  device?: string | null
+  clip?: string | null
+  scene?: string | null
+  view?: string | null
+  mainView?: FocusViewName | null
+  editorView?: FocusViewName | null
+  item?: { kind?: string; name?: string | null } | null
+  section?: { kind?: string; name?: string | null } | null
+  parameter?: { name?: string; value?: string | null; owner?: string | null } | null
+  /** Why the DAW answers late ("a dialog is open"), while it does. */
+  busy?: string | null
+}
+
+/** What changed in a project while Kumi wasn't looking, as Kumi's `CatchUp` serializes it. */
+export interface CatchUp {
+  set?: string
+  lastSeenAt?: number
+  lines?: string[]
+  /** Changes not listed. */
+  more?: number
+  afterReconnect?: boolean | null
 }
 
 export interface Focus extends Liveness {
-  project?: Project
-  focus?: { track?: Named; device?: Named; clip?: Named; view?: string | null }
-  transport?: Transport
-  catch_up?: unknown[]
+  project?: Project | null
+  focus?: DawFocus | null
+  transport?: Transport | null
+  catch_up?: CatchUp[] | null
   seq?: number | null
 }
 

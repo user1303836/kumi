@@ -3,7 +3,7 @@
 `write_state(plugin_data, library)` writes what `kumi serve` would publish while connected to a Live Set: owner,
 status, FOCUS, HISTORY, a sound map with its samples, two measured files and a scan job. Everything is deterministic
 but the timestamps. From a terminal, `python3 tests/ui_fixtures.py <plugin-data>/kumi <library> --live` keeps the
-owner's heartbeat fresh (and the transport moving) until stopped, so the UI shows a connected runtime.
+owner's heartbeat fresh until stopped, so the UI shows a connected runtime.
 """
 
 from __future__ import annotations
@@ -127,6 +127,8 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             "capabilities": ["observe", "read", "change", "undo", "history", "listen", "sounds", "library", "map"],
         },
     )
+    # As `kumi serve` writes it (W1, #953): Kumi's `DawFocus` (Live's own fields here) and `Transport` in camelCase,
+    # and `CatchUp` entries. It's rewritten when the focus, the transport's play state, tempo or meter changes.
     _write_json(
         state / "focus.json",
         {
@@ -134,12 +136,16 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             "project": dict(PROJECT),
             "focus": {
                 "track": {"name": "Drums", "color": "#f59a3c", "kind": "midi"},
-                "device": {"name": "Drum Rack"},
-                "clip": None,
+                "trackRef": "t-3",
+                "device": "Drum Rack",
+                "deviceRef": "d-3-0",
                 "view": "Session",
+                "detail": "Device",
             },
-            "transport": {"playing": True, "tempo": 124.0, "position": "17.1.1"},
-            "catch_up": ["Drums: Drum Rack's pad D1 changed", "Tempo 120 → 124 BPM"],
+            "transport": {"playing": True, "tempo": 124.0, "beat": 64.0, "at": 0.0, "beatsPerBar": 4.0},
+            "catch_up": [
+                {"set": PROJECT["name"], "lastSeenAt": now - 26 * 60_000, "lines": ["Drums: Drum Rack's pad D1 changed", "Tempo 120 → 124 BPM"], "more": 0},
+            ],
         },
     )
     minute = 60_000
@@ -290,20 +296,14 @@ def listen_result() -> dict:
 
 
 def _live(plugin_data: Path) -> None:
+    """Keep the owner's heartbeat fresh, every 3 s, as a running `kumi serve` does."""
     state = plugin_data / "state"
-    beat = 0
     while True:
         now = _now_ms()
         owner = json.loads((state / "owner.json").read_text(encoding="utf-8"))
         owner.update(seq=owner.get("seq", 0) + 1, at=now, heartbeat=now)
         _write_json(state / "owner.json", owner)
-        beat += 1
-        if beat % 2 == 0:
-            focus = json.loads((state / "focus.json").read_text(encoding="utf-8"))
-            bar = 17 + (beat // 2) % 16
-            focus["transport"]["position"] = f"{bar}.{1 + beat % 4}.1"
-            _write_json(state / "focus.json", focus)
-        time.sleep(2)
+        time.sleep(3)
 
 
 def main(argv: list[str]) -> int:

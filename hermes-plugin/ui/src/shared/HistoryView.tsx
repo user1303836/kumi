@@ -3,7 +3,7 @@
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { ago, bpm, clean, cleanupWords, colorOf, focusPath, nameOf } from './format.ts'
+import { ago, bpm, catchUpLines, clean, cleanupWords, colorOf, focusParameter, focusPath, focusPlace, nameOf } from './format.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
 import { Chip, Dot, S } from './ui.tsx'
 
@@ -27,32 +27,43 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   if (!focus || (!focus.focus && !focus.project)) {
     return <span style={S.muted}>Nothing in focus yet. Kumi shows what you select in your DAW once it's connected.</span>
   }
-  const view = typeof focus.focus?.view === 'string' ? focus.focus.view : undefined
   const transport = focus.transport
   const path = focusPath(focus)
-  const catchUp = Array.isArray(focus.catch_up) ? focus.catch_up.filter((line): line is string => typeof line === 'string') : []
+  const parameter = focusParameter(focus)
+  const busy = nameOf(focus.focus?.busy ?? undefined)
+  const meter = nameOf(transport?.meter ?? undefined)
+  const catchUp = catchUpLines(focus)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: focus.stale ? 0.6 : 1 }}>
       <div style={{ ...S.row, gap: 7 }}>
         <Dot color={colorOf(focus.focus?.track) ?? T.faint} size={9} />
         <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600 }}>{path.length ? path.join(' › ') : 'Nothing selected'}</span>
       </div>
+      {parameter && <span style={{ ...S.muted, ...S.ellipsis }}>{parameter}</span>}
       <div style={{ ...S.row, gap: 4, flexWrap: 'wrap' }}>
         {focus.project?.name && <Chip title="The open project">{clean(focus.project.name, 40)}</Chip>}
-        {view && <Chip>{clean(view, 20)}</Chip>}
-        {transport?.playing !== undefined && <Chip tone={transport.playing ? 'good' : undefined}>{transport.playing ? '▶ playing' : '■ stopped'}</Chip>}
+        {focusPlace(focus).map(place => (
+          <Chip key={place}>{place}</Chip>
+        ))}
+        {typeof transport?.playing === 'boolean' && <Chip tone={transport.playing ? 'good' : undefined}>{transport.playing ? '▶ playing' : '■ stopped'}</Chip>}
         {bpm(transport?.tempo) && <Chip>{bpm(transport?.tempo)}</Chip>}
-        {typeof transport?.position === 'string' && <Chip>{clean(transport.position, 16)}</Chip>}
+        {meter && <Chip>{clean(meter, 12)}</Chip>}
+        {busy && (
+          <Chip tone="warn" title="The DAW answers late while this lasts, so what's shown may be behind">
+            {clean(busy, 40)}
+          </Chip>
+        )}
         {focus.stale && <Chip tone="warn">not answering</Chip>}
       </div>
-      {catchUp.length > 0 && (
+      {catchUp.lines.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={S.faint}>Since Kumi last looked</span>
-          {catchUp.slice(0, 4).map((line, index) => (
+          {catchUp.lines.map((line, index) => (
             <span key={index} style={{ ...S.muted, ...S.ellipsis }}>
-              {clean(line, 120)}
+              {line}
             </span>
           ))}
+          {catchUp.more > 0 && <span style={S.faint}>{`and ${catchUp.more} more`}</span>}
         </div>
       )}
       {focus.stale && typeof focus.heard_at === 'number' && <span style={S.faint}>{`Last heard ${ago(focus.heard_at, now)}.`}</span>}
