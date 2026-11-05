@@ -236,6 +236,13 @@ const en = {
     generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
     soundTitle: 'Generated sound',
     notesTitle: 'Notes from audio',
+    kinds: { video_to_sfx: 'Sound for a video', extend: 'Extended audio', inpaint: 'Inpainted audio' },
+    // CC-15: what a generation's billed seconds covered, never the returned file's length.
+    window: {
+      video_to_sfx: (first: string) => `Sound for video · first ${first}`,
+      extend: (added: string, source: string) => `Extended by ${added} (source ${source})`,
+      inpaint: (span: string, source: string) => `Replaced ${span} of ${source}`
+    },
     credits: (n: number, shown: string) => (n === 1 ? `${shown} credit` : `${shown} credits`),
     creditsTitle: 'Mirelo API credits, not money. An estimate or a reservation is not a price.',
     cost: (credits: string, estimate: string) => `${credits} (est. ${estimate})`,
@@ -506,6 +513,12 @@ const ja: Shape<typeof en> = {
     generatedTitle: 'Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。',
     soundTitle: '生成したサウンド',
     notesTitle: 'オーディオから取り出したノート',
+    kinds: { video_to_sfx: '映像の効果音', extend: '延長したオーディオ', inpaint: '一部を差し替えたオーディオ' },
+    window: {
+      video_to_sfx: first => `映像の効果音 · 最初の ${first}`,
+      extend: (added, source) => `${added} 延長（元は ${source}）`,
+      inpaint: (span, source) => `${source} のうち ${span} を差し替え`
+    },
     credits: (_n, shown) => `${shown} クレジット`,
     creditsTitle: 'Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。',
     cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
@@ -772,6 +785,12 @@ const zh: Shape<typeof en> = {
     generatedTitle: '由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。',
     soundTitle: '生成的声音',
     notesTitle: '从音频提取的音符',
+    kinds: { video_to_sfx: '视频音效', extend: '延长的音频', inpaint: '局部替换的音频' },
+    window: {
+      video_to_sfx: first => `视频音效 · 前 ${first}`,
+      extend: (added, source) => `延长 ${added}（原长 ${source}）`,
+      inpaint: (span, source) => `替换了 ${source} 中的 ${span}`
+    },
     credits: (_n, shown) => `${shown} 积分`,
     creditsTitle: 'Mirelo API 积分，不是钱。预估或预留不是价格。',
     cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,

@@ -226,6 +226,13 @@ var en = {
     generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
     soundTitle: "Generated sound",
     notesTitle: "Notes from audio",
+    kinds: { video_to_sfx: "Sound for a video", extend: "Extended audio", inpaint: "Inpainted audio" },
+    // CC-15: what a generation's billed seconds covered, never the returned file's length.
+    window: {
+      video_to_sfx: (first) => `Sound for video · first ${first}`,
+      extend: (added, source) => `Extended by ${added} (source ${source})`,
+      inpaint: (span2, source) => `Replaced ${span2} of ${source}`
+    },
     credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
     creditsTitle: "Mirelo API credits, not money. An estimate or a reservation is not a price.",
     cost: (credits2, estimate) => `${credits2} (est. ${estimate})`,
@@ -491,6 +498,12 @@ var ja = {
     generatedTitle: "Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。",
     soundTitle: "生成したサウンド",
     notesTitle: "オーディオから取り出したノート",
+    kinds: { video_to_sfx: "映像の効果音", extend: "延長したオーディオ", inpaint: "一部を差し替えたオーディオ" },
+    window: {
+      video_to_sfx: (first) => `映像の効果音 · 最初の ${first}`,
+      extend: (added, source) => `${added} 延長（元は ${source}）`,
+      inpaint: (span2, source) => `${source} のうち ${span2} を差し替え`
+    },
     credits: (_n, shown) => `${shown} クレジット`,
     creditsTitle: "Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。",
     cost: (credits2, estimate) => `${credits2}（見積 ${estimate}）`,
@@ -756,6 +769,12 @@ var zh = {
     generatedTitle: "由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。",
     soundTitle: "生成的声音",
     notesTitle: "从音频提取的音符",
+    kinds: { video_to_sfx: "视频音效", extend: "延长的音频", inpaint: "局部替换的音频" },
+    window: {
+      video_to_sfx: (first) => `视频音效 · 前 ${first}`,
+      extend: (added, source) => `延长 ${added}（原长 ${source}）`,
+      inpaint: (span2, source) => `替换了 ${source} 中的 ${span2}`
+    },
     credits: (_n, shown) => `${shown} 积分`,
     creditsTitle: "Mirelo API 积分，不是钱。预估或预留不是价格。",
     cost: (credits2, estimate) => `${credits2}（预估 ${estimate}）`,
@@ -1748,6 +1767,29 @@ function ListenResultCard({ result, audition, fallback }) {
 }
 
 // src/shared/generate.ts
+var WINDOWED = /* @__PURE__ */ new Set(["video_to_sfx", "extend", "inpaint"]);
+function timing(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.abs(value * 1e3 - Math.round(value * 1e3)) < 1e-6 ? value : null;
+}
+var ms = (value) => Math.round(value * 1e3);
+function windowOf(kind, result) {
+  const source = timing(result.source_seconds);
+  const billed = timing(result.seconds);
+  if (source === null || source === 0 || billed === null || billed === 0) return null;
+  if (kind === "video_to_sfx") return billed <= source ? { kind, seconds: billed, source } : null;
+  if (kind === "extend") {
+    const append = timing(result.append_seconds);
+    return append !== null && ms(append) === ms(billed) ? { kind, append, source } : null;
+  }
+  if (kind === "inpaint") {
+    const start = timing(result.region_start_seconds);
+    const end = timing(result.region_end_seconds);
+    if (start === null || end === null || !(start < end) || end > source || ms(end) - ms(start) !== ms(billed)) return null;
+    return { kind, start, end, source };
+  }
+  return null;
+}
 var STATES = /* @__PURE__ */ new Set(["running", "done", "failed", "cancelled", "interrupted"]);
 function objectOf(value) {
   let found = value;
@@ -1781,14 +1823,16 @@ function parseGeneration(value) {
   const error = objectOf(outer.error);
   const progress = objectOf(outer.progress);
   const notes = result.note_count;
+  const kind = typeof result.kind === "string" ? clean(result.kind, 24) : "";
   return {
     state,
-    kind: typeof result.kind === "string" ? clean(result.kind, 24) : "",
+    kind,
     prompt: typeof result.prompt === "string" ? clean(result.prompt, 200) : "",
     artifactId: plainId(result.artifact_id),
     file: typeof result.file === "string" ? clean(result.file.split(/[\\/]/).pop() ?? "", 80) : "",
     outputType: typeof result.output_type === "string" ? clean(result.output_type, 16) : null,
     seconds: positive(result.seconds),
+    window: WINDOWED.has(kind) ? windowOf(kind, result) : null,
     noteCount: typeof notes === "number" && Number.isInteger(notes) && notes >= 0 ? notes : null,
     estimate: credits(spent?.estimate ?? estimate?.credits),
     reserved: credits(spent?.reserved ?? estimate?.max_credits),
@@ -1819,12 +1863,23 @@ function capWords(made, t = english) {
 }
 var NOTES = /* @__PURE__ */ new Set(["midi", "notes", "musicxml"]);
 function outputKind(made) {
-  if (made.outputType === null) return made.kind === "sfx" ? "audio" : made.kind === "audio_to_midi" ? "notes" : null;
+  if (made.outputType === null) return made.kind === "sfx" || WINDOWED.has(made.kind) ? "audio" : made.kind === "audio_to_midi" ? "notes" : null;
   if (made.outputType === "audio") return "audio";
   return NOTES.has(made.outputType) ? "notes" : null;
 }
 function generationTitle(made, t = english) {
-  return made.prompt || (outputKind(made) === "notes" ? t("generate.notesTitle") : t("generate.soundTitle"));
+  if (made.prompt) return made.prompt;
+  if (WINDOWED.has(made.kind)) return t(`generate.kinds.${made.kind}`);
+  return outputKind(made) === "notes" ? t("generate.notesTitle") : t("generate.soundTitle");
+}
+var clock = (value) => `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
+var span = (from, to) => to < 60 ? `${num(from, 2)}–${seconds(to)}` : `${clock(from)}–${clock(to)}`;
+function lengthWords(made, t = english) {
+  const covered = made.window;
+  if (covered?.kind === "video_to_sfx") return t("generate.window.video_to_sfx", seconds(covered.seconds));
+  if (covered?.kind === "extend") return t("generate.window.extend", seconds(covered.append), seconds(covered.source));
+  if (covered?.kind === "inpaint") return t("generate.window.inpaint", span(covered.start, covered.end), seconds(covered.source));
+  return WINDOWED.has(made.kind) || made.seconds === null ? "" : seconds(made.seconds);
 }
 function generationJobWords(job, t = english) {
   const words = jobWords(job, t);
@@ -1833,7 +1888,8 @@ function generationJobWords(job, t = english) {
   const frozen = (made.ledger ?? parseGeneration(job.card)?.ledger)?.frozen === true;
   const over = made.actual !== null && made.reserved !== null && made.actual > made.reserved;
   const reason = made.state === "failed" || made.state === "interrupted" ? made.error?.reason ?? "" : "";
-  const detail = [made.state === "running" ? made.message : made.file, reason, costWords(made, t), frozen ? t("generate.frozen") : ""];
+  const covered = made.window ? lengthWords(made, t) : "";
+  const detail = [made.state === "running" ? made.message : made.file, covered, reason, costWords(made, t), frozen ? t("generate.frozen") : ""];
   return { ...words, detail: detail.filter(Boolean).join(" · "), tone: (frozen || over) && words.tone === "good" ? "warn" : words.tone };
 }
 function generationRequest(made, t = english) {
@@ -2113,6 +2169,7 @@ function GenerateCard({ media, audition, ctx, store }) {
   const kind = outputKind(made);
   const cost = costWords(made, t);
   const left = capWords(made, t);
+  const length = lengthWords(made, t);
   const offer = generationRequest(made, t);
   return /* @__PURE__ */ jsxs6(
     "div",
@@ -2129,7 +2186,7 @@ function GenerateCard({ media, audition, ctx, store }) {
           /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 4, flexShrink: 0 }, children: [
             made.outputType && OUTPUTS.has(made.outputType) && /* @__PURE__ */ jsx6(Chip, { children: t(`generate.outputs.${made.outputType}`) }),
             made.noteCount !== null && /* @__PURE__ */ jsx6(Chip, { children: t("generate.notes", made.noteCount, String(made.noteCount)) }),
-            made.seconds !== null && /* @__PURE__ */ jsx6(Chip, { children: seconds(made.seconds) }),
+            length && /* @__PURE__ */ jsx6(Chip, { children: length }),
             ENDED.has(made.state) ? /* @__PURE__ */ jsx6(Chip, { tone: "bad", children: t(`generate.states.${made.state}`) }) : /* @__PURE__ */ jsx6(Chip, { title: t("generate.generatedTitle"), tone: "accent", children: t("generate.generated") })
           ] })
         ] }),
@@ -2450,8 +2507,8 @@ function frame(model, ids, width, height, margin = 48) {
   const ys = chosen.map((point) => point.y);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const size = Math.max(1, Math.min(width, height) - 32);
-  const span = Math.max(x1 - x0, y1 - y0, 0.04);
-  const scale = Math.min(40, Math.max(1, (Math.min(width, height) - 2 * margin) / (span * size)));
+  const span2 = Math.max(x1 - x0, y1 - y0, 0.04);
+  const scale = Math.min(40, Math.max(1, (Math.min(width, height) - 2 * margin) / (span2 * size)));
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
   return { scale, dx: width / 2 - cx * size * scale, dy: height / 2 - cy * size * scale };
