@@ -42,7 +42,8 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
 
 
 def status_text(host: tools.Host) -> str:
-    """`hermes kumi status`: setup, the DAW setting, the runtime as it last published itself, and the folders."""
+    """`hermes kumi status`: setup, the DAW setting, the runtime as it last published itself, the folders, and whether
+    Kumi reads compressed audio (the ffmpeg allowed at setup, CC-10)."""
     data = Path(host.data_dir())
     daw = schemas.DAW_NAMES.get(host.daw(), host.daw())
     try:
@@ -69,6 +70,7 @@ def status_text(host: tools.Host) -> str:
             lines.append(f"Not connected to {daw}.")
     folders = host.library_folders()
     lines.append("Sample folders: " + (", ".join(folders) if folders else "none yet."))
+    lines.append(setup.compressed_audio(data)["message"])
     lines.append("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking."
                  if tools.approvals_bypassed(host, chat=False)
                  else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
