@@ -585,6 +585,32 @@ class SetupTest(unittest.TestCase):
         program.unlink()
         self.assertEqual(self.status()["compressed_audio"]["state"], "gone")
 
+    def test_what_the_model_is_told_of_setup_names_no_path_on_this_computer(self) -> None:
+        self.install_runtime()
+        parts = [{"name": "Remote Script", "path": f"{FAKE_LIBRARY}/Remote Scripts/AbletonMcpBridge", "state": "same"},
+                 {"name": "Kumi Ears", "path": f"{FAKE_LIBRARY}/Kumi/Audio Effects/Kumi Ears.amxd", "state": "same"}]
+        self.plan(setup_daw=Runtime("missing", parts=parts))
+        self.assertTrue(self.install(None, setup_daw=Runtime("missing", parts=parts))["ok"])
+        program = self.ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        local = [str(self.data), str(program), str(FAKE_LIBRARY), str(Path(self.tmp.name))]
+        for state, change in (("available", None), ("changed", lambda: program.write_bytes(b"#!/bin/sh\n")),
+                              ("gone", program.unlink)):
+            if change:
+                change()
+            report = self.status()
+            self.assertTrue(any(path in json.dumps(report) for path in local), "hermes kumi status shows them")
+            shown = setup.for_model(report)
+            for path in local:
+                self.assertNotIn(path, json.dumps(shown), (state, path))
+            self.assertEqual((shown["state"], shown["compressed_audio"]["state"]), (report["state"], state))
+            self.assertEqual(shown["runtime"]["version"], VERSION)
+            self.assertEqual(shown["daw_component"]["parts"], [{"name": "Remote Script", "state": "same"},
+                                                               {"name": "Kumi Ears", "state": "same"}])
+        self.assertEqual(shown["compressed_audio"]["message"], "Compressed audio (MP3, FLAC…): no. The ffmpeg you allowed "
+                         "is gone, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only.")
+
     @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
     def test_an_allowed_ffmpeg_whose_folder_became_a_link_isnt_used(self) -> None:
         self.install_runtime()
