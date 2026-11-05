@@ -133,9 +133,10 @@ async fn complete_public_tool_catalog_matches_source_versions_capabilities_and_s
             integration.connection.epoch.set(Some(7.));
             let definitions:Vec<_>=integration.definitions().iter().map(|tool| {
                 // Kumi's deliberate changes since the source, each set aside for its own tool only: the plug-in tool's file
-                // actions, and make_device's from and remove (#353).
+                // actions, make_device's from and remove (#353), and set_mixer's levels as Live shows them (#1037).
                 let (description,schema) = if tool.name()=="plugin" { plugin_catalog::legacy(tool.description(),&json!(tool.input_schema())) }
                     else if tool.name()=="make_device" { device_from_existing::legacy(tool.description(),&json!(tool.input_schema())) }
+                    else if tool.name()=="set_mixer" { crate::mixer_in_db::legacy(tool.description(),&json!(tool.input_schema())) }
                     else { (tool.description().to_string(),json!(tool.input_schema())) };
                 crate::pads_in_order::legacy_json(&json!({"name":tool.name(),"description":description,"inputSchema":schema,"stream":tool.stream(Signal::new(),Rc::new(||{})).is_some()}))
             }).collect();
