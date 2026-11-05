@@ -1,7 +1,7 @@
 """Kumi's runtime for the Hermes plugin: which release it pins, and setup (contract C8). Owned by W5.
 
 Stdlib only and import-safe: `dashboard/plugin_api.py` loads this file by path, so it imports no sibling module and
-does no I/O at import. Setup is two approved steps (W5-SETUP-INTERFACES.md):
+does no I/O at import. Setup is two approved steps and an optional third (W5-SETUP-INTERFACES.md, CC-10):
 
 1. **Runtime:** download the bundle `kumi_release.json` pins for this machine, only from Kumi's GitHub release,
    check its size and SHA-256, unpack it into `<data>/runtime/<version>/`, and write `<data>/runtime/current.json`
@@ -10,6 +10,8 @@ does no I/O at import. Setup is two approved steps (W5-SETUP-INTERFACES.md):
 2. **DAW component:** Kumi's part inside the DAW (Live's Remote Script, REAPER's extension, Renoise's tool), which
    the runtime's `setup_daw` installs. Its dry run names the exact paths, so this step is planned once the runtime
    is installed.
+3. **ffmpeg (optional):** an ffmpeg already on this computer, which setup only looks for, recorded with its identity
+   in `current.json` so the runtime can decode MP3, FLAC and other compressed audio. Without it, WAV and AIFF only.
 
 `plan()` records what a step will do; the plugin's approval hook shows `approval()` to the user; `install()` re-plans,
 refuses if anything changed since that approval, then does that one step. `<data>` is the active profile's
@@ -27,6 +29,7 @@ import platform
 import re
 import secrets
 import shutil
+import stat
 import sys
 import tarfile
 import time
@@ -193,6 +196,120 @@ def _configured_daw() -> str:
     return daw if daw in DAWS else "ableton"
 
 
+# ---- ffmpeg (CC-10): an optional program the producer allows; setup only looks for it ------------------------------
+
+_FFMPEG_FOLDERS = {"darwin": ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"),
+                   "linux": ("/usr/bin", "/usr/local/bin", "/snap/bin")}
+_IDENTITY = ("path", "size", "mtime_ns", "ino")
+_WINDOWS_LOCAL = re.compile(r"[A-Za-z]:[\\/]")
+
+
+def _local(path: str, windows: bool | None = None) -> bool:
+    """Whether `path` is a local absolute path, judged from its text before anything touches it: on Windows a drive
+    letter and a root, never UNC (`\\\\server\\share`) or a device namespace (`\\\\?\\`, `\\\\.\\`), which could make
+    Windows reach a network share before anything is approved; elsewhere `/…`, never `//…`."""
+    if os.name == "nt" if windows is None else windows:
+        return _WINDOWS_LOCAL.match(path) is not None
+    return path.startswith("/") and not path.startswith("//")
+
+
+def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | None = None) -> list[str]:
+    """The folders setup looks in for ffmpeg, in order: each `PATH` entry that is a local absolute path (never an
+    empty or relative entry, `.`, or the working folder, which `shutil.which` may search on Windows), then the usual
+    install folders."""
+    env = os.environ if env is None else env
+    platform_name = platform_name or sys.platform
+    windows = platform_name == "win32"
+    entries = [entry.strip().strip('"') for entry in (env.get("PATH") or "").split(";" if windows else ":")]
+    folders: list[str] = []
+    for folder in [*entries, *_FFMPEG_FOLDERS.get(platform_name, ())]:
+        if folder and _local(folder, windows) and folder not in folders:
+            folders.append(folder)
+    return folders
+
+
+def _resolved(path: str) -> str | None:
+    """`path` with its links followed, each link's target read without following it (`readlink`) and checked to be
+    local first, then made canonical (`realpath`: a Homebrew link becomes its Cellar file). None if any step isn't
+    local."""
+    for _ in range(16):
+        try:
+            if not os.path.islink(path):
+                break
+            target = os.readlink(path)
+        except (OSError, ValueError):
+            return None
+        if target.startswith("\\\\?\\") and _local(target[4:], windows=True):  # Windows's long form of a local path
+            target = target[4:]
+        path = os.path.join(os.path.dirname(path), target)
+        if not _local(path):
+            return None
+    else:
+        return None
+    real = os.path.realpath(path)
+    return real if _local(real) else None
+
+
+def _identity(path: str) -> dict | None:
+    """The program at `path` as an approval binds it: `{path, size, mtime_ns, ino}` from one `stat`, if it's a
+    regular, executable file. runtime.py passes it to the runtime only while all four still match."""
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(info.st_mode) or not os.access(path, os.X_OK):
+        return None
+    return {"path": path, "size": info.st_size, "mtime_ns": info.st_mtime_ns, "ino": info.st_ino}
+
+
+def find_ffmpeg(env: Mapping[str, str] | None = None) -> dict | None:
+    """An ffmpeg already on this computer, found only by looking: the first in `_ffmpeg_search()` that resolves to a
+    local, regular, executable file, as `_identity()` of its canonical path. Setup never runs it and never downloads
+    one (catalog rule 17)."""
+    name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    for folder in _ffmpeg_search(env):
+        path = _resolved(os.path.join(folder, name))
+        found = _identity(path) if path and _plain(path, _MAX_PATH) else None
+        if found:
+            return found
+    return None
+
+
+def _allowed_ffmpeg(data_dir: Path) -> tuple[str, str | None]:
+    """The ffmpeg the producer allowed (`tools.ffmpeg` in `current.json`), and whether it's still that program, as
+    runtime.py checks at each start: `available`, `changed`, `gone` or `not_allowed`."""
+    tools = (_read_json(data_dir / "runtime" / "current.json") or {}).get("tools")
+    allowed = tools.get("ffmpeg") if isinstance(tools, dict) else None
+    path = allowed.get("path") if isinstance(allowed, dict) else None
+    if not isinstance(path, str) or not _local(path):
+        return "not_allowed", None
+    if _identity(path) == {key: allowed.get(key) for key in _IDENTITY}:
+        return "available", path
+    return ("changed" if os.path.lexists(path) else "gone"), path
+
+
+def compressed_audio(data_dir: Path, env: Mapping[str, str] | None = None) -> dict:
+    """Whether Kumi's runtime can decode MP3, FLAC and other compressed audio: `{"state": "available" | "changed" |
+    "gone" | "not_allowed", "ffmpeg": the allowed path, "found": an ffmpeg setup could offer, "message"}`. `message`
+    is the line `kumi_status` and `hermes kumi status` show. No subprocess."""
+    state, path = _allowed_ffmpeg(data_dir)
+    if state == "available":
+        return {"state": state, "ffmpeg": path, "found": None,
+                "message": f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg at {path}."}
+    found = find_ffmpeg(env)
+    offer = found["path"] if found else None
+    why = {"changed": f"The ffmpeg at {path} changed since you allowed it",
+           "gone": f"The ffmpeg you allowed ({path}) is gone"}.get(state, "Kumi reads WAV and AIFF only")
+    if offer:
+        allow = "allow it again" if offer == path else f"let Kumi use the ffmpeg at {offer}"
+        message = f"{why}; to {allow}, run hermes kumi setup (or ask Hermes to set up Kumi)."
+    elif state == "not_allowed":
+        message = f"{why}: there's no ffmpeg on this computer."
+    else:
+        message = f"{why}, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only."
+    return {"state": state, "ffmpeg": path, "found": offer, "message": f"Compressed audio (MP3, FLAC…): no. {message}"}
+
+
 # ---- status: read-only ---------------------------------------------------------------------------------------------
 
 def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: Path | None = None,
@@ -210,7 +327,7 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
         "daw_component": {"state": "not_installed", "name": None, "path": None, "version": None, "installed_at": None},
         "existing_kumi": {"path": str(existing), "adopted": bool(adopted and Path(adopted.get("kumi_home", "")) == existing)}
         if existing else None,
-        "next_step": None, "message": ""}
+        "compressed_audio": compressed_audio(data_dir, env), "next_step": None, "message": ""}
     try:
         pin = load_pin(plugin_dir)
     except SetupError as error:
@@ -335,7 +452,14 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime to plan the DAW step.")
     dry = _ask_runtime(setup_daw, {"daw": daw, "dry_run": True}, f"Kumi's runtime couldn't plan the step for {DAWS[daw]}")
     if dry["state"] in ("same", "newer"):
-        plan.update(step="none", paths=[], effects=[], component=dry)
+        found = None if _allowed_ffmpeg(data_dir)[0] == "available" else find_ffmpeg()
+        if found is None:
+            plan.update(step="none", paths=[], effects=[], component=dry)
+        else:  # the DAW is set up; offering ffmpeg is the last, optional step
+            plan.update(step="ffmpeg", optional=True, paths=[], ffmpeg=found, component=dry, effects=[
+                f"Kumi's runtime will run {found['path']} to decode MP3, FLAC and other compressed audio in the "
+                "folders and files you let it read",
+                "Kumi doesn't download or install ffmpeg. Without it, Kumi reads WAV and AIFF only.", _RESTART])
     elif dry["state"] == "other_owner":
         plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_TAGGING.get(daw, ())],
                     component=dry)
@@ -365,7 +489,7 @@ def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: 
     try:
         _write_json(data_dir / "setup" / "plan.json", result)
         component = result.get("component") or {}
-        if result["step"] == "none" and component.get("state") == "same":  # installed by this Kumi home already
+        if result["step"] in ("none", "ffmpeg") and component.get("state") == "same":  # installed by this Kumi home
             receipt = _read_json(data_dir / "setup" / "receipt.json") or {}
             if daw not in (receipt.get("daw_components") or {}):
                 _record_component(data_dir, daw, component, installed_at=None)
@@ -421,10 +545,11 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
                 f"The {component} it installed stays as it is", _RESTART, *_TAGGING.get(daw, ())]
-    if action != "install" or plan.get("step") not in ("runtime", "daw_component"):
+    if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg"):
         return None
-    title = (f"Kumi: set up Kumi {plan['version']}'s runtime" if plan["step"] == "runtime"
-             else f"Kumi: install Kumi's part in {DAWS[daw]}")
+    title = {"runtime": f"Kumi: set up Kumi {plan['version']}'s runtime",
+             "daw_component": f"Kumi: install Kumi's part in {DAWS[daw]}",
+             "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer"}[plan["step"]]
     return [title, *plan["effects"], *(f"Writes: {path}" for path in plan["paths"])]
 
 
@@ -559,6 +684,8 @@ def install(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict]
                 raise SetupError("plan_changed", "What setup would do changed since it was approved; plan again.")
             if approved["step"] == "runtime":
                 message = _install_runtime(approved, data_dir, target, progress, opener or _open_url)
+            elif approved["step"] == "ffmpeg":
+                message = _allow_ffmpeg(approved, data_dir)
             else:
                 message = _install_component(approved, setup_daw, data_dir)
         return {"ok": True, "step": approved["step"], "message": message,
@@ -638,6 +765,8 @@ def _install_runtime(approved: dict, data_dir: Path, target: str, progress: Call
                    "installed_at": _now_ms()}
         if isinstance(previous.get("kumi_home"), str):
             current["kumi_home"] = previous["kumi_home"]
+        if isinstance(previous.get("tools"), dict):  # an ffmpeg the producer allowed stays allowed (CC-10)
+            current["tools"] = previous["tools"]
         _write_json(runtime / "current.json", current)
         receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
         receipt["runtime"] = {"version": version, "target": target, "sha256": download["sha256"],
@@ -665,6 +794,22 @@ def _record_component(data_dir: Path, daw: str, component: Mapping[str, Any], *,
     _write_json(data_dir / "setup" / "receipt.json", receipt)
 
 
+def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
+    """Record the ffmpeg the producer allowed, as the program it is now, where runtime.py reads it (CC-10)."""
+    chosen = {key: approved["ffmpeg"][key] for key in _IDENTITY}
+    if _identity(chosen["path"]) != chosen:
+        raise SetupError("plan_changed", f"{chosen['path']} changed since it was approved; plan again.")
+    record = _read_json(data_dir / "runtime" / "current.json")
+    if not record:
+        raise SetupError("needs_runtime", "Install Kumi's runtime before allowing ffmpeg.")
+    tools = record.get("tools") if isinstance(record.get("tools"), dict) else {}
+    _write_json(data_dir / "runtime" / "current.json", {**record, "tools": {**tools, "ffmpeg": chosen}})
+    receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
+    receipt["ffmpeg"] = {**chosen, "at": _now_ms()}
+    _write_json(data_dir / "setup" / "receipt.json", receipt)
+    return f"Kumi's runtime will use the ffmpeg at {chosen['path']} for compressed audio from its next start."
+
+
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime for the DAW step.")
@@ -689,14 +834,15 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
               file=stdout)
         return 1
     daw = daw if daw in DAWS else _configured_daw()
-    for _ in range(3):  # runtime, then the DAW component, then a final check
+    for _ in range(4):  # the runtime, the DAW component, ffmpeg if there is one, then a final check
         try:
             step = plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)
         except SetupError as error:
             print(error.message, file=stdout)
             return 1
         if step["step"] == "none":
-            print(status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)["message"], file=stdout)
+            now = status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)
+            print(now["message"], now["compressed_audio"]["message"], sep="\n", file=stdout)
             return 0
         adopting = step["step"] == "owned_elsewhere"
         lines = _approval_lines(step, daw, "adopt" if adopting else "install")  # what a chat's approval shows
@@ -706,6 +852,11 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
         print(lines[0], *lines[1:], sep="\n  ", file=stdout)
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
         if stdin.readline().strip().lower() not in ("y", "yes"):
+            if step.get("optional"):  # setup is done without it
+                print(status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)["message"],
+                      "Kumi reads WAV and AIFF only; run hermes kumi setup again to allow ffmpeg later.",
+                      sep="\n", file=stdout)
+                return 0
             print("Nothing was changed.", file=stdout)
             return 1
         if adopting:

@@ -39,8 +39,10 @@ KUMI_SETUP = _tool(
     "the DAW step starts Kumi's runtime for a dry run, which changes nothing. `install` does the planned step, and the "
     "producer is asked first; plan again after each step until the plan says nothing is left. When another Kumi "
     "installation already owns the DAW's part, the plan says so, and `adopt` uses that installation's connection to "
-    "the DAW instead of replacing it (also asked first). Setup never starts or quits the DAW. kumi_status says where "
-    "setup stands.",
+    "the DAW instead of replacing it (also asked first). Once the DAW is set up, if an ffmpeg is already on this "
+    "computer, the plan offers one optional last step: letting Kumi's runtime run it to read MP3, FLAC and other "
+    "compressed audio (Kumi never downloads one; without it, WAV and AIFF only). Ask the producer before installing "
+    "that step. Setup never starts or quits the DAW. kumi_status says where setup stands.",
     {"action": {"type": "string", "enum": ["plan", "install", "adopt"]},
      "daw": {"type": "string", "enum": list(DAWS), "description": "The DAW to set up for; the DAW setting when left out."}},
     ("action",))
