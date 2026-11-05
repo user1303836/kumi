@@ -508,7 +508,9 @@ pub fn apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> {
         applied: after.clone(),
         material: Some(json!({"undo": {"mode": "value"}})),
         display: json!({"title": title(&after), "before": public(&now), "after": public(&after)}),
-        ..Applied::default()
+        created: None,
+        step: None,
+        probe: None,
     })
 }
 
