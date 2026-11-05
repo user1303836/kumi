@@ -2,15 +2,17 @@
 
 It takes the runtime's arguments, answers MCP over stdin and stdout as the runtime does, and holds a made-up Live Set
 ("Night Drive") in memory: connect, observe, read, a typed change with HISTORY and its preview (CC-3), undo, a small
-sample library (two snares on map revision r1) with search, measuring and a scan job, and the C3 snapshot files in
-`--state-dir`, with a resource update after each. Standard library only.
+sample library (two snares on map revision r1) with search, measuring and a scan job, a track or mix listen with its
+preview (CC-2), and the C3 snapshot files in `--state-dir`, with a resource update after each. Standard library only.
 
     python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton [--library-root DIR]...
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
+        [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
-refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends.
+refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends; and say how a
+track listen ends (`unsure-with-media` is a runtime that wrongly sends a MEDIA: line with an unsure result).
 
 It writes what it was started with (`fixture-start.json`: its arguments and environment's names) and every message it
 received (`fixture-requests.jsonl`) into the state directory, for tests to read.
@@ -323,11 +325,59 @@ def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
 
 def listen(fixture: Fixture, args: dict, host: dict) -> dict:
     source = args.get("source") or {}
+    if "track" in source:
+        return listen_track(fixture, args, host)
     if source.get("sound_id") not in {sound["sound_id"] for sound in SOUNDS}:
         return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
     return {"metrics": {"lufsIntegrated": -14.2, "truePeakDb": -1.3, "centroidHz": 1840.0}, "artifact_id": "a-1",
             "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
             "media_tag": "MEDIA:/fixture/Dusty Snare 04.wav"}
+
+
+def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
+    """A track or the mix over a beat window (CC-2). Its preview is a read; a real one "plays" the window and measures
+    it, or ends as --listen-outcome says. Each real one is added to fixture-listens.jsonl."""
+    if not fixture.connected:
+        return error("not_connected", "Kumi isn't connected to the DAW: connect first.")
+    if args.get("expected_project_key") != fixture.set["key"] or args.get("expected_epoch") != fixture.epoch:
+        return error("stale", "The project changed since Kumi last looked: observe it again.")
+    source = args["source"]
+    track = source.get("track") or {}
+    named = next((each for each in fixture.set["tracks"] if each["ref"] == track.get("ref")), None)
+    if not track.get("mix") and named is None:
+        return error("stale", f"There's no track {track.get('ref')!r} in {fixture.set['name']} now: observe it again.")
+    start, beats = source["from_beat"], source["beats"]
+    seconds = beats * 60 / fixture.set["tempo"]
+    if seconds > 60:
+        return error("too_long", f"{beats:g} beats at {fixture.set['tempo']:g} BPM is {seconds:.0f} s; Kumi listens to "
+                                 "60 s at most.")
+    what = "the mix" if track.get("mix") else f"the track {named['name']}"
+    text = (f"play {what} of {fixture.set['name']} from beat {start:g} to beat {start + beats:g} (Arrangement) "
+            "through Kumi Ears and measure it; routing and the transport change for a moment and are put back")
+    if args.get("preview"):
+        return {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
+                "estimated_seconds": round(seconds, 2), "method": "ears"}
+    with open(fixture.state / "fixture-listens.jsonl", "a", encoding="utf-8") as log:
+        log.write(json.dumps({"args": args, "host": host}) + "\n")
+    measured = {"metrics": {"lufsIntegrated": -11.8, "truePeakDb": -0.6, "centroidHz": 2210.0},
+                "verdict_text": "Measured: -11.8 LUFS, true peak -0.6 dBTP, centroid 2210 Hz."}
+    outcome = fixture.options.listen_outcome
+    if outcome == "refused":
+        return {"state": "refused", "code": "playing", "reason": "Live started playing before Kumi could listen.",
+                "cleanup": "restored"}
+    if outcome == "cancelled":
+        return {"state": "cancelled", "code": "cancelled", "reason": "The listen was cancelled.", "cleanup": "restored"}
+    if outcome in ("unsure", "unsure-with-media"):
+        fixture.epoch = str(int(fixture.epoch) + 1)  # an unsure call moves the project on (CC-2's W1-c)
+        fixture.publish("status", "focus")
+        unsure = {"state": "unsure", "code": "restore_failed", "cleanup": "unsure",
+                  "reason": "Kumi couldn't confirm Live's routing was put back."}
+        if outcome == "unsure-with-media":
+            unsure.update(measured, artifact_id="a-partial", media_tag="MEDIA:/fixture/artifacts/a-partial.wav")
+        return unsure
+    return {**measured, "artifact_id": "a-track-1", "media_tag": "MEDIA:/fixture/artifacts/a-track-1.wav",
+            "capture": {"method": "ears", "from_beat": start, "beats": beats, "seconds": round(seconds, 2),
+                        "cleanup": "restored"}}
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
@@ -357,6 +407,8 @@ def main() -> None:
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
     parser.add_argument("--library-root", action="append", default=[])
+    parser.add_argument("--listen-outcome", default="measured",
+                        choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
     Fixture(parser.parse_args()).serve()
 
 

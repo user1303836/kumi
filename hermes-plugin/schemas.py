@@ -93,12 +93,37 @@ KUMI_HISTORY = _tool(
     "still be undone. Reads only.",
     {"limit": {"type": "integer", "minimum": 1, "maximum": 200}})
 
+# A listen's source: a file, a sound or an artifact as _SOURCE, or one track or the mix over a beat window (CC-2).
+_LISTEN_SOURCE = {
+    "type": "object",
+    "description": (_SOURCE["description"] + " Or a track of the open project, or its mix, over a beat window: "
+                    "{\"track\": {\"ref\": \"<track ref from kumi_observe>\"} or {\"mix\": true}, \"from_beat\", "
+                    "\"beats\"}. That plays the window in the DAW (60 s at most, only while it's stopped), so the "
+                    "producer approves it."),
+    "properties": {**_SOURCE["properties"],
+                   "track": {"type": "object",
+                             "description": "{\"ref\": \"…\"} for one track, {\"mix\": true} for the mix.",
+                             "properties": {"ref": {"type": "string"}, "mix": {"type": "boolean"}},
+                             "additionalProperties": False},
+                   "from_beat": {"type": "number", "minimum": 0,
+                                 "description": "The beat to start at (0 is the first)."},
+                   "beats": {"type": "number", "minimum": 0, "maximum": 256,
+                             "description": "How many beats to listen to: more than 0, at most 256 and 60 s."}},
+    "additionalProperties": False,
+}
+
 KUMI_LISTEN = _tool(
     "kumi_listen",
-    "Measure an audio file on this computer: loudness (LUFS), loudness range, true peak, spectral balance and "
-    "centroid, tempo and key, and, with compare_to, the differences between two files. Returns the measurements and "
-    "the file as MEDIA:. Nothing is heard: these are measurements, so report them as such. Reads only.",
-    {"source": _SOURCE, "compare_to": _SOURCE}, ("source",))
+    "Measure audio: a file on this computer, or a track or the mix of the open project over a beat window: loudness "
+    "(LUFS), loudness range, true peak, spectral balance and centroid, tempo and key, and, with compare_to, the "
+    "differences from a file. Returns the measurements and the audio as MEDIA:. Nothing is heard: these are "
+    "measurements, so report them as such. A file only reads; a track or the mix plays that window in the DAW while "
+    "it's stopped, and the producer approves it first. For a track or the mix, pass the project key and epoch "
+    "kumi_observe gave, and refs from it.",
+    {"source": _LISTEN_SOURCE, "compare_to": _SOURCE,
+     "expected_project_key": {"type": "string", "description": "For a track or the mix: kumi_observe's project_key."},
+     "expected_epoch": {"type": "string", "description": "For a track or the mix: kumi_observe's epoch."}},
+    ("source",))
 
 KUMI_SOUNDS = _tool(
     "kumi_sounds",

@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 PREVIEW_TIMEOUT = 10.0
 STEP_LINES = 18
 LINE = 120
+PLAYBACK_LINE = 300  # a track listen's one line: which track or the mix, the exact beats, and what's put back after
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
 FOOTER = "(Values as Kumi read them just now.)"
@@ -64,7 +65,7 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     if tool in PASS:
         return None, {}
     if tool == "kumi_listen":
-        return _listen(args), {}
+        return _listen(host, args, kwargs), {}
     if tool == "kumi_change":
         return _change(host, args, kwargs), {}
     if tool == "kumi_undo":
@@ -122,11 +123,27 @@ def _reason(failure: Exception) -> str:
     return getattr(failure, "reason", str(failure))
 
 
-def _listen(args: dict) -> dict | None:
-    """Measuring a file, a sound or an artifact is a read. Any other source (a DAW track, which plays the project:
-    CC-2) isn't approved here yet, so it doesn't run."""
+def _listen(host: Any, args: dict, kwargs: dict) -> dict | None:
+    """Measuring a file, a sound or an artifact is a read. A track or the mix plays the project (CC-2): it's asked in
+    the words of the runtime's own preview (which track or the mix, the exact beats, what changes for a moment and is
+    put back) and how long it plays, and blocked unasked when the runtime would refuse it."""
     refusal = tools.listen_refusal(args)
-    return block(f"Kumi didn't measure anything: {refusal}") if refusal else None
+    if refusal:
+        return block(f"Kumi didn't listen: {refusal}")
+    if not tools.is_track_listen(args):
+        return None
+    try:
+        answer = _ask(host, "listen", {**tools.listen_args(args), "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't play anything: {_reason(failure)}")
+    text = answer.get("text")
+    if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
+        return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused this listen.'}")
+    seconds = answer.get("estimated_seconds")
+    about = (f" (about {seconds:.3g} s)" if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
+             and seconds > 0 else "")
+    return {"action": "approve", "message": one_line(f"Kumi: {text}{about}", PLAYBACK_LINE),
+            "rule_key": "kumi:playback:listen"}
 
 
 def _change(host: Any, args: dict, kwargs: dict) -> dict:
