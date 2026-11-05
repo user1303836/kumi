@@ -45,6 +45,15 @@ impl Busy {
         }
     }
 
+    pub fn from_code(code: &str) -> Option<Busy> {
+        match code {
+            "modal" => Some(Busy::Modal),
+            "away" => Some(Busy::Away),
+            "loading" => Some(Busy::Loading),
+            _ => None,
+        }
+    }
+
     pub fn reason(self) -> &'static str {
         match self {
             Busy::Modal => "Logic Pro is showing a dialog",
@@ -241,14 +250,22 @@ pub fn project_of(window: &Window) -> Option<Project> {
     Some(Project { id: None, name: Some(identity), path: None, extra })
 }
 
-/// The window the project is read from: the main window, else the focused one, else the one with a document or a
-/// Tracks title; never a dialog, a sheet or a floating window.
+/// Whether a standard window is a project's: it names a document, or its title is a project's ("… - Tracks").
+fn is_project(window: &Window) -> bool {
+    window.standard() && (window.document.is_some() || window.title.ends_with(TRACKS_SUFFIX))
+}
+
+/// The window the project is read from: a project's window, the main one first, then the focused one; failing that
+/// the main standard window, then the focused one (Logic's own windows, the Control Surface Setup among them, are
+/// standard windows too, so a project's window wins over them); never a dialog, a sheet or a floating window.
 pub fn project_window(windows: &[Window]) -> Option<&Window> {
     windows
         .iter()
-        .find(|window| window.main && window.standard())
+        .find(|window| window.main && is_project(window))
+        .or_else(|| windows.iter().find(|window| window.focused && is_project(window)))
+        .or_else(|| windows.iter().find(|window| is_project(window)))
+        .or_else(|| windows.iter().find(|window| window.main && window.standard()))
         .or_else(|| windows.iter().find(|window| window.focused && window.standard()))
-        .or_else(|| windows.iter().find(|window| window.standard() && (window.document.is_some() || window.title.ends_with(TRACKS_SUFFIX))))
 }
 
 fn busy_of(windows: &[Window], project_window: Option<&Window>) -> Option<Busy> {
@@ -284,11 +301,33 @@ pub struct Model {
     pub project: Option<Project>,
     pub busy: Option<Busy>,
     pub permission: Option<Permission>,
+    /// The project window's title as last seen, and whether it was the main window: the readers address it by title
+    /// when another of Logic's windows (the Control Surface Setup, say) is main.
+    pub window_title: Option<String>,
+    pub window_is_main: bool,
 }
 
 impl Model {
     pub fn new(pid: u32, resource: &str, daw_version: &str) -> Model {
-        Model { pid, resource: resource.into(), daw_version: daw_version.into(), project: None, busy: None, permission: None }
+        Model {
+            pid,
+            resource: resource.into(),
+            daw_version: daw_version.into(),
+            project: None,
+            busy: None,
+            permission: None,
+            window_title: None,
+            window_is_main: true,
+        }
+    }
+
+    /// Where the readers address the project window: the main window, or the project's window by its title when
+    /// another window is main.
+    pub fn window_root(&self) -> crate::ax::Root {
+        match &self.window_title {
+            Some(title) if !self.window_is_main && !title.is_empty() => crate::ax::Root::Title(title.clone()),
+            _ => crate::ax::Root::Main,
+        }
     }
 
     pub fn attach(app: &App, daw_version: &str) -> Model {
@@ -317,6 +356,10 @@ impl Model {
         let before = project_key(self.project.as_ref());
         let window = project_window(windows);
         self.busy = busy_of(windows, window);
+        if let Some(window) = window {
+            self.window_title = Some(window.title.clone());
+            self.window_is_main = window.main;
+        }
         if windows.is_empty() {
             // Away: nothing can be read, and the project stays what it was. (The Window menu still lists the project
             // window's title, but a title can't give a saved project's path, so it isn't followed from there.)
@@ -550,6 +593,21 @@ mod tests {
         // Only a dialog left (the project chooser after a close): no project.
         assert!(model.look(&[dialog], &[]));
         assert_eq!((model.project.as_ref(), model.busy), (None, Some(Busy::Modal)));
+        // Logic's own Control Surface Setup as the main window, the project's window behind it: still the project.
+        let setup = Window {
+            title: "Control Surface Setup".into(),
+            role: "AXWindow".into(),
+            subrole: "AXStandardWindow".into(),
+            main: true,
+            focused: true,
+            ..Window::default()
+        };
+        let behind = Window { main: false, focused: false, ..window("Other - Tracks", Some("file:///m/Other%202.logicx")) };
+        assert!(model.look(&[setup.clone(), behind], &[]), "a project again, after the chooser");
+        assert_eq!((model.project.as_ref().map(|p| p.name.clone().unwrap()), model.busy), (Some("Other 2".into()), None));
+        assert_eq!(model.window_root(), crate::ax::Root::Title("Other - Tracks".into()));
+        assert!(model.look(&[window("Other - Tracks", Some("file:///m/Other%202.logicx"))], &[]) == false);
+        assert_eq!(model.window_root(), crate::ax::Root::Main);
         // A floating window alone isn't a project window either.
         let floating = Window {
             title: "Channel EQ".into(),
@@ -558,7 +616,7 @@ mod tests {
             main: true,
             ..Window::default()
         };
-        assert!(!model.look(&[floating], &[]));
+        assert!(model.look(&[floating], &[]), "the project went away");
         assert_eq!((model.project.as_ref(), model.busy), (None, None));
         // An unsaved project: its identity.
         assert!(model.look(&[window("Untitled - Tracks", None)], &[]));

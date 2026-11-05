@@ -3,14 +3,25 @@
 //! MIDI), and serves Kumi's bridge wire (`kumi-daw/1`, daw-bridge) on loopback as the REAPER extension and the Renoise
 //! tool do from inside their DAWs.
 //!
-//! M1, "bridges talk": the bridge finds Logic, attaches to it, follows the open project's identity through Logic's
-//! windows, answers `ping` and `status`, sends `project` events, keeps its discovery file and goes when Logic does. The
-//! bridge does not serve project rows, focus, bodies or actions at this stage.
+//! M2 adds native Accessibility readers, cached focus, snapshots and the four focus bodies. Only read methods are
+//! exposed on the wire; project changes, listening and application registration are later stages.
 
+pub mod ax;
+pub mod bodies;
 pub mod bridge;
+pub mod fixtures;
+pub mod focus;
 pub mod helper;
 pub mod log;
 pub mod logic;
+pub mod mcu;
+pub mod project;
+pub mod queue;
+pub mod read;
+pub mod refs;
+pub mod rows;
+pub mod scenes;
+pub mod serve;
 pub mod server;
 
 pub const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -38,7 +38,8 @@ try:
             break
         if op == "apps":
             reply["apps"] = [{"bundle": "com.apple.logic10", "pid": int(os.environ["KUMI_LOGIC_FIXTURE_PID"]),
-                              "name": "Logic Pro", "version": "12.3.1", "active": True, "hidden": False}]
+                              "name": "Logic Pro", "version": "12.3.1", "active": True, "hidden": False,
+                              "path": str(root / "No Logic.app")}]
         elif op == "trusted":
             reply["trusted"] = True
         elif op == "windows":

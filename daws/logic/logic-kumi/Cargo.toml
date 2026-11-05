@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 daw-bridge.workspace = true
+flate2.workspace = true
 percent-encoding.workspace = true
 serde_json.workspace = true
 

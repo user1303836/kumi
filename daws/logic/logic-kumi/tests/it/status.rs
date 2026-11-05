@@ -1,6 +1,7 @@
 //! The bridge on the mock helper, without a Logic: what `status`, the welcome and the discovery file say of a saved,
 //! an unsaved and a loading project, of a dialog, of Logic's windows away and of a missing permission; the discovery
-//! file through attach, a project switch and the stop; a helper that exits mid-run; and Logic quitting.
+//! file through attach, a project switch and the stop; a helper that exits mid-run; and Logic quitting. The reads
+//! over a recorded Logic are `tests/reads.rs`.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
@@ -69,8 +70,11 @@ impl Lab {
     /// The bridge on `hands`, with short intervals, in a fresh Kumi folder.
     fn start(hands: &MockHands) -> Lab {
         let dir = tempfile::tempdir().unwrap();
-        let config =
-            Config::development(&dir.path().join("kumi")).unwrap().with_timing(Duration::from_millis(40), Duration::from_millis(120));
+        let mut config = Config::development(&dir.path().join("kumi"))
+            .unwrap()
+            .with_timing(Duration::from_millis(40), Duration::from_millis(120))
+            .without_mcu();
+        config.bundle = Some(dir.path().join("No Logic.app"));
         let secret = files::read_secret(&config.server.secret_file).unwrap();
         let discovery_dir = config.server.discovery_dir.clone();
         let helper = Supervised::new(Box::new(hands.clone())).with_backoff(Duration::from_millis(40), Duration::from_millis(100));
@@ -242,14 +246,17 @@ fn a_saved_project_is_identified_by_its_path_in_status_the_welcome_and_the_disco
     assert_eq!(client.welcome["pid"], me());
     assert_eq!(client.welcome["resource"], "com.apple.logic10");
     assert_eq!((client.welcome["bridge"].as_str(), client.welcome["dawVersion"].as_str()), (Some(BRIDGE_VERSION), Some("12.3.1")));
-    assert_eq!(client.welcome["methods"], json!(["ping", "status"]));
-    assert_eq!(client.welcome["events"], json!(["project"]));
+    assert_eq!(client.welcome["methods"], json!(["ping", "status", "focus", "read", "snapshot", "focus_body"]));
+    assert_eq!(client.welcome["events"], json!(["project", "transport", "tracks", "selection"]));
     assert_eq!(client.welcome["project"], serde_json::to_value(&project).unwrap());
     assert_eq!(client.call("ping")["result"], json!({}));
     let status = client.status();
     assert_eq!(status, json!({"project": project, "busy": false, "permission": null}));
     assert_eq!(status.as_object().unwrap().keys().collect::<Vec<_>>(), ["project", "busy", "permission"]);
-    assert_eq!(client.call("read")["error"]["code"], "unknown-method");
+    // A read goes to the run loop, which reads the request before Logic: no kind is refused as the simulator refuses it.
+    let read = client.call("read");
+    assert_eq!((read["error"]["code"].as_str(), read["error"]["message"].as_str()), (Some("bad-params"), Some("kind: one of the kinds")));
+    assert_eq!(client.call("change_apply")["error"]["code"], "unknown-method");
 
     // The helper was asked as the contract says: the apps by both bundle ids, then the permission and the windows.
     let calls = hands.calls();

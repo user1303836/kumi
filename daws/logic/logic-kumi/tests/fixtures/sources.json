@@ -1,0 +1,30 @@
+{
+  "commit": "d821e6690c06f9b983ca63ac98e37ba40eb50c7e",
+  "files": [
+    {
+      "source": "crates/logic-kumi/tests/fixtures/scratch-dialog/scene.json.gz",
+      "path": "scratch-dialog/scene.json.gz",
+      "sha256": "96258a94808cf6d350df267d882faa5911e3d1f7b749351a13b95a6d7393450a"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/scratch-keys/scene.json.gz",
+      "path": "scratch-keys/scene.json.gz",
+      "sha256": "84d1f4437909629cc0614d981fa1f68809ab86b14fdca8f26345895204637d19"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/scratch-playing/scene.json.gz",
+      "path": "scratch-playing/scene.json.gz",
+      "sha256": "7a92408650179803e1237845ab94d15b10668789e206907936c12cfcdfc78585"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/scratch/scene.json.gz",
+      "path": "scratch/scene.json.gz",
+      "sha256": "f1793fc4f4d8c8780d9b9624fdeae7c5e07875e171be7cfed4d1de13ef7ae28f"
+    },
+    {
+      "source": "crates/daw-mcp-server/tests/vectors/logic-reads.json",
+      "path": "logic-reads.json",
+      "sha256": "72beee747c7e5f0e29c5be4da79da09bbdbdbbdf7684830085adf9a599ad6a32"
+    }
+  ]
+}

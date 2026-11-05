@@ -1,7 +1,7 @@
-# Logic Pro 桥接器：M1
+# Logic Pro 桥接器：M2
 
-- 面向 macOS 上 Logic Pro 12 的实验性基础。通过经过身份验证的本地回环连接，仅提供 `ping`、`status` 和 `project` 事件。桥接器跟踪 Logic 窗口显示的项目，并发布发现文件。
-- 此阶段不提供项目行、FOCUS、编辑、试听或渲染。应用中也尚未注册 Logic 提供程序或 DAW 选择项；目前只有独立桥接器和主机基础。
+- 面向 macOS 上 Logic Pro 12 的实验性原生读取基础。经过身份验证的本地回环连接仅公开六个方法：`ping`、`status`、`focus`、`read`、`snapshot`、`focus_body`，以及项目、走带、轨道和选择事件。原生读取等待时，缓存的状态和 FOCUS 仍能响应。
+- 可读取 project、track、region、note、plugin、send、marker、tempo 行，支持 `tree`、`notes`、`timeline`、`routing` 四种正文。不公开乐曲编辑、试听或渲染。应用中尚未注册 Logic 提供程序或 DAW 选择项；主机功能开放以及原生与应用验收仍是独立工作。
 - `kumi-logic-hands` 是独立的子进程。缺少辅助功能权限时，状态会单独返回 `permission: "accessibility"`，而非将其视为 `busy`。首次连接时，macOS 可能询问是否授予助手权限。无需向 Logic 内安装任何内容，也无需重启 Logic。
 
 在仓库根目录运行以下命令，每次只执行一个构建：
@@ -24,3 +24,5 @@ cargo run -p logic-kumi --example logic_lab_client -- --kumi-home /absolute/path
 - 桥接器会自动查找已构建的助手，也可用 `--helper <path>` 指定。直接运行时，Logic 退出，或桥接器收到 SIGINT、SIGTERM、SIGHUP 后才会结束；标准输入 EOF 不会使其结束。
 - 主机会添加 `--hosted`，此时关闭标准输入管道也会使桥接器结束。两种退出路径都会删除发现文件，并停止、回收助手，即使助手请求仍在等待响应。桥接器不会启动或退出 Logic。
 - 可选的原生助手检查，不需要 Logic：`python3 -m unittest discover -s daws/logic/logic-kumi/helper/tests -p test_protocol.py`。此检查会编译、运行 macOS 助手，并使用临时虚拟 MIDI 端口。
+
+原生录制回放使用 `d821e669` 中原始的四个 M2 场景和26请求向量。`tests/fixtures/sources.json` 记录来源路径及 SHA-256；测试确认原始字节不变，并比较实际读取结果，不重写期望值。录制回放不等于当前 Logic 或应用的原生验收。读取操作可能通过助手切换 Logic 的面板和选择。

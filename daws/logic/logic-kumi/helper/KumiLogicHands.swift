@@ -469,6 +469,29 @@ func postKey(_ code: CGKeyCode, _ flags: CGEventFlags, to pid: pid_t) throws {
   }
 }
 
+/** A mouse click at a point on the screen: the pointer moved there, then the button down and up with the modifiers
+    held, `count` times for a double click. Posted at the system's event tap (the Accessibility grant allows it), so
+    it lands on whatever window is at the point, as a click of the producer's would: the app is activated first.
+    Mouse events posted to a process alone are ignored by Logic. */
+func postClick(_ point: CGPoint, _ flags: CGEventFlags, count: Int) throws {
+  let source = CGEventSource(stateID: .hidSystemState)
+  guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) else { throw fail("event-failed") }
+  move.post(tap: .cghidEventTap)
+  usleep(30_000)
+  for click in 1...max(count, 1) {
+    guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { throw fail("event-failed") }
+    down.flags = flags
+    up.flags = flags
+    down.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+    up.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+    down.post(tap: .cghidEventTap)
+    usleep(40_000)
+    up.post(tap: .cghidEventTap)
+    usleep(40_000)
+  }
+}
+
 /** Text typed into the process, one key event a character, carrying the character itself. */
 func postText(_ text: String, to pid: pid_t) throws {
   let source = CGEventSource(stateID: .hidSystemState)
@@ -742,6 +765,24 @@ func handle(_ request: Request) throws -> [String: Any] {
     guard AXIsProcessTrusted() else { throw fail("untrusted") }
     try postKey(code, flags, to: pid)
     return ["posted": true, "active": NSRunningApplication(processIdentifier: pid).map(isFront) ?? false]
+
+  case "click":
+    let pid = try request.pid()
+    guard let x = (request.fields["x"] as? NSNumber)?.doubleValue, let y = (request.fields["y"] as? NSNumber)?.doubleValue else {
+      throw fail("bad-request", ["detail": "x and y are the point on the screen"])
+    }
+    let flags = try modifierFlags(request.fields["mods"])
+    let count = min(max(request.int("count") ?? 1, 1), 3)
+    guard let app = NSRunningApplication(processIdentifier: pid) else { throw fail("no-process", ["pid": Int(pid)]) }
+    guard AXIsProcessTrusted() else { throw fail("untrusted") }
+    // The click lands on what is on screen at the point: the app is brought in front first.
+    if !isFront(app) {
+      onMain { if #available(macOS 14.0, *) { app.activate() } else { app.activate(options: [.activateIgnoringOtherApps]) } }
+      let until = Date().addingTimeInterval(1.0)
+      while !isFront(app) && Date() < until { usleep(20_000) }
+    }
+    try postClick(CGPoint(x: x, y: y), flags, count: count)
+    return ["posted": true, "active": isFront(app)]
 
   case "type":
     let pid = try request.pid()

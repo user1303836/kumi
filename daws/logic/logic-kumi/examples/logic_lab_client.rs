@@ -2,7 +2,9 @@
 //! the secret, prints the welcome and `status`, then the events for a while. The M1 gate on a Mac: start `logic-kumi`
 //! with Logic open, run this, and open or switch a project in Logic to see the `project` event.
 //!
-//! cargo run -p logic-kumi --example logic_lab_client -- [--kumi-home <dir>] [--watch <seconds>] [--call <method> <json params>]...
+//! cargo run -p logic-kumi --example logic_lab_client -- [--kumi-home <dir>] [--watch <seconds>] [--call <method> <json params>]... [--bench <method> <json params> <n>]
+//!
+//! `--bench` calls a method n times and prints the median and the worst round trip: the lab's numbers for `focus`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -20,14 +22,19 @@ use serde_json::{json, Value};
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let (mut home, mut calls, mut watch) = (None, vec![], 5.0);
+    let (mut home, mut calls, mut watch, mut benches) = (None, vec![], 5.0, vec![]);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--kumi-home" => home = Some(PathBuf::from(args.next().expect("--kumi-home <dir>"))),
             "--call" => calls.push((args.next().expect("--call <method> <json>"), args.next().expect("--call <method> <json>"))),
+            "--bench" => benches.push((
+                args.next().expect("--bench <method> <json> <n>"),
+                args.next().expect("--bench <method> <json> <n>"),
+                args.next().and_then(|n| n.parse::<usize>().ok()).expect("--bench <method> <json> <n>"),
+            )),
             "--watch" => watch = args.next().and_then(|s| s.parse().ok()).expect("--watch <seconds>"),
             other => {
-                panic!("unknown argument {other}; usage: lab_client [--kumi-home <dir>] [--watch <seconds>] [--call <method> <json>]...")
+                panic!("unknown argument {other}; usage: lab_client [--kumi-home <dir>] [--watch <seconds>] [--call <method> <json>]... [--bench <method> <json> <n>]")
             }
         }
     }
@@ -64,6 +71,18 @@ fn main() {
     for (method, params) in calls {
         client.call(&method, serde_json::from_str(&params).expect("the params as JSON"));
     }
+    for (method, params, n) in benches {
+        let params: Value = serde_json::from_str(&params).expect("the params as JSON");
+        let mut times: Vec<Duration> = (0..n).map(|_| client.timed(&method, params.clone())).collect();
+        times.sort();
+        let median = times[times.len() / 2];
+        println!(
+            "{method} x{n}: median {:.2} ms, worst {:.2} ms, best {:.2} ms",
+            median.as_secs_f64() * 1000.0,
+            times[times.len() - 1].as_secs_f64() * 1000.0,
+            times[0].as_secs_f64() * 1000.0
+        );
+    }
     client.watch(Duration::from_secs_f64(watch));
 }
 
@@ -74,6 +93,21 @@ struct Client {
 }
 
 impl Client {
+    /// One call, silent: how long its round trip took.
+    fn timed(&mut self, method: &str, params: Value) -> Duration {
+        let id = self.next_id;
+        self.next_id += 1;
+        let sent = Instant::now();
+        self.stream.write_all(&Frame::Request(Request { id, method: method.into(), params, deadline_ms: None }).encode()).unwrap();
+        loop {
+            let line = self.lines.recv_timeout(Duration::from_secs(15)).expect("a response");
+            let frame: Value = serde_json::from_str(&line).unwrap();
+            if frame["type"] == "response" && frame["id"] == id {
+                return sent.elapsed();
+            }
+        }
+    }
+
     fn call(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
         self.next_id += 1;

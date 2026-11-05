@@ -217,6 +217,10 @@ class Protocol(unittest.TestCase):
         self.assertEqual(error(self.helper.request("keys", pid=os.getpid(), key="bogus")), "unknown-key")
         self.assertEqual(error(self.helper.request("keys", pid=os.getpid(), key="a", mods=["hyper"])), "unknown-mod")
         self.assertEqual(error(self.helper.request("keys", key="a")), "bad-request")
+        # A click needs a point and a process; its grant is checked after those.
+        self.assertEqual(error(self.helper.request("click", pid=os.getpid(), x=10)), "bad-request")
+        self.assertEqual(error(self.helper.request("click", pid=pid, x=10, y=10)), "no-process")
+        self.assertEqual(error(self.helper.request("click", pid=os.getpid(), x=10, y=10, mods=["hyper"])), "unknown-mod")
         self.assertEqual(error(self.helper.request("type", pid=os.getpid(), text="x" * 201)), "too-long")
 
     def test_tap_is_reserved(self):
@@ -233,7 +237,9 @@ class Protocol(unittest.TestCase):
             self.assertEqual(echo.stdout.readline().strip(), "ready")
             self.assertTrue(ok(self.helper.request("midi.send", hex=INERT))["sent"])
             self.assertEqual(error(self.helper.request("midi.send", hex="F")), "bad-hex")
-            events = [event for event in self.helper.events_for(1.0) if event["event"] == "midi"]
+            # A DAW that is open scans every new port for a control surface (Logic sends its Mackie device queries,
+            # F0 00 00 66 …); those aren't the echo's and are left out.
+            events = [event for event in self.helper.events_for(1.0) if event["event"] == "midi" and not event["hex"].startswith("F0 00 00 66")]
             self.assertEqual([event["hex"] for event in events], [INERT])
             self.assertIsInstance(events[0]["ms"], int)
             self.assertGreater(events[0]["ms"], 1_700_000_000_000)
