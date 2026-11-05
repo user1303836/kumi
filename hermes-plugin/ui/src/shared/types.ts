@@ -187,9 +187,13 @@ export interface Analysis {
   file?: string
   seconds?: number
   analyzed?: { from?: string; to?: string; focus?: string }
-  loudness?: { integratedLufs?: number | null; rangeLu?: number | null; truePeakDbtp?: number | null; samplePeakDbfs?: number | null }
-  balance?: { bands?: { name?: string; hz?: string; db?: number }[]; tiltDbPerOctave?: number; centroidHz?: number }
-  dynamics?: { crestDb?: number }
+  loudness?: { integratedLufs?: number | null; shortTermMaxLufs?: number | null; rangeLu?: number | null; truePeakDbtp?: number | null; samplePeakDbfs?: number | null }
+  /** Each band's `db` is its share of the whole file's energy, so two files' bands compare level-matched. `width` is the
+   *  band's side share (0 is mono). */
+  balance?: { bands?: { name?: string; hz?: string; db?: number; width?: number }[]; tiltDbPerOctave?: number; centroidHz?: number }
+  /** Absent for a mono file. `width` is the side share of the whole file (0 is mono). */
+  stereo?: { correlation?: number; width?: number; lowEndMono?: boolean } | null
+  dynamics?: { crestDb?: number; peakToLoudnessDb?: number | null }
   tempo?: { bpm?: number; confidence?: number } | null
   key?: { name?: string; confidence?: number } | null
   /** Set when the audio is one sound (a sample, a one-shot): its pitch, envelope and movement. The runtime's own

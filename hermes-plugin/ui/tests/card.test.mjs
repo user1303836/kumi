@@ -10,6 +10,7 @@ import { load } from './load.mjs'
 
 const { ListenCard } = await load('src/desktop/card.tsx', { react: 'real' })
 const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
+const { KumiStore } = await load('src/shared/store.ts')
 // The catalog's English, so a test checks what a surface says by its meaning, not by one wording of it.
 const { english } = await load('src/shared/i18n.ts')
 
@@ -35,7 +36,7 @@ const result = {
   }
 }
 
-function render(props) {
+function render(props, store = new KumiStore(async () => ({}))) {
   const audition = new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
   const media = {
     file: { path: '/tmp/a.wav', name: 'a.wav', kind: 'audio', mime: 'audio/wav', resolveUrl: async () => '' },
@@ -46,7 +47,7 @@ function render(props) {
     fallback: createElement('span', null, 'BUILT-IN PLAYER'),
     ...props
   }
-  return renderToStaticMarkup(createElement(ListenCard, { media, audition }))
+  return renderToStaticMarkup(createElement(ListenCard, { media, audition, store }))
 }
 
 test('a comparison shows both files, the measured numbers side by side and the differences', () => {
@@ -57,6 +58,30 @@ test('a comparison shows both files, the measured numbers side by side and the d
   assert.ok(!html.includes('BUILT-IN PLAYER'))
   assert.ok(!html.includes('Interpretation'))
   assert.ok(!/\bheard\b/i.test(html))
+})
+
+test('a mastering round says how far each comparison so far was from the reference, over both spectra', () => {
+  const bands = db => [{ name: 'sub', hz: '20–60', db }, { name: 'bass', hz: '60–120', db: db + 4 }]
+  const pass = (lufs, artifact) => ({
+    ...result,
+    artifact_id: artifact,
+    metrics: { ...analysis(lufs, -1, 2000, '/mix/Mix.wav'), balance: { centroidHz: 2000, tiltDbPerOctave: -3.9, bands: bands(-12) } },
+    compare: {
+      artifact_id: `r-${artifact}`,
+      metrics: { ...analysis(-8.6, -0.2, 2600, '/refs/Ref.wav'), balance: { centroidHz: 2600, tiltDbPerOctave: -3.1, bands: bands(-10) } },
+      differences: { loudness: { differenceLu: Math.round((lufs + 8.6) * 10) / 10 } }
+    }
+  })
+  const store = new KumiStore(async () => ({}))
+  store.noteListen(pass(-12.7, 'a-1'))
+  store.noteListen(pass(-10.2, 'a-2'))
+  const html = render({ result: pass(-10.2, 'a-2') }, store)
+  assert.ok(html.includes(english('listen.round', 2)), html)
+  assert.ok(html.includes('−4.1 → −1.6'), html)
+  assert.ok(html.includes(english('listen.overlay')))
+  // A comparison this window didn't see arrive (a chat opened later) isn't numbered, and the first one has no trend.
+  assert.ok(!render({ result: pass(-9.0, 'a-9') }, store).includes(english('listen.round', 3)))
+  assert.ok(!render({ result: pass(-12.7, 'a-1') }, store).includes(english('listen.round', 1)))
 })
 
 test("a model's reading sits under a plain heading with its model, its own opening line said once", () => {
@@ -365,7 +390,8 @@ test("a track listen's capture note shows as plain text under the capture line, 
   const capture = { method: 'ears', from_beat: 17, beats: 8, seconds: 6.1, cleanup: 'restored' }
   const card = note => renderToStaticMarkup(createElement(ListenCard, {
     media: { file: { kind: 'audio' }, result: { metrics: { file: 'Drums (beats 17–25).wav', loudness: { integratedLufs: -12.1 } }, capture: { ...capture, note } }, fallback: null },
-    audition: new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
+    audition: new Audition(async () => ({ data_url: 'data:audio/wav;base64,' })),
+    store: new KumiStore(async () => ({}))
   }))
   const html = card('Captured 6.1 s of the 7.9 s window; <b>Live</b> was put back.')
   assert.ok(html.includes('Captured 6.1 s of the 7.9 s window; &lt;b&gt;Live&lt;/b&gt; was put back.'), 'the note is text, never markup')
