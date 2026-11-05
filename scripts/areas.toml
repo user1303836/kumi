@@ -127,7 +127,6 @@ paths = [
   "daws/reaper/kumi-daw-reaper/src/provider.rs",
   "daws/renoise/kumi-daw-renoise/src/provider.rs",
   "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs",
-  "daws/lynx/kumi-daw-lynx/src/provider.rs",
   "crates/kumi-types/src/system.rs",
   "crates/kumi-ai/src/http.rs",
   "crates/kumi-library/src/sources.rs",

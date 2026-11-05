@@ -187,7 +187,7 @@ Kumi 每次查看时都会读取这首歌曲的设置并照着做：BPM（2 倍�
 
 ## LYNX SHARE（实验性）
 
-- `kumi --daw lynx` 连接包含对应 `lynx-kumi/1` 原生控制修改的 [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) 版本。原生端点目前支持 macOS 和 Linux；不含该端点的普通 LYNX 版本无法连接。
+- `kumi --daw lynx` 连接包含对应 [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) 原生控制修改的 [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) 版本。原生端点目前支持 macOS 和 Linux；不含该端点的普通 LYNX 版本无法连接。
 - 启动 LYNX 时，将 `LYNX_KUMI_DISCOVERY` 设为连接信息文件的绝对路径；将 `KUMI_LYNX_CONFIG` 设为同一路径，或两者均使用 `KUMI_HOME/bridges/lynx/connection.json`。连接信息仅限所有者读取，端点只在环回地址监听并使用私有令牌认证。请勿将凭据粘贴到聊天中。
 - 可读取实时项目、音型、设备、参数和当前 Playlist 编排，修改速度、通道和混音设置及音符，并控制播放和共享的原生撤销/重做。
 - 参数编辑面向宿主插件乐器或混音效果器，使用读取结果中的归一化值，并在修改前核对每个 `expectedValue`。暂不支持内置乐器的合成参数。效果器只能从内置或已扫描的效果器目录加载。

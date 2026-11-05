@@ -388,7 +388,7 @@ saves the song, instruments and device presets.
 
 ## LYNX SHARE (experimental)
 
-- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching `lynx-kumi/1` native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
+- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
 - Start LYNX with `LYNX_KUMI_DISCOVERY` set to an absolute discovery-file path. Set `KUMI_LYNX_CONFIG` to the same path, or use `KUMI_HOME/bridges/lynx/connection.json` for both. Discovery is owner-only, and the endpoint listens only on loopback with a private token; no credentials belong in chat.
 - Reads the live project, patterns, devices, parameters and current Playlist arrangement; changes tempo, channel/mixer settings and notes; controls playback and shared native undo/redo.
 - Parameter edits target hosted instruments or mixer effects, use the normalized values returned by the device read, and check each observed `expectedValue` before changing anything. Native instrument synthesis parameters are not exposed. Effects load only from the built-in or scanned-effect catalog.

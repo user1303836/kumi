@@ -167,7 +167,7 @@ case!(help_version_errors_and_checkout_commands, async {
     );
     assert!(first.iter().any(|l| l.starts_with("  kumi bridge") && l.contains("Or, with Live closed:")), "{installed}");
     assert!(
-        first.iter().any(|l| l.starts_with("  kumi --daw live|reaper|renoise ") && l.contains("Work with that DAW only")),
+        first.iter().any(|l| l.starts_with("  kumi --daw live|reaper|renoise|lynx ") && l.contains("Work with that DAW only")),
         "{installed}"
     );
     for asked in [&["-h"][..], &["help"], &["help", "bridge"], &["model", "--help"]] {

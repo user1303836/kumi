@@ -130,7 +130,7 @@ REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上
 
 ## LYNX SHARE（实验性）
 
-- `kumi --daw lynx` 连接包含对应 `lynx-kumi/1` 原生控制修改的 [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) 版本。原生端点目前支持 macOS 和 Linux；不含该端点的普通 LYNX 版本无法连接。
+- `kumi --daw lynx` 连接包含对应 [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) 原生控制修改的 [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) 版本。原生端点目前支持 macOS 和 Linux；不含该端点的普通 LYNX 版本无法连接。
 - 可读取实时项目、音型、设备、参数和当前 Playlist 编排，修改速度、通道和混音设置及音符，并控制播放和共享的原生撤销/重做。
 - 参数编辑面向宿主插件乐器或混音效果器，使用读取结果中的归一化值，并在修改前核对每个 `expectedValue`。暂不支持内置乐器的合成参数。效果器只能从内置或已扫描的效果器目录加载。
 - Playlist 可原子地添加、移动、调整长度、复制或删除使用现有源的片段，保留路由和省略的属性。

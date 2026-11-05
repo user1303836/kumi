@@ -79,7 +79,7 @@ fn without_any_bridge_kumi_chats_in_lives_words() {
     let env = env();
     assert_eq!(
         providers().map(|provider| provider.id()).collect::<Vec<_>>(),
-        [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft],
+        [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft, DawId::Lynx],
         "Live first"
     );
     let (provider, found) = chosen(None, &env);

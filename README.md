@@ -129,7 +129,7 @@ To build Kumi from source, see [DEVELOPMENT.md](DEVELOPMENT.md) and the [develop
 
 ## LYNX SHARE (experimental)
 
-- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching `lynx-kumi/1` native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
+- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
 - Reads the live project, patterns, devices, parameters and current Playlist arrangement; changes tempo, channel/mixer settings and notes; controls playback and shared native undo/redo.
 - Parameter edits target hosted instruments or mixer effects, use the normalized values returned by the device read, and check each observed `expectedValue` before changing anything. Native instrument synthesis parameters are not exposed. Effects load only from the built-in or scanned-effect catalog.
 - Playlist edits atomically add, move, resize, duplicate or remove clips using existing sources and preserve routing and omitted properties.
