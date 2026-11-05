@@ -670,9 +670,9 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     wire.end().await;
 });
 
-/// (#980) The look's own snapshot gives the epoch a read is held to: REAPER switches from project A to B right after
-/// it answers the look's snapshot (where a second read of the epoch, after the look, would have read B's), and B's
-/// page is never taken for A's: A's key stays with A's epoch, a read is stale, and the next look is B's with B's epoch.
+// (#980) The look's own snapshot gives the epoch a read is held to: REAPER switches from project A to B right after
+// it answers the look's snapshot (where a second read of the epoch, after the look, would have read B's), and B's
+// page is never taken for A's: A's key stays with A's epoch, a read is stale, and the next look is B's with B's epoch.
 case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_after_it_is_never_the_looked_project, async {
     let script = ReaperScript::new(3, 0);
     // What REAPER does as it answers the next look's snapshot: nothing (0), switch to another project right after (1),
