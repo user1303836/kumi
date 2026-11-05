@@ -113,6 +113,14 @@ class Host:
                             for kind, setting in generate.SETTINGS.items()},
                 "cap": cap if isinstance(cap, int) and not isinstance(cap, bool) and cap >= 0 else 0}
 
+    def mirelo_status(self) -> dict:
+        """Mirelo's readiness as `hermes kumi doctor` reports it (#1058): whether the producer's key is held (never the
+        key), the onboarding acknowledged, a kind switched on, and a credit cap above 0. Settings only: the ledger
+        isn't opened, so nothing is written (rgzm)."""
+        settings = self.generation()
+        return {"key": self.mirelo_key() is not None, "acknowledged": settings["acknowledged"],
+                "task": any(settings["enabled"].values()), "cap": settings["cap"] > 0}
+
     def ledger(self) -> Any:
         """This profile's credit ledger (W3's `ledger.Ledger`, under its own file lock), with the cap as the producer
         set it now, and their acknowledgement and each kind's switch written into it (`configure`): the runtime reads

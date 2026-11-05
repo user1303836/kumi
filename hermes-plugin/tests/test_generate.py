@@ -1,5 +1,5 @@
-"""Paid generation with Mirelo, W2's side (CC-13 and its amendment A), against the fixture runtime's `generate` and a
-stand-in for W3's ledger, set up only through the ledger's own calls: off until the producer switches it on, a quote
+"""Paid generation with Mirelo, W2's side (CC-13 and its amendment A), against the fixture runtime's `generate` and
+W3's ledger (ledger.py), set up only through the ledger's own calls: off until the producer switches it on, a quote
 then a create approved from the stored quote alone, once, within the cap, never where nobody can answer, credits held
 only for a create that may have left, and the key nowhere but the one request."""
 from __future__ import annotations
@@ -14,12 +14,12 @@ import time
 import unittest
 from unittest import mock
 
-import fake_ledger
 import support
 
 calls = support.module("calls")
 commands = support.module("commands")
 generate = support.module("generate")
+ledger = support.module("ledger")
 policy = support.module("policy")
 tools = support.module("tools")
 
@@ -35,16 +35,15 @@ class Tty(io.StringIO):
         return True
 
 
-class Unfreeable(fake_ledger.Ledger):
+class Unfreeable(ledger.Ledger):
     """A ledger whose lock is busy just when a reservation is to be freed."""
 
     def refuse(self, reservation_id: str, *, not_submitted: bool, reason: str) -> dict:
-        raise fake_ledger.LedgerError("ledger_unavailable", "Kumi's credit ledger is busy.")
+        raise ledger.LedgerError("ledger_unavailable", "Kumi's credit ledger is busy.")
 
 
 class Generation(unittest.TestCase):
-    def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY,
-             ledger: type = fake_ledger.Ledger):
+    def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY, ledger: type | None = None):
         host, ctx, data = support.host(self, dict(ON if settings is None else settings), *fixture_args,
                                        ledger=ledger, mirelo_key=key)
         support.call(host, "kumi_connect", {}, session_id="s1")
@@ -79,6 +78,17 @@ class Generation(unittest.TestCase):
                 self.assertEqual(support.call(host, "kumi_generate", SFX, session_id="s1")["error"]["code"], code)
                 self.assertEqual(self.sent(data, "quote"), [], "Mirelo is never asked")
                 self.assertFalse((data / generate.LEDGER_FILE).exists(), "and no ledger is made")
+
+    def test_mirelos_readiness_says_what_is_set_never_the_key_and_opens_no_ledger(self):
+        host, ctx, data = self.host()
+        ready = host.mirelo_status()
+        self.assertEqual(ready, {"key": True, "acknowledged": True, "task": True, "cap": True})
+        self.assertNotIn(KEY, json.dumps(ready), "the key itself is never given")
+        ctx.settings.update(mirelo_sfx_enabled=False, mirelo_midi_enabled=False, mirelo_credit_cap=0)
+        self.assertEqual(host.mirelo_status(), {"key": True, "acknowledged": True, "task": False, "cap": False})
+        bare, _, _ = self.host({"daw": "ableton"}, key=None)
+        self.assertEqual(bare.mirelo_status(), {"key": False, "acknowledged": False, "task": False, "cap": False})
+        self.assertFalse((data / generate.LEDGER_FILE).exists(), "read only: the ledger isn't opened, or made")
 
     def test_a_sound_effect_is_quoted_unasked_then_created_only_as_approved_from_its_stored_quote(self):
         host, _, data = self.host()
