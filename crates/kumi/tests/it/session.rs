@@ -4460,6 +4460,13 @@ local_test!(an_imported_conversation_carries_on_here_in_a_copy_and_the_model_hea
     live(&h, Some(SET_B));
     h.session.start().await.unwrap();
     assert!(h.session.resume_conversation(KEPT).await.unwrap());
+    assert!(
+        h.events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, SessionEvent::Resumed { saved_at, .. } if *saved_at == imported.conversation.saved_at)),
+        "the copy banner says when the imported conversation was last saved"
+    );
     assert!(asks(&h).is_empty(), "a conversation from a file has no Set to open");
     let copy = now(&h).await;
     assert!(copy.id != KEPT && !copy.kept, "kept by its first request: {copy:?}");

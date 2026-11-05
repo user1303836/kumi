@@ -14,6 +14,7 @@ use kumi_agent::core::conversations::FileConversationStore;
 use kumi_agent::core::export::{
     details, file_name, html, html_text, import, importable, json, markdown, Format, Options, Part, Source, IMPORT_MAX_BYTES,
 };
+use kumi_agent::core::text::cut;
 use kumi_agent::gone_words;
 use kumi_common::js::string::head;
 use kumi_common::time::now_ms;
@@ -316,6 +317,20 @@ pub fn reveal(path: &Path) {
         }
         "win32" => {
             let mut command = std::process::Command::new("explorer");
+            #[cfg(windows)]
+            {
+                use std::os::windows::{ffi::OsStrExt, process::CommandExt};
+                // Explorer parses its own command line. Keep the comma outside the quoted path and reject characters
+                // that could end that quote (neither is valid in a Windows file name).
+                if path.as_os_str().encode_wide().any(|unit| unit == 0 || unit == u16::from(b'"')) {
+                    return;
+                }
+                let mut selection = std::ffi::OsString::from("/select,\"");
+                selection.push(path);
+                selection.push("\"");
+                command.raw_arg(selection);
+            }
+            #[cfg(not(windows))]
             command.arg(format!("/select,{}", path.display()));
             command
         }
@@ -610,7 +625,7 @@ pub async fn import_command(file: &str, env: &Env, out: &dyn TtyOutput, err: &dy
         None => store.new_id().await,
     };
     // A name runs to 60 characters, with the mark.
-    let name = format!("{} (imported)", head(&imported.title, 49));
+    let name = format!("{} (imported)", cut(&imported.title, 49));
     store.create(IMPORTED, &id, &imported.conversation, Some(name.as_str()), None).await?;
     // The store keeps the latest part of a long conversation; one whose last exchange alone is too long, it can't. What
     // it can't read back goes too: nothing's left of a refused import.
@@ -631,6 +646,9 @@ pub async fn import_command(file: &str, env: &Env, out: &dyn TtyOutput, err: &dy
         _ => String::new(),
     };
     out.write(&format!("Imported “{}” as {id}{why}. Carry it on: {command} -r {id}\n", imported.title));
+    for warning in &imported.warnings {
+        out.write(&format!("{warning}\n"));
+    }
     Ok(0)
 }
 

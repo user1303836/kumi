@@ -134,6 +134,7 @@ fn a_full_export_takes_out_what_a_field_named_for_a_secret_holds_whatever_it_loo
         "c00kieOne",
         "Errpw7788",
         "awsS3cr3tK",
+        "nestedOnly5",
     ];
     let input = json!({
         "track": "Kick",
@@ -146,6 +147,7 @@ fn a_full_export_takes_out_what_a_field_named_for_a_secret_holds_whatever_it_loo
         "AWSSecretKey": "awsS3cr3tK",
         "credential": {"user": "pr0ducerName", "pin": "PinCode4821"},
         "author": "Aphex Twin",
+        "payload": json!({"session": json!({"password": "nestedOnly5"}).to_string()}).to_string(),
         "max_tokens": 512
     });
     let messages = vec![
@@ -519,4 +521,28 @@ fn an_exported_conversation_speaks_the_words_of_the_daw_its_place_is_in() {
     for place in [id, "unsaved", IMPORTED] {
         assert_eq!(words_of(place).0, WORDS, "{place}");
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_imports_name_keeps_whole_characters_and_reports_a_bounded_clip_picture() {
+    let root = tempfile::tempdir().unwrap();
+    let env = Env::from([("KUMI_HOME".into(), root.path().join("home").display().to_string())]);
+    let file = root.path().join("import.json");
+    let title = format!("{}🎹 Night", "a".repeat(48));
+    fs::write(
+        &file,
+        json!({"format":"kumi-conversation", "version":1, "title":title, "messages":[
+            {"role":"user","content":[{"type":"text","text":"Make the keys brighter"}]}
+        ],"changes":[{"id":"c1","family":"clip","title":"Keys","state":"applied","at":1,
+            "clip":{"length":4,"notes":vec![json!({"pitch":60,"start":0,"duration":0.25,"velocity":90});600]}
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let (out, err) = (Out::default(), Out::default());
+    assert_eq!(import_command(&file.display().to_string(), &env, &out, &err, "kumi").await.unwrap(), 0);
+    let store = create_conversation_store(root.path().join("home/projects"));
+    let row = store.all().await.unwrap().remove(0);
+    assert_eq!(row.title(), format!("{} (imported)", "a".repeat(48)));
+    assert!(out.0.borrow().contains("A change's clip picture keeps only its first 512 notes."));
 }
