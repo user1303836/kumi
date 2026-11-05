@@ -11,8 +11,14 @@ license: MIT
 requires_hermes: ">=0.22.7"
 provides_tools: [kumi_status, kumi_connect, kumi_observe, kumi_read, kumi_change, kumi_undo, kumi_history,
                  kumi_listen, kumi_sounds, kumi_library, kumi_job]
-provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, on_session_finalize]
+provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
+                 on_session_finalize]
 config_schema:
+  inject_focus:
+    type: bool
+    default: true
+    label: Tell the agent what you're looking at
+    description: "Adds a short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes. Notes stay in the chat's history."
   daw:
     type: str
     choices: [ableton, reaper, renoise]
