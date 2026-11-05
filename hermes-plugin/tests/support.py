@@ -48,6 +48,7 @@ class Context:
         self.hooks: dict[str, list] = {}
         self.unloads: list = []
         self.commands: dict[str, Any] = {}
+        self.cli: dict[str, dict] = {}
         self.skills: dict[str, Path] = {}
         self.prompt: dict[str, str] = {}
         self.settings = dict(settings or {})
@@ -65,6 +66,9 @@ class Context:
 
     def register_command(self, name, handler, description="", args_hint="", argument_mode=None):
         self.commands[name] = handler
+
+    def register_cli_command(self, name, help, setup_fn, handler_fn=None, description=""):
+        self.cli[name] = {"help": help, "setup_fn": setup_fn, "handler_fn": handler_fn}
 
     def register_skill(self, name, path, description="", frontmatter=None):
         if not Path(path).is_file():

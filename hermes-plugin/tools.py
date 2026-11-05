@@ -62,6 +62,9 @@ class Host:
         daw = self._ctx.get_config("daw", "ableton")
         return daw if daw in schemas.DAWS else "ableton"
 
+    def inject_focus(self) -> bool:
+        return self._ctx.get_config("inject_focus", True) is not False
+
     def library_folders(self) -> list[str]:
         folders = self._ctx.get_config("library_folders", [])
         return [folder for folder in folders if isinstance(folder, str) and folder] if isinstance(folders, list) else []
