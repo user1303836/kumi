@@ -1,0 +1,30 @@
+  Kumi  ·  Night Drive                                                                ● SoundCraft
+
+                                                                ╭─ FOCUS · Edit ───────────────────╮
+                                                                │ ■  Bass                          │
+                                                                │ ────────┃───────┼─────────────── │
+                                                                │ bar 11 · playing · after Verse   │
+                                                                │ selection 10–12 · bars 9–16 of … │
+                 ██                          ▀▀                 │ Regions    Verse─────[Chorus──── │
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ Drums      ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │ Bass       ▬▬▬▬▬▬    ▬▬▬▬▬▬▬▬▬▬▬ │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │ Vox          ▬▬▬▬▬▬▬▬▬           │
+                                                                │ 1 hidden                         │
+                 ░▒▓████████████████████████▓▒░                 │                                  │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   ├─ NOW ────────────────────────────┤
+                                                                │ Ready                            │
+                               Try                              ├─ HISTORY ────────────────────────┤
+                     “What's on this track?”                    │ Nothing changed yet              │
+                    “Which tracks are muted?”                   │                                  │
+               “Why might my low end sound muddy?”              │                                  │
+                                                                │                                  │
+   Kumi keeps each session's conversations: /conversations go…  │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your session                               ─╯ ╰──────────────────────────────────╯
+

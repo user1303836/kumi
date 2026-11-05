@@ -1,7 +1,8 @@
 //! FOCUS draws REAPER's and Renoise's views as the producer moves between them: REAPER's MIDI editor shows the take's
 //! notes and controller lanes, its arrange view each track's items, a track's routing its sends, an FX chain (a take's
 //! too) its tree; Renoise's pattern and phrase editors show the lines around the cursor, its matrix the sequence, an
-//! instrument its keyzones, the DSP chain its Doofers and Splitters. NOW and HISTORY draw each family of their changes.
+//! instrument its keyzones, the DSP chain its Doofers and Splitters; SoundCraft's Edit window, MIDI Editor, a track's
+//! Inserts and its Mix window draw from its bridge's bodies. NOW and HISTORY draw each family of their changes.
 #[path = "../support/models.rs"]
 mod models;
 #[path = "../support/tui_app.rs"]
@@ -12,6 +13,7 @@ use kumi_agent::core::contracts::*;
 use kumi_daw_own::pictures as own_pictures;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
+use kumi_daw_soundcraft as soundcraft;
 use kumi_types::contracts::*;
 use kumi_types::daw::DawId;
 use serde_json::{json, Value};
@@ -526,6 +528,7 @@ const BODY_SHOTS: &[(i32, i32, bool)] = &[(120, 36, false), (160, 40, false), (1
 const PICTURE_SHOTS: &[(i32, i32, bool)] = &[(120, 36, false), (160, 40, false), (100, 30, false), (80, 30, false), (120, 36, true)];
 
 /// One scene at each of `shots`: the app for `daw`, started and connected; `drive` sets it up and leaves the screen to keep.
+/// A DAW Kumi only reads (SoundCraft's) gets a session that says so, as the app gives it.
 macro_rules! scene {
     ($name:ident, $daw:expr, $shots:expr, |$h:ident| $drive:block) => {
         #[tokio::test(flavor = "current_thread")]
@@ -533,8 +536,13 @@ macro_rules! scene {
             tokio::task::LocalSet::new()
                 .run_until(async {
                     work_with($daw);
+                    let reads_only = kumi::daw::provider($daw).is_some_and(|provider| provider.reads_only());
                     for &(width, height, plain) in $shots {
-                        let $h = Harness::with(width, height, Rc::new(Control::default()), |o| {
+                        let control = Rc::new(Control::default());
+                        if reads_only {
+                            control.set("reads-only", json!(true));
+                        }
+                        let $h = Harness::with(width, height, control, |o| {
                             if plain {
                                 o.color_depth = Some(ColorDepth::None);
                                 o.graphics = Some(Graphics::Words);
@@ -877,6 +885,130 @@ scene!(renoise_mixer, DawId::Renoise, BODY_SHOTS, |h| {
     let focus = json!({"view": "mixer", "selection": {"track": {"name": "Bass", "type": "sequencer"}, "trackRef": "e1:track:2"}});
     h.emit(focus_of(renoise::DAW.fill_focus, focus));
     shows(&h, "FOCUS · Mixer").await;
+});
+
+// SoundCraft's bodies as its bridge answers them (`focus_body`), each read by its integration.
+
+scene!(soundcraft_edit_window, DawId::SoundCraft, BODY_SHOTS, |h| {
+    // The Edit window scrolled to bars 9–16 of 64: each track's clips in quarter notes, a marker and ranged markers (as
+    // regions), the time selection, and a hidden track left out.
+    let clip = |n: u32, position: f64, length: f64, name: &str, more: Value| {
+        let mut row =
+            json!({"ref": format!("s:clip:{n}"), "position": position, "length": length, "name": name, "muted": false, "selected": false});
+        for (key, value) in more.as_object().unwrap() {
+            row[key] = value.clone();
+        }
+        row
+    };
+    let body = json!({"epoch": "e1", "kind": "edit", "length": 256.0, "beatsPerBar": 4.0, "playhead": 40.0, "playing": true,
+    "trackCount": 4, "from": 0, "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0},
+    "meter": [{"position": 0.0, "bar": 1, "beat": 0.0, "beatsPerBar": 4.0}],
+    "timeSelection": {"start": 36.0, "end": 44.0},
+    "markers": [{"name": "Drop", "position": 48.0}],
+    "regions": [{"name": "Verse", "position": 16.0, "end": 48.0}, {"name": "Chorus", "position": 48.0, "end": 80.0}],
+    "tracks": [
+        {"ref": "s:track:1", "name": "Drums", "depth": 0, "shown": true, "items": [clip(10, 32.0, 32.0, "Beat", json!({}))]},
+        {"ref": "s:track:2", "name": "Click", "depth": 0, "shown": false, "items": []},
+        {"ref": "s:track:3", "name": "Bass", "depth": 0, "shown": true, "items": [
+            clip(25, 32.0, 8.0, "Bass line", json!({"selected": true})), clip(26, 48.0, 16.0, "Bass 2", json!({"muted": true}))]},
+        {"ref": "s:track:4", "name": "Vox", "depth": 0, "shown": true, "items": [clip(40, 36.0, 12.0, "Take 1", json!({}))]}
+    ]});
+    let Some(FocusBody::Timeline(strip)) = (soundcraft::DAW.to_body)(&BodyRequest::Timeline, &body) else { panic!() };
+    *h.control.arrangement.borrow_mut() = Some(strip);
+    let focus = json!({"view": "edit", "selection": {"track": {"name": "Bass", "type": "midi"}, "trackRef": "s:track:3",
+        "trackRefs": ["s:track:3"], "clipRefs": ["s:clip:25"]}});
+    h.emit(focus_of(soundcraft::DAW.fill_focus, focus));
+    shows(&h, "selection 10–12").await;
+    h.has("[Chorus");
+});
+
+scene!(soundcraft_midi_editor, DawId::SoundCraft, BODY_SHOTS, |h| {
+    // The clip the MIDI Editor shows (SoundCraft's own pick, not the first selected clip): notes in quarter notes from its
+    // start, none selected (SoundCraft doesn't say which are).
+    let note = |pitch: i64, start: f64, length: f64, velocity: i64| json!({"pitch": pitch, "start": start, "length": length, "velocity": velocity, "selected": false});
+    let body = json!({"epoch": "e1", "kind": "midi", "ref": "s:clip:25", "trackRef": "s:track:3", "name": "Bass line", "length": 8.0,
+        "beatsPerBar": 4.0, "noteCount": 5,
+        "notes": [note(36, 0.0, 1.0, 110), note(36, 1.5, 0.5, 90), note(43, 2.0, 1.0, 100), note(41, 4.0, 2.0, 100), note(39, 6.0, 1.5, 80)]});
+    let request = BodyRequest::Notes { item_ref: "s:clip:25".into() };
+    let Some(FocusBody::Notes(view)) = (soundcraft::DAW.to_body)(&request, &body) else { panic!() };
+    *h.control.clip.borrow_mut() = Some(view);
+    let focus = json!({"view": "midi", "selection": {"track": {"name": "Bass", "type": "midi"}, "trackRef": "s:track:3",
+        "trackRefs": ["s:track:3"], "clipRefs": ["s:clip:20", "s:clip:25"], "midiClipRef": "s:clip:25"}});
+    h.emit(focus_of(soundcraft::DAW.fill_focus, focus));
+    shows(&h, "FOCUS · MIDI").await;
+    assert!(h.calls().contains(&"clip:s:clip:25".to_string()), "the MIDI Editor's clip is read: {:?}", h.calls());
+});
+
+/// An insert as SoundCraft's bridge answers it: a built-in plug-in by its name, on or bypassed. An instrument says neither:
+/// the session shows no bypass for it.
+fn insert(reference: &str, name: &str, enabled: Option<bool>) -> Value {
+    let mut row = json!({"ref": reference, "name": name, "plugin": true});
+    if let Some(enabled) = enabled {
+        row["enabled"] = enabled.into();
+    }
+    row
+}
+
+scene!(soundcraft_inserts, DawId::SoundCraft, BODY_SHOTS, |h| {
+    let body = json!({"epoch": "e1", "kind": "fx", "ref": "s:track:3", "nodes": [
+        insert("s:insert:3:instrument", "Subtractive Synth", None),
+        insert("s:insert:3:a", "Channel EQ", Some(true)),
+        insert("s:insert:3:b", "Compressor", Some(false)),
+        insert("s:insert:3:e", "Delay", Some(true))]});
+    let request = BodyRequest::Tree { track_ref: "s:track:3".into() };
+    let Some(FocusBody::Tree(tree)) = (soundcraft::DAW.to_body)(&request, &body) else { panic!() };
+    *h.control.tree.borrow_mut() = Some(tree);
+    let focus = json!({"view": "fx", "selection": {"track": {"name": "Bass", "type": "midi"}, "trackRef": "s:track:3",
+        "fxRef": "s:insert:3:a", "fxName": "Channel EQ", "fxTrackRef": "s:track:3", "fxTrackName": "Bass"}});
+    h.emit(focus_of(soundcraft::DAW.fill_focus, focus));
+    shows(&h, "FOCUS · Inserts").await;
+});
+
+// A plug-in's window on a track that isn't selected: FOCUS reads that track's inserts (by the ref the bridge gives it,
+// with its life) and heads them with its name, with no track selected at all.
+case!(soundcrafts_plugin_window_on_another_track_reads_that_tracks_inserts, async {
+    work_with(DawId::SoundCraft);
+    let c = Rc::new(Control::default());
+    let body = json!({"epoch": "e1", "kind": "fx", "ref": "s:track:7.2", "nodes": [insert("s:insert:7.2:a", "Reverb", Some(true))]});
+    let request = BodyRequest::Tree { track_ref: "s:track:7.2".into() };
+    let Some(FocusBody::Tree(tree)) = (soundcraft::DAW.to_body)(&request, &body) else { panic!() };
+    *c.tree.borrow_mut() = Some(tree);
+    let h = Harness::with(120, 36, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let focus = json!({"view": "fx", "selection": {"trackRefs": [], "clipRefs": [], "fxRef": "s:insert:7.2:a", "fxName": "Reverb",
+        "fxTrackRef": "s:track:7.2", "fxTrackName": "Vox"}});
+    h.emit(focus_of(soundcraft::DAW.fill_focus, focus));
+    shows(&h, "FOCUS · Inserts").await;
+    h.has("Reverb");
+    h.has("Vox");
+    assert!(h.calls().contains(&"tree:s:track:7.2".to_string()), "the window's track is read: {:?}", h.calls());
+    h.close().await;
+});
+
+scene!(soundcraft_mix_window, DawId::SoundCraft, BODY_SHOTS, |h| {
+    // The Mix window's strips as the bridge answers: the master first (only it marked so, and no arm), each kind in the
+    // chip's words (an aux track as a return), one pan each, and no meters (SoundCraft has none to read).
+    let strip = |n: u32, name: &str, kind: &str, volume: f64, pan: f64, more: Value| {
+        let mut row = json!({"ref": format!("s:track:{n}"), "name": name, "type": kind, "volumeDb": volume, "pan": pan,
+            "mute": false, "solo": false, "arm": false, "selected": false});
+        for (key, value) in more.as_object().unwrap() {
+            row[key] = value.clone();
+        }
+        row
+    };
+    let master = json!({"ref": "s:track:9", "name": "Master", "type": "master", "master": true, "volumeDb": 0.0, "pan": 0.0,
+        "mute": false, "solo": false, "selected": false});
+    let body = json!({"epoch": "e1", "kind": "mixer", "strips": [master,
+        strip(1, "Drums", "audio", -3.0, 0.0, json!({})),
+        strip(3, "Bass", "midi", -6.02, -0.25, json!({"selected": true, "arm": true})),
+        strip(4, "Vox", "audio", -150.0, 0.3, json!({"mute": true})),
+        strip(5, "Pad with a long name", "midi", 1.5, 1.0, json!({"solo": true})),
+        strip(6, "Reverb", "send", -8.0, 0.0, json!({}))], "trackCount": 5, "from": 0, "levels": false});
+    *h.control.own.borrow_mut() = (soundcraft::DAW.to_body)(&BodyRequest::Mixer { track_ref: Some("s:track:3".into()) }, &body);
+    let focus = json!({"view": "mixer", "selection": {"track": {"name": "Bass", "type": "midi"}, "trackRef": "s:track:3"}});
+    h.emit(focus_of(soundcraft::DAW.fill_focus, focus));
+    shows(&h, "FOCUS · Mix").await;
 });
 
 // NOW and HISTORY: one picture per family
