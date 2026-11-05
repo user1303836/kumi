@@ -15,6 +15,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+mod records;
+
 const QUOTE_MS: u64 = 5 * 60 * 1000;
 const PENDING: usize = 8;
 const OUTPUT_BYTES: u64 = 50 * 1024 * 1024;
@@ -72,6 +74,7 @@ fn effect(args: &JsonObject) -> Effect {
 #[derive(Default)]
 pub struct Generation {
     pending: RefCell<Pending>,
+    records: RefCell<Option<records::Records>>,
 }
 #[derive(Default)]
 struct Pending {
@@ -103,6 +106,7 @@ impl Generation {
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         ctx.generation().prune();
+        ensure_records(ctx).await?;
         check(&call.signal)?;
         match call.args.get("action").and_then(Value::as_str) {
             Some("quote") => quote(ctx, call).await,
@@ -111,6 +115,45 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             _ => Err(refused("invalid_request", "Choose quote, create, or job.")),
         }
     })
+}
+
+async fn ensure_records(ctx: &Ctx) -> Result<(), OpError> {
+    if ctx.generation().records.borrow().is_some() {
+        return Ok(());
+    }
+    let state = ctx.paths().state_dir.clone();
+    let loaded = tokio::task::spawn_blocking(move || records::load(&state))
+        .await
+        .map_err(|_| refused("ledger_unavailable", "The retained generation receipts could not be inspected."))??;
+    // Another call may have finished loading and started a job while this read ran.
+    ctx.generation().records.borrow_mut().get_or_insert(loaded);
+    Ok(())
+}
+
+fn remember(ctx: &Ctx, id: &str, receipt: &Value) -> Result<(), OpError> {
+    let mut records = ctx.generation().records.borrow_mut();
+    records::remember(records.as_mut().ok_or_else(stale)?, id, receipt)
+}
+
+fn no_unsettled_overrun(ctx: &Ctx, authority: &Authority) -> Result<(), OpError> {
+    let held = ctx.generation().records.borrow();
+    let records = held.as_ref().ok_or_else(stale)?;
+    for reservation in authority.unsettled() {
+        let Some(record) = records.get(&reservation.quote_id) else { continue };
+        if record.kind != reservation.kind
+            || record.reserved != reservation.reserved_credits
+            || reservation.job_id.as_deref().is_some_and(|id| id != record.job_id)
+        {
+            return Err(stale());
+        }
+        if record.actual.is_some_and(|actual| actual > record.reserved) {
+            return Err(refused("ledger_frozen", &format!(
+                "ledger_frozen: job {} exceeded its reserved credits. Inspect that job to settle its charge before the producer clears the freeze.",
+                record.job_id
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn authority(ctx: &Ctx) -> Result<Authority, OpError> {
@@ -177,7 +220,7 @@ async fn quote(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         let pin = saved
             .filter(|(expires, pin)| *expires > now() && pin.source() == source)
             .map(|(_, pin)| pin)
-            .ok_or_else(|| refused("not_approved", "Approve this source's content in this host call before preparing its upload."))?;
+            .ok_or_else(|| refused("stale", "The source no longer matches an unexpired upload preview for this host call."))?;
         let stage = pin.stage(ctx, &call.signal).await?;
         Some((pin, stage))
     } else {
@@ -239,10 +282,7 @@ struct Reservation {
 
 async fn approve(ctx: &Ctx, quote: &Value, reservation: &Reservation, job_id: Option<&str>) -> Result<(), OpError> {
     let authority = authority(ctx).await?;
-    if authority.quote(quote["quote_id"].as_str().unwrap_or("")).as_ref() != Some(quote) {
-        return Err(stale());
-    }
-    authority.approve(&CreateClaim {
+    let claim = CreateClaim {
         quote_id: quote["quote_id"].as_str().unwrap_or(""),
         request_sha256: quote["request_sha256"].as_str().unwrap_or(""),
         kind: quote["kind"].as_str().unwrap_or(""),
@@ -251,14 +291,51 @@ async fn approve(ctx: &Ctx, quote: &Value, reservation: &Reservation, job_id: Op
         host_call_id: &reservation.call,
         now_ms: now(),
         expected_job_id: job_id,
-    })?;
+    };
+    // Only genuine ownership can turn a later refusal into release proof. This also proves
+    // quote() hits an active row, so it performs no archival I/O on the runtime thread.
+    authority.prove_own(&claim)?;
+    if authority.quote(claim.quote_id)?.as_ref() != Some(quote) {
+        return Err(not_submitted(stale()));
+    }
+    authority.approve(&claim)?;
+    no_unsettled_overrun(ctx, &authority).map_err(not_submitted)?;
     Ok(())
 }
 
+async fn missing_quote(ctx: &Ctx, id: &str, reservation: &Reservation) -> Result<Value, OpError> {
+    if ctx.generation().records.borrow().as_ref().is_none_or(|records| records.contains_key(id)) {
+        return Err(refused("quote_consumed", "A job already owns this quote; recover that job instead of resubmitting it."));
+    }
+    let authority = authority(ctx).await?;
+    // Look only at active reservations: a previously settled/archived quote never authorizes
+    // another create. Its absence in pending memory is not by itself release evidence.
+    if !authority.unsettled().any(|held| held.reservation_id == reservation.id && held.quote_id == id) {
+        return Err(refused("quote_consumed", "This quote is unavailable or already used; never resubmit it."));
+    }
+    let quote = authority.quote(id)?.ok_or_else(stale)?;
+    authority.prove_own(&CreateClaim {
+        quote_id: id,
+        request_sha256: quote["request_sha256"].as_str().unwrap_or(""),
+        kind: quote["kind"].as_str().unwrap_or(""),
+        reservation_id: &reservation.id,
+        reserved_credits: reservation.amount,
+        host_call_id: &reservation.call,
+        now_ms: now(),
+        expected_job_id: None,
+    })?;
+    // The authority read yielded; do not turn a concurrently started job into release proof.
+    if ctx.generation().records.borrow().as_ref().is_none_or(|records| records.contains_key(id)) {
+        return Err(refused("quote_consumed", "A job already owns this quote; recover that job instead of resubmitting it."));
+    }
+    // Every POST requires a durable quote_id checkpoint. Retention never prunes an unsettled
+    // generation. No such checkpoint, plus an unbound owned reservation, proves no submission.
+    Err(not_submitted(refused("quote_unavailable", "This runtime no longer holds the prepared quote; request a new quote.")))
+}
+
 async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
-    let key = private_key(&call, true)?.to_owned();
     let host = call_key(&call.host)?;
-    let private = call.host.private.get("_mirelo").unwrap();
+    let private = call.host.private.get("_mirelo").ok_or_else(|| refused("not_approved", "A durable credit reservation is required."))?;
     let reservation = Reservation {
         id: private["reservation_id"]
             .as_str()
@@ -268,32 +345,37 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         call: host.call,
     };
     let id = call.args.get("quote_id").and_then(Value::as_str).unwrap_or("");
-    // Taking the opaque Prepared consumes it even if preparation is subsequently refused. A missing
-    // quote may already have been sent: never call that definitive non-submission or free its credits.
+    let public = ctx.generation().pending.borrow().quotes.get(id).map(|quote| quote.public.clone());
+    let Some(public) = public else { return missing_quote(ctx, id, &reservation).await };
+    // Do not consume Prepared while a ledger lock/read can fail. A successful ownership check
+    // precedes every definitive non-submission refusal, including changed private consent.
+    if let Err(error) = approve(ctx, &public, &reservation, None).await {
+        if error.code() == "not_submitted" {
+            ctx.generation().pending.borrow_mut().quotes.remove(id);
+        }
+        return Err(error);
+    }
     let quote = ctx
         .generation()
         .pending
         .borrow_mut()
         .quotes
         .remove(id)
-        .ok_or_else(|| refused("quote_consumed", "This quote is unavailable, expired, or already used; never resubmit it."))?;
-    // A refusal for a forged/mismatched reservation must not free some other job's unknown charge.
-    // Only after this binding succeeds may this owned, unsubmitted quote prove non-submission.
-    approve(ctx, &quote.public, &reservation, None).await?;
+        .ok_or_else(|| refused("quote_consumed", "Another call already owns this quote; never resubmit it."))?;
     let checked = async {
+        let key = private_key(&call, true)?.to_owned();
         if quote.credential != <[u8; 32]>::from(Sha256::digest(key.as_bytes())) {
             return Err(stale());
         }
         check(&call.signal)?;
-        client(ctx, &key)
+        Ok((client(ctx, &key)?, key))
     }
     .await;
-    let client = checked.map_err(not_submitted)?;
-    let public = quote.public.clone();
+    let (client, key) = checked.map_err(not_submitted)?;
     let native = ctx
         .start_job("generate", move |ctx, job| async move {
             let mut receipt = generate_output::receipt(&quote.public, reservation.amount, None, "not_submitted", None)?;
-            checkpoint(&job, &receipt).await?;
+            checkpoint(&ctx, &job, &receipt).await?;
             job.report(0.0, None, Some("Checking the approved Mirelo generation"));
             let ready = async {
                 if let Some((pin, stage)) = &quote.source {
@@ -302,7 +384,7 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 }
                 check(&job.signal)?;
                 receipt["submission"] = json!("unknown");
-                checkpoint(&job, &receipt).await?;
+                checkpoint(&ctx, &job, &receipt).await?;
                 // This is the last authority read before dispatch, after durable I/O and source checks.
                 approve(&ctx, &quote.public, &reservation, Some(job.id())).await?;
                 check(&job.signal)
@@ -310,7 +392,7 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             .await;
             if let Err(error) = ready {
                 receipt["submission"] = json!("not_submitted");
-                checkpoint(&job, &receipt).await?;
+                checkpoint(&ctx, &job, &receipt).await?;
                 return Err(not_submitted(error));
             }
             let vendor = match client.submit(quote.prepared, &job.signal).await {
@@ -318,7 +400,7 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 Err(error) => {
                     if error.not_submitted() {
                         receipt["submission"] = json!("not_submitted");
-                        checkpoint(&job, &receipt).await?;
+                        checkpoint(&ctx, &job, &receipt).await?;
                     }
                     return Err(refused(if error.not_submitted() { "not_submitted" } else { "submission_unknown" }, &error.to_string()));
                 }
@@ -328,6 +410,11 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             finish(&ctx, &job, &client, vendor, receipt, &key, false).await
         })
         .map_err(not_submitted)?;
+    remember(
+        ctx,
+        &native,
+        &generate_output::receipt(&public, private["reserved_credits"].as_u64().unwrap(), None, "not_submitted", None)?,
+    )?;
     Ok(json!({"state": "running", "job_id": native, "quote_id": public["quote_id"], "kind": public["kind"],
         "prompt": public["prompt"], "seconds": public["seconds"], "estimate": public["estimate"], "credit_unit": "mirelo_credits"}))
 }
@@ -354,14 +441,14 @@ async fn finish(
             receipt["credits"]["actual"] = json!(actual);
         }
     }
-    checkpoint(job, &receipt).await?;
+    checkpoint(ctx, job, &receipt).await?;
     job.report(0.0, None, Some("Mirelo is generating"));
     let vendor = if terminal(&vendor) { vendor } else { client.wait(vendor, &job.signal).await.map_err(provider)? };
     if let Some(actual) = vendor.actual_credits() {
         receipt["credits"]["actual"] = json!(actual);
     }
     // Known terminal billing is durable before any download, decoder, or artifact publication.
-    checkpoint(job, &receipt).await?;
+    checkpoint(ctx, job, &receipt).await?;
     if !vendor.succeeded() {
         return Err(refused("provider_failed", "Mirelo did not complete the job successfully; its reported charge is retained."));
     }
@@ -391,7 +478,7 @@ async fn finish(
             }
         }
     }
-    checkpoint(job, &receipt).await?;
+    checkpoint(ctx, job, &receipt).await?;
     result?;
     if contains_secret(&receipt, key) {
         return Err(refused("output_failed", "The generation result cannot contain private credentials."));
@@ -424,19 +511,27 @@ async fn follow(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         return Ok(view);
     }
     let key = private_key(&call, false)?.to_owned();
-    let authority = authority(ctx).await?;
-    let recovery = authority.for_job(id).ok_or_else(|| refused("not_approved", "This job has no matching durable credit reservation."))?;
+    let state = ctx.paths().state_dir.clone();
+    let native_id = id.to_owned();
+    let (recovery, quote) = tokio::task::spawn_blocking(move || {
+        let authority = Authority::read(&state)?;
+        let recovery = authority
+            .for_job(&native_id)?
+            .ok_or_else(|| refused("not_approved", "This job has no matching durable credit reservation."))?;
+        let quote = authority.quote(&recovery.quote_id)?.ok_or_else(stale)?;
+        Ok::<_, OpError>((recovery, quote))
+    })
+    .await
+    .map_err(|_| refused("ledger_unavailable", "The saved generation authority could not be read."))??;
     if saved["quote_id"] != recovery.quote_id
         || saved["kind"] != recovery.kind
         || saved["provider"] != "mirelo"
         || saved["credits"]["reserved"].as_u64() != Some(recovery.reserved_credits)
         || recovery.provider_job_id.as_deref().is_some_and(|known| known != vendor_id)
         || recovery.settlement == "not_submitted"
-        || recovery.settlement == "manual_release"
     {
         return Err(stale());
     }
-    let quote = authority.quote(&recovery.quote_id).ok_or_else(stale)?;
     if saved["credits"]["estimate"] != quote["estimate"]["credits"] {
         return Err(stale());
     }
@@ -450,13 +545,13 @@ async fn follow(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         let vendor = match fetched {
             Ok(vendor) => vendor,
             Err(error) => {
-                checkpoint(&job, &receipt).await?;
+                checkpoint(&ctx, &job, &receipt).await?;
                 return Err(provider(error));
             }
         };
         if let Some(known) = recovery.actual_credits {
             if terminal(&vendor) && vendor.actual_credits().is_some_and(|actual| actual != known) {
-                checkpoint(&job, &receipt).await?;
+                checkpoint(&ctx, &job, &receipt).await?;
                 return Err(refused(
                     "stale",
                     "Mirelo reported a different charge for an already settled job; the saved receipt is unchanged.",
@@ -471,13 +566,14 @@ async fn follow(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 
 /// Keep the compact billing/output identity receipt, not large notes or absolute MEDIA paths.
 /// A successful outcome carries full notes; a restored successful receipt re-resolves its artifact.
-async fn checkpoint(job: &JobHandle, receipt: &Value) -> Result<(), OpError> {
+async fn checkpoint(ctx: &Ctx, job: &JobHandle, receipt: &Value) -> Result<(), OpError> {
     let compact = receipt
         .as_object()
         .ok_or_else(stale)?
         .iter()
         .map(|(field, value)| (field.clone(), if matches!(field.as_str(), "notes" | "media_tag") { Value::Null } else { value.clone() }))
         .collect::<serde_json::Map<String, Value>>();
+    remember(ctx, job.id(), receipt)?;
     job.checkpoint(Value::Object(compact)).await.map_err(|_| {
         refused("checkpoint_failed", "The generation receipt could not be kept durably; no further provider action was taken.")
     })
@@ -551,3 +647,7 @@ fn refused(code: &'static str, reason: &str) -> OpError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "generate/schema_tests.rs"]
+mod schema_tests;

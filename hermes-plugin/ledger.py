@@ -2,12 +2,21 @@
 
 Only producer settings configure policy. Approval consumes a quote before dispatch;
 transport uncertainty never refunds it. The native runtime shares ledger.lock and
-schema 1, but Python alone writes this file. No provider payload is persisted.
+schema 2. Python alone writes storage. No provider payload is persisted.
+
+The bounded schema-2 manifest holds active evidence and archived_count/archived_spent.
+Immutable .ledger-history-<sequence>.json receipts retain original quotes and terminal
+billing facts. Hashed quote/receipt/host/job/provider indexes resolve one receipt without
+scanning history. Receipt/index files become visible only at the atomic manifest commit;
+an index must also name the canonical receipt's reservation to exclude abandoned copies.
+No earlier ledger format shipped; only schema 2 manifests are accepted.
+Pending and manual-release evidence is never auto-expired.
 """
 from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import json
 import math
 import os
@@ -15,6 +24,7 @@ from pathlib import Path
 import re
 import secrets
 import stat
+import sys
 import time
 from typing import Iterator
 
@@ -97,8 +107,13 @@ def _policy() -> dict:
 
 
 def _empty() -> dict:
-    return {"schema": 1, "policy": _policy(), "frozen": False, "freeze_reason": None,
-            "quotes": {}, "reservations": {}}
+    return {"schema": 2, "policy": _policy(), "frozen": False, "freeze_reason": None,
+            "quotes": {}, "reservations": {}, "archived_count": 0, "archived_spent": 0}
+
+
+def _history_name(category: str, identity: str) -> str:
+    digest = hashlib.sha256(identity.encode("ascii")).hexdigest()
+    return f".ledger-{category}-{digest}.json"
 
 
 def _quote_projection(value: object) -> dict:
@@ -121,7 +136,7 @@ def _quote_projection(value: object) -> dict:
 
 
 def _totals(data: dict) -> tuple[int, int]:
-    spent = sum(r["actual_credits"] for r in data["reservations"].values() if r["settlement"] == "charged")
+    spent = data["archived_spent"] + sum(r["actual_credits"] for r in data["reservations"].values() if r["settlement"] == "charged")
     reserved = sum(r["reserved_credits"] for r in data["reservations"].values() if r["settlement"] == "pending")
     _require(_integer(spent) and _integer(reserved) and _integer(spent + reserved), "ledger_unavailable")
     return spent, reserved
@@ -129,9 +144,10 @@ def _totals(data: dict) -> tuple[int, int]:
 
 def _validate_storage(data: object) -> dict:
     _require(type(data) is dict)
-    fields = {"schema", "policy", "frozen", "freeze_reason", "quotes", "reservations"}
+    fields = {"schema", "policy", "frozen", "freeze_reason", "quotes", "reservations", "archived_count", "archived_spent"}
+    _require(type(data["schema"]) is int and data["schema"] == 2)
+    _require(_integer(data.get("archived_count")) and _integer(data.get("archived_spent")))
     _require(set(data) in (fields, fields - {"policy"}))
-    _require(type(data["schema"]) is int and data["schema"] == 1)
     if data.get("policy") is None:
         data["policy"] = _policy()
     policy = data["policy"]
@@ -148,7 +164,8 @@ def _validate_storage(data: object) -> dict:
         _require(key == quote["quote_id"] and _identity(quote["host_call_id"]) and type(quote["consumed"]) is bool)
     used_quotes, used_calls, used_jobs, used_providers = set(), set(), set(), set()
     for key, r in data["reservations"].items():
-        _require(type(r) is dict and set(r) == _RESERVATION_FIELDS)
+        _require(type(r) is dict and set(r) in (_RESERVATION_FIELDS, _RESERVATION_FIELDS | {"manually_released"}))
+        _require("manually_released" not in r or r["manually_released"] is True)
         _require(_identity(key) and key == r["reservation_id"] and _identity(r["host_call_id"]))
         _require(_identity(r["quote_id"]) and r["quote_id"] in data["quotes"])
         q = data["quotes"][r["quote_id"]]
@@ -284,6 +301,19 @@ def _replace(source: Path, target: Path, directory: int | None) -> None:
         os.replace(source, target, src_dir_fd=directory, dst_dir_fd=directory)
 
 
+def _sync(fd: int) -> None:
+    """Flush drive caches on Darwin; fall back only when FULLFSYNC is unsupported."""
+    if sys.platform == "darwin":
+        import fcntl
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.ENOSYS):
+                raise
+    os.fsync(fd)
+
+
 class Ledger:
     def __init__(self, data_dir, *, credit_cap: int, lock_timeout: float = 2.0):
         _require(_integer(credit_cap))
@@ -324,7 +354,17 @@ class Ledger:
                     _require(remaining > 0, "ledger_unavailable")
                     time.sleep(min(0.01, remaining))
             _check_file(lock_path, fd, directory)
-            yield self._load(directory), directory
+            data = self._load(directory, initialized=os.fstat(fd).st_size != 0)
+            if os.fstat(fd).st_size == 0:
+                # Use the locked handle itself (Windows locks are handle-specific).
+                # The marker precedes the initial manifest: a crash fails closed.
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.write(fd, b"initialized\n")
+                _sync(fd)
+                if directory is not None:
+                    _sync(directory)
+                self._write_record("ledger.json", self._encode(data), directory)
+            yield data, directory
         except (OSError, ValueError, TypeError, OverflowError, RecursionError):
             raise LedgerError("ledger_unavailable") from None
         finally:
@@ -347,35 +387,121 @@ class Ledger:
                 if directory is not None:
                     os.close(directory)
 
-    def _load(self, directory: int | None) -> dict:
-        path = self._dir / "ledger.json" if directory is None else Path("ledger.json")
+    def _read_record(self, name: str, directory: int | None) -> dict:
+        path = self._dir / name if directory is None else Path(name)
+        fd = _open_private(path, readonly=True, directory=directory)
+        with os.fdopen(fd, "rb") as stream:
+            _require(os.fstat(stream.fileno()).st_size <= _MAX_BYTES, "ledger_unavailable")
+            encoded = stream.read(_MAX_BYTES + 1)
+        _require(len(encoded) <= _MAX_BYTES, "ledger_unavailable")
         try:
-            fd = _open_private(path, readonly=True, directory=directory)
+            return json.loads(encoded.decode("utf-8"), object_pairs_hook=_unique_object)
+        except (LedgerError, ValueError, TypeError, RecursionError):
+            raise LedgerError("ledger_unavailable") from None
+
+    def _load(self, directory: int | None, *, initialized: bool) -> dict:
+        try:
+            data = self._read_record("ledger.json", directory)
         except FileNotFoundError:
+            _require(not initialized, "ledger_unavailable")
             return _empty()
         try:
-            with os.fdopen(fd, "rb") as stream:
-                _require(os.fstat(stream.fileno()).st_size <= _MAX_BYTES, "ledger_unavailable")
-                encoded = stream.read(_MAX_BYTES + 1)
-            _require(len(encoded) <= _MAX_BYTES, "ledger_unavailable")
-            return _validate_storage(json.loads(encoded, object_pairs_hook=_unique_object))
+            data = _validate_storage(data)
+        except (LedgerError, ValueError, TypeError, KeyError, RecursionError):
+            raise LedgerError("ledger_unavailable") from None
+        return data
+
+    def _history(self, data: dict, directory: int | None, category: str, identity: str) -> dict | None:
+        """At most two bounded reads; uncommitted crash copies never affect accounting."""
+        count = data["archived_count"]
+        if count == 0:
+            return None
+        try:
+            entry = self._read_record(_history_name(category, identity), directory)
+        except FileNotFoundError:
+            return None
+        try:
+            _require(type(entry) is dict and entry.get("schema") == 1 and type(entry["schema"]) is int)
+            _require(_integer(entry.get("sequence")))
+            if entry["sequence"] >= count:
+                return None
+            _require(set(entry) == {"schema", "sequence", "reservation_id"} and _identity(entry["reservation_id"]))
+            receipt = self._read_record(f".ledger-history-{entry['sequence']:016x}.json", directory)
+            _require(type(receipt) is dict and set(receipt) == {"schema", "sequence", "quote", "reservation"})
+            _require(type(receipt["schema"]) is int and receipt["schema"] == 1 and _integer(receipt["sequence"]))
+            _require(receipt["sequence"] == entry["sequence"])
+            q, r = receipt["quote"], receipt["reservation"]
+            check = _empty()
+            check["quotes"][q["quote_id"]] = q
+            check["reservations"][r["reservation_id"]] = r
+            _validate_storage(check)
+            _require(r["settlement"] in {"charged", "not_submitted"})
+            if r["reservation_id"] != entry["reservation_id"]:
+                return None  # An abandoned index for a subsequently reused uncommitted slot.
+            field = {"receipt": "reservation_id", "quote": "quote_id", "host": "host_call_id",
+                     "job": "job_id", "provider": "provider_job_id"}[category]
+            _require(r[field] == identity)
+            return receipt
         except (LedgerError, ValueError, TypeError, KeyError, RecursionError):
             raise LedgerError("ledger_unavailable") from None
 
     def _save(self, data: dict, directory: int | None) -> None:
+        now = _now()
+        data["quotes"] = {key: q for key, q in data["quotes"].items() if q["consumed"] or q["expires_at"] > now}
         _validate_storage(data)
+        active = dict(data)
+        active["quotes"], active["reservations"] = dict(data["quotes"]), dict(data["reservations"])
+        writes = []
+        for key, r in data["reservations"].items():
+            if r["settlement"] not in {"charged", "not_submitted"}:
+                continue
+            sequence = active["archived_count"]
+            receipt = {"schema": 1, "sequence": sequence, "quote": data["quotes"][r["quote_id"]], "reservation": r}
+            writes.append((f".ledger-history-{sequence:016x}.json", self._encode(receipt)))
+            index = self._encode({"schema": 1, "sequence": sequence, "reservation_id": key})
+            for category, field in (("receipt", "reservation_id"), ("quote", "quote_id"), ("host", "host_call_id"),
+                                    ("job", "job_id"), ("provider", "provider_job_id")):
+                if r[field] is not None:
+                    writes.append((_history_name(category, r[field]), index))
+            del active["reservations"][key]
+            del active["quotes"][r["quote_id"]]
+            active["archived_count"] += 1
+            active["archived_spent"] += r["actual_credits"] if r["settlement"] == "charged" else 0
+        _validate_storage(active)
+        encoded = self._encode(active)
+        for name, body in writes:
+            self._write_record(name, body, directory)
+        # One atomic manifest commit publishes indexes and updates the lifetime total once.
+        self._write_record("ledger.json", encoded, directory)
+        data.clear()
+        data.update(active)
+
+    @staticmethod
+    def _encode(data: dict) -> bytes:
         encoded = (json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
         _require(len(encoded) <= _MAX_BYTES, "ledger_unavailable")
+        return encoded
+
+    def _write_record(self, name: str, encoded: bytes, directory: int | None) -> None:
         root = self._dir if directory is None else Path()
-        scratch = root / (".ledger-" + secrets.token_hex(16) + ".tmp")
+        # One exact owned scratch path per target, under the same OS lock. Recover only
+        # that target's interrupted save, never glob a directory containing lifetime history.
+        scratch = root / (".ledger-save-" + hashlib.sha256(name.encode("ascii")).hexdigest() + ".tmp")
+        try:
+            abandoned = _open_private(scratch, readonly=True, directory=directory)
+        except FileNotFoundError:
+            pass
+        else:
+            os.close(abandoned)
+            os.unlink(scratch, dir_fd=directory)
         fd = _open_private(scratch, create=True, exclusive=True, directory=directory)
         try:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(encoded)
                 stream.flush()
-                os.fsync(stream.fileno())
+                _sync(stream.fileno())
             # Inspect the target without following a link; replacement never follows it either.
-            target = root / "ledger.json"
+            target = root / name
             try:
                 current = os.stat(target, dir_fd=directory, follow_symlinks=False)
             except FileNotFoundError:
@@ -383,9 +509,11 @@ class Ledger:
             else:
                 _require(stat.S_ISREG(current.st_mode) and current.st_nlink == 1
                          and not (getattr(current, "st_file_attributes", 0) & 0x400), "ledger_unavailable")
+                if os.name != "nt":
+                    _require(current.st_uid == os.geteuid() and current.st_mode & 0o077 == 0, "ledger_unavailable")
             _replace(scratch, target, directory)
             if directory is not None:
-                os.fsync(directory)
+                _sync(directory)
         finally:
             try:
                 os.unlink(scratch, dir_fd=directory)
@@ -394,37 +522,51 @@ class Ledger:
 
     def _snapshot(self, data: dict) -> dict:
         spent, reserved = _totals(data)
-        return {"cap": self._cap, "spent": spent, "reserved": reserved,
-                "left": max(0, self._cap - spent - reserved), "frozen": data["frozen"],
+        cap = min(self._cap, data["policy"]["cap"])
+        return {"cap": cap, "spent": spent, "reserved": reserved,
+                "left": max(0, cap - spent - reserved), "frozen": data["frozen"],
                 "freeze_reason": data["freeze_reason"]}
 
-    @staticmethod
-    def _reservation(data: dict, reservation_id: str) -> dict:
-        _require(_identity(reservation_id))
-        _require(reservation_id in data["reservations"], "stale")
-        return data["reservations"][reservation_id]
+    def _quote(self, data: dict, directory: int | None, quote_id: str) -> dict | None:
+        quote = data["quotes"].get(quote_id)
+        if quote is None:
+            receipt = self._history(data, directory, "quote", quote_id)
+            quote = receipt["quote"] if receipt else None
+        return quote
 
-    @staticmethod
-    def _bind(data: dict, r: dict, job_id: str) -> None:
+    def _reservation(self, data: dict, directory: int | None, reservation_id: str) -> dict:
+        _require(_identity(reservation_id))
+        reservation = data["reservations"].get(reservation_id)
+        if reservation is None:
+            receipt = self._history(data, directory, "receipt", reservation_id)
+            reservation = receipt["reservation"] if receipt else None
+        _require(reservation is not None, "stale")
+        return reservation
+
+    def _bind(self, data: dict, directory: int | None, r: dict, job_id: str) -> None:
         _require(_identity(job_id))
         _require(r["job_id"] in (None, job_id), "stale")
         _require(not any(other["reservation_id"] != r["reservation_id"] and other["job_id"] == job_id
                          for other in data["reservations"].values()), "stale")
+        archived = self._history(data, directory, "job", job_id)
+        _require(archived is None or archived["reservation"]["reservation_id"] == r["reservation_id"], "stale")
         r["job_id"] = job_id
 
     def configure(self, *, acknowledged: bool, enabled: dict[str, bool]) -> None:
         with self._locked() as (data, directory):
             _require(type(acknowledged) is bool and type(enabled) is dict and set(enabled) == _KINDS)
             _require(all(type(value) is bool for value in enabled.values()))
-            data["policy"] = {"acknowledged": acknowledged, "enabled": dict(enabled), "cap": self._cap}
-            self._save(data, directory)
+            policy = {"acknowledged": acknowledged, "enabled": dict(enabled), "cap": self._cap}
+            if data["policy"] != policy:
+                data["policy"] = policy
+                self._save(data, directory)
 
     def record_quote(self, quote_result: dict, host_call_id: str) -> dict:
         with self._locked() as (data, directory):
             _require(_identity(host_call_id))
             quote = _quote_projection(quote_result)
             quote.update(host_call_id=host_call_id, consumed=False)
-            old = data["quotes"].get(quote["quote_id"])
+            old = self._quote(data, directory, quote["quote_id"])
             if old is not None:
                 _require(all(old[key] == value for key, value in quote.items() if key != "consumed"), "stale")
                 return old
@@ -435,24 +577,29 @@ class Ledger:
     def quote(self, quote_id: str) -> dict:
         with self._locked() as (data, directory):
             _require(_identity(quote_id))
-            _require(quote_id in data["quotes"], "unknown_quote")
-            return data["quotes"][quote_id]
+            quote = self._quote(data, directory, quote_id)
+            _require(quote is not None, "unknown_quote")
+            return quote
 
     def reserve(self, quote_id: str, approved_sha256: str, approved_max: int, *, host_call_id: str) -> dict:
         with self._locked() as (data, directory):
             _require(_identity(quote_id) and _identity(host_call_id) and _digest(approved_sha256) and _integer(approved_max))
-            _require(quote_id in data["quotes"], "unknown_quote")
-            quote = data["quotes"][quote_id]
+            quote = self._quote(data, directory, quote_id)
+            _require(quote is not None, "unknown_quote")
             _require(approved_sha256 == quote["request_sha256"] and approved_max == quote["estimate"]["max_credits"], "stale")
             now = _now()
             _require(quote["expires_at"] > now, "expired_quote")
             _require(not quote["consumed"] and not any(r["host_call_id"] == host_call_id for r in data["reservations"].values()), "quote_consumed")
+            _require(self._history(data, directory, "host", host_call_id) is None, "quote_consumed")
             _require(data["policy"]["acknowledged"], "not_configured")
             _require(data["policy"]["enabled"][quote["kind"]], "not_enabled")
             _require(not data["frozen"], "ledger_frozen")
             spent, reserved = _totals(data)
-            _require(self._cap > 0 and spent + reserved + approved_max <= self._cap, "cap_exceeded")
+            cap = min(self._cap, data["policy"]["cap"])
+            _require(cap > 0 and spent + reserved + approved_max <= cap, "cap_exceeded")
             reservation_id = "r-" + secrets.token_hex(16)
+            _require(reservation_id not in data["reservations"]
+                     and self._history(data, directory, "receipt", reservation_id) is None, "stale")
             r = {"reservation_id": reservation_id, "quote_id": quote_id, "request_sha256": approved_sha256,
                  "host_call_id": host_call_id, "kind": quote["kind"], "reserved_credits": approved_max,
                  "expires_at": quote["expires_at"], "created_at": now, "job_id": None, "provider_job_id": None,
@@ -464,19 +611,20 @@ class Ledger:
 
     def bind(self, reservation_id: str, job_id: str) -> dict:
         with self._locked() as (data, directory):
-            r = self._reservation(data, reservation_id)
+            r = self._reservation(data, directory, reservation_id)
             _require(r["settlement"] == "pending" or r["job_id"] == job_id, "stale")
-            self._bind(data, r, job_id)
+            self._bind(data, directory, r, job_id)
             self._save(data, directory)
             return self._snapshot(data)
 
     def refuse(self, reservation_id: str, *, not_submitted: bool, reason: str) -> dict:
         with self._locked() as (data, directory):
             _require(type(not_submitted) is bool and isinstance(reason, str))
-            r = self._reservation(data, reservation_id)
+            r = self._reservation(data, directory, reservation_id)
             if not not_submitted:
                 return self._snapshot(data)
-            _require(r["settlement"] in {"pending", "not_submitted"} and r["submission"] != "submitted", "stale")
+            _require(r["job_id"] is None and r["settlement"] in {"pending", "not_submitted"}
+                     and r["submission"] != "submitted", "stale")
             r.update(submission="not_submitted", settlement="not_submitted")
             # reason is display-only caller text; it is never stored or echoed.
             self._save(data, directory)
@@ -484,19 +632,26 @@ class Ledger:
 
     def reconcile(self, reservation_id: str, job: dict) -> dict:
         with self._locked() as (data, directory):
-            r = self._reservation(data, reservation_id)
-            receipt = _job_receipt(job, data["quotes"][r["quote_id"]], r)
+            r = self._reservation(data, directory, reservation_id)
+            receipt = _job_receipt(job, self._quote(data, directory, r["quote_id"]), r)
             if receipt is None:
                 _require(r["job_id"] == job["job_id"], "stale")
                 return self._snapshot(data)
-            _require(r["settlement"] == "pending" or r["job_id"] == job["job_id"], "stale")
-            self._bind(data, r, job["job_id"])
+            _require(r["settlement"] in {"pending", "manual_release"} or r["job_id"] == job["job_id"], "stale")
+            self._bind(data, directory, r, job["job_id"])
             submission, provider, actual = receipt
             _require(r["provider_job_id"] in (None, provider) or provider is None, "stale")
             if provider is not None:
                 _require(not any(other["reservation_id"] != reservation_id and other["provider_job_id"] == provider
                                  for other in data["reservations"].values()), "stale")
+                archived = self._history(data, directory, "provider", provider)
+                _require(archived is None or archived["reservation"]["reservation_id"] == reservation_id, "stale")
             terminal = job["state"] in _TERMINAL
+            # A producer override is not a refund. Later native evidence restores the
+            # reservation until actual billing is known, or accounts the charge immediately.
+            if r["settlement"] == "manual_release" and submission == "submitted":
+                r["manually_released"] = True
+                r["settlement"] = "pending"
             if r["settlement"] != "pending":
                 if r["settlement"] == "charged":
                     _require(actual is None or (terminal and actual == r["actual_credits"] and provider == r["provider_job_id"]), "stale")
@@ -505,6 +660,7 @@ class Ledger:
                     _require(submission == "not_submitted" and actual is None and provider is None, "stale")
                 else:
                     _require(submission == "unknown" and actual is None and provider is None, "stale")
+                    self._save(data, directory)
                 return self._snapshot(data)
             if r["submission"] == "submitted":
                 _require(submission != "not_submitted", "stale")
@@ -525,11 +681,14 @@ class Ledger:
     def find_job(self, job_id: str) -> dict | None:
         with self._locked() as (data, directory):
             _require(_identity(job_id))
-            for r in data["reservations"].values():
-                if r["job_id"] == job_id:
-                    return {key: r[key] for key in ("reservation_id", "quote_id", "kind", "job_id", "provider_job_id",
-                                                   "reserved_credits", "submission", "settlement", "actual_credits")}
-            return None
+            r = next((r for r in data["reservations"].values() if r["job_id"] == job_id), None)
+            if r is None:
+                receipt = self._history(data, directory, "job", job_id)
+                r = receipt["reservation"] if receipt else None
+            if r is None:
+                return None
+            return {key: r[key] for key in ("reservation_id", "quote_id", "kind", "job_id", "provider_job_id",
+                                           "reserved_credits", "submission", "settlement", "actual_credits")}
 
     def snapshot(self) -> dict:
         with self._locked() as (data, directory):
@@ -548,9 +707,9 @@ class Ledger:
 
     def release(self, reservation_id: str) -> dict:
         with self._locked() as (data, directory):
-            r = self._reservation(data, reservation_id)
+            r = self._reservation(data, directory, reservation_id)
             _require(r["settlement"] in {"pending", "manual_release"} and r["submission"] == "unknown", "stale")
-            r["settlement"] = "manual_release"
+            r.update(settlement="manual_release", manually_released=True)
             self._save(data, directory)
             return self._snapshot(data)
 

@@ -7,6 +7,7 @@
 
 use super::ctx::OpError;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
@@ -22,6 +23,7 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct Authority {
     ledger: Ledger,
     committed: u64,
+    directory: Option<Directory>,
 }
 
 /// Policy permission for a quote or local preview. A zero cap does not prevent a quote.
@@ -78,6 +80,8 @@ struct Ledger {
     quotes: BTreeMap<String, Quote>,
     #[serde(deserialize_with = "unique_map")]
     reservations: BTreeMap<String, Reservation>,
+    archived_count: u64,
+    archived_spent: u64,
 }
 
 #[derive(Deserialize)]
@@ -142,6 +146,25 @@ struct Reservation {
     settlement: String,
     #[serde(deserialize_with = "required_nullable")]
     actual_credits: Option<u64>,
+    #[serde(default, deserialize_with = "present")]
+    manually_released: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryIndex {
+    schema: u64,
+    sequence: u64,
+    reservation_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryReceipt {
+    schema: u64,
+    sequence: u64,
+    quote: Quote,
+    reservation: Reservation,
 }
 
 impl Authority {
@@ -159,37 +182,34 @@ impl Authority {
         // This inode is never truncated, replaced or unlinked. It is the same lock Python uses.
         let lock = directory.open_file("ledger.lock", true).map_err(|_| unavailable())?;
         acquire(&lock, timeout)?;
+        let _guard = LockGuard(&lock);
         let file = match directory.open_file("ledger.json", false) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::empty()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound && lock.metadata().map_err(|_| unavailable())?.len() == 0 => {
+                return Ok(Self::empty());
+            }
             Err(_) => return Err(unavailable()),
         };
-        let size = file.metadata().map_err(|_| unavailable())?.len();
-        if size > MAX_BYTES {
-            return Err(unavailable());
-        }
-        let mut bytes = Vec::with_capacity(size as usize);
-        file.take(MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| unavailable())?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(unavailable());
-        }
-        let ledger: Ledger = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+        let ledger: Ledger = decode_file(file)?;
         let committed = ledger.validate()?;
         // Drop releases the lock even on a parse/validation error. No network under the lock.
-        Ok(Self { ledger, committed })
+        Ok(Self { ledger, committed, directory: Some(directory) })
     }
 
     fn empty() -> Self {
         Self {
             ledger: Ledger {
-                schema: 1,
+                schema: 2,
                 policy: None,
                 frozen: false,
                 freeze_reason: None,
                 quotes: BTreeMap::new(),
                 reservations: BTreeMap::new(),
+                archived_count: 0,
+                archived_spent: 0,
             },
             committed: 0,
+            directory: None,
         }
     }
 
@@ -209,13 +229,31 @@ impl Authority {
     }
 
     pub fn approve(&self, claim: &CreateClaim<'_>) -> Result<Approval, OpError> {
-        let policy = self.policy(claim.kind)?;
-        if self.ledger.frozen {
-            return Err(refusal("ledger_frozen", "New generations are paused because a charge exceeded its estimate."));
-        }
-        if policy.cap == 0 || self.committed > policy.cap {
-            return Err(refusal("cap_exceeded", "The credit cap does not permit this generation."));
-        }
+        let approval = self.prove_own(claim)?;
+        let check = || {
+            let policy = self.policy(claim.kind)?;
+            if self.ledger.frozen {
+                return Err(refusal("ledger_frozen", "New generations are paused because a charge exceeded its estimate."));
+            }
+            if policy.cap == 0 || self.committed > policy.cap {
+                return Err(refusal("cap_exceeded", "The credit cap does not permit this generation."));
+            }
+            let reservation = &self.ledger.reservations[claim.reservation_id];
+            if claim.now_ms >= approval.expires_at {
+                return Err(refusal("expired_quote", "The generation quote has expired."));
+            }
+            if claim.now_ms < reservation.created_at {
+                return Err(refusal("stale", "The reservation's time does not match this generation."));
+            }
+            Ok(())
+        };
+        check().map_err(|error: OpError| refusal("not_submitted", &error.reason()))?;
+        Ok(approval)
+    }
+
+    /// Prove ownership before returning any refusal that permits the host to release credits.
+    /// This proves binding only, never permission to submit (nor absence of a native checkpoint).
+    pub fn prove_own(&self, claim: &CreateClaim<'_>) -> Result<Approval, OpError> {
         if !valid_id(claim.quote_id)
             || !valid_id(claim.reservation_id)
             || !valid_id(claim.host_call_id)
@@ -257,12 +295,6 @@ impl Authority {
         {
             return Err(refusal("stale", "The reservation does not match the approved generation."));
         }
-        if claim.now_ms >= quote.expires_at {
-            return Err(refusal("expired_quote", "The generation quote has expired."));
-        }
-        if claim.now_ms < reservation.created_at {
-            return Err(refusal("stale", "The reservation's time does not match this generation."));
-        }
         Ok(Approval {
             quote_id: quote.quote_id.clone(),
             reservation_id: reservation.reservation_id.clone(),
@@ -274,109 +306,127 @@ impl Authority {
 
     /// The exact public quote the host approved, without its bookkeeping fields. Native creation
     /// compares the complete projection, not merely a digest beside mutable display text.
-    pub fn quote(&self, id: &str) -> Option<serde_json::Value> {
-        let quote = self.ledger.quotes.get(id)?;
-        Some(serde_json::json!({
+    pub fn quote(&self, id: &str) -> Result<Option<serde_json::Value>, OpError> {
+        let archived;
+        let quote = if let Some(quote) = self.ledger.quotes.get(id) {
+            quote
+        } else {
+            archived = self.history("quote", id)?;
+            let Some(receipt) = archived.as_ref() else { return Ok(None) };
+            &receipt.quote
+        };
+        Ok(Some(serde_json::json!({
             "state": quote.state, "quote_id": quote.quote_id, "kind": quote.kind,
             "prompt": quote.prompt, "file": quote.file, "seconds": quote.seconds,
             "estimate": {"credits": quote.estimate.credits, "max_credits": quote.estimate.max_credits},
             "credit_unit": quote.credit_unit, "upload": quote.upload, "expires_at": quote.expires_at,
             "request_sha256": quote.request_sha256, "summary": quote.summary
-        }))
+        })))
     }
 
     /// A job must already be bound by the host before GET-only recovery. An unbound lost reply is
     /// adopted by W2 from the native checkpoint's quote_id, under the writer's ledger lock.
-    pub fn for_job(&self, id: &str) -> Option<Recovery> {
-        let reservation = self.ledger.reservations.values().find(|reservation| reservation.job_id.as_deref() == Some(id))?;
-        self.recovery(&reservation.reservation_id)
+    pub fn for_job(&self, id: &str) -> Result<Option<Recovery>, OpError> {
+        if let Some(reservation) = self.ledger.reservations.values().find(|reservation| reservation.job_id.as_deref() == Some(id)) {
+            return Ok(Some(reservation.recovery()));
+        }
+        Ok(self.history("job", id)?.map(|receipt| receipt.reservation.recovery()))
     }
 
-    /// Lookup remains available with generation disabled, expired quotes, or a frozen cap.
-    /// The caller separately requires current permission/key and an identified vendor job for GET.
-    pub fn recovery(&self, reservation_id: &str) -> Option<Recovery> {
-        let reservation = self.ledger.reservations.get(reservation_id)?;
-        Some(Recovery {
-            reservation_id: reservation.reservation_id.clone(),
-            quote_id: reservation.quote_id.clone(),
-            kind: reservation.kind.clone(),
-            job_id: reservation.job_id.clone(),
-            provider_job_id: reservation.provider_job_id.clone(),
-            reserved_credits: reservation.reserved_credits,
-            submission: reservation.submission.clone(),
-            settlement: reservation.settlement.clone(),
-            actual_credits: reservation.actual_credits,
-        })
+    /// Reservation-id lookup for the Python/Rust storage parity fixtures.
+    #[cfg(test)]
+    fn recovery(&self, reservation_id: &str) -> Result<Option<Recovery>, OpError> {
+        if let Some(reservation) = self.ledger.reservations.get(reservation_id) {
+            return Ok(Some(reservation.recovery()));
+        }
+        Ok(self.history("receipt", reservation_id)?.map(|receipt| receipt.reservation.recovery()))
+    }
+
+    /// Active evidence only; callers inspect retained native checkpoints without scanning history.
+    pub fn unsettled(&self) -> impl Iterator<Item = Recovery> + '_ {
+        self.ledger
+            .reservations
+            .values()
+            .filter(|reservation| matches!(reservation.settlement.as_str(), "pending" | "manual_release"))
+            .map(Reservation::recovery)
+    }
+
+    fn history(&self, category: &str, id: &str) -> Result<Option<HistoryReceipt>, OpError> {
+        let count = self.ledger.archived_count;
+        if count == 0 || !valid_id(id) {
+            return Ok(None);
+        }
+        let directory = self.directory.as_ref().ok_or_else(unavailable)?;
+        let name = format!(".ledger-{category}-{:x}.json", Sha256::digest(id.as_bytes()));
+        let file = match directory.open_file(&name, false) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(unavailable()),
+        };
+        let index: HistoryIndex = decode_file(file)?;
+        if index.schema != 1 || index.sequence > MAX_INTEGER || !valid_id(&index.reservation_id) {
+            return Err(unavailable());
+        }
+        if index.sequence >= count {
+            return Ok(None);
+        }
+        let file = directory.open_file(&format!(".ledger-history-{:016x}.json", index.sequence), false).map_err(|_| unavailable())?;
+        let receipt: HistoryReceipt = decode_file(file)?;
+        if receipt.schema != 1
+            || receipt.sequence != index.sequence
+            || !receipt.quote.valid()
+            || !matches!(receipt.reservation.settlement.as_str(), "charged" | "not_submitted")
+        {
+            return Err(unavailable());
+        }
+        receipt.reservation.amount(&receipt.quote)?;
+        if receipt.reservation.reservation_id != index.reservation_id {
+            return Ok(None); // A stale orphan index for an abandoned, subsequently reused slot.
+        }
+        let matches = match category {
+            "quote" => receipt.reservation.quote_id == id,
+            "job" => receipt.reservation.job_id.as_deref() == Some(id),
+            "receipt" => receipt.reservation.reservation_id == id,
+            _ => false,
+        };
+        if !matches {
+            return Err(unavailable());
+        }
+        Ok(Some(receipt))
     }
 }
 
 impl Ledger {
     fn validate(&self) -> Result<u64, OpError> {
-        if self.schema != 1
+        if self.schema != 2
+            || self.archived_count > MAX_INTEGER
+            || self.archived_spent > MAX_INTEGER
             || self.policy.as_ref().is_some_and(|policy| policy.cap > MAX_INTEGER)
             || (self.frozen && self.freeze_reason.as_deref() != Some("actual_exceeded_estimate"))
             || (!self.frozen && self.freeze_reason.is_some())
         {
             return Err(unavailable());
         }
-        for (id, quote) in &self.quotes {
-            let source_valid = match quote.kind.as_str() {
-                "sfx" => quote.prompt.as_deref().is_some_and(|prompt| display_text(prompt, 4096)) && quote.file.is_none() && !quote.upload,
-                "audio_to_midi" => quote.prompt.is_none() && quote.file.as_deref().is_some_and(basename) && quote.upload,
-                _ => false,
-            };
-            if id != &quote.quote_id
-                || !valid_id(id)
-                || !valid_id(&quote.host_call_id)
-                || quote.state != "quoted"
-                || !source_valid
-                || !quote.seconds.is_finite()
-                || quote.seconds <= 0.0
-                || quote.seconds > MAX_INTEGER as f64
-                || quote.estimate.credits > quote.estimate.max_credits
-                || quote.estimate.max_credits > MAX_INTEGER
-                || quote.credit_unit != "mirelo_credits"
-                || quote.expires_at > MAX_INTEGER
-                || !valid_digest(&quote.request_sha256)
-                || !display_text(&quote.summary, 1024)
-            {
-                return Err(unavailable());
-            }
+        if self.quotes.iter().any(|(id, quote)| id != &quote.quote_id || !quote.valid()) {
+            return Err(unavailable());
         }
         let mut quote_ids = BTreeSet::new();
         let mut host_ids = BTreeSet::new();
         let mut job_ids = BTreeSet::new();
         let mut provider_ids = BTreeSet::new();
-        let mut committed = 0_u64;
+        let mut committed = self.archived_spent;
         for (id, reservation) in &self.reservations {
             let quote = self.quotes.get(&reservation.quote_id).ok_or_else(unavailable)?;
             if id != &reservation.reservation_id
                 || !valid_id(id)
-                || !valid_id(&reservation.host_call_id)
                 || !quote_ids.insert(&reservation.quote_id)
                 || !host_ids.insert(&reservation.host_call_id)
-                || !quote.consumed
-                || reservation.kind != quote.kind
-                || reservation.request_sha256 != quote.request_sha256
-                || reservation.reserved_credits != quote.estimate.max_credits
-                || reservation.expires_at != quote.expires_at
-                || reservation.created_at >= reservation.expires_at
-                || reservation.job_id.as_deref().is_some_and(|id| !valid_id(id) || !job_ids.insert(id))
-                || reservation.provider_job_id.as_deref().is_some_and(|id| !valid_id(id) || !provider_ids.insert(id))
-                || reservation.actual_credits.is_some_and(|actual| actual > MAX_INTEGER)
-                || !matches!(reservation.submission.as_str(), "unknown" | "submitted" | "not_submitted")
-                || (reservation.provider_job_id.is_some() != (reservation.submission == "submitted"))
-                || (reservation.provider_job_id.is_some() && reservation.job_id.is_none())
+                || reservation.job_id.as_deref().is_some_and(|id| !job_ids.insert(id))
+                || reservation.provider_job_id.as_deref().is_some_and(|id| !provider_ids.insert(id))
             {
                 return Err(unavailable());
             }
-            let amount = match reservation.settlement.as_str() {
-                "pending" if reservation.actual_credits.is_none() => reservation.reserved_credits,
-                "charged" if reservation.submission == "submitted" => reservation.actual_credits.ok_or_else(unavailable)?,
-                "not_submitted" if reservation.submission == "not_submitted" && reservation.actual_credits.is_none() => 0,
-                "manual_release" if reservation.actual_credits.is_none() && reservation.submission == "unknown" => 0,
-                _ => return Err(unavailable()),
-            };
+            let amount = reservation.amount(quote)?;
             committed = committed.checked_add(amount).filter(|total| *total <= MAX_INTEGER).ok_or_else(unavailable)?;
         }
         if self.quotes.values().any(|quote| quote.consumed != quote_ids.contains(&quote.quote_id)) {
@@ -384,6 +434,87 @@ impl Ledger {
         }
         Ok(committed)
     }
+}
+
+impl Quote {
+    fn valid(&self) -> bool {
+        let source_valid = match self.kind.as_str() {
+            "sfx" => self.prompt.as_deref().is_some_and(|prompt| display_text(prompt, 4096)) && self.file.is_none() && !self.upload,
+            "audio_to_midi" => self.prompt.is_none() && self.file.as_deref().is_some_and(basename) && self.upload,
+            _ => false,
+        };
+        valid_id(&self.quote_id)
+            && valid_id(&self.host_call_id)
+            && self.state == "quoted"
+            && source_valid
+            && self.seconds.is_finite()
+            && self.seconds > 0.0
+            && self.seconds <= MAX_INTEGER as f64
+            && self.estimate.credits <= self.estimate.max_credits
+            && self.estimate.max_credits <= MAX_INTEGER
+            && self.credit_unit == "mirelo_credits"
+            && self.expires_at <= MAX_INTEGER
+            && valid_digest(&self.request_sha256)
+            && display_text(&self.summary, 1024)
+    }
+}
+
+impl Reservation {
+    fn amount(&self, quote: &Quote) -> Result<u64, OpError> {
+        if !valid_id(&self.reservation_id)
+            || !valid_id(&self.host_call_id)
+            || self.quote_id != quote.quote_id
+            || !quote.consumed
+            || self.kind != quote.kind
+            || self.request_sha256 != quote.request_sha256
+            || self.reserved_credits != quote.estimate.max_credits
+            || self.expires_at != quote.expires_at
+            || self.created_at >= self.expires_at
+            || self.job_id.as_deref().is_some_and(|id| !valid_id(id))
+            || self.provider_job_id.as_deref().is_some_and(|id| !valid_id(id))
+            || self.actual_credits.is_some_and(|actual| actual > MAX_INTEGER)
+            || self.manually_released == Some(false)
+            || !matches!(self.submission.as_str(), "unknown" | "submitted" | "not_submitted")
+            || (self.provider_job_id.is_some() != (self.submission == "submitted"))
+            || (self.provider_job_id.is_some() && self.job_id.is_none())
+        {
+            return Err(unavailable());
+        }
+        match self.settlement.as_str() {
+            "pending" if self.actual_credits.is_none() => Ok(self.reserved_credits),
+            "charged" if self.submission == "submitted" => self.actual_credits.ok_or_else(unavailable),
+            "not_submitted" if self.submission == "not_submitted" && self.actual_credits.is_none() => Ok(0),
+            "manual_release" if self.actual_credits.is_none() && self.submission == "unknown" => Ok(0),
+            _ => Err(unavailable()),
+        }
+    }
+
+    fn recovery(&self) -> Recovery {
+        Recovery {
+            reservation_id: self.reservation_id.clone(),
+            quote_id: self.quote_id.clone(),
+            kind: self.kind.clone(),
+            job_id: self.job_id.clone(),
+            provider_job_id: self.provider_job_id.clone(),
+            reserved_credits: self.reserved_credits,
+            submission: self.submission.clone(),
+            settlement: self.settlement.clone(),
+            actual_credits: self.actual_credits,
+        }
+    }
+}
+
+fn decode_file<T: serde::de::DeserializeOwned>(file: File) -> Result<T, OpError> {
+    let size = file.metadata().map_err(|_| unavailable())?.len();
+    if size > MAX_BYTES {
+        return Err(unavailable());
+    }
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| unavailable())?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(unavailable());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| unavailable())
 }
 
 fn valid_kind(kind: &str) -> bool {
@@ -410,7 +541,7 @@ fn basename(name: &str) -> bool {
     display_text(name, 255) && !matches!(name, "." | "..") && !name.contains(['/', '\\', ':'])
 }
 
-fn refusal(code: &'static str, reason: &'static str) -> OpError {
+fn refusal(code: &'static str, reason: &str) -> OpError {
     OpError::Refused { code, reason: reason.into(), owner: None }
 }
 
@@ -427,6 +558,14 @@ fn data_dir(state_dir: &Path) -> Result<&Path, OpError> {
         return Err(unavailable());
     }
     kumi.parent().ok_or_else(unavailable)
+}
+
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -541,6 +680,30 @@ impl Directory {
     }
 }
 
+struct LockGuard<'a>(&'a File);
+
+impl Drop for LockGuard<'_> {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            // SAFETY: the borrowed file outlives this guard.
+            unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::UnlockFileEx;
+            use windows_sys::Win32::System::IO::OVERLAPPED;
+            // SAFETY: unlock exactly byte zero while its handle remains live.
+            unsafe {
+                let mut overlapped: OVERLAPPED = std::mem::zeroed();
+                UnlockFileEx(self.0.as_raw_handle() as _, 0, 1, 0, &mut overlapped);
+            }
+        }
+    }
+}
+
 fn acquire(file: &File, timeout: Duration) -> Result<(), OpError> {
     let started = Instant::now();
     loop {
@@ -604,7 +767,7 @@ mod tests {
 
     fn record() -> Value {
         json!({
-            "schema": 1,
+            "schema": 2, "archived_count": 0, "archived_spent": 0,
             "policy": {"acknowledged": true, "enabled": {"sfx": true, "audio_to_midi": false}, "cap": 30},
             "frozen": false, "freeze_reason": null,
             "quotes": {"q1": {
@@ -703,14 +866,14 @@ mod tests {
         let mut value = record();
         value["policy"]["acknowledged"] = json!(false);
         fixture.put(&value);
-        assert_eq!(code(fixture.authority().approve(&claim())), "not_approved");
+        assert_eq!(code(fixture.authority().approve(&claim())), "not_submitted");
         value["policy"]["acknowledged"] = json!(true);
         fixture.put(&value);
         assert_eq!(code(fixture.authority().policy("audio_to_midi")), "not_enabled");
         assert!(fixture.authority().policy("sfx").is_ok());
         value.as_object_mut().unwrap().remove("policy");
         fixture.put(&value);
-        assert_eq!(code(fixture.authority().approve(&claim())), "not_enabled");
+        assert_eq!(code(fixture.authority().approve(&claim())), "not_submitted");
     }
 
     #[test]
@@ -752,10 +915,10 @@ mod tests {
         assert_eq!(code(authority.approve(&changed)), "stale");
         changed = claim();
         changed.now_ms = 300000;
-        assert_eq!(code(authority.approve(&changed)), "expired_quote");
+        assert_eq!(code(authority.approve(&changed)), "not_submitted");
         changed = claim();
         changed.now_ms = 999;
-        assert_eq!(code(authority.approve(&changed)), "stale");
+        assert_eq!(code(authority.approve(&changed)), "not_submitted");
         let mut value = record();
         value["policy"]["enabled"]["audio_to_midi"] = json!(true);
         fixture.put(&value);
@@ -786,7 +949,7 @@ mod tests {
             assert!(fixture.authority().approve(&claim()).is_ok());
             value["policy"]["cap"] = json!(29);
             fixture.put(&value);
-            assert_eq!(code(fixture.authority().approve(&claim())), "cap_exceeded");
+            assert_eq!(code(fixture.authority().approve(&claim())), "not_submitted");
         }
         let mut value = record();
         value["policy"]["cap"] = json!(0);
@@ -796,12 +959,41 @@ mod tests {
         let mut zero = claim();
         zero.reserved_credits = 0;
         assert!(fixture.authority().policy("sfx").is_ok());
-        assert_eq!(code(fixture.authority().approve(&zero)), "cap_exceeded");
+        assert_eq!(code(fixture.authority().approve(&zero)), "not_submitted");
         value["policy"]["cap"] = json!(1000);
         value["frozen"] = json!(true);
         value["freeze_reason"] = json!("actual_exceeded_estimate");
         fixture.put(&value);
-        assert_eq!(code(fixture.authority().approve(&zero)), "ledger_frozen");
+        assert_eq!(code(fixture.authority().approve(&zero)), "not_submitted");
+    }
+
+    #[test]
+    fn binding_precedes_every_refundable_policy_refusal() {
+        let fixture = Fixture::new();
+        let mut value = record();
+        value["policy"]["acknowledged"] = json!(false);
+        value["policy"]["cap"] = json!(0);
+        value["frozen"] = json!(true);
+        value["freeze_reason"] = json!("actual_exceeded_estimate");
+        fixture.put(&value);
+        let authority = fixture.authority();
+        assert!(authority.prove_own(&claim()).is_ok());
+        assert_eq!(code(authority.approve(&claim())), "not_submitted");
+        let mut forged = claim();
+        forged.host_call_id = "foreign-call";
+        assert_eq!(code(authority.approve(&forged)), "stale");
+        forged = claim();
+        forged.reservation_id = "foreign-reservation";
+        assert_eq!(code(authority.approve(&forged)), "not_approved");
+        value["reservations"]["r1"]["job_id"] = json!("foreign-job");
+        fixture.put(&value);
+        assert_eq!(code(fixture.authority().approve(&claim())), "quote_consumed");
+        value["reservations"]["r1"]["submission"] = json!("submitted");
+        value["reservations"]["r1"]["provider_job_id"] = json!("vendor-job");
+        fixture.put(&value);
+        let mut worker = claim();
+        worker.expected_job_id = Some("foreign-job");
+        assert_eq!(code(fixture.authority().approve(&worker)), "quote_consumed");
     }
 
     #[test]
@@ -827,11 +1019,11 @@ mod tests {
             }
             value["policy"]["enabled"]["sfx"] = json!(false);
             fixture.put(&value);
-            let saved = fixture.authority().recovery("r1").unwrap();
+            let saved = fixture.authority().recovery("r1").unwrap().unwrap();
             assert_eq!(saved.job_id.as_deref(), Some("native-job"));
             assert_eq!(saved.submission, submission);
             assert_eq!(saved.actual_credits, None);
-            assert!(fixture.authority().recovery("missing").is_none());
+            assert!(fixture.authority().recovery("missing").unwrap().is_none());
         }
     }
 
@@ -861,7 +1053,7 @@ mod tests {
     fn malformed_records_and_private_payloads_fail_closed_without_echo() {
         let fixture = Fixture::new();
         let mutations = [
-            ("/schema", json!(2)),
+            ("/schema", json!(1)),
             ("/policy/cap", json!(true)),
             ("/policy/cap", json!(1.0)),
             ("/policy/cap", json!(MAX_INTEGER + 1)),
@@ -918,6 +1110,185 @@ mod tests {
         assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
         fixture.put(&record());
         assert!(fixture.authority().approve(&claim()).is_ok());
+    }
+
+    const PYTHON_FIXTURE: &str = r#"
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("ledger", sys.argv[1])
+ledger = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ledger)
+ledger._now = lambda: 1000
+store = ledger.Ledger(sys.argv[2], credit_cap=30)
+if sys.argv[3] == "hold":
+    with store._locked():
+        print("locked", flush=True)
+        sys.stdin.readline()
+    sys.exit(0)
+store.configure(acknowledged=True, enabled={"sfx":True, "audio_to_midi":False})
+def reserve(name, amount):
+    quote = {"state":"quoted", "quote_id":name, "kind":"sfx", "prompt":"metal impact",
+             "file":None, "seconds":0.1, "estimate":{"credits":amount, "max_credits":amount},
+             "credit_unit":"mirelo_credits", "upload":False, "expires_at":300000,
+             "request_sha256":"a"*64, "summary":"One sound effect"}
+    store.record_quote(quote, "quote-"+name)
+    reservation = store.reserve(name, "a"*64, amount, host_call_id="create-"+name)
+    return quote, reservation["reservation_id"]
+def settle(quote, reservation, job, actual):
+    store.reconcile(reservation, {"job_id":job, "kind":"generate", "state":"done", "result":{
+        "quote_id":quote["quote_id"], "kind":"sfx", "provider":"mirelo", "provider_job_id":"vendor-"+job,
+        "submission":"submitted", "credit_unit":"mirelo_credits",
+        "credits":{"estimate":quote["estimate"]["credits"], "reserved":quote["estimate"]["max_credits"], "actual":actual}}})
+charged, charged_id = reserve("q-charged", 15)
+settle(charged, charged_id, "j-charged", 12)
+pending, pending_id = reserve("q1", 15)
+manual, manual_id = reserve("q-manual", 1)
+store.release(manual_id)
+late, late_id = reserve("q-late", 1)
+store.release(late_id)
+settle(late, late_id, "j-late", 1)
+print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id, "late":late_id,
+                  "pending_quote":pending, "charged_quote":charged}), flush=True)
+"#;
+
+    fn python(fixture: &Fixture, mode: &str) -> std::process::Command {
+        let mut command = std::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
+        command
+            .args(["-I", "-S", "-c", PYTHON_FIXTURE])
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hermes-plugin/ledger.py"))
+            .arg(&fixture.data)
+            .arg(mode)
+            .current_dir(&fixture.data)
+            .env("HOME", &fixture.data)
+            .env("USERPROFILE", &fixture.data);
+        command
+    }
+
+    fn python_written(fixture: &Fixture) -> Value {
+        let output = python(fixture, "write").output().expect("isolated stdlib Python is required");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    #[test]
+    fn python_written_active_and_archived_receipts_are_native_authority() {
+        let fixture = Fixture::new();
+        let ids = python_written(&fixture);
+        let authority = fixture.authority();
+        assert_eq!(authority.committed, 28);
+        assert_eq!(authority.ledger.archived_count, 2);
+        assert_eq!(authority.ledger.archived_spent, 13);
+        let mut own = claim();
+        own.reservation_id = ids["pending"].as_str().unwrap();
+        own.host_call_id = "create-q1";
+        assert!(authority.approve(&own).is_ok());
+        assert_eq!(authority.quote("q1").unwrap().unwrap(), ids["pending_quote"]);
+        assert_eq!(authority.quote("q-charged").unwrap().unwrap(), ids["charged_quote"]);
+        let charged = authority.for_job("j-charged").unwrap().unwrap();
+        assert_eq!(charged.reservation_id, ids["charged"].as_str().unwrap());
+        assert_eq!(charged.actual_credits, Some(12));
+        assert_eq!(authority.recovery(&charged.reservation_id).unwrap().unwrap(), charged);
+        let late = authority.for_job("j-late").unwrap().unwrap();
+        assert_eq!(late.actual_credits, Some(1));
+        let archived = authority.history("receipt", &late.reservation_id).unwrap().unwrap();
+        assert_eq!(archived.reservation.manually_released, Some(true));
+        assert_eq!(authority.unsettled().count(), 2);
+        own.quote_id = "q-charged";
+        own.reservation_id = ids["charged"].as_str().unwrap();
+        own.host_call_id = "create-q-charged";
+        assert_ne!(code(authority.approve(&own)), "not_submitted");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(fixture.data.join("ledger.json")).unwrap()).unwrap();
+        manifest["policy"]["cap"] = json!(27);
+        fixture.put(&manifest);
+        own.quote_id = "q1";
+        own.reservation_id = ids["pending"].as_str().unwrap();
+        own.host_call_id = "create-q1";
+        assert_eq!(code(fixture.authority().approve(&own)), "not_submitted");
+    }
+
+    #[test]
+    fn python_holds_shared_os_lock_native_times_out_then_succeeds() {
+        use std::io::{BufRead, Write};
+        use std::process::{Child, Stdio};
+        struct ChildGuard(Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let fixture = Fixture::new();
+        python_written(&fixture);
+        let mut child = ChildGuard(
+            python(&fixture, "hold")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("isolated stdlib Python is required"),
+        );
+        let stdout = child.0.stdout.take().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut line = String::new();
+            let result = std::io::BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = send.send(result);
+        });
+        assert_eq!(receive.recv_timeout(Duration::from_secs(10)).unwrap().unwrap().trim(), "locked");
+        reader.join().unwrap();
+        let started = Instant::now();
+        assert_eq!(code(Authority::read_with_timeout(&fixture.state, Duration::from_millis(100))), "ledger_unavailable");
+        assert!(started.elapsed() >= Duration::from_millis(75));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        child.0.stdin.take().unwrap().write_all(b"release\n").unwrap();
+        assert!(child.0.wait().unwrap().success());
+        assert_eq!(fixture.authority().committed, 28);
+    }
+
+    #[test]
+    fn archive_damage_is_reported_on_demand_without_scanning_or_resetting_totals() {
+        let fixture = Fixture::new();
+        python_written(&fixture);
+        std::fs::write(fixture.data.join(".ledger-history-0000000000000000.json"), b"corrupt").unwrap();
+        let authority = fixture.authority();
+        assert_eq!(authority.committed, 28);
+        assert!(authority.quote("q1").unwrap().is_some());
+        assert_eq!(code(authority.quote("q-charged")), "ledger_unavailable");
+        assert_eq!(code(authority.for_job("j-charged")), "ledger_unavailable");
+        std::fs::remove_file(fixture.data.join("ledger.json")).unwrap();
+        assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+    }
+
+    #[test]
+    fn archived_indexes_require_both_snapshot_commit_and_canonical_identity() {
+        let fixture = Fixture::new();
+        let ids = python_written(&fixture);
+        let authority = fixture.authority();
+        let path = fixture.data.join(format!(".ledger-quote-{:x}.json", Sha256::digest(b"q-charged")));
+        let mut index = json!({"schema":1, "sequence":2, "reservation_id":ids["charged"]});
+        std::fs::write(&path, serde_json::to_vec(&index).unwrap()).unwrap();
+        assert!(authority.quote("q-charged").unwrap().is_none());
+        index["sequence"] = json!(1); // committed slot belongs to the late-charge reservation
+        std::fs::write(&path, serde_json::to_vec(&index).unwrap()).unwrap();
+        assert!(authority.quote("q-charged").unwrap().is_none());
+        assert_eq!(authority.committed, 28);
+    }
+
+    #[test]
+    fn bom_and_utf16_are_refused_like_python() {
+        let fixture = Fixture::new();
+        fixture.put(&record());
+        let path = fixture.data.join("ledger.json");
+        let utf8 = serde_json::to_vec(&record()).unwrap();
+        let mut bom = vec![0xef, 0xbb, 0xbf];
+        bom.extend_from_slice(&utf8);
+        std::fs::write(&path, bom).unwrap();
+        assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        let mut utf16 = vec![0xff, 0xfe];
+        for unit in String::from_utf8(utf8).unwrap().encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        std::fs::write(path, utf16).unwrap();
+        assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
     }
 
     #[test]

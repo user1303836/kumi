@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
@@ -26,6 +26,8 @@ struct Server {
     requests: Arc<Mutex<Vec<Request>>>,
     download_fails: Arc<AtomicBool>,
     lose_create: Arc<AtomicBool>,
+    actual_credits: Arc<AtomicU64>,
+    midi_file: Arc<AtomicBool>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Server {
@@ -44,6 +46,10 @@ impl Server {
         let failing = download_fails.clone();
         let lose_create = Arc::new(AtomicBool::new(false));
         let lost = lose_create.clone();
+        let actual_credits = Arc::new(AtomicU64::new(12));
+        let charged = actual_credits.clone();
+        let midi_file = Arc::new(AtomicBool::new(false));
+        let has_midi = midi_file.clone();
         let task = tokio::spawn(async move {
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
@@ -94,16 +100,20 @@ impl Server {
                     "/put" => json!({}),
                     "/v2/audio-to-midi/v1.0/jobs" | "/v2/audio-to-midi/v1.0/jobs/midi-job" => json!({
                         "job_id": "midi-job", "status": "succeeded", "credits": 3,
-                        "result": {"notes": [{"pitch": 60, "velocity": 101, "start": 0.0, "end": 0.5, "instrument": "acoustic_piano"}]}
+                        "result": {"midi_url": if has_midi.load(Ordering::SeqCst) { json!(format!("{base}/midi")) } else { Value::Null },
+                            "notes": [{"pitch": 60, "velocity": 101, "start": 0.0, "end": 0.5, "instrument": "acoustic_piano"}]}
                     }),
-                    "/download" => Value::Null,
-                    _ => json!({"id": "sfx-job", "status": "succeeded", "credits": 12, "result": {"output": {
+                    "/download" | "/midi" => Value::Null,
+                    _ => json!({"id": "sfx-job", "status": "succeeded", "credits": charged.load(Ordering::SeqCst), "result": {"output": {
                         "status": "succeeded", "variants": [{"status": "succeeded", "files": {
                             "audio": {"url": format!("{base}/download"), "format": "wav", "sample_rate": 8000}
                         }}]
                     }}}),
                 };
-                let body = if path == "/download" {
+                let body = if path == "/midi" {
+                    mime = "audio/midi";
+                    midi().to_vec()
+                } else if path == "/download" {
                     if failing.load(Ordering::SeqCst) {
                         status = 404;
                         b"missing output".to_vec()
@@ -123,7 +133,7 @@ impl Server {
                 }
             }
         });
-        Self { url, requests, download_fails, lose_create, task }
+        Self { url, requests, download_fails, lose_create, actual_credits, midi_file, task }
     }
     fn creates(&self) -> usize {
         self.requests
@@ -156,6 +166,10 @@ fn wav() -> Vec<u8> {
     out
 }
 
+fn midi() -> &'static [u8] {
+    b"MThd\0\0\0\x06\0\0\0\x01\0\x60MTrk\0\0\0\x0c\0\x90\x3c\x65\x60\x80\x3c\0\0\xff\x2f\0"
+}
+
 struct Fixture {
     _dir: tempfile::TempDir,
     data: PathBuf,
@@ -169,23 +183,33 @@ impl Fixture {
         let data = dir.path().canonicalize().unwrap();
         let source = data.join("samples");
         std::fs::create_dir(&source).unwrap();
+        let ctx = Self::context(&data, &source, server);
+        let ledger = json!({"schema": 2, "policy": {"acknowledged": true, "enabled": {"sfx": true, "audio_to_midi": true}, "cap": 100},
+            "frozen": false, "freeze_reason": null, "quotes": {}, "reservations": {}, "archived_count": 0, "archived_spent": 0});
+        let fixture = Self { _dir: dir, data, source, ctx, ledger };
+        fixture.save();
+        fixture
+    }
+    fn context(data: &Path, source: &Path, server: &Server) -> Rc<Ctx> {
         let args = Args {
             state_dir: data.join("kumi/state"),
             kumi_home: data.join("kumi/home"),
             hermes_home: None,
             hermes_root: None,
             daw: DawId::Reaper,
-            library_roots: vec![source.clone()],
+            library_roots: vec![source.to_owned()],
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
         let answers = kumi_daw::io::Answers::default().with(FixtureEndpoint(server.url.clone()));
-        let ctx = Ctx::new(args, Env::new(), answers).unwrap();
-        let ledger = json!({"schema": 1, "policy": {"acknowledged": true, "enabled": {"sfx": true, "audio_to_midi": true}, "cap": 100},
-            "frozen": false, "freeze_reason": null, "quotes": {}, "reservations": {}});
-        let fixture = Self { _dir: dir, data, source, ctx, ledger };
-        fixture.save();
-        fixture
+        Ctx::new(args, Env::new(), answers).unwrap()
+    }
+    fn restart(self, server: &Server) -> Self {
+        let Self { _dir, data, source, ctx, ledger } = self;
+        ctx.snapshots().flush();
+        drop(ctx);
+        let ctx = Self::context(&data, &source, server);
+        Self { _dir, data, source, ctx, ledger }
     }
     fn save(&self) {
         for (name, bytes) in [("ledger.lock", Vec::new()), ("ledger.json", serde_json::to_vec(&self.ledger).unwrap())] {
@@ -351,7 +375,7 @@ async fn changed_approval_text_or_digest_is_refused_before_the_paid_post() {
                 .call(json!({"action": "create", "quote_id": quote["quote_id"]}), "create-call", Some(("r-one", 15)))
                 .await
                 .unwrap_err();
-            assert_eq!(error.code(), "stale");
+            assert_eq!(error.code(), "not_submitted");
             assert_eq!(server.creates(), 0);
         })
         .await;
@@ -552,3 +576,6 @@ async fn pcm_duration_uses_the_entire_source_and_enforces_mirelos_thirty_minute_
     }
     assert!(server.requests.lock().unwrap().is_empty());
 }
+
+#[path = "review_tests.rs"]
+mod review;
