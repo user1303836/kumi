@@ -186,14 +186,20 @@ def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: 
     return kumi
 
 
-def pin(plugin_dir: Path, version: str = VERSION) -> None:
-    """A kumi_release.json for `version` with this computer's bundle, as scripts/hermes_pin.py writes one."""
+# The fixture runtime listens to every kind of source in every DAW (CC-16's listen_sources as hermes_pin records them).
+LISTEN_ALL = {daw: ["artifact", "file", "sound", "track"] for daw in ("ableton", "reaper", "renoise")}
+
+
+def pin(plugin_dir: Path, version: str = VERSION, listen_sources: dict | None = LISTEN_ALL) -> None:
+    """A kumi_release.json for `version` with this computer's bundle, as scripts/hermes_pin.py writes one, with the
+    runtime's listen sources (none recorded when `listen_sources` is None, as on a pin from before CC-16)."""
     target = module("setup").host_target()
     record = {"url": f"https://github.com/user1303836/kumi/releases/download/v{version}/kumi-{target}.tar.xz",
               "sha256": "0" * 64, "size": 26_000_000, "unpacked_bytes": 82_000_000}
     (plugin_dir / "kumi_release.json").write_text(json.dumps(
         {"schema": 1, "kumi": version, "repository": "user1303836/kumi", "tag": f"v{version}",
-         "targets": {target: record}}), encoding="utf-8")
+         "targets": {target: record}, **({"listen_sources": listen_sources} if listen_sources is not None else {})}),
+        encoding="utf-8")
 
 
 def requests(state_dir: Path) -> list[dict]:

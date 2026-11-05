@@ -4,7 +4,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 ---
 # Measuring audio with Kumi
 
-`kumi_listen` measures an audio file on this computer, or a track or the mix of the open project over a beat window (that plays the window in the DAW while it's stopped, so the producer approves it first). Nothing is heard, by Kumi or by you: report measurements as measurements.
+`kumi_listen` measures an audio file on this computer and, in the DAWs its description names, a track or the mix of the open project over a beat window (that plays the window in the DAW while it's stopped, so the producer approves it first). Nothing is heard, by Kumi or by you: report measurements as measurements.
 
 ## What it measures
 - **Loudness:** integrated LUFS. Higher is louder, and streaming services normalise around −14 LUFS.
@@ -27,6 +27,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **To share the measured file,** put the result's `MEDIA:` line in your reply, on a line of its own. In a messaging chat (Telegram, Discord…) only a `MEDIA:` line in your answer reaches the producer; one inside a tool result doesn't.
 
 ## Listening to a track or the mix
+- **Only in the DAWs `kumi_listen`'s description names.** Kumi's runtime says which it can listen to, and a version may name none. Elsewhere, Kumi refuses a track or mix listen before anything plays: say so, and offer to measure a file instead (a bounce of the part, or the sample it plays).
 - **It plays the project.** `kumi_listen` with `source: {"track": {"ref": "…"} or {"mix": true}, "from_beat", "beats"}`, plus the project key and epoch from `kumi_observe`, plays exactly that window (60 s at most) while the DAW is stopped, and measures it. The producer approves it first, in the runtime's own words.
 - **In Live, a listen leaves traces Kumi can't remove.** Live may show the Set as modified, and Live's own Undo history holds the listen's temporary device steps, so pressing Undo in Live can bring Kumi Ears back. The approval says so; say it again if the producer asks what changed. A listen isn't a change in Kumi's HISTORY.
 - **A listen that didn't measure** (`refused`, `cancelled` or `unsure`) has no measurements. Say what happened; after `unsure`, observe again (`kumi_observe`) before anything else, and never send it again.

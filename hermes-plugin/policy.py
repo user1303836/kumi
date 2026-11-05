@@ -218,6 +218,9 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     refusal = tools.listen_refusal(args)
     if refusal:
         return block(f"Kumi didn't listen: {refusal}"), {}
+    unsupported = tools.listen_unsupported(host, args)
+    if unsupported:
+        return block(f"Kumi didn't listen: {unsupported}"), {}
     if not tools.is_track_listen(args):
         return None, {}
     try:
