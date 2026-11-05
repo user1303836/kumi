@@ -1,11 +1,16 @@
 """kumi_setup and `hermes kumi setup` (C8) through the plugin, against the fixture runtime's setup_daw: what the model
-can plan, what the producer is asked, and the terminal command."""
+can plan, what the producer is asked, that only the plan the producer approved runs (CC-5), and the terminal command."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
+from pathlib import Path
+import tarfile
+import tempfile
 import unittest
+from unittest import mock
 
 import support
 
@@ -63,6 +68,80 @@ class SetupTool(unittest.TestCase):
         planned = support.call(host, "kumi_setup", {"action": "plan", "daw": "ableton"}, session_id="s2")
         self.assertEqual(planned["error"]["code"], "other_daw")
         self.assertEqual(setup_daw_calls(data), [])
+
+    def test_an_approved_install_carries_out_the_daw_step_it_showed(self):
+        host, _, data = support.host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        self.assertEqual(setup_daw_calls(data)[-1], {"daw": "ableton", "dry_run": False})
+        parts = setup.status(daw="ableton", data_dir=data, plugin_dir=host.plugin_dir)["daw_component"]["parts"]
+        self.assertEqual([(part["name"], part["state"]) for part in parts], [("Remote Script", "same"),
+                                                                             ("Kumi Ears", "same")])
+
+    def test_a_denied_install_or_one_that_skipped_the_hook_changes_nothing(self):
+        host, _, data = support.host(self, daw_component=False)
+        plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        self.assertIn("blocked", support.call(host, "kumi_setup", {"action": "install"}, session_id="s1", answer="deny"))
+        skipped = support.handle(host, "kumi_setup", {"action": "install", "expected_digest": plan["digest"]},
+                                 session_id="s1")
+        self.assertEqual(skipped["error"]["code"], "not_approved", "a digest from the model is never used")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
+
+    def test_a_plan_another_chat_made_after_the_approval_is_not_installed(self):
+        host, _, data = support.host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        hook = {"session_id": "s1", "task_id": None, "tool_call_id": "setup-1"}
+        self.assertEqual(policy.pre_tool_call(host, tool_name="kumi_setup", args={"action": "install"}, **hook)["action"],
+                         "approve")
+        policy.post_approval_response(host, tool_call_id="setup-1", choice="once")
+
+        def elsewhere(args: dict) -> dict:  # another chat's runtime sees other paths
+            return {"daw": "ableton", "component": "Live Remote Script", "version": "1.0.105", "state": "missing",
+                    "paths": ["/elsewhere/Remote Scripts/AbletonMcpBridge"], "owner": None, "after": None,
+                    "effects": ["Copy the AbletonMcpBridge Remote Script into /elsewhere/Remote Scripts"]}
+
+        setup.plan("ableton", setup_daw=elsewhere, data_dir=data, plugin_dir=host.plugin_dir)
+        result = support.handle(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertEqual(result["error"]["code"], "plan_changed")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
+
+    def test_adopting_the_owner_of_lives_component_installs_nothing_and_restarts_the_runtime(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        owner = Path(folder.name)
+        host, _, data = support.host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
+                                     daw_component=False)
+        plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        self.assertEqual((plan["step"], plan["next"]), ("owned_elsewhere", "kumi_setup adopt"))
+        self.assertIn("blocked", support.call(host, "kumi_setup", {"action": "install"}, session_id="s1"),
+                      "a component another Kumi owns is never offered as an install")
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        adopted = support.call(host, "kumi_setup", {"action": "adopt"}, session_id="s1")
+        self.assertTrue(adopted["ok"], adopted)
+        self.assertEqual(json.loads((data / "runtime" / "current.json").read_text())["kumi_home"], str(owner))
+        self.assertIsNone(host.runtimes.get(data), "the next start uses the adopted Kumi home")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
+
+    def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_an_older_runtime(self):
+        host, _, data = support.host(self, installed=False)
+        bundle = io.BytesIO()
+        with tarfile.open(fileobj=bundle, mode="w:xz") as archive:
+            info = tarfile.TarInfo("kumi")
+            info.size, info.mode = 3, 0o755
+            archive.addfile(info, io.BytesIO(b"#!\n"))
+        data_bytes = bundle.getvalue()
+        pin = json.loads((host.plugin_dir / "kumi_release.json").read_text())
+        record = next(iter(pin["targets"].values()))
+        record.update(sha256=hashlib.sha256(data_bytes).hexdigest(), size=len(data_bytes))
+        (host.plugin_dir / "kumi_release.json").write_text(json.dumps(pin))
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        with mock.patch.object(setup, "_open_url", side_effect=lambda url: io.BytesIO(data_bytes)), \
+                mock.patch.object(host.runtimes, "stop", wraps=host.runtimes.stop) as stop:
+            installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        stop.assert_called_once_with(data)
+        self.assertEqual(setup.runtime_state(data, support.VERSION, setup.host_target())[0], "ready")
 
 
 class Cli(unittest.TestCase):
