@@ -437,11 +437,12 @@ const HEARD_KEPT: usize = 512;
 const FLAGS_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a DAW's own tools are made from: the shared plan of its changes, the renderer the shared listening plays and
-/// renders with, and Kumi's folder.
+/// renders with, Kumi's folder, and what the host permits (a plugin host keeps its variations under its own state).
 pub struct OwnParts<S: RefScheme + 'static> {
     pub changes: Rc<OwnPlan<S>>,
     pub renderer: Rc<crate::listening::OwnRenderer<S>>,
     pub kumi_home: PathBuf,
+    pub policy: kumi_agent::core::context::HostPolicy,
 }
 
 /// The tools a DAW adds to the shared ones, where it offers them (its profile's caps): Renoise's variations of its
@@ -508,8 +509,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     let listening = OwnListening::new(link.clone(), changes.clone(), context, &options.kumi_home);
     // (#401) the DAW's own tools, where it offers them: variations, the sample map, chopping, delivery, routing, jams
     // and layered breaks (each DAW's own, from its own integration)
-    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers, ears } =
-        own_tools(&OwnParts { changes: changes.clone(), renderer: listening.renderer.clone(), kumi_home: options.kumi_home.clone() });
+    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers, ears } = own_tools(&OwnParts {
+        changes: changes.clone(),
+        renderer: listening.renderer.clone(),
+        kumi_home: options.kumi_home.clone(),
+        policy: options.context.policy.clone(),
+    });
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
         let backend = crate::scripts::OwnScripts::new(changes.clone(), daw.scripts);

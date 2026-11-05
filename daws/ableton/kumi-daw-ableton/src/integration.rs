@@ -167,9 +167,10 @@ impl Ableton {
                 }),
             );
             let watch = Watch::new(mutations.clone());
-            let variations =
-                Variations::new(LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone()), kumi_home())
-                    .tool();
+            // (a plugin host's keeps its sets under its own state, adds no scene for a take, and has its rules: CC-24)
+            let hosted = options.policy.variations_home.is_some();
+            let backend = LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone(), !hosted);
+            let variations = Variations::for_policy(backend, &options.policy, kumi_home()).tool();
             Self {
                 weak: weak.clone(),
                 connection,
