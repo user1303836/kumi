@@ -607,12 +607,20 @@ _TAGGING = {
     "reaper": ("REAPER: Kumi's extension keeps an id for each saved project in the project (ext state), saved with it.",),
     "renoise": ("Renoise: Kumi's tool keeps an id for each song in the song's tool data, saved with it.",),
 }
+# A component that reports `keep_identity: true` (8c) keeps an id only while a connection asks: Kumi in Hermes never
+# does, but a standalone Kumi connected to the same DAW still can (8b), and the id is then saved with the project.
+_TAGGING_WHEN_ASKED = {
+    "reaper": ("REAPER: Kumi's extension keeps an id in a saved project only when a standalone Kumi connected to REAPER "
+               "asks it to; Kumi in Hermes never asks. Once kept, the id is saved with the project (ext state).",),
+    "renoise": ("Renoise: Kumi's tool keeps an id in a song only when a standalone Kumi connected to Renoise asks it to; "
+                "Kumi in Hermes never asks. Once kept, the id is saved with the song (its tool data).",),
+}
 
 
 def _tagging(daw: str, component: Mapping[str, Any]) -> tuple[str, ...]:
-    """CC-8's line for `daw`, unless the component reports `keep_identity: true` (8c): a component from the shared
-    bridge bump keeps an id only while a standalone Kumi asks it to, which the plugin's runtime never does."""
-    return () if component.get("keep_identity") is True else _TAGGING.get(daw, ())
+    """CC-8's line for `daw`: what its component keeps in a project. Only a real `keep_identity: true` (8c) says the
+    component keeps an id only when asked, which a standalone Kumi beside Hermes still can (#1035, O-S4)."""
+    return (_TAGGING_WHEN_ASKED if component.get("keep_identity") is True else _TAGGING).get(daw, ())
 
 
 def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
