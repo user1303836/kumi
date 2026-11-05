@@ -198,10 +198,11 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   const { JobsView } = await load('src/desktop/jobs.tsx', { react: 'real' })
   const jobs = {
     'j-1': { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' }, ended_at: null },
-    'j-2': { job_id: 'j-2', kind: 'scan', state: 'failed', error: { reason: 'the folder went away' }, ended_at: 1 }
+    'j-2': { job_id: 'j-2', kind: 'scan', state: 'failed', error: { reason: 'the folder went away' }, ended_at: 1 },
+    'j-3': { job_id: 'j-3', kind: 'scan', state: 'done', result: { sounds: 637, measured: 637, failed: 3, map_revision: 'r8' }, ended_at: 1 }
   }
   const html = renderToStaticMarkup(createElement(JobsView, { jobs }))
-  for (const text of ['Scanning', 'Drums · 412 of 1,200', 'aria-label="Scanning: 34%"', 'width:34%', 'Scan failed', 'the folder went away']) {
+  for (const text of ['Scanning', 'Drums · 412 of 1,200', 'aria-label="Scanning: 34%"', 'width:34%', 'Scan failed', 'the folder went away', 'Scan done', "637 sounds · 3 couldn&#x27;t be read"]) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
@@ -219,4 +220,46 @@ test('the Measurements tab draws the latest measurement an event brought, or say
   assert.ok(drawn.includes('Dusty Snare 04.wav') && drawn.includes('−14.2 LUFS'), drawn)
   store.measure('call-5', null)
   assert.ok(draw().includes('the numbers are in its reply in the chat'))
+})
+
+test('Settings says whether Kumi can read compressed audio, in setup\'s own words (CC-10), and nothing when setup says nothing', async () => {
+  const { SettingsPage } = await load('src/desktop/settings.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const page = async setup => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/setup')) return setup
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refresh('setup')
+    const ctx = { storage: { get: (_key, fallback) => fallback, set: () => {} } }
+    return renderToStaticMarkup(createElement(SettingsPage, { ctx, store, onOpenMap: () => {} }))
+  }
+  const message = 'Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only; to let Kumi use the ffmpeg at /opt/homebrew/bin/ffmpeg, run hermes kumi setup (or ask Hermes to set up Kumi).'
+  const html = await page({ state: 'ready', compressed_audio: { state: 'not_allowed', ffmpeg: null, found: '/opt/homebrew/bin/ffmpeg', message } })
+  assert.ok(html.includes('Audio formats'), html)
+  assert.ok(html.includes('Kumi reads WAV and AIFF only; to let Kumi use the ffmpeg at /opt/homebrew/bin/ffmpeg'), html)
+  assert.ok(!(await page({ state: 'ready' })).includes('Audio formats'))
+})
+
+test('what the agent found, or a search, is also listed by name above the map, for the keyboard', async () => {
+  const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
+  const ids = Array.from({ length: 8 }, (_, index) => `s-r7-00${10 + index}`)
+  const map = {
+    revision: 'r7',
+    points: [...ids.map((id, index) => [id, index / 10, index / 10, 0]), ['s-r7-0099', 0.9, 0.9, 1]],
+    groups: { 0: { name: 'snare', color: '#f59e0b', count: 8 }, 1: { name: 'kick', color: '#ef4444', count: 1 } },
+    sounds: { ...Object.fromEntries(ids.map((id, index) => [id, { name: `Dusty Snare ${index + 1}.wav`, class: 'snare' }])), 's-r7-0099': { name: 'Kick 1.wav', class: 'kick' } }
+  }
+  const draw = (found, selected = null) =>
+    renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, empty: 'none' }))
+  const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
+  assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
+  assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
+  assert.equal(html.split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
+  const many = draw({ revision: 'r7', ids })
+  assert.equal(many.split('<button aria-pressed').length - 1, 6)
+  assert.ok(many.includes('and 2 more on the map'), many)
+  // A find from another map revision names sounds this map may not have: no list.
+  assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
+  assert.ok(!draw(null).includes('Sounds Kumi found'))
 })

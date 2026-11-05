@@ -1,6 +1,7 @@
 // The sound map, drawn on a canvas: each sound of the library where Kumi's layout put it, coloured by its group.
 // Wheel zooms, a drag pans, a click picks the sound under the pointer. Search and the legend dim what they leave out;
-// sounds the agent just found get a ring. Both UI halves use it; what a picked sound can do comes from `actions`.
+// sounds the agent just found get a ring. What a search or a find picks out is also listed by name, for the keyboard.
+// Both UI halves use it; what a picked sound can do comes from `actions`.
 import { CANVAS, T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -20,6 +21,9 @@ export interface MapCanvasProps {
   actions?: (id: string, sound: MapSound) => ReactNode
   empty: ReactNode
 }
+
+/** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
+const MATCHES_LISTED = 6
 
 interface Size {
   width: number
@@ -66,6 +70,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
       return !searched || searched.has(point.id)
     }
   }, [model, hidden, searched])
+  // What a search, or else the agent's find, picked out, also as named rows: a keyboard or a screen reader can pick a
+  // sound the canvas only draws.
+  const matches = useMemo(() => {
+    const ids = searched ?? foundIds
+    return ids ? [...ids].filter(id => indexOf.has(id) && visible(indexOf.get(id) as number)) : []
+  }, [searched, foundIds, indexOf, visible])
 
   // Follow the box's size (the pane or tab is resized all the time).
   useEffect(() => {
@@ -202,6 +212,26 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
           )
         })}
       </div>
+      {matches.length > 0 && (
+        <div aria-label={searched ? 'Sounds that match' : 'Sounds Kumi found'} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
+          {matches.slice(0, MATCHES_LISTED).map(id => {
+            const sound = model.sounds[id]
+            return (
+              <button
+                aria-pressed={selected === id}
+                key={id}
+                onClick={() => onPick(id)}
+                type="button"
+                style={{ ...S.row, gap: 6, font: 'inherit', fontSize: 11.5, padding: '1px 6px', borderRadius: 3, border: 'none', textAlign: 'left', cursor: 'pointer', color: T.text, background: selected === id ? T.card : 'transparent' }}
+              >
+                <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
+                {sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
+              </button>
+            )
+          })}
+          {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>and {matches.length - MATCHES_LISTED} more on the map</span>}
+        </div>
+      )}
       <div ref={boxRef} style={{ position: 'relative', flex: 1, minHeight: 160, overflow: 'hidden' }}>
         <canvas
           ref={canvasRef}

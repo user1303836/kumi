@@ -103,6 +103,12 @@ export function seconds(value: unknown): string {
 // A job's kind as a producer says it: running, and once it ended.
 const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'Scanning', noun: 'Scan' } }
 
+/** A count a job's result gives as a number or as a list of what it counted; null when it gives neither. */
+function count(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
 /** A background job in words: `Scanning` · `Drums · 412 of 1,200`, how much of it is done (0–1, when it's known),
  *  and a tone for its state. */
 export function jobWords(job: Job): { title: string; detail: string; fraction: number | null; tone: 'bad' | 'good' | 'muted' | 'warn' } {
@@ -118,8 +124,11 @@ export function jobWords(job: Job): { title: string; detail: string; fraction: n
   }
   if (job.state === 'done') {
     const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
-    const sounds = typeof result.sounds === 'number' ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? '' : 's'}` : ''
-    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: 'good' }
+    // A scan's result (W3): `sounds` indexed, `failed` files it couldn't read, as counts.
+    const sounds = count(result.sounds)
+    const failed = count(result.failed)
+    const detail = [sounds === null ? '' : `${num(sounds, 0)} sound${sounds === 1 ? '' : 's'}`, failed ? `${num(failed, 0)} couldn't be read` : '']
+    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: failed ? 'warn' : 'good' }
   }
   if (job.state === 'failed') return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? '', 120), fraction: null, tone: 'bad' }
   if (job.state === 'cancelled') return { title: `${named.noun} stopped`, detail: '', fraction: null, tone: 'muted' }
@@ -149,12 +158,16 @@ export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
 }
 
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
- *  doesn't write. */
-export function soundRequest(soundId: string, name?: string): string | null {
+ *  doesn't write. The name leads, as the producer would say it; the ids follow in parentheses, with the map revision
+ *  the sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
+ *  again. */
+export function soundRequest(soundId: string, name?: string, revision?: string | null): string | null {
   const id = plainId(soundId)
   if (!id) return null
+  const from = revision ? plainId(revision) : null
   const said = clean(name ?? '', 80)
-  return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`
+  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
+  return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
 }
 
 export function setupRequest(daw: unknown): string {

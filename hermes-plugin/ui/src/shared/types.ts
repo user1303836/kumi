@@ -168,6 +168,8 @@ export interface SetupStatus {
   daw?: string
   daw_component?: { state?: string; name?: string; path?: string | null; version?: string | null }
   existing_kumi?: { path?: string; adopted?: boolean } | null
+  /** CC-10: whether Kumi's runtime can decode MP3, FLAC and other compressed audio, with the line to show. */
+  compressed_audio?: { state?: 'available' | 'changed' | 'gone' | 'not_allowed'; message?: string } | null
   next_step?: string | null
   message?: string
 }

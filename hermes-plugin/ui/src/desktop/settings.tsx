@@ -94,6 +94,11 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
                 <span style={S.faint}>{setup.existing_kumi.adopted ? ' · adopted' : ' · left as it is'}</span>
               </Line>
             )}
+            {setup?.compressed_audio?.message && (
+              <Line label="Audio formats">
+                <span style={setup.compressed_audio.state === 'available' ? undefined : S.muted}>{clean(setup.compressed_audio.message, 400)}</span>
+              </Line>
+            )}
           </div>
           <div>
             <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Connection</span>
