@@ -182,6 +182,8 @@ export function ListenResultCard({ result, audition, fallback }: { result: unkno
           {view.capture}
         </span>
       )}
+      {/* The runtime's own note on the capture (CC-2 A3): muted plain text, no tone, never a control. */}
+      {view.captureNote && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{view.captureNote}</span>}
       {view.verdict && <span style={S.text}>{view.verdict}</span>}
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>

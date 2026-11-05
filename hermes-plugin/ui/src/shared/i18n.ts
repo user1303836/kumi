@@ -181,6 +181,7 @@ const en = {
     unpacked: (size: string) => `(${size} unpacked)`,
     part: (daw: string) => `${daw} part`,
     dawComponent: 'DAW component',
+    componentLine: (name: string, state: string) => `${name}: ${state}`,
     standalone: 'Standalone Kumi',
     adopted: 'adopted',
     leftAsIs: 'left as it is',
@@ -404,6 +405,7 @@ const ja: Shape<typeof en> = {
     unpacked: size => `（展開後 ${size}）`,
     part: daw => `${daw} 側の部品`,
     dawComponent: 'DAW の部品',
+    componentLine: (name, state) => `${name}：${state}`,
     standalone: '単体の Kumi',
     adopted: '引き継ぎ済み',
     leftAsIs: 'そのまま',
@@ -624,6 +626,7 @@ const zh: Shape<typeof en> = {
     unpacked: size => `（解压后 ${size}）`,
     part: daw => `${daw} 组件`,
     dawComponent: 'DAW 组件',
+    componentLine: (name, state) => `${name}：${state}`,
     standalone: '独立的 Kumi',
     adopted: '已接管',
     leftAsIs: '保持不变',
@@ -680,10 +683,12 @@ const zh: Shape<typeof en> = {
 /** The catalogs as Desktop's `ctx.i18n.register` takes them: its own locale ids (`zh` is Simplified Chinese). */
 export const MESSAGES = { en, ja, zh }
 
-/** A locale id from Desktop or the dashboard (`ja`, `zh`, `zh-CN`, `en-US`…) as one of ours; English otherwise. */
+/** A locale id from Desktop or the dashboard (`ja`, `zh`, `zh-CN`, `en-US`…) as one of ours; English otherwise.
+ *  Traditional Chinese (`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`) reads English, not the Simplified catalog. */
 export function localeOf(raw: unknown): Locale {
   const id = typeof raw === 'string' ? raw.toLowerCase() : ''
   if (id.startsWith('ja')) return 'ja'
+  if (/^zh[-_](?:hant|tw|hk|mo)(?![a-z])/.test(id)) return 'en'
   if (id.startsWith('zh')) return 'zh'
   return 'en'
 }

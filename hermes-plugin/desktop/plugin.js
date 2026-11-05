@@ -172,6 +172,7 @@ var en = {
     unpacked: (size) => `(${size} unpacked)`,
     part: (daw) => `${daw} part`,
     dawComponent: "DAW component",
+    componentLine: (name, state) => `${name}: ${state}`,
     standalone: "Standalone Kumi",
     adopted: "adopted",
     leftAsIs: "left as it is",
@@ -391,6 +392,7 @@ var ja = {
     unpacked: (size) => `（展開後 ${size}）`,
     part: (daw) => `${daw} 側の部品`,
     dawComponent: "DAW の部品",
+    componentLine: (name, state) => `${name}：${state}`,
     standalone: "単体の Kumi",
     adopted: "引き継ぎ済み",
     leftAsIs: "そのまま",
@@ -610,6 +612,7 @@ var zh = {
     unpacked: (size) => `（解压后 ${size}）`,
     part: (daw) => `${daw} 组件`,
     dawComponent: "DAW 组件",
+    componentLine: (name, state) => `${name}：${state}`,
     standalone: "独立的 Kumi",
     adopted: "已接管",
     leftAsIs: "保持不变",
@@ -666,6 +669,7 @@ var MESSAGES = { en, ja, zh };
 function localeOf(raw) {
   const id = typeof raw === "string" ? raw.toLowerCase() : "";
   if (id.startsWith("ja")) return "ja";
+  if (/^zh[-_](?:hant|tw|hk|mo)(?![a-z])/.test(id)) return "en";
   if (id.startsWith("zh")) return "zh";
   return "en";
 }
@@ -727,7 +731,7 @@ function colorOf(value) {
 }
 function clean(text, max = 80) {
   if (typeof text !== "string") return "";
-  const one = text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").replace(/"/g, "”").trim();
+  const one = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u{e0000}-\u{e007f}]/gu, "").replace(/\s+/g, " ").replace(/"/g, "”").trim();
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 var MINUS = "−";
@@ -1021,7 +1025,9 @@ function listenView(result, t = english) {
     bandsAre: differenceBands.length ? "difference" : "level",
     headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
     verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
-    capture: captureWords(result.capture, t)
+    capture: captureWords(result.capture, t),
+    // CC-2 A3: one line of at most 200 characters, shown as it is and never read for a decision.
+    captureNote: typeof result.capture?.note === "string" && result.capture.note.trim() ? clean(result.capture.note, 200) : void 0
   };
   if (compare) {
     view.referenceTitle = fileName(reference, t("listen.reference"));
@@ -1499,6 +1505,7 @@ function ListenResultCard({ result, audition, fallback }) {
           /* @__PURE__ */ jsx2(Chip, { title: t("listen.measuredTitle"), children: t("listen.measured") })
         ] }),
         view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: t("listen.captureTitle"), children: view.capture }),
+        view.captureNote && /* @__PURE__ */ jsx2("span", { style: { ...S.muted, whiteSpace: "normal" }, children: view.captureNote }),
         view.verdict && /* @__PURE__ */ jsx2("span", { style: S.text, children: view.verdict }),
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
@@ -2344,10 +2351,11 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           ] })
         ] }),
         component && /* @__PURE__ */ jsxs11(Line, { label: t("settings.part", dawName(daw, t)), children: [
-          clean(component.name ?? t("settings.dawComponent"), 40),
-          ":",
-          " ",
-          COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " "),
+          t(
+            "settings.componentLine",
+            clean(component.name ?? t("settings.dawComponent"), 40),
+            COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
+          ),
           component.path && /* @__PURE__ */ jsx11("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
         setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: t("settings.standalone"), children: [

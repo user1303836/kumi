@@ -62,11 +62,17 @@ export function colorOf(value: Named): string | undefined {
 }
 
 /** Text from the backend, safe to put in a sentence: one line, no control characters, quotes turned typographic,
- *  at most `max` characters. */
+ *  at most `max` characters. Characters that hide, reorder or redraw text (bidi controls, zero-width characters, the
+ *  BOM, tag characters) are dropped, so a name can't pass for other words. */
 export function clean(text: unknown, max = 80): string {
   if (typeof text !== 'string') return ''
-  // eslint-disable-next-line no-control-regex
-  const one = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').replace(/"/g, '”').trim()
+  const one = text
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+    .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u{e0000}-\u{e007f}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .replace(/"/g, '”')
+    .trim()
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
 }
 

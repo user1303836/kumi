@@ -210,6 +210,7 @@
       unpacked: (size) => `(${size} unpacked)`,
       part: (daw) => `${daw} part`,
       dawComponent: "DAW component",
+      componentLine: (name, state) => `${name}: ${state}`,
       standalone: "Standalone Kumi",
       adopted: "adopted",
       leftAsIs: "left as it is",
@@ -429,6 +430,7 @@
       unpacked: (size) => `（展開後 ${size}）`,
       part: (daw) => `${daw} 側の部品`,
       dawComponent: "DAW の部品",
+      componentLine: (name, state) => `${name}：${state}`,
       standalone: "単体の Kumi",
       adopted: "引き継ぎ済み",
       leftAsIs: "そのまま",
@@ -648,6 +650,7 @@
       unpacked: (size) => `（解压后 ${size}）`,
       part: (daw) => `${daw} 组件`,
       dawComponent: "DAW 组件",
+      componentLine: (name, state) => `${name}：${state}`,
       standalone: "独立的 Kumi",
       adopted: "已接管",
       leftAsIs: "保持不变",
@@ -704,6 +707,7 @@
   function localeOf(raw) {
     const id = typeof raw === "string" ? raw.toLowerCase() : "";
     if (id.startsWith("ja")) return "ja";
+    if (/^zh[-_](?:hant|tw|hk|mo)(?![a-z])/.test(id)) return "en";
     if (id.startsWith("zh")) return "zh";
     return "en";
   }
@@ -765,7 +769,7 @@
   }
   function clean(text, max = 80) {
     if (typeof text !== "string") return "";
-    const one = text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").replace(/"/g, "”").trim();
+    const one = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\u{e0000}-\u{e007f}]/gu, "").replace(/\s+/g, " ").replace(/"/g, "”").trim();
     return one.length > max ? `${one.slice(0, max - 1)}…` : one;
   }
   var MINUS = "−";
