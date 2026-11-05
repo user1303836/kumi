@@ -826,6 +826,9 @@ mod tests {
     fn spill(_ctx: &Ctx, call: Call) -> OpFuture<'_> {
         Box::pin(async move {
             RUNS.with(|runs| runs.set(runs.get() + 1));
+            if call.args.get("word").and_then(Value::as_str) == Some("fine") {
+                return Ok(json!({"state": "applied", "cleanup": "restored"}));
+            }
             let mut outcome = json!({"state": "unsure", "reason": "The render ran past its window, and Live's routing may not be back.", "cleanup": "unsure"});
             if call.args.get("hold").and_then(Value::as_bool) == Some(true) {
                 outcome["history_ids"] = json!(["h-own-1"]);
@@ -1416,12 +1419,20 @@ mod tests {
             let status = session.state("status.json");
             assert_eq!((status["unsure"]["op"].clone(), status["unsure"]["cleanup"].clone()), (json!("spill"), json!("unsure")));
             assert_eq!(session.ctx.link().epoch(), before + 1, "refs from before it no longer hold");
-            // One that kept its own HISTORY (as change does) isn't audited again, nor its epoch moved twice.
-            session.send(call(json!(2), "spill", json!({"hold": true, "_host": {"tool_call_id": "tc-2"}}))).await;
+            // Its retry is the same call: answered as before, with no second row and no second move.
+            session.send(call(json!(2), "spill", json!({"_host": {"tool_call_id": "tc-1"}}))).await;
+            let again = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            assert_eq!(again, answered, "the stored answer");
+            // One that kept its own HISTORY (as change and undo do) isn't audited again, nor its epoch moved twice.
+            session.send(call(json!(3), "spill", json!({"hold": true, "_host": {"tool_call_id": "tc-2"}}))).await;
             let own = session.next().await.unwrap()["result"]["structuredContent"].clone();
             assert_eq!(own["history_ids"], json!(["h-own-1"]));
+            // One that came to anything but unsure is the operation's own to record: no row, no move.
+            session.send(call(json!(4), "spill", json!({"word": "fine", "_host": {"tool_call_id": "tc-3"}}))).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["state"], "applied");
             assert_eq!(session.state("history.json")["items"].as_array().map(Vec::len), Some(1));
             assert_eq!(session.ctx.link().epoch(), before + 1);
+            assert_eq!(RUNS.with(Cell::get), 3, "the retry wasn't run");
             session.end().await;
         })
         .await;

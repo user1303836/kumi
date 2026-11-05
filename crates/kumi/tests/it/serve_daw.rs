@@ -610,6 +610,44 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     wire.end().await;
 });
 
+case!(serve_audits_an_undo_reaper_didnt_confirm_once_and_moves_the_epoch_on_once, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = sim.config(secret, "/lab/REAPER");
+            let answer = config.respond.take().unwrap();
+            // The change goes through; the undo's answer is lost, so whether it happened isn't known.
+            config.respond = Some(Arc::new(move |method, params| {
+                if method == "change_restore" {
+                    Some(Err(("uncertain".into(), "REAPER stopped answering".into())))
+                } else {
+                    answer(method, params)
+                }
+            }));
+            config
+        })),
+    )
+    .await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, reference, _) = looked(&mut wire).await;
+    let down = json!([{"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6}}]);
+    let (changed, _) = wire.call("change", plan(&key, epoch, down), Some("tc-1")).await;
+    assert_eq!(changed["state"], "applied", "{changed}");
+    let rows = |lab: &Lab| lab.state("history.json")["items"].as_array().map(Vec::len).unwrap_or_default();
+    let (before_rows, before_epoch) = (rows(&lab), lab.ctx.link().epoch());
+    let (undone, _) = wire.call("undo", json!({"history_id": changed["history_ids"][0]}), Some("tc-2")).await;
+    assert_eq!(undone["state"], "unsure", "{undone}");
+    assert_eq!(rows(&lab), before_rows + 1, "one audit row");
+    assert_eq!(lab.ctx.link().epoch(), before_epoch + 1, "the epoch moved on once");
+    let ids = undone["history_ids"].as_array().cloned().unwrap_or_default();
+    let kept = lab.state("history.json");
+    assert_eq!((ids.len(), kept["items"][0]["id"].clone()), (1, ids[0].clone()), "the answer names its audit row");
+    wire.end().await;
+});
+
 case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins_plan_fills_it, async {
     let script = ReaperScript::new(3, 0);
     let tab = script.clone();

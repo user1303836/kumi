@@ -476,17 +476,25 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }
         Err(error) => ("unsure", format!("The undo stopped: {error}")),
     };
+    // Its own audit row for an unsure undo, in the answer's history_ids: the adapter then adds none of its own.
+    let mut audited = None;
     if state == "unsure" {
         let asked = super::mcp::digest(UNDO.name, &call.args);
         let identity = CallIdentity { tool_call_id: call.host.tool_call_id.as_deref(), digest: &asked };
-        ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
+        let audit = ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
+        ctx.history().call_came_to(std::slice::from_ref(&audit.id), "unsure", ctx.snapshots());
         ctx.link().note_unsure("undo", &reason, "unsure");
+        audited = Some(audit.id);
     }
     if state != "refused" {
         moved_on(ctx);
     }
     super::core::publish_status(ctx, false).await;
-    Ok(answer(state, &reason))
+    let mut answered = answer(state, &reason);
+    if let Some(audit) = audited {
+        answered["history_ids"] = json!([audit]);
+    }
+    Ok(answered)
 }
 
 pub static HISTORY: Operation = Operation {
