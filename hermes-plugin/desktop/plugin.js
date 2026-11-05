@@ -88,7 +88,7 @@ var en = {
     dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
     byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
     byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
-    scriptUndo: (daw) => `Kumi doesn't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
+    scriptUndo: (daw) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
   },
   job: {
     scanning: "Scanning",
@@ -155,6 +155,7 @@ var en = {
     codeTitle: "Every line of the code as it will run. Nothing runs from here.",
     reading: "Reading the code Kumi saved…",
     unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
+    unreadableSaved: "Kumi couldn't read the code this script ran: its saved copy is gone, or no longer matches the hash Kumi kept.",
     show: "Show code",
     hide: "Hide code",
     showTitle: "The code this script ran, as Kumi saved it when its approval asked"
@@ -399,7 +400,7 @@ var ja = {
     dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
     byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
     byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
-    scriptUndo: (daw) => `Kumi はスクリプトを取り消しません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
+    scriptUndo: (daw) => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
   },
   job: {
     scanning: "スキャン中",
@@ -466,6 +467,7 @@ var ja = {
     codeTitle: "実行されるとおりのコードの全行です。ここからは何も実行されません。",
     reading: "Kumi が保存したコードを読み込み中…",
     unreadable: "保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。",
+    unreadableSaved: "このスクリプトが実行したコードを読めませんでした。保存したコピーがないか、Kumi が控えたハッシュと一致しません。",
     show: "コードを表示",
     hide: "コードを隠す",
     showTitle: "このスクリプトが実行したコード（承認を求めたときに Kumi が保存したもの）"
@@ -709,7 +711,7 @@ var zh = {
     dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
     byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
     byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
-    scriptUndo: (daw) => `Kumi 不会撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
+    scriptUndo: (daw) => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
   },
   job: {
     scanning: "正在扫描",
@@ -776,6 +778,7 @@ var zh = {
     codeTitle: "将要运行的完整代码。这里不会运行任何东西。",
     reading: "正在读取 Kumi 保存的代码…",
     unreadable: "Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。",
+    unreadableSaved: "无法读取这个脚本运行的代码：保存的副本已不存在，或与 Kumi 记下的哈希不再一致。",
     show: "显示代码",
     hide: "隐藏代码",
     showTitle: "这个脚本运行的代码（在请求批准时由 Kumi 保存）"
@@ -2446,7 +2449,7 @@ function SavedScript({ item, store }) {
   if (!sha || !language) return null;
   return /* @__PURE__ */ jsxs6("span", { style: { display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }, children: [
     /* @__PURE__ */ jsx6("span", { children: /* @__PURE__ */ jsx6(TextButton, { onClick: () => setOpen(!open), pressed: open, title: t("script.showTitle"), children: open ? t("script.hide") : t("script.show") }) }),
-    open && (code ? /* @__PURE__ */ jsx6(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.reading") }))
+    open && (code ? /* @__PURE__ */ jsx6(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadableSaved") }) : /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.reading") }))
   ] });
 }
 

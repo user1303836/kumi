@@ -70,7 +70,7 @@ export function SavedScript({ item, store }: { item: HistoryItem; store: KumiSto
         (code ? (
           <CodeBlock code={code.code} label={t('script.code')} />
         ) : code === false ? (
-          <span style={S.muted}>{t('script.unreadable')}</span>
+          <span style={S.muted}>{t('script.unreadableSaved')}</span>
         ) : (
           <span style={S.faint}>{t('script.reading')}</span>
         ))}
