@@ -90,9 +90,11 @@ class Context:
         raise AttributeError(f"the plugin used ctx.{name}, which register() and the tools never need")
 
 
-def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: str | None = None) -> Path:
-    """A runtime set up in `data_dir` as setup leaves it (runtime/<version>/kumi and runtime/current.json), whose
-    `kumi` runs the fixture runtime with `fixture_args` after the runtime's own arguments. Returns `kumi`."""
+def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: str | None = None,
+            daw_component: bool = True) -> Path:
+    """A runtime set up in `data_dir` as setup leaves it (runtime/<version>/kumi and runtime/current.json, and with
+    `daw_component` the receipt of Kumi's part in each DAW), whose `kumi` runs the fixture runtime with `fixture_args`
+    after the runtime's own arguments. Returns `kumi`."""
     host_target = module("setup").host_target()
     folder = data_dir / "runtime" / version
     folder.mkdir(parents=True, exist_ok=True)
@@ -107,7 +109,24 @@ def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: 
     receipt = {"schema": 1, "version": version, "target": target or host_target,
                "kumi": kumi.relative_to(data_dir).as_posix(), "sha256": "0" * 64, "installed_at": 0}
     (data_dir / "runtime" / "current.json").write_text(json.dumps(receipt), encoding="utf-8")
+    if daw_component:
+        component = {"component": "Kumi's DAW component", "version": "1.0.105", "paths": [], "after": None,
+                     "parts": [], "installed_at": 0}
+        (data_dir / "setup").mkdir(parents=True, exist_ok=True)
+        (data_dir / "setup" / "receipt.json").write_text(json.dumps(
+            {"schema": 1, "daw_components": {daw: component for daw in ("ableton", "reaper", "renoise")}}),
+            encoding="utf-8")
     return kumi
+
+
+def pin(plugin_dir: Path, version: str = VERSION) -> None:
+    """A kumi_release.json for `version` with this computer's bundle, as scripts/hermes_pin.py writes one."""
+    target = module("setup").host_target()
+    record = {"url": f"https://github.com/user1303836/kumi/releases/download/v{version}/kumi-{target}.tar.xz",
+              "sha256": "0" * 64, "size": 26_000_000, "unpacked_bytes": 82_000_000}
+    (plugin_dir / "kumi_release.json").write_text(json.dumps(
+        {"schema": 1, "kumi": version, "repository": "user1303836/kumi", "tag": f"v{version}",
+         "targets": {target: record}}), encoding="utf-8")
 
 
 def requests(state_dir: Path) -> list[dict]:
@@ -116,20 +135,24 @@ def requests(state_dir: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 
-def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0):
+def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0,
+         daw_component: bool = True):
     """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
-    `installed` is false). Returns (host, context, data folder); everything is cleaned up after `test`."""
+    `installed` is false), and a plugin folder whose kumi_release.json pins it. Returns (host, context, data folder);
+    everything is cleaned up after `test`."""
     import tempfile
-    folder = tempfile.TemporaryDirectory()
+    folder, plugin = tempfile.TemporaryDirectory(), tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
+    test.addCleanup(plugin.cleanup)
     data = Path(folder.name)
+    pin(Path(plugin.name))
     if installed:
-        install(data, *fixture_args)
+        install(data, *fixture_args, daw_component=daw_component)
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
     runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
     test.addCleanup(runtimes.stop_all)
     return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
-                                 hook_timeout=lambda: hook_timeout), ctx, data)
+                                 hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name)), ctx, data)
 
 
 _IDS = iter(range(1, 1 << 30))

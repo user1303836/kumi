@@ -26,6 +26,8 @@ WRITE_TIMEOUT = 120.0
 TRACK_TIMEOUT = 300.0
 TRACK_MARGIN = 30.0
 TRACK_LONGEST = 900.0  # a preview's deadline past this isn't believed
+# Installing Kumi's part in a DAW unpacks and copies its bridge: it gets longer than a change.
+SETUP_TIMEOUT = 300.0
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
 
@@ -36,13 +38,14 @@ class Host:
 
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
-                 hook_timeout: Callable[[], float | None] | None = None):
+                 hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
         self._data_dir = data_dir
         self._pinned = pinned
         self._hook_timeout = hook_timeout
+        self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
 
     def hook_timeout(self) -> float | None:
         """Hermes's `plugins.hook_callback_timeout` (default 30 s; 0 or less: none), read on each call."""
@@ -114,15 +117,15 @@ def broadcast(event: str, payload: dict) -> None:
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     daw = host.daw()
-    report: dict[str, Any] = {"setup": None, "runtime": None, "connected": False, "daw": daw, "project": None,
-                              "owner": None, "capabilities": []}
     data_dir = host.data_dir()
+    report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
+                              "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
+                              "capabilities": []}
     try:
-        install = host.install(data_dir)
+        host.install(data_dir)
     except runtime.Unavailable as failure:
-        report["setup"] = {"installed": False, "message": failure.reason}
+        report["message"] = report["setup"].get("message") or failure.reason
         return report
-    report["setup"] = {"installed": True, "version": install.version, "target": install.target}
     live = host.runtimes.get(data_dir)
     if live is None:
         report["message"] = "Kumi's runtime isn't running: kumi_connect starts it and connects to the DAW."
@@ -131,6 +134,63 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     report.update({key: status[key] for key in ("runtime", "connected", "daw", "project", "owner", "capabilities")
                    if key in status})
     return report
+
+
+def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dict]:
+    """The runtime's `setup_daw` (C8's DAW step) for setup.py: this profile's runtime for `daw`, started for this chat
+    when none runs. A runtime that works in another DAW refuses rather than being restarted under a running chat."""
+
+    def call(args: dict) -> dict:
+        data_dir = host.data_dir()
+        install = host.install(data_dir)
+        live = host.runtimes.get(data_dir)
+        if live is not None and live.daw != daw:
+            raise runtime.Refused("other_daw", (
+                f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; set Kumi up for "
+                f"{schemas.DAW_NAMES[daw]} once the chat that started it ends."))
+        live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
+                                           library_roots=host.library_folders())
+        timeout = READ_TIMEOUT if args.get("dry_run") else SETUP_TIMEOUT
+        return live.call("setup_daw", args, host.identity(kwargs), timeout=timeout)
+
+    return call
+
+
+def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
+    """C8 through C1's kumi_setup. `plan` records the next step. `install` and `adopt` carry out exactly the plan the
+    producer approved: the approval hook bound its digest to this call's record (CC-5), and only that plan runs. A
+    digest in the model's own arguments is never used."""
+    action, daw = args.get("action"), args.get("daw") or host.daw()
+    if action not in ("plan", "install", "adopt"):
+        return {"error": {"code": "invalid", "reason": "action is plan, install or adopt."}}
+    if daw not in schemas.DAWS:
+        return {"error": {"code": "invalid", "reason": f"Kumi works in {', '.join(schemas.DAWS)}, not {daw!r}."}}
+    data_dir = host.data_dir()
+    setup_daw = setup_daw_caller(host, daw, kwargs)
+    if action == "plan":
+        try:
+            planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir)
+        except setup.SetupError as error:
+            return {"error": {"code": error.code, "reason": error.message}}
+        next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt"}.get(planned["step"])
+        return {**planned, "next": f"kumi_setup {next_action}" if next_action else None}
+    call = kwargs.get("kumi_call")
+    digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
+    if not isinstance(digest, str) or not digest:
+        return {"error": {"code": "not_approved", "reason": "Kumi did not set anything up: this call carries no "
+                                                            "approved setup plan. Run kumi_setup plan first."}}
+    if action == "install":
+        result = setup.install(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
+                               plugin_dir=host.plugin_dir)
+    else:
+        result = setup.adopt(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
+                             plugin_dir=host.plugin_dir)
+    if not result.get("ok"):
+        error = result.get("error") or {}
+        return {"error": {"code": error.get("code") or "failed", "reason": error.get("message") or "Setup failed."}}
+    if action == "adopt" or result.get("step") == "runtime":
+        host.runtimes.stop(data_dir)  # the next start uses the new runtime, or the adopted --kumi-home
+    return result
 
 
 def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -337,6 +397,7 @@ def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
 # name, schema, handler, emoji: every one registered every time (catalog rule 6).
 TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_status", schemas.KUMI_STATUS, kumi_status, "🎛️"),
+    ("kumi_setup", schemas.KUMI_SETUP, kumi_setup, "🧰"),
     ("kumi_connect", schemas.KUMI_CONNECT, kumi_connect, "🔌"),
     ("kumi_observe", schemas.KUMI_OBSERVE, _forward("observe", READ_TIMEOUT), "👀"),
     ("kumi_read", schemas.KUMI_READ, _forward("read", READ_TIMEOUT), "📖"),
@@ -348,15 +409,17 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
     ("kumi_job", schemas.KUMI_JOB, _forward("job", READ_TIMEOUT), "⏳"),
 )
-# What a tool needs before it's shown to the model: kumi_status and kumi_connect always are (RESEARCH.md §5.4).
-ALWAYS_SHOWN = {"kumi_status", "kumi_connect"}
+# What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
+# §5.4).
+ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
     return (name in ("kumi_change", "kumi_undo")
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
-            or (name == "kumi_listen" and is_track_listen(args)))
+            or (name == "kumi_listen" and is_track_listen(args))
+            or (name == "kumi_setup" and args.get("action") in ("install", "adopt")))
 
 
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:

@@ -3,12 +3,14 @@
 It takes the runtime's arguments, answers MCP over stdin and stdout as the runtime does, and holds a made-up Live Set
 ("Night Drive") in memory: connect, observe, read, a typed change with HISTORY and its preview (CC-3), undo, a small
 sample library (two snares on map revision r1) with search, measuring and a scan job, a track or mix listen with its
-preview (CC-2), and the C3 snapshot files in `--state-dir`, with a resource update after each. Standard library only.
+preview (CC-2), setup's `setup_daw` (C8) on a made-up Live User Library, and the C3 snapshot files in `--state-dir`,
+with a resource update after each. Standard library only.
 
     python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton [--library-root DIR]...
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
         [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media] [--listen-deadline SECONDS]
+        [--component-state missing|same|older|newer|other_owner] [--component-owner DIR]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
 refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends; and say how a
@@ -441,8 +443,36 @@ def job(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"state": "done", "progress": 1.0, "result": {"sounds": len(SOUNDS), "map_revision": "r1"}}
 
 
+def setup_daw(fixture: Fixture, args: dict, host: dict) -> dict:
+    """The runtime's setup_daw (C8, W1-REGISTRY): a dry run names the exact paths and writes nothing; a real install
+    of a missing or older component "installs" it (recorded in the state directory, nothing else written)."""
+    if args.get("daw") != fixture.daw:
+        return error("other_daw", f"kumi serve was started for {fixture.daw}")
+    state, owner = fixture.options.component_state, fixture.options.component_owner
+    library = Path(fixture.options.state_dir).resolve() / "fake-user-library"
+    script, ears = library / "Remote Scripts" / "AbletonMcpBridge", library / "Kumi" / "Audio Effects" / "Kumi Ears.amxd"
+    reply = {"daw": fixture.daw, "component": "Live Remote Script", "version": "1.0.105",
+             "paths": [str(script), str(ears)], "state": state,
+             "owner": {"kumi_home": owner} if owner else None, "after": "choose_control_surface",
+             "effects": [f"Copy the AbletonMcpBridge Remote Script into {script.parent}",
+                         f"Copy the Kumi Ears device to {ears} (track listening needs Max for Live)"],
+             "parts": [{"name": "Remote Script", "path": str(script), "state": state},
+                       {"name": "Kumi Ears", "path": str(ears), "state": state}]}
+    if args.get("dry_run"):
+        return reply
+    if state == "other_owner":
+        return error("owned_elsewhere", "Another Kumi installation owns Live's component.")
+    if state == "newer":
+        return error("newer_installed", "Live has a newer Kumi component than this runtime.")
+    fixture.options.component_state = "same"
+    fixture.record("fixture-setup-daw.json", {"installed": reply["paths"], "host": host})
+    return {**reply, "state": "same", "installed_at": now(),
+            "parts": [{**part, "state": "same"} for part in reply["parts"]]}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
-         "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job}
+         "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
+         "setup_daw": setup_daw}
 
 
 def main() -> None:
@@ -466,6 +496,9 @@ def main() -> None:
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
     parser.add_argument("--listen-deadline", type=float, default=75.0,
                         help="the preview's deadline_seconds: the capture's 65 s cap, restoring and measuring")
+    parser.add_argument("--component-state", default="missing",
+                        choices=["missing", "same", "older", "newer", "other_owner"])
+    parser.add_argument("--component-owner")
     Fixture(parser.parse_args()).serve()
 
 

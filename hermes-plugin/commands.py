@@ -1,19 +1,20 @@
-"""Kumi's commands, which only read (C6): no change, no approval.
+"""Kumi's commands.
 
-- `/kumi` in a chat: where Kumi stands, from this process's runtime.
+- `/kumi` in a chat: where Kumi stands, from this process's runtime. It only reads (C6): no change, no approval.
 - `hermes kumi status` in a terminal: the same from what the runtime last published (C3), since the runtime belongs to
   whichever Hermes process started it, never to this short-lived one.
+- `hermes kumi setup` in a terminal: setup, asking before each step (C8).
 """
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
-from . import runtime, schemas, snapshots, tools
+from . import runtime, schemas, setup, snapshots, tools
 
 DESCRIPTION = "Kumi's state: setup, its runtime, the DAW connection and the open project"
-CLI_HELP = "Kumi in this Hermes profile: where it stands"
+CLI_HELP = "Kumi in this Hermes profile: where it stands, and setting it up"
 
 
 def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
@@ -22,10 +23,11 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
     except (runtime.Unavailable, runtime.Refused) as failure:
         return f"Kumi: its runtime didn't answer ({failure.reason})"
     daw = schemas.DAW_NAMES.get(status.get("daw"), status.get("daw"))
-    setup = status.get("setup") or {}
-    if not setup.get("installed"):
-        return f"Kumi isn't ready: {setup.get('message')}"
-    lines = [f"Kumi {setup.get('version')} is set up ({setup.get('target')}); DAW: {daw}."]
+    state = status.get("setup") or {}
+    if state.get("state") != "ready":
+        return (f"Kumi isn't ready: {state.get('message')} Ask the agent to set Kumi up, or run `hermes kumi setup` "
+                "in a terminal (Hermes leaves plugin commands out when `plugins.isolation` is `host`).")
+    lines = [f"Kumi {(state.get('runtime') or {}).get('version')} is set up ({state.get('target')}); DAW: {daw}."]
     if not status.get("connected"):
         lines.append(status.get("message") or f"Kumi isn't connected to {daw}: ask the agent to connect.")
         return "\n".join(lines)
@@ -77,8 +79,22 @@ def register_cli(ctx: Any, host: tools.Host) -> None:
 def cli_parser(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="kumi_action")
     actions.add_parser("status", help="where Kumi stands in this profile (what `hermes kumi` alone shows)")
+    setup_parser = actions.add_parser("setup", help="set Kumi up in this profile, asking before each step")
+    setup_parser.add_argument("--daw", choices=schemas.DAWS, help="the DAW to set up for (default: the DAW setting)")
 
 
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
+    if getattr(args, "kumi_action", None) == "setup":
+        return cli_setup(host, getattr(args, "daw", None) or host.daw())
     print(status_text(host))  # `status`, or no action at all
     return 0
+
+
+def cli_setup(host: tools.Host, daw: str, *, stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
+    """setup.cli_main with this profile's plugin data. The DAW step uses a runtime this command starts, which stops
+    before the command ends."""
+    try:
+        return setup.cli_main(daw, setup_daw=tools.setup_daw_caller(host, daw, {}), data_dir=host.data_dir(),
+                              plugin_dir=host.plugin_dir, stdin=stdin, stdout=stdout)
+    finally:
+        host.runtimes.stop_all()
