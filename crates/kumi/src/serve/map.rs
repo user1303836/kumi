@@ -308,7 +308,7 @@ impl MapStore {
             if error.kind() == std::io::ErrorKind::InvalidData {
                 OpError::Refused {
                     code: "map_too_large",
-                    reason: "The sound map exceeds the 64 MiB reader limit; the previous map remains available.".into(),
+                    reason: "This sound map is too large for Kumi to read (over 64 MiB): scan fewer or smaller folders. Your previous map stays.".into(),
                     owner: None,
                 }
             } else {

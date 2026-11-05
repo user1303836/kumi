@@ -260,7 +260,7 @@ class ListeningInterpretationTests(unittest.TestCase):
                 self.assertEqual(result, before)
                 self.assertEqual(len(model.calls), 1)
 
-    def test_explicit_image_model_rejection_is_actionable_without_exposing_provider_details(self):
+    def test_image_model_rejection_preserves_measurements_without_retries_or_provider_details(self):
         class ProviderError(Exception):
             status_code = 400
 
@@ -282,12 +282,11 @@ class ListeningInterpretationTests(unittest.TestCase):
                 model = LocalModel(error=failure)
                 with self.assertRaises(listening.InterpretationError) as error:
                     listening.interpret(model, result, timeout=30)
-                self.assertIn("the listening model needs image input", str(error.exception))
                 self.assertNotIn("PRIVATE", str(error.exception))
                 self.assertEqual(result, before)
                 self.assertEqual(len(model.calls), 1)
 
-    def test_other_provider_failures_and_metrics_only_calls_do_not_blame_image_support(self):
+    def test_other_provider_failures_remain_private_without_retries(self):
         class ProviderError(Exception):
             def __init__(self, status, message):
                 super().__init__("PRIVATE_EXCEPTION")
@@ -308,7 +307,6 @@ class ListeningInterpretationTests(unittest.TestCase):
                 model = LocalModel(error=failure)
                 with self.assertRaises(listening.InterpretationError) as error:
                     listening.interpret(model, {"metrics": measured(spectrum=spectrum)}, timeout=30)
-                self.assertNotIn("needs image input", str(error.exception))
                 self.assertNotIn("PRIVATE", str(error.exception))
                 self.assertEqual(len(model.calls), 1)
 

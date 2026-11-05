@@ -395,7 +395,7 @@ def library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str 
     if real is None:
         return None, f"{normal} leads to a network or device path; name a folder on this computer."
     if os.path.dirname(real) == real or os.path.ismount(real):
-        return None, f"{normal} is a whole disk or volume; name a sample folder."
+        return None, f"{normal} is a whole drive or volume; name a sample folder."
     if _holds(real, os.path.expanduser("~")):
         return None, "that's the home folder, or a folder holding it; name a sample folder."
     if hermes_home and (_holds(real, hermes_home) or _within(real, hermes_home)):
