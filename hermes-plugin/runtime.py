@@ -85,6 +85,11 @@ class Unavailable(Exception):
         self.reason = reason
 
 
+class NotSent(Unavailable):
+    """Unavailable before anything of the call was written to the runtime: proof, on Kumi's side, that nothing of it
+    reached the runtime, so nothing of it can have reached anyone else (a paid create's reservation is freed on it)."""
+
+
 class Refused(Exception):
     """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`)."""
 
@@ -410,9 +415,9 @@ class Client:
         pending = _Pending()
         with self._lock:
             if self._gone is not None:
-                raise Unavailable("not_running", f"{self._gone} Nothing was sent.")
+                raise NotSent("not_running", f"{self._gone} Nothing was sent.")
             if self._input_ended:
-                raise Unavailable("not_running", "Kumi's runtime is stopping. Nothing was sent.")
+                raise NotSent("not_running", "Kumi's runtime is stopping. Nothing was sent.")
             ident = next(self._ids)
             self._pending[ident] = pending
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
@@ -609,20 +614,22 @@ class Runtime:
         return self.data_dir / "state"
 
     def call(self, tool: str, args: dict, host: dict, *, timeout: float,
-             interrupted: Callable[[], bool] | None = None) -> dict:
+             interrupted: Callable[[], bool] | None = None, private: dict | None = None) -> dict:
         """Call one of the runtime's tools (C2: C1's names without `kumi_`), with Hermes's call identity in `_host`.
         Its answer's structured content, or Refused with the runtime's error. A key starting with `_` is the host's to
         give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
         the model, is dropped, never passed on (rgzm, #1007). With `interrupted`, the producer's Stop cancels the call
-        while it waits (Client.request)."""
+        while it waits (Client.request). `private` is the host's own (`_mirelo`, after the producer's approval): added
+        to this one request only, never logged, recorded or returned."""
         arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
+        hosts = {key: value for key, value in (private or {}).items() if isinstance(key, str) and key.startswith("_")}
         with self._lock:
             if self.closing:
-                raise Unavailable("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing "
-                                                 "was sent.")
+                raise NotSent("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing was "
+                                             "sent.")
             self.in_flight += 1
         try:
-            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, "_host": host}},
+            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, **hosts, "_host": host}},
                                          timeout=timeout, interrupted=interrupted)
         finally:
             with self._lock:

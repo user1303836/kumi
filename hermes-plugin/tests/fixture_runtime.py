@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -61,6 +62,10 @@ class Fixture:
         self.state.mkdir(parents=True, exist_ok=True)
         self.artifacts: dict[str, dict] = {}  # artifacts.json's table, as W3's runtime keeps a measured file
         self.scans: dict[str, str] = {}  # job id -> running, cancelling, cancelled or done (CC-14)
+        self.quoted: dict[str, dict] = {}  # Mirelo quotes this runtime made (CC-13)
+        self.generations: dict[str, dict] = {}  # generation jobs it created
+        self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
+        self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
         self.seq = 0
         self.connected = False
         self.daw = options.daw
@@ -81,7 +86,8 @@ class Fixture:
         self.writing = threading.Lock()
         self.counting = threading.Lock()
         self.beating = threading.RLock()  # owner.json's writes: a heartbeat never lands after stopped()'s
-        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ)})
+        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ),
+                                           "pid": os.getpid()})  # its own: on Windows the client's is kumi.bat's cmd.exe
         if options.stderr_flood:
             sys.stderr.write("noise " * (options.stderr_flood // 6) + "\n")
             sys.stderr.flush()
@@ -98,7 +104,7 @@ class Fixture:
         for line in sys.stdin:
             message = json.loads(line)
             with open(self.state / "fixture-requests.jsonl", "a", encoding="utf-8") as log:
-                log.write(json.dumps(message) + "\n")
+                log.write(json.dumps(logged(message)) + "\n")
             method, ident = message.get("method"), message.get("id")
             if ident is None:
                 continue  # notifications: initialized, cancelled
@@ -576,9 +582,11 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
-    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done, its map then the
-    current one."""
+    """A generation's job, or a scan's: a scan settles when it's next read, a cancelled one as cancelled, any other as
+    done, its map then the current one."""
     job_id = args.get("job_id")
+    if job_id in fixture.generations:
+        return generation_job(fixture, job_id)
     state = fixture.scans.get(job_id)
     if state is None:
         return error("not_found", f"no job {job_id!r}")
@@ -617,9 +625,97 @@ def setup_daw(fixture: Fixture, args: dict, host: dict) -> dict:
             "parts": [{**part, "state": "same"} for part in reply["parts"]]}
 
 
+def logged(message: dict) -> dict:
+    """What the fixture keeps of a request: a `_mirelo` key is never written (kumi serve strips it from every record,
+    13-R3); that one came, and the request's other `_mirelo` fields, are."""
+    arguments = (message.get("params") or {}).get("arguments")
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("_mirelo"), dict):
+        return message
+    sealed = {key: value for key, value in arguments["_mirelo"].items() if key != "api_key"}
+    sealed["api_key"] = "<given>" if arguments["_mirelo"].get("api_key") else None
+    return {**message, "params": {**message["params"], "arguments": {**arguments, "_mirelo": sealed}}}
+
+
+def generate(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Mirelo generation as W3's native `generate` answers it (CC-13): a quote (for MIDI, first a preview naming the
+    file it would send, pinned to the host call it was for, and that call's quote is stale without it), a create that
+    needs the host's `_mirelo` with a reservation, and its job."""
+    action, sealed = args.get("action"), args.get("_mirelo") if isinstance(args.get("_mirelo"), dict) else {}
+    if action == "quote":
+        kind, source = args.get("kind"), args.get("source") if isinstance(args.get("source"), dict) else {}
+        name = next((sound["name"] for sound in SOUNDS if sound["sound_id"] == source.get("sound_id")), "a-1.wav")
+        call = (host.get("profile_id"), host.get("session_id"), host.get("tool_call_id"))
+        identity = hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest()
+        if kind == "audio_to_midi" and args.get("preview"):
+            if call[2] is not None:
+                fixture.previews[call] = identity
+            return {"state": "preview", "upload": {"file": name, "bytes": 480044, "identity_sha256": identity}}
+        if not sealed.get("api_key"):
+            return error("not_configured", "no Mirelo key came with this quote")
+        if kind == "audio_to_midi" and fixture.previews.pop(call, None) != identity:
+            return error("stale", "no upload preview was pinned for this call and file")
+        sfx = kind == "sfx"
+        seconds = float(args.get("seconds") or 5) if sfx else 0.42
+        request = {"kind": kind, "prompt": args.get("prompt"), "seconds": seconds, "source": source}
+        quote_id = f"q-{os.getpid()}-{len(fixture.quoted) + 1}"  # unique across restarts, as the runtime's are
+        credits = fixture.options.generate_estimate
+        fixture.quoted[quote_id] = quote = {
+            "state": "quoted", "quote_id": quote_id, "kind": kind, "prompt": args.get("prompt") if sfx else None,
+            "file": None if sfx else name, "seconds": seconds, "estimate": {"credits": credits, "max_credits": credits},
+            "credit_unit": "mirelo_credits", "upload": not sfx,
+            "expires_at": int(time.time() * 1000) + fixture.options.generate_expires_ms,
+            "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(),
+            "summary": f"One {seconds:g}-second sound effect" if sfx else f"MIDI notes from {name}"}
+        return quote
+    if action == "create":
+        quote = fixture.quoted.get(args.get("quote_id"))
+        if quote is None:
+            return error("unknown_quote", "no such quote")
+        if not sealed.get("api_key") or not sealed.get("reservation_id"):
+            return error("not_approved", "a create needs the host's reservation")
+        if fixture.options.generate_create == "not_submitted":
+            return error("not_submitted", "Mirelo refused it before anything was sent")
+        busy = fixture.options.generate_create == "ledger_busy" or (
+            fixture.options.generate_create == "ledger_busy_once" and not fixture.ledger_busy_said)
+        if busy:  # its ledger lock timed out before anything was posted; the same call may come again
+            fixture.ledger_busy_said = True
+            return error("ledger_unavailable", "Kumi's credit ledger is busy.")
+        job_id = f"g-{os.getpid()}-{len(fixture.generations) + 1}"
+        fixture.generations[job_id] = {"quote": quote, "reserved": sealed.get("reserved_credits")}
+        fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "job_id": job_id,
+                                               "kind": "generate", "state": "running"})  # as kumi serve lists its jobs
+        return {"state": "running", "job_id": job_id, "quote_id": quote["quote_id"], "kind": quote["kind"],
+                "prompt": quote["prompt"], "seconds": quote["seconds"], "estimate": quote["estimate"],
+                "credit_unit": "mirelo_credits"}
+    if action == "job":
+        return generation_job(fixture, args.get("job_id"))
+    return error("invalid_request", "action is quote, create or job")
+
+
+def generation_job(fixture: Fixture, job_id: object) -> dict:
+    """A generation job's envelope, as `generate`'s job action and the plain `job` tool both give it (C3's one job
+    store): its checkpointed result names its quote, whatever became of the create's answer."""
+    made = fixture.generations.get(job_id)
+    if made is None:
+        return error("not_found", f"no job {job_id!r}")
+    quote, artifact = made["quote"], f"a-{job_id}"
+    actual = fixture.options.generate_actual
+    tag = kept(fixture, artifact)
+    return {"job_id": job_id, "kind": "generate", "state": "done", "progress": {"done": 1, "total": 1},
+            "result": {"quote_id": quote["quote_id"], "kind": quote["kind"], "prompt": quote["prompt"],
+                       "seconds": quote["seconds"], "provider": "mirelo", "provider_job_id": "v-1",
+                       "submission": "submitted", "artifact_id": artifact, "file": f"{artifact}.wav",
+                       "output_type": "audio", "media_tag": tag,
+                       "outputs": [{"artifact_id": artifact, "file": f"{artifact}.wav", "type": "audio",
+                                    "mime": "audio/wav", "bytes": len(WAV)}],
+                       "credits": {"estimate": quote["estimate"]["credits"], "reserved": made["reserved"],
+                                   "actual": None if actual < 0 else actual},
+                       "credit_unit": "mirelo_credits"}}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw}
+         "setup_daw": setup_daw, "generate": generate}
 
 
 def main() -> None:
@@ -654,6 +750,12 @@ def main() -> None:
     parser.add_argument("--component-state", default="missing",
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")
+    parser.add_argument("--generate-estimate", type=int, default=15, help="a quote's estimate, in credits")
+    parser.add_argument("--generate-create", default="running",
+                        choices=["running", "not_submitted", "ledger_busy_once", "ledger_busy"])
+    parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
+    parser.add_argument("--generate-expires-ms", type=int, default=300_000,
+                        help="how long a quote lasts from now, in milliseconds (negative: already expired)")
     Fixture(parser.parse_args()).serve()
 
 

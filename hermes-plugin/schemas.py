@@ -176,6 +176,25 @@ KUMI_LIBRARY = _tool(
 
 KUMI_JOB = _tool(
     "kumi_job",
-    "The state, progress and result of a long Kumi job (a library scan), by the job id the tool that started it returned. "
-    "Reads only.",
+    "The state, progress and result of a long Kumi job (a library scan, a Mirelo generation), by the job id the tool "
+    "that started it returned. Reads only: it never creates or pays for anything.",
     {"job_id": {"type": "string"}}, ("job_id",))
+
+KUMI_GENERATE = _tool(
+    "kumi_generate",
+    "Paid generation with Mirelo, only when the producer switched it on in Kumi's settings: a sound effect from a "
+    "prompt, or MIDI notes from an audio file. First `quote` (kind sfx with prompt and optional seconds, or kind "
+    "audio_to_midi with a source; sending that file to Mirelo is approved first). Then `create` with the quote_id: the "
+    "producer approves it from the quote itself, with its estimate in credits. Credits are Mirelo API credits: an "
+    "estimate and a reservation, never a price. The generation runs as a job: follow it with kumi_job. Never create a "
+    "quote again after an unsure answer.",
+    {"action": {"type": "string", "enum": ["quote", "create"]},
+     "kind": {"type": "string", "enum": ["sfx", "audio_to_midi"], "description": "quote: what to generate."},
+     "prompt": {"type": "string", "description": "quote, sfx: what the sound effect should be."},
+     "seconds": {"type": "number", "description": "quote, sfx: how long, in seconds (5 when left out)."},
+     "source": {"type": "object", "description": (
+         "quote, audio_to_midi: the audio, as a source, never a path: {\"artifact_id\"} from a Kumi result, "
+         "{\"sound_id\", \"map_revision\"} from kumi_sounds, or {\"file\", \"provenance\": {\"host_tool\", "
+         "\"tool_call_id\"}} for a file another Hermes tool made in an approved folder.")},
+     "quote_id": {"type": "string", "description": "create: the quote_id a quote returned."}},
+    ("action",))
