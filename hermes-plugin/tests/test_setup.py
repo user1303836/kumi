@@ -426,6 +426,8 @@ class SetupTest(unittest.TestCase):
         self.install_runtime()
         tagging = {"reaper": "keeps an id for each saved project in the project (ext state), saved with it",
                    "renoise": "keeps an id for each song in the song's tool data, saved with it"}
+        when_asked = {"reaper": "only when a standalone Kumi connected to REAPER asks it to; Kumi in Hermes never asks",
+                      "renoise": "only when a standalone Kumi connected to Renoise asks it to; Kumi in Hermes never asks"}
         for daw, words in tagging.items():
             with self.subTest(daw):
                 setup.plan(daw, setup_daw=Runtime(), data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
@@ -434,16 +436,23 @@ class SetupTest(unittest.TestCase):
                 setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner), data_dir=self.data,
                            plugin_dir=self.plugin, target=TARGET)
                 self.assertIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
+                # A component from the bridge bump keeps an id only when asked (CC-8 8c): the plugin never asks, but a
+                # standalone Kumi beside it still can (8b), and the step says so instead of saying nothing.
                 setup.plan(daw, setup_daw=Runtime(keep_identity=True), data_dir=self.data, plugin_dir=self.plugin,
                            target=TARGET)
-                self.assertNotIn(words, setup.approval(daw, data_dir=self.data)["message"],
-                                 "a component from the bridge bump reports keep_identity, and keeps no id (CC-8 8c)")
+                message = setup.approval(daw, data_dir=self.data)["message"]
+                self.assertNotIn(words, message)
+                self.assertIn(when_asked[daw], message)
                 setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner, keep_identity=True), data_dir=self.data,
                            plugin_dir=self.plugin, target=TARGET)
-                self.assertNotIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
+                message = setup.approval(daw, action="adopt", data_dir=self.data)["message"]
+                self.assertNotIn(words, message)
+                self.assertIn(when_asked[daw], message)
                 setup.plan(daw, setup_daw=Runtime(keep_identity="true"), data_dir=self.data, plugin_dir=self.plugin,
                            target=TARGET)
-                self.assertIn(words, setup.approval(daw, data_dir=self.data)["message"], "only a real true drops it")
+                message = setup.approval(daw, data_dir=self.data)["message"]
+                self.assertIn(words, message, "only a real true says it keeps an id only when asked")
+                self.assertNotIn(when_asked[daw], message)
         self.plan(setup_daw=Runtime())
         self.assertNotIn("keeps an id", setup.approval("ableton", data_dir=self.data)["message"], "Live's doesn't")
 
