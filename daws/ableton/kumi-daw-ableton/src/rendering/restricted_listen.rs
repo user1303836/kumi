@@ -124,6 +124,8 @@ impl LiveRenderer {
         if !self.supported(crate::bridge_version::EARS_BRIDGE)
             || !self.connection().has("live_song_state")
             || !self.connection().has("live_browser_load_preview")
+            || !self.connection().has("live_selection_preview")
+            || !self.connection().has("live_selection_apply")
         {
             return Err(unreadable());
         }
@@ -269,7 +271,128 @@ impl LiveRenderer {
         if applied.is_error == Some(true) || payload(&applied)?.get("state").and_then(Value::as_str) != Some("applied") {
             return Err(unsure());
         }
-        Ok(())
+        // Live accepts a playhead/loop write before its next tick applies it. Starting
+        // from the old cursor can make Ears report the requested end immediately.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let playback = only(self.rows("session-playback", json!({}), signal.clone()).await?)?;
+            let transport = playback.get("transport").and_then(Value::as_object).ok_or_else(unreadable)?;
+            let playing = flag(transport, "playing")?;
+            if flag(transport, "arrangementRecord")?
+                || flag(transport, "sessionRecord")?
+                || (matches!(step, CaptureTransport::Prepare | CaptureTransport::Restore) && playing)
+            {
+                return Err(refused("transport_changed", "Live's transport changed while its capture step was settling."));
+            }
+            let settled = match step {
+                CaptureTransport::Prepare | CaptureTransport::Restore => {
+                    let (position, looped) = if matches!(step, CaptureTransport::Prepare) {
+                        (ready.window.from, false)
+                    } else {
+                        (
+                            state.transport["position"].as_f64().ok_or_else(unreadable)?,
+                            state.transport["loop"]["enabled"].as_bool().ok_or_else(unreadable)?,
+                        )
+                    };
+                    let loop_state = transport.get("loop").and_then(Value::as_object).ok_or_else(unreadable)?;
+                    (number(transport, "position")? - position).abs() <= 1e-6 && flag(loop_state, "enabled")? == looped
+                }
+                CaptureTransport::Continue => playing,
+                CaptureTransport::Stop => !playing,
+            };
+            if settled {
+                self.capture_set_at(state.epoch, &state.identity, signal).await?;
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(refused("capture_incomplete", "Live did not confirm its requested capture transport state."));
+            }
+            delay(20., signal.clone()).await?;
+        }
+    }
+
+    async fn capture_selection(&self, signal: Signal) -> Result<Value, RuntimeError> {
+        let selection = only(self.rows("selection", json!({"fields":["selectedTrackRef","selectedDeviceRef"]}), signal).await?)?;
+        for key in ["selectedTrackRef", "selectedDeviceRef"] {
+            if !selection.contains_key(key) {
+                return Err(unreadable());
+            }
+        }
+        let selected = object(self.connection().references.borrow().lengthen(&Value::Object(selection)));
+        Ok(json!({"track":selected.get("selectedTrackRef"),"device":selected.get("selectedDeviceRef")}))
+    }
+
+    /// Only the selection of the one device this call added is ours to put back.
+    async fn capture_tap_selection(&self, ready: &Ready, signal: Signal) -> Result<Option<Value>, RuntimeError> {
+        self.capture_set_at(ready.state.epoch, &ready.state.identity, signal.clone()).await?;
+        let selected = self.capture_selection(signal.clone()).await?;
+        if selected == ready.state.selection {
+            return Ok(None);
+        }
+        if selected["track"].as_str() != Some(ready.target.as_str()) {
+            return Err(unsure());
+        }
+        let devices = self.rows("device", json!({"parent":ready.target,"fields":["objectIdentity"]}), signal).await?;
+        let mut added = devices.iter().filter(|device| !ready.state.devices.contains(&object_identity(device)));
+        let device = added.next().filter(|_| added.next().is_none()).ok_or_else(unsure)?;
+        let reference = device.get("ref").and_then(Value::as_str).ok_or_else(unreadable)?;
+        let native = self.connection().references.borrow().lengthen(&json!({"deviceRef":reference}));
+        if selected["device"] != native["deviceRef"] {
+            return Err(unsure());
+        }
+        Ok(Some(selected))
+    }
+
+    async fn restore_capture_selection(&self, ready: &Ready, placed: &Value, signal: Signal) -> Result<(), RuntimeError> {
+        self.capture_set_at(ready.state.epoch, &ready.state.identity, signal.clone()).await?;
+        let selected = self.capture_selection(signal.clone()).await?;
+        if selected == ready.state.selection {
+            return Ok(());
+        }
+        if &selected != placed {
+            return Err(unsure()); // The producer selected something else: leave it alone.
+        }
+        let prepared = self
+            .connection()
+            .call(
+                "live_selection_preview",
+                object(json!({"trackRef":ready.state.selection["track"],"deviceRef":ready.state.selection["device"]})),
+                signal.clone(),
+            )
+            .await?;
+        if prepared.is_error == Some(true) {
+            return Err(unsure());
+        }
+        let preview = payload(&prepared)?;
+        if preview.get("epoch").and_then(Value::as_f64) != Some(ready.state.epoch)
+            || preview.get("confirmation").and_then(Value::as_str) != Some("apply")
+            || self.capture_selection(signal.clone()).await? != *placed
+        {
+            return Err(unsure());
+        }
+        let transaction = preview.get("transactionId").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(unreadable)?;
+        signal.check()?;
+        let applied = self
+            .connection()
+            .call(
+                "live_selection_apply",
+                object(json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":uuid::Uuid::new_v4().to_string()})),
+                self.history.change_signal(),
+            )
+            .await?;
+        if applied.is_error == Some(true) || payload(&applied)?.get("state").and_then(Value::as_str) != Some("applied") {
+            return Err(unsure());
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if self.capture_selection(signal.clone()).await? == ready.state.selection {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(unsure());
+            }
+            delay(20., signal.clone()).await?;
+        }
     }
 
     async fn capture_state(&self, request: &HearRequest, signal: Signal) -> Result<(CaptureState, String, String), RuntimeError> {
@@ -288,7 +411,7 @@ impl LiveRenderer {
             self.rows("track", light.clone(), signal.clone()),
             self.rows("return-track", light.clone(), signal.clone()),
             self.rows("main-track", light, signal.clone()),
-            self.rows("selection", json!({"fields":["selectedTrackRef","selectedDeviceRef"]}), signal.clone()),
+            self.capture_selection(signal.clone()),
             async {
                 payload(&self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await?).map_err(RuntimeError::from)
             },
@@ -331,8 +454,11 @@ impl LiveRenderer {
         let target = if request.mix == Some(true) {
             all.last().ok_or_else(unreadable)?
         } else {
+            let references = self.connection().references.borrow();
+            let requested = &request.tracks[0];
+            let short = references.short.get(requested).map(String::as_str).unwrap_or(requested);
             all.iter()
-                .find(|row| row.get("ref").and_then(Value::as_str) == request.tracks.first().map(String::as_str))
+                .find(|row| row.get("ref").and_then(Value::as_str) == Some(short))
                 .ok_or_else(|| refused("stale", "The requested track is not in the current Set; observe again."))?
         };
         let reference = target.get("ref").and_then(Value::as_str).ok_or_else(unreadable)?.to_owned();
@@ -351,14 +477,6 @@ impl LiveRenderer {
             }
             tracks.push(json!({"identity":identity,"armed":row["armed"],"monitoringState":row["monitoringState"]}));
         }
-        let selection = only(selection)?;
-        for key in ["selectedTrackRef", "selectedDeviceRef"] {
-            if !selection.contains_key(key) {
-                return Err(unreadable());
-            }
-        }
-        let selected = object(self.connection().references.borrow().lengthen(&Value::Object(selection)));
-        let selection = json!({"track":selected.get("selectedTrackRef"),"device":selected.get("selectedDeviceRef")});
         let devices = self.rows("device", json!({"parent":reference,"fields":["objectIdentity"]}), signal.clone()).await?;
         let devices: Vec<_> = devices.iter().map(object_identity).collect();
         if devices.iter().any(String::is_empty) {
@@ -428,11 +546,17 @@ impl LiveRenderer {
         let mut steps = Vec::new();
         let mut started = false;
         let mut transport_touched = false;
+        let mut placed_selection = None;
         let result = self
             .history
             .quietly(Some(&mut steps), async {
                 // The tap is the only device mutation, never a recording-track fallback.
-                let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await.map_err(|error| {
+                let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await;
+                // A silent/incompatible device was still loaded and may have selected its track.
+                if tap.is_ok() || tap.as_ref().is_err_and(|error| error.silent) {
+                    placed_selection = self.capture_tap_selection(&ready, cleanup.clone()).await?;
+                }
+                let tap = tap.map_err(|error| {
                     if error.silent {
                         refused("ears_missing", "The installed Kumi Ears did not start with the required version. Max for Live is required; listening never installs it.")
                     } else {
@@ -455,6 +579,11 @@ impl LiveRenderer {
             }
             if started {
                 let _ = self.capture_transport(&ready, CaptureTransport::Stop, cleanup.clone()).await;
+            }
+            // Select the original device before removing the tap, so deleting a selected
+            // Ears cannot move the selection again. Never overwrite a producer's new choice.
+            if let Some(placed) = &placed_selection {
+                let _ = self.restore_capture_selection(&ready, placed, cleanup.clone()).await;
             }
             let _ = tokio::time::timeout_at(cleanup_deadline, self.close_rig(&mut rig)).await;
             if transport_touched {

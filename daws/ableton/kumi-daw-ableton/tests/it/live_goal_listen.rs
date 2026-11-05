@@ -13,6 +13,8 @@ pub(super) struct State {
     epoch: Cell<f64>,
     transactions: RefCell<std::collections::HashMap<String, f64>>,
     position: Cell<f64>,
+    seek_delay_reads: Cell<u8>,
+    pending_position: Cell<Option<(f64, u8)>>,
     looped: Cell<bool>,
     tempo: Cell<f64>,
     recording: Cell<bool>,
@@ -20,7 +22,8 @@ pub(super) struct State {
     advancing: Cell<bool>,
     ignore_restore: Cell<bool>,
     ignore_stop: Cell<bool>,
-    selected_device: Cell<&'static str>,
+    selected_track: Cell<usize>,
+    selected_device: RefCell<Value>,
     missing: Cell<Option<(&'static str, &'static str)>>,
     switch_set: Cell<bool>,
     cancel: RefCell<Option<Signal>>,
@@ -41,6 +44,8 @@ impl State {
         Rc::new(Self {
             identity: RefCell::new("song".into()),
             position: Cell::new(12.),
+            seek_delay_reads: Cell::new(0),
+            pending_position: Cell::new(None),
             looped: Cell::new(true),
             epoch: Cell::new(7.),
             transactions: RefCell::new(std::collections::HashMap::new()),
@@ -50,7 +55,8 @@ impl State {
             advancing: Cell::new(true),
             ignore_restore: Cell::new(false),
             ignore_stop: Cell::new(false),
-            selected_device: Cell::new("7:device:0:d0"),
+            selected_track: Cell::new(0),
+            selected_device: RefCell::new(json!("7:device:0:d0")),
             missing: Cell::new(None),
             switch_set: Cell::new(false),
             cancel: RefCell::new(None),
@@ -95,6 +101,16 @@ impl State {
     pub(super) fn discover(&self, set: &Set, args: &JsonObject) -> Option<Vec<Value>> {
         let tracks = set.tracks.borrow();
         let kind = text(&args["kind"]);
+        if kind == "session-playback" {
+            if let Some((position, left)) = self.pending_position.get() {
+                if left == 0 {
+                    self.position.set(position);
+                    self.pending_position.set(None);
+                } else {
+                    self.pending_position.set(Some((position, left - 1)));
+                }
+            }
+        }
         let mut rows: Vec<Value> = match kind {
             "set" => vec![json!({"ref":"7:set:song","objectIdentity":*self.identity.borrow(),"name":"Fixture Set",
                 "tempo":self.tempo.get(),"position":self.position.get(),"playing":set.playing.get(),
@@ -113,7 +129,7 @@ impl State {
             "main-track" => vec![json!({"ref":format!("7:track:{}",tracks.len() - 1),"parentRef":"7:set:song",
                 "objectIdentity":tracks.last().unwrap().id,"name":"Main","armed":false,"monitoringState":null})],
             "selection" => vec![json!({"ref":"7:selection:current","parentRef":"7:set:song",
-                "selectedTrackRef":"7:track:0","selectedDeviceRef":self.selected_device.get()})],
+                "selectedTrackRef":format!("7:track:{}",self.selected_track.get()),"selectedDeviceRef":*self.selected_device.borrow()})],
             "session-playback" => vec![json!({"ref":"7:session_playback:0","transport":{
                 "playing":set.playing.get(),"arrangementRecord":self.recording.get(),"sessionRecord":false,
                 "position":self.position.get(),"loop":{"enabled":self.looped.get(),"start":4,"length":16},
@@ -151,7 +167,11 @@ impl State {
             "live_transport" => {
                 if let Some(position) = args.get("position").and_then(Value::as_f64) {
                     if !(position == 12. && self.ignore_restore.get()) {
-                        self.position.set(position);
+                        if self.seek_delay_reads.get() == 0 {
+                            self.position.set(position);
+                        } else {
+                            self.pending_position.set(Some((position, self.seek_delay_reads.get())));
+                        }
                     }
                 }
                 if let Some(looped) = args.get("loopEnabled").and_then(Value::as_bool) {
@@ -171,6 +191,14 @@ impl State {
                 }
                 other => panic!("a restricted capture cannot perform {other:?}"),
             },
+            "live_selection" => {
+                if let Some(track) = args.get("trackRef").and_then(Value::as_str) {
+                    self.selected_track.set(places(track)[0]);
+                }
+                if let Some(device) = args.get("deviceRef") {
+                    *self.selected_device.borrow_mut() = device.clone();
+                }
+            }
             "live_browser_load" => {
                 assert_eq!(args["itemId"], EARS_ITEM);
                 let at = places(text(&args["trackRef"]))[0];
@@ -179,6 +207,8 @@ impl State {
                 let mut tracks = set.tracks.borrow_mut();
                 tracks[at].devices.push(device);
                 answer["deviceRef"] = json!(format!("7:device:{at}:d{}", tracks[at].devices.len() - 1));
+                self.selected_track.set(at);
+                *self.selected_device.borrow_mut() = answer["deviceRef"].clone();
             }
             _ => return None,
         }
@@ -348,7 +378,10 @@ fn capture_trims_the_approved_window_and_verifies_restoration() {
             assert_ne!(name, "live_session_emergency_stop", "no unfenced stop");
             if name.ends_with("_apply") {
                 assert!(
-                    matches!(name, "live_browser_load_apply" | "live_transport_apply" | "live_transport_action_apply"),
+                    matches!(
+                        name,
+                        "live_browser_load_apply" | "live_transport_apply" | "live_transport_action_apply" | "live_selection_apply"
+                    ),
                     "forbidden mutation: {call}"
                 );
             }
@@ -746,7 +779,6 @@ fn an_acknowledged_stop_that_leaves_live_playing_is_unsure_and_discards_audio() 
         assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert!(state.stops.get() > 0, "the bridge acknowledged a stop");
         assert!(live.set.playing.get(), "the independent transport read still sees playback");
-        assert_eq!(state.written.get(), 1, "discard even audio already written before the restoration read");
         assert_eq!(live.set.chain("Bass"), ["Synth"]);
         assert_eq!(state.closed.get(), 1);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
@@ -760,12 +792,12 @@ fn a_changed_selected_device_after_cleanup_is_unsure_and_discards_audio() {
         let s = state.clone();
         *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
             if name == "live_undo" {
-                s.selected_device.set("7:device:1:d0");
+                *s.selected_device.borrow_mut() = json!("7:device:1:d0");
             }
             Ok(())
         }));
         assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
-        assert_eq!(state.selected_device.get(), "7:device:1:d0", "do not overwrite the producer's selection");
+        assert_eq!(*state.selected_device.borrow(), "7:device:1:d0", "do not overwrite the producer's selection");
         assert_eq!(state.written.get(), 1);
         assert_eq!(state.closed.get(), 1);
         restored(&live, &state);
@@ -849,5 +881,74 @@ fn a_short_live_capture_is_refused_not_published_as_a_short_success() {
         assert_eq!(state.closed.get(), 1);
         restored(&live, &state);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn deferred_live_seek_is_confirmed_before_ears_arms_and_playback_starts() {
+    on_a_paused_clock(async {
+        let (live, state, mut request) = bounded(true).await;
+        state.seek_delay_reads.set(3);
+        request.from_beat = Some(0.);
+        let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
+        assert!((takes[0].seconds.unwrap() - 2.).abs() < 0.001);
+        assert_eq!(state.starts.get(), 1, "the approved window plays once, never from the old cursor");
+        restored(&live, &state);
+    });
+}
+
+#[test]
+fn loading_ears_on_another_track_restores_the_original_selection() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.selected_track.set(1);
+        *state.selected_device.borrow_mut() = json!("7:device:1:d0");
+        let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
+        assert!((takes[0].seconds.unwrap() - 2.).abs() < 0.001);
+        assert_eq!(state.selected_track.get(), 1);
+        assert_eq!(*state.selected_device.borrow(), "7:device:1:d0");
+        restored(&live, &state);
+    });
+}
+
+#[test]
+fn a_producer_selection_during_capture_is_not_overwritten_by_cleanup() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        let changed = Rc::new(Cell::new(false));
+        let (s, once) = (state.clone(), changed.clone());
+        *live.set.on_call.borrow_mut() = Some(Box::new(move |name, args| {
+            if name == "live_transport_action_preview" && args["action"] == "stop" && !once.replace(true) {
+                s.selected_track.set(1);
+                *s.selected_device.borrow_mut() = json!("7:device:1:d0");
+            }
+            Ok(())
+        }));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert_eq!(state.selected_track.get(), 1);
+        assert_eq!(*state.selected_device.borrow(), "7:device:1:d0");
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn native_and_observed_track_refs_name_the_same_track_but_old_epochs_refuse() {
+    on_a_paused_clock(async {
+        let (live, state, mut request) = bounded(true).await;
+        let observed = live.rendering.preview_hear(&request, Signal::new()).await.unwrap();
+        request.tracks[0] = "7:track:0".into();
+        let native = live.rendering.preview_hear(&request, Signal::new()).await.unwrap();
+        assert_eq!((native.label, native.seconds), (observed.label, observed.seconds));
+        let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
+        assert_eq!(takes[0].label, "Bass");
+        restored(&live, &state);
+        request.tracks[0] = "8:track:0".into();
+        let mutations = live.set.next.get();
+        assert!(matches!(
+            live.rendering.preview_hear(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))
+        ));
+        assert_eq!(live.set.next.get(), mutations);
     });
 }

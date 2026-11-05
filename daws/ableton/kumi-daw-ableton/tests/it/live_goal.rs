@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 mod bounded_listening;
 
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 39] = [
+const TOOLS: [&str; 41] = [
     "live_run_python",
     "server_status",
     "live_status",
@@ -76,6 +76,8 @@ const TOOLS: [&str; 39] = [
     "live_session_emergency_stop",
     "live_routing_preview",
     "live_routing_apply",
+    "live_selection_preview",
+    "live_selection_apply",
 ];
 
 #[derive(Clone)]
