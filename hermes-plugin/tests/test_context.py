@@ -7,7 +7,9 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -158,10 +160,48 @@ class Cli(unittest.TestCase):
         self.assertEqual(shown, self.run_cli(host, "status").splitlines(), "`hermes kumi` alone is status")
         self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
-        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}"])
+        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}",
+                                     "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that)."])
         host.runtimes.stop_all()
         self.assertRegex(self.run_cli(host).splitlines()[2], r"^Runtime: not running \(last heard \d+ s ago\)\.$",
                          "a runtime that stopped reads as not running at once")
+
+
+class Approvals(unittest.TestCase):
+    """Hermes's approvals off (`approvals.mode: off`, `--yolo`, a chat's `/yolo`): kumi_status, /kumi and `hermes kumi
+    status` say plainly that Kumi's changes run without asking."""
+
+    def setUp(self):
+        environ = mock.patch.dict("os.environ", {key: value for key, value in os.environ.items()
+                                                 if key != "HERMES_YOLO_MODE"}, clear=True)
+        environ.start()
+        self.addCleanup(environ.stop)
+
+    def chat_yolo(self, on: bool):
+        """A chat's /yolo, through Hermes v0.22.7's tools.approval (the one stated coupling)."""
+        approval = SimpleNamespace(is_current_session_yolo_enabled=lambda: on)
+        return mock.patch.dict("sys.modules", {"tools": SimpleNamespace(approval=approval), "tools.approval": approval})
+
+    def test_each_way_hermes_stops_asking_is_said_in_the_chat(self):
+        tools = support.module("tools")
+        for name, hermes, yolo, chat in (("approvals.mode: off", {"approvals": {"mode": "off"}}, "", False),
+                                         ("YAML's bare off", {"approvals": {"mode": False}}, "", False),
+                                         ("--yolo", {}, "1", False), ("a chat's /yolo", {}, "", True)):
+            with self.subTest(name), mock.patch.dict("os.environ", {"HERMES_YOLO_MODE": yolo}), self.chat_yolo(chat):
+                host, _, _ = support.host(self, hermes_config=hermes)
+                self.assertEqual(support.call(host, "kumi_status", {})["approvals"], tools.NO_APPROVALS)
+                self.assertTrue(commands.kumi(host, "").endswith(tools.NO_APPROVALS))
+        with self.chat_yolo(False):
+            host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "manual"}})
+            self.assertNotIn("approvals", support.call(host, "kumi_status", {}), "Hermes asks: nothing to say")
+
+    def test_hermes_kumi_status_says_whether_hermes_asks(self):
+        host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
+        self.assertIn("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking.",
+                      commands.status_text(host))
+        with self.chat_yolo(True):  # a terminal can't see any chat's /yolo
+            host, _, _ = support.host(self)
+            self.assertIn("Approvals: Hermes asks before each Kumi change", commands.status_text(host))
 
 
 if __name__ == "__main__":

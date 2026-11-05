@@ -189,12 +189,41 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         log.exception("Kumi couldn't tell Desktop about %s", tool)
 
 
+NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so Kumi's changes, track "
+                "listens, folder reads and setup steps run without asking the producer.")
+
+
+def approvals_bypassed(host: Host, *, chat: bool = True) -> bool:
+    """Whether Hermes runs a call it would ask about without asking:
+    - `approvals.mode: off` in Hermes's settings (YAML's bare `off` reads as false);
+    - `HERMES_YOLO_MODE` set for this process (what `--yolo` sets);
+    - for a chat (`chat`), that chat's `/yolo`. Hermes has no documented way to read it, so this is a stated coupling
+      with Hermes v0.22.7's `tools.approval.is_current_session_yolo_enabled`; if that moves, only a chat's `/yolo`
+      goes unreported.
+    A terminal (`chat=False`) can't see any chat's `/yolo`."""
+    approvals = host.hermes_config().get("approvals")
+    mode = approvals.get("mode") if isinstance(approvals, dict) else None
+    if mode is False or (isinstance(mode, str) and mode.strip().lower() == "off"):
+        return True
+    if os.environ.get("HERMES_YOLO_MODE", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if not chat:
+        return False
+    try:
+        from tools.approval import is_current_session_yolo_enabled  # Hermes's; see above
+        return bool(is_current_session_yolo_enabled())
+    except Exception:
+        return False
+
+
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     daw = host.daw()
     data_dir = host.data_dir()
     report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
+    if approvals_bypassed(host):
+        report["approvals"] = NO_APPROVALS  # say it to the producer before changing anything
     try:
         host.install(data_dir)
     except runtime.Unavailable as failure:

@@ -24,19 +24,21 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
         return f"Kumi: its runtime didn't answer ({failure.reason})"
     daw = schemas.DAW_NAMES.get(status.get("daw"), status.get("daw"))
     state = status.get("setup") or {}
+    warning = [status["approvals"]] if status.get("approvals") else []
     if state.get("state") != "ready":
-        return (f"Kumi isn't ready: {state.get('message')} Ask the agent to set Kumi up, or run `hermes kumi setup` "
-                "in a terminal (Hermes leaves plugin commands out when `plugins.isolation` is `host`).")
+        return "\n".join([f"Kumi isn't ready: {state.get('message')} Ask the agent to set Kumi up, or run `hermes kumi "
+                          "setup` in a terminal (Hermes leaves plugin commands out when `plugins.isolation` is `host`).",
+                          *warning])
     lines = [f"Kumi {(state.get('runtime') or {}).get('version')} is set up ({state.get('target')}); DAW: {daw}."]
     if not status.get("connected"):
         lines.append(status.get("message") or f"Kumi isn't connected to {daw}: ask the agent to connect.")
-        return "\n".join(lines)
+        return "\n".join([*lines, *warning])
     project = status.get("project") or {}
     owner = (status.get("owner") or {}).get("session_id")
     held = "this chat" if owner and owner == kwargs.get("session_id") else f"chat {owner}" if owner else "no chat yet"
     lines.append(f"Connected to {daw}: {project.get('name', 'a project')} (epoch {project.get('epoch')}). "
                  f"Changes are held by {held}.")
-    return "\n".join(lines)
+    return "\n".join([*lines, *warning])
 
 
 def status_text(host: tools.Host) -> str:
@@ -67,6 +69,9 @@ def status_text(host: tools.Host) -> str:
             lines.append(f"Not connected to {daw}.")
     folders = host.library_folders()
     lines.append("Sample folders: " + (", ".join(folders) if folders else "none yet."))
+    lines.append("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking."
+                 if tools.approvals_bypassed(host, chat=False)
+                 else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
     return "\n".join(lines)
 
 
