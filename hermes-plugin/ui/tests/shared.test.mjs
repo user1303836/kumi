@@ -473,12 +473,48 @@ test('an unknown charge is never a number, a frozen ledger warns, and notes neve
   const fractional = { ...fixtures.DONE, result: { ...fixtures.DONE.result, credits: { estimate: 15, reserved: 15, actual: 12.5 } } }
   assert.equal(generate.costWords(generate.parseGeneration(fractional)), 'charge not known yet · 15 credits reserved')
   const notes = generate.parseGeneration(fixtures.MIDI_DONE)
-  assert.equal(generate.isNotes(notes), true)
+  assert.equal(generate.outputKind(notes), 'notes')
   assert.deepEqual(generate.generationRequest(notes), {
     label: 'Plan notes…',
     title: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send",
-    request: "Plan putting the 128 notes from artifact a-midi (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything"
+    request: "Plan putting the 128 notes from artifact a-midi (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me before changing anything"
   })
+  // An output type CC-13 doesn't name gets neither request.
+  const odd = generate.parseGeneration({ ...fixtures.DONE, result: { ...fixtures.DONE.result, output_type: 'video' } })
+  assert.deepEqual([generate.outputKind(odd), generate.generationRequest(odd)], [null, null])
+})
+
+test('only a job that ended never sent says nothing was charged; a raw overrun is amber, and the kept card says the ledger froze', () => {
+  const neverSent = { ...fixtures.FAILED_UNKNOWN, error: { code: 'not_submitted', reason: 'Mirelo turned the key down' }, result: { ...fixtures.FAILED_UNKNOWN.result, submission: 'not_submitted' } }
+  assert.equal(generate.generationJobWords(neverSent).detail, 'Mirelo turned the key down · never sent to Mirelo · nothing charged')
+  // While it runs, `not_submitted` isn't that: it may still submit.
+  assert.equal(generate.costWords(generate.parseGeneration({ ...fixtures.RUNNING, result: { ...fixtures.RUNNING.result, submission: 'not_submitted' } })), '15 credits reserved')
+  // The `/job` route's raw snapshot has no ledger: a charge over the reservation is amber, but frozen only once a card says so.
+  assert.deepEqual(generate.generationJobWords(fixtures.RAW_FROZEN), { title: 'Generation done', detail: 'a-primary.wav · 18 credits (est. 15)', fraction: 1, tone: 'warn' })
+  assert.ok(generate.generationJobWords({ ...fixtures.RAW_FROZEN, card: fixtures.FROZEN }).detail.endsWith('New paid generations are paused: a charge came in above its estimate'))
+})
+
+test("a generation an event reports shows even when first read finished, keeps the event's card, and a card-less or foreign one leaves nothing", async () => {
+  const kumi = new store.KumiStore(async path => {
+    if (path === '/job?id=native-job-id') return fixtures.RAW_DONE
+    if (path === '/job?id=native-job-3') return fixtures.RAW_FROZEN
+    throw new Error('404: {"detail":"Kumi has no job with that id here."}')
+  })
+  const settled = () => new Promise(resolve => setTimeout(resolve, 10))
+  // Found finished by a tool's result alone, a job isn't news (#959)...
+  kumi.trackJob('native-job-id')
+  await settled()
+  assert.deepEqual(kumi.get().jobs, {})
+  // ...but one a generate.updated event reports is: with tool progress off, the Jobs row is where it shows.
+  kumi.noteGeneration(fixtures.FROZEN)
+  kumi.noteGeneration(undefined)
+  kumi.noteGeneration({ ...fixtures.DONE, job_id: 'another-profiles-job' })
+  await settled()
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['native-job-3'])
+  const job = kumi.get().jobs['native-job-3']
+  assert.equal(typeof job.ended_at, 'number')
+  assert.equal(generate.generationJobWords(job).tone, 'warn')
+  assert.ok(generate.generationJobWords(job).detail.endsWith('New paid generations are paused: a charge came in above its estimate'))
 })
 
 test('a quote, a scan and a refusal before any job are not generations', () => {

@@ -213,6 +213,7 @@ var en = {
     cost: (credits2, estimate) => `${credits2} (est. ${estimate})`,
     reserved: (credits2) => `${credits2} reserved`,
     unknownCharge: (credits2) => `charge not known yet · ${credits2} reserved`,
+    notSubmitted: "never sent to Mirelo · nothing charged",
     left: (left, cap) => `${left} of ${cap} credits left under your cap`,
     capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
     frozen: "New paid generations are paused: a charge came in above its estimate",
@@ -456,12 +457,13 @@ var ja = {
     cost: (credits2, estimate) => `${credits2}（見積 ${estimate}）`,
     reserved: (credits2) => `${credits2} を確保`,
     unknownCharge: (credits2) => `請求額はまだ不明 · ${credits2} を確保`,
+    notSubmitted: "Mirelo には送信されませんでした · 請求なし",
     left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
     capTitle: "有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。",
     frozen: "見積を超える請求があったため、新しい有料生成は止めています",
     notes: (_n, shown) => `${shown} ノート`,
     outputs: { midi: "MIDI ファイル", notes: "ノート", musicxml: "MusicXML" },
-    states: { running: "生成中", failed: "失敗", cancelled: "取り消し", interrupted: "中断" },
+    states: { running: "生成中", failed: "失敗", cancelled: "キャンセル済み", interrupted: "中断" },
     place: "配置…",
     placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
     planNotes: "ノートの配置を計画…",
@@ -699,6 +701,7 @@ var zh = {
     cost: (credits2, estimate) => `${credits2}（预估 ${estimate}）`,
     reserved: (credits2) => `已预留 ${credits2}`,
     unknownCharge: (credits2) => `费用尚不清楚 · 已预留 ${credits2}`,
+    notSubmitted: "未发送给 Mirelo · 未收费",
     left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
     capTitle: "Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。",
     frozen: "有一笔费用超出了预估，新的付费生成已暂停",
@@ -883,7 +886,7 @@ function planNotesRequest(artifactId, count2) {
   const id = plainId(artifactId);
   if (!id) return null;
   const notes = typeof count2 === "number" && Number.isInteger(count2) && count2 >= 0 ? `the ${count2} notes` : "the notes";
-  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything`;
+  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me before changing anything`;
 }
 function soundRequest(soundId, name, revision) {
   const id = plainId(soundId);
@@ -1168,6 +1171,8 @@ var KumiStore = class {
   reads = /* @__PURE__ */ new Map();
   wanted = /* @__PURE__ */ new Map();
   generation = 0;
+  /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
+  cards = /* @__PURE__ */ new Map();
   get = () => this.state;
   subscribe = (fn) => {
     this.listeners.add(fn);
@@ -1187,6 +1192,7 @@ var KumiStore = class {
   reset() {
     this.generation += 1;
     this.reads.clear();
+    this.cards.clear();
     this.state = EMPTY;
     for (const fn of [...this.listeners]) fn();
   }
@@ -1267,6 +1273,22 @@ var KumiStore = class {
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
     void this.refreshJob(jobId);
   }
+  /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
+   *  has none, and read the job as news. Unlike a job first met finished elsewhere, a generation the event reports
+   *  shows even when it has already ended: with tool progress off, this row is where it shows. */
+  noteGeneration(card) {
+    const id = jobOf(card);
+    if (!id) return;
+    const before = this.state.jobs[id];
+    if (before) this.set({ jobs: { ...this.state.jobs, [id]: { ...before, card } } });
+    else if (Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+    else {
+      this.cards.delete(id);
+      this.cards.set(id, card);
+      if (this.cards.size > MOST_JOBS) this.cards.delete(this.cards.keys().next().value);
+    }
+    void this.refreshJob(id);
+  }
   /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
    *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
    *  with it. */
@@ -1284,12 +1306,17 @@ var KumiStore = class {
         const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
         if (generation !== this.generation) return;
         const before = this.state.jobs[id];
-        if (!before && finished(read)) return;
+        const waiting = this.cards.has(id);
+        if (!before && finished(read) && !waiting) return;
+        const card = before?.card ?? this.cards.get(id);
+        this.cards.delete(id);
         const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
         const ended_at = finished(job) ? before?.ended_at ?? Date.now() : null;
-        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } });
+        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at, ...card === void 0 ? {} : { card } } } });
       } catch (error) {
-        if (generation !== this.generation || statusOf(error) !== 404 || !this.state.jobs[id]) return;
+        if (generation !== this.generation || statusOf(error) !== 404) return;
+        this.cards.delete(id);
+        if (!this.state.jobs[id]) return;
         const { [id]: _gone, ...rest } = this.state.jobs;
         this.set({ jobs: rest });
       }
@@ -1653,14 +1680,19 @@ function parseGeneration(value) {
     // A raw job snapshot has no ledger: then none is shown, rather than an older one.
     ledger: ledgerOf(result.ledger ?? outer.ledger),
     error: error ? { code: typeof error.code === "string" ? clean(error.code, 40) : "", reason: typeof error.reason === "string" ? clean(error.reason, 200) : "" } : null,
+    submission: typeof result.submission === "string" ? clean(result.submission, 24) : "",
     message: typeof progress?.message === "string" ? clean(progress.message, 60) : ""
   };
+}
+function neverSent(made) {
+  return made.state !== "running" && (made.submission === "not_submitted" || made.error?.code === "not_submitted");
 }
 function costWords(made, t = english) {
   const amount = (n) => t("generate.credits", n, num(n, 0));
   if (made.actual !== null) {
     return made.estimate === null || made.estimate === made.actual ? amount(made.actual) : t("generate.cost", amount(made.actual), num(made.estimate, 0));
   }
+  if (neverSent(made)) return t("generate.notSubmitted");
   const held = made.reserved ?? made.estimate;
   if (held === null) return "";
   return made.state === "running" ? t("generate.reserved", amount(held)) : t("generate.unknownCharge", amount(held));
@@ -1668,26 +1700,33 @@ function costWords(made, t = english) {
 function capWords(made, t = english) {
   return made.ledger ? t("generate.left", num(made.ledger.left, 0), num(made.ledger.cap, 0)) : "";
 }
-function isNotes(made) {
-  return made.outputType !== null ? made.outputType !== "audio" : made.kind === "audio_to_midi";
+var NOTES = /* @__PURE__ */ new Set(["midi", "notes", "musicxml"]);
+function outputKind(made) {
+  if (made.outputType === null) return made.kind === "sfx" ? "audio" : made.kind === "audio_to_midi" ? "notes" : null;
+  if (made.outputType === "audio") return "audio";
+  return NOTES.has(made.outputType) ? "notes" : null;
 }
 function generationTitle(made, t = english) {
-  return made.prompt || (isNotes(made) ? t("generate.notesTitle") : t("generate.soundTitle"));
+  return made.prompt || (outputKind(made) === "notes" ? t("generate.notesTitle") : t("generate.soundTitle"));
 }
 function generationJobWords(job, t = english) {
   const words = jobWords(job, t);
   const made = parseGeneration({ ...job, kind: "generate" });
   if (!made) return words;
+  const frozen = (made.ledger ?? parseGeneration(job.card)?.ledger)?.frozen === true;
+  const over = made.actual !== null && made.reserved !== null && made.actual > made.reserved;
   const reason = made.state === "failed" || made.state === "interrupted" ? made.error?.reason ?? "" : "";
-  const detail = [made.state === "running" ? made.message : made.file, reason, costWords(made, t), made.ledger?.frozen ? t("generate.frozen") : ""];
-  return { ...words, detail: detail.filter(Boolean).join(" · "), tone: made.ledger?.frozen && words.tone === "good" ? "warn" : words.tone };
+  const detail = [made.state === "running" ? made.message : made.file, reason, costWords(made, t), frozen ? t("generate.frozen") : ""];
+  return { ...words, detail: detail.filter(Boolean).join(" · "), tone: (frozen || over) && words.tone === "good" ? "warn" : words.tone };
 }
 function generationRequest(made, t = english) {
   if (made.state !== "done" || !made.artifactId) return null;
-  if (isNotes(made)) {
+  const kind = outputKind(made);
+  if (kind === "notes") {
     const request2 = planNotesRequest(made.artifactId, made.noteCount);
     return request2 ? { label: t("generate.planNotes"), title: t("generate.planNotesTitle"), request: request2 } : null;
   }
+  if (kind !== "audio") return null;
   const request = placeRequest(made.artifactId, made.prompt);
   return request ? { label: t("generate.place"), title: t("generate.placeTitle"), request } : null;
 }
@@ -1787,7 +1826,8 @@ function JobsView({ jobs, onRequest }) {
     return /* @__PURE__ */ jsxs4("li", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
       /* @__PURE__ */ jsxs4("span", { style: { ...S.row, gap: 6 }, children: [
         /* @__PURE__ */ jsx4("span", { style: { ...S.text, color: job.ended_at === null ? T.text : TONE2[words.tone] }, children: words.title }),
-        words.detail && /* @__PURE__ */ jsx4("span", { style: { ...S.faint, ...S.ellipsis }, children: words.detail })
+        words.detail && // A generation's detail names credits: the tooltip says they're Mirelo API credits, not money (13d).
+        /* @__PURE__ */ jsx4("span", { style: { ...S.faint, ...S.ellipsis }, title: generation ? t("generate.creditsTitle") : void 0, children: words.detail })
       ] }),
       job.ended_at === null && /* @__PURE__ */ jsx4(
         "span",
@@ -1917,7 +1957,7 @@ function GenerateCard({ media, audition, ctx, store }) {
   const made = parseGeneration(media.result);
   if (!made) return media.fallback;
   const title = generationTitle(made, t);
-  const notes = isNotes(made);
+  const kind = outputKind(made);
   const cost = costWords(made, t);
   const left = capWords(made, t);
   const offer = generationRequest(made, t);
@@ -1929,7 +1969,7 @@ function GenerateCard({ media, audition, ctx, store }) {
       children: [
         /* @__PURE__ */ jsxs6("div", { style: { ...S.row, justifyContent: "space-between", alignItems: "flex-start", gap: 8 }, children: [
           /* @__PURE__ */ jsxs6("span", { style: { ...S.text, fontWeight: 600, minWidth: 0, whiteSpace: "normal" }, children: [
-            /* @__PURE__ */ jsx6("span", { style: { color: T.accent }, children: notes ? "♫" : "♪" }),
+            /* @__PURE__ */ jsx6("span", { style: { color: T.accent }, children: kind === "notes" ? "♫" : "♪" }),
             " ",
             made.prompt ? `“${title}”` : title
           ] }),
@@ -1941,7 +1981,7 @@ function GenerateCard({ media, audition, ctx, store }) {
           ] })
         ] }),
         made.file && /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: made.file }),
-        !notes && made.artifactId && media.file?.kind === "audio" ? (
+        kind === "audio" && made.artifactId && media.file?.kind === "audio" ? (
           // In a row, as in the listen card: the waveform's flex basis is a width there, not a height.
           /* @__PURE__ */ jsx6("div", { style: { display: "flex" }, children: /* @__PURE__ */ jsx6(Wave, { audition, caption: "", id: made.artifactId, label: title }) })
         ) : (
@@ -2713,7 +2753,10 @@ var plugin = {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
     ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, ours((payload) => store.trackJob(jobOf(payload.card))));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, (event) => {
+      const payload = payloadOf(event);
+      if (forThisProfile(payload)) store.noteGeneration(payload.card);
+    });
     ctx.onEvent(
       `plugin.${PLUGIN_ID}.settings.changed`,
       ours(() => {

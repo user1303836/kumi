@@ -110,3 +110,7 @@ export const MIDI_DONE = {
     ledger: ledger({ spent: 30, left: 70 })
   }
 }
+
+/** FROZEN as the plugin's `/job` route serves it: the raw snapshot, without the ledger. */
+const { ledger: _frozenLedger, ...frozenRaw } = FROZEN.result
+export const RAW_FROZEN = { ...FROZEN, result: frozenRaw }

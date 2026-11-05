@@ -29,7 +29,7 @@ import { ListenCard } from './card.tsx'
 import { GenerateCard } from './generate.tsx'
 import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
-import { callId, Calls, forAnotherProfile, forChatInFront, payloadOf } from './events.ts'
+import { callId, Calls, forAnotherProfile, forChatInFront, forThisProfile, payloadOf } from './events.ts'
 import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
@@ -135,9 +135,14 @@ const plugin: HermesPlugin = {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)
     ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours(payload => store.trackJob(payload.job_id)))
-    // CC-13: a generation's card, sent whatever Hermes's tool progress setting is. The Jobs row follows its job; it
-    // creates, places or inserts nothing.
-    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, ours(payload => store.trackJob(jobOf(payload.card))))
+    // CC-13: a generation's card, sent whatever Hermes's tool progress setting is. The Jobs row follows its job and
+    // keeps the card for its reconciled ledger; it creates, places or inserts nothing. The event always names its
+    // profile, so one naming none is for no one here (fails closed, like CC-9's). One over 256 KiB comes without a
+    // card, and carries nothing to follow.
+    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, event => {
+      const payload = payloadOf(event)
+      if (forThisProfile(payload)) store.noteGeneration(payload.card)
+    })
     ctx.onEvent(
       `plugin.${PLUGIN_ID}.settings.changed`,
       ours(() => {

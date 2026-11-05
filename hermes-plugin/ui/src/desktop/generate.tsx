@@ -7,7 +7,7 @@ import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
 import { seconds } from '../shared/format.ts'
-import { capWords, costWords, generationRequest, generationTitle, isNotes, parseGeneration } from '../shared/generate.ts'
+import { capWords, costWords, generationRequest, generationTitle, outputKind, parseGeneration } from '../shared/generate.ts'
 import type { Audition } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
 import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
@@ -24,7 +24,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
   // Anything this card can't read (a scan's answer, say) keeps Desktop's own player or chip.
   if (!made) return media.fallback
   const title = generationTitle(made, t)
-  const notes = isNotes(made)
+  const kind = outputKind(made)
   const cost = costWords(made, t)
   const left = capWords(made, t)
   const offer = generationRequest(made, t)
@@ -35,7 +35,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
     >
       <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <span style={{ ...S.text, fontWeight: 600, minWidth: 0, whiteSpace: 'normal' }}>
-          <span style={{ color: T.accent }}>{notes ? '♫' : '♪'}</span> {made.prompt ? `“${title}”` : title}
+          <span style={{ color: T.accent }}>{kind === 'notes' ? '♫' : '♪'}</span> {made.prompt ? `“${title}”` : title}
         </span>
         <span style={{ ...S.row, gap: 4, flexShrink: 0 }}>
           {made.outputType && OUTPUTS.has(made.outputType) && <Chip>{t(`generate.outputs.${made.outputType}`)}</Chip>}
@@ -51,7 +51,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
         </span>
       </div>
       {made.file && <span style={{ ...S.faint, ...S.ellipsis }}>{made.file}</span>}
-      {!notes && made.artifactId && media.file?.kind === 'audio' ? (
+      {kind === 'audio' && made.artifactId && media.file?.kind === 'audio' ? (
         // In a row, as in the listen card: the waveform's flex basis is a width there, not a height.
         <div style={{ display: 'flex' }}>
           <Wave audition={audition} caption="" id={made.artifactId} label={title} />

@@ -251,6 +251,7 @@
       cost: (credits, estimate) => `${credits} (est. ${estimate})`,
       reserved: (credits) => `${credits} reserved`,
       unknownCharge: (credits) => `charge not known yet · ${credits} reserved`,
+      notSubmitted: "never sent to Mirelo · nothing charged",
       left: (left, cap) => `${left} of ${cap} credits left under your cap`,
       capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
       frozen: "New paid generations are paused: a charge came in above its estimate",
@@ -494,12 +495,13 @@
       cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
       reserved: (credits) => `${credits} を確保`,
       unknownCharge: (credits) => `請求額はまだ不明 · ${credits} を確保`,
+      notSubmitted: "Mirelo には送信されませんでした · 請求なし",
       left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
       capTitle: "有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。",
       frozen: "見積を超える請求があったため、新しい有料生成は止めています",
       notes: (_n, shown) => `${shown} ノート`,
       outputs: { midi: "MIDI ファイル", notes: "ノート", musicxml: "MusicXML" },
-      states: { running: "生成中", failed: "失敗", cancelled: "取り消し", interrupted: "中断" },
+      states: { running: "生成中", failed: "失敗", cancelled: "キャンセル済み", interrupted: "中断" },
       place: "配置…",
       placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
       planNotes: "ノートの配置を計画…",
@@ -737,6 +739,7 @@
       cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
       reserved: (credits) => `已预留 ${credits}`,
       unknownCharge: (credits) => `费用尚不清楚 · 已预留 ${credits}`,
+      notSubmitted: "未发送给 Mirelo · 未收费",
       left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
       capTitle: "Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。",
       frozen: "有一笔费用超出了预估，新的付费生成已暂停",
@@ -1548,6 +1551,8 @@
     reads = /* @__PURE__ */ new Map();
     wanted = /* @__PURE__ */ new Map();
     generation = 0;
+    /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
+    cards = /* @__PURE__ */ new Map();
     get = () => this.state;
     subscribe = (fn) => {
       this.listeners.add(fn);
@@ -1567,6 +1572,7 @@
     reset() {
       this.generation += 1;
       this.reads.clear();
+      this.cards.clear();
       this.state = EMPTY;
       for (const fn of [...this.listeners]) fn();
     }
@@ -1647,6 +1653,22 @@
       if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
       void this.refreshJob(jobId);
     }
+    /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
+     *  has none, and read the job as news. Unlike a job first met finished elsewhere, a generation the event reports
+     *  shows even when it has already ended: with tool progress off, this row is where it shows. */
+    noteGeneration(card) {
+      const id = jobOf(card);
+      if (!id) return;
+      const before = this.state.jobs[id];
+      if (before) this.set({ jobs: { ...this.state.jobs, [id]: { ...before, card } } });
+      else if (Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+      else {
+        this.cards.delete(id);
+        this.cards.set(id, card);
+        if (this.cards.size > MOST_JOBS) this.cards.delete(this.cards.keys().next().value);
+      }
+      void this.refreshJob(id);
+    }
     /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
      *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
      *  with it. */
@@ -1664,18 +1686,34 @@
           const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
           if (generation !== this.generation) return;
           const before = this.state.jobs[id];
-          if (!before && finished(read)) return;
+          const waiting = this.cards.has(id);
+          if (!before && finished(read) && !waiting) return;
+          const card = before?.card ?? this.cards.get(id);
+          this.cards.delete(id);
           const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
           const ended_at = finished(job) ? before?.ended_at ?? Date.now() : null;
-          this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } });
+          this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at, ...card === void 0 ? {} : { card } } } });
         } catch (error) {
-          if (generation !== this.generation || statusOf(error) !== 404 || !this.state.jobs[id]) return;
+          if (generation !== this.generation || statusOf(error) !== 404) return;
+          this.cards.delete(id);
+          if (!this.state.jobs[id]) return;
           const { [id]: _gone, ...rest } = this.state.jobs;
           this.set({ jobs: rest });
         }
       });
     }
   };
+  function jobOf(result) {
+    let value = result;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return value && typeof value === "object" && "job_id" in value ? plainId(value.job_id) : null;
+  }
 
   // src/dashboard/index.tsx
   var BASE = "/api/plugins/kumi";

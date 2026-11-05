@@ -32,6 +32,8 @@ export interface Generation {
   actual: number | null
   ledger: Ledger | null
   error: { code: string; reason: string } | null
+  /** `not_submitted`, `unknown` or `submitted` (CC-13): only a job that ended `not_submitted` was never billed. */
+  submission: string
   /** What the job is on now, in its own words (a real phase, never a path). */
   message: string
 }
@@ -93,8 +95,15 @@ export function parseGeneration(value: unknown): Generation | null {
     // A raw job snapshot has no ledger: then none is shown, rather than an older one.
     ledger: ledgerOf(result.ledger ?? outer.ledger),
     error: error ? { code: typeof error.code === 'string' ? clean(error.code, 40) : '', reason: typeof error.reason === 'string' ? clean(error.reason, 200) : '' } : null,
+    submission: typeof result.submission === 'string' ? clean(result.submission, 24) : '',
     message: typeof progress?.message === 'string' ? clean(progress.message, 60) : ''
   }
+}
+
+/** Whether an ended job was never sent to Mirelo (CC-13's `not_submitted`): the one case nothing was charged. A running
+ *  job's `not_submitted` isn't that: it may still submit. */
+function neverSent(made: Generation): boolean {
+  return made.state !== 'running' && (made.submission === 'not_submitted' || made.error?.code === 'not_submitted')
 }
 
 /** What it cost: `12 credits (est. 15)` once the charge is known; while it runs, what's reserved; after it ended
@@ -104,6 +113,7 @@ export function costWords(made: Generation, t: Translate = english): string {
   if (made.actual !== null) {
     return made.estimate === null || made.estimate === made.actual ? amount(made.actual) : t('generate.cost', amount(made.actual), num(made.estimate, 0))
   }
+  if (neverSent(made)) return t('generate.notSubmitted')
   const held = made.reserved ?? made.estimate
   if (held === null) return ''
   return made.state === 'running' ? t('generate.reserved', amount(held)) : t('generate.unknownCharge', amount(held))
@@ -114,25 +124,33 @@ export function capWords(made: Generation, t: Translate = english): string {
   return made.ledger ? t('generate.left', num(made.ledger.left, 0), num(made.ledger.cap, 0)) : ''
 }
 
-/** Whether a generation made notes rather than audio: then it has no waveform and no Place step (CC-13). */
-export function isNotes(made: Generation): boolean {
-  return made.outputType !== null ? made.outputType !== 'audio' : made.kind === 'audio_to_midi'
+const NOTES = new Set(['midi', 'notes', 'musicxml'])
+
+/** What a generation's primary output is to the UI: `audio` (waveform, Place…), `notes` (MIDI, notes or MusicXML:
+ *  Plan notes…, never an audio step), or null for a type CC-13 doesn't name, which gets neither (CC-13). */
+export function outputKind(made: Generation): 'audio' | 'notes' | null {
+  if (made.outputType === null) return made.kind === 'sfx' ? 'audio' : made.kind === 'audio_to_midi' ? 'notes' : null
+  if (made.outputType === 'audio') return 'audio'
+  return NOTES.has(made.outputType) ? 'notes' : null
 }
 
 /** What the card and the Jobs row call it: the words it was made from, else what it is. */
 export function generationTitle(made: Generation, t: Translate = english): string {
-  return made.prompt || (isNotes(made) ? t('generate.notesTitle') : t('generate.soundTitle'))
+  return made.prompt || (outputKind(made) === 'notes' ? t('generate.notesTitle') : t('generate.soundTitle'))
 }
 
-/** A generation job as a Jobs row: the shared title and progress, with its file, its cost and, when the ledger is
- *  frozen or the job failed, a warning. */
-export function generationJobWords(job: Job, t: Translate = english): ReturnType<typeof jobWords> {
+/** A generation job as a Jobs row: the shared title and progress, with its file, its cost and, when the job failed
+ *  or the ledger is frozen, why. The raw `/job` snapshot has no ledger, so the frozen state comes from the latest
+ *  `generate.updated` card kept on the job (`card`); a charge above the job's own reservation is amber either way. */
+export function generationJobWords(job: Job & { card?: unknown }, t: Translate = english): ReturnType<typeof jobWords> {
   const words = jobWords(job, t)
   const made = parseGeneration({ ...job, kind: 'generate' })
   if (!made) return words
+  const frozen = (made.ledger ?? parseGeneration(job.card)?.ledger)?.frozen === true
+  const over = made.actual !== null && made.reserved !== null && made.actual > made.reserved
   const reason = made.state === 'failed' || made.state === 'interrupted' ? made.error?.reason ?? '' : ''
-  const detail = [made.state === 'running' ? made.message : made.file, reason, costWords(made, t), made.ledger?.frozen ? t('generate.frozen') : '']
-  return { ...words, detail: detail.filter(Boolean).join(' · '), tone: made.ledger?.frozen && words.tone === 'good' ? 'warn' : words.tone }
+  const detail = [made.state === 'running' ? made.message : made.file, reason, costWords(made, t), frozen ? t('generate.frozen') : '']
+  return { ...words, detail: detail.filter(Boolean).join(' · '), tone: (frozen || over) && words.tone === 'good' ? 'warn' : words.tone }
 }
 
 /** The one thing a finished generation offers, as a request left unsent in the chat: audio goes through CC-11's file
@@ -140,10 +158,12 @@ export function generationJobWords(job: Job, t: Translate = english): ReturnType
  *  stays English (C5): it names the producer's own words, never a translated title. */
 export function generationRequest(made: Generation, t: Translate = english): { label: string; title: string; request: string } | null {
   if (made.state !== 'done' || !made.artifactId) return null
-  if (isNotes(made)) {
+  const kind = outputKind(made)
+  if (kind === 'notes') {
     const request = planNotesRequest(made.artifactId, made.noteCount)
     return request ? { label: t('generate.planNotes'), title: t('generate.planNotesTitle'), request } : null
   }
+  if (kind !== 'audio') return null
   const request = placeRequest(made.artifactId, made.prompt)
   return request ? { label: t('generate.place'), title: t('generate.placeTitle'), request } : null
 }

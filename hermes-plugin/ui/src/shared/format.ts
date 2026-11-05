@@ -201,7 +201,7 @@ export function planNotesRequest(artifactId: string, count?: number | null): str
   const id = plainId(artifactId)
   if (!id) return null
   const notes = typeof count === 'number' && Number.isInteger(count) && count >= 0 ? `the ${count} notes` : 'the notes'
-  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything`
+  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me before changing anything`
 }
 
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime

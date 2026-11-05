@@ -25,7 +25,12 @@ export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>
           <li key={id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <span style={{ ...S.row, gap: 6 }}>
               <span style={{ ...S.text, color: job.ended_at === null ? T.text : TONE[words.tone] }}>{words.title}</span>
-              {words.detail && <span style={{ ...S.faint, ...S.ellipsis }}>{words.detail}</span>}
+              {words.detail && (
+                // A generation's detail names credits: the tooltip says they're Mirelo API credits, not money (13d).
+                <span style={{ ...S.faint, ...S.ellipsis }} title={generation ? t('generate.creditsTitle') : undefined}>
+                  {words.detail}
+                </span>
+              )}
             </span>
             {job.ended_at === null && (
               <span
