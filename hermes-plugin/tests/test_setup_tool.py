@@ -91,7 +91,7 @@ class Surface(unittest.TestCase):
                 unknown = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
                                                tool_call_id="c2")
         self.assertEqual(unknown["action"], "block", "where Hermes can't say, nothing is taken as shown whole")
-        self.assertIn("hermes kumi setup", unknown["message"])
+        self.assertNotIn("Writes:", unknown["message"], "it doesn't ask with part of the plan")
         self.assertFalse(policy.shows_whole("x", "unknown"))
 
     def test_a_plan_shown_whole_is_asked_on_every_surface_and_a_chat_app_that_would_cut_it_refuses(self):
