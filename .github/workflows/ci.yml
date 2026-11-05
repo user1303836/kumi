@@ -97,7 +97,7 @@ jobs:
           TMPDIR: /dev/shm
         # (word splitting on purpose: the -p options)
         run: sh scripts/test-isolated.sh --profile ci ${{ steps.part.outputs.picked }}
-      # The tests this part selected (`cargo nextest list`), which `dev.py worktree extended-only` reads.
+      # The tests this part selected (`cargo nextest list`), to compare one run's tests with another's.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() && steps.part.outputs.picked != '' }}
         with:

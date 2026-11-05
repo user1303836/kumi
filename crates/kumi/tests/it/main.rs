@@ -32,7 +32,6 @@ mod library_search;
 mod library_state_plan;
 #[cfg(unix)]
 mod library_stop;
-mod library_tools;
 mod live_extension;
 mod login;
 mod map_server;
