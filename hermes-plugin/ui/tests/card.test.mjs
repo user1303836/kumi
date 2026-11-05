@@ -317,6 +317,7 @@ test('the generate card shows what was asked, the file, the waveform, the cost a
   for (const text of ['<i>player</i>', 'MIDI file', '128 notes', 'Plan notes…']) assert.ok(notes.includes(text), `${text} in ${notes}`)
   assert.ok(!notes.includes('Place…') && !notes.includes('Waveform'))
   assert.ok(card(fixtures.FROZEN).includes('New paid generations are paused'))
-  // A scan's answer keeps Desktop's own player, unchanged.
+  // A scan's answer, or an upload preview (CC-13 amendment A), keeps Desktop's own player, unchanged.
   assert.equal(card({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), '<i>player</i>')
+  assert.equal(card(fixtures.PREVIEW), '<i>player</i>')
 })

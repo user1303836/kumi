@@ -525,8 +525,9 @@ test("a generation an event reports shows even when first read finished, keeps t
   assert.ok(generate.generationJobWords(job).detail.endsWith('New paid generations are paused: a charge came in above its estimate'))
 })
 
-test('a quote, a scan and a refusal before any job are not generations', () => {
-  for (const value of [fixtures.QUOTE, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
+test('a quote, an upload preview, a scan and a refusal before any job are not generations', () => {
+  // The preview (CC-13 amendment A) is the approval hook's own Read: no job state, no job id.
+  for (const value of [fixtures.QUOTE, fixtures.PREVIEW, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
     assert.equal(generate.parseGeneration(value), null, JSON.stringify(value))
   }
 })
