@@ -23,6 +23,9 @@ SPEC.loader.exec_module(setup)
 
 TARGET, VERSION = "aarch64-apple-darwin", "1.24.67"
 URL = f"https://github.com/user1303836/kumi/releases/download/v{VERSION}/kumi-{TARGET}.tar.xz"
+# Where the fake runtime says Live's User Library is: absolute on every system (a POSIX "/Users/…" isn't on Windows).
+# Nothing is ever written there.
+FAKE_LIBRARY = Path(tempfile.gettempdir()) / "kumi-setup-tests" / "User Library"
 # Another process's setup step: it takes setup's lock on a data folder, says so, and holds it until it is killed.
 HOLD_LOCK = """
 import importlib.util, sys, time
@@ -67,7 +70,7 @@ class Served:
 class Runtime:
     """The runtime's setup_daw as W1 answers it: a dry run names the paths; a real install does exactly that."""
 
-    def __init__(self, state: str = "missing", owner: str | None = None, library: str = "/Users/x/Music/Ableton/User Library") -> None:
+    def __init__(self, state: str = "missing", owner: str | None = None, library: str = str(FAKE_LIBRARY)) -> None:
         self.state, self.owner, self.library, self.calls = state, owner, library, []
 
     def __call__(self, args: dict) -> dict:
@@ -202,7 +205,7 @@ class SetupTest(unittest.TestCase):
     def test_a_daw_step_another_chat_planned_differently_isnt_installed_under_this_approval(self) -> None:
         self.install_runtime()
         self.plan(setup_daw=Runtime())
-        elsewhere = Runtime(library="/Users/x/Other Library")
+        elsewhere = Runtime(library=str(FAKE_LIBRARY.parent / "Other Library"))
         setup.plan("ableton", setup_daw=elsewhere, data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
         self.assertEqual(self.install(Served(b""), setup_daw=elsewhere)["error"]["code"], "plan_changed")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, elsewhere.calls, "nothing approved was installed")
@@ -375,7 +378,7 @@ class SetupTest(unittest.TestCase):
         current.write_text(json.dumps(record))
         binary = self.data / record["kumi"]
         binary.unlink()
-        binary.symlink_to("/bin/sh")
+        binary.symlink_to(sys.executable)  # a real program outside the data folder
         self.assertEqual(setup.runtime_state(self.data, VERSION, TARGET)[0], "damaged",
                          "a binary that is a link out of the data folder isn't trusted")
 
