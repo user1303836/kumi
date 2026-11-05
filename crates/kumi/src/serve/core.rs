@@ -158,12 +158,14 @@ fn focus_words(focus: &Value) -> String {
         Some(reference) => format!("{said} (ref {reference})"),
         None => said,
     };
+    // A kind is the DAW's word too: one bounded line, its dashes spaces.
+    let word = |value: &Value, key: &str| text(value, key).map(|kind| super::change::one_line(&kind.replace('-', " "), 20));
     let mut parts = Vec::new();
     if let Some(track) = focus.get("track") {
-        let kind = text(track, "kind").map(|kind| format!(", {kind}")).unwrap_or_default();
         let said = named("track", text(track, "name"));
-        parts.push(match (text(focus, "trackRef"), text(track, "kind")) {
-            (Some(reference), _) => format!("{said} (ref {reference}{kind})"),
+        parts.push(match (text(focus, "trackRef"), word(track, "kind")) {
+            (Some(reference), Some(kind)) => format!("{said} (ref {reference}, {kind})"),
+            (Some(reference), None) => format!("{said} (ref {reference})"),
             (None, Some(kind)) => format!("{said} ({kind})"),
             (None, None) => said,
         });
@@ -186,7 +188,7 @@ fn focus_words(focus: &Value) -> String {
         parts.push(said);
     }
     if let Some(item) = focus.get("item") {
-        let kind = text(item, "kind").unwrap_or_else(|| "item".into()).replace('-', " ");
+        let kind = word(item, "kind").unwrap_or_else(|| "item".into());
         let mut said = with_ref(named(&kind, text(item, "name")), text(item, "itemRef"));
         if let Some(notes) = focus.get("selectedNotes").and_then(Value::as_u64) {
             said.push_str(&format!(", {notes} notes selected"));
@@ -194,7 +196,7 @@ fn focus_words(focus: &Value) -> String {
         parts.push(said);
     }
     if let Some(section) = focus.get("section") {
-        let kind = text(section, "kind").unwrap_or_else(|| "section".into()).replace('-', " ");
+        let kind = word(section, "kind").unwrap_or_else(|| "section".into());
         let at = section.get("index").and_then(Value::as_f64).map(|index| format!(" {}", index as i64 + 1)).unwrap_or_default();
         parts.push(match text(section, "name").filter(|name| !name.trim().is_empty()) {
             Some(name) => format!("{kind}{at} {}", quote(&name)),
