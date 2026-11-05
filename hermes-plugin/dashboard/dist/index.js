@@ -123,10 +123,10 @@
       restored: "Kumi put back what it changed meanwhile.",
       restoreUnsure: "Kumi isn’t sure it put everything back.",
       restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
-      dawUndo: (daw, keys) => `Undo in ${daw} (${keys})`,
-      dawUndoTitle: (daw) => `${daw}'s own undo takes this back; Kumi can't yet (#1101)`,
-      byHand: (daw) => `Remove it by hand in ${daw}`,
-      byHandTitle: (daw) => `${daw}'s undo would take back your later work first, so remove this by hand; Kumi can't undo it yet (#1101)`
+      dawUndo: (daw, keys) => `Undo in ${daw} (${keys}), if nothing has changed there since`,
+      dawUndoTitle: (daw, keys) => `Press ${keys} in ${daw} once, right away, if nothing has changed there since: it takes back that whole change.`,
+      byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
     },
     job: {
       scanning: "Scanning",
@@ -416,10 +416,10 @@
       restored: "その間に変えたものは Kumi が元に戻しました。",
       restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
       restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
-      dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）`,
-      dawUndoTitle: (daw) => `${daw} 自身の取り消しで戻せます。Kumi はまだ戻せません（#1101）`,
-      byHand: (daw) => `${daw} で手動で削除`,
-      byHandTitle: (daw) => `${daw} の取り消しはその後の作業を先に戻してしまうため、手動で削除してください。Kumi はまだ取り消せません（#1101）`
+      dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）。その後 ${daw} で何も変えていなければ`,
+      dawUndoTitle: (daw, keys) => `その後 ${daw} で何も変えていなければ、すぐに ${keys} を一度押してください。その変更全体が取り消されます。`,
+      byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
     },
     job: {
       scanning: "スキャン中",
@@ -708,10 +708,10 @@
       restored: "Kumi 已还原期间做出的改动。",
       restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
       restoreUnsure: "Kumi 不确定是否已全部还原。",
-      dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}）`,
-      dawUndoTitle: (daw) => `${daw} 自己的撤销可以还原这一步；Kumi 暂时还不能（#1101）`,
-      byHand: (daw) => `在 ${daw} 中手动删除`,
-      byHandTitle: (daw) => `${daw} 的撤销会先撤回你之后的操作，所以请手动删除；Kumi 暂时还不能撤销（#1101）`
+      dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}），前提是之后那里没有任何改动`,
+      dawUndoTitle: (daw, keys) => `如果之后在 ${daw} 中没有任何改动，请立即按一次 ${keys}：它会撤回这整个改动。`,
+      byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
     },
     job: {
       scanning: "正在扫描",
@@ -1317,7 +1317,7 @@
     const app = dawName(daw, t);
     if (how === "buried") return /* @__PURE__ */ jsx(Chip, { title: t("history.byHandTitle", app), children: t("history.byHand", app) });
     const keys = /Mac/.test(globalThis.navigator?.userAgent ?? "") ? "Cmd+Z" : "Ctrl+Z";
-    return /* @__PURE__ */ jsx(Chip, { title: t("history.dawUndoTitle", app), children: t("history.dawUndo", app, keys) });
+    return /* @__PURE__ */ jsx(Chip, { title: t("history.dawUndoTitle", app, keys), children: t("history.dawUndo", app, keys) });
   }
   function HistoryView({
     history,

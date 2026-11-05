@@ -95,7 +95,7 @@ function DawUndo({ daw, how }: { daw: unknown; how: 'next' | 'buried' }) {
   const app = dawName(daw, t)
   if (how === 'buried') return <Chip title={t('history.byHandTitle', app)}>{t('history.byHand', app)}</Chip>
   const keys = /Mac/.test(globalThis.navigator?.userAgent ?? '') ? 'Cmd+Z' : 'Ctrl+Z'
-  return <Chip title={t('history.dawUndoTitle', app)}>{t('history.dawUndo', app, keys)}</Chip>
+  return <Chip title={t('history.dawUndoTitle', app, keys)}>{t('history.dawUndo', app, keys)}</Chip>
 }
 
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
