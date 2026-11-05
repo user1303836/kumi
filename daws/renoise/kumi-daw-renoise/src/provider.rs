@@ -36,6 +36,7 @@ pub static PROVIDER: Own = Own {
     carried: || RENOISE_TOOL_FOLDER,
     built: |_| Some(kumi_common::dev::checkout()?.join("daws").join("renoise").join(RENOISE_TOOL_FOLDER)),
     version_file: |source| source.join("payload").join("version.lua"),
+    identity_file: |source| source.join("payload").join("status.lua"),
     placed: |_, env| renoise_target(&detected(env, detect::detect_renoise)).map_err(Some),
     // Renoise's version folders from 3.5, where a newer Renoise may have copied Kumi's tool.
     elsewhere: |env| renoise_targets(&detected(env, detect::detect_renoise)),

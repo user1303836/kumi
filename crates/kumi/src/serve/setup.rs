@@ -146,10 +146,13 @@ fn fix(ctx: &Ctx) -> String {
     format!("{} --daw {} bridge", *kumi_types::command::KUMI, ctx.daw().as_str())
 }
 
-/// The plan's digest, over what the producer approves of it: how it stands, the version, every path it writes and each
-/// part. A real install refuses a plan whose digest isn't the one approved (C8: changed targets need a new approval).
+/// The plan's digest, over what the producer approves of it: how it stands, the version, every path it writes, each
+/// part, and whether the part keeps a project's id only when asked (CC-8: what the approval says it writes into a project,
+/// which can differ at one version). A real install refuses a plan whose digest isn't the one approved (C8: changed
+/// targets need a new approval).
 fn digest(plan: &ComponentPlan) -> String {
-    let approved = json!({"state": plan.state, "version": plan.version, "paths": plan.paths, "parts": plan.parts});
+    let approved = json!({"state": plan.state, "version": plan.version, "paths": plan.paths, "parts": plan.parts,
+        "keep_identity": plan.keep_identity});
     hex::encode(Sha256::digest(approved.to_string()))
 }
 
