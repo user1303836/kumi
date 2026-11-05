@@ -366,9 +366,7 @@ impl RenoiseScript {
     /// The caller has already checked and normalized its epoch.
     fn track_read(state: &State, asked: &Value) -> Option<Result<Value, (String, String)>> {
         let reference = asked.get("ref")?.as_str()?;
-        let (_, at) = place(reference, "track")?;
-        if at.len() != 1 { return None; }
-        let number = at[0];
+        let number = reference.strip_prefix(EPOCH)?.strip_prefix(":track:")?.parse::<u64>().ok()?;
         let page = state.cases.iter().find(|case| {
             case.method == "read" && case.params["kind"] == "track"
                 && case.params["limit"] == MAX_LIMIT && case.params.get("cursor").is_none()
