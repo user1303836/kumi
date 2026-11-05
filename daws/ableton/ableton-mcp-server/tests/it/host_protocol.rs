@@ -96,6 +96,9 @@ async fn host_lifecycle_resources_status_and_gates_match_source() {
             }
             let result = request.unwrap_or_else(|e| panic!("{} step {index}: {e}", case["name"]));
             let mut result = result.unwrap_or(Value::Null);
+            if let Some(tools) = result.pointer_mut("/result/tools") {
+                crate::play_start_and_selection::as_recorded(tools);
+            }
             if step["normalizeStatus"] == true {
                 let status: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
                 result["result"]["content"][0]["text"] =
