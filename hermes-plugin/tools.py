@@ -207,13 +207,13 @@ def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
 
 
 def library_folder(folder: Any) -> tuple[str | None, str | None]:
-    """A sample folder the producer may approve, as Kumi will keep and read it: an absolute path, normalized, never a
-    disk's root or the home folder itself. Returns (folder, None), or (None, why not)."""
+    """A sample folder the producer may approve, as Kumi will keep and read it: an absolute path (on Windows with its
+    drive), normalized, never a disk's root or the home folder itself. Returns (folder, None), or (None, why not)."""
     if not isinstance(folder, str) or not folder.strip():
         return None, "name the folder, as a full path."
     if any(ord(char) < 32 or ord(char) == 127 for char in folder):
         return None, "the folder's name has control characters."
-    if not os.path.isabs(folder):
+    if not Path(folder).is_absolute():
         return None, f"{folder!r} isn't a full path."
     normal = os.path.normpath(folder)
     if os.path.dirname(normal) == normal:

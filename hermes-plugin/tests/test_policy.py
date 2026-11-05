@@ -89,10 +89,15 @@ class Approvals(unittest.TestCase):
         self.assertEqual((decision["action"], decision["message"]), ("block", "Kumi didn't undo anything: expired"))
 
     def test_a_folder_is_approved_as_kumi_will_keep_it_and_never_a_whole_disk_or_home(self):
-        decision = self.hook("kumi_library", {"action": "add_folder", "folder": "/Samples/Pads/../Drums/"})
-        self.assertEqual(decision["rule_key"], "kumi:folder_read:/Samples/Drums")
-        self.assertTrue(decision["message"].startswith("Kumi: read the folder /Samples/Drums and everything in it"))
-        for folder in ("Samples", "/", os.path.expanduser("~"), "/Samples/\nDrums", "/Users/me/Samples/../../.."):
+        written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep
+        decision = self.hook("kumi_library", {"action": "add_folder", "folder": written})
+        self.assertEqual(decision["rule_key"], f"kumi:folder_read:{support.DRUMS}")
+        self.assertTrue(decision["message"].startswith(f"Kumi: read the folder {support.DRUMS} and everything in it"))
+        refused = ["Samples", str(support.ROOT), os.path.expanduser("~"), support.DRUMS + "\nKicks",
+                   os.path.join(str(support.ROOT), "Users", "me", "Samples", "..", "..", "..")]
+        if os.name == "nt":
+            refused.append("\\Samples")  # a root without its drive isn't a full path on Windows
+        for folder in refused:
             with self.subTest(folder=folder):
                 self.assertEqual(self.hook("kumi_library", {"action": "add_folder", "folder": folder})["action"],
                                  "block")
@@ -100,10 +105,10 @@ class Approvals(unittest.TestCase):
 
     def test_a_scan_names_the_folders_the_runtime_reads_and_needs_one(self):
         self.assertIn("no approved sample folders", self.hook("kumi_library", {"action": "scan"})["message"])
-        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": "/Samples/Drums"}, session_id="s1")
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
         decision = self.hook("kumi_library", {"action": "scan"})
         self.assertEqual(decision["rule_key"], "kumi:folder_read:scan")
-        self.assertTrue(decision["message"].endswith("• /Samples/Drums"), decision["message"])
+        self.assertTrue(decision["message"].endswith(f"• {support.DRUMS}"), decision["message"])
 
     def test_listening_to_anything_but_a_file_sound_or_artifact_is_blocked(self):
         for args in ({"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}},
@@ -120,7 +125,7 @@ class Blocked(unittest.TestCase):
     def test_without_a_running_runtime_a_change_undo_or_folder_read_is_blocked(self):
         host, _, _ = support.host(self)
         for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}),
-                           ("kumi_library", {"action": "add_folder", "folder": "/Samples"}),
+                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}),
                            ("kumi_library", {"action": "scan"})):
             decision = self.hook(host, tool, args)
             self.assertEqual(decision["action"], "block", tool)

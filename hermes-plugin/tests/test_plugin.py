@@ -3,6 +3,7 @@ their handlers against the fixture runtime: status and connect, a change with HI
 from __future__ import annotations
 
 import json
+import os
 import re
 import unittest
 from unittest import mock
@@ -108,17 +109,17 @@ class Tools(unittest.TestCase):
 
     def test_an_approved_folder_is_kept_for_the_next_runtime(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
-        added = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": "/Samples/Drums/"})
-        self.assertEqual(added["folders"], ["/Samples/Drums"])
-        self.assertEqual(self.ctx.settings["library_folders"], ["/Samples/Drums"])
-        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": "/Samples/Drums"})
-        self.assertEqual(self.ctx.settings["library_folders"], ["/Samples/Drums"], "kept once")
+        added = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS + os.sep})
+        self.assertEqual(added["folders"], [support.DRUMS])
+        self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS])
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS})
+        self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS], "kept once")
         self.assertIn("isn't a full path", support.call(self.host, "kumi_library", {"action": "add_folder",
                                                                                    "folder": "Drums"})["blocked"])
         self.host.runtimes.stop_all()
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
-        self.assertEqual(started["argv"][-2:], ["--library-root", "/Samples/Drums"])
+        self.assertEqual(started["argv"][-2:], ["--library-root", support.DRUMS])
 
     def test_sounds_reach_the_model_by_id_never_by_path(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")

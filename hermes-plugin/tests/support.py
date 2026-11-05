@@ -16,6 +16,11 @@ PLUGIN_DIR = TESTS.parent
 PACKAGE = "kumi_hermes_plugin"
 FIXTURE = TESTS / "fixture_runtime.py"
 VERSION = "1.24.66"
+# A disk's root and a samples folder on it, absolute on every system ("/Samples", or "C:\Samples" on Windows). Nothing
+# is created there: only their names are checked.
+ROOT = Path(os.path.abspath(os.sep))
+SAMPLES = ROOT / "Samples"
+DRUMS = str(SAMPLES / "Drums")
 
 
 def plugin():
