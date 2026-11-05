@@ -187,7 +187,7 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     R: std::future::Future<Output = Option<String>>,
     S: Reconnect + ?Sized,
 {
-    let mut began = Some(std::time::Instant::now());
+    let mut began = Some(tokio::time::Instant::now());
     let open = live_open().await;
     let absent = absent.filter(|_| !told && !open);
     // Told what to do already (restart Live, when it runs another version of the bridge): nothing more to say until
@@ -204,14 +204,14 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         emit(SessionEvent::Notice { message });
     }
     let mut tries = 0;
-    let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
+    let mut next: Option<tokio::time::Instant> = Some(tokio::time::Instant::now());
     let mut failure_said: Option<String> = None;
     // When a failed start is next looked for: at the usual pace, quick looks or not.
-    let mut next_failure = std::time::Instant::now();
+    let mut next_failure = tokio::time::Instant::now();
     // When the DAW was seen open, or its port began to answer: looks come quickly for a while from then.
-    let mut seen_open = open.then(std::time::Instant::now);
+    let mut seen_open = open.then(tokio::time::Instant::now);
     let quick_since =
-        |seen: Option<std::time::Instant>| seen.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
+        |seen: Option<tokio::time::Instant>| seen.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
     // (None until the first look: a port answering then is no Live starting, and a failure that persists there, a
     // restart told or a stale secret, gets no quick tries)
     let (mut looks, mut was_answering) = (0, None::<bool>);
@@ -225,13 +225,13 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         }
         if let Some(absent) = absent.as_ref().filter(|_| began.is_none()) {
             if (absent.opened)().await {
-                began = Some(std::time::Instant::now());
+                began = Some(tokio::time::Instant::now());
                 seen_open = began;
                 emit(SessionEvent::Notice { message: words.starting.into() });
             }
         }
-        if std::time::Instant::now() >= next_failure {
-            next_failure = std::time::Instant::now() + std::time::Duration::from_millis(pace.look_ms);
+        if tokio::time::Instant::now() >= next_failure {
+            next_failure = tokio::time::Instant::now() + std::time::Duration::from_millis(pace.look_ms);
             if let Some(failure) = failure().await.filter(|failure| failure_said.as_ref() != Some(failure)) {
                 said = true;
                 emit(SessionEvent::Notice { message: failure.clone() });
@@ -245,12 +245,12 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         let answering = answers().await;
         // Its port answering now and not before: Live is starting its Remote Script (opened after Kumi, say).
         if answering && was_answering == Some(false) {
-            seen_open = Some(std::time::Instant::now());
+            seen_open = Some(tokio::time::Instant::now());
         }
         was_answering = Some(answering);
         let quick = quick_since(seen_open);
         if answering {
-            if (quick || tries < pace.tries) && next.is_some_and(|at| std::time::Instant::now() >= at) {
+            if (quick || tries < pace.tries) && next.is_some_and(|at| tokio::time::Instant::now() >= at) {
                 // A quick try doesn't count against the tries: a Live that takes a while to answer after its port
                 // opens would otherwise use them all up within the minute.
                 if !quick {
@@ -262,11 +262,11 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
                     break;
                 }
                 let retry = if quick { pace.look_ms } else { pace.retry_ms };
-                next = Some(std::time::Instant::now() + std::time::Duration::from_millis(retry));
+                next = Some(tokio::time::Instant::now() + std::time::Duration::from_millis(retry));
             }
         } else {
             tries = 0;
-            next = Some(std::time::Instant::now());
+            next = Some(tokio::time::Instant::now());
         }
         drop(session);
         tokio::time::sleep(std::time::Duration::from_millis(if quick { pace.quick_ms } else { pace.look_ms })).await;
@@ -1759,15 +1759,16 @@ mod watch_tests {
         Pace { look_ms, quick_ms, quick_for_ms, retry_ms: 60_000, tries, looks: 10_000, hold_ms: 60_000 }
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn an_open_live_not_answering_yet_is_looked_at_quickly_for_a_while_then_at_the_usual_pace() {
-        // Open as Kumi starts: every 20 ms for its first 600 ms (about 30 looks), then every 500 ms.
-        let (counts, _) = watched(pace(500, 20, 600, 10), true, usize::MAX, u32::MAX, &[550, 1550]).await;
-        assert!(counts[0] >= 10, "quickly at first: {} looks in 550 ms", counts[0]);
-        assert!(counts[1] - counts[0] <= 4, "then the usual pace: {} more in the next second", counts[1] - counts[0]);
-        // Not open, its port not answering: the usual pace from the start.
+        // The watch and its deadlines run on the same paused clock. `watched` polls the watch itself, so every due look
+        // finishes before the next timer advances; a busy runner can't move one across a sampling boundary.
+        // Open as Kumi starts: at 0, 20, …, 580 ms, then 600, 1100, 1600 ms.
+        let (counts, _) = watched(pace(500, 20, 600, 10), true, usize::MAX, u32::MAX, &[550, 650, 1050, 1150, 1550]).await;
+        assert_eq!(counts, [28, 31, 31, 32, 32], "quick looks end, then each look waits the usual pace");
+        // Not open, its port not answering: the usual pace from the start, at 0 and 500 ms.
         let (counts, _) = watched(pace(500, 20, 600, 10), false, usize::MAX, u32::MAX, &[550]).await;
-        assert!(counts[0] <= 3, "the usual pace: {} looks in 550 ms", counts[0]);
+        assert_eq!(counts, [2], "the usual pace from the first look");
     }
 
     #[tokio::test(flavor = "current_thread")]
