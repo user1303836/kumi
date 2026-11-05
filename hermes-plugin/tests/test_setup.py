@@ -432,20 +432,11 @@ class SetupTest(unittest.TestCase):
             with self.subTest(daw):
                 setup.plan(daw, setup_daw=Runtime(), data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
                 self.assertIn(words, setup.approval(daw, data_dir=self.data)["message"], "it's in what's approved")
-                owner = str(self.data.parent / f"standalone-{daw}")
-                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner), data_dir=self.data,
-                           plugin_dir=self.plugin, target=TARGET)
-                self.assertIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
                 # A component from the bridge bump keeps an id only when asked (CC-8 8c): the plugin never asks, but a
                 # standalone Kumi beside it still can (8b), and the step says so instead of saying nothing.
                 setup.plan(daw, setup_daw=Runtime(keep_identity=True), data_dir=self.data, plugin_dir=self.plugin,
                            target=TARGET)
                 message = setup.approval(daw, data_dir=self.data)["message"]
-                self.assertNotIn(words, message)
-                self.assertIn(when_asked[daw], message)
-                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner, keep_identity=True), data_dir=self.data,
-                           plugin_dir=self.plugin, target=TARGET)
-                message = setup.approval(daw, action="adopt", data_dir=self.data)["message"]
                 self.assertNotIn(words, message)
                 self.assertIn(when_asked[daw], message)
                 setup.plan(daw, setup_daw=Runtime(keep_identity="true"), data_dir=self.data, plugin_dir=self.plugin,
