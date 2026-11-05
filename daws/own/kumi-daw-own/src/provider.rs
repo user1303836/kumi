@@ -970,11 +970,11 @@ impl Own {
                         self.bridge
                     ),
                     Some(found) => format!(
-                        "{} in {name} ({copy}) says it's {found}, a version that can't be compared with this Kumi's {version}: it stays as it is. To replace it, delete that copy, then set Kumi up again",
+                        "{} in {name} ({copy}) says it's {found}, a version that can't be compared with this Kumi's {version}: it stays as it is. To replace it, quit {name}, delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
                         self.bridge
                     ),
                     None => format!(
-                        "{} in {name} ({copy}) doesn't say its version, so it stays as it is. To replace it, delete that copy, then set Kumi up again",
+                        "{} in {name} ({copy}) doesn't say its version, so it stays as it is. To replace it, quit {name}, delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
                         self.bridge
                     ),
                 });
