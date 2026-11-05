@@ -38,7 +38,8 @@ jobs:
     env:
       # The workspace's crates, which rust-cache never keeps, come from sccache's store in the Actions cache: main's pushes
       # write it and pull requests read it (as rust-cache's), so a pull request compiles only the crates it changed. The
-      # steps that compile set RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables, so a job-wide one misses main's.
+      # steps that compile set RUSTC_WRAPPER only after cache setup succeeds: rust-cache keys its cache on RUST*
+      # variables, so a job-wide one misses main's. Cache setup is optional; compilation and tests always gate.
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     strategy:
@@ -65,9 +66,13 @@ jobs:
       - if: steps.part.outputs.picked != ''
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       - if: steps.part.outputs.picked != ''
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
         with:
           version: v0.18.0
+          # The post-run assumes SCCACHE_PATH exists even when its download failed; skip its optional statistics.
+          disable_annotations: 'true'
       # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
       # pushed main's out of the repository's 10 GB. The app's and Kumi's crates' parts build the same crates from
       # crates.io, so they share one cache (the first to finish on main saves it); the bridges build others. Each cache
@@ -89,14 +94,19 @@ jobs:
       - name: The tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
         if: steps.part.outputs.picked != ''
         env:
-          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
           # runner's disk makes several times slower.
           TMPDIR: /dev/shm
         # (word splitting on purpose: the -p options)
-        run: sh scripts/test-isolated.sh --profile ci ${{ steps.part.outputs.picked }}
+        run: |
+          if [ '${{ steps.sccache.outcome }}' = success ]; then
+            export RUSTC_WRAPPER=sccache
+          else
+            unset RUSTC_WRAPPER
+          fi
+          sh scripts/test-isolated.sh --profile ci ${{ steps.part.outputs.picked }}
       # The tests this part selected (`cargo nextest list`), to compare one run's tests with another's.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() && steps.part.outputs.picked != '' }}
@@ -125,9 +135,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - if: steps.affected.outputs.rust_lint == 'true'
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
         with:
           version: v0.18.0
+          # The post-run assumes SCCACHE_PATH exists even when its download failed; skip its optional statistics.
+          disable_annotations: 'true'
       - if: steps.affected.outputs.rust_lint == 'true'
         uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
@@ -138,9 +152,13 @@ jobs:
       # the same cell meanwhile. That one lint gates; the rest of Clippy is the author's to run.
       - name: No RefCell borrow held across an await
         if: steps.affected.outputs.rust_lint == 'true'
-        env:
-          RUSTC_WRAPPER: sccache
-        run: cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
+        run: |
+          if [ '${{ steps.sccache.outcome }}' = success ]; then
+            export RUSTC_WRAPPER=sccache
+          else
+            unset RUSTC_WRAPPER
+          fi
+          cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
 
   checks:
     # Everything else a pull request is held to, in one job: the change's whitespace; the repository's own checks (every
@@ -447,9 +465,13 @@ jobs:
           picked="$(python3 scripts/dev.py select --tested-by ci-os "$AFFECTED")"
           echo "picked=$picked" | tee -a "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - id: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
         with:
           version: v0.18.0
+          # The post-run assumes SCCACHE_PATH exists even when its download failed; skip its optional statistics.
+          disable_annotations: 'true'
       # Saved from main only, by name (see Rust / Linux).
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
@@ -463,13 +485,18 @@ jobs:
           node-version: 24
       - name: The tests, in a home of their own
         env:
-          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           # Only the test binaries the profile names are built.
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
         # (word splitting on purpose: the -p options)
-        run: sh scripts/test-isolated.sh --profile ci-os ${{ steps.part.outputs.picked }}
+        run: |
+          if [ '${{ steps.sccache.outcome }}' = success ]; then
+            export RUSTC_WRAPPER=sccache
+          else
+            unset RUSTC_WRAPPER
+          fi
+          sh scripts/test-isolated.sh --profile ci-os ${{ steps.part.outputs.picked }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -521,9 +548,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "picked=$picked" | Tee-Object -Append -FilePath $env:GITHUB_OUTPUT
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - id: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
         with:
           version: v0.18.0
+          # The post-run assumes SCCACHE_PATH exists even when its download failed; skip its optional statistics.
+          disable_annotations: 'true'
       # Saved from main only, by name (see Rust / Linux). Each part keeps its own: they build some crates from crates.io
       # differently (cargo unifies their features over the packages a build selects).
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
@@ -539,13 +570,18 @@ jobs:
       - name: The tests, in a home of their own (Windows)
         shell: pwsh
         env:
-          RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
           KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
           KUMI_NEXTEST_BUILD_PROFILE: ci-os
           RUST_TEST_NOCAPTURE: '1'
         # (the -p options as separate words: the expression is replaced before PowerShell reads the line)
-        run: ./scripts/test-isolated.ps1 --profile ci-os -E "not ($env:KUMI_WINDOWS_EXTENDED_ONLY)" ${{ steps.part.outputs.picked }}
+        run: |
+          if ('${{ steps.sccache.outcome }}' -eq 'success') {
+            $env:RUSTC_WRAPPER = 'sccache'
+          } else {
+            Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
+          }
+          ./scripts/test-isolated.ps1 --profile ci-os -E "not ($env:KUMI_WINDOWS_EXTENDED_ONLY)" ${{ steps.part.outputs.picked }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
