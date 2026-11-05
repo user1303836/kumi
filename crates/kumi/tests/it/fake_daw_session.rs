@@ -897,10 +897,15 @@ async fn a_logic_session_changes_and_undoes_in_logics_words() {
                 "the add, the rename and its put-back are Logic's steps; the fader none: {:?}",
                 script.undo_history()
             );
-            // The producer's /undo takes back the latest change still standing: the track Kumi added, by its deletion.
-            let undone = session.undo(None).await.unwrap();
-            assert_eq!(undone.map(|record| record.title).as_deref(), Some("Added audio track “Pad”"));
-            assert_eq!(script.track_count(), 2);
+            // The latest standing change added material: /undo must keep it and explain the manual-only boundary.
+            let restores = script.asked().iter().filter(|(method, _)| method == "change_restore").count();
+            let kept = session.undo(None).await.unwrap().expect("the added track remains the latest change");
+            assert_eq!(kept.title, "Added audio track “Pad”");
+            assert_eq!(kept.state, ChangeState::Kept);
+            assert!(kept.note.as_deref().is_some_and(|note| note.contains("manually") && note.contains("Undo History")), "{kept:?}");
+            assert_eq!(script.track_count(), 3, "Kumi cannot prove all hidden material in a created track is untouched");
+            assert_eq!(script.volume(1), -6.0, "default undo must not fall through to the earlier volume change");
+            assert_eq!(script.asked().iter().filter(|(method, _)| method == "change_restore").count(), restores);
             session.submit("What changed?", None).await.unwrap();
             session.close().await.unwrap();
             simulator.stop();
