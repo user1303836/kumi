@@ -44,9 +44,10 @@ SECTIONS = {"scene": "scene", "marker": "marker", "region": "region", "sequence-
 
 
 def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_chars: int = MAX_CHARS,
-               now_ms: int | None = None) -> str | None:
+               now_ms: int | None = None, changes: list | None = None) -> str | None:
     """The fenced note, from focus.json's body (CC-7) and snapshots.owner(); None when no project was published.
-    `connected` is status.json's (None: not known). A stopped runtime gets one line instead of the last state."""
+    `connected` is status.json's (None: not known). A stopped runtime gets one line instead of the last state.
+    `changes` are HISTORY's rows, newest first: the latest three are named, so "undo that" has its id."""
     if owner.get("running") is False:
         return fenced([STOPPED], max_chars)
     project = _dict(focus.get("project"))
@@ -72,9 +73,12 @@ def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_c
                                    or quoted(place.get("view"), 30),
                                    quoted(_dict(place.get("editorView")).get("label"), 30)) if view]
         lines.append("On: " + ", ".join(on) + (f" (view {', '.join(views)})" if views else ""))
+    if this := _this(place):
+        lines.append(f'"This" here means the {this}.')
     if said := _transport(_dict(focus.get("transport"))):
         lines.append("Transport: " + ", ".join(said))
     lines += _catch_up(focus.get("catch_up"))
+    lines += _latest(changes)
     return fenced(lines, max_chars)
 
 
@@ -106,17 +110,18 @@ def quoted(value: Any, limit: int) -> str | None:
 
 
 def _on(place: dict) -> list[str]:
-    """What the producer has selected, by name: track, device, the item in the editor, the section, the parameter."""
+    """What the producer has selected, by name and ref: track, device, the item in the editor, the section, the
+    parameter."""
     on = []
     if track := quoted(_dict(place.get("track")).get("name"), 60):
-        on.append(f"track {track}")
+        on.append(f"track {track}{_ref(place.get('trackRef'))}")
     if device := quoted(place.get("device"), 60):
-        on.append(f"device {device}")
+        on.append(f"device {device}{_ref(place.get('deviceRef'))}")
     item = _dict(place.get("item"))
     if clip := quoted(place.get("clip"), 60):
-        on.append(f"clip {clip}")
+        on.append(f"clip {clip}{_ref(item.get('itemRef'))}")
     elif name := quoted(item.get("name"), 60):
-        on.append(f"{ITEMS.get(item.get('kind'), 'item')} {name}")
+        on.append(f"{ITEMS.get(item.get('kind'), 'item')} {name}{_ref(item.get('itemRef'))}")
     section = _dict(place.get("section"))
     if scene := quoted(place.get("scene"), 60):
         on.append(f"scene {scene}")
@@ -128,6 +133,46 @@ def _on(place: dict) -> list[str]:
         value = f" = {value}" if (value := quoted(parameter.get("value"), 30)) else ""
         on.append(f"parameter {name}{device}{value}")
     return on
+
+
+def _ref(value: Any) -> str:
+    """A selection's ref as the runtime gives it, for a change's input."""
+    return f" (ref {ref})" if (ref := quoted(value, 80)) else ""
+
+
+def _this(place: dict) -> str | None:
+    """What "this" or "here" points at: the most particular selection that has a ref, a device over the item in the
+    editor over the track (item 3)."""
+    track = quoted(_dict(place.get("track")).get("name"), 60)
+    on_track = f" on track {track}" if track else ""
+    item = _dict(place.get("item"))
+    if (device := quoted(place.get("device"), 60)) and (ref := _ref(place.get("deviceRef"))):
+        return f"device {device}{ref}{on_track}"
+    name = quoted(place.get("clip"), 60) or quoted(item.get("name"), 60)
+    if name and (ref := _ref(item.get("itemRef"))):
+        kind = "clip" if quoted(place.get("clip"), 60) else ITEMS.get(item.get("kind"), "item")
+        return f"{kind} {name}{ref}{on_track}"
+    if track and (ref := _ref(place.get("trackRef"))):
+        return f"track {track}{ref}"
+    return None
+
+
+LATEST = 3
+
+
+def _latest(changes: Any) -> list[str]:
+    """Kumi's latest changes, newest first, by HISTORY id: what "undo that" means (item 3)."""
+    rows = [row for row in changes if isinstance(row, dict)][:LATEST] if isinstance(changes, list) else []
+    lines = []
+    for row in rows:
+        ident = quoted(row.get("id"), 60)
+        if not ident:
+            continue
+        where = f" on {track}" if (track := quoted(row.get("track"), 40)) else ""
+        state = quoted(row.get("state"), 20) or "unknown"
+        undo = "can be undone" if row.get("undo_available") is True else "can't be undone"
+        lines.append(f"- {quoted(row.get('title'), 60) or 'a change'}{where}: {state}, {undo} (id {ident})")
+    return ["Kumi's latest changes, newest first:", *lines] if lines else []
 
 
 def _transport(transport: dict) -> list[str]:
@@ -261,8 +306,9 @@ def pre_llm_call(host: Any, session_id: Any = None, **kwargs: Any) -> dict | Non
         focus = snapshots.read(state, "focus") or {}
         status = snapshots.read(state, "status") or {}
         connected = status.get("connected") if isinstance(status.get("connected"), bool) else None
-        text = focus_text(focus, owner, connected=connected)
-        key = (focus.get("seq"), bool(owner.get("stale")), owner.get("running"), connected)
+        history = snapshots.history(state, limit=LATEST)
+        text = focus_text(focus, owner, connected=connected, changes=history["items"])
+        key = (focus.get("seq"), history.get("seq"), bool(owner.get("stale")), owner.get("running"), connected)
         if text is None or not SENT.first((str(state), session_id), key):
             return None
     except Exception:

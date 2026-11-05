@@ -59,7 +59,9 @@ class Focus(unittest.TestCase):
         body = fenced(self.note())
         self.assertTrue(body.startswith(context.HEADER), body)
         self.assertIn('Project: "Night Drive" (epoch 1)', body, "W1's epoch is a number")
-        self.assertIn('On: track "Drums", device "Drum Rack" (view "Arrangement")', body)
+        self.assertIn('On: track "Drums" (ref "t1"), device "Drum Rack" (ref "t1/d1") (view "Arrangement")', body)
+        self.assertIn('"This" here means the device "Drum Rack" (ref "t1/d1") on track "Drums".', body,
+                      "item 3: the most particular selection with a ref")
         self.assertIn("Transport: stopped, 124 BPM", body)
         self.assertIsNone(self.note(), "nothing changed, so nothing is added again (Hermes keeps the last one)")
         self.assertIsNone(self.note("s2"), "another chat on the profile")
@@ -69,6 +71,17 @@ class Focus(unittest.TestCase):
         self.ctx.settings["inject_focus"] = False
         support.call(self.host, "kumi_observe", {"scope": "focus"}, session_id="s1")
         self.assertIsNone(self.note(), "the producer switched it off")
+
+    def test_the_note_names_kumis_latest_changes_by_id_and_comes_again_when_one_is_made(self):
+        self.connect()
+        self.assertNotIn("Kumi's latest changes", fenced(self.note()), "no change yet")
+        made = [support.call(self.host, "kumi_change", {
+            "title": title, "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": db}}],
+            "expected_project_key": "live:night-drive", "expected_epoch": "1"}, session_id="s1")
+            for title, db in (("Louder drums", -4.0),)]
+        body = fenced(self.note())
+        latest = body.split("Kumi's latest changes, newest first:\n", 1)[1].splitlines()
+        self.assertEqual(latest[0], f'- "Louder drums" on "Drums": "applied", can be undone (id "{made[0]["history_ids"][0]}")')
 
     def test_a_compacted_chat_keeps_focus_and_a_subagent_never_gets_it(self):
         self.connect("s1")
