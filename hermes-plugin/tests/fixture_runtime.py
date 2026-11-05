@@ -29,12 +29,14 @@ from pathlib import Path
 import sys
 import threading
 import time
+from typing import Any
 
 VERSION = "1.24.66"
 PROTOCOL = "kumi-serve/1"
 MCP = "2025-11-25"
-# The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`).
-STEPS = {"set_track_volume", "replace_sample"}
+# The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
+# the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
+STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
 SET = {
     "name": "Night Drive", "key": "live:night-drive", "tempo": 124.0,
     "tracks": [
@@ -184,6 +186,11 @@ class Fixture:
     def track(self, ref: str) -> dict | None:
         return next((track for track in self.set["tracks"] if track["ref"] == ref), None)
 
+    def simpler(self, ref: str) -> tuple[dict, dict] | None:
+        """The track and the drum pad whose Simpler has device ref `ref` (the demo's replace_sample target)."""
+        return next(((track, pad) for track in self.set["tracks"] for device in track["devices"]
+                     for pad in device.get("pads", []) if pad["ref"] == ref), None)
+
 
 def now() -> int:
     return int(time.time() * 1000)
@@ -257,38 +264,81 @@ def read(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"rows": copy.deepcopy(fixture.set["tracks"]), "cursor": None, "epoch": fixture.epoch}
 
 
-def plan_refusal(fixture: Fixture, args: dict) -> str | None:
-    """Why a change plan can't run (CC-3's refusals), or None."""
+def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
+    """Why a change plan can't run, as (code, reason) (#965: not_connected, stale, unknown_step, invalid, not_allowed),
+    or None."""
     if not fixture.connected:
-        return "Kumi isn't connected to the DAW: connect first."
+        return "not_connected", "Kumi isn't connected to the DAW: connect first."
     if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
-        return "stale: the project or its epoch changed since it was read; read it again"
+        return "stale", "The project or its epoch changed since it was read: read it again."
     steps = args.get("steps") or []
     unknown = [step.get("tool") for step in steps if step.get("tool") not in STEPS]
     if not steps or len(steps) > 20 or unknown:
-        return f"Kumi doesn't take these steps here: {unknown or 'none given'}"
+        return "unknown_step", f"Kumi doesn't take these steps here: {unknown or 'none given'}"
     for step in steps:
         target = step.get("input") or {}
-        if fixture.track(target.get("track_ref", "")) is None:
-            return f"no track {target.get('track_ref')!r} in the project"
-        if step["tool"] == "set_track_volume" and not isinstance(target.get("volume_db"), (int, float)):
-            return "set_track_volume needs volume_db, a number"
-        if step["tool"] == "replace_sample" and not isinstance(target.get("sample"), str):
-            return "replace_sample needs sample, a file name"
+        if step["tool"] == "set_track_volume":
+            if fixture.track(target.get("track_ref", "")) is None:
+                return "invalid", f"no track {target.get('track_ref')!r} in the project"
+            if not isinstance(target.get("volume_db"), (int, float)):
+                return "invalid", "set_track_volume needs volume_db, a number"
+        elif step["tool"] == "replace_sample":
+            if fixture.simpler(target.get("deviceRef", "")) is None:
+                return "invalid", f"no Simpler {target.get('deviceRef')!r} in the project"
+            refusal = source_refusal(fixture, target.get("sample"))
+            if refusal is not None:
+                return refusal
     return None
 
 
+def source_refusal(fixture: Fixture, source: Any) -> tuple[str, str] | None:
+    """CC-11: a file step's file field holds a source, never a path."""
+    if isinstance(source, str):
+        return "not_allowed", "A file step takes a sound, an artifact or an approved file as its source, never a path."
+    if not isinstance(source, dict):
+        return "invalid", "replace_sample needs sample, a source"
+    if "sound_id" in source:
+        if source.get("map_revision") != "r1":
+            return "stale", "That sound is from another map revision: search again."
+        if source["sound_id"] not in {sound["sound_id"] for sound in SOUNDS}:
+            return "invalid", f"no sound {source['sound_id']!r} on the map"
+        return None
+    if "artifact_id" in source:
+        return None if source["artifact_id"] in ("a-1", "a-track-1") else ("invalid", "no such artifact")
+    if "file" in source:
+        roots = [*fixture.options.library_root, *fixture.options.media_root]
+        inside = isinstance(source["file"], str) and any(
+            os.path.commonpath([os.path.abspath(source["file"]), os.path.abspath(root)]) == os.path.abspath(root)
+            for root in roots)
+        return None if inside else ("not_allowed", "That file isn't in an approved folder.")
+    return "invalid", "replace_sample needs sample, a source"
+
+
+def source_name(source: dict) -> str:
+    """The file a source names, by its name only (CC-11: the preview never shows a path)."""
+    if "sound_id" in source:
+        return next(sound["name"] for sound in SOUNDS if sound["sound_id"] == source["sound_id"])
+    if "artifact_id" in source:
+        return f"{source['artifact_id']}.wav"
+    return os.path.basename(source["file"])
+
+
 def describe(fixture: Fixture, step: dict) -> dict:
-    """A step's preview (CC-3): one sentence naming the targets by their current names, values as read just now."""
+    """A step's preview (CC-3) as #1005's runtime writes it: the step, its values first, then ` — on ` and its targets
+    by their current names, each quoted and cut at 40 characters; and the step's HISTORY family."""
     target = step["input"]
-    track = fixture.track(target["track_ref"])
     if step["tool"] == "set_track_volume":
-        text = f"Set {track['name']} volume from {track['volume_db']:g} dB to {float(target['volume_db']):g} dB"
-        return {"tool": step["tool"], "family": "mixer", "effect": "write", "text": text}
-    pad = track["devices"][0]["pads"][0]
-    text = (f"Replace the sample in the {pad['device']} on {track['name']} > {track['devices'][0]['name']} pad "
-            f"{pad['pad']} ({pad['sample']}) with {target['sample']}")
-    return {"tool": step["tool"], "family": "sample", "effect": "write", "text": text}
+        name = fixture.track(target["track_ref"])["name"]
+        text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
+    else:
+        track, pad = fixture.simpler(target["deviceRef"])
+        name = f"{pad['device']} ({track['name']} > {track['devices'][0]['name']} pad {pad['pad']})"
+        text = f"Replace sample: sample {quoted(source_name(target['sample']))} — on {quoted(name)}"
+    return {"tool": step["tool"], "family": STEPS[step["tool"]], "effect": "write", "text": text}
+
+
+def quoted(name: str) -> str:
+    return json.dumps(name if len(name) <= 40 else name[:39] + "…", ensure_ascii=False)
 
 
 def change(fixture: Fixture, args: dict, host: dict) -> dict:
@@ -296,38 +346,37 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
         owner = {"profile": "default", "session_id": fixture.options.leased_by, "pid": 4242, "since": now()}
         return {"error": {"code": "leased", "reason": "Another chat holds the DAW for changes.", "owner": owner}}
     refusal = plan_refusal(fixture, args)
+    if refusal is not None:
+        return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
     if args.get("preview"):
-        if refusal is not None:
-            return {"state": "refused", "code": "refused", "reason": refusal}
         return {"state": "preview", "title": args.get("title"),
                 "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
                 "steps": [describe(fixture, step) for step in args["steps"]]}
-    if refusal is not None:
-        return {"state": "refused", "history_ids": [], "steps": [], "summary": "Nothing changed.",
-                "undo_available": False, "reason": refusal}
     steps = args["steps"]
     before = copy.deepcopy(fixture.set)
     for step in steps:
         target = step["input"]
-        track = fixture.track(target["track_ref"])
         if step["tool"] == "set_track_volume":
-            track["volume_db"] = float(target["volume_db"])
+            fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
         else:
-            track["devices"][0]["pads"][0]["sample"] = target["sample"]
+            fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
+    first = steps[0]["input"]
+    track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
     ident = f"h-{fixture.set['key']}-g1-c{len(fixture.history) + 1}"
-    track = fixture.track(steps[0]["input"]["track_ref"])
     # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
     # (tool_call_id, digest, call_outcome), which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": "g1", "title": args.get("title") or "Kumi change",
-                            "family": describe(fixture, steps[0])["family"], "at": now(), "state": "applied",
+                            "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
                             "call_outcome": "applied", "before": before})
     fixture.publish("history", "focus")
-    applied = [{"tool": step["tool"], "state": "applied"} for step in steps]
-    return {"state": "applied", "history_ids": [ident], "steps": applied, "summary": args.get("title") or "Applied.",
-            "undo_available": True}
+    done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
+    return {"state": "applied", "history_ids": [ident],
+            "steps": {"done": done, "refused": [], "held_back": [], "stopped": None, "skipped": 0},
+            "summary": args.get("title") or "Applied.", "undo_available": True, "project_key": fixture.set["key"],
+            "epoch": fixture.epoch}
 
 
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
