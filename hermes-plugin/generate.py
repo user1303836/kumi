@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
+from pathlib import Path
 import time
 from typing import Any
 
@@ -22,7 +23,9 @@ KEY_ENV = "MIRELO_API_KEY"
 # quickly: the generation itself is a job, followed with kumi_job.
 TIMEOUT = 60.0
 PROMPT_MAX = 500
-TERMINAL = ("done", "failed", "cancelled", "interrupted")
+# W3's frozen layout: the ledger is <plugin-data>/ledger.json, beside its lock. Opening it makes it, so a profile that
+# never used Mirelo has none, and kumi_job doesn't open it there.
+LEDGER_FILE = "ledger.json"
 # The card event (13a): the public result, MIDI `notes` left out; one over this goes without its card.
 CARD_BYTES = 256 * 1024
 _SOURCE_KEYS = ({"artifact_id"}, {"sound_id", "map_revision"}, {"file", "provenance"})
@@ -72,22 +75,24 @@ def refusal(args: dict) -> str | None:
     return "kind is sfx or audio_to_midi."
 
 
-def ready(host: Any, kind: Any) -> dict | None:
+def ready(host: Any, kind: Any, key: str | None) -> dict | None:
     """Why a paid generation of `kind` can't run now, as CC-13's error, or None: the producer has acknowledged Mirelo
-    and switched this kind on (not_enabled), and Hermes holds the key (not_configured). None of it is the model's."""
+    and switched this kind on (not_enabled), and Hermes holds the key (not_configured). `key` is read once by the
+    caller, so the key checked is the key sent. None of it is the model's."""
     settings = host.generation()
     if kind not in KINDS or not settings["acknowledged"] or not settings["enabled"].get(kind):
         return error("not_enabled", "Paid generation of this kind is off. The producer switches it on in Kumi's "
                                     "settings in Hermes (Mirelo acknowledged, and the kind enabled).")
-    if not host.mirelo_key():
+    if not key:
         return error("not_configured", "No Mirelo API key is set: the producer adds it in Kumi's settings in Hermes.")
     return None
 
 
-def private(host: Any, **extra: Any) -> dict:
-    """The `_mirelo` fields of one request (CC-13), only after the producer's approval: the key read now, and that the
-    producer acknowledged Mirelo and enabled this kind (ready() checked both). Never in a result, record or log."""
-    return {"_mirelo": {"api_key": host.mirelo_key(), "acknowledged": True, "enabled": True, **extra}}
+def private(key: str, **extra: Any) -> dict:
+    """The `_mirelo` fields of one request (CC-13), only after the producer's approval: the key ready() checked, and
+    that the producer acknowledged Mirelo and enabled this kind (ready() checked both). Never in a result, record or
+    log."""
+    return {"_mirelo": {"api_key": key, "acknowledged": True, "enabled": True, **extra}}
 
 
 def _snapshot(ledger: Any) -> dict | None:
@@ -113,17 +118,19 @@ def call_id(kwargs: dict) -> str | None:
 
 def quote(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
     """A quote (CC-13): the runtime prepares it (for MIDI, the approved file, pinned by the approval) and asks Mirelo
-    for its estimate; the ledger keeps the quote, so a create's approval is built from it, never from the model."""
-    not_ready = ready(host, args.get("kind"))
+    for its estimate; the ledger keeps the quote, so a create's approval is built from it, never from the model. While
+    the kind is off, the ledger isn't opened (or made)."""
+    key = host.mirelo_key()
+    not_ready = ready(host, args.get("kind"), key)
+    if not_ready:
+        return not_ready
     try:
         ledger = host.ledger()
     except LedgerUnavailable as failure:
-        return not_ready or error(failure.code, failure.reason)
-    if not_ready:
-        return {**not_ready, "ledger": _snapshot(ledger)}
-    asked = {key: args[key] for key in ("action", "kind", "prompt", "seconds", "source") if key in args}
+        return error(failure.code, failure.reason)
+    asked = {name: args[name] for name in ("action", "kind", "prompt", "seconds", "source") if name in args}
     try:
-        result = host.live().call("generate", asked, identity, timeout=TIMEOUT, private=private(host))
+        result = host.live().call("generate", asked, identity, timeout=TIMEOUT, private=private(key))
     except runtime.Refused as refused:
         return {**refused.as_json(), "ledger": _snapshot(ledger)}
     except runtime.Unavailable as failure:
@@ -138,9 +145,11 @@ def quote(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
 
 
 def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
-    """A create (CC-13): only the quote the producer approved, as approved (13-R1). The ledger reserves its estimate
-    under its file lock before anything is sent; the runtime then posts it once. A native `not_submitted` is the only
-    proof that frees the reservation; any other loss keeps it, and nothing is ever sent again."""
+    """A create (CC-13): only the quote the producer approved, as approved (13-R1). Everything Kumi's side needs (the
+    ledger, the switches and the key, the runtime) is had before the ledger reserves the estimate under its file lock,
+    so a create that can't be sent never holds credits; the runtime then posts it once. Only proof that nothing was
+    posted frees the reservation: the runtime's `not_submitted`, or Kumi's own refusal before anything was written to
+    the runtime (runtime.NotSent). Any other loss keeps it, and nothing is ever sent again."""
     call = kwargs.get("kumi_call")
     extra = call.extra if isinstance(call, calls.Entry) else {}
     quote_id = args["quote_id"]
@@ -155,24 +164,32 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
         record = ledger.quote(quote_id)
     except Exception as failure:
         return _ledger_error(failure, ledger)
-    not_ready = ready(host, record.get("kind"))
+    key = host.mirelo_key()
+    not_ready = ready(host, record.get("kind"), key)
     if not_ready:
         return {**not_ready, "ledger": _snapshot(ledger)}
     estimate = record.get("estimate") if isinstance(record.get("estimate"), dict) else {}
     if record.get("request_sha256") != extra["request_sha256"] or estimate.get("max_credits") != extra["max_credits"]:
         return error("stale", "The quote isn't the one the producer approved; quote again.", _snapshot(ledger))
     try:
+        live = host.live()
+    except runtime.Unavailable as failure:
+        return error(failure.code, f"Nothing was reserved or sent. {failure.reason}", _snapshot(ledger))
+    try:
         reservation = ledger.reserve(quote_id, extra["request_sha256"], extra["max_credits"],
                                      host_call_id=call.tool_call_id)
     except Exception as failure:
         return _ledger_error(failure, ledger)
     reservation_id = reservation["reservation_id"]
-    sealed = private(host, reservation_id=reservation_id, reserved_credits=reservation["reserved_credits"])
+    sealed = private(key, reservation_id=reservation_id, reserved_credits=reservation["reserved_credits"])
     try:
-        result = host.live().call("generate", {"action": "create", "quote_id": quote_id}, identity, timeout=TIMEOUT,
-                                  private=sealed)
+        result = live.call("generate", {"action": "create", "quote_id": quote_id}, identity, timeout=TIMEOUT,
+                           private=sealed)
+    except runtime.NotSent as failure:  # refused before a byte reached the runtime: nothing reached Mirelo either
+        _refuse(ledger, reservation_id, failure.reason)
+        return error(failure.code, failure.reason, _snapshot(ledger))
     except runtime.Refused as refused:
-        if refused.code == "not_submitted":  # the runtime's proof nothing was posted: the only release (13-R8)
+        if refused.code == "not_submitted":  # the runtime's proof nothing was posted (13-R8)
             _refuse(ledger, reservation_id, refused.reason)
         return {**refused.as_json(), "ledger": _snapshot(ledger)}
     except runtime.Unavailable as failure:  # posted or not is unknown: the reservation stays, and nothing is resent
@@ -185,11 +202,10 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
             _refuse(ledger, reservation_id, str(result["error"].get("reason") or "not submitted"))
         return {**result, "ledger": _snapshot(ledger)}
     job_id = result.get("job_id")
-    if isinstance(job_id, str) and job_id:
-        try:
-            ledger.bind(reservation_id, job_id)
-        except Exception:
-            log.warning("Kumi couldn't bind a generation job to its credit reservation")
+    if isinstance(job_id, str) and job_id and not _bind(ledger, reservation_id, job_id):
+        result = {**result, "hint": ("Kumi couldn't link this job to its credit reservation, so following it won't "
+                                     "settle it: its credits stay reserved until the producer checks Mirelo and "
+                                     "hermes kumi credits.")}
     return {**result, "ledger": _snapshot(ledger)}
 
 
@@ -200,13 +216,26 @@ def _refuse(ledger: Any, reservation_id: str, reason: str) -> None:
         log.warning("Kumi couldn't free a reservation its runtime didn't submit")
 
 
+def _bind(ledger: Any, reservation_id: str, job_id: str) -> bool:
+    """Link a created job to its reservation, so kumi_job settles it; tried twice (a lock busy once may be free)."""
+    for _ in range(2):
+        try:
+            ledger.bind(reservation_id, job_id)
+            return True
+        except Exception:
+            continue
+    log.warning("Kumi couldn't bind a generation job to its credit reservation")
+    return False
+
+
 def job(host: Any, args: dict, identity: dict, timeout: float) -> dict | None:
-    """A generation job for kumi_job, or None when `job_id` isn't one (the ledger doesn't route it). Its runtime reads
-    the saved state, and with the producer's key and switches still on, may only GET an already identified vendor job
-    (never a create). A finished one is settled in the ledger by its reservation, and its result carries the fresh
-    totals; an unknown charge stays reserved."""
+    """A generation job for kumi_job, or None when `job_id` isn't one (the ledger doesn't route it, or this profile
+    never used Mirelo and has no ledger, which isn't opened then). Its runtime reads the saved state, and with the
+    producer's key and switches still on, may only GET an already identified vendor job (never a create). Every answer
+    goes to the ledger (a finished one settles its reservation), and the result carries the fresh totals; an unknown
+    charge stays reserved."""
     job_id = args.get("job_id")
-    if snapshots.file_id(job_id) is None:
+    if snapshots.file_id(job_id) is None or not (Path(host.data_dir()) / LEDGER_FILE).is_file():
         return None
     try:
         ledger = host.ledger()
@@ -215,15 +244,15 @@ def job(host: Any, args: dict, identity: dict, timeout: float) -> dict | None:
         return None
     if not isinstance(found, dict):
         return None
-    kind = found.get("kind")
-    sealed = private(host) if ready(host, kind) is None else None
+    key = host.mirelo_key()
+    sealed = private(key) if ready(host, found.get("kind"), key) is None else None
     envelope = host.live().call("generate", {"action": "job", "job_id": job_id}, identity, timeout=timeout,
                                 private=sealed)
-    if envelope.get("state") in TERMINAL and isinstance(found.get("reservation_id"), str):
+    if isinstance(found.get("reservation_id"), str):
         try:
             ledger.reconcile(found["reservation_id"], envelope)
         except Exception:
-            log.warning("Kumi couldn't settle a finished generation in its credit ledger")
+            log.warning("Kumi couldn't bring a generation's credit reservation up to date")
     result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
     totals = _snapshot(ledger)
     return {**envelope, "result": {**result, **({"ledger": totals} if totals is not None else {})}}

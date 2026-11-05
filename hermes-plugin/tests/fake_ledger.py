@@ -1,8 +1,10 @@
 """A stand-in for W3's `ledger.Ledger` (W3-GENERATE.md, CC-13 amendment A) until ledger.py lands: the same calls and
-refusal codes, kept in memory per plugin-data folder. It serves the plugin's own tests only; the real ledger's file
-lock, fsync and cross-process atomicity (13-R4) are W3's to test."""
+refusal codes, kept in memory per plugin-data folder; like the real one, opening it makes `ledger.json` there. It
+serves the plugin's own tests only; the real ledger's file lock, fsync and cross-process atomicity (13-R4) are W3's to
+test."""
 from __future__ import annotations
 
+from pathlib import Path
 import time
 from typing import Any
 
@@ -20,10 +22,11 @@ class LedgerError(Exception):
 class Ledger:
     books: dict[str, dict] = {}
 
-    def __init__(self, data_dir: Any, *, credit_cap: int):
+    def __init__(self, data_dir: Any, *, credit_cap: int, lock_timeout: float = 2.0):
         self.book = Ledger.books.setdefault(str(data_dir), {"quotes": {}, "reservations": {}, "spent": 0,
                                                              "frozen": False, "policy": None})
         self.cap = credit_cap
+        (Path(data_dir) / "ledger.json").touch()
 
     def configure(self, *, acknowledged: bool, enabled: dict) -> None:
         self.book["policy"] = {"acknowledged": acknowledged, "enabled": dict(enabled), "cap": self.cap}
@@ -57,7 +60,8 @@ class Ledger:
         reservation_id = f"r-{len(self.book['reservations']) + 1}"
         self.book["reservations"][reservation_id] = {"quote_id": quote_id, "kind": record["kind"], "job_id": None,
                                                      "reserved": approved_max, "settled": None, "actual": None,
-                                                     "host_call_id": host_call_id}
+                                                     "host_call_id": host_call_id, "submission": "unknown",
+                                                     "created_at": int(time.time() * 1000)}
         return {"reservation_id": reservation_id, "quote_id": quote_id, "kind": record["kind"],
                 "reserved_credits": approved_max, "expires_at": record["expires_at"]}
 
@@ -65,7 +69,7 @@ class Ledger:
         held = self.book["reservations"][reservation_id]
         if held["job_id"] not in (None, job_id):
             raise LedgerError("invalid_request", "That reservation has another job.")
-        held["job_id"] = job_id
+        held["job_id"], held["submission"] = job_id, "submitted"
         return self.snapshot()
 
     def refuse(self, reservation_id: str, *, not_submitted: bool, reason: str) -> dict:
@@ -93,6 +97,12 @@ class Ledger:
                         "job_id": job_id, "provider_job_id": None, "reserved_credits": held["reserved"],
                         "submission": "submitted", "settlement": held["settled"], "actual_credits": held["actual"]}
         return None
+
+    def reservations(self) -> list[dict]:
+        return [{"reservation_id": reservation_id, "quote_id": held["quote_id"], "job_id": held["job_id"],
+                 "kind": held["kind"], "reserved_credits": held["reserved"], "submission": held["submission"],
+                 "created_at": held["created_at"]}
+                for reservation_id, held in self.book["reservations"].items() if held["settled"] is None]
 
     def snapshot(self) -> dict:
         reserved = sum(held["reserved"] for held in self.book["reservations"].values() if held["settled"] is None)

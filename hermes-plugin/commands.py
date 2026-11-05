@@ -149,14 +149,33 @@ def credits_line(totals: Any) -> str:
     return line
 
 
+KIND_WORDS = {"sfx": "sound effect", "audio_to_midi": "audio to MIDI"}
+
+
+def reservation_lines(held: Any) -> list[str]:
+    """The ledger's unsettled reservations, one line each, with the id `release` takes (W3's `reservations()`)."""
+    rows = [row for row in held if isinstance(row, dict)] if isinstance(held, list) else []
+    lines = ["Reserved, not settled yet:"] if rows else []
+    for row in rows:
+        job = row.get("job_id")
+        lines.append(f"• {_said(row.get('reservation_id'), 80)}: {KIND_WORDS.get(row.get('kind'), 'a generation')}, "
+                     f"{_said(row.get('reserved_credits'), 20)} credits, "
+                     f"{f'job {_said(job, 80)}' if isinstance(job, str) and job else 'no job'}, "
+                     f"submitted: {_said(row.get('submission') or 'unknown', 40)}")
+    return lines
+
+
 def cli_credits(host: tools.Host, action: str | None, reservation_id: str | None = None, *,
                 stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
-    """`hermes kumi credits [unfreeze | release <reservation_id>]` (CC-13's 13-R5): the ledger's totals, and the two
-    things only the producer may do, in a terminal, after an interactive yes. No tool reaches them."""
+    """`hermes kumi credits [unfreeze | release <reservation_id>]` (CC-13's 13-R5): the ledger's totals and its
+    unsettled reservations, and the two things only the producer may do, in a terminal, after an interactive yes. No
+    tool reaches them."""
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     try:
         ledger = host.ledger()
         print(credits_line(ledger.snapshot()), file=stdout)
+        for line in reservation_lines(ledger.reservations()):
+            print(line, file=stdout)
     except Exception as failure:
         print(credits_line(None), _said(getattr(failure, "reason", None) or ""), file=stdout)
         return 1

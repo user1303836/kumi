@@ -369,9 +369,19 @@ def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
 
 
 def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
-    not_ready = generate.ready(host, "audio_to_midi")
+    """Sending an audio file to Mirelo (13-R2, amendment A). Where nobody can answer, it's refused before the runtime
+    looks at the file. The ledger is opened first, so the producer's current policy is in it before the runtime's
+    preview, a bounded local read (no network, copy or DSP); the approval names the file as that preview describes it,
+    under a key naming its content (A-a), in this chat (A-c)."""
+    if host.unattended():
+        return block(UNATTENDED), {}
+    not_ready = generate.ready(host, "audio_to_midi", host.mirelo_key())
     if not_ready is not None:
         return block(f"Kumi didn't send anything: {not_ready['error']['reason']}"), {}
+    try:
+        host.ledger()
+    except generate.LedgerUnavailable as failure:
+        return block(f"Kumi didn't send anything: {failure.reason}"), {}
     try:
         preview = _ask(host, "generate", {**args, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
@@ -379,15 +389,34 @@ def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     upload = preview.get("upload") if isinstance(preview.get("upload"), dict) else {}
     name, size, identity = upload.get("file"), upload.get("bytes"), upload.get("identity_sha256")
     if (preview.get("state") != "preview" or not isinstance(name, str) or not name.strip() or isinstance(size, bool)
-            or not isinstance(size, int) or size < 0 or snapshots.file_id(identity) is None):
+            or not isinstance(size, int) or size < 0 or not isinstance(identity, str)
+            or not _SHA256.fullmatch(identity)):
         return block("Kumi didn't send anything: its runtime couldn't describe the file."), {}
-    decision = approve([f"Kumi: send {quoted(name)} ({size / 1_000_000:.1f} MB) to Mirelo, to turn it into MIDI notes",
+    decision = approve([f"Kumi: send {quoted(name)} ({_size(size)}) to Mirelo, to turn it into MIDI notes",
                         "• Mirelo quotes it in credits first; nothing is paid until that quote is approved too."],
                        f"kumi:upload:{identity}")
-    return decision, {"upload_sha256": identity}
+    return decision, {}
+
+
+# A-a: a file's identity is its content's SHA-256, as lowercase hex.
+_SHA256 = re.compile("[0-9a-f]{64}")
+
+
+def _size(size: int) -> str:
+    """A file's size as people read it: bytes under a kilobyte, kilobytes under a megabyte, else megabytes."""
+    if size < 1_000:
+        return f"{size} bytes"
+    if size < 1_000_000:
+        return f"{size / 1_000:.0f} KB"
+    return f"{size / 1_000_000:.1f} MB"
 
 
 def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
+    """A create (13-R1), refused before anyone is asked, and before the ledger is opened where nobody can answer: a
+    used or expired quote, a kind switched off or no key, a ledger that doesn't add up, a cap of 0 (which refuses
+    every paid generation, a zero estimate's too), a freeze, or an estimate over what's left."""
+    if host.unattended():
+        return block(UNATTENDED), {}
     quote_id = args["quote_id"]
     try:
         ledger = host.ledger()
@@ -401,13 +430,16 @@ def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
         return block("Kumi didn't create anything: that quote was already used. Quote again."), {}
     if generate.expired(record):
         return block("Kumi didn't create anything: that quote expired. Quote again."), {}
-    not_ready = generate.ready(host, record.get("kind"))
+    not_ready = generate.ready(host, record.get("kind"), host.mirelo_key())
     if not_ready is not None:
         return block(f"Kumi didn't create anything: {not_ready['error']['reason']}"), {}
     estimate = record.get("estimate") if isinstance(record.get("estimate"), dict) else {}
     most, left, cap = estimate.get("max_credits"), totals.get("left"), totals.get("cap")
     if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in (most, left, cap)):
         return block("Kumi didn't create anything: its quote or credit ledger doesn't add up."), {}
+    if cap == 0:
+        return block("Kumi didn't create anything: the producer's credit cap is 0, which refuses every paid "
+                     "generation. They set one in Kumi's settings in Hermes."), {}
     if totals.get("frozen"):
         return block("Kumi didn't create anything: new paid generations are paused, since a charge came in above its "
                      "estimate. The producer checks Mirelo, then runs hermes kumi credits unfreeze."), {}

@@ -1,6 +1,7 @@
 """Paid generation with Mirelo, W2's side (CC-13 and its amendment A), against the fixture runtime's `generate` and a
-stand-in for W3's ledger: off until the producer switches it on, a quote then a create approved from the stored quote
-alone, once, within the cap, never where nobody can answer, and the key nowhere but the one request."""
+stand-in for W3's ledger, set up only through the ledger's own calls: off until the producer switches it on, a quote
+then a create approved from the stored quote alone, once, within the cap, never where nobody can answer, credits held
+only for a create that may have left, and the key nowhere but the one request."""
 from __future__ import annotations
 
 import io
@@ -8,12 +9,15 @@ import json
 import logging
 import os
 from pathlib import Path
+import signal
+import time
 import unittest
 from unittest import mock
 
 import fake_ledger
 import support
 
+calls = support.module("calls")
 commands = support.module("commands")
 generate = support.module("generate")
 policy = support.module("policy")
@@ -23,6 +27,7 @@ KEY = "mk-SENTINEL-4f2a9c"  # a key that must turn up nowhere but in the request
 ON = {"daw": "ableton", "mirelo_acknowledged": True, "mirelo_sfx_enabled": True, "mirelo_midi_enabled": True,
       "mirelo_credit_cap": 100}
 SFX = {"action": "quote", "kind": "sfx", "prompt": "a short metallic impact"}
+MIDI = {"action": "quote", "kind": "audio_to_midi", "source": {"sound_id": "s-r1-1", "map_revision": "r1"}}
 
 
 class Tty(io.StringIO):
@@ -46,6 +51,17 @@ class Generation(unittest.TestCase):
     def hook(self, host, args: dict, call: str = "c1") -> dict | None:
         return policy.pre_tool_call(host, tool_name="kumi_generate", args=args, session_id="s1", tool_call_id=call)
 
+    def approved(self, host, args: dict, call: str) -> None:
+        """The hook asks, and the producer allows it once."""
+        self.assertEqual(self.hook(host, args, call)["action"], "approve")
+        policy.post_approval_response(host, tool_call_id=call, choice="once")
+
+    def generation(self, host) -> dict:
+        """A sound effect quoted, created as approved and followed to its end: its job's answer."""
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        running = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+        return support.call(host, "kumi_job", {"job_id": running["job_id"]}, session_id="s1")
+
     def test_paid_generation_is_off_until_the_producer_switches_it_on_and_holds_a_key(self):
         for settings, key, code in (({"daw": "ableton"}, KEY, "not_enabled"),
                                     ({**ON, "mirelo_sfx_enabled": False}, KEY, "not_enabled"),
@@ -54,6 +70,7 @@ class Generation(unittest.TestCase):
                 host, _, data = self.host(settings, key=key)
                 self.assertEqual(support.call(host, "kumi_generate", SFX, session_id="s1")["error"]["code"], code)
                 self.assertEqual(self.sent(data, "quote"), [], "Mirelo is never asked")
+                self.assertFalse((data / generate.LEDGER_FILE).exists(), "and no ledger is made")
 
     def test_a_sound_effect_is_quoted_unasked_then_created_only_as_approved_from_its_stored_quote(self):
         host, _, data = self.host()
@@ -79,39 +96,61 @@ class Generation(unittest.TestCase):
     def test_a_create_runs_only_the_quote_approved_as_approved_and_only_once(self):
         host, _, data = self.host()
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
-        self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id, "prompt": "louder"})["action"],
-                         "block", "a create can't carry other words than the quote's")
-        self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id}, "c2")["action"], "approve")
-        policy.post_approval_response(host, tool_call_id="c2", choice="once")
-        book = fake_ledger.Ledger.books[str(data)]
-        book["quotes"][quote_id]["request_sha256"] = "0" * 64  # the stored quote changed after the approval
-        stale = support.handle(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
-        self.assertEqual((stale["error"]["code"], stale["ledger"]["reserved"]), ("stale", 0), "nothing reserved")
-        self.assertEqual(self.sent(data, "create"), [], "and nothing sent")
+        create = {"action": "create", "quote_id": quote_id}
+        self.assertEqual(self.hook(host, {**create, "prompt": "louder"})["action"], "block",
+                         "a create can't carry other words than the quote's")
+        other_terms = calls.Entry("c9", 0.0, {"approved": True, "quote_id": quote_id, "request_sha256": "0" * 64,
+                                              "max_credits": 15})
+        stale = generate.create(host, create, host.identity({"session_id": "s1"}), {"kumi_call": other_terms})
+        self.assertEqual((stale["error"]["code"], stale["ledger"]["reserved"]), ("stale", 0),
+                         "approved with other terms than the stored quote's: nothing reserved")
+        for call in ("c2", "c3"):  # the model sent the same create twice, and the producer allowed both
+            self.approved(host, create, call)
+        answers = [support.handle(host, "kumi_generate", create, session_id="s1") for _ in range(2)]
+        self.assertEqual(sorted(answer.get("state") or answer["error"]["code"] for answer in answers),
+                         ["quote_consumed", "running"])
+        self.assertEqual(len(self.sent(data, "create")), 1, "sent once")
+        self.assertEqual(self.hook(host, create, "c4")["action"], "block", "a used quote is never asked again")
 
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
-        support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
-        again = self.hook(host, {"action": "create", "quote_id": quote_id}, "c4")
-        self.assertEqual(again["action"], "block", "a used quote is never asked again")
-        self.assertEqual(len(self.sent(data, "create")), 1)
+    def test_a_quote_that_expired_or_a_kind_switched_off_is_refused_at_the_hook_and_at_dispatch(self):
+        host, ctx, data = self.host(None, "--generate-expires-ms", "3000")
+        first = support.call(host, "kumi_generate", SFX, session_id="s1")
+        create = {"action": "create", "quote_id": first["quote_id"]}
+        self.approved(host, create, "c2")
+        self.assertTrue(support.eventually(lambda: time.time() * 1000 > first["expires_at"]),
+                        "the quote expires between its approval and its dispatch")
+        late = support.handle(host, "kumi_generate", create, session_id="s1")
+        self.assertEqual((late["error"]["code"], late["ledger"]["reserved"]), ("expired_quote", 0))
+        self.assertEqual(self.hook(host, create, "c3")["action"], "block", "an expired quote is never asked")
+
+        second = support.call(host, "kumi_generate", SFX, session_id="s1")
+        create = {"action": "create", "quote_id": second["quote_id"]}
+        self.approved(host, create, "c4")
+        ctx.settings["mirelo_sfx_enabled"] = False  # the producer switched sound effects off after approving
+        off = support.handle(host, "kumi_generate", create, session_id="s1")
+        self.assertEqual((off["error"]["code"], off["ledger"]["reserved"]), ("not_enabled", 0))
+        self.assertEqual(self.hook(host, create, "c5")["action"], "block", "never asked while it's off")
+        self.assertEqual(self.sent(data, "create"), [])
 
     def test_the_cap_a_freeze_and_a_turn_with_nobody_in_it_refuse_before_anyone_is_asked(self):
-        for settings in ({**ON, "mirelo_credit_cap": 0}, {**ON, "mirelo_credit_cap": 10}):
-            with self.subTest(cap=settings["mirelo_credit_cap"]):
-                host, _, _ = self.host(settings)
+        for cap, estimate in ((0, "15"), (0, "0"), (10, "15")):  # a cap of 0 refuses even a zero estimate
+            with self.subTest(cap=cap, estimate=estimate):
+                host, _, _ = self.host({**ON, "mirelo_credit_cap": cap}, "--generate-estimate", estimate)
                 quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
                 self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id})["action"], "block")
-        host, ctx, data = self.host()
+        host, ctx, data = self.host(None, "--generate-actual", "20")  # a charge above its estimate (15)
+        self.assertTrue(self.generation(host)["result"]["ledger"]["frozen"])
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
-        fake_ledger.Ledger.books[str(data)]["frozen"] = True
         self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id})["action"], "block", "frozen")
-        fake_ledger.Ledger.books[str(data)]["frozen"] = False
         for surface in ("webhook", "api_server"):
             with self.subTest(surface=surface):
                 ctx.surface = surface
                 self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id})["message"],
                                  policy.UNATTENDED)
+                self.assertEqual(self.hook(host, MIDI)["message"], policy.UNATTENDED)
                 self.assertIsNone(self.hook(host, SFX), "a free estimate may still be read there")
+        looked = [m for m in support.requests(data / "state") if m.get("params", {}).get("arguments", {}).get("preview")]
+        self.assertEqual(looked, [], "with nobody there, the runtime never looked at the file")
         ctx.surface, ctx.cron_execution = "tui", object()
         self.assertEqual(self.hook(host, SFX)["message"], tools.SCHEDULED)
 
@@ -120,59 +159,121 @@ class Generation(unittest.TestCase):
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
         refused = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((refused["error"]["code"], refused["ledger"]["reserved"]), ("not_submitted", 0), refused)
-        host, _, data = self.host(None, "--slow", "generate=2")
+        host, _, _ = self.host(None, "--slow", "generate=2")
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
         with mock.patch.object(generate, "TIMEOUT", 0.3):
             unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((unsure["state"], unsure["ledger"]["reserved"]), ("unsure", 15), "kept, never sent again")
 
+    def test_a_create_kumi_can_not_send_holds_no_credits(self):
+        host, _, data = self.host()
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        create = {"action": "create", "quote_id": quote_id}
+        self.approved(host, create, "c2")
+        host.runtimes.stop_all()  # Kumi's runtime stopped after the approval
+        stopped = support.handle(host, "kumi_generate", create, session_id="s1")
+        self.assertEqual((sorted(stopped), stopped["ledger"]["reserved"]), (["error", "ledger"], 0), stopped)
+
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        create = {"action": "create", "quote_id": quote_id}
+        self.approved(host, create, "c3")
+        held = host.live()
+        host.runtimes.stop_all()  # it stopped after Kumi had it, before the create was written to it
+        with mock.patch.object(host, "live", return_value=held):
+            raced = support.handle(host, "kumi_generate", create, session_id="s1")
+        self.assertEqual((raced["error"]["code"], raced["ledger"]["reserved"]), ("not_running", 0),
+                         "proof nothing left frees it")
+        self.assertEqual(self.sent(data, "create"), [], "nothing was sent")
+
     def test_sending_audio_to_mirelo_is_approved_first_from_the_runtimes_own_description_of_it(self):
         host, _, data = self.host()
-        midi = {"action": "quote", "kind": "audio_to_midi", "source": {"sound_id": "s-r1-1", "map_revision": "r1"}}
-        asked = self.hook(host, midi)
+        asked = self.hook(host, MIDI)
         self.assertEqual(asked["action"], "approve")
         self.assertRegex(asked["rule_key"], r"^kumi:upload:[0-9a-f]{64}:s1$", "the file's own key, in this chat")
         self.assertIn("Dusty Snare 04.wav", asked["message"])
+        self.assertIn("480 KB", asked["message"], "a file under a megabyte isn't shown as 0.5 MB, or 0.0")
+        self.assertTrue((data / generate.LEDGER_FILE).is_file(), "the producer's policy is in the ledger first")
         self.assertEqual(self.sent(data, "quote"), [], "only the local preview so far")
-        quoted = support.call(host, "kumi_generate", midi, session_id="s1")
-        self.assertEqual((quoted["state"], quoted["upload"], quoted["file"]), ("quoted", True, "Dusty Snare 04.wav"))
+        quoted = support.call(host, "kumi_generate", MIDI, session_id="s1")
+        self.assertEqual((quoted["state"], quoted["upload"], quoted["file"]), ("quoted", True, "Dusty Snare 04.wav"),
+                         "the quote of the call whose preview was approved")
+        unpinned = generate.quote(host, MIDI, host.identity({"session_id": "s1", "tool_call_id": "never-asked"}), {})
+        self.assertEqual(unpinned["error"]["code"], "stale", "the runtime takes a quote only for its call's preview")
 
     def test_the_key_turns_up_nowhere_but_in_the_requests_that_carry_it(self):
         events: list = []
         records: list = []
         catcher = logging.Handler(logging.DEBUG)
         catcher.emit = records.append
-        logging.getLogger().addHandler(catcher)
-        self.addCleanup(logging.getLogger().removeHandler, catcher)
+        root = logging.getLogger()
+        self.addCleanup(root.setLevel, root.level)
+        root.setLevel(logging.DEBUG)
+        root.addHandler(catcher)
+        self.addCleanup(root.removeHandler, catcher)
         with mock.patch.object(tools, "broadcast", side_effect=lambda event, payload: events.append(payload)):
             host, _, data = self.host()
             answers = [support.call(host, "kumi_generate", SFX, session_id="s1")]
             answers.append(support.call(host, "kumi_generate", {"action": "create", "quote_id": answers[0]["quote_id"]},
                                         session_id="s1"))
             answers.append(support.call(host, "kumi_job", {"job_id": answers[1]["job_id"]}, session_id="s1"))
-            for tool, answer in zip(("kumi_generate", "kumi_generate", "kumi_job"), answers):
+            answers.append(support.call(host, "kumi_generate", MIDI, session_id="s1"))
+            answers.append(support.call(host, "kumi_generate", {"action": "create", "quote_id": answers[3]["quote_id"]},
+                                        session_id="s1"))
+            for tool, answer in zip(("kumi_generate", "kumi_generate", "kumi_job", "kumi_generate", "kumi_generate"),
+                                    answers):
                 policy.post_tool_call(host, tool_name=tool, tool_call_id="c", result=json.dumps(answer), status="ok",
                                       session_id="s1")
-            host.runtimes.stop_all()
-        self.assertEqual(len(events), 3, "a card for the quote, the create and the job")
-        said = [json.dumps(answers), json.dumps(events), *(record.getMessage() for record in records)]
+            os.kill(host.runtimes.get(data).client.pid, getattr(signal, "SIGKILL", signal.SIGTERM))  # killed
+            self.assertTrue(support.eventually(lambda: host.runtimes.get(data) is None))
+        self.assertEqual(len(events), 5, "a card for each quote, create and job")
+        said = [json.dumps(answers), json.dumps(events)]
+        for record in records:
+            said += [record.getMessage(), record.exc_text or "",
+                     logging.Formatter().formatException(record.exc_info) if record.exc_info else ""]
         for folder, _, files in os.walk(data):
             said += [Path(folder, name).read_text(encoding="utf-8", errors="replace") for name in files]
         self.assertFalse([text for text in said if KEY in text], "nowhere: answers, events, logs, the state folder")
 
-    def test_hermes_kumi_credits_shows_the_ledger_and_changes_it_only_after_a_yes_in_a_terminal(self):
-        host, _, data = self.host()
-        host.ledger().book["frozen"] = True  # a charge came in above its estimate
+    def test_hermes_kumi_credits_lists_whats_held_and_changes_it_only_after_a_yes_in_a_terminal(self):
+        host, _, _ = self.host(None, "--generate-actual", "-1")  # Mirelo never says what it charged
+        self.generation(host)
+        [held] = host.ledger().reservations()
         out = io.StringIO()
         self.assertEqual(commands.cli_credits(host, None, stdout=out), 0)
-        self.assertIn("100", out.getvalue())
-        self.assertEqual(commands.cli_credits(host, "unfreeze", stdin=io.StringIO("y\n"), stdout=io.StringIO()), 1,
+        self.assertIn(held["reservation_id"], out.getvalue(), "the id `release` takes is shown")
+        release = ("release", held["reservation_id"])
+        self.assertEqual(commands.cli_credits(host, *release, stdin=io.StringIO("y\n"), stdout=io.StringIO()), 1,
                          "no terminal: nothing changes")
+        self.assertEqual(commands.cli_credits(host, *release, stdin=Tty("n\n"), stdout=Tty()), 1)
+        self.assertEqual(host.ledger().snapshot()["reserved"], 15)
+        self.assertEqual(commands.cli_credits(host, *release, stdin=Tty("y\n"), stdout=Tty()), 0)
+        self.assertEqual((host.ledger().snapshot()["reserved"], host.ledger().reservations()), (0, []))
+
+        host, _, _ = self.host(None, "--generate-actual", "20")  # a charge above its estimate (15) pauses new ones
+        self.generation(host)
+        self.assertTrue(host.ledger().snapshot()["frozen"])
         self.assertEqual(commands.cli_credits(host, "unfreeze", stdin=Tty("n\n"), stdout=Tty()), 1)
-        self.assertTrue(fake_ledger.Ledger.books[str(data)]["frozen"])
+        self.assertTrue(host.ledger().snapshot()["frozen"])
         self.assertEqual(commands.cli_credits(host, "unfreeze", stdin=Tty("y\n"), stdout=Tty()), 0)
-        self.assertFalse(fake_ledger.Ledger.books[str(data)]["frozen"])
+        self.assertFalse(host.ledger().snapshot()["frozen"])
         self.assertFalse([name for name, _, _, _ in tools.TOOLS if "credit" in name], "no tool reaches them")
+
+    def test_a_card_goes_only_for_a_call_hermes_ran_and_none_over_its_size(self):
+        sent: list = []
+        with mock.patch.object(tools, "broadcast", side_effect=lambda event, payload: sent.append((event, payload))):
+            host, _, _ = self.host()
+            quoted = support.call(host, "kumi_generate", SFX, session_id="s1")
+            for status in ("blocked", "error"):
+                policy.post_tool_call(host, tool_name="kumi_generate", tool_call_id="c1", result=json.dumps(quoted),
+                                      status=status, session_id="s1")
+            self.assertEqual(sent, [], "no card for a call Hermes didn't run through")
+            huge = {**quoted, "summary": "x" * generate.CARD_BYTES}
+            policy.post_tool_call(host, tool_name="kumi_generate", tool_call_id="c2", result=json.dumps(huge),
+                                  status="ok", session_id="s1")
+        [(event, payload)] = sent
+        self.assertEqual((event, payload["tool_call_id"], "card" in payload), ("generate.updated", "c2", False),
+                         "too big for a card: the Jobs row refreshes through kumi_job")
 
     def test_a_generation_card_leaves_out_midis_notes(self):
         card = generate.card({"job_id": "g-1", "kind": "generate", "state": "done",

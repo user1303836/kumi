@@ -64,6 +64,7 @@ class Fixture:
         self.scans: dict[str, str] = {}  # job id -> running, cancelling, cancelled or done (CC-14)
         self.quoted: dict[str, dict] = {}  # Mirelo quotes this runtime made (CC-13)
         self.generations: dict[str, dict] = {}  # generation jobs it created
+        self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
         self.seq = 0
         self.connected = False
         self.daw = options.daw
@@ -632,26 +633,33 @@ def logged(message: dict) -> dict:
 
 
 def generate(fixture: Fixture, args: dict, host: dict) -> dict:
-    """Mirelo generation as W3's native `generate` answers it (CC-13): a quote (for MIDI, a preview naming the file it
-    would send first), a create that needs the host's `_mirelo` with a reservation, and its job."""
+    """Mirelo generation as W3's native `generate` answers it (CC-13): a quote (for MIDI, first a preview naming the
+    file it would send, pinned to the host call it was for, and that call's quote is stale without it), a create that
+    needs the host's `_mirelo` with a reservation, and its job."""
     action, sealed = args.get("action"), args.get("_mirelo") if isinstance(args.get("_mirelo"), dict) else {}
     if action == "quote":
         kind, source = args.get("kind"), args.get("source") if isinstance(args.get("source"), dict) else {}
         name = next((sound["name"] for sound in SOUNDS if sound["sound_id"] == source.get("sound_id")), "a-1.wav")
+        call = (host.get("profile_id"), host.get("session_id"), host.get("tool_call_id"))
+        identity = hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest()
         if kind == "audio_to_midi" and args.get("preview"):
-            identity = hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest()
+            if call[2] is not None:
+                fixture.previews[call] = identity
             return {"state": "preview", "upload": {"file": name, "bytes": 480044, "identity_sha256": identity}}
         if not sealed.get("api_key"):
             return error("not_configured", "no Mirelo key came with this quote")
+        if kind == "audio_to_midi" and fixture.previews.pop(call, None) != identity:
+            return error("stale", "no upload preview was pinned for this call and file")
         sfx = kind == "sfx"
         seconds = float(args.get("seconds") or 5) if sfx else 0.42
         request = {"kind": kind, "prompt": args.get("prompt"), "seconds": seconds, "source": source}
-        quote_id = f"q-{len(fixture.quoted) + 1}"
+        quote_id = f"q-{os.getpid()}-{len(fixture.quoted) + 1}"  # unique across restarts, as the runtime's are
         credits = fixture.options.generate_estimate
         fixture.quoted[quote_id] = quote = {
             "state": "quoted", "quote_id": quote_id, "kind": kind, "prompt": args.get("prompt") if sfx else None,
             "file": None if sfx else name, "seconds": seconds, "estimate": {"credits": credits, "max_credits": credits},
-            "credit_unit": "mirelo_credits", "upload": not sfx, "expires_at": int(time.time() * 1000) + 300_000,
+            "credit_unit": "mirelo_credits", "upload": not sfx,
+            "expires_at": int(time.time() * 1000) + fixture.options.generate_expires_ms,
             "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(),
             "summary": f"One {seconds:g}-second sound effect" if sfx else f"MIDI notes from {name}"}
         return quote
@@ -663,7 +671,7 @@ def generate(fixture: Fixture, args: dict, host: dict) -> dict:
             return error("not_approved", "a create needs the host's reservation")
         if fixture.options.generate_create == "not_submitted":
             return error("not_submitted", "Mirelo refused it before anything was sent")
-        job_id = f"g-{len(fixture.generations) + 1}"
+        job_id = f"g-{os.getpid()}-{len(fixture.generations) + 1}"
         fixture.generations[job_id] = {"quote": quote, "reserved": sealed.get("reserved_credits")}
         return {"state": "running", "job_id": job_id, "quote_id": quote["quote_id"], "kind": quote["kind"],
                 "prompt": quote["prompt"], "seconds": quote["seconds"], "estimate": quote["estimate"],
@@ -728,6 +736,8 @@ def main() -> None:
     parser.add_argument("--generate-estimate", type=int, default=15, help="a quote's estimate, in credits")
     parser.add_argument("--generate-create", default="running", choices=["running", "not_submitted"])
     parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
+    parser.add_argument("--generate-expires-ms", type=int, default=300_000,
+                        help="how long a quote lasts from now, in milliseconds (negative: already expired)")
     Fixture(parser.parse_args()).serve()
 
 

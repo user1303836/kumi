@@ -85,6 +85,11 @@ class Unavailable(Exception):
         self.reason = reason
 
 
+class NotSent(Unavailable):
+    """Unavailable before anything of the call was written to the runtime: proof, on Kumi's side, that nothing of it
+    reached the runtime, so nothing of it can have reached anyone else (a paid create's reservation is freed on it)."""
+
+
 class Refused(Exception):
     """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`)."""
 
@@ -410,9 +415,9 @@ class Client:
         pending = _Pending()
         with self._lock:
             if self._gone is not None:
-                raise Unavailable("not_running", f"{self._gone} Nothing was sent.")
+                raise NotSent("not_running", f"{self._gone} Nothing was sent.")
             if self._input_ended:
-                raise Unavailable("not_running", "Kumi's runtime is stopping. Nothing was sent.")
+                raise NotSent("not_running", "Kumi's runtime is stopping. Nothing was sent.")
             ident = next(self._ids)
             self._pending[ident] = pending
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
@@ -620,8 +625,8 @@ class Runtime:
         hosts = {key: value for key, value in (private or {}).items() if isinstance(key, str) and key.startswith("_")}
         with self._lock:
             if self.closing:
-                raise Unavailable("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing "
-                                                 "was sent.")
+                raise NotSent("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing was "
+                                             "sent.")
             self.in_flight += 1
         try:
             result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, **hosts, "_host": host}},
