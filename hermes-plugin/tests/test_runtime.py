@@ -312,7 +312,9 @@ class Runtimes(unittest.TestCase):
         answers = []
         caller = threading.Thread(target=lambda: answers.append(live.call("history", {}, self.host(), timeout=30)))
         caller.start()
-        self.assertTrue(eventually(lambda: live.in_flight == 1), "the call is in flight")
+        sent = lambda: [m for m in support.requests(self.data / "state") if m.get("params", {}).get("name") == "history"]
+        # Counted in flight isn't sent yet: a stop between the two ends the call with "Nothing was sent" (Windows, #1051).
+        self.assertTrue(eventually(lambda: live.in_flight == 1 and sent()), "the call is in flight, at the runtime")
         self.events.clear()
         self.runtimes.stop_session("s1")
         self.assertTrue(live.client.running, "the stop returned without waiting for the call to settle")
@@ -346,7 +348,9 @@ class Runtimes(unittest.TestCase):
 
         caller = threading.Thread(target=call)
         caller.start()
-        self.assertTrue(eventually(lambda: live.in_flight == 1))
+        self.assertTrue(eventually(lambda: live.in_flight == 1 and any(
+            m.get("params", {}).get("name") == "history" for m in support.requests(self.data / "state"))),
+            "the call is in flight, at the runtime")
         runtimes.stop_session("s1")
         caller.join()
         self.assertEqual(failures, ["stopped"], "its call ended unknown, never resent")
