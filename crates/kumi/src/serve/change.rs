@@ -774,6 +774,10 @@ fn rows_digest(rows: &[Row]) -> String {
 /// an older one can depend on a newer (a track's creation, and its volume since). A row undone already is skipped.
 async fn whole_change(ctx: &Ctx, call: &Call, row: &Row) -> Result<Value, OpError> {
     let rows = change_rows(ctx, row);
+    // A change only the DAW's own Undo takes back is undone of nothing, whichever of its rows says so (CC-20's 20e).
+    if let Some(daw_undo) = rows.iter().find(|row| row.reason.as_deref() == Some(DAW_UNDO)) {
+        return Ok(daw_undo_refusal(ctx.history(), daw_undo, previewing(&call.args)));
+    }
     let digest = rows_digest(&rows);
     let previewed = previewing(&call.args);
     // The real call names the set its approval listed (the preview's `rows_digest`), and a set that's changed since (a

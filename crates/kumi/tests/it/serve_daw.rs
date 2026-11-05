@@ -833,6 +833,57 @@ case!(serve_stops_a_whole_reaper_change_undo_at_the_first_step_reaper_wont_undo_
     wire.end().await;
 });
 
+case!(serve_undoes_nothing_of_a_change_only_reapers_own_undo_takes_back_whole_or_by_its_rows, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let (key, _, _) = looked_tracks(&mut wire).await;
+    // Two rows recorded as a call holding a step only REAPER's own Undo takes back records them (CC-20): no DAW marks
+    // one yet, so they're made in HISTORY as that call makes them.
+    let history = lab.ctx.history();
+    let note = "Kumi can't undo this change. REAPER's own Undo (Cmd+Z) takes all of it back while it's still REAPER's latest step.";
+    history.begin_call();
+    history.daw_undo_call(note.into());
+    for id in ["c901", "c902"] {
+        let record = json!({"id": id, "family": "mixer", "title": "Bass volume −6 dB", "state": "applied", "at": 1});
+        history.record(&serde_json::from_value(record).unwrap(), key.as_str().unwrap(), lab.ctx.snapshots());
+    }
+    let identity = kumi::serve::history::CallIdentity { profile_id: None, session_id: None, tool_call_id: None, digest: "d" };
+    let made: Vec<String> = history.end_call(identity, lab.ctx.snapshots()).into_iter().map(|row| row.id).collect();
+    history.one_change(&made, lab.ctx.snapshots());
+    let asked_before = lab.methods_sent().len();
+    // Whole or by a row, previewed or real, with the set its preview gave or without: refused with the change's words.
+    for (n, (asked, preview)) in [
+        (json!({"history_id": made[0], "whole_change": true, "preview": true}), true),
+        (json!({"history_id": made[1], "whole_change": true, "expect_rows": "0".repeat(64)}), false),
+        (json!({"history_id": made[1], "whole_change": true}), false),
+        (json!({"history_id": made[0]}), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (answer, _) = wire.call("undo", asked.clone(), Some(&format!("tc-{n}"))).await;
+        if preview {
+            assert_eq!(
+                (answer["undo_available"].clone(), answer["reason"].clone(), answer["note"].clone()),
+                (json!(false), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        } else {
+            assert_eq!(
+                (answer["state"].clone(), answer["code"].clone(), answer["reason"].clone()),
+                (json!("refused"), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        }
+    }
+    let sent = lab.methods_sent();
+    assert!(!sent[asked_before..].iter().any(|method| method.starts_with("change_")), "REAPER asked nothing: {sent:?}");
+    wire.end().await;
+});
+
 case!(serve_audits_an_undo_reaper_didnt_confirm_once_and_moves_the_epoch_on_once, async {
     let script = ReaperScript::new(3, 0);
     let sim = script.clone();
