@@ -13,14 +13,14 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-在 Hermes Desktop 中，还要在 **Capabilities → Plugins** 里打开 Kumi：插件的 Desktop 部分默认是关闭的。
+在 Hermes Desktop 中，还要在 **技能与工具 → 插件** 里打开 Kumi 的**桌面**开关：插件的桌面开关默认是关闭的。
 
 ## 设置
 
 让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup`。设置分两步，另有可选的第三步，每一步之前 Hermes 都会征求你的同意：
 
 1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（26–33 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（82–120 MB）。
-2. **DAW 里的 Kumi 部分：** Live 的 Remote Script（含用于聆听音轨的 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
+2. **Kumi 的 DAW 组件：** Live 的 Remote Script（含用于聆听音轨的 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
 3. **可选的 ffmpeg：** 如果你的电脑上已有 ffmpeg，设置会询问是否让 Kumi 用它读取 MP3、FLAC 等压缩音频。无论是否允许，设置都会完成；不使用时，Kumi 只能读取 WAV 和 AIFF。
 
 Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对话或聊天应用可能只显示其中一部分，所以在那里 Kumi 绝不会只拿出一步的一部分来征求同意，而是请你在终端运行 `hermes kumi setup`，或改用 Hermes Desktop。
@@ -32,7 +32,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 
-如果单独的 Kumi 已经在 Live 里安装了它的部分，设置会告诉你，并建议直接使用那套安装而不是替换它。这样 Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。对于 REAPER 和 Renoise，Kumi for Hermes 目前还不能使用单独的 Kumi 安装的部分：设置会说明这一点，并保持原样。
+如果单独的 Kumi 已经安装了 Kumi 的 Live 组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样 Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。对于 REAPER 和 Renoise，Kumi for Hermes 目前还不能使用单独的 Kumi 的组件：设置会说明这一点，并保持原样。
 
 设置不会启动或退出你的 DAW、替你选择控制界面，也不会保存你的工程。
 
@@ -70,7 +70,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - **对话：** Kumi 记下的工程信息（FOCUS、变化）和测量结果，会作为对话的一部分发给你在 Hermes 中使用的模型。Kumi 的状态告诉模型设置进行到哪一步时，不会提到你电脑上的任何文件夹。
 - **用模型解读测量结果**（只有打开后才会）：把测量数值和一张小的频段能量图发给你在 Hermes 中为 Kumi 聆听任务设置的模型，或 Hermes 为该任务配置的后备服务商，绝不发送音频本身或文件路径。重试和后备可能增加时间和 token 费用。
 - **音频留在本地：** Kumi 在你的电脑上测量音频，不会把音频发给任何模型。在聊天应用（Telegram、Discord 等）中，如果你让 Hermes 把声音发给你，它会作为附件通过该应用送达。
-- **聆听音轨或混音**之前会先征求同意，只播放你批准的节拍范围（最多 60 秒），而且只在 DAW 停止时进行。路由和走带可能会短暂改变，结束后会恢复。Live 通过 Kumi Ears（Max for Live）采集；REAPER 和 Renoise 渲染到拥有其 DAW 部分的那套 Kumi 安装的 listening 文件夹中，Kumi 只复制那一个文件，然后删除它。聆听 REAPER 或 Renoise 的音轨需要该 DAW 中较新的 Kumi 部分：Kumi 提示时，请再运行一次设置并重启 DAW。Renoise 只聆听在歌曲内、起止都落在整行 pattern 上的范围，其他范围会直接拒绝，而不会多播放你未批准的内容。在 REAPER 中聆听音轨后，工程可能显示为已修改（只有保存才能清除这个标记，而 Kumi 从不保存）。在 Live 中聆听音轨后，Set 可能显示为已修改，而且 Live 自己的撤销历史中会包含这次聆听临时添加设备的步骤：在 Live 中按撤销可能会让 Kumi Ears 重新出现。
+- **聆听音轨或混音**之前会先征求同意，只播放你批准的节拍范围（最多 60 秒），而且只在 DAW 停止时进行。路由和走带可能会短暂改变，结束后会恢复。Live 通过 Kumi Ears（Max for Live）采集；REAPER 和 Renoise 渲染到拥有 Kumi 的该 DAW 组件的那套 Kumi 安装的 listening 文件夹中，Kumi 只复制那一个文件，然后删除它。聆听 REAPER 或 Renoise 的音轨需要较新的 Kumi 的 DAW 组件：Kumi 提示时，请再运行一次设置并重启 DAW。Renoise 只聆听在歌曲内、起止都落在整行 pattern 上的范围，其他范围会直接拒绝，而不会多播放你未批准的内容。在 REAPER 中聆听音轨后，工程可能显示为已修改（只有保存才能清除这个标记，而 Kumi 从不保存）。在 Live 中聆听音轨后，Set 可能显示为已修改，而且 Live 自己的撤销历史中会包含这次聆听临时添加设备的步骤：在 Live 中按撤销可能会让 Kumi Ears 重新出现。
 - **定时任务**（Hermes 的 cron）只读取 Kumi 最后发布的状态和 HISTORY。它的回答（修改标题、音轨名称）只会通过该任务的投递目标离开你的电脑；Kumi 的任务模板默认投递到本机。
 - Kumi for Hermes 绝不使用单独的 Kumi 的登录、模型服务商或更新程序，也不发送遥测数据。
 
@@ -90,7 +90,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 ## 遇到问题时
 
 - `/kumi`（在终端中用 `hermes kumi status`）会告诉你设置还缺什么，以及 Kumi 能否读取压缩音频。当 `plugins.isolation` 为 `host` 时，Hermes 不会加载 `hermes kumi` 这类插件命令，请改在 Hermes Desktop 的对话中设置。
-- 聆听 REAPER 或 Renoise 音轨时提示 DAW 中的 Kumi 部分太旧：再运行一次设置，然后重启 DAW。
-- Hermes Desktop 中看不到 Kumi：检查 Capabilities → Plugins 里是否打开了 Kumi，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
+- 聆听 REAPER 或 Renoise 音轨时提示 Kumi 的 DAW 组件太旧：再运行一次设置，然后重启 DAW。
+- Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
 - 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Kumi for Hermes 使用的是单独的 Kumi 的安装，请改用那套 Kumi 运行 `kumi --daw ableton bridge`。Kumi Ears 需要 Max for Live。

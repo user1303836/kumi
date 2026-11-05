@@ -46,8 +46,8 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-In Hermes Desktop, also switch on Kumi's Desktop half under **Capabilities → Plugins**: plugins' Desktop halves start
-switched off.
+In Hermes Desktop, also turn on Kumi's **Desktop** switch under **Capabilities → Plugins**: a plugin's Desktop switch
+starts off.
 
 ## Set up
 

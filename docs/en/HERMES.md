@@ -16,7 +16,8 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-In Hermes Desktop, also switch on Kumi under **Capabilities → Plugins**: a plugin's Desktop half starts switched off.
+In Hermes Desktop, also turn on Kumi's **Desktop** switch under **Capabilities → Plugins**: a plugin's Desktop switch
+starts off.
 
 ## Set up
 
@@ -151,8 +152,8 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
   audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
   chat in Hermes Desktop instead.
 - Listening to a REAPER or Renoise track says Kumi's part in the DAW is too old: run setup again, then restart the DAW.
-- Nothing from Kumi in Hermes Desktop: check that Kumi is switched on under Capabilities → Plugins, and enabled in
-  Hermes (`hermes plugins enable kumi`).
+- Nothing from Kumi in Hermes Desktop: check Kumi's **Agent** and **Desktop** switches under Capabilities → Plugins,
+  and that it's enabled in Hermes (`hermes plugins enable kumi`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
 - Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi for Hermes uses a standalone Kumi's
   installation, run `kumi --daw ableton bridge` with that Kumi instead. Kumi Ears needs Max for Live.
