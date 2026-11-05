@@ -208,6 +208,20 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "once the DAW is gone, the short wait")
         self.assertTrue(eventually(lambda: not idle.client.running and not connected.client.running))
 
+    def test_a_runtime_running_a_job_nobody_asks_about_is_not_stopped_as_idle_until_it_ends(self):
+        runtimes = self.make(idle_after=0.3, job_busy_for=3600)
+        scanning = self.start(session=None, runtimes=runtimes)  # looked at first in each pass: started first
+        scanning.call("library", {"action": "scan"}, self.host(), timeout=10)  # jobs/j-scan-1.json: running
+        other = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        support.install(other)
+        self.addCleanup(support.stopped, runtimes, other)
+        runtimes.start(other, runtime.installed(other, support.VERSION), "ableton", None, profile="other")
+        self.assertTrue(eventually(lambda: runtimes.get(other) is None), "a runtime with nothing running stops")
+        self.assertIs(runtimes.get(self.data), scanning, "the scanning one, idle longer, still runs (rgzm, #1059)")
+        job = self.data / "state" / "jobs" / "j-scan-1.json"
+        job.write_text(json.dumps({**json.loads(job.read_text(encoding="utf-8")), "state": "done"}), encoding="utf-8")
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "its scan done, the short wait again")
+
     def test_an_idle_runtime_is_stopped_in_the_context_of_the_profile_that_started_it(self):
         profile = contextvars.ContextVar("profile")
         heard: list[tuple[object, object]] = []

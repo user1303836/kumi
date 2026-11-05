@@ -47,6 +47,10 @@ IDLE_AFTER = 15 * 60.0  # RESEARCH.md §3.1
 # A runtime connected to the DAW for a chat waits this long: its undo goes when it stops, and a producer may take a
 # long break before "undo that" (kumi-adv's D2).
 IDLE_CONNECTED = 2 * 60 * 60.0
+# A job the runtime is running (a library scan, a Mirelo wait) keeps it up although nobody calls it, for at most this
+# long with nothing asked of it (rgzm, #1059): an unpolled job isn't ended for idleness, and a stuck one isn't kept.
+JOB_BUSY_FOR = 6 * 60 * 60.0
+_JOB_RUNNING = ("running", "cancelling")
 # How long a stop waits for an idle runtime to exit before ending it: within the 10 s Hermes's gateway gives a chat's
 # finalization, with the terminate's own wait after it.
 STOP_WAIT = 5.0
@@ -644,7 +648,7 @@ class Runtimes:
     def __init__(self, *, events: Callable[[str, dict], None] | None = None, spawn: Spawn = Client,
                  environ: Callable[[], Mapping[str, str]] = lambda: os.environ, start_timeout: float = 30.0,
                  idle_after: float = IDLE_AFTER, idle_connected: float = IDLE_CONNECTED,
-                 stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT,
+                 job_busy_for: float = JOB_BUSY_FOR, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT,
                  hermes: Callable[[], tuple[str | None, str | None]] = hermes_homes):
         self._events = events
         self._spawn = spawn
@@ -653,6 +657,7 @@ class Runtimes:
         self._start_timeout = start_timeout
         self._idle_after = idle_after
         self._idle_connected = idle_connected
+        self._job_busy_for = job_busy_for
         self._stop_wait = stop_wait
         self._settle_wait = settle_wait
         self._lock = threading.Lock()  # the registry only: never held while a runtime starts or stops
@@ -809,9 +814,11 @@ class Runtimes:
 
     def _idle_limit(self, runtime: Runtime) -> float:
         """How long `runtime` may have nothing to do: `idle_connected` while it's connected to the DAW (its status.json
-        says so) for a chat, whose end stops it anyway; `idle_after` otherwise."""
+        says so) for a chat, whose end stops it anyway; `idle_after` otherwise; and at least `job_busy_for` while one of
+        its jobs (`jobs/*.json`) is running."""
         connected = (_read_json(runtime.state_dir / "status.json") or {}).get("connected") is True
-        return self._idle_connected if connected and runtime.owner_session else self._idle_after
+        limit = self._idle_connected if connected and runtime.owner_session else self._idle_after
+        return max(limit, self._job_busy_for) if _job_running(runtime.state_dir) else limit
 
     def _stop_idle(self, runtime: Runtime, limit: float) -> None:
         log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, limit)
@@ -922,6 +929,16 @@ def _read_text(path: Path) -> str | None:
     except OSError:
         return None
     return text or None
+
+
+def _job_running(state: Path) -> bool:
+    """Whether any job the runtime keeps (`jobs/<id>.json`, C3) says it's still running."""
+    try:
+        entries = list(os.scandir(state / "jobs"))
+    except OSError:
+        return False
+    return any(entry.name.endswith(".json") and (_read_json(Path(entry.path)) or {}).get("state") in _JOB_RUNNING
+               for entry in entries)
 
 
 WATCH_EVERY = 0.5  # how often a running runtime's snapshots are looked at (C5)
