@@ -648,6 +648,14 @@ pub(crate) fn place(params: &mut Value, epoch: Option<&str>, layout: Option<u64>
 }
 
 impl crate::host::Host {
+    fn change_timeout(&self) -> std::time::Duration {
+        if self.daw() == daw_bridge::Daw::Lynx {
+            std::time::Duration::from_secs(70)
+        } else {
+            CHANGE_TIMEOUT
+        }
+    }
+
     /// New preset-file fields must never be sent to an old bridge. In particular, an old REAPER accepts a file in its
     /// named-preset argument without checking its class. Advertise the format explicitly rather than guessing versions.
     async fn preset_file_bridge(&self, pick: &crate::host::Pick, kind: &str, input: &Value) -> Result<(), Value> {
@@ -664,7 +672,7 @@ impl crate::host::Host {
         if !needed {
             return Ok(());
         }
-        let status = self.call("status", json!({}), pick, CHANGE_TIMEOUT).await.map_err(|e| self.call_error(&e))?;
+        let status = self.call("status", json!({}), pick, self.change_timeout()).await.map_err(|e| self.call_error(&e))?;
         if !status["presetFiles"].as_array().is_some_and(|formats| formats.iter().any(|format| format == "vst3")) {
             return Err(json!({"code":"bridge-update-required", "error":format!(
                 "The bridge running in {} cannot safely load VST3 preset files. Update Kumi's bridge and restart {} before loading this preset.", self.daw(), self.daw())}));
@@ -745,7 +753,7 @@ impl crate::host::Host {
         }
         let mut params = json!({"kind": kind, "input": input});
         place(&mut params, arguments.get("epoch").and_then(Value::as_str), layout);
-        let answer = match self.call("change_preview", params, &pick, CHANGE_TIMEOUT).await {
+        let answer = match self.call("change_preview", params, &pick, self.change_timeout()).await {
             Ok(answer) => answer,
             Err(error) => return (self.call_error(&error), true),
         };
@@ -788,7 +796,7 @@ impl crate::host::Host {
             apply_params(&record)
         };
         let host_file = crate::renoise::instruments::host_file(&params);
-        let outcome = self.call("change_apply", params, &record.instance, CHANGE_TIMEOUT).await;
+        let outcome = self.call("change_apply", params, &record.instance, self.change_timeout()).await;
         remove_once_answered(host_file, &outcome);
         match outcome {
             Ok(answer) => {
@@ -854,7 +862,7 @@ impl crate::host::Host {
             params
         };
         let host_file = crate::renoise::instruments::host_file(&params);
-        let outcome = self.call("change_restore", params, &record.instance, CHANGE_TIMEOUT).await;
+        let outcome = self.call("change_restore", params, &record.instance, self.change_timeout()).await;
         remove_once_answered(host_file, &outcome);
         match outcome {
             Ok(answer) => self.journal().end_undo(&id, &key, Ok(&answer)),
@@ -876,7 +884,7 @@ impl crate::host::Host {
             Ok(pick) => pick,
             Err(why) => return (json!({"error": why, "code": "bad-params"}), true),
         };
-        match self.call("transport_stop", json!({}), &pick, CHANGE_TIMEOUT).await {
+        match self.call("transport_stop", json!({}), &pick, self.change_timeout()).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),
         }
@@ -896,7 +904,7 @@ impl crate::host::Host {
                 params[*field] = value.clone();
             }
         }
-        match self.call(method, params, &pick, CHANGE_TIMEOUT).await {
+        match self.call(method, params, &pick, self.change_timeout()).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),
         }
@@ -916,7 +924,7 @@ impl crate::host::Host {
                 params[field] = value.clone();
             }
         }
-        match self.call("fx_chain_save", params, &pick, CHANGE_TIMEOUT).await {
+        match self.call("fx_chain_save", params, &pick, self.change_timeout()).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),
         }
@@ -934,7 +942,7 @@ impl crate::host::Host {
             fields.remove("pid");
             fields.remove("resource");
         }
-        match self.call(method, params, &pick, CHANGE_TIMEOUT).await {
+        match self.call(method, params, &pick, self.change_timeout()).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),
         }
@@ -1011,7 +1019,7 @@ impl crate::host::Host {
                 params[*field] = value.clone();
             }
         }
-        match self.call(method, params, &pick, CHANGE_TIMEOUT).await {
+        match self.call(method, params, &pick, self.change_timeout()).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),
         }
@@ -1051,7 +1059,7 @@ impl crate::host::Host {
                 Err(answer) => return answer,
             },
         };
-        match self.call(method, params, &crate::host::Pick::default(), CHANGE_TIMEOUT).await {
+        match self.call(method, params, &crate::host::Pick::default(), self.change_timeout()).await {
             Ok(answer) => {
                 if let Some(named) = &named {
                     self.journal().name_step(named);

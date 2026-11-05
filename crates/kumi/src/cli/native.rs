@@ -99,7 +99,7 @@ pub fn help(installed: bool) -> String {
         "Sign in, then open your DAW (Live, REAPER or Renoise), before or after Kumi: Kumi\nconnects to the one open and puts its bridge in the first time. Then talk about\nwhat's open; /login and /model change the sign-in and model.",
     ));
     first.push((format!("{cmd} bridge"), "Or, with Live closed: put the bridge into Live, or bring it up to date"));
-    first.push((format!("{cmd} --daw live|reaper|renoise|lynx"), "Work with that DAW only, whichever DAW is open"));
+    first.push((format!("{cmd} --daw live|reaper|renoise"), "Work with that DAW only, whichever DAW is open"));
     first.push((
         format!("{cmd} --daw reaper|renoise bridge"),
         "Put Kumi's extension into REAPER, or its tool into Renoise, or bring it up to date",

@@ -127,13 +127,3 @@ Kumi をソースからビルドするには、[DEVELOPMENT.md](DEVELOPMENT.md)�
 ## ライセンス
 
 [MIT](LICENSE.md)。他の人の成果から来た部分と、Kumi が取得するモデルについては [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) にあります。Ableton Live は Ableton AG の商標です。Kumi は Ableton、Cockos（REAPER）、Renoise、および対応するプラグインのメーカーと提携・関係・スポンサー契約・推奨関係を持ちません。製品名は互換性のあるソフトウェアを示すために使用しています。
-
-## LYNX SHARE（実験的）
-
-- `kumi --daw lynx` は、対応する [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) ネイティブ制御の変更を含む [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) ビルドに接続します。現在のネイティブ接続は macOS と Linux に対応し、接続機能のない通常の LYNX ビルドでは使用できません。
-- ライブのプロジェクト、パターン、デバイス、パラメーター、現在の Playlist アレンジを読み取り、テンポ、チャンネルとミキサー、ノートを変更します。再生と共有のネイティブ undo/redo にも対応します。
-- パラメーター編集はホスト型の楽器またはミキサーのエフェクトを対象とし、読み取った正規化値と `expectedValue` を照合してから変更します。ネイティブ楽器の合成パラメーターは未対応です。エフェクトは内蔵またはスキャン済みのカタログからのみ追加できます。
-- Playlist では既存のソースを使うクリップを一括で追加、移動、長さ変更、複製、削除できます。ルーティングと省略された属性は保持されます。
-- 新しいツール群は、接続したネイティブビルドが対応を通知した場合だけ表示されます。保存、ライブ音声の取得、レンダリングは未対応です。
-
-[LYNX の設定と制限](docs/ja/DAWS.md)を参照してください。

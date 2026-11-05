@@ -1,9 +1,7 @@
 //! Kumi's changes in a DAW whose bridge is its own (REAPER's extension, Renoise's tool): each one previewed and applied
 //! through the host's journal (`change_preview`, `change_apply`), kept in HISTORY, and undone as a new step of the
 //! DAW's (`change_undo`), never by the DAW's own undo. Plans run through core's plan engine over the DAW's kinds.
-use crate::bridge::{
-    answer_of, follow_epoch, layout_of, names_tracks, note_epoch, stopped_or, Layout, OwnDaw, Refused, CALL_MS, SHORT_REF,
-};
+use crate::bridge::{answer_of, follow_epoch, layout_of, names_tracks, note_epoch, stopped_or, Layout, OwnDaw, Refused, SHORT_REF};
 use async_trait::async_trait;
 use chrono::Utc;
 use indexmap::IndexMap;
@@ -320,7 +318,7 @@ impl<S: RefScheme> Link<S> {
             return Err(RuntimeError::plain(self.daw.profile.vocab.cant_reach));
         };
         let args = args.as_object().cloned().unwrap_or_default();
-        let bounded = abort::any([signal, self.lifetime.clone(), abort::timeout(CALL_MS)]);
+        let bounded = abort::any([signal, self.lifetime.clone(), abort::timeout(self.daw.call_ms)]);
         stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(answer_of), &bounded)
     }
 

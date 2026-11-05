@@ -2,7 +2,7 @@
 
 ## 1. What Kumi is
 
-Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374), and SoundCraft is experimental (read-only, reached only with `--daw soundcraft`). One Rust workspace, shipped as GitHub releases.
+Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374), and SoundCraft is experimental (read-only, reached only with `--daw soundcraft`); LYNX SHARE is experimental (`--daw lynx`, requiring its unreleased native-control build). One Rust workspace, shipped as GitHub releases.
 
 Kumi starts a bridge and talks MCP to it over stdio; the bridge reaches the DAW over authenticated TCP on 127.0.0.1:
 - Live: `ableton-mcp-server`, to the Remote Script (`ableton-loopback/v1`) and Kumi's Live extension.
@@ -33,11 +33,11 @@ daws/                       everything DAW-specific, one folder per DAW
   ableton/                  kumi-daw-ableton/ (L5: Live's integration, its provider in src/app/, the M4L device builder),
                             ableton-mcp-server/ (bridge), remote-script/ (Python, in Live),
                             live-extension/ (TypeScript), protocol/ (the only list of Live's operations), max-standard/
+  lynx/                     kumi-daw-lynx/ (L5: shared OwnIntegration); lynx-kumi/ (companion: native LYNX control to kumi-daw/1)
   own/                      Kumi's own bridge: daw-bridge/ (kumi-daw/1 wire), daw-mcp-server/ (host),
                             kumi-daw-own/ (L5: what the own-bridge integrations share, their provider among it)
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
   renoise/                  com.kumi.Bridge.xrnx/ (Lua tool), tests/ (against a mock Renoise), kumi-daw-renoise/ (L5)
-  lynx/                     kumi-daw-lynx/ (L5: direct authenticated loopback JSON control of the custom LYNX build)
   soundcraft/               soundcraft-kumi/ (Kumi's bridge beside SoundCraft, a program its host starts: the client of
                             SoundCraft's control channel and its recorded vectors, starting SoundCraft, kumi-daw/1),
                             kumi-daw-soundcraft/ (L5: experimental and read-only; its provider, `Beside`, opens SoundCraft

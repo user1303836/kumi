@@ -25,6 +25,7 @@ members = [
     "daws/renoise/kumi-daw-renoise",
     "daws/soundcraft/kumi-daw-soundcraft",
     "daws/lynx/kumi-daw-lynx",
+    "daws/lynx/lynx-kumi",
     "daws/own/kumi-daw-own",
     "daws/soundcraft/soundcraft-kumi",
 ]

@@ -1,7 +1,7 @@
 [package]
 name = "kumi-daw-lynx"
 version = "0.1.0"
-description = "Native local LYNX SHARE control for Kumi"
+description = "LYNX SHARE through Kumi's own host and companion bridge"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,19 +10,21 @@ publish = false
 
 [dependencies]
 kumi-daw.workspace = true
+kumi-daw-own.workspace = true
 kumi-library.workspace = true
 kumi-agent.workspace = true
-kumi-common.workspace = true
 kumi-types.workspace = true
-async-trait.workspace = true
-chrono.workspace = true
-futures.workspace = true
-serde.workspace = true
+daw-bridge.workspace = true
+regex.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
+futures.workspace = true
+kumi-common.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

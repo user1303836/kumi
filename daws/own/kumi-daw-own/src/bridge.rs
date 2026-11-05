@@ -106,6 +106,9 @@ pub struct OwnDaw {
     pub descriptor: BridgeDescriptor,
     /// What `daw-mcp-server --daw` takes: "reaper", "renoise".
     pub host_flag: &'static str,
+    /// Bound for host calls, including vendor plug-in creation. Ordinary bridges
+    /// keep CALL_MS; a companion with a longer native deadline can allow for it.
+    pub call_ms: u64,
     /// Its bridge, as Kumi brings it up to date: what the producer is told when it lacks something.
     pub bridge: OwnBridge,
     pub instructions: &'static str,
@@ -726,8 +729,14 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     "--kumi-home".into(),
                     self.options.kumi_home.to_string_lossy().into_owned(),
                 ];
-                connect_mcp(Options { signal, args, timeout_ms: Some(CALL_MS), bridge: Some(self.daw.descriptor), ..Default::default() })
-                    .await?
+                connect_mcp(Options {
+                    signal,
+                    args,
+                    timeout_ms: Some(self.daw.call_ms),
+                    bridge: Some(self.daw.descriptor),
+                    ..Default::default()
+                })
+                .await?
             }
         };
         *self.endpoint.borrow_mut() = Some(endpoint.clone());
@@ -844,7 +853,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     async fn call(&self, tool: &str, args: Value, signal: Signal) -> Result<Result<Value, Refused>, RuntimeError> {
         let endpoint = self.endpoint(signal.clone()).await?;
         let args = args.as_object().cloned().unwrap_or_default();
-        let bounded = abort::any([signal, abort::timeout(CALL_MS)]);
+        let bounded = abort::any([signal, abort::timeout(self.daw.call_ms)]);
         stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(answer_of), &bounded)
     }
 
@@ -1287,7 +1296,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let mut tools = vec![self.read_tool()];
         tools.extend(self.changes.tools());
         // M6: learning a routine the producer does by hand, for a recipe in the DAW's change kinds.
-        if !self.daw.changes.changes_nothing() {
+        if !self.daw.changes.changes_nothing() && !self.daw.catch_up.watch_description.is_empty() {
             tools.push(Rc::new(WatchTool {
                 endpoint: self.endpoint.clone(),
                 words: self.daw.catch_up,

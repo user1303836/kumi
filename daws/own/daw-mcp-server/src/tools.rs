@@ -83,6 +83,7 @@ pub fn kinds(daw: Daw) -> Kinds {
             bodies: &["edit", "midi", "fx", "mixer"],
             outside_undo: &[],
         },
+        Daw::Lynx => Kinds { read: crate::lynx::READ_KINDS, bodies: crate::lynx::BODIES, outside_undo: &[] },
     }
 }
 

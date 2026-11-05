@@ -1556,15 +1556,15 @@ name = "kumi-daw-lynx"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chrono",
+ "daw-bridge",
  "futures",
  "kumi-agent",
  "kumi-common",
  "kumi-daw",
+ "kumi-daw-own",
  "kumi-library",
  "kumi-types",
- "libc",
- "serde",
+ "regex",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1968,6 +1968,19 @@ name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
+
+[[package]]
+name = "lynx-kumi"
+version = "1.24.67"
+dependencies = [
+ "daw-bridge",
+ "libc",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "mach2"

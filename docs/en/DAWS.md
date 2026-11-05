@@ -1,4 +1,4 @@
-# What Kumi does in Live, REAPER and Renoise
+# What Kumi can do in each DAW
 
 English · [简体中文](../zh-CN/DAWS.md) · [日本語](../ja/DAWS.md)
 
@@ -388,10 +388,11 @@ saves the song, instruments and device presets.
 
 ## LYNX SHARE (experimental)
 
-- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching [`lynx-kumi/1`](https://github.com/Ka1-S/LYNX-SHARE/pull/71) native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
-- Start LYNX with `LYNX_KUMI_DISCOVERY` set to an absolute discovery-file path. Set `KUMI_LYNX_CONFIG` to the same path, or use `KUMI_HOME/bridges/lynx/connection.json` for both. Discovery is owner-only, and the endpoint listens only on loopback with a private token; no credentials belong in chat.
-- Reads the live project, patterns, devices, parameters and current Playlist arrangement; changes tempo, channel/mixer settings and notes; controls playback and shared native undo/redo.
-- Parameter edits target hosted instruments or mixer effects, use the normalized values returned by the device read, and check each observed `expectedValue` before changing anything. Native instrument synthesis parameters are not exposed. Effects load only from the built-in or scanned-effect catalog.
-- Playlist edits atomically add, update, duplicate or remove clips referencing existing pattern, audio-channel or automation sources. Omitted properties are preserved, and locked tracks are refused. Read paginated clips before editing; other arrangements are listed but are not edited. Existing source routing is preserved; the adapter does not create patterns, auto-route linked tracks or switch arrangements.
-- Every mutation checks the control process, project and revision. Stop playback before device/effect or Playlist edits; recording blocks project edits. Full note replacement also requires the revision and every note property returned by its read. Native undo/redo is shared with the producer's own edits.
-- New tool groups are offered only when the connected native build advertises them. Saving, live audio capture and rendering are not implemented by this adapter.
+- Requires a custom [LYNX SHARE native-control build](https://github.com/Ka1-S/LYNX-SHARE/pull/71) and the matching Kumi host/`lynx-kumi` companion from this PR. No released LYNX version supports this connection yet. Native authentication uses `lynx-kumi/2`; older `/1` endpoints are refused. macOS and Linux are supported; Windows is not.
+- Set `KUMI_LYNX_APP` to the custom application and run `kumi --daw lynx bridge`, then `kumi --daw lynx`. The companion opens or connects to the compatible application. Native discovery credentials stay in the companion; do not paste them into chat.
+- `lynx_read` provides paged project, channel/mixer, pattern/note, device/parameter, catalog and current Playlist reads. A full project read gives the revision used to plan edits. Names are data; use current refs and their returned epoch.
+- Inserts native or already-scanned hosted instruments into new channels, or replaces existing instruments while preserving notes, routing and channel settings. Select an available exact instrument-catalog ID first. Arbitrary plugin paths, scanning and sample imports are unavailable.
+- Parameter edits target hosted instruments or mixer effects, using normalized values and each observed `expectedValue`. Native instrument synthesis parameters and nested Patcher devices are not exposed. Effects load from the built-in or scanned-effect catalog.
+- Playlist edits atomically add, update, duplicate or remove clips referencing existing pattern, audio-channel or automation sources. Omitted properties and routing are preserved, and locked tracks are refused. Other arrangements are listed only; pattern/source creation and arrangement switching are unavailable.
+- Persistent changes use Kumi's shared plans and HISTORY, with an explicit `expectedRevision`. Refresh after each committed change before planning later indexed edits. `undo_change` targets Kumi's owned change and refuses conflicting producer edits; it does not undo an arbitrary shared native history step. Device, note and Playlist edits require stopped playback, and recording blocks persistent edits. Emergency stop remains available after project changes.
+- Saving, live audio capture and rendering are not implemented. This integration remains experimental until a supported LYNX release and the matching bridge are available.
