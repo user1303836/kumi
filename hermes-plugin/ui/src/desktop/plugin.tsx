@@ -19,12 +19,13 @@ import { host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from '@hermes/plugin-
 
 import { canUndo, undoRequest } from '../shared/format.ts'
 import { Audition } from '../shared/hooks.ts'
+import { parseListen } from '../shared/listen.ts'
 import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
 import { ask } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
-import { callId, Calls, forChatInFront, payloadOf } from './events.ts'
+import { callId, Calls, forAnotherProfile, forChatInFront, payloadOf } from './events.ts'
 import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
@@ -92,23 +93,31 @@ const plugin: HermesPlugin = {
     const openSettings = () => host.navigate(typeof sdk.pluginSettingsHref === 'function' ? sdk.pluginSettingsHref(PLUGIN_ID) : '/settings?tab=plugins')
 
     // Read /status now, every few seconds while the window is in view, and on every event that says something moved.
+    // An event about another profile's Kumi (#966's `profile`) moves nothing this window shows.
     const refresh = () => void store.refreshStatus()
     refresh()
     ctx.setInterval(() => {
       if (document.visibilityState !== 'hidden') refresh()
     }, POLL_MS)
-    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, refresh)
-    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, () => void store.refresh('focus'))
-    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, () => void store.refresh('history'))
-    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, () => void store.refresh('map'))
+    const ours = (act: (payload: Record<string, unknown>) => void) => (event: { payload?: unknown }) => {
+      const payload = payloadOf(event)
+      if (!forAnotherProfile(payload)) act(payload)
+    }
+    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, ours(refresh))
+    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, ours(() => void store.refresh('focus')))
+    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, ours(() => void store.refresh('history')))
+    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, ours(() => void store.refresh('map')))
     ctx.setInterval(() => {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, event => store.trackJob(payloadOf(event).job_id))
-    ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
-      refresh()
-      void store.refresh('setup')
-    })
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours(payload => store.trackJob(payload.job_id)))
+    ctx.onEvent(
+      `plugin.${PLUGIN_ID}.settings.changed`,
+      ours(() => {
+        refresh()
+        void store.refresh('setup')
+      })
+    )
 
     // A search's finds and a measurement reach this window twice: as the call's `tool.complete` (not sent while
     // Hermes's tool progress is off, or in focus view) and as a plugin event (CC-9). Each call is acted on once.
@@ -134,6 +143,10 @@ const plugin: HermesPlugin = {
       const payload = payloadOf(event)
       const id = callId(payload.tool_call_id)
       if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return
+      // A result too large to carry comes as none (the tab then points to Kumi's reply); one that isn't a measurement
+      // opens nothing.
+      const result = payload.result ?? null
+      if (result !== null && !parseListen(result)) return
       // The transcript draws the card in the call's tool part: the tab opens only when no tool.complete comes for it.
       waiting.set(
         id,
@@ -141,7 +154,7 @@ const plugin: HermesPlugin = {
           waiting.delete(id)
           if (calls.has(id)) return
           calls.add(id)
-          store.measure(id, payload.result)
+          store.measure(id, result)
           openMeasurements()
         }, LISTEN_FALLBACK_MS)
       )
@@ -165,9 +178,12 @@ const plugin: HermesPlugin = {
       const found = foundSounds(payload.result)
       if (found) showFound(id, found.revision, found.ids)
     })
-    // Another profile or connection: another backend, another Kumi.
+    // Another profile or connection: another backend, another Kumi. What waited on the old one is dropped with it.
     for (const atom of [host.state.profile, host.state.connectionId]) {
       const stop = atom?.listen?.(() => {
+        for (const cancel of waiting.values()) cancel()
+        waiting.clear()
+        calls.clear()
         store.reset()
         audition.reset()
         refresh()

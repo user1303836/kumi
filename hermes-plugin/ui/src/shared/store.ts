@@ -187,8 +187,8 @@ export class KumiStore {
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
   trackJob(id: unknown): void {
     const jobId = plainId(id)
-    // Shown only once this profile's backend answers for it (`job.progress` names no profile: a job of another
-    // profile 404s and never shows), and at most MOST_JOBS at a time.
+    // Shown only once this profile's backend answers for it (another profile's job 404s and never shows, even from an
+    // event that names no profile), and at most MOST_JOBS at a time.
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return
     void this.refreshJob(jobId)
   }

@@ -247,6 +247,102 @@ function usePlaying(audition) {
   return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
 }
 
+// src/shared/listen.ts
+var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
+function parseListen(result) {
+  let value = result;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+  const state = "state" in value ? value.state : void 0;
+  if (typeof state === "string" && NOT_MEASURED[state]) return null;
+  return value;
+}
+var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
+function captureWords(capture) {
+  if (!capture || typeof capture !== "object") return void 0;
+  const parts = [];
+  const from = capture.from_beat;
+  const beats = capture.beats;
+  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
+  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
+  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
+  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
+  if (!said) return void 0;
+  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
+}
+var finite = (value) => typeof value === "number" && Number.isFinite(value);
+function fileName(analysis, fallback) {
+  const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+  return clean(file || fallback, 60);
+}
+function row(label, mine, reference, show, delta, deltaShow) {
+  if (!finite(mine) && !finite(reference)) return null;
+  const out = { label, mine: finite(mine) ? show(mine) : "—", direction: 0 };
+  if (reference !== void 0) {
+    out.reference = finite(reference) ? show(reference) : "—";
+    const difference = finite(delta) ? delta : finite(mine) && finite(reference) ? mine - reference : void 0;
+    if (difference !== void 0) {
+      out.delta = (deltaShow ?? show)(difference);
+      out.direction = difference < 0 ? -1 : difference > 0 ? 1 : 0;
+    }
+  }
+  return out;
+}
+function listenView(result) {
+  const mine = result.metrics ?? {};
+  const compare = result.compare;
+  const reference = compare?.metrics;
+  const differences = compare?.differences;
+  const theirs = (value) => compare ? value ?? null : void 0;
+  const rows = [
+    row("Loudness", mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
+    row("True peak", mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
+    row("Brightness (centroid)", mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
+    row("Loudness range", mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
+    row("Crest", mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row("Tempo", mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
+  ].filter((value) => value !== null);
+  const key = mine.key?.name;
+  if (typeof key === "string" && key) {
+    const otherKey = reference?.key?.name;
+    rows.push({ label: "Key", mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
+  }
+  const differenceBands = (Array.isArray(differences?.balance) ? differences.balance : []).flatMap(
+    (band) => band && finite(band.difference) ? [{ name: clean(band.band ?? band.hz ?? "", 16), value: band.difference }] : []
+  );
+  const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
+    (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
+  );
+  const view = {
+    title: fileName(mine, "Measured audio"),
+    mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
+    rows,
+    bands: differenceBands.length ? differenceBands : levelBands,
+    bandsAre: differenceBands.length ? "difference" : "level",
+    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
+    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
+    capture: captureWords(result.capture)
+  };
+  if (compare) {
+    view.referenceTitle = fileName(reference, "Reference");
+    view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
+  }
+  const interpretation = result.interpretation;
+  if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
+    const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
+    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
+  } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
+    view.interpretationError = clean(result.interpretation_error, 200);
+  }
+  return view;
+}
+
 // src/shared/store.ts
 var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
@@ -513,102 +609,6 @@ var CANVAS = {
 
 // src/desktop/card.tsx
 import { useEffect as useEffect2, useState } from "react";
-
-// src/shared/listen.ts
-var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
-function parseListen(result) {
-  let value = result;
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
-  const state = "state" in value ? value.state : void 0;
-  if (typeof state === "string" && NOT_MEASURED[state]) return null;
-  return value;
-}
-var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
-function captureWords(capture) {
-  if (!capture || typeof capture !== "object") return void 0;
-  const parts = [];
-  const from = capture.from_beat;
-  const beats = capture.beats;
-  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
-  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
-  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
-  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
-  if (!said) return void 0;
-  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
-}
-var finite = (value) => typeof value === "number" && Number.isFinite(value);
-function fileName(analysis, fallback) {
-  const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
-  return clean(file || fallback, 60);
-}
-function row(label, mine, reference, show, delta, deltaShow) {
-  if (!finite(mine) && !finite(reference)) return null;
-  const out = { label, mine: finite(mine) ? show(mine) : "—", direction: 0 };
-  if (reference !== void 0) {
-    out.reference = finite(reference) ? show(reference) : "—";
-    const difference = finite(delta) ? delta : finite(mine) && finite(reference) ? mine - reference : void 0;
-    if (difference !== void 0) {
-      out.delta = (deltaShow ?? show)(difference);
-      out.direction = difference < 0 ? -1 : difference > 0 ? 1 : 0;
-    }
-  }
-  return out;
-}
-function listenView(result) {
-  const mine = result.metrics ?? {};
-  const compare = result.compare;
-  const reference = compare?.metrics;
-  const differences = compare?.differences;
-  const theirs = (value) => compare ? value ?? null : void 0;
-  const rows = [
-    row("Loudness", mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
-    row("True peak", mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
-    row("Brightness (centroid)", mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
-    row("Loudness range", mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
-    row("Crest", mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
-    row("Tempo", mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
-  ].filter((value) => value !== null);
-  const key = mine.key?.name;
-  if (typeof key === "string" && key) {
-    const otherKey = reference?.key?.name;
-    rows.push({ label: "Key", mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
-  }
-  const differenceBands = (Array.isArray(differences?.balance) ? differences.balance : []).flatMap(
-    (band) => band && finite(band.difference) ? [{ name: clean(band.band ?? band.hz ?? "", 16), value: band.difference }] : []
-  );
-  const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
-    (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
-  );
-  const view = {
-    title: fileName(mine, "Measured audio"),
-    mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
-    rows,
-    bands: differenceBands.length ? differenceBands : levelBands,
-    bandsAre: differenceBands.length ? "difference" : "level",
-    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
-    capture: captureWords(result.capture)
-  };
-  if (compare) {
-    view.referenceTitle = fileName(reference, "Reference");
-    view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
-  }
-  const interpretation = result.interpretation;
-  if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
-    const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
-    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
-  } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
-    view.interpretationError = clean(result.interpretation_error, 200);
-  }
-  return view;
-}
 
 // src/shared/ui.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
@@ -1122,16 +1122,16 @@ import { host as host3 } from "@hermes/plugin-sdk";
 function profileKey(value) {
   return value.trim() || "default";
 }
-function frontProfile() {
-  const focused = host3.state.focusedSessionProfile?.get();
-  if (typeof focused === "string") return profileKey(focused);
-  const profile = host3.state.profile?.get();
-  return typeof profile === "string" ? profileKey(profile) : null;
+function forThisProfile(payload) {
+  const own = host3.state.profile?.get();
+  return typeof payload.profile === "string" && typeof own === "string" && profileKey(payload.profile) === profileKey(own);
+}
+function forAnotherProfile(payload) {
+  const own = host3.state.profile?.get();
+  return typeof payload.profile === "string" && typeof own === "string" && profileKey(payload.profile) !== profileKey(own);
 }
 function forChatInFront(payload) {
-  if (typeof payload.profile !== "string" || typeof payload.session_id !== "string" || !payload.session_id) return false;
-  const profile = frontProfile();
-  if (profile === null || profileKey(payload.profile) !== profile) return false;
+  if (!forThisProfile(payload) || typeof payload.session_id !== "string" || !payload.session_id) return false;
   return host3.state.focusedStoredSessionId?.get() === payload.session_id;
 }
 function callId(value) {
@@ -1150,6 +1150,9 @@ var Calls = class {
     if (this.has(id)) return;
     this.seen.push(id);
     if (this.seen.length > this.most) this.seen.shift();
+  }
+  clear() {
+    this.seen = [];
   }
 };
 function payloadOf(event) {
@@ -1731,18 +1734,25 @@ var plugin = {
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") refresh();
     }, POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, refresh);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, () => void store.refresh("focus"));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, () => void store.refresh("history"));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, () => void store.refresh("map"));
+    const ours = (act) => (event) => {
+      const payload = payloadOf(event);
+      if (!forAnotherProfile(payload)) act(payload);
+    };
+    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, ours(refresh));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, ours(() => void store.refresh("focus")));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, ours(() => void store.refresh("history")));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, ours(() => void store.refresh("map")));
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, (event) => store.trackJob(payloadOf(event).job_id));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
-      refresh();
-      void store.refresh("setup");
-    });
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
+    ctx.onEvent(
+      `plugin.${PLUGIN_ID}.settings.changed`,
+      ours(() => {
+        refresh();
+        void store.refresh("setup");
+      })
+    );
     const calls = new Calls();
     const waiting = /* @__PURE__ */ new Map();
     const showFound = (id, revision, ids) => {
@@ -1765,13 +1775,15 @@ var plugin = {
       const payload = payloadOf(event);
       const id = callId(payload.tool_call_id);
       if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return;
+      const result = payload.result ?? null;
+      if (result !== null && !parseListen(result)) return;
       waiting.set(
         id,
         ctx.setTimeout(() => {
           waiting.delete(id);
           if (calls.has(id)) return;
           calls.add(id);
-          store.measure(id, payload.result);
+          store.measure(id, result);
           openMeasurements();
         }, LISTEN_FALLBACK_MS)
       );
@@ -1795,6 +1807,9 @@ var plugin = {
     });
     for (const atom of [host6.state.profile, host6.state.connectionId]) {
       const stop = atom?.listen?.(() => {
+        for (const cancel of waiting.values()) cancel();
+        waiting.clear();
+        calls.clear();
         store.reset();
         audition.reset();
         refresh();
