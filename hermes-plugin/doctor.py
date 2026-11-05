@@ -182,6 +182,9 @@ def _part(report: dict, shown: dict, status: dict, daw: str, app: str) -> dict:
     if component.get("state") == "not_installed":
         return _item(name, FIX, f"Kumi's part in {app} isn't set up in this profile.", _SET_UP)
     adopted = component.get("state") == "unknown" or existing.get("adopted") is True
+    if adopted and daw in ("reaper", "renoise"):  # the runtime refuses to connect through one (serve/connection.rs)
+        return _item(name, FIX, f"Kumi for Hermes can't use {app} through an adopted installation yet, so connecting "
+                                f"to {app} is refused.", f"Set {app} up for Hermes instead.")
     part = f"the part another Kumi installation put in {app}" if adopted else f"Kumi's part in {app}"
     update = (f"Update it with the Kumi that put it in: kumi --daw {daw} bridge for a standalone Kumi, or setup in "
               "that Kumi's own Hermes profile.") if adopted else _SET_UP

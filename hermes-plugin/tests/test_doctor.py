@@ -167,15 +167,15 @@ class Doctor(unittest.TestCase):
         host, _, _ = self.ready(settings={"library_folders": []})
         self.assertEqual(self.item(doctor.checks(host), "Sound map")["state"], doctor.CHECK, "a map is optional")
 
-    def recorded(self, data: Path, *, parts: list | None = None, adopted: bool = False) -> None:
-        """Setup's record of Kumi's part in Live: its sub-parts' states, or adopted from a standalone Kumi here."""
+    def recorded(self, data: Path, *, parts: list | None = None, adopted: bool = False, daw: str = "ableton") -> None:
+        """Setup's record of Kumi's part in `daw`: its sub-parts' states, or adopted from a standalone Kumi here."""
         path = data / "setup" / "receipt.json"
         receipt = json.loads(path.read_text(encoding="utf-8"))
-        component = receipt["daw_components"]["ableton"]
+        component = receipt["daw_components"][daw]
         component["parts"] = parts or []
         if adopted:
             (self.home / ".kumi").mkdir(exist_ok=True)
-            receipt["adopted"] = {"kumi_home": str(self.home / ".kumi"), "daw": "ableton", "at": 0}
+            receipt["adopted"] = {"kumi_home": str(self.home / ".kumi"), "daw": daw, "at": 0}
             component["adopted"] = True
         path.write_text(json.dumps(receipt), encoding="utf-8")
 
@@ -214,6 +214,18 @@ class Doctor(unittest.TestCase):
                 last = part(**published)
                 self.assertEqual(last["state"], doctor.OK, "only setup's record to go on")
                 self.assertIn("as setup last recorded it", last["detail"])
+
+    def test_an_adopted_part_is_usable_in_live_only(self):
+        for daw, app, state in (("ableton", "Live", doctor.OK), ("reaper", "REAPER", doctor.FIX),
+                                ("renoise", "Renoise", doctor.FIX)):
+            with self.subTest(daw=daw):
+                host, _, data = self.ready(settings={"daw": daw}, daw=daw)
+                self.recorded(data, adopted=True, daw=daw)
+                adopted = self.item(doctor.checks(host), f"Kumi's part in {app}")
+                self.assertEqual(adopted["state"], state, adopted)
+                if state == doctor.FIX:  # the runtime refuses to connect through it (serve/connection.rs)
+                    self.assertIn("can't use", adopted["detail"])
+                    self.assertEqual(adopted["fix"], f"Set {app} up for Hermes instead.")
 
     def test_the_connection_names_the_daw_the_runtime_runs_for(self):
         host, _, _ = self.ready(daw="reaper")
