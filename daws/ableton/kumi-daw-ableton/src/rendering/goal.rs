@@ -114,7 +114,7 @@ struct Goal {
     beside: RefCell<Option<String>>,
 }
 pub(super) fn left_search(name: &str) -> String {
-    format!("“{name}” is no longer available under that name, so it left the search; the other candidates carry on.")
+    format!("“{name}” is no longer available under that name, so it left the search.")
 }
 fn device_name(device: &JsonObject) -> String {
     device
