@@ -333,23 +333,30 @@ def _allowed_ffmpeg(data_dir: Path) -> tuple[str, str | None]:
 def compressed_audio(data_dir: Path, env: Mapping[str, str] | None = None) -> dict:
     """Whether Kumi's runtime can decode MP3, FLAC and other compressed audio: `{"state": "available" | "changed" |
     "gone" | "not_allowed", "ffmpeg": the allowed path, "found": an ffmpeg setup could offer, "message"}`. `message`
-    is the line `kumi_status` and `hermes kumi status` show. No subprocess."""
+    is the line `hermes kumi status` shows (`for_model` says it without the paths). No subprocess."""
     state, path = _allowed_ffmpeg(data_dir)
-    if state == "available":
-        return {"state": state, "ffmpeg": path, "found": None,
-                "message": f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg at {path}."}
-    found = find_ffmpeg(env)
+    found = None if state == "available" else find_ffmpeg(env)
     offer = found["path"] if found else None
-    why = {"changed": f"The ffmpeg at {path} changed since you allowed it",
-           "gone": f"The ffmpeg you allowed ({path}) is gone"}.get(state, "Kumi reads WAV and AIFF only")
+    return {"state": state, "ffmpeg": path, "found": offer, "message": _audio_line(state, path, offer)}
+
+
+def _audio_line(state: str, path: str | None, offer: str | None, *, paths: bool = True) -> str:
+    """`compressed_audio`'s line; without `paths`, the same line naming no path on this computer."""
+    if state == "available":
+        return f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg {f'at {path}' if paths else 'you allowed'}."
+    why = {"changed": f"The ffmpeg at {path} changed since you allowed it" if paths else
+           "The ffmpeg you allowed has changed since you allowed it",
+           "gone": f"The ffmpeg you allowed ({path}) is gone" if paths else "The ffmpeg you allowed is gone"
+           }.get(state, "Kumi reads WAV and AIFF only")
     if offer:
-        allow = "allow it again" if offer == path else f"let Kumi use the ffmpeg at {offer}"
+        other = f"let Kumi use the ffmpeg at {offer}" if paths else "let Kumi use the ffmpeg setup found"
+        allow = "allow it again" if offer == path else other
         message = f"{why}; to {allow}, run hermes kumi setup (or ask Hermes to set up Kumi)."
     elif state == "not_allowed":
         message = f"{why}: there's no ffmpeg on this computer."
     else:
         message = f"{why}, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only."
-    return {"state": state, "ffmpeg": path, "found": offer, "message": f"Compressed audio (MP3, FLAC…): no. {message}"}
+    return f"Compressed audio (MP3, FLAC…): no. {message}"
 
 
 # ---- status: read-only ---------------------------------------------------------------------------------------------
@@ -421,6 +428,30 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
     else:
         result.update(state="ready", next_step="connect", message=f"Kumi is set up; open {DAWS[daw]} and connect.")
     return result
+
+
+def for_model(report: Mapping[str, Any]) -> dict:
+    """`status()` as `kumi_status` gives it to the model: where setup stands and what's next, with no path on this
+    computer in it (the producer's home, the runtime's and the DAW's folders, where ffmpeg is), which the model has no
+    use for and a chat's transcript shouldn't carry (adversarial review LOW 11). `hermes kumi status` shows them."""
+    shown = {key: report.get(key) for key in ("schema", "state", "target", "pinned_version", "download_bytes",
+                                               "unpacked_bytes", "daw", "next_step", "message")}
+    if report.get("state") == "no_pin":  # a pin that can't be read says why in words that may name its file
+        shown["message"] = "This copy of the plugin has no Kumi release it can set up; hermes kumi status says why."
+    runtime = report.get("runtime") or {}
+    shown["runtime"] = {key: runtime[key] for key in ("installed", "version", "installed_at") if key in runtime}
+    component = report.get("daw_component") or {}
+    shown["daw_component"] = {key: component.get(key) for key in ("state", "name", "version", "installed_at")}
+    parts = [{"name": part.get("name"), "state": part.get("state")} for part in component.get("parts") or []
+             if isinstance(part, dict)]
+    if parts:
+        shown["daw_component"]["parts"] = parts
+    existing = report.get("existing_kumi")
+    shown["existing_kumi"] = {"adopted": existing.get("adopted") is True} if isinstance(existing, dict) else None
+    audio = report.get("compressed_audio") or {}
+    shown["compressed_audio"] = {"state": audio.get("state"), "message": _audio_line(
+        str(audio.get("state") or ""), audio.get("ffmpeg"), audio.get("found"), paths=False)}
+    return shown
 
 
 def _mb(size: int) -> str:
