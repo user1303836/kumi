@@ -50,6 +50,7 @@ fn helper(folder: &Path) -> String {
         r#"#!/bin/sh
 root="$(dirname "$0")"
 printf 'start\n' >> "$root/starts"
+printf '%s\n' "$$" >> "$root/pids"
 while IFS= read -r line; do
  printf '%s\n' "$line" >> "$root/requests"
  id="${line#*\"id\":}"; id="${id%%,*}"
@@ -196,8 +197,18 @@ async fn exited_helpers_restart_and_missing_helpers_report_failure() {
     assert_eq!(hands.answer("exit", None).await.unwrap().error.as_deref(), Some("helper-ended"));
     assert!(hands.trusted(true).await.unwrap());
     assert_eq!(std::fs::read_to_string(folder.path().join("starts")).unwrap(), "start\nstart\n");
+    let pid: libc::pid_t = std::fs::read_to_string(folder.path().join("pids")).unwrap().lines().last().unwrap().parse().unwrap();
     hands.close();
-    // Close and the next request share the FIFO channel: the reply itself proves the next helper has started.
+    // close() queues its work and cancels every waiter when handled. A new request registers its waiter before its
+    // queued Ask is handled, so it must follow the completed close, not just the call that queued it. The reaped PID
+    // proves that completion without guessing how long the helper or transport task needs.
+    tokio::time::timeout(std::time::Duration::from_millis(ANSWER_GUARD_MS), async {
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the closed helper ended and was reaped");
     assert!(hands.trusted(false).await.unwrap());
     hands.close();
     let absent = persistent(folder.path().join("absent").to_string_lossy().into(), vec![], Some(ANSWER_GUARD_MS));
