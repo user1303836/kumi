@@ -247,7 +247,7 @@ fn the_two_properties_restore_by_full_value_without_selection_or_navigation_and_
                 lab.native.item()["c"][1]["value"] = 0.into();
                 lab.native.item()["c"][1]["valueDesc"] = "off".into();
             }
-            let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().expect("complete synthetic preview");
+            let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().expect("complete synthetic preview");
             assert_eq!(lab.native.writes, 0);
             let applied = lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).ok().expect("complete synthetic apply");
             assert_eq!(applied.applied["identity"], preview.prior["identity"]);
@@ -289,7 +289,7 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
                 continue;
             } // Name Confirm isn't the Loop action's readiness.
             let mut lab = Lab::new();
-            let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+            let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
             let applied = lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).ok().unwrap();
             lab.native.edit(scenario);
             let writes = lab.native.writes;
@@ -299,7 +299,7 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
             assert_eq!(lab.native.writes, writes, "{mode:?}/{scenario}");
             // Matching the old property value is insufficient when the identity changed in the meantime.
             let mut lab = Lab::new();
-            let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+            let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
             let applied = lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).ok().unwrap();
             if mode == Mode::Rename {
                 lab.native.rename("Keys");
@@ -312,14 +312,14 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
             assert!(lab.restore(&preview, &applied, mode, true).is_err(), "already restored {mode:?}/{scenario}");
             assert_eq!(lab.native.writes, writes);
             let mut lab = Lab::new();
-            let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+            let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
             lab.native.edit(scenario);
             assert!(lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).is_err(), "apply {mode:?}/{scenario}");
             assert_eq!(lab.native.writes, 0);
         }
     }
     let mut lab = Lab::new();
-    let preview = lab.with(|ctx| preview(ctx, &input(Mode::Rename), Mode::Rename)).ok().unwrap();
+    let preview = lab.with(|ctx| super::preview(ctx, &input(Mode::Rename), Mode::Rename)).ok().unwrap();
     lab.native.edit_on_read = Some(lab.native.content_reads + 3); // Apply observes twice, fresh dispatch guard reads next.
     assert!(lab.with(|ctx| apply(ctx, &input(Mode::Rename), &preview.fence, Mode::Rename)).is_err());
     assert_eq!(lab.native.writes, 0);
@@ -328,7 +328,7 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
         let full = format!("{}A", "x".repeat(1100));
         lab.native.rename(&full);
         lab.project.shape.as_mut().unwrap().regions[0].1 = rows::clip(&full);
-        let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+        let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
         assert_eq!(preview.prior["name"], full);
         lab.native.rename(&format!("{}B", "x".repeat(1100)));
         assert!(lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).is_err());
@@ -356,7 +356,7 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
     // comparison. Empty version-one containers must not turn a malformed journal into a UI observation request.
     for mode in [Mode::Rename, Mode::Loop] {
         let mut lab = Lab::new();
-        let complete = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap().prior;
+        let complete = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap().prior;
         for (pointer, replacement) in [
             ("/identity/project", json!({})),
             ("/identity/project/path", Value::Null),
@@ -416,7 +416,7 @@ fn unverified_or_partial_region_dispatches_stop_without_confirm_retry_compensati
                 },
             ] {
                 let mut lab = Lab::new();
-                let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+                let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
                 lab.native.fault = Some((at, fault));
                 assert_eq!(lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).err().unwrap().0, "uncertain");
                 assert_eq!(lab.native.writes, at);
@@ -426,13 +426,13 @@ fn unverified_or_partial_region_dispatches_stop_without_confirm_retry_compensati
     }
     for mode in [Mode::Rename, Mode::Loop] {
         let mut lab = Lab::new();
-        let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+        let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
         lab.native.malformed = Some(1);
         assert_eq!(lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).err().unwrap().0, "uncertain");
         assert_eq!(lab.native.writes, 1);
         assert!(matches!(lab.native.calls.last().unwrap().0.as_str(), "set" | "action"));
         let mut lab = Lab::new();
-        let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+        let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
         let applied = lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).ok().unwrap();
         lab.native.fault = Some((lab.native.writes + 1, HelperError::Timeout));
         let before = lab.native.writes;
@@ -440,13 +440,13 @@ fn unverified_or_partial_region_dispatches_stop_without_confirm_retry_compensati
         assert_eq!(lab.native.writes, before + 1);
     }
     let mut lab = Lab::new();
-    let preview = lab.with(|ctx| preview(ctx, &input(Mode::Rename), Mode::Rename)).ok().unwrap();
+    let preview = lab.with(|ctx| super::preview(ctx, &input(Mode::Rename), Mode::Rename)).ok().unwrap();
     lab.native.edit_after_set = true;
     assert_eq!(lab.with(|ctx| apply(ctx, &input(Mode::Rename), &preview.fence, Mode::Rename)).err().unwrap().0, "uncertain");
     assert_eq!(lab.native.writes, 1, "changed complete identity after SET never receives Confirm");
     for mode in [Mode::Rename, Mode::Loop] {
         let mut lab = Lab::new();
-        let preview = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap();
+        let preview = lab.with(|ctx| super::preview(ctx, &input(mode), mode)).ok().unwrap();
         lab.native.fail_read_after_write = true;
         assert_eq!(lab.with(|ctx| apply(ctx, &input(mode), &preview.fence, mode)).err().unwrap().0, "uncertain");
         assert_eq!(lab.native.writes, 1);
