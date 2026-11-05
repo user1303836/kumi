@@ -435,6 +435,7 @@ async fn convert(
                 timeout_ms: Some(timeout),
                 max_buffer: Some(max_buffer),
                 isolated_dir: isolated_dir.map(Path::to_path_buf),
+                ..Default::default()
             },
         )
         .await;

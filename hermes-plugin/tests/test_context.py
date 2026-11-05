@@ -175,6 +175,7 @@ class Cli(unittest.TestCase):
         self.assertEqual(shown[3:], ["Connected to Live: Night Drive.", f"Sample folders: {support.DRUMS}",
                                      "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: setup found no "
                                      "ffmpeg on this computer.",
+                                     "Video tutorials: not set up; this plugin's Kumi has no yt-dlp for this computer.",
                                      "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that)."])
         host.runtimes.stop_all()
         self.assertRegex(self.run_cli(host).splitlines()[2], r"^Runtime: not running \(last heard \d+ s ago\)\.$",

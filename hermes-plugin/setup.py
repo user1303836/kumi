@@ -44,6 +44,13 @@ REPOSITORY = "user1303836/kumi"
 SCHEMA = 1
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+# yt-dlp, which the pin may name for reading videos (CC-21a): one exact tag of yt-dlp's official repository, and its
+# single-file build for each Kumi target (nothing is unpacked).
+YT_DLP_REPOSITORY = "yt-dlp/yt-dlp"
+YT_DLP_TAG = re.compile(r"[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?")
+YT_DLP_ASSETS = {"aarch64-apple-darwin": "yt-dlp_macos", "x86_64-apple-darwin": "yt-dlp_macos",
+                 "x86_64-pc-windows-msvc": "yt-dlp.exe", "aarch64-pc-windows-msvc": "yt-dlp_arm64.exe",
+                 "x86_64-unknown-linux-gnu": "yt-dlp_linux", "aarch64-unknown-linux-gnu": "yt-dlp_linux_aarch64"}
 DAWS = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
 # A DAW whose part a standalone Kumi put in can be used as it is (adopted): Live only (kumi-adv's D1). A REAPER
 # extension or Renoise tool serves one Kumi at a time, so setup stops while another Kumi's is there, and says how to
@@ -161,6 +168,40 @@ def pin_for(pin: dict, target: str) -> dict:
         if not isinstance(record.get(key), int) or isinstance(record.get(key), bool) or record[key] <= 0:
             raise SetupError("bad_pin", f"The pin has no {key} for {target}.")
     return record
+
+
+def yt_dlp_for(pin: dict, target: str | None) -> dict | None:
+    """The yt-dlp the pin names for `target` (CC-21a), checked before anything is fetched: one exact tag of yt-dlp's
+    official repository, the single-file build for this target at its exact release URL, a SHA-256 and a size, as
+    `{tag, asset, url, sha256, size}`. None when the pin names no yt-dlp, or none for this target; a section off that
+    pattern is refused, as `pin_for` refuses Kumi's."""
+    section = pin.get("yt_dlp")
+    if section is None:
+        return None
+    tag = section.get("tag") if isinstance(section, dict) else None
+    if (not isinstance(tag, str) or not YT_DLP_TAG.fullmatch(tag) or section.get("repository") != YT_DLP_REPOSITORY
+            or section.get("release") != f"https://github.com/{YT_DLP_REPOSITORY}/releases/tag/{tag}"
+            or not isinstance(section.get("targets"), dict)):
+        raise SetupError("bad_pin", f"The pin's yt-dlp isn't one exact release of github.com/{YT_DLP_REPOSITORY}.")
+    record = section["targets"].get(target) if target else None
+    if record is None:
+        return None
+    asset = YT_DLP_ASSETS.get(target)
+    url = f"https://github.com/{YT_DLP_REPOSITORY}/releases/download/{tag}/{asset}"
+    if asset is None or not isinstance(record, dict) or record.get("asset") != asset or record.get("url") != url:
+        raise SetupError("bad_pin", f"The pin's yt-dlp for {target} isn't yt-dlp {tag}'s own build for it.")
+    if not isinstance(record.get("sha256"), str) or not SHA256.fullmatch(record["sha256"]):
+        raise SetupError("bad_pin", f"The pin has no SHA-256 for yt-dlp on {target}.")
+    size = record.get("size")
+    if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+        raise SetupError("bad_pin", f"The pin has no size for yt-dlp on {target}.")
+    return {"tag": tag, "asset": asset, "url": url, "sha256": record["sha256"], "size": size}
+
+
+def _reads_videos(pin: Mapping[str, Any]) -> bool:
+    """Whether the pinned runtime has the `watch` operation (the pin's `serve_operations`), so yt-dlp has a use."""
+    operations = pin.get("serve_operations")
+    return isinstance(operations, list) and "watch" in operations
 
 
 # ---- files setup keeps -----------------------------------------------------------------------------------------------
@@ -411,6 +452,86 @@ def _audio_line(state: str, path: str | None, offer: str | None, *, paths: bool 
     return f"Compressed audio (MP3, FLAC…): no. {message}"
 
 
+# ---- yt-dlp (CC-21): an optional program setup downloads from the pin, kept in Kumi's data --------------------------
+
+def yt_dlp_name(target: str) -> str:
+    return "yt-dlp.exe" if "windows" in target else "yt-dlp"
+
+
+def _ytdlp_folder(data_dir: Path) -> Path:
+    """`<data>/tools/yt-dlp`, one folder per tag. Never under `runtime/`, whose cleanup removes version-named folders."""
+    return data_dir / "tools" / "yt-dlp"
+
+
+def _allowed_ytdlp(data_dir: Path) -> tuple[str, str | None, str | None]:
+    """The yt-dlp setup kept (`tools.yt-dlp` in `current.json`), whether it's still that program as runtime.py checks at
+    each start (`available`, `changed`, `gone` or `not_installed`), its path, and its tag (the folder it's in, under
+    `<data>/tools/yt-dlp`), or None for a path setup wouldn't have written."""
+    tools = (_read_json(data_dir / "runtime" / "current.json") or {}).get("tools")
+    kept = tools.get("yt-dlp") if isinstance(tools, dict) else None
+    path = kept.get("path") if isinstance(kept, dict) else None
+    if not isinstance(path, str) or not _local(path):
+        return "not_installed", None, None
+    folder = Path(path).parent
+    tag = folder.name if (folder.parent == Path(os.path.realpath(_ytdlp_folder(data_dir)))
+                          and YT_DLP_TAG.fullmatch(folder.name)) else None
+    if _resolved(path) != path:
+        return "changed", path, tag
+    if _identity(path) == {key: kept.get(key) for key in _IDENTITY}:
+        return "available", path, tag
+    return ("changed" if os.path.lexists(path) else "gone"), path, tag
+
+
+def _ytdlp_offer(pin: Mapping[str, Any], target: str | None, data_dir: Path) -> dict | None:
+    """The yt-dlp step's download when setup offers it: the pin names one for this target, the pinned runtime has
+    `watch`, and Kumi doesn't already keep that tag unchanged. `state` is `missing`, `newer` (a copy of another tag is
+    kept; `replaces` names it), or `changed`/`gone` for the pinned tag's own copy."""
+    pinned = yt_dlp_for(dict(pin), target)
+    if pinned is None or not _reads_videos(pin):
+        return None
+    state, _, tag = _allowed_ytdlp(data_dir)
+    if state == "not_installed":
+        return {**pinned, "state": "missing", "replaces": None}
+    if tag != pinned["tag"]:
+        return {**pinned, "state": "newer", "replaces": tag}
+    return None if state == "available" else {**pinned, "state": state, "replaces": None}
+
+
+def video_tutorials(data_dir: Path, plugin_dir: Path | None = None, target: str | None = None) -> dict:
+    """Whether Kumi's runtime can read a video tutorial's captions and frames: `{"state": "available" | "changed" |
+    "gone" | "not_installed", "tag": the kept yt-dlp's tag, "pinned": the tag setup offers, "message"}`. `message` is
+    the line `hermes kumi status` shows; it names no path. No network, no subprocess."""
+    state, _, tag = _allowed_ytdlp(data_dir)
+    try:
+        pin = load_pin(plugin_dir)
+        pinned = yt_dlp_for(pin, target or host_target()) if _reads_videos(pin) else None
+    except SetupError:
+        pinned = None
+    offer = pinned["tag"] if pinned else None
+    ffmpeg = _allowed_ffmpeg(data_dir)[0] == "available"
+    return {"state": state, "tag": tag, "pinned": offer, "message": _video_line(state, tag, offer, ffmpeg)}
+
+
+def _video_line(state: str, tag: str | None, offer: str | None, ffmpeg: bool) -> str:
+    """`video_tutorials`'s line: what Kumi reads of a video, and how to change that."""
+    run = "run hermes kumi setup (or ask Hermes to set up Kumi)"
+    if state == "available" and not ffmpeg:
+        return (f"Video tutorials: captions only (yt-dlp {tag}); frames need the ffmpeg allowed at setup, so allow one "
+                "with hermes kumi setup.")
+    if state == "available":
+        update = f" To update it to yt-dlp {offer}, {run}." if offer and offer != tag else ""
+        return f"Video tutorials: yes, Kumi can read a video tutorial's captions and frames (yt-dlp {tag}).{update}"
+    why = {"changed": "no. Kumi's copy of yt-dlp changed since setup kept it, so Kumi doesn't run it",
+           "gone": "no. Kumi's copy of yt-dlp is gone"}.get(state, "not set up")
+    if not offer:
+        return f"Video tutorials: {why}; this plugin's Kumi has no yt-dlp for this computer."
+    if not ffmpeg:
+        return (f"Video tutorials: {why}; setup offers yt-dlp once an ffmpeg is allowed: install ffmpeg, then run "
+                "hermes kumi setup.")
+    again = "download it again" if state in ("changed", "gone") else "let Kumi read a video tutorial's captions and frames"
+    return f"Video tutorials: {why}; to {again}, {run}."
+
+
 # ---- status: read-only ---------------------------------------------------------------------------------------------
 
 def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: Path | None = None,
@@ -428,7 +549,8 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
         "daw_component": {"state": "not_installed", "name": None, "path": None, "version": None, "installed_at": None},
         "existing_kumi": {"path": str(existing), "adopted": bool(adopted and Path(adopted.get("kumi_home", "")) == existing)}
         if existing else None,
-        "compressed_audio": compressed_audio(data_dir, env), "next_step": None, "message": ""}
+        "compressed_audio": compressed_audio(data_dir, env),
+        "video_tutorials": video_tutorials(data_dir, plugin_dir, target), "next_step": None, "message": ""}
     try:
         pin = load_pin(plugin_dir)
     except SetupError as error:
@@ -513,6 +635,8 @@ def for_model(report: Mapping[str, Any]) -> dict:
     audio = report.get("compressed_audio") or {}
     shown["compressed_audio"] = {"state": audio.get("state"), "message": _audio_line(
         str(audio.get("state") or ""), audio.get("ffmpeg"), audio.get("found"), paths=False)}
+    video = report.get("video_tutorials") or {}
+    shown["video_tutorials"] = {key: video.get(key) for key in ("state", "tag", "pinned", "message")}
     return shown
 
 
@@ -529,6 +653,9 @@ def plan_for_model(plan: Mapping[str, Any]) -> dict:
     if component:
         shown["component"] = {key: component.get(key) for key in ("component", "version", "state")}
     shown["existing_kumi"] = plan.get("existing_kumi") is not None
+    video = plan.get("yt_dlp") or {}
+    if video:
+        shown["yt_dlp"] = {"tag": video.get("tag"), "download_bytes": video.get("size"), "state": video.get("state")}
     daw = DAWS.get(str(plan.get("daw")), "the DAW")
     shown["summary"] = {
         "runtime": f"Download Kumi {plan.get('version')} ({_mb(int(download.get('bytes') or 0))}), check it against "
@@ -540,6 +667,10 @@ def plan_for_model(plan: Mapping[str, Any]) -> dict:
                       f"on while it's there. The producer quits {daw} and uninstalls that Kumi (kumi uninstall in a "
                       "terminal; hermes kumi setup shows exactly which), then sets Kumi up again. Nothing to approve.",
         "ffmpeg": "Optional: let Kumi's runtime use the ffmpeg already on this computer for compressed audio.",
+        "yt_dlp": f"Optional: download yt-dlp {video.get('tag')} ({_mb(int(video.get('size') or 0))}) from yt-dlp's "
+                  "official GitHub release, check it against the SHA-256 this plugin pins, and keep it in this "
+                  "profile's plugin data, so Kumi can read a video tutorial's captions and frames when the producer "
+                  f"names one.{' It replaces the older yt-dlp Kumi kept.' if video.get('state') == 'newer' else ''}",
         "use_daw": f"Make {daw} Kumi's DAW in this profile, so Kumi connects to it.",
         "none": f"Kumi is set up for {daw}.",
     }.get(str(plan.get("step")), "")
@@ -638,14 +769,25 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
     if dry["state"] in ("same", "newer") and using:  # the DAW is set up; making it Kumi's DAW comes before ffmpeg
         plan.update(step="use_daw", paths=[], effects=[], component=dry, use_daw=using)
     elif dry["state"] in ("same", "newer"):
-        found = None if _allowed_ffmpeg(data_dir)[0] == "available" else find_ffmpeg()
-        if found is None:
-            plan.update(step="none", paths=[], effects=[], component=dry)
-        else:  # the DAW is set up; offering ffmpeg is the last, optional step
+        allowed = _allowed_ffmpeg(data_dir)[0] == "available"
+        found = None if allowed else find_ffmpeg()
+        video = _ytdlp_offer(pin, target, data_dir) if allowed else None  # frames need the allowed ffmpeg
+        if found is not None:  # the DAW is set up; ffmpeg is offered next, optionally
             plan.update(step="ffmpeg", optional=True, paths=[], ffmpeg=found, component=dry, effects=[
                 f"Kumi's runtime will run {found['path']} to decode MP3, FLAC and other compressed audio in the "
                 "folders and files you let it read",
                 "Kumi doesn't download or install ffmpeg. Without it, Kumi reads WAV and AIFF only.", _RESTART])
+        elif video is not None:  # then yt-dlp, the last optional step (CC-21b)
+            destination = _ytdlp_folder(data_dir) / video["tag"]
+            replaced = ([f"Then remove yt-dlp {video['replaces']}, which Kumi kept before"]
+                        if video["state"] == "newer" and video["replaces"] else [])
+            plan.update(step="yt_dlp", optional=True, paths=[str(destination)], yt_dlp=video, component=dry, effects=[
+                f"Download yt-dlp {video['tag']} ({_mb(video['size'])}) from github.com/{YT_DLP_REPOSITORY}'s "
+                "official release, check it against the pinned SHA-256, and keep it in Kumi's data. Kumi runs it "
+                "only to read a video you name, and never updates it.",
+                f"The download: {video['url']}", *replaced, _RESTART])
+        else:
+            plan.update(step="none", paths=[], effects=[], component=dry)
     elif dry["state"] == "other_owner" and daw in ADOPTABLE:
         plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
                     component=dry, **({"use_daw": using} if using else {}))
@@ -733,7 +875,7 @@ def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: 
     try:
         _write_json(data_dir / "setup" / "plan.json", result)
         component = result.get("component") or {}
-        if result["step"] in ("none", "ffmpeg", "use_daw") and component.get("state") == "same":  # this home's
+        if result["step"] in ("none", "ffmpeg", "yt_dlp", "use_daw") and component.get("state") == "same":  # this home's
             receipt = _read_json(data_dir / "setup" / "receipt.json") or {}
             if daw not in (receipt.get("daw_components") or {}):
                 _record_component(data_dir, daw, component, installed_at=None)
@@ -799,13 +941,14 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
                 f"{kept} stays as it is", _RESTART, *_tagging(daw, plan["component"]), *using]
-    if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg", "use_daw"):
+    if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg", "yt_dlp", "use_daw"):
         return None
     if plan["step"] == "use_daw" and not using:
         return None
     title = {"runtime": f"Kumi: download and install Kumi {plan['version']}",
              "daw_component": f"Kumi: install Kumi's part in {DAWS[daw]}",
              "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer",
+             "yt_dlp": f"Kumi: download yt-dlp {(plan.get('yt_dlp') or {}).get('tag')} to read videos you name",
              "use_daw": f"Kumi: make {DAWS[daw]} Kumi's DAW in this profile"}[plan["step"]]
     named = "\n".join(plan["effects"])
     writes = [f"Writes: {path}" for path in plan["paths"] if not _names(named, path)]
@@ -960,6 +1103,8 @@ def install(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict]
                 message = _install_runtime(approved, data_dir, target, progress, opener or _open_url)
             elif approved["step"] == "ffmpeg":
                 message = _allow_ffmpeg(approved, data_dir)
+            elif approved["step"] == "yt_dlp":
+                message = _install_ytdlp(approved, data_dir, target, progress, opener or _open_url)
             elif approved["step"] == "use_daw":
                 message = ""
             else:
@@ -982,23 +1127,26 @@ def _open_url(url: str) -> Any:
 
 
 def _download(url: str, expect_size: int, expect_sha256: str, into: Path,
-              progress: Callable[[int, int], None] | None, opener: Callable[..., Any]) -> None:
+              progress: Callable[[int, int], None] | None, opener: Callable[..., Any], what: str) -> None:
+    """`url` into `into`, stopped once it's larger than `expect_size`, and refused unless its size and SHA-256 are the
+    pinned ones. `what` names the download in the producer's words ("Kumi 1.2.3", "yt-dlp 2026.10.26")."""
     digest, done = hashlib.sha256(), 0
     try:
         with opener(url) as response, into.open("wb") as out:
             while chunk := response.read(1 << 20):
                 done += len(chunk)
                 if done > expect_size:
-                    raise SetupError("checksum_mismatch", "The download is larger than the pinned bundle; stopped.")
+                    raise SetupError("checksum_mismatch", f"The download of {what} is larger than this plugin pins; "
+                                                          "stopped, and nothing was installed.")
                 digest.update(chunk)
                 out.write(chunk)
                 if progress:
                     progress(done, expect_size)
     except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as error:
-        raise SetupError("download_failed", f"Downloading Kumi failed ({error}). Check your internet connection and run "
-                                            "setup again; nothing was installed.") from None
+        raise SetupError("download_failed", f"Downloading {what} failed ({error}). Check your internet connection and "
+                                            "run setup again; nothing was installed.") from None
     if done != expect_size or digest.hexdigest() != expect_sha256:
-        raise SetupError("checksum_mismatch", "The downloaded bundle doesn't match the SHA-256 this plugin pins; "
+        raise SetupError("checksum_mismatch", f"The download of {what} doesn't match the SHA-256 this plugin pins; "
                                               "nothing was installed.")
 
 
@@ -1021,7 +1169,8 @@ def _install_runtime(approved: dict, data_dir: Path, target: str, progress: Call
     archive_path, staging = runtime / f".download-{token}.tar.xz", runtime / f".staging-{version}-{token}"
     final, old = runtime / version, runtime / f".old-{version}-{token}"
     try:
-        _download(download["url"], download["bytes"], download["sha256"], archive_path, progress, opener)
+        _download(download["url"], download["bytes"], download["sha256"], archive_path, progress, opener,
+                  f"Kumi {version}")
         if not hasattr(tarfile, "data_filter"):
             raise SetupError("python_too_old", "Setup needs Python 3.11.4 or later to unpack the bundle safely.")
         try:
@@ -1090,6 +1239,46 @@ def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
     return "Kumi's runtime will use the ffmpeg you allowed for compressed audio from its next start."
 
 
+def _install_ytdlp(approved: Mapping[str, Any], data_dir: Path, target: str,
+                   progress: Callable[[int, int], None] | None, opener: Callable[..., Any]) -> str:
+    """Download the pinned yt-dlp (CC-21b) into `<data>/tools/yt-dlp/<tag>/`, keeping it only once its size and
+    SHA-256 are the pinned ones (a temporary file in the same folder, renamed into place), and record it with its
+    identity where runtime.py reads it; then remove other tags' copies."""
+    video = approved["yt_dlp"]
+    record = _read_json(data_dir / "runtime" / "current.json")
+    if not record:
+        raise SetupError("needs_runtime", "Install Kumi's runtime before setting up yt-dlp.")
+    tools_dir = _ytdlp_folder(data_dir)
+    folder = tools_dir / video["tag"]
+    folder.mkdir(parents=True, exist_ok=True)
+    final, scratch = folder / yt_dlp_name(target), folder / f".download-{secrets.token_hex(4)}"
+    kept = None
+    try:
+        _download(video["url"], video["size"], video["sha256"], scratch, progress, opener, f"yt-dlp {video['tag']}")
+        scratch.chmod(0o755)
+        os.replace(scratch, final)
+        path = _resolved(str(final))
+        kept = _identity(path) if path else None
+        if kept is None:
+            final.unlink(missing_ok=True)
+            raise SetupError("not_local", f"{folder} isn't a folder on this computer Kumi can run a program from, so "
+                                          "yt-dlp wasn't kept.")
+    finally:
+        scratch.unlink(missing_ok=True)
+        if kept is None:
+            with contextlib.suppress(OSError):
+                folder.rmdir()  # only when empty: nothing of this download is kept
+    tools = record.get("tools") if isinstance(record.get("tools"), dict) else {}
+    _write_json(data_dir / "runtime" / "current.json", {**record, "tools": {**tools, "yt-dlp": kept}})
+    receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
+    receipt["yt_dlp"] = {"tag": video["tag"], "sha256": video["sha256"], "at": _now_ms()}
+    _write_json(data_dir / "setup" / "receipt.json", receipt)
+    for stale in tools_dir.iterdir():  # other tags' copies; a running runtime keeps its open file
+        if stale.name != video["tag"] and YT_DLP_TAG.fullmatch(stale.name) and stale.is_dir() and not stale.is_symlink():
+            shutil.rmtree(stale, ignore_errors=True)
+    return f"yt-dlp {video['tag']} is set up: Kumi's runtime can read a video you name from its next start."
+
+
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime for the DAW step.")
@@ -1122,7 +1311,7 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
         return 1
     current = current if current in DAWS else _configured_daw()
     daw = daw if daw in DAWS else current
-    for _ in range(5):  # the runtime, the DAW component, making it Kumi's DAW, ffmpeg if there is one, a final check
+    for _ in range(6):  # the runtime, the DAW component, making it Kumi's DAW, ffmpeg and yt-dlp if offered, a check
         try:
             step = plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target,
                         current=current, use=use)
@@ -1131,7 +1320,8 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
             return 1
         if step["step"] == "none":
             now = status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)
-            print(now["message"], now["compressed_audio"]["message"], *filter(None, [next_daw(daw, current)]),
+            print(now["message"], now["compressed_audio"]["message"], now["video_tutorials"]["message"],
+                  *filter(None, [next_daw(daw, current)]),
                   sep="\n", file=stdout)
             return 0
         if step["step"] == "other_kumi":  # nothing to approve: the producer takes that Kumi's part out first
@@ -1147,8 +1337,10 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
         if stdin.readline().strip().lower() not in ("y", "yes"):
             if step.get("optional"):  # setup is done without it
+                later = {"ffmpeg": "Kumi reads WAV and AIFF only; run hermes kumi setup again to allow ffmpeg later.",
+                         "yt_dlp": "Kumi doesn't read videos; run hermes kumi setup again to set up yt-dlp later."}
                 print(status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)["message"],
-                      "Kumi reads WAV and AIFF only; run hermes kumi setup again to allow ffmpeg later.",
+                      later.get(step["step"], ""),
                       sep="\n", file=stdout)
                 return 0
             print("Nothing was changed.", file=stdout)

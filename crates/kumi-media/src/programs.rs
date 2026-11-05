@@ -117,9 +117,12 @@ pub struct RunOptions {
     pub signal: Option<Signal>,
     pub timeout_ms: Option<u64>,
     pub max_buffer: Option<usize>,
-    /// Run in owned scratch with a private home/temp and no inherited secrets, proxies, or loader overrides.
-    /// None preserves the standalone caller's working directory and environment.
+    /// Run in owned scratch with a private home, config, cache and temp, and no inherited secrets, proxies, or loader
+    /// overrides. None preserves the standalone caller's working directory and environment.
     pub isolated_dir: Option<PathBuf>,
+    /// The variables of this process's environment an isolated run keeps when they're set: a network program's
+    /// proxies, which a standalone run inherits.
+    pub keep_env: &'static [&'static str],
 }
 
 /// What a program wrote: its stdout as bytes (text when it was text), its stderr as text.
@@ -232,8 +235,13 @@ pub async fn run<S: AsRef<OsStr>>(command: &str, args: &[S], options: RunOptions
     spawning.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     if let Some(dir) = &options.isolated_dir {
         spawning.current_dir(dir).env_clear().env("LC_ALL", "C");
-        for name in ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP"] {
+        for name in ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA"] {
             spawning.env(name, dir);
+        }
+        for name in options.keep_env {
+            if let Some(value) = std::env::var_os(name) {
+                spawning.env(name, value);
+            }
         }
         #[cfg(windows)]
         for name in ["SystemRoot", "WINDIR"] {

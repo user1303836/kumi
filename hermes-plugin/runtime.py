@@ -108,13 +108,15 @@ class Refused(Exception):
 
 @dataclass(frozen=True)
 class Install:
-    """The runtime setup installed: its version and target, the `kumi` to start, Kumi's transport home, and the ffmpeg
-    the producer allowed at setup, as setup recorded it (CC-10: `{path, size, mtime_ns, ino}`), if any."""
+    """The runtime setup installed: its version and target, the `kumi` to start, Kumi's transport home, the ffmpeg
+    the producer allowed at setup and the yt-dlp setup downloaded, as setup recorded them (CC-10, CC-21: `{path, size,
+    mtime_ns, ino}`), if any."""
     version: str
     target: str
     kumi: Path
     kumi_home: Path
     ffmpeg: dict | None = None
+    yt_dlp: dict | None = None
 
 
 def installed(data_dir: Path, pinned: str | None, target: str | None = None) -> Install:
@@ -148,7 +150,8 @@ def installed(data_dir: Path, pinned: str | None, target: str | None = None) -> 
                                           "Kumi up again.")
     tools = receipt.get("tools") if isinstance(receipt.get("tools"), dict) else {}
     ffmpeg = tools.get("ffmpeg") if isinstance(tools.get("ffmpeg"), dict) else None
-    return Install(version, target, program, Path(home) if home else data_dir / "kumi-home", ffmpeg)
+    yt_dlp = tools.get("yt-dlp") if isinstance(tools.get("yt-dlp"), dict) else None
+    return Install(version, target, program, Path(home) if home else data_dir / "kumi-home", ffmpeg, yt_dlp)
 
 
 def allowed_tool(record: dict | None) -> str | None:
@@ -180,7 +183,8 @@ def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Itera
     """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, each sample folder
     the producer approved (`--library-root`, the runtime's only grant to read them), each folder of finished media it
     may import or measure (`--media-root`: Hermes's generated audio, where other plugins' results land), the ffmpeg
-    they allowed at setup while it's unchanged (`--tool ffmpeg=`, CC-10), and Hermes's homes (`hermes_homes()`:
+    they allowed at setup and the yt-dlp setup downloaded, each while it's unchanged (`--tool ffmpeg=`, CC-10;
+    `--tool yt-dlp=`, CC-21), and Hermes's homes (`hermes_homes()`:
     `--hermes-home`, `--hermes-root`), each only when it's a full path: inside them the runtime takes no library root
     and reads no source, but for a media root it's given (#970). Read at each start."""
     argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
@@ -191,6 +195,8 @@ def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Itera
         argv += ["--media-root", root]
     if ffmpeg := allowed_tool(install.ffmpeg):
         argv += ["--tool", f"ffmpeg={ffmpeg}"]
+    if yt_dlp := allowed_tool(install.yt_dlp):
+        argv += ["--tool", f"yt-dlp={yt_dlp}"]
     for flag, home in zip(("--hermes-home", "--hermes-root"), hermes):
         if isinstance(home, str) and home and Path(home).is_absolute():
             argv += [flag, home]

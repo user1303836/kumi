@@ -6,7 +6,8 @@ approval.
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
 current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. A folder the
 producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt in the
-words of the plan they carry out (C8). Anything else of Kumi's is blocked.
+words of the plan they carry out (C8). A YouTube video Kumi reads is approved by its address (CC-21). Anything else of
+Kumi's is blocked.
 
 Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
 approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
@@ -25,7 +26,7 @@ import textwrap
 from typing import Any
 import unicodedata
 
-from . import calls, generate, runtime, setup, snapshots, tools
+from . import calls, generate, runtime, schemas, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
 # What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
-ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
+ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_watch"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
@@ -167,6 +168,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _setup(host, args)
     if tool == "kumi_generate":
         return _generate(host, args, kwargs)
+    if tool == "kumi_watch":
+        return _watch(host, args), {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -471,6 +474,36 @@ def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
                         "• Mirelo quotes it in credits first; nothing is paid until that quote is approved too."],
                        f"kumi:upload:{identity}")
     return decision, {}
+
+
+def _watch(host: Any, args: dict) -> dict:
+    """Reading a YouTube video (CC-21's 21h): every call fetches from YouTube, so each is asked, naming the video's
+    canonical address and what's read, under a key naming that video (`tools.video_key`), in this chat. Where nobody
+    can answer, it's refused before this (decide). Anything but a YouTube address is refused unasked."""
+    url = tools.video_url(args.get("url"))
+    if url is None:
+        return block("Kumi didn't read anything: it reads only YouTube videos, from an https youtube.com/watch, youtu.be "
+                     "or youtube.com/shorts address.")
+    try:
+        _live(host)
+    except runtime.Unavailable as failure:
+        return block(f"Kumi didn't read the video: {_reason(failure)}")
+    at = args.get("at", [])
+    if (not isinstance(at, list) or len(at) > schemas.WATCH_FRAMES
+            or any(tools.video_seconds(each) is None or each > 86400 for each in at)
+            or (args.get("region") is not None and args["region"] not in schemas.REGIONS)
+            or not isinstance(args.get("captions", False), bool)):
+        return block("Kumi didn't read the video: kumi_watch takes up to 4 moments in seconds, a region it names, and "
+                     "captions as true or false.")
+    # Its page (title, length, chapters) is read every time; the lines name what else is (Discord shows 300 characters).
+    read = ["its captions"] if args.get("captions") else [] if at else ["its title, length and chapters"]
+    if at:
+        region = f" (close-up: {args['region']})" if isinstance(args.get("region"), str) else ""
+        frames = "1 frame" if len(at) == 1 else f"{len(at)} frames"
+        read += [f"{frames} at {', '.join(tools.moment(each) for each in at)}{region}",
+                 "(the first time, a ≤720p copy of its picture, up to 150 MB, kept in Kumi's data)"]
+    return approve([f"Kumi: read a YouTube video, {quoted(url)}", *(f"• {line}" for line in read)],
+                   tools.video_key(url))
 
 
 # A-a: a file's identity is its content's SHA-256, as lowercase hex.

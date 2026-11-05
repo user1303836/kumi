@@ -610,6 +610,44 @@ class Installed(unittest.TestCase):
                                        "ino": found.st_ino}})
         self.assertNotIn("--tool", argv(), "an allowed path that now leads through a link is changed")
 
+    def test_the_yt_dlp_setup_kept_is_passed_only_while_it_is_the_same_file(self):
+        support.install(self.data)
+        folder = Path(os.path.realpath(self.data)) / "tools" / "yt-dlp" / "2026.10.26"  # setup records it canonical
+        folder.mkdir(parents=True)
+        yt_dlp = folder / ("yt-dlp.exe" if os.name == "nt" else "yt-dlp")
+        yt_dlp.write_bytes(b"#!/bin/sh\n")
+        yt_dlp.chmod(0o755)
+        found = yt_dlp.stat()
+        kept = {"path": str(yt_dlp), "size": found.st_size, "mtime_ns": found.st_mtime_ns, "ino": found.st_ino}
+        self.receipt(tools={"yt-dlp": kept})
+
+        def argv() -> list[str]:
+            return runtime.serve_argv(runtime.installed(self.data, support.VERSION), self.data / "state", "ableton")
+
+        self.assertEqual(runtime.installed(self.data, support.VERSION).yt_dlp, kept)
+        self.assertEqual(argv()[-2:], ["--tool", f"yt-dlp={yt_dlp}"])
+        ffmpeg = folder / "ffmpeg"  # beside an allowed ffmpeg, each is its own argument
+        ffmpeg.write_bytes(b"#!/bin/sh\n")
+        ffmpeg.chmod(0o755)
+        found = ffmpeg.stat()
+        allowed = {"path": str(ffmpeg), "size": found.st_size, "mtime_ns": found.st_mtime_ns, "ino": found.st_ino}
+        self.receipt(tools={"ffmpeg": allowed, "yt-dlp": kept})
+        self.assertEqual(argv()[-4:], ["--tool", f"ffmpeg={ffmpeg}", "--tool", f"yt-dlp={yt_dlp}"])
+        yt_dlp.write_bytes(b"#!/bin/sh\n# swapped after setup kept it\n")  # same path, another program
+        self.assertEqual(argv()[-2:], ["--tool", f"ffmpeg={ffmpeg}"], "only the unchanged ffmpeg is passed")
+        yt_dlp.unlink()
+        self.assertNotIn(f"yt-dlp={yt_dlp}", argv())
+        yt_dlp.write_bytes(b"#!/bin/sh\n")
+        yt_dlp.chmod(0o755)
+        found = yt_dlp.stat()
+        kept = {"path": str(yt_dlp), "size": found.st_size, "mtime_ns": found.st_mtime_ns, "ino": found.st_ino}
+        self.receipt(tools={"yt-dlp": kept})
+        self.assertEqual(argv()[-2:], ["--tool", f"yt-dlp={yt_dlp}"], "set up again, it's passed again")
+        for record in ({**kept, "path": "yt-dlp"}, {**kept, "ino": str(found.st_ino)}, str(yt_dlp)):
+            with self.subTest(record=record):
+                self.receipt(tools={"yt-dlp": record})
+                self.assertNotIn("--tool", argv())
+
 
 if __name__ == "__main__":
     unittest.main()

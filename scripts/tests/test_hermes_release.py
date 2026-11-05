@@ -94,6 +94,43 @@ class FakeGitHub:
         return path
 
 
+YT_TAG = "2026.10.26"
+YT_NAMES = ("yt-dlp_macos", "yt-dlp.exe", "yt-dlp_arm64.exe", "yt-dlp_linux", "yt-dlp_linux_aarch64")
+
+
+class FakeYtDlp:
+    """yt-dlp's published, immutable release, as GitHub and its assets would return it; tests break one thing."""
+
+    def __init__(self) -> None:
+        self.repository = "yt-dlp/yt-dlp"
+        self.files = {name: f"yt-dlp build {name}".encode() for name in YT_NAMES}
+        self.digest = {name: hashlib.sha256(data).hexdigest() for name, data in self.files.items()}
+        # The real file lists more than the builds setup installs.
+        self.sums = "".join(f"{self.digest[name]}  {name}\n" for name in YT_NAMES) + f"{'a' * 64}  yt-dlp.tar.gz\n"
+        self.release_data = {
+            "tag_name": YT_TAG, "draft": False, "prerelease": False, "immutable": True,
+            "assets": [{"name": name, "size": len(self.files[name]), "digest": f"sha256:{self.digest[name]}",
+                        "browser_download_url": f"https://github.com/yt-dlp/yt-dlp/releases/download/{YT_TAG}/{name}"}
+                       for name in YT_NAMES]}
+        self.downloads: list[str] = []
+
+    def asset_data(self, name: str) -> dict:
+        return next(asset for asset in self.release_data["assets"] if asset["name"] == name)
+
+    def release(self, tag: str) -> dict:
+        return copy.deepcopy(self.release_data)
+
+    def asset(self, tag: str, name: str) -> bytes:
+        assert name == "SHA2-256SUMS", name
+        return self.sums.encode()
+
+    def download(self, tag: str, name: str, into: Path) -> Path:
+        self.downloads.append(name)
+        path = into / name
+        path.write_bytes(self.files[name])
+        return path
+
+
 # What a pinned `kumi serve` prints for an argument it doesn't take: the error line (which quotes it, and names --help),
 # the usage line, its indented continuations, then a line that isn't the usage's (which names --verbose).
 USAGE = (f'kumi serve: unknown argument "{pin.PROBE}" (try --help)\n'
@@ -109,13 +146,13 @@ LISTING = {"serve_operations": ["change", "connect", "generate", "status"],
                               "renoise": []}}
 
 
-def run(github: FakeGitHub, *args: str, probe=None, lister=None) -> tuple[int, str]:
-    """hermes_pin.py's main on `github`, with `probe` and `lister` standing in for running the runtime (USAGE and
-    LISTING by default)."""
+def run(github: FakeGitHub, *args: str, probe=None, lister=None, yt_dlp=None) -> tuple[int, str]:
+    """hermes_pin.py's main on `github` (and `yt_dlp` for yt-dlp's release), with `probe` and `lister` standing in for
+    running the runtime (USAGE and LISTING by default)."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
         code = pin.main(list(args), github=github, probe=probe or (lambda kumi, scratch: USAGE),
-                        lister=lister or (lambda kumi, scratch, version: LISTING))
+                        lister=lister or (lambda kumi, scratch, version: LISTING), yt_dlp=yt_dlp)
     return code, err.getvalue()
 
 
@@ -419,6 +456,80 @@ class PinTest(unittest.TestCase):
         code, err = run(self.github, VERSION, "--out", str(self.out), "--check")
         self.assertEqual(code, 1, err)
         self.assertIn('says version "1.24.60"', err)
+
+    def test_yt_dlp_is_pinned_per_target_from_its_immutable_release_each_file_downloaded_once(self) -> None:
+        yt = FakeYtDlp()
+        code, err = run(self.github, VERSION, "--out", str(self.out), "--yt-dlp", YT_TAG, yt_dlp=yt)
+        self.assertEqual(code, 0, err)
+        section = json.loads(self.out.read_text())["yt_dlp"]
+        self.assertEqual({key: section[key] for key in ("repository", "tag", "release")}, {
+            "repository": "yt-dlp/yt-dlp", "tag": YT_TAG,
+            "release": f"https://github.com/yt-dlp/yt-dlp/releases/tag/{YT_TAG}"})
+        self.assertEqual(set(section["targets"]), set(pin.TARGETS))
+        for target, name in pin.YT_DLP_ASSETS.items():
+            self.assertEqual(section["targets"][target], {
+                "asset": name, "url": f"https://github.com/yt-dlp/yt-dlp/releases/download/{YT_TAG}/{name}",
+                "sha256": yt.digest[name], "size": len(yt.files[name])})
+        self.assertEqual(section["targets"]["x86_64-apple-darwin"]["asset"], "yt-dlp_macos")
+        self.assertEqual(sorted(yt.downloads), sorted(YT_NAMES))
+
+    def test_a_yt_dlp_release_that_isnt_exact_published_and_immutable_or_whose_records_disagree_is_refused(self) -> None:
+        def mutable(yt): yt.release_data["immutable"] = False
+        def missing(yt): del yt.release_data["immutable"]
+        def prerelease(yt): yt.release_data["prerelease"] = True
+        def digest(yt): yt.asset_data("yt-dlp_linux").update(digest=f"sha256:{'f' * 64}")
+        def unlisted(yt): yt.sums = "".join(line + "\n" for line in yt.sums.splitlines() if "yt-dlp.exe" not in line)
+        def url(yt): yt.asset_data("yt-dlp_macos").update(browser_download_url="https://example.com/yt-dlp_macos")
+        def size(yt): yt.files["yt-dlp_arm64.exe"] += b"!"
+        def sha(yt): yt.files["yt-dlp_linux_aarch64"] = b"x" * len(yt.files["yt-dlp_linux_aarch64"])
+        for broken, said in ((mutable, "isn't an immutable release"), (missing, "isn't an immutable release"),
+                             (prerelease, "draft or a prerelease"), (digest, "GitHub's digest of yt-dlp's yt-dlp_linux"),
+                             (unlisted, "doesn't list yt-dlp.exe"), (url, "yt-dlp_macos downloads from"),
+                             (size, "downloaded yt-dlp yt-dlp_arm64.exe doesn't match"),
+                             (sha, "downloaded yt-dlp yt-dlp_linux_aarch64 doesn't match")):
+            with self.subTest(broken.__name__):
+                yt = FakeYtDlp()
+                broken(yt)
+                code, err = run(self.github, VERSION, "--out", str(self.out), "--yt-dlp", YT_TAG, yt_dlp=yt)
+                self.assertEqual(code, 1, err)
+                self.assertIn(said, err)
+                self.assertFalse(self.out.exists())
+        for tag in ("latest", "2026.10", "v2026.10.26"):
+            code, err = run(self.github, VERSION, "--out", str(self.out), "--yt-dlp", tag, yt_dlp=FakeYtDlp())
+            self.assertEqual(code, 1, tag)
+            self.assertIn("isn't a yt-dlp tag", err)
+
+    def test_the_committed_yt_dlp_tag_is_kept_and_rechecked_and_none_is_written_without_one(self) -> None:
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out))[0], 0)
+        self.assertNotIn("yt_dlp", json.loads(self.out.read_text()))
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--yt-dlp", YT_TAG, yt_dlp=FakeYtDlp())[0], 0)
+        written = json.loads(self.out.read_text())
+        yt = FakeYtDlp()
+        code, err = run(self.github, VERSION, "--out", str(self.out), yt_dlp=yt)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(self.out.read_text()), written)
+        self.assertEqual(sorted(yt.downloads), sorted(YT_NAMES), "the kept tag is downloaded and checked again")
+        yt = FakeYtDlp()
+        yt.release_data["immutable"] = False
+        code, err = run(self.github, VERSION, "--out", str(self.out), yt_dlp=yt)
+        self.assertEqual(code, 1)
+        self.assertIn("isn't an immutable release", err)
+
+    def test_check_covers_the_yt_dlp_section(self) -> None:
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--yt-dlp", YT_TAG, yt_dlp=FakeYtDlp())[0], 0)
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--check", yt_dlp=FakeYtDlp())[0], 0)
+        written = json.loads(self.out.read_text())
+        edited = copy.deepcopy(written)
+        edited["yt_dlp"]["targets"]["x86_64-pc-windows-msvc"]["sha256"] = "e" * 64
+        self.out.write_text(json.dumps(edited))
+        code, err = run(self.github, VERSION, "--out", str(self.out), "--check", yt_dlp=FakeYtDlp())
+        self.assertEqual(code, 1)
+        self.assertIn("doesn't match the published v1.24.66", err)
+        del edited["yt_dlp"]
+        self.out.write_text(json.dumps(edited))
+        code, err = run(self.github, VERSION, "--out", str(self.out), "--check", "--yt-dlp", YT_TAG, yt_dlp=FakeYtDlp())
+        self.assertEqual(code, 1, "a pin without the section doesn't match one that has it")
+        self.assertIn("doesn't match the published v1.24.66", err)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,14 @@ FFMPEG = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 
 TARGET, VERSION = "aarch64-apple-darwin", "1.24.67"
 URL = f"https://github.com/user1303836/kumi/releases/download/v{VERSION}/kumi-{TARGET}.tar.xz"
+# yt-dlp as the pin names it (CC-21a): a stand-in for its single-file build, never run.
+YTDLP, YTDLP_TAG = b"#!/bin/sh\necho yt-dlp\n", "2026.10.26"
+
+
+def ytdlp_url(tag: str = YTDLP_TAG) -> str:
+    return f"https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/yt-dlp_macos"
+
+
 # Where the fake runtime says Live's User Library is: absolute on every system (a POSIX "/Users/…" isn't on Windows).
 # Nothing is ever written there.
 FAKE_LIBRARY = Path(tempfile.gettempdir()) / "kumi-setup-tests" / "User Library"
@@ -169,6 +177,29 @@ class SetupTest(unittest.TestCase):
 
     def current(self) -> dict:
         return json.loads((self.data / "runtime" / "current.json").read_text())
+
+    def pin_ytdlp(self, data: bytes = YTDLP, tag: str = YTDLP_TAG, watch: bool = True, **changes) -> None:
+        """The plugin's pin with a yt-dlp section for TARGET (`changes` alter its record), and a runtime whose
+        operations include `watch` unless `watch` is false."""
+        path = self.plugin / "kumi_release.json"
+        pin = json.loads(path.read_text())
+        record = {"asset": "yt-dlp_macos", "url": ytdlp_url(tag), "sha256": hashlib.sha256(data).hexdigest(),
+                  "size": len(data), **changes}
+        pin["yt_dlp"] = {"repository": "yt-dlp/yt-dlp", "tag": tag,
+                         "release": f"https://github.com/yt-dlp/yt-dlp/releases/tag/{tag}", "targets": {TARGET: record}}
+        pin["serve_operations"] = ["change", "connect", *(["watch"] if watch else [])]
+        path.write_text(json.dumps(pin))
+
+    def allow_ffmpeg(self) -> Path:
+        """The runtime and the DAW part set up, and an ffmpeg allowed: where the yt-dlp step can be offered."""
+        self.install_runtime()
+        program = self.ffmpeg()
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "ffmpeg")
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        return program
+
+    def kept_ytdlp(self, tag: str = YTDLP_TAG) -> Path:
+        return Path(os.path.realpath(self.data / "tools" / "yt-dlp" / tag / "yt-dlp"))
 
     def test_host_target_names_kumis_bundles_and_nothing_else(self) -> None:
         self.assertEqual(setup.host_target("Darwin", "arm64"), "aarch64-apple-darwin")
@@ -739,6 +770,191 @@ class SetupTest(unittest.TestCase):
         self.assertIn("write its own connection state there", said, "the CLI asks with the adoption's own words")
         current = json.loads((self.data / "runtime" / "current.json").read_text())
         self.assertEqual(current["kumi_home"], str(standalone))
+
+    def test_yt_dlp_is_offered_after_ffmpeg_only_for_a_runtime_that_reads_videos(self) -> None:
+        self.pin_ytdlp()
+        self.install_runtime()
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "no ffmpeg allowed: frames need it")
+        self.assertIn("once an ffmpeg is allowed", self.status()["video_tutorials"]["message"])
+        program = self.ffmpeg()
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "ffmpeg", "ffmpeg comes first")
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        self.pin_ytdlp(watch=False)
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "a runtime without `watch` has no use")
+        self.pin_ytdlp()
+        pin = json.loads((self.plugin / "kumi_release.json").read_text())
+        pin["yt_dlp"]["targets"] = {"x86_64-unknown-linux-gnu": pin["yt_dlp"]["targets"][TARGET]}
+        (self.plugin / "kumi_release.json").write_text(json.dumps(pin))
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "no yt-dlp pinned for this computer")
+        self.pin_ytdlp()
+        planned = self.plan(setup_daw=Runtime("same"))
+        self.assertEqual((planned["step"], planned["optional"], planned["yt_dlp"]["state"]), ("yt_dlp", True, "missing"))
+        self.assertEqual(self.status()["state"], "ready", "Kumi is set up without it")
+        asked = setup.approval("ableton", data_dir=self.data)
+        self.assertEqual(asked["title"], f"Kumi: download yt-dlp {YTDLP_TAG} to read videos you name")
+        self.assertEqual(asked["effects"][0], f"Download yt-dlp {YTDLP_TAG} (0.0 MB) from github.com/yt-dlp/yt-dlp's "
+                         "official release, check it against the pinned SHA-256, and keep it in Kumi's data. Kumi runs "
+                         "it only to read a video you name, and never updates it.")
+        self.assertIn(ytdlp_url(), asked["message"])
+        self.assertIn(f"Writes: {self.data / 'tools' / 'yt-dlp' / YTDLP_TAG}", asked["message"])
+        self.assertIn("reconnects at its next Kumi call", asked["message"], "a running runtime stops")
+        shown = setup.plan_for_model(planned)
+        self.assertEqual(shown["yt_dlp"], {"tag": YTDLP_TAG, "download_bytes": len(YTDLP), "state": "missing"})
+        self.assertFalse([text for text in texts(shown) if "github.com/yt-dlp" in text or str(self.data) in text],
+                         "the model gets no URL and no path")
+        program.unlink()
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "an ffmpeg that's gone offers nothing")
+
+    def test_a_yt_dlp_pin_off_its_pattern_is_refused_before_anything_is_fetched(self) -> None:
+        pin = {"yt_dlp": {"repository": "yt-dlp/yt-dlp", "tag": YTDLP_TAG,
+                          "release": f"https://github.com/yt-dlp/yt-dlp/releases/tag/{YTDLP_TAG}",
+                          "targets": {TARGET: {"asset": "yt-dlp_macos", "url": ytdlp_url(), "sha256": "a" * 64,
+                                               "size": 37466304}}}}
+        self.assertEqual(setup.yt_dlp_for(pin, TARGET)["url"], ytdlp_url())
+        self.assertIsNone(setup.yt_dlp_for({}, TARGET), "a pin that names no yt-dlp")
+        self.assertIsNone(setup.yt_dlp_for(pin, "aarch64-pc-windows-msvc"), "none for that target")
+        section, record = pin["yt_dlp"], pin["yt_dlp"]["targets"][TARGET]
+        for change in ({"repository": "someone/yt-dlp"}, {"tag": "latest"}, {"tag": "2026.10.26-1"},
+                       {"release": "https://github.com/yt-dlp/yt-dlp/releases/latest"}, {"targets": []}):
+            with self.subTest(change=change), self.assertRaises(setup.SetupError) as refused:
+                setup.yt_dlp_for({"yt_dlp": {**section, **change}}, TARGET)
+            self.assertEqual(refused.exception.code, "bad_pin")
+        for change in ({"asset": "yt-dlp"}, {"url": "https://example.com/yt-dlp_macos"},
+                       {"url": ytdlp_url().replace(YTDLP_TAG, "2026.10.25")}, {"sha256": "A" * 64}, {"size": 0},
+                       {"size": True}, {"size": "37466304"}):
+            with self.subTest(change=change), self.assertRaises(setup.SetupError) as refused:
+                setup.yt_dlp_for({"yt_dlp": {**section, "targets": {TARGET: {**record, **change}}}}, TARGET)
+            self.assertEqual(refused.exception.code, "bad_pin")
+        self.allow_ffmpeg()
+        self.pin_ytdlp(url="https://example.com/yt-dlp_macos")
+        with self.assertRaises(setup.SetupError) as refused:
+            self.plan(setup_daw=Runtime("same"))
+        self.assertEqual(refused.exception.code, "bad_pin")
+
+    def test_installing_yt_dlp_keeps_the_verified_file_and_records_its_identity(self) -> None:
+        self.pin_ytdlp()
+        ffmpeg = self.allow_ffmpeg()
+        self.assertEqual(self.status()["video_tutorials"]["state"], "not_installed")
+        self.plan(setup_daw=Runtime("same"))
+        served = Served(YTDLP)
+        done = self.install(served, setup_daw=Runtime("same"))
+        self.assertTrue(done["ok"], done)
+        self.assertEqual(served.asked, [ytdlp_url()])
+        kept = self.kept_ytdlp()
+        self.assertEqual(kept.read_bytes(), YTDLP)
+        if os.name != "nt":
+            self.assertEqual(kept.stat().st_mode & 0o777, 0o755)
+        info = os.stat(kept)
+        tools = self.current()["tools"]
+        self.assertEqual(tools["yt-dlp"], {"path": str(kept), "size": info.st_size, "mtime_ns": info.st_mtime_ns,
+                                           "ino": info.st_ino})
+        self.assertEqual(tools["ffmpeg"]["path"], str(ffmpeg), "the allowed ffmpeg stays")
+        receipt = json.loads((self.data / "setup" / "receipt.json").read_text())
+        self.assertEqual({k: receipt["yt_dlp"][k] for k in ("tag", "sha256")},
+                         {"tag": YTDLP_TAG, "sha256": hashlib.sha256(YTDLP).hexdigest()})
+        self.assertIsInstance(receipt["yt_dlp"]["at"], int)
+        self.assertEqual(sorted(p.name for p in kept.parent.iterdir()), ["yt-dlp"], "no temporary file is left")
+        self.assertFalse((self.data / "runtime" / YTDLP_TAG).exists(), "never under runtime/")
+        video = self.status()["video_tutorials"]
+        self.assertEqual((video["state"], video["tag"]), ("available", YTDLP_TAG))
+        self.assertIn("captions and frames", video["message"])
+        self.assertFalse([text for text in texts(setup.for_model(self.status())) if str(self.data) in text])
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "it isn't offered again")
+        (self.data / "runtime" / VERSION / "kumi").unlink()  # the runtime is set up again
+        self.assertEqual(self.plan()["step"], "runtime")
+        self.assertTrue(self.install(Served(BUNDLE))["ok"])
+        self.assertEqual(self.current()["tools"]["yt-dlp"]["path"], str(kept), "a new runtime keeps it")
+
+    def test_a_yt_dlp_download_that_differs_or_runs_over_keeps_nothing(self) -> None:
+        self.pin_ytdlp()
+        self.allow_ffmpeg()
+        folder = self.data / "tools" / "yt-dlp"
+        for served, why in ((YTDLP[:-1] + b"!", "another file of the same size"), (YTDLP + b"more", "too large"),
+                            (YTDLP[:-1], "too small")):
+            with self.subTest(why=why):
+                self.plan(setup_daw=Runtime("same"))
+                failed = self.install(Served(served), setup_daw=Runtime("same"))
+                self.assertEqual(failed["error"]["code"], "checksum_mismatch", failed)
+                self.assertIn("nothing was installed", failed["error"]["message"])
+                self.assertEqual(list(folder.iterdir()) if folder.exists() else [], [], why)
+                self.assertNotIn("yt-dlp", self.current()["tools"])
+
+        def breaks(url: str):
+            raise http.client.IncompleteRead(b"")
+
+        self.plan(setup_daw=Runtime("same"))
+        failed = self.install(breaks, setup_daw=Runtime("same"))
+        self.assertEqual(failed["error"]["code"], "download_failed")
+        self.assertIn(f"Downloading yt-dlp {YTDLP_TAG} failed", failed["error"]["message"])
+        self.assertEqual(list(folder.iterdir()), [])
+
+    def test_a_kept_yt_dlp_that_changed_isnt_used_and_is_offered_again(self) -> None:
+        self.pin_ytdlp()
+        self.allow_ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(Served(YTDLP), setup_daw=Runtime("same"))["ok"])
+        kept = self.kept_ytdlp()
+        kept.write_bytes(b"#!/bin/sh\necho another program at the same path\n")
+        video = self.status()["video_tutorials"]
+        self.assertEqual(video["state"], "changed")
+        self.assertIn("to download it again, run hermes kumi setup", video["message"])
+        planned = self.plan(setup_daw=Runtime("same"))
+        self.assertEqual((planned["step"], planned["yt_dlp"]["state"]), ("yt_dlp", "changed"))
+        self.assertTrue(self.install(Served(YTDLP), setup_daw=Runtime("same"))["ok"])
+        self.assertEqual((kept.read_bytes(), self.status()["video_tutorials"]["state"]), (YTDLP, "available"))
+        kept.unlink()
+        self.assertEqual(self.status()["video_tutorials"]["state"], "gone")
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["yt_dlp"]["state"], "gone")
+
+    def test_a_newer_pinned_yt_dlp_replaces_the_old_tags_copy_once_its_in(self) -> None:
+        self.pin_ytdlp()
+        self.allow_ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(Served(YTDLP), setup_daw=Runtime("same"))["ok"])
+        old = self.kept_ytdlp()
+        newer, tag = b"#!/bin/sh\necho yt-dlp, newer\n", "2026.11.02"
+        self.pin_ytdlp(newer, tag)
+        video = self.status()["video_tutorials"]
+        self.assertEqual((video["state"], video["tag"], video["pinned"]), ("available", YTDLP_TAG, tag))
+        self.assertIn(f"To update it to yt-dlp {tag}", video["message"])
+        planned = self.plan(setup_daw=Runtime("same"))
+        self.assertEqual((planned["step"], planned["yt_dlp"]["state"], planned["yt_dlp"]["replaces"]),
+                         ("yt_dlp", "newer", YTDLP_TAG))
+        self.assertIn(f"Then remove yt-dlp {YTDLP_TAG}, which Kumi kept before",
+                      setup.approval("ableton", data_dir=self.data)["message"])
+        failed = self.install(Served(YTDLP), setup_daw=Runtime("same"))
+        self.assertEqual(failed["error"]["code"], "checksum_mismatch")
+        self.assertEqual(old.read_bytes(), YTDLP, "the old copy stays until the new one is in")
+        self.assertEqual(self.current()["tools"]["yt-dlp"]["path"], str(old))
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(Served(newer), setup_daw=Runtime("same"))["ok"])
+        self.assertEqual(self.kept_ytdlp(tag).read_bytes(), newer)
+        self.assertEqual(self.current()["tools"]["yt-dlp"]["path"], str(self.kept_ytdlp(tag)))
+        self.assertEqual([p.name for p in (self.data / "tools" / "yt-dlp").iterdir()], [tag], "the old tag's folder goes")
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none")
+
+    def test_in_the_terminal_yt_dlp_is_asked_after_ffmpeg_and_no_ends_setup(self) -> None:
+        self.pin_ytdlp()
+        self.install_runtime()
+        self.ffmpeg()
+
+        def cli(answers: str) -> tuple[int, str]:
+            out = Tty()
+            code = setup.cli_main("ableton", setup_daw=Runtime("same"), data_dir=self.data, plugin_dir=self.plugin,
+                                  target=TARGET, opener=Served(YTDLP), stdin=Tty(answers), stdout=out)
+            return code, out.getvalue()
+
+        code, said = cli("y\nn\n")
+        self.assertEqual(code, 0, said)
+        self.assertIn(f"Download yt-dlp {YTDLP_TAG}", said)
+        self.assertIn("Kumi doesn't read videos; run hermes kumi setup again to set up yt-dlp later.", said)
+        self.assertNotIn("yt-dlp", self.current()["tools"])
+        self.assertIn("ffmpeg", self.current()["tools"])
+        code, said = cli("y\n")
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self.kept_ytdlp().read_bytes(), YTDLP)
+        self.assertIn(f"Video tutorials: yes, Kumi can read a video tutorial's captions and frames (yt-dlp {YTDLP_TAG}).",
+                      said)
 
 
 if __name__ == "__main__":

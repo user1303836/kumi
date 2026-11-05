@@ -3,6 +3,7 @@ blocked before anyone is asked; and that the hook never holds up Hermes's other 
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -332,6 +333,77 @@ class Approvals(unittest.TestCase):
         decision = self.hook("kumi_library", {"action": "scan"})
         self.assertEqual(decision["rule_key"], "kumi:folder_read:scan:s1")
         self.assertIn(f"• {support.DRUMS}\n{policy.CHAT_ONLY}", decision["message"])
+
+
+VIDEO = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+class Watch(unittest.TestCase):
+    """CC-21's 21h: every video read is asked, naming the video and what's read, under a key naming the video."""
+
+    def setUp(self):
+        self.host, self.ctx, self.data = support.host(self)
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+
+    def hook(self, args: dict) -> dict | None:
+        return policy.pre_tool_call(self.host, tool_name="kumi_watch", args=args, session_id="s1", tool_call_id="c1")
+
+    def test_a_video_read_is_asked_with_what_it_reads_under_the_videos_own_key_in_this_chat(self):
+        decision = self.hook({"url": "https://youtu.be/dQw4w9WgXcQ?t=62", "captions": True, "at": [62, 90.5]})
+        self.assertEqual(decision["action"], "approve")
+        self.assertEqual(decision["message"].splitlines(), [
+            f"Kumi: read a YouTube video, \"{VIDEO}\"",
+            "• its captions",
+            "• 2 frames at 1:02, 1:30.5",
+            "• (the first time, a ≤720p copy of its picture, up to 150 MB, kept in Kumi's data)",
+            policy.CHAT_ONLY])
+        key = f"kumi:fetch:{hashlib.sha256(VIDEO.encode()).hexdigest()}:s1"
+        self.assertEqual(decision["rule_key"], key)
+        for same in (VIDEO, "https://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ",
+                     "https://youtube.com/shorts/dQw4w9WgXcQ", "  https://youtu.be/dQw4w9WgXcQ  "):
+            with self.subTest(url=same):
+                self.assertEqual(self.hook({"url": same})["rule_key"], key, "one video, one key")
+        self.assertNotEqual(self.hook({"url": "https://youtu.be/aaaaaaaaaaa"})["rule_key"], key)
+        captions = self.hook({"url": VIDEO, "captions": True})["message"].splitlines()
+        self.assertEqual(captions[1:], ["• its captions", policy.CHAT_ONLY])
+        page = self.hook({"url": VIDEO})["message"].splitlines()
+        self.assertEqual(page[1:], ["• its title, length and chapters", policy.CHAT_ONLY])
+        close = self.hook({"url": VIDEO, "at": [3725], "region": "top-left"})["message"].splitlines()
+        self.assertEqual(close[1], "• 1 frame at 1:02:05 (close-up: top-left)")
+
+    def test_it_is_asked_only_where_it_shows_whole(self):
+        args = {"url": VIDEO, "captions": True, "at": [600.5, 1200.5, 1800.5, 3599.5], "region": "bottom-right"}
+        for surface in ("tui", "cli", "telegram", "slack", "discord", "desktop"):
+            with self.subTest(surface=surface):
+                self.ctx.surface = surface
+                decision = self.hook(args)
+                self.assertEqual(decision["action"], "approve")
+                self.assertTrue(policy.shows_whole(decision["message"], surface))
+        self.ctx.surface = "unknown"
+        self.assertEqual(self.hook(args)["message"], policy.TOO_LONG)
+
+    def test_where_nobody_can_answer_a_video_read_is_refused(self):
+        with mock.patch.dict(os.environ, {"HERMES_SINGLE_QUERY_SESSION": "1"}):
+            self.assertEqual(self.hook({"url": VIDEO})["message"], policy.UNATTENDED)
+        for surface in ("api_server", "webhook"):
+            self.ctx.surface = surface
+            self.assertEqual(self.hook({"url": VIDEO})["message"], policy.UNATTENDED, surface)
+        self.ctx.cron_execution, self.ctx.surface = object(), "tui"
+        self.assertEqual(self.hook({"url": VIDEO})["message"], tools.SCHEDULED)
+
+    def test_anything_but_a_youtube_video_or_kumis_own_arguments_is_refused_unasked(self):
+        for args in ({"url": "http://youtu.be/dQw4w9WgXcQ"}, {"url": "https://vimeo.com/123"},
+                     {"url": "https://www.youtube.com.evil.example/watch?v=dQw4w9WgXcQ"},
+                     {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQx"},
+                     {"url": "https://music.youtube.com/watch?v=dQw4w9WgXcQ"}, {},
+                     {"url": VIDEO, "at": [1, 2, 3, 4, 5]}, {"url": VIDEO, "at": [-1]}, {"url": VIDEO, "at": "62"},
+                     {"url": VIDEO, "region": "whole"}, {"url": VIDEO, "captions": "yes"}):
+            with self.subTest(args=args):
+                self.assertEqual(self.hook(args)["action"], "block")
+        before = support.requests(self.data / "state")
+        answer = support.handle(self.host, "kumi_watch", {"url": VIDEO}, session_id="s1")
+        self.assertEqual(answer["error"]["code"], "not_approved", "never without the hook's approval")
+        self.assertEqual(support.requests(self.data / "state"), before)
 
 
 class Blocked(unittest.TestCase):

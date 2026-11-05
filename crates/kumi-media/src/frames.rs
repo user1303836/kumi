@@ -274,6 +274,7 @@ pub(crate) async fn duration_of_in(ffmpeg: &str, file: &str, signal: Option<Sign
             signal,
             max_buffer: isolated_dir.map(|_| 1024 * 1024),
             isolated_dir: isolated_dir.map(Path::to_path_buf),
+            ..Default::default()
         },
     )
     .await

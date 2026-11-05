@@ -224,14 +224,17 @@ async fn prune(folder: &str) -> Result<(), VideoFailure> {
     }
     Ok(())
 }
+/// A video's caption track as [`caption_track`] chose it: its language code, whether YouTube made it, and its file.
 #[derive(Clone)]
-struct Track {
-    code: String,
-    automatic: bool,
-    url: Option<String>,
-    ext: Option<String>,
+pub struct Track {
+    pub code: String,
+    pub automatic: bool,
+    pub url: Option<String>,
+    pub ext: Option<String>,
 }
-fn caption_track(info: &Value) -> Option<Track> {
+/// The caption track to read from yt-dlp's `-J` (`language`, `subtitles`, `automatic_captions`): the producer-written
+/// English track, else one in the video's language, else YouTube's own in it, else in English.
+pub fn caption_track(info: &Value) -> Option<Track> {
     let spoken = info["language"].as_str().unwrap_or("en").split(['-', '_']).next().unwrap_or("").to_lowercase();
     let mut tracks = Vec::new();
     for (key, automatic) in [("subtitles", false), ("automatic_captions", true)] {
@@ -349,7 +352,7 @@ static CAPTIONS: LazyLock<reqwest::Client> = LazyLock::new(|| {
 const CAPTIONS_MAX: usize = 16 * 1024 * 1024;
 /// A sidecar's captions as text: by its BOM (UTF-8 or UTF-16), as UTF-8, or else as Windows-1252, which older
 /// subtitle tools write.
-fn caption_text(bytes: &[u8]) -> String {
+pub fn caption_text(bytes: &[u8]) -> String {
     if let Some((encoding, length)) = encoding_rs::Encoding::for_bom(bytes) {
         return encoding.decode_without_bom_handling(&bytes[length..]).0.into_owned();
     }

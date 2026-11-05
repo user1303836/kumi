@@ -11,9 +11,16 @@ its `SHA256SUMS`, and the digest GitHub recorded for the uploaded file.
 
     python3 scripts/hermes_pin.py 1.24.67             write the pin for v1.24.67
     python3 scripts/hermes_pin.py 1.24.67 --check     say whether the committed pin matches that release
+    python3 scripts/hermes_pin.py 1.24.67 --yt-dlp 2026.10.26
+                                                      also pin yt-dlp's standalone builds from that yt-dlp release
 
 Both also download each bundle once (about 170 MB, one at a time, deleted after), confirm its size and SHA-256,
 and read it as setup will: a `.tar.xz` of plain files and folders, with `kumi` (`kumi.exe` on Windows) at its root.
+
+The `yt_dlp` section names the yt-dlp release setup installs for reading videos (CC-21): for each target, the
+standalone build's URL, SHA-256 and size, from an immutable, published release of yt-dlp/yt-dlp, each confirmed in its
+`SHA2-256SUMS`, GitHub's digest and a download (five files, one at a time, deleted after). Without `--yt-dlp`, the
+tag the pin already names is kept and checked again; with neither, the pin has no such section.
 
 The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256, download size and
 unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. It also holds what the pinned
@@ -80,6 +87,17 @@ MCP_PROTOCOL = "2025-11-25"
 # that declares none in `_meta`, the input schema's source field that names each files-only kind.
 LISTEN_KINDS = ("artifact", "file", "sound", "track")
 SOURCE_FIELDS = {"file": "file", "sound_id": "sound", "artifact_id": "artifact"}
+# yt-dlp's release (CC-21): the standalone build each Kumi target's setup installs.
+YT_DLP_REPOSITORY = "yt-dlp/yt-dlp"
+YT_DLP_TAG = re.compile(r"[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?")
+YT_DLP_ASSETS = {
+    "aarch64-apple-darwin": "yt-dlp_macos",
+    "x86_64-apple-darwin": "yt-dlp_macos",
+    "aarch64-pc-windows-msvc": "yt-dlp_arm64.exe",
+    "x86_64-pc-windows-msvc": "yt-dlp.exe",
+    "aarch64-unknown-linux-gnu": "yt-dlp_linux_aarch64",
+    "x86_64-unknown-linux-gnu": "yt-dlp_linux",
+}
 
 
 class Refused(Exception):
@@ -419,6 +437,69 @@ def measured(github: GitHub, pin: dict, probe: Callable[[Path, Path], str] | Non
             "listen_sources": listing["listen_sources"], "targets": targets}
 
 
+def yt_dlp_pin(github: GitHub, tag: str) -> dict:
+    """The `yt_dlp` section for yt-dlp's release `tag`: refused unless the release is published and immutable, and
+    each target's build agrees in its `SHA2-256SUMS`, GitHub's digest, its URL, and a download of it (each distinct
+    file once, deleted after)."""
+    if not YT_DLP_TAG.fullmatch(tag):
+        raise Refused(f"{tag!r} isn't a yt-dlp tag like 2026.10.26: the pin names one exact release")
+    release = github.release(tag)
+    if release.get("tag_name") != tag:
+        raise Refused(f"GitHub returned the yt-dlp release {release.get('tag_name')!r} for {tag}")
+    if release.get("draft") or release.get("prerelease"):
+        raise Refused(f"yt-dlp {tag} is a draft or a prerelease: only a published release can be pinned")
+    if release.get("immutable") is not True:
+        raise Refused(f"yt-dlp {tag} isn't an immutable release: its files could change after they're pinned")
+    digests = checksums(github.asset(tag, "SHA2-256SUMS").decode(errors="replace"))
+    assets = {asset.get("name"): asset for asset in release.get("assets") or []}
+    entries = {}
+    for name in dict.fromkeys(YT_DLP_ASSETS.values()):
+        sha = digests.get(name)
+        if sha is None:
+            raise Refused(f"yt-dlp {tag}'s SHA2-256SUMS doesn't list {name}")
+        asset = assets.get(name)
+        if asset is None:
+            raise Refused(f"yt-dlp {tag} has no {name} uploaded")
+        if asset.get("digest") != f"sha256:{sha}":
+            raise Refused(f"GitHub's digest of yt-dlp's {name} is {asset.get('digest')!r}, not sha256:{sha}")
+        url = f"https://github.com/{YT_DLP_REPOSITORY}/releases/download/{tag}/{name}"
+        if asset.get("browser_download_url") != url:
+            raise Refused(f"yt-dlp's {name} downloads from {asset.get('browser_download_url')!r}, not {url}")
+        size = asset.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            raise Refused(f"yt-dlp's {name} has no size")
+        entries[name] = {"asset": name, "url": url, "sha256": sha, "size": size}
+    with tempfile.TemporaryDirectory(prefix="hermes-pin-yt-dlp-") as scratch:
+        for name, entry in entries.items():
+            path = github.download(tag, name, Path(scratch))
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1 << 20), b""):
+                    digest.update(chunk)
+            size = path.stat().st_size
+            path.unlink()
+            if size != entry["size"] or digest.hexdigest() != entry["sha256"]:
+                raise Refused(f"the downloaded yt-dlp {name} doesn't match its release "
+                              f"({size} bytes, sha256 {digest.hexdigest()})")
+            print(f"  yt-dlp {tag}: {name} matches ({size} bytes)")
+    return {"repository": YT_DLP_REPOSITORY, "tag": tag,
+            "release": f"https://github.com/{YT_DLP_REPOSITORY}/releases/tag/{tag}",
+            "targets": {target: dict(entries[name]) for target, name in YT_DLP_ASSETS.items()}}
+
+
+def committed_yt_dlp_tag(path: Path) -> str | None:
+    """The yt-dlp tag the pin at `path` already names, or None when there's no pin or it names none."""
+    try:
+        committed = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        raise Refused(f"can't read {path}: {error}") from None
+    section = committed.get("yt_dlp") if isinstance(committed, dict) else None
+    tag = section.get("tag") if isinstance(section, dict) else None
+    return tag if isinstance(tag, str) else None
+
+
 def text_of(pin: dict) -> str:
     return json.dumps(pin, indent=2) + "\n"
 
@@ -452,19 +533,26 @@ def manifest_line(manifest: Path) -> tuple[str, re.Match[str]] | None:
 
 def main(argv: list[str] | None = None, github: GitHub | None = None,
          probe: Callable[[Path, Path], str] | None = None,
-         lister: Callable[[Path, Path, str], dict] | None = None) -> int:
+         lister: Callable[[Path, Path, str], dict] | None = None, yt_dlp: GitHub | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pin the Kumi release that Kumi's Hermes plugin installs.")
     parser.add_argument("version", help="a published Kumi version, e.g. 1.24.67 (never 'latest')")
     parser.add_argument("--repository", default=REPOSITORY, help=f"owner/name (default {REPOSITORY})")
     parser.add_argument("--out", type=Path, default=PIN, help=f"the pin file (default {PIN.relative_to(ROOT)})")
     parser.add_argument("--check", action="store_true", help="don't write: say whether --out matches the release")
+    parser.add_argument("--yt-dlp", metavar="TAG", help="a yt-dlp release tag, e.g. 2026.10.26 (default: the one "
+                        "--out names, if any)")
     args = parser.parse_args(argv)
     try:
         version = args.version.removeprefix("v")
         if not VERSION.fullmatch(version):
             raise Refused(f"{args.version!r} isn't a version like 1.24.67: the pin names one exact release")
         github = github or GitHub(args.repository)
+        yt_dlp_tag = args.yt_dlp if args.yt_dlp is not None else committed_yt_dlp_tag(args.out)
+        if yt_dlp_tag is not None and not YT_DLP_TAG.fullmatch(yt_dlp_tag):
+            raise Refused(f"{yt_dlp_tag!r} isn't a yt-dlp tag like 2026.10.26: the pin names one exact release")
         pin = measured(github, read_pin(github, version), probe, lister)
+        if yt_dlp_tag is not None:
+            pin["yt_dlp"] = yt_dlp_pin(yt_dlp or GitHub(YT_DLP_REPOSITORY), yt_dlp_tag)
         manifest = args.out.parent / "plugin.yaml"
         line = manifest_line(manifest)
         if args.check:

@@ -60,8 +60,8 @@ def _commands_left_out(host: tools.Host) -> bool:
 
 
 def status_text(host: tools.Host) -> str:
-    """`hermes kumi status`: setup, the DAW setting, the runtime as it last published itself, the folders, and whether
-    Kumi reads compressed audio (the ffmpeg allowed at setup, CC-10)."""
+    """`hermes kumi status`: setup, the DAW setting, the runtime as it last published itself, the folders, whether
+    Kumi reads compressed audio (the ffmpeg allowed at setup, CC-10), and whether it reads videos (yt-dlp, CC-21)."""
     data = Path(host.data_dir())
     daw = schemas.DAW_NAMES.get(host.daw(), host.daw())
     try:
@@ -89,6 +89,7 @@ def status_text(host: tools.Host) -> str:
     folders = host.library_folders()
     lines.append("Sample folders: " + (", ".join(_said(folder, 300) for folder in folders) if folders else "none yet."))
     lines.append(setup.compressed_audio(data)["message"])
+    lines.append(setup.video_tutorials(data, host.plugin_dir)["message"])
     lines.append(f"Approvals: off in Hermes (approvals.mode: off or --yolo), so {tools.UNASKED} run without asking first."
                  if tools.approvals_bypassed(host, chat=False)
                  else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")

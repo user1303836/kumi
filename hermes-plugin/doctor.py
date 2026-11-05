@@ -39,7 +39,7 @@ def checks(host: tools.Host, **chat: Any) -> list[dict]:
     shown = setup.for_model(report)  # setup's words naming no path on this computer
     status = snapshots.status(state)
     items += [_runtime(report, shown), _part(report, shown, status, daw, app), _connection(status, report, daw),
-              _project(status), _library(host, state, live=not status.get("stale")), _audio(shown)]
+              _project(status), _library(host, state, live=not status.get("stale")), _audio(shown), _video(shown)]
     items += [_mirelo(host.mirelo_status()), _desktop()]
     return items
 
@@ -319,6 +319,19 @@ def _audio(shown: dict) -> dict:
     offer = "" if "hermes kumi setup" in message else \
         "Only if your sample folders hold MP3, FLAC or other compressed audio: install ffmpeg, then run hermes kumi setup."
     return _item(name, OFF, message, offer)
+
+
+def _video(shown: dict) -> dict:
+    """Whether Kumi reads a video tutorial's captions and frames: the yt-dlp setup downloaded (CC-21)."""
+    name = "Video tutorials"
+    video = shown.get("video_tutorials") or {}
+    message = _said(str(video.get("message") or "").removeprefix("Video tutorials: "))
+    message = message[:1].upper() + message[1:]
+    if video.get("state") == "available":
+        return _item(name, OK, message)
+    if video.get("state") in ("changed", "gone"):
+        return _item(name, FIX, message, "Run hermes kumi setup to download yt-dlp again.")
+    return _item(name, OFF, message)
 
 
 def _mirelo(ready: Any) -> dict:

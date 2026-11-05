@@ -2,6 +2,7 @@
 their handlers against the fixture runtime: status and connect, a change with HISTORY and undo, the library, sounds."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -325,6 +326,123 @@ class Tools(unittest.TestCase):
                 with self.subTest(tool=name, args=args):
                     answer = support.call(self.host, name, args, session_id="s1")
                     self.assertIsInstance(answer, dict)
+
+
+JPEG = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 4
+VIDEO = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+class Watching(unittest.TestCase):
+    """CC-21's 21g: kumi_watch's frames come back as Hermes's multimodal result, each read only from its kept
+    artifact; every other answer stays JSON."""
+
+    def setUp(self):
+        self.host, self.ctx, self.data = support.host(self)
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        self.state = self.data / "state"
+        self.sent: list[tuple[str, dict]] = []
+        self.answers: list[dict] = []
+
+    def keep(self, artifact_id: str, data: bytes = JPEG, *, where: Path | None = None) -> str:
+        """A frame kept as serve keeps one: a file listed in artifacts.json, in `<state>/artifacts` unless `where`."""
+        path = (where or self.state / "artifacts") / f"{artifact_id}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        listing = self.state / "artifacts.json"
+        table = json.loads(listing.read_text(encoding="utf-8")) if listing.exists() else {"schema": 1, "artifacts": {}}
+        table["artifacts"][artifact_id] = {"path": str(path), "kind": "image", "mime": "image/jpeg", "tool": "watch"}
+        listing.write_text(json.dumps(table), encoding="utf-8")
+        return str(path)
+
+    def call(self, tool: str, args: dict):
+        """`tool` as Hermes calls it, approved once where it's asked, its runtime answering from `self.answers`."""
+        ident = f"w-{len(self.sent)}-{time.monotonic_ns()}"
+        decision = policy.pre_tool_call(self.host, tool_name=tool, args=args, session_id="s1", tool_call_id=ident)
+        self.assertNotEqual((decision or {}).get("action"), "block", decision)
+        if decision is not None:
+            policy.post_approval_response(self.host, tool_call_id=ident, choice="once")
+
+        def answer(name, sent, identity, **options):
+            self.sent.append((name, sent))
+            return self.answers.pop(0)
+
+        live = SimpleNamespace(call=answer)
+        function = next(function for name, _, function, _ in tools.TOOLS if name == tool)
+        with mock.patch.object(self.host, "live", return_value=live):
+            return tools.handler(tool, function, self.host)(args, session_id="s1")
+
+    def watched(self, frames: list[dict]) -> dict:
+        return {"video": {"id": "dQw4w9WgXcQ", "url": VIDEO, "title": "Mixing a kick", "duration": 754,
+                          "chapters": [{"title": "Intro", "start": 0, "end": 62}, {"title": "EQ", "start": 62,
+                                                                                   "end": 754}],
+                          "captions": ["en"]},
+                "transcript": {"language": "en", "kind": "manual", "text": "Cut 300 Hz by 3 dB.", "truncated": False},
+                "frames": frames, "notes": ["Some formats need a JavaScript runtime."]}
+
+    def frame(self, at: float, artifact_id: str, path: str) -> dict:
+        return {"at": at, "artifact_id": artifact_id, "path": path, "mime": "image/jpeg", "width": 1280,
+                "height": 720, "bytes": len(JPEG)}
+
+    def test_frames_come_back_as_images_with_the_videos_words_in_the_text(self):
+        frames = [self.frame(62 + n, f"a-f{n}", self.keep(f"a-f{n}")) for n in range(5)]
+        self.answers.append(self.watched(frames))
+        args = {"url": "https://youtu.be/dQw4w9WgXcQ", "captions": True, "at": [62, 63, 64, 65]}
+        result = self.call("kumi_watch", args)
+        self.assertEqual(self.sent, [("watch", args)])
+        self.assertEqual(set(result), {"_multimodal", "content", "text_summary"})
+        self.assertIs(result["_multimodal"], True)
+        text, *images = result["content"]
+        self.assertEqual(text, {"type": "text", "text": result["text_summary"]})
+        expected = "data:image/jpeg;base64," + base64.b64encode(JPEG).decode("ascii")
+        self.assertEqual(images, [{"type": "image_url", "image_url": {"url": expected}}] * 4, "at most 4")
+        summary = result["text_summary"]
+        for said in (f"YouTube video \"Mixing a kick\" ({VIDEO}), 12:34 long.", "• 1:02 EQ", "Cut 300 Hz by 3 dB.",
+                     "• 1:02, artifact a-f0: image 1 below.", "• 1:05, artifact a-f3: image 4 below.",
+                     "• 1:06, artifact a-f4: not shown here", "• Some formats need a JavaScript runtime."):
+            self.assertIn(said, summary)
+
+    def test_a_frame_that_isnt_its_kept_artifact_or_too_big_is_never_read(self):
+        elsewhere = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        outside = elsewhere / "secret.jpg"
+        outside.write_bytes(JPEG)
+        listed_outside = self.keep("a-out", where=elsewhere)
+        kept = self.keep("a-ok")
+        big = self.keep("a-big", JPEG + bytes(tools.FRAME_BYTES))
+        not_jpeg = self.keep("a-png", b"\x89PNG\r\n\x1a\n" + bytes(64))
+        self.answers.append(self.watched([self.frame(1, "a-ok", str(outside)),  # its id, another file
+                                          self.frame(2, "a-out", listed_outside),  # listed, outside the artifacts
+                                          self.frame(3, "a-missing", kept),  # no such artifact
+                                          self.frame(4, "a-big", big), self.frame(5, "a-png", not_jpeg),
+                                          self.frame(6, "a-ok", kept)]))
+        with mock.patch("builtins.open", wraps=open) as opened:
+            result = self.call("kumi_watch", {"url": VIDEO, "at": [1, 2, 3, 4]})
+        read = {str(call.args[0]) for call in opened.call_args_list}
+        self.assertNotIn(str(outside), read)
+        self.assertNotIn(listed_outside, read)
+        self.assertEqual(len(result["content"]), 2, "only the kept frame")
+        self.assertEqual(result["text_summary"].count("not shown here"), 5)
+        self.assertIn("• 0:06, artifact a-ok: image 1 below.", result["text_summary"])
+
+    def test_a_refusal_a_running_job_or_words_alone_stay_json_and_a_done_job_shows_its_frames(self):
+        refusal = {"error": {"code": "no_yt_dlp", "reason": "yt-dlp isn't set up: run Kumi's setup to read videos"}}
+        running = {"job_id": "j-watch-1", "state": "running", "progress": {"bytes": 1024}}
+        words = {**self.watched([]), "frames": []}
+        for answer in (refusal, running, words):
+            with self.subTest(answer=answer):
+                self.answers.append(answer)
+                self.assertEqual(json.loads(self.call("kumi_watch", {"url": VIDEO, "at": [1]})), answer)
+        done = {"job_id": "j-watch-1", "state": "done",
+                "result": self.watched([self.frame(1, "a-ok", self.keep("a-ok"))])}
+        self.answers.append(done)
+        result = self.call("kumi_job", {"job_id": "j-watch-1"})
+        self.assertIs(result["_multimodal"], True)
+        self.assertEqual(len(result["content"]), 2)
+        self.answers.append({**done, "state": "running", "result": None})
+        self.assertEqual(json.loads(self.call("kumi_job", {"job_id": "j-watch-1"}))["state"], "running")
+
+    def test_only_kumi_watch_can_answer_with_images(self):
+        self.answers.append(self.watched([self.frame(1, "a-ok", self.keep("a-ok"))]))
+        self.assertIsInstance(self.call("kumi_observe", {"scope": "focus"}), str)
 
 
 class Command(unittest.TestCase):

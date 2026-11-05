@@ -5,7 +5,7 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{generate, library, listen, map, read, setup};
+use super::{generate, library, listen, map, read, setup, watch};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
@@ -21,6 +21,7 @@ pub static OPERATIONS: &[&Operation] = &[
     &map::SOUNDS,
     &listen::LISTEN,
     &generate::GENERATE,
+    &watch::WATCH,
 ];
 
 #[cfg(test)]

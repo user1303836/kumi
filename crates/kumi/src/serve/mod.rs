@@ -30,6 +30,7 @@ mod generate;
 mod generate_ledger;
 mod generate_output;
 mod generate_source;
+mod watch;
 
 use kumi_types::daw::DawId;
 use kumi_types::system::Env;

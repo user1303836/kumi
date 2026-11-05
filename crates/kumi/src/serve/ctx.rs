@@ -57,6 +57,8 @@ pub enum Effect {
     Upload,
     /// Spends the producer's credits.
     Paid,
+    /// Reads a third party's page or file over the network (a video the producer named).
+    Fetch,
 }
 
 impl Effect {
@@ -362,6 +364,7 @@ pub struct Ctx {
     maps: super::map::MapStore,
     library: super::library::LibraryState,
     generation: super::generate::Generation,
+    watching: super::watch::Watching,
     snapshots: Snapshots,
     jobs: Jobs,
     shutdown: Signal,
@@ -431,6 +434,7 @@ impl Ctx {
             maps,
             library: super::library::LibraryState::default(),
             generation: super::generate::Generation::default(),
+            watching: super::watch::Watching::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(library_roots),
@@ -562,6 +566,10 @@ impl Ctx {
 
     pub(crate) fn generation(&self) -> &super::generate::Generation {
         &self.generation
+    }
+
+    pub(crate) fn watching(&self) -> &super::watch::Watching {
+        &self.watching
     }
 
     pub fn approved(&self, path: &Path) -> Result<PathBuf, OpError> {
@@ -958,6 +966,7 @@ mod tests {
             Effect::Setup,
             Effect::Upload,
             Effect::Paid,
+            Effect::Fetch,
         ]
         .into_iter()
         .filter(|effect| effect.writes())
