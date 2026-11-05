@@ -53,6 +53,8 @@ pub struct Own {
     pub profile: &'static DawProfile,
     pub presentation: &'static ToolPresentation,
     pub view: &'static ViewPresentation,
+    /// The change steps an agent host's plugin may use in the DAW (C2's allowlist).
+    pub plugin_steps: &'static [kumi_daw::plugin::PluginStep],
     pub library: &'static dyn LibrarySources,
     /// Where the DAW is downloaded from, as setup names it.
     pub site: &'static str,
@@ -389,6 +391,9 @@ impl DawProvider for Own {
     }
     fn view(&self) -> &'static ViewPresentation {
         self.view
+    }
+    fn plugin_steps(&self) -> &'static [kumi_daw::plugin::PluginStep] {
+        self.plugin_steps
     }
     fn library(&self) -> &'static dyn LibrarySources {
         self.library

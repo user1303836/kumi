@@ -21,6 +21,7 @@ pub static PROVIDER: Own = Own {
     profile: &DawProfile::REAPER,
     presentation: &crate::PRESENTATION,
     view: &crate::VIEW,
+    plugin_steps: crate::plugin_steps::PLUGIN_STEPS,
     library: &crate::library::LIBRARY,
     site: "reaper.fm",
     bridge: "Kumi's extension",

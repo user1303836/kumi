@@ -8,9 +8,11 @@
 //! - [`io`]: what a DAW's steps get from the app: where they say things, how they ask, a test's answers.
 //! - [`process`]: running programs, where Kumi's executables are, copying a folder.
 //! - [`files`]: a file's text, a folder's names, when a file changed, a long line clipped, removing.
+//! - [`plugin`]: what an agent host's plugin may change in the DAW (Kumi for Hermes): its change steps' allowlist.
 pub mod check;
 pub mod files;
 pub mod io;
+pub mod plugin;
 pub mod process;
 pub mod provider;
 pub mod setup;
