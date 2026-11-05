@@ -224,6 +224,37 @@ class Media(StateTest):
         self._add_artifact("a-big", big)
         self.assertIsNone(snapshots.media(self.state, "a-big"))
 
+    def test_windows_paths_compare_in_the_plain_drive_form_and_network_or_device_paths_are_refused(self) -> None:
+        # Kumi's native snapshots use the verbatim drive form; a producer's folder is usually plain (W5 review L-S6).
+        local = snapshots._local
+        self.assertEqual(local(r"\\?\C:\Samples\Snare.wav", windows=True), r"C:\Samples\Snare.wav")
+        self.assertEqual(local("//?/d:/Samples/Snare.wav", windows=True), "d:/Samples/Snare.wav")
+        self.assertEqual(local(r"C:\Samples\Snare.wav", windows=True), r"C:\Samples\Snare.wav")
+        for refused in (r"\\server\share\Snare.wav", "//server/share/Snare.wav", r"\\?\UNC\server\share\Snare.wav",
+                        r"\\.\PhysicalDrive0", r"\\?\GLOBALROOT\Device\HarddiskVolume1\Snare.wav", "C:Snare.wav",
+                        r"\Samples\Snare.wav"):
+            self.assertIsNone(local(refused, windows=True), refused)
+        self.assertEqual(local("/Users/me/Samples/Snare.wav", windows=False), "/Users/me/Samples/Snare.wav")
+
+    @unittest.skipUnless(os.name == "nt", "Windows path forms")
+    def test_on_windows_a_sound_named_verbatim_is_served_from_a_plain_folder_and_a_network_path_is_never_resolved(self) -> None:
+        current_file = self.state / "map" / "r7.json"
+        current = json.loads(current_file.read_text(encoding="utf-8"))
+        plain = os.path.realpath(current["sounds"]["s-r7-0091"]["path"])
+        current["sounds"]["s-r7-0091"]["path"] = "\\\\?\\" + plain
+        current_file.write_text(json.dumps(current), encoding="utf-8")
+        self.assertEqual(snapshots.media(self.state, "s-r7-0091", [str(self.library)])["path"].lower(), plain.lower())
+        current["sounds"]["s-r7-0091"]["path"] = r"\\attacker\share\Snare.wav"
+        current_file.write_text(json.dumps(current), encoding="utf-8")
+        resolved = []
+        real_realpath = snapshots.os.path.realpath
+        snapshots.os.path.realpath = lambda path, *args, **kwargs: (resolved.append(str(path)), real_realpath(path, *args, **kwargs))[1]
+        try:
+            self.assertIsNone(snapshots.media(self.state, "s-r7-0091", [str(self.library)]))
+        finally:
+            snapshots.os.path.realpath = real_realpath
+        self.assertFalse([path for path in resolved if "attacker" in path], resolved)
+
 
 class PublicViews(StateTest):
     def test_the_map_and_a_sound_as_clients_see_them_carry_no_file_path(self) -> None:

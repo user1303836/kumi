@@ -263,6 +263,24 @@ def _inside(path: str, roots: list[Path]) -> bool:
     return False
 
 
+# Windows path forms (W5 review L-S6). Kumi's native snapshots name files in the verbatim drive form (`\\?\C:\…`), and
+# a sample folder the producer approved is usually a plain drive path (`C:\…`): both are compared in the plain form.
+# A network or device path (`\\server\share`, `\\?\UNC\…`, `\\.\…`, `\\?\GLOBALROOT\…`) is refused before anything
+# touches the filesystem, since even resolving one can reach another machine. So is a path that isn't drive-absolute
+# (`C:x`, `\x`), which depends on the process's own drive and folder.
+_VERBATIM_DRIVE = re.compile(r"^[\\/]{2}\?[\\/](?=[A-Za-z]:[\\/])")
+_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _local(path: str, windows: bool = os.name == "nt") -> str | None:
+    """`path` as a file path on this machine, in the form the containment check compares; None for one never served.
+    Elsewhere than Windows it is returned as it is."""
+    if not windows:
+        return path
+    plain = _VERBATIM_DRIVE.sub("", path, count=1)
+    return plain if _DRIVE_ABSOLUTE.match(plain) else None
+
+
 # The keys every snapshot carries around its own data.
 _ENVELOPE = {"schema", "seq", "at", "owner"}
 
@@ -282,7 +300,7 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
     sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
     data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
-    approved = [Path(os.path.realpath(os.path.expanduser(f))) for f in library_folders or [] if isinstance(f, str) and f]
+    approved = [Path(os.path.realpath(local)) for local in (_local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f) if local]
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
         roots = [Path(os.path.realpath(state / "artifacts")), *approved]
@@ -293,9 +311,10 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
         entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
         roots = approved
     path = entry.get("path")
-    if not isinstance(path, str) or not path:
+    local = _local(path) if isinstance(path, str) and path else None
+    if local is None:
         return None
-    real = os.path.realpath(path)
+    real = os.path.realpath(local)
     if not _inside(real, roots) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)
