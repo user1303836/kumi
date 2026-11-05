@@ -12,6 +12,7 @@ local json = import("json")
 local refs = import("refs")
 local rows = import("rows")
 local base = import("changes_base")
+local material_ = import("changes_material")
 
 local bad, fail, the_song = base.bad, base.fail, base.the_song
 local q = base.q
@@ -161,7 +162,8 @@ local function region_print(song, p, from, to)
     end
   end
   if #parts == 0 then return "none" end
-  return REGION_MARK .. base.hash((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
+  -- Read every line again; only the hash of identical text is reused, within the material cache's bounds.
+  return REGION_MARK .. material_.hash_of((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
 end
 M.region_print = region_print
 
@@ -281,7 +283,6 @@ base.register({
 -- alias is refused by Renoise: the source it shows is taken. A change of lines, so Kumi's undo goes through only while nothing
 -- in the pattern changed since (the plain rule, changes_notes.lua), and while the alias is as Kumi left it.
 
-local material_ = import("changes_material")
 local notes_ = import("changes_notes")
 
 -- The automation of one pattern's track, by the device's place on the track (followed through its devices' log: places.lua)
@@ -311,7 +312,7 @@ local function own_print(song, p, t)
   for k, automation in ipairs(pattern_track.automation) do
     for _, point in ipairs(automation.points) do parts[#parts + 1] = string.format("a%d:%.9g:%.9g:%.9g", k, point.time, point.value, point.scaling) end
   end
-  return base.hash(table.concat(parts, "|"))
+  return material_.hash_of(table.concat(parts, "|"))
 end
 
 local function alias_input(song, env, input)
