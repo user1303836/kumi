@@ -39,7 +39,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
     - `load_sample_to_pad` puts it on a Drum Rack pad that's empty (`deviceRef`: the Drum Rack; `note`: the pad), in a new Simpler. **Kumi can't undo a pad load:** Live's own Undo (Cmd+Z, right away) takes back the whole change, and the approval says so. So load pads in a change of their own, several pads at once if you like, with nothing else in it.
     - `replace_sample` swaps the audio of a pad, or a track, that already has a Simpler (`deviceRef`: that Simpler).
     - `load_sample` puts it in a new Simpler on an empty MIDI track.
-    - `import_audio` puts it in an empty Session slot of an audio track. `add_arrangement_clip` puts it in the Arrangement, on an audio track at a `position` in beats.
+    - `import_audio` puts it in an empty Session slot of an audio track.
   - REAPER: `item_import` puts it on a track at a position. Renoise: `sample_load` loads it into an instrument.
   - For a new track, add it in an earlier step of the same plan, named with `as`, and refer to it as `@name`.
   - Example (Live, an empty pad): `{"tool": "load_sample_to_pad", "input": {"deviceRef": "<the Drum Rack's ref>", "note": 38, "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
