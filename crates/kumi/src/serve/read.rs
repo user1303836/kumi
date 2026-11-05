@@ -232,7 +232,8 @@ mod tests {
 
     #[test]
     fn a_page_names_files_not_folders_and_keeps_its_cursor_through_a_cut() {
-        let project = super::super::connection::Project { key: "p-1".into(), name: "Song".into(), epoch: 7, seen_at: 0 };
+        let project =
+            super::super::connection::Project { native_epoch: None, key: "p-1".into(), name: "Song".into(), epoch: 7, seen_at: 0 };
         let rows = json!({
             "items": [
                 {"ref": "r:item:{4F2A}", "name": "Vox", "source": "/Users/me/Music/Takes/Vox take 2.wav"},
