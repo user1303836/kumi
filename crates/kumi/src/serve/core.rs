@@ -55,8 +55,9 @@ fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             return Err(OpError::Refused { code: "other_daw", reason, owner: None });
         }
         let connection = connection::connect(ctx, call.signal.clone()).await?;
-        // A first look, for the project's key and epoch: a DAW that doesn't answer yet leaves it for observe.
-        if let Ok(observation) = connection.integration.observe(call.signal.clone(), None).await {
+        // A first look, for the project's key and epoch: a DAW that doesn't answer yet, or a look that couldn't read the
+        // project, leaves it for observe.
+        if let Some(observation) = connection.integration.observe(call.signal.clone(), None).await.ok().filter(read_the_project) {
             ctx.link().saw(&observation);
             connection::publish_focus(&ctx.handle());
         }
@@ -66,21 +67,24 @@ fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 pub static OBSERVE: Operation = Operation {
     name: "observe",
-    description: "Looks at the open project now: `project` gives its full description with the refs a change names, \
-                  `focus` what the producer has selected and the transport, `catch_up` what changed since the last look. \
-                  Every answer has the project's key and epoch, which a change names. Writes nothing into the DAW.",
+    description: "Looks at the open project now: `project` gives the whole turn's look (what's selected and what \"this\" \
+                  means, Kumi's changes and what changed since the last look first, then the steps a change may use, one \
+                  line each, and the tracks with their refs, folded round the one in focus), `focus` what the producer \
+                  has selected and the transport, `catch_up` what changed since the last look. Every answer has the \
+                  project's key and epoch, which a change names. Writes nothing into the DAW.",
     schema: observe_schema,
     effect: reads,
     run: run_observe,
 };
 
-/// The longest `text` an observation gives when it isn't told (`max_chars`), and the bounds of what it may be told.
-const MAX_CHARS: (u64, u64, u64) = (4000, 200, 20000);
+/// The longest `text` an observation gives when it isn't told (`max_chars`), and the bounds of what it may be told: room
+/// for a whole turn's look (worklist item 3).
+const MAX_CHARS: (u64, u64, u64) = (12000, 200, 20000);
 
 fn observe_schema() -> Value {
     json!({"type": "object", "additionalProperties": false, "required": ["scope"], "properties": {
         "scope": {"type": "string", "enum": ["focus", "catch_up", "project"]},
-        "max_chars": {"type": "integer", "minimum": MAX_CHARS.1, "maximum": MAX_CHARS.2, "description": "The longest text to answer with (4000 if left out)"}
+        "max_chars": {"type": "integer", "minimum": MAX_CHARS.1, "maximum": MAX_CHARS.2, "description": format!("The longest text to answer with ({} if left out)", MAX_CHARS.0)}
     }})
 }
 
@@ -92,12 +96,24 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             .observe(call.signal.clone(), None)
             .await
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
+        // A look that couldn't read the project (the DAW gone, busy or not answering) is no project: it's said in the
+        // DAW's words, and the last project read stays the one a plan names.
+        if !read_the_project(&observation) {
+            let app = ctx.daw().profile().words.app;
+            let why = observation.label.strip_prefix("Inference-only — ").unwrap_or(&observation.label);
+            return Err(OpError::Failed {
+                reason: format!(
+                    "Kumi can't see the project in {app} right now ({why}). It looks again by itself once {app} answers; nothing from an earlier look is current."
+                ),
+            });
+        }
         let project = ctx.link().saw(&observation);
         ctx.link().clear_unsure();
         let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
         // A look at FOCUS leaves what changed for the look that asks for it (catch_up, or the whole project).
         let catch_up = if scope == "focus" { connection.catch_up() } else { connection.take_catch_up() };
         let (focus, transport) = (connection.focus(), connection.transport());
+        let most = call.args.get("max_chars").and_then(Value::as_u64).unwrap_or(MAX_CHARS.0) as usize;
         let text = match scope {
             "focus" => focus_text(&project, focus.as_ref(), transport.as_ref()),
             "catch_up" if catch_up.is_empty() => format!("Nothing has changed in {} since the last look.", project.name),
@@ -106,15 +122,22 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                 .flat_map(|seen| seen.lines.iter().cloned().chain((seen.more > 0).then(|| format!("…and {} more", seen.more))))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            _ => observation.context.clone(),
+            _ => {
+                let tools = ctx.link().tools();
+                super::turn::whole_turn(
+                    &observation.context,
+                    &super::read::turn_steps(ctx, &tools),
+                    &super::read::reader_names(&tools),
+                    most,
+                )
+            }
         };
-        let most = call.args.get("max_chars").and_then(Value::as_u64).unwrap_or(MAX_CHARS.0);
         let refs = connection::refs(&connection, call.signal.clone()).await;
         ctx.link().keep_refs(&refs);
         connection::publish_focus(&ctx.handle());
         publish_status(ctx, false).await;
         Ok(json!({
-            "text": bounded(&text, most as usize),
+            "text": bounded(&text, most),
             "project_key": project.key,
             "epoch": project.epoch,
             "project": project_value(&project),
@@ -125,6 +148,12 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             "age_ms": kumi_common::time::now_ms() - project.seen_at,
         }))
     })
+}
+
+/// Whether a look read the project: one that couldn't (the DAW gone, busy or not answering) has neither the project's
+/// identity nor the open project's, only the DAW's words for why.
+fn read_the_project(observation: &kumi_agent::core::contracts::Observation) -> bool {
+    observation.identity.is_some() || observation.set.is_some()
 }
 
 /// What the producer has selected and the transport, in a few lines.

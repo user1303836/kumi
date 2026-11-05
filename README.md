@@ -88,6 +88,13 @@ With more than one installed, setup asks which you work in; `/daw` switches late
 </details>
 
 <details>
+<summary><b>Can I use Kumi from Hermes Agent?</b></summary>
+
+Yes. Kumi is also a [Hermes Agent](https://hermes-agent.nousresearch.com) plugin: `hermes plugins install kumi` (once Kumi is in Hermes's plugin catalog; until then, see the guide) and `hermes plugins enable kumi`, then ask Hermes to set up Kumi for your DAW. Hermes stays your agent and asks before each change (unless its approvals are off), and Kumi keeps its HISTORY, with an undo while Kumi runs. See [Kumi for Hermes Agent](docs/en/HERMES.md).
+
+</details>
+
+<details>
 <summary><b>Which AI does it use, and what does it cost?</b></summary>
 
 Kumi is free and open source (MIT). You choose the model:

@@ -148,6 +148,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           history={state.history}
           live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
+          target={state.setup?.target}
           action={item => {
             const rows = changeOf.get(item)
             if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null

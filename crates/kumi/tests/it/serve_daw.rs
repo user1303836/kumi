@@ -216,7 +216,13 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
         (Some(key.as_str()), Some(epoch)),
         "the same project, the same epoch"
     );
-    assert!(!seen["text"].as_str().unwrap().is_empty());
+    // The whole turn's look: the steps a change may use, each with its input's fields, and the readers, before the
+    // tracks, which come last (what a small room cuts).
+    let look: Value = serde_json::from_str(seen["text"].as_str().unwrap()).unwrap();
+    let volume = look["steps"].as_array().unwrap().iter().filter_map(Value::as_str).find(|line| line.starts_with("track_volume: "));
+    assert!(volume.is_some_and(|line| line.contains("(ref")), "{}", look["steps"]);
+    assert!(look["readers"].as_array().unwrap().contains(&json!("reaper_read")), "{}", look["readers"]);
+    assert_eq!(look.as_object().unwrap().keys().last().map(String::as_str), Some("tracks"), "{look}");
     let refs = seen["refs"].as_array().unwrap();
     assert!(refs.iter().filter(|candidate| candidate["kind"] == "track").count() >= 3, "{refs:?}");
     assert!(refs.iter().all(|candidate| candidate["reference"]["kind"] == "daw"), "only the project's things: {refs:?}");
@@ -271,6 +277,13 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let Err(OpError::NotConnected { .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch + 1) else {
         panic!("a plan while REAPER is away")
     };
+    // A look that can't read the project makes no project of REAPER's words for why: it's refused in them, and the last
+    // project read stays the one a plan names.
+    let Err(OpError::Failed { reason }) = lab.call("observe", json!({"scope": "project"})).await else {
+        panic!("a look while REAPER is away")
+    };
+    assert!(reason.contains("REAPER") && !reason.contains("Inference-only"), "{reason}");
+    assert_eq!(lab.ctx.link().project().map(|project| project.key), other["project_key"].as_str().map(str::to_owned));
     // Nothing but reads reached REAPER: connecting and looking write nothing into the project.
     let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
     let sent = lab.methods_sent();
@@ -579,6 +592,9 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
     }
+    // A step REAPER's list keeps out says why, at the plan and at a look at its input.
+    let (lua, _) = wire.call("change", plan(&key, epoch, json!([{"tool": "run_lua", "input": {"code": "x = 1"}}])), Some("tc-why")).await;
+    assert!(lua["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // A sound from a map this runtime hasn't made: stale at its preview, and nothing runs.
     let sound = json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]);
@@ -695,6 +711,192 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     wire.end().await;
 });
 
+/// A connected runtime's look: the project's key and epoch, and up to three tracks' refs.
+async fn looked_tracks(wire: &mut Wire) -> (Value, u64, Vec<String>) {
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let tracks = seen["refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|candidate| candidate["kind"] == "track")
+        .map(|candidate| candidate["reference"]["node"]["ref"].as_str().unwrap().to_string())
+        .take(3)
+        .collect();
+    (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap(), tracks)
+}
+
+/// A volume step on each track, as one change.
+fn volume_steps(tracks: &[String]) -> Value {
+    Value::Array(
+        tracks
+            .iter()
+            .enumerate()
+            .map(|(n, reference)| json!({"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6 - n as i64}}))
+            .collect(),
+    )
+}
+
+case!(serve_undoes_a_whole_reaper_change_newest_first_in_one_call_unless_its_steps_changed_since_the_approval, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let volumes = || (0..4).map(|n| script.volume(n)).collect::<Vec<f64>>();
+    let before = volumes();
+    let whole = |id: &Value| json!({"history_id": id, "whole_change": true});
+
+    // A change of three steps: its preview lists them newest first and changes nothing.
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    assert_eq!(tracks.len(), 3, "{tracks:?}");
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks)), Some("tc-1")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    assert_eq!((changed["state"].clone(), made.len()), (json!("applied"), 3), "{changed}");
+    let newest_first: Vec<Value> = made.iter().rev().cloned().collect();
+    let (applied, steps_made) = (volumes(), script.undo_history().len());
+    let mut asked = whole(&made[1]);
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("undo", asked, Some("tc-2")).await;
+    assert_eq!((preview["state"].clone(), preview["undo_available"].clone()), (json!("preview"), json!(true)), "{preview}");
+    let listed = |answer: &Value| answer["rows"].as_array().unwrap().iter().map(|row| row["history_id"].clone()).collect::<Vec<_>>();
+    assert_eq!(listed(&preview), newest_first);
+    assert!(preview["rows"].as_array().unwrap().iter().all(|row| row["family"] == "mixer"), "{preview}");
+    assert!(preview["text"].as_str().unwrap().starts_with("Undo 3 steps: "), "{preview}");
+    assert_eq!((volumes(), script.undo_history().len()), (applied, steps_made), "a preview changes nothing");
+    // Undone whole as approved: every step, newest first, in one call that moves the epoch on once.
+    let moved_from = lab.ctx.link().epoch();
+    let mut approved = whole(&made[1]);
+    approved["expect_rows"] = preview["rows_digest"].clone();
+    let (undone, _) = wire.call("undo", approved, Some("tc-3")).await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(listed(&undone), newest_first);
+    assert!(undone["rows"].as_array().unwrap().iter().all(|row| row["state"] == "undone"), "{undone}");
+    assert_eq!((volumes(), lab.ctx.link().epoch()), (before.clone(), moved_from + 1));
+
+    // Another change, its newest step undone by id after the approval: the approved set is stale and nothing is undone,
+    // and an undo of the whole change that names no set is refused; previewed again, the step undone already is passed
+    // over and the rest are undone.
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks)), Some("tc-4")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    let mut asked = whole(&made[0]);
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("undo", asked, Some("tc-5")).await;
+    assert_eq!(wire.call("undo", json!({"history_id": made[2]}), Some("tc-6")).await.0["state"], "undone");
+    let one_back = volumes();
+    let mut approved = whole(&made[0]);
+    approved["expect_rows"] = preview["rows_digest"].clone();
+    let (stale, _) = wire.call("undo", approved, Some("tc-7")).await;
+    assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
+    assert_eq!(volumes(), one_back, "nothing undone of a stale set");
+    let (unbound, refused) = wire.call("undo", whole(&made[0]), Some("tc-8")).await;
+    assert_eq!((refused, unbound["error"]["code"].clone()), (true, json!("invalid")), "{unbound}");
+    assert_eq!(volumes(), one_back, "nothing undone without the set its preview gave");
+    let mut asked = whole(&made[0]);
+    asked["preview"] = json!(true);
+    let (again, _) = wire.call("undo", asked, Some("tc-9")).await;
+    assert_eq!(again["rows"][0]["state"], "undone", "listed, undone already: {again}");
+    let mut approved = whole(&made[0]);
+    approved["expect_rows"] = again["rows_digest"].clone();
+    let (rest, _) = wire.call("undo", approved, Some("tc-10")).await;
+    assert_eq!(rest["state"], "undone", "{rest}");
+    assert_eq!(listed(&rest), made.iter().rev().cloned().collect::<Vec<_>>());
+    assert_eq!(volumes(), before);
+    wire.end().await;
+});
+
+case!(serve_stops_a_whole_reaper_change_undo_at_the_first_step_reaper_wont_undo_and_asks_nothing_of_the_older_ones, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let restoring: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let asked = restoring.clone();
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = sim.config(secret, "/lab/REAPER");
+            let answer = config.respond.take().unwrap();
+            // REAPER is busy with each undo asked of it: nothing is undone, and the change stays as it was.
+            config.respond = Some(Arc::new(move |method, params| {
+                if method == "change_restore" {
+                    asked.lock().unwrap().push(params["target"]["ref"].as_str().unwrap_or_default().to_string());
+                    return Some(Err(("busy".into(), "a render is running".into())));
+                }
+                answer(method, params)
+            }));
+            config
+        })),
+    )
+    .await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks[..2])), Some("tc-1")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    assert_eq!(made.len(), 2, "{changed}");
+    let (preview, _) = wire.call("undo", json!({"history_id": made[0], "whole_change": true, "preview": true}), Some("tc-2")).await;
+    let approved = json!({"history_id": made[0], "whole_change": true, "expect_rows": preview["rows_digest"]});
+    let (whole, _) = wire.call("undo", approved, Some("tc-3")).await;
+    let rows = whole["rows"].as_array().unwrap();
+    assert_eq!((rows[0]["history_id"].clone(), rows[0]["state"].clone()), (made[1].clone(), json!("refused")), "{whole}");
+    assert_eq!((rows[1]["history_id"].clone(), rows[1]["state"].clone()), (made[0].clone(), json!("not_tried")), "{whole}");
+    assert_eq!((whole["state"].clone(), whole["reason"].clone()), (json!("refused"), rows[0]["reason"].clone()), "the newest step's");
+    let restored = restoring.lock().unwrap().clone();
+    assert!(!restored.is_empty() && !restored.contains(&tracks[0]), "nothing asked of the older step: {restored:?}");
+    wire.end().await;
+});
+
+case!(serve_undoes_nothing_of_a_change_only_reapers_own_undo_takes_back_whole_or_by_its_rows, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let (key, _, _) = looked_tracks(&mut wire).await;
+    // Two rows recorded as a call holding a step only REAPER's own Undo takes back records them (CC-20): no DAW marks
+    // one yet, so they're made in HISTORY as that call makes them.
+    let history = lab.ctx.history();
+    let note = "Kumi can't undo this change. REAPER's own Undo (Cmd+Z) takes all of it back while it's still REAPER's latest step.";
+    history.begin_call();
+    history.daw_undo_call(note.into());
+    for id in ["c901", "c902"] {
+        let record = json!({"id": id, "family": "mixer", "title": "Bass volume −6 dB", "state": "applied", "at": 1});
+        history.record(&serde_json::from_value(record).unwrap(), key.as_str().unwrap(), lab.ctx.snapshots());
+    }
+    let identity = kumi::serve::history::CallIdentity { profile_id: None, session_id: None, tool_call_id: None, digest: "d" };
+    let made: Vec<String> = history.end_call(identity, lab.ctx.snapshots()).into_iter().map(|row| row.id).collect();
+    history.one_change(&made, lab.ctx.snapshots());
+    let asked_before = lab.methods_sent().len();
+    // Whole or by a row, previewed or real, with the set its preview gave or without: refused with the change's words.
+    for (n, (asked, preview)) in [
+        (json!({"history_id": made[0], "whole_change": true, "preview": true}), true),
+        (json!({"history_id": made[1], "whole_change": true, "expect_rows": "0".repeat(64)}), false),
+        (json!({"history_id": made[1], "whole_change": true}), false),
+        (json!({"history_id": made[0]}), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (answer, _) = wire.call("undo", asked.clone(), Some(&format!("tc-{n}"))).await;
+        if preview {
+            assert_eq!(
+                (answer["undo_available"].clone(), answer["reason"].clone(), answer["note"].clone()),
+                (json!(false), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        } else {
+            assert_eq!(
+                (answer["state"].clone(), answer["code"].clone(), answer["reason"].clone()),
+                (json!("refused"), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        }
+    }
+    let sent = lab.methods_sent();
+    assert!(!sent[asked_before..].iter().any(|method| method.starts_with("change_")), "REAPER asked nothing: {sent:?}");
+    wire.end().await;
+});
+
 case!(serve_audits_an_undo_reaper_didnt_confirm_once_and_moves_the_epoch_on_once, async {
     let script = ReaperScript::new(3, 0);
     let sim = script.clone();
@@ -763,6 +965,7 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     assert!(import["input_schema"]["properties"]["path"]["anyOf"].is_array(), "{import}");
     let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
     assert!(error && lua["error"]["code"] == "invalid", "{lua}");
+    assert!(lua["error"]["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // The reader's rows, as REAPER gives them, names and not folders; never an API function by name, a query its
     // schema doesn't take, nor a tool that isn't a reader.
@@ -1236,20 +1439,22 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
 });
 
 case!(serve_refuses_a_path_in_renoises_file_field_before_anything_runs, async {
-    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(|secret| SimulatorConfig::renoise(secret, "/lab/Renoise")))).await;
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (connected, refused) = wire.call("connect", json!({}), None).await;
     assert!(!refused, "{connected}");
     let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
     let key = seen["project_key"].clone();
     let epoch = seen["epoch"].as_u64().unwrap_or_else(|| panic!("{seen}"));
-    let sent = lab.methods_sent();
+    let sent = lab.methods_sent().len();
     for (n, path) in ["/Users/me/Samples/kick.wav", "C:\\Samples\\kick.wav", "library:Drums/kick.wav"].into_iter().enumerate() {
         let steps = json!([{"tool": "sample_load", "input": {"ref": "i1", "path": path}}]);
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-path-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{path}: {refused}");
     }
-    assert_eq!(lab.methods_sent(), sent, "nothing reached Renoise");
+    let after = lab.methods_sent();
+    assert!(!after[sent..].iter().any(|method| method.starts_with("change_")), "nothing written into Renoise: {after:?}");
     wire.end().await;
 });
 

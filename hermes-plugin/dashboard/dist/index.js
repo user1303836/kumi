@@ -122,7 +122,11 @@
       lookFirst: "Ask Hermes to look again before another change.",
       restored: "Kumi put back what it changed meanwhile.",
       restoreUnsure: "Kumi isn’t sure it put everything back.",
-      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+      dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
+      dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
+      byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
     },
     job: {
       scanning: "Scanning",
@@ -411,7 +415,11 @@
       lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
       restored: "その間に変えたものは Kumi が元に戻しました。",
       restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
+      dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
+      dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
+      byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
     },
     job: {
       scanning: "スキャン中",
@@ -699,7 +707,11 @@
       lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
       restored: "Kumi 已还原期间做出的改动。",
       restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-      restoreUnsure: "Kumi 不确定是否已全部还原。"
+      restoreUnsure: "Kumi 不确定是否已全部还原。",
+      dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
+      dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
+      byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
     },
     job: {
       scanning: "正在扫描",
@@ -1300,12 +1312,25 @@
       focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
     ] });
   }
+  function undoKeys(target) {
+    const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+    return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+  }
+  function DawUndo({ daw, how, keys }) {
+    const t = useT();
+    const app = dawName(daw, t);
+    if (how === "buried") {
+      return /* @__PURE__ */ jsx("span", { title: t("history.byHandTitle", app), style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) });
+    }
+    return /* @__PURE__ */ jsx("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
+  }
   function HistoryView({
     history,
     now,
     action,
     live = false,
-    daw
+    daw,
+    target
   }) {
     const t = useT();
     const items = history?.items ?? [];
@@ -1315,6 +1340,7 @@
     return /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
       const state = stateOf(item, t, live);
       const track = nameOf(item.track);
+      const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
       return /* @__PURE__ */ jsxs("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
         /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
         /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
@@ -1325,10 +1351,11 @@
           ] }),
           item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
             // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
-            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
-          )
+            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
+          ),
+          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) })
         ] }),
-        action?.(item)
+        dawUndo ? null : action?.(item)
       ] }, item.id);
     }) });
   }
@@ -2231,7 +2258,8 @@
               daw: state.status?.daw,
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
-              now
+              now,
+              target: state.setup?.target
             }
           ) })
         ] }),

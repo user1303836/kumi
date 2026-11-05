@@ -6,6 +6,7 @@ import contextvars
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -302,13 +303,26 @@ class Approvals(unittest.TestCase):
         snapshots = support.module("snapshots")
         network = ([r"\\server\share\Samples", r"\\?\UNC\server\share\Samples", "//server/share/Samples"]
                    if os.name == "nt" else ["/net/server/Samples", "/Network/Servers/s/Samples", "/NET/server"])
-        touched = mock.Mock(side_effect=AssertionError("Kumi looked the folder up"))
-        with mock.patch.object(os.path, "realpath", touched), mock.patch.object(os.path, "ismount", touched), \
-                mock.patch.object(os.path, "samefile", touched), mock.patch.object(os, "stat", touched):
+        # Only this thread's calls count: the runtime setUp started has threads of its own (its snapshot watcher stats
+        # the state folder), which get the real functions (#1141: on Windows one ran inside this window).
+        mine, looked = threading.get_ident(), []
+
+        def guarded(original):
+            def lookup(*args, **kwargs):
+                if threading.get_ident() != mine:
+                    return original(*args, **kwargs)
+                looked.append((original.__name__, args))
+                raise AssertionError("Kumi looked the folder up")
+            return lookup
+
+        with mock.patch.object(os.path, "realpath", guarded(os.path.realpath)), \
+                mock.patch.object(os.path, "ismount", guarded(os.path.ismount)), \
+                mock.patch.object(os.path, "samefile", guarded(os.path.samefile)), \
+                mock.patch.object(os, "stat", guarded(os.stat)):
             for folder in network:
                 with self.subTest(folder=folder):
                     self.assertIsNone(snapshots.library_folder(folder)[0])
-        touched.assert_not_called()
+        self.assertEqual(looked, [], "Kumi looked the folder up")
 
     def test_a_scan_is_cancelled_by_its_job_id_from_a_chat_with_nothing_asked(self):
         cancel = {"action": "cancel", "job_id": "j-scan-1"}

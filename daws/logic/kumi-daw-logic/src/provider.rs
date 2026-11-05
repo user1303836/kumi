@@ -27,6 +27,7 @@ pub static PROVIDER: Own = Own {
     presentation: &crate::PRESENTATION,
     view: &crate::VIEW,
     plugin_steps: &[],
+    plugin_refused: &[],
     library: &crate::library::LIBRARY,
     site: "apple.com/logic-pro",
     bridge: "Kumi's Logic Pro bridge",

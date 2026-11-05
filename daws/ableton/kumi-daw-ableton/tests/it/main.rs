@@ -8,6 +8,7 @@ mod bridge_start;
 mod changes;
 mod copies_script;
 mod device_background;
+mod device_build;
 mod devices;
 mod focus_stream;
 mod groove;

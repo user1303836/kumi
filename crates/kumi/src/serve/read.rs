@@ -11,6 +11,7 @@
 use super::change::{offered_steps, source_schema};
 use super::connection::{names_only, names_only_text};
 use super::ctx::{Call, Ctx, OpError, OpFuture, Operation};
+use kumi_agent::integrations::shared::steps::step_line;
 use kumi_daw::plugin::{plugin_schema, PluginStep};
 use kumi_types::contracts::{KernelTool, Reach, ToolRole};
 use serde_json::{json, Map, Value};
@@ -149,6 +150,31 @@ fn allowed_steps(ctx: &Ctx, tools: &[Rc<dyn KernelTool>]) -> Vec<&'static Plugin
     listed.iter().filter(|step| offered.iter().any(|name| name == step.tool)).collect()
 }
 
+/// The steps a change may use here, as the whole turn's look says them (worklist item 3): each one's line as the plan
+/// tool's own description says a step (what it does, then its input's fields as a plugin's plan fills them); a step
+/// with no input of its own to describe, by its name.
+pub(super) fn turn_steps(ctx: &Ctx, tools: &[Rc<dyn KernelTool>]) -> Vec<super::turn::Step> {
+    allowed_steps(ctx, tools)
+        .into_iter()
+        .map(|step| match tools.iter().find(|tool| tool.name() == step.tool) {
+            Some(tool) => {
+                let schema = plugin_schema(step, &tool.input_schema(), &source_schema());
+                super::turn::Step {
+                    name: step.tool,
+                    line: step_line(step.tool, &step.description(tool.description()), &schema),
+                    fields: kumi_agent::kernel::schema::fields(&schema),
+                }
+            }
+            None => super::turn::Step { name: step.tool, line: step.tool.to_string(), fields: Vec::new() },
+        })
+        .collect()
+}
+
+/// The DAW's readers, by name.
+pub(super) fn reader_names(tools: &[Rc<dyn KernelTool>]) -> Vec<String> {
+    tools.iter().filter(|tool| reader(tool.as_ref())).map(|tool| tool.name().to_string()).collect()
+}
+
 /// A step's or reader's whole input; or, with none named, the steps a change may use and the readers, each with what
 /// it does (while that fits in `most`; the names alone otherwise).
 fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: usize) -> Result<Value, OpError> {
@@ -180,6 +206,10 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
         }
         if let Some(tool) = tools.iter().find(|tool| tool.name() == name && reader(tool.as_ref())) {
             return Ok(json!({"tool": name, "kind": "reader", "description": tool.description(), "input_schema": tool.input_schema()}));
+        }
+        let refused = crate::daw::provider(ctx.daw()).and_then(|provider| provider.plugin_refused().iter().find(|(step, _)| *step == name));
+        if let Some((_, why)) = refused {
+            return Err(OpError::Invalid { reason: format!("Kumi for Hermes doesn't make {name} here. {why}") });
         }
         return Err(OpError::Invalid {
             reason: format!(

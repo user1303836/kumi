@@ -29,6 +29,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock},
+    time::Duration,
 };
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -44,9 +45,9 @@ pub type BrowserSees = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Resu
 #[derive(Clone)]
 pub struct DeviceToolOptions {
     pub user_library: String,
-    /// Kept for source compatibility. Making a file no longer reads the Browser; load_device waits for it instead.
+    /// Typed builds check the Browser; standalone make_device leaves that wait to load_device.
     pub browser_sees: BrowserSees,
-    /// Kept for source compatibility; ignored. Making a device never waits for Live's Browser.
+    /// The typed build's Browser wait; standalone make_device ignores it.
     pub wait_ms: Option<u64>,
     /// The devices this conversation made: the tool is made anew each turn, and these are kept for the conversation.
     pub made: Rc<RefCell<Made>>,
@@ -151,7 +152,7 @@ fn hashed(bytes: &[u8]) -> u64 {
 /// The device's file name: its own, numbered past a file the folder has ("Echo 2") and a name `reserved` keeps (in any
 /// case). On Windows a name it takes for a device ("Aux", "Con.Dist") is taken as a file's would be, and its number goes
 /// right after that part ("Aux 2", "Con 2.Dist").
-fn free_name(folder: &Path, name: &str, windows: bool, reserved: &[&str]) -> String {
+pub(crate) fn free_name(folder: &Path, name: &str, windows: bool, reserved: &[&str]) -> String {
     let (stem, rest) = name.split_at(name.find('.').unwrap_or(name.len()));
     let numbered = |number: &str| {
         if windows && windows_device_name(stem) {
@@ -314,13 +315,62 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Work as long as the device it reads is big, done beside the app's thread: a stop doesn't wait for it, and what it found
 /// is dropped. None when the work itself failed.
-async fn beside<T: Send + 'static>(signal: &Signal, work: impl FnOnce() -> T + Send + 'static) -> Result<Option<T>, RuntimeError> {
+pub(crate) async fn beside<T: Send + 'static>(
+    signal: &Signal,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<Option<T>, RuntimeError> {
     let task = tokio::task::spawn_blocking(work);
     tokio::select! {
         biased;
         () = signal.cancelled() => Err(RuntimeError::Aborted),
         done = task => Ok(done.ok()),
     }
+}
+
+/// Writes `bytes` as `file` through a temporary file in `folder`: over the file there (`replace`), or only where there's
+/// none ([`put_new`], AlreadyExists when one's there).
+pub(crate) async fn write_device(folder: &Path, file: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
+    let temporary = folder.join(format!(".{}.amxd", Uuid::new_v4()));
+    let written: std::io::Result<()> = async {
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o644);
+        let mut out = options.open(&temporary).await?;
+        out.write_all(bytes).await?;
+        out.flush().await?;
+        drop(out);
+        if replace {
+            tokio::fs::rename(&temporary, file).await
+        } else {
+            put_new(&temporary, file).await
+        }
+    }
+    .await;
+    // The temporary file goes as best it can: after a hard link it's still there, and a scanner holding it open (on
+    // Windows) doesn't undo a device that's written.
+    let _ = tokio::fs::remove_file(&temporary).await;
+    written
+}
+
+/// Waits for Live's Browser to list a device just written, asking every 400 ms until `wait_ms` (20 s) is over, and marks
+/// it listed, or written but unlisted, so the first load of it waits for the Browser: whether it was listed.
+pub(crate) async fn wait_listed(options: &DeviceToolOptions, item_id: &str, signal: &Signal) -> Result<bool, RuntimeError> {
+    let deadline = now_ms().saturating_add(options.wait_ms.unwrap_or(20_000) as i64);
+    let mut seen = false;
+    while !seen && now_ms() < deadline {
+        seen = (options.browser_sees)(item_id.to_string(), signal.clone()).await.unwrap_or(false);
+        if !seen {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        signal.check()?;
+    }
+    if seen {
+        options.made.borrow_mut().listed(item_id);
+    } else {
+        options.made.borrow_mut().written_unlisted(item_id);
+    }
+    Ok(seen)
 }
 
 impl DeviceTool {
@@ -392,31 +442,12 @@ impl DeviceTool {
             Err(why) => return Ok(Err(ToolResult::error(why))),
         };
         found.append(more);
-        let temporary = folder.join(format!(".{}.amxd", Uuid::new_v4()));
         let kept_in = self.options.made.borrow().kept.clone();
         let kept = match (&ours, kept_in) {
             (Some(_), Some(kept_in)) => keep(&file, &name, &kept_in).await,
             _ => None,
         };
-        let written: Result<(), std::io::Error> = async {
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            options.mode(0o644);
-            let mut out = options.open(&temporary).await?;
-            out.write_all(&bytes).await?;
-            out.flush().await?;
-            drop(out);
-            if ours.is_some() {
-                tokio::fs::rename(&temporary, &file).await
-            } else {
-                put_new(&temporary, &file).await
-            }
-        }
-        .await;
-        // The temporary file goes as best it can: after a hard link it's still there, and a scanner holding it open (on
-        // Windows) doesn't undo a device that's written.
-        let _ = tokio::fs::remove_file(&temporary).await;
+        let written = write_device(&folder, &file, &bytes, ours.is_some()).await;
         if let Err(error) = written {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 return Ok(Err(ToolResult::error(format!(

@@ -449,7 +449,9 @@ jobs:
     name: Rust / macOS
     if: github.event_name != 'pull_request'
     runs-on: macos-15
-    timeout-minutes: 10
+    # A release's version bump recompiles every crate, which a cold cache can't fit in 10 minutes (1.24.69's run
+    # stopped at 10:22); a warm run takes 5 to 6. A hang is still caught.
+    timeout-minutes: 15
     env:
       # The workspace's crates from sccache (see Rust / Linux; the steps that compile set RUSTC_WRAPPER).
       SCCACHE_GHA_ENABLED: "true"
@@ -512,7 +514,9 @@ jobs:
     name: Rust / ${{ matrix.label }}
     if: github.event_name != 'pull_request'
     runs-on: windows-2025
-    timeout-minutes: 10
+    # A change to many crates (a release's version bump, a bridge's rework) compiles cold in more than 10 minutes
+    # (#1035's run stopped at 10:05, after its 373 tests had passed); a warm run takes 6 to 8. A hang is still caught.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

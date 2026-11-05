@@ -321,9 +321,11 @@ fn folder_name(path: &Path) -> std::borrow::Cow<'_, str> {
 
 fn display_error(ctx: &Ctx, mut error: OpError) -> OpError {
     let reason = match &mut error {
-        OpError::Invalid { reason } | OpError::NotConnected { reason } | OpError::Refused { reason, .. } | OpError::Failed { reason } => {
-            reason
-        }
+        OpError::Invalid { reason }
+        | OpError::NotConnected { reason }
+        | OpError::Refused { reason, .. }
+        | OpError::Findings { reason, .. }
+        | OpError::Failed { reason } => reason,
     };
     for root in ctx.library_roots() {
         redact_path(reason, &root, &folder_name(&root));

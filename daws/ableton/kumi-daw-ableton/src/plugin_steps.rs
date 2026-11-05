@@ -19,6 +19,23 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_locators", "locators"),
     PluginStep::new("set_track_color", "color"),
     PluginStep::new("set_mixer_options", "mixer"),
+    // Where a track's sound goes, only. A track's input is for recording, as arming and monitoring are: Live's default
+    // Monitor ("Auto") passes it only while the track is armed. Live 12.4 also crashed, losing unsaved work, when Kumi set
+    // a track's input to Main (#195); the guards against that match Main's English name, which a localized Live may not
+    // show, so the plugin doesn't set an input at all.
+    PluginStep::new("set_routing", "mixer")
+        .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["*"]), ("inputSubRouting", &["*"])])
+        .because(&[
+            ("arm", "arming a track is for recording, which Kumi for Hermes doesn't do."),
+            ("monitoring", "a track's monitoring is for recording, which Kumi for Hermes doesn't do."),
+            ("inputType", "a track's input is for recording, which Kumi for Hermes doesn't do."),
+            ("inputSubRouting", "a track's input is for recording, which Kumi for Hermes doesn't do."),
+        ])
+        .described(
+            "Route a track's output: outputType and outputSubRouting, exactly as Live names them (live_discover kind \
+             routing-choice with the track as parent lists them), such as a group or another track. Kumi for Hermes \
+             doesn't change a track's input, arm it or change its monitoring.",
+        ),
     PluginStep::new("edit_rack_mapping", "device"),
     PluginStep::new("set_clip_follow_actions", "clip"),
     PluginStep::new("set_clip", "clip"),
@@ -71,7 +88,6 @@ pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
     ("load_sample", "It loads an audio file by path into a new Simpler."),
     ("load_sample_to_pad", "It loads an audio file by path onto a Drum Rack pad."),
     ("set_transport", "It moves the playhead and changes the metronome and punch settings."),
-    ("set_routing", "It arms tracks and sets their monitoring, to record."),
     ("edit_clip", "Live gives Kumi no undo for any of its edits, and crop destroys material."),
     ("move_clip", "It replaces clips where it drops one, and a copy or a move to another track has no Kumi undo."),
     ("add_arrangement_clip", "It puts an audio file in by path."),
@@ -90,7 +106,7 @@ pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
     ("delete_track", "It deletes a track with its clips and devices, and Kumi's undo can't bring it back."),
     ("delete_locator", "It deletes a locator, and Kumi's undo can't bring it back."),
     ("clear_range", "It clears clips from a stretch of the Arrangement and cuts those crossing it."),
-    ("group_tracks", "It has no Kumi HISTORY inverse."),
+    ("group_tracks", "Live's API can't group tracks without Kumi's native editing; select the tracks and press Cmd+G (Ctrl+G on Windows)."),
     ("play", "It plays and stops Live."),
     ("fire_scene", "It launches a scene."),
     ("launch_clip", "It launches a clip."),
@@ -153,6 +169,18 @@ mod tests {
         for tool in ["move_clip", "load_sample_to_pad", "capture_midi", "use_looper", "delete_track", "record"] {
             assert!(check(PLUGIN_STEPS, tool, &json!({})).is_err(), "{tool}");
         }
+        // Output routing only: nothing that records, and no input, however it's written (Live crashed on Main, #195).
+        for input in [
+            json!({"trackRef":"t1","arm":true}),
+            json!({"trackRef":"t1","arm":false}),
+            json!({"trackRef":"t1","outputType":"Drum Bus","monitoring":"in"}),
+            json!({"trackRef":"t1","inputType":"Main"}),
+            json!({"trackRef":"t1","inputType":"Resampling"}),
+            json!({"trackRef":"t1","inputType":"Bass","inputSubRouting":"Post FX"}),
+            json!({"trackRef":"t1","outputType":"Drum Bus","inputSubRouting":"Post FX"}),
+        ] {
+            assert!(check(PLUGIN_STEPS, "set_routing", &input).is_err(), "{input}");
+        }
     }
 
     #[test]
@@ -209,8 +237,11 @@ mod tests {
     }
 
     #[test]
-    fn plugin_steps_allow_a_mixer_change_and_sourced_files() {
+    fn plugin_steps_allow_a_mixer_change_a_route_and_sourced_files() {
         assert!(check(PLUGIN_STEPS, "set_mixer", &json!({"trackRef":"t1","volume":0.7,"pan":-0.2})).is_ok());
+        for route in [json!({"trackRef":"t1","outputType":"Drum Bus"}), json!({"trackRef":"t2","outputType":"Sends Only"})] {
+            assert!(check(PLUGIN_STEPS, "set_routing", &route).is_ok(), "{route}");
+        }
         let source = json!({"sound_id":"s-r1-1","map_revision":"r1"});
         for tool in ["replace_sample", "import_audio"] {
             assert!(check(PLUGIN_STEPS, tool, &json!({"deviceRef":"d1","trackRef":"t1","sample":source})).is_ok(), "{tool}");

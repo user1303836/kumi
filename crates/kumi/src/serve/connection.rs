@@ -163,6 +163,15 @@ impl Link {
         self.connection.borrow().clone()
     }
 
+    /// A connection to `integration` that answers, as `connect` makes one: for an operation's tests.
+    #[cfg(test)]
+    pub(super) fn connected_to(&self, integration: Rc<dyn Integration>) {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+    }
+
     pub fn project(&self) -> Option<Project> {
         self.project.borrow().clone()
     }
@@ -606,6 +615,19 @@ pub fn transport_value(transport: &Transport) -> Value {
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
 pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))
+}
+
+/// A connection to `integration` that answers, with `observation` seen on it: as a `connect` and an `observe` leave the
+/// link, for an operation's tests.
+#[cfg(test)]
+impl Link {
+    pub(super) fn connected_for_test(&self, integration: Rc<dyn Integration>, observation: &Observation) -> Project {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+        self.saw(observation)
+    }
 }
 
 #[cfg(test)]

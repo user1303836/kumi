@@ -64,6 +64,7 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 - **Give values in the producer's units:** `volumeDb: -4`, not a fader position.
   - Every DAW's parameter step also takes a value as the device shows it: "800 Hz", "-6 dB" (Renoise's as `valueString`).
   - A Renoise `#Send` device's own `amount` is 0–1, not dB, so set it by `valueString`.
+- **Read a device's or plug-in's parameters before you set them by name** (`kumi_read`), and use the names as read. A name the device doesn't have is refused ("that FX has no parameter named …"). The plan then stops there as `partial`, and its earlier steps stay: report them, read the parameters, and set the rest in a new change.
 
 ## Notes (MIDI)
 - **Read first,** and keep the producer's meter and key unless they ask otherwise:

@@ -17,16 +17,21 @@ pub struct PluginStep {
     /// The field that takes an audio file, when it takes one: the import step puts there the file a source names, so a
     /// plan gives a source (an object) in it, never a path.
     pub file_field: Option<&'static str>,
-    /// What a file step does as the plugin offers it: the DAW's own description says its field takes a path, which a
-    /// plugin's plan never gives.
+    /// What the step does as the plugin offers it, when the DAW's own description offers more than a plugin's plan may
+    /// give: a file step's field takes a source, never the path its description names; a step whose description offers
+    /// fields it refuses doesn't offer them.
     pub described: Option<&'static str>,
     /// The field that names something in the DAW's own browser by a path of names ("Audio/Effects/Native/Delay"), when
     /// it has one: allowed though it's called `path`, its value still never a file's path.
     pub browser_field: Option<&'static str>,
     /// Values of its input it refuses, by field name, wherever in the input the field is: `("action", &["delete-return"])`.
-    /// A true or false, or a number, is matched by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field
-    /// whatever it holds (`("remove", &["*"])`).
+    /// A text is matched whatever its case and the spaces around it ("main" is refused as "Main"); a true or false, or a
+    /// number, by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field whatever it holds
+    /// (`("remove", &["*"])`).
     pub refused: &'static [(&'static str, &'static [&'static str])],
+    /// Why it refuses a field, by the field's name, said when it does: `("arm", "…is for recording…")`. A refused field
+    /// without one is refused as deleting or not undoable.
+    pub because: &'static [(&'static str, &'static str)],
     /// What the DAW's instructions teach about its input (Live's notation), which a plugin's host reads with the step
     /// since it doesn't have Kumi's instructions.
     pub noting: Option<&'static str>,
@@ -71,6 +76,7 @@ impl PluginStep {
             described: None,
             browser_field: None,
             refused: &[],
+            because: &[],
             noting: None,
             daw_undo: DawUndo::Never,
             daw_undo_because: None,
@@ -83,7 +89,12 @@ impl PluginStep {
         PluginStep { file_field: Some(field), described: Some(described), ..self }
     }
 
-    /// Its description as the plugin gives it: its own for a file step, the DAW's (`native`) otherwise; then what the
+    /// It does `described` as the plugin offers it, in place of the DAW's own description.
+    pub const fn described(self, described: &'static str) -> PluginStep {
+        PluginStep { described: Some(described), ..self }
+    }
+
+    /// Its description as the plugin gives it: its own when it has one, the DAW's (`native`) otherwise; then what the
     /// DAW's instructions teach about its input.
     pub fn description<'a>(&self, native: &'a str) -> Cow<'a, str> {
         let said = self.described.unwrap_or(native);
@@ -101,6 +112,11 @@ impl PluginStep {
     /// It refuses these values of these fields.
     pub const fn refusing(self, refused: &'static [(&'static str, &'static [&'static str])]) -> PluginStep {
         PluginStep { refused, ..self }
+    }
+
+    /// Why it refuses these fields, said when it does.
+    pub const fn because(self, because: &'static [(&'static str, &'static str)]) -> PluginStep {
+        PluginStep { because, ..self }
     }
 
     /// Its input as the DAW's instructions teach it, after its description.
@@ -224,14 +240,20 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
     if NEVER.contains(&plain.as_str()) && step.browser_field != Some(field) {
         return Err(format!("{}'s {field} names a file or holds raw data or code, which Kumi for Hermes doesn't change.", step.tool));
     }
-    let refused = |text: &str| step.refused.iter().any(|(name, values)| *name == field && values.contains(&text));
+    let refused = |text: &str| {
+        let text = text.trim();
+        step.refused.iter().any(|(name, values)| *name == field && values.iter().any(|value| value.eq_ignore_ascii_case(text)))
+    };
     if refused("*") {
-        return Err(format!("{}'s {field} deletes, or can't be undone, which Kumi for Hermes doesn't do.", step.tool));
+        return Err(refusal(step, field, None));
     }
     match value {
         Value::String(text) => {
             let lower = text.to_ascii_lowercase();
-            if refused(text) || (ACTIONS.contains(&plain.as_str()) && DESTROYS.iter().any(|word| lower.contains(word))) {
+            if refused(text) {
+                return Err(refusal(step, field, Some(text)));
+            }
+            if ACTIONS.contains(&plain.as_str()) && DESTROYS.iter().any(|word| lower.contains(word)) {
                 return Err(format!("{}'s {field} {text} deletes, or can't be undone, which Kumi for Hermes doesn't do.", step.tool));
             }
             if path_like(text) || lower.starts_with("<?xml") {
@@ -239,7 +261,7 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
             }
         }
         Value::Bool(_) | Value::Number(_) if refused(&value.to_string()) => {
-            return Err(format!("{}'s {field} {value} deletes, or can't be undone, which Kumi for Hermes doesn't do.", step.tool));
+            return Err(refusal(step, field, Some(&value.to_string())));
         }
         Value::Array(items) => {
             for item in items {
@@ -254,6 +276,19 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
         _ => {}
     }
     Ok(())
+}
+
+/// Why `step` refuses its `field` (holding `value`, when it's one of the values it refuses): the step's own reason for
+/// that field, else as deleting or not undoable.
+fn refusal(step: &PluginStep, field: &str, value: Option<&str>) -> String {
+    let what = match value {
+        Some(value) => format!("{}'s {field} {value}", step.tool),
+        None => format!("{}'s {field}", step.tool),
+    };
+    match step.because.iter().find(|(name, _)| *name == field) {
+        Some((_, why)) => format!("{what}: {why}"),
+        None => format!("{what} deletes, or can't be undone, which Kumi for Hermes doesn't do."),
+    }
 }
 
 /// A step's input schema as a plugin's plan fills it: its file field takes `source` (an object naming where the file
@@ -337,6 +372,16 @@ mod tests {
         assert!(check(&STEPS, "change_structure", &json!({"edits": [{"action": "delete-return"}]})).is_err(), "inside a list");
         assert!(check(&STEPS, "change_structure", &json!({"op": "clear-envelope"})).is_err(), "an action that destroys");
         assert!(check(&STEPS, "change_structure", &json!({"name": "Clear vocals"})).is_ok(), "only what a step does is read so");
+        // A refusal gives the step's own reason for that field when it has one; otherwise it's refused as deleting.
+        const ROUTING: [PluginStep; 1] = [PluginStep::new("set_routing", "mixer")
+            .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["Main"])])
+            .because(&[("arm", "it's for recording."), ("inputType", "it crashes.")])];
+        let why = |input: Value| check(&ROUTING, "set_routing", &input).unwrap_err();
+        assert!(why(json!({"arm": false})).ends_with("arm: it's for recording."), "whatever it holds");
+        assert!(why(json!({"inputType": "Main"})).ends_with("inputType Main: it crashes."), "that value");
+        assert!(why(json!({"monitoring": "in"})).contains("deletes, or can't be undone"), "a field without a reason");
+        assert!(check(&ROUTING, "set_routing", &json!({"inputType": " main "})).is_err(), "whatever its case and spaces");
+        assert!(check(&ROUTING, "set_routing", &json!({"inputType": "Bass"})).is_ok());
     }
 
     #[test]
