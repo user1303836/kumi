@@ -30,11 +30,51 @@ pub struct PluginStep {
     /// What the DAW's instructions teach about its input (Live's notation), which a plugin's host reads with the step
     /// since it doesn't have Kumi's instructions.
     pub noting: Option<&'static str>,
+    /// Whether it's a change only the DAW's own Undo takes back (CC-20).
+    pub daw_undo: DawUndo,
+    /// Why Kumi doesn't undo such a change, when the step has its own reason: said after CC-20's words
+    /// ([`DAW_UNDO_NOTE`]), as "Kumi can't yet tell whether the pad was changed since."
+    pub daw_undo_because: Option<&'static str>,
+}
+
+/// When a step is a change only the DAW's own Undo takes back (CC-20): it runs though the DAW keeps no undo Kumi can
+/// use for it, and Kumi undoes nothing of the change it's in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DawUndo {
+    /// Never: Kumi undoes it, or it's refused where the DAW keeps no undo for it.
+    Never,
+    /// Whatever its input holds.
+    Always,
+    /// When a field at the top of its input (where the step's own action is) holds one of these values, whatever its
+    /// case and the spaces around it: `("action", "add-chain")`.
+    When(&'static [(&'static str, &'static str)]),
+}
+
+/// What Kumi says of a change only the DAW's own Undo takes back, the same in its approval, its rows and the refusal of
+/// its undo (CC-20's words): `{app}` is the DAW's name, `{key}` its Undo key on the machine Kumi runs on.
+pub const DAW_UNDO_NOTE: &str =
+    "Kumi can't undo this change. {app}'s own Undo ({key}) takes all of it back while it's still {app}'s latest step.";
+
+/// CC-20's words, or a step's reason, for `app` on the system `os` names (`std::env::consts::OS`), whose Undo key is
+/// Cmd+Z on macOS and Ctrl+Z elsewhere.
+pub fn daw_undo_said(note: &str, app: &str, os: &str) -> String {
+    let key = if os == "macos" { "Cmd+Z" } else { "Ctrl+Z" };
+    note.replace("{app}", app).replace("{key}", key)
 }
 
 impl PluginStep {
     pub const fn new(tool: &'static str, family: &'static str) -> PluginStep {
-        PluginStep { tool, family, file_field: None, described: None, browser_field: None, refused: &[], noting: None }
+        PluginStep {
+            tool,
+            family,
+            file_field: None,
+            described: None,
+            browser_field: None,
+            refused: &[],
+            noting: None,
+            daw_undo: DawUndo::Never,
+            daw_undo_because: None,
+        }
     }
 
     /// It takes an audio file in `field`, which the import step fills from a source; `described` is what it does as the
@@ -66,6 +106,33 @@ impl PluginStep {
     /// Its input as the DAW's instructions teach it, after its description.
     pub const fn noting(self, more: &'static str) -> PluginStep {
         PluginStep { noting: Some(more), ..self }
+    }
+
+    /// These values of these fields make it a change only the DAW's own Undo takes back.
+    pub const fn daw_undo(self, when: &'static [(&'static str, &'static str)]) -> PluginStep {
+        PluginStep { daw_undo: DawUndo::When(when), ..self }
+    }
+
+    /// It's a change only the DAW's own Undo takes back, whatever its input.
+    pub const fn daw_undo_always(self) -> PluginStep {
+        PluginStep { daw_undo: DawUndo::Always, ..self }
+    }
+
+    /// Kumi says `why` after CC-20's words of such a change it's in.
+    pub const fn daw_undo_because(self, why: &'static str) -> PluginStep {
+        PluginStep { daw_undo_because: Some(why), ..self }
+    }
+
+    /// Whether `input` makes it a change only the DAW's own Undo takes back.
+    pub fn daw_undo_only(&self, input: &Value) -> bool {
+        let marked = |(field, value): &(&str, &str)| {
+            input.get(*field).and_then(Value::as_str).is_some_and(|text| value.eq_ignore_ascii_case(text.trim()))
+        };
+        match self.daw_undo {
+            DawUndo::Never => false,
+            DawUndo::Always => true,
+            DawUndo::When(marks) => marks.iter().any(marked),
+        }
     }
 }
 
@@ -270,6 +337,29 @@ mod tests {
         assert!(check(&STEPS, "change_structure", &json!({"edits": [{"action": "delete-return"}]})).is_err(), "inside a list");
         assert!(check(&STEPS, "change_structure", &json!({"op": "clear-envelope"})).is_err(), "an action that destroys");
         assert!(check(&STEPS, "change_structure", &json!({"name": "Clear vocals"})).is_ok(), "only what a step does is read so");
+    }
+
+    #[test]
+    fn a_marked_action_is_a_change_only_the_daws_undo_takes_back() {
+        let rack = PluginStep::new("edit_rack", "device").refusing(&[("action", &["insert-chain"])]).daw_undo(&[("action", "add-chain")]);
+        for marked in [json!({"rackRef": "d1", "action": "add-chain"}), json!({"action": " Add-Chain "})] {
+            assert!(rack.daw_undo_only(&marked), "{marked}");
+            assert!(check(std::slice::from_ref(&rack), "edit_rack", &marked).is_ok(), "{marked}");
+        }
+        // Only the step's own action marks it, and a refused one stays refused.
+        assert!(!rack.daw_undo_only(&json!({"action": "rename-chain"})));
+        assert!(!rack.daw_undo_only(&json!({"edits": [{"action": "add-chain"}]})), "only at the top");
+        assert!(!rack.daw_undo_only(&json!({"action": "insert-chain"})));
+        assert!(check(std::slice::from_ref(&rack), "edit_rack", &json!({"action": "insert-chain"})).is_err());
+        assert!(!PluginStep::new("set_mixer", "mixer").daw_undo_only(&json!({"action": "add-chain"})), "a step marks only its own");
+        // A step marked whatever its input is marked so for any input, and may give its reason.
+        let pad = PluginStep::new("load_sample_to_pad", "device").daw_undo_always().daw_undo_because("Kumi can't tell.");
+        assert!(pad.daw_undo_only(&json!({})) && pad.daw_undo_only(&json!({"padRef": "p1"})));
+        assert_eq!(
+            daw_undo_said(DAW_UNDO_NOTE, "Live", "macos"),
+            "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
+        );
+        assert!(daw_undo_said(DAW_UNDO_NOTE, "Live", "windows").contains("Live's own Undo (Ctrl+Z)"));
     }
 
     #[test]
