@@ -835,8 +835,11 @@ impl ChangeKind {
     pub fn permanent(&self, input: &JsonObject) -> Option<String> {
         let action = input.get("action").and_then(Value::as_str);
         let why = match self.tool.as_str() {
+            // The step says add-chain for the bridge's insert-chain: either spelling, before or after it's prepared.
             "edit_rack" => match action {
-                Some("insert-chain") => "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it.",
+                Some("insert-chain" | "add-chain") => {
+                    "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it."
+                }
                 Some("delete-variation") => "Live gives Kumi no way to bring a deleted variation back.",
                 _ => return None,
             },
