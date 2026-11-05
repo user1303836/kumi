@@ -32,7 +32,25 @@ fn tool_list(daw: Daw) -> Value {
         } else { format!("The {daw} resource or preferences folder to use, from discover, when several run.") }},
     });
     if daw == Daw::Logic {
-        return json!(finding(daw, "project", &pick));
+        let [status, discover] = finding(daw, "project", &pick);
+        let kinds = kinds(daw);
+        let read = read_tool(
+            daw,
+            (
+                "project",
+                "a track's regions, plug-ins or sends, or a region's notes",
+                "The ref of what the rows are in: a track for its regions, plug-ins or sends; a region for its notes. Notes need a region already selected in Logic Pro.",
+            ),
+            &kinds,
+            &pick,
+            json!({}),
+        );
+        let mut body = focus_body_tool(daw, ("the track or region it is about", "the Tracks area"), kinds.bodies, &pick);
+        body["description"] =
+            format!("{} Notes require a region already selected in Logic Pro.", body["description"].as_str().unwrap_or_default()).into();
+        body["inputSchema"]["properties"]["window"]["description"] =
+            "The range to show, in quarter-note beats from the start of the project.".into();
+        return json!([status, discover, read, snapshot_tool(daw, "project", &pick), focus_tool(daw, &pick), body]);
     }
     // (SoundCraft's bridge serves ping, status, read, snapshot, focus and focus_body so far: its change and listening tools
     // come as it learns them)

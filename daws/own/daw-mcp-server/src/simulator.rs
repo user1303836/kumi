@@ -24,6 +24,8 @@ pub struct Line {
 }
 
 pub mod listening;
+pub mod logic;
+mod replay;
 
 /// What a simulated bridge answers beyond `ping` and `status`: `Some(Ok(result))`, `Some(Err((code, message)))`, or None
 /// for a method it doesn't have.
@@ -57,8 +59,8 @@ impl std::fmt::Debug for SimulatorConfig {
 }
 
 impl SimulatorConfig {
-    /// Logic's M1 bridge: it attaches beside a running app and serves only ping/status, including whether its
-    /// Accessibility permission is missing. No synthetic reads, changes or listening stand in for an implemented API.
+    /// Logic's identity beside a running app. Add the native M2 read methods through [`logic::LogicScript`];
+    /// this constructor alone answers only ping/status, including its Accessibility permission.
     pub fn logic(secret: Secret, bundle: &str) -> Self {
         Self {
             secret,
@@ -145,6 +147,7 @@ impl SimulatorConfig {
 struct State {
     identity: Identity,
     busy: Option<String>,
+    permission: Option<String>,
     /// Methods whose requests get no answer at all (a bridge stuck in the middle of one).
     held: Vec<String>,
     transcript: Vec<Line>,
@@ -187,6 +190,7 @@ impl Simulator {
         let state = Arc::new(Mutex::new(State {
             identity: config.identity.clone(),
             busy: None,
+            permission: None,
             held: vec![],
             transcript: vec![],
             connections: 0,
@@ -270,6 +274,12 @@ impl Simulator {
         self.state.lock().unwrap().busy = busy.map(str::to_string);
     }
 
+    /// Logic's Accessibility grant: reads fail in words while status and ping still answer.
+    pub fn set_permission(&self, permission: Option<&str>) {
+        assert_eq!(self.config.identity.daw, Daw::Logic.id());
+        self.state.lock().unwrap().permission = permission.map(str::to_string);
+    }
+
     /// Requests for this method are taken and never answered (until `release`), the rest go on as they do.
     pub fn hold(&self, method: &str) {
         self.state.lock().unwrap().held.push(method.to_string());
@@ -344,8 +354,19 @@ fn record(state: &Mutex<State>, connection: usize, from_host: bool, bytes: &[u8]
 
 fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> Frame {
     let state = state.lock().unwrap();
-    // Busy, as the bridges are: status and focus still answer (saying why), the rest is refused.
-    if let Some(busy) = state.busy.clone().filter(|_| !matches!(request.method.as_str(), "status" | "focus")) {
+    let logic = state.identity.daw == Daw::Logic.id();
+    // Logic checks its grant before busy: a missing permission is a failure, never a temporarily busy project.
+    if logic && state.permission.is_some() && matches!(request.method.as_str(), "read" | "snapshot" | "focus" | "focus_body") {
+        return Frame::error(
+            request.id,
+            code::FAILED,
+            "Kumi's helper isn't allowed under Accessibility, so nothing of Logic Pro can be read",
+        );
+    }
+    // Logic's ping is answered from the socket even while native readers wait behind a dialog.
+    if let Some(busy) =
+        state.busy.clone().filter(|_| !matches!(request.method.as_str(), "status" | "focus") && !(logic && request.method == "ping"))
+    {
         return Frame::error(request.id, code::BUSY, format!("{} is {busy}", state.identity.daw));
     }
     let busy = state.busy.clone();
@@ -363,10 +384,17 @@ fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> 
             }
         }
         "status" => {
-            let mut status = serde_json::to_value(&state.identity).unwrap();
+            let mut status = if logic {
+                json!({"project": state.identity.project, "permission": state.permission})
+            } else {
+                serde_json::to_value(&state.identity).unwrap()
+            };
             status["busy"] = busy.map_or(Value::Bool(false), Value::from);
             for (key, value) in &config.status_extra {
                 status[key] = value.clone();
+            }
+            if logic && state.permission.is_some() {
+                status["permission"] = state.permission.clone().into();
             }
             if let Some(more) = &config.status_more {
                 for (key, value) in more() {

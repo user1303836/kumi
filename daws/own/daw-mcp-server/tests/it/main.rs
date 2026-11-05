@@ -7,6 +7,8 @@ mod credit;
 mod fx_chain_save;
 mod listening;
 mod logic;
+mod logic_reads;
+mod logic_tools;
 mod mcp;
 mod reads;
 mod renoise_doofer_make;
