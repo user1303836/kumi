@@ -133,7 +133,7 @@ fn focus_text(
 ) -> String {
     let mut lines = vec![format!("{} (epoch {})", project.name, project.epoch)];
     match focus {
-        Some(focus) => lines.push(format!("Selected: {}", connection::focus_value(focus))),
+        Some(focus) => lines.push(format!("Selected: {}", focus_words(&connection::focus_value(focus)))),
         None => lines.push("Selected: nothing the DAW has said yet".into()),
     }
     if let Some(transport) = transport {
@@ -143,6 +143,93 @@ fn focus_text(
         lines.push(format!("Transport: {state}{tempo}{beat}"));
     }
     lines.join("\n")
+}
+
+/// The focus in words, from what `focus` gives (names only, refs as the DAW's): the track, device, parameter, item and
+/// section with their refs, then the views. A name is data, quoted on one line; an empty one is said to have none.
+fn focus_words(focus: &Value) -> String {
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+    let quote = |name: &str| format!("\"{}\"", super::change::one_line(name, 60).replace('"', "'"));
+    let named = |what: &str, name: Option<String>| match name.filter(|name| !name.trim().is_empty()) {
+        Some(name) => format!("{what} {}", quote(&name)),
+        None => format!("{what} with no name"),
+    };
+    let with_ref = |said: String, reference: Option<String>| match reference {
+        Some(reference) => format!("{said} (ref {reference})"),
+        None => said,
+    };
+    // A kind is the DAW's word too: one bounded line, its dashes spaces.
+    let word = |value: &Value, key: &str| text(value, key).map(|kind| super::change::one_line(&kind.replace('-', " "), 20));
+    let mut parts = Vec::new();
+    if let Some(track) = focus.get("track") {
+        let said = named("track", text(track, "name"));
+        parts.push(match (text(focus, "trackRef"), word(track, "kind")) {
+            (Some(reference), Some(kind)) => format!("{said} (ref {reference}, {kind})"),
+            (Some(reference), None) => format!("{said} (ref {reference})"),
+            (None, Some(kind)) => format!("{said} ({kind})"),
+            (None, None) => said,
+        });
+    }
+    if focus.get("device").is_some() || focus.get("deviceRef").is_some() {
+        let mut said = with_ref(named("device", text(focus, "device")), text(focus, "deviceRef"));
+        if let Some(chain) = text(focus, "chain") {
+            said.push_str(&format!(" in {}", named("chain", Some(chain))));
+        }
+        parts.push(said);
+    }
+    if let Some(parameter) = focus.get("parameter") {
+        let mut said = named("parameter", text(parameter, "name"));
+        if let Some(value) = text(parameter, "value") {
+            said.push_str(&format!(" at {}", super::change::one_line(&value, 40)));
+        }
+        if let Some(owner) = text(parameter, "owner").filter(|owner| !owner.trim().is_empty()) {
+            said.push_str(&format!(" on {}", quote(&owner)));
+        }
+        parts.push(said);
+    }
+    if let Some(item) = focus.get("item") {
+        let kind = word(item, "kind").unwrap_or_else(|| "item".into());
+        let mut said = with_ref(named(&kind, text(item, "name")), text(item, "itemRef"));
+        if let Some(notes) = focus.get("selectedNotes").and_then(Value::as_u64) {
+            said.push_str(&format!(", {notes} notes selected"));
+        }
+        parts.push(said);
+    }
+    if let Some(section) = focus.get("section") {
+        let kind = word(section, "kind").unwrap_or_else(|| "section".into());
+        let at = section.get("index").and_then(Value::as_f64).map(|index| format!(" {}", index as i64 + 1)).unwrap_or_default();
+        parts.push(match text(section, "name").filter(|name| !name.trim().is_empty()) {
+            Some(name) => format!("{kind}{at} {}", quote(&name)),
+            None => format!("{kind}{at}"),
+        });
+    }
+    if let Some(line) = focus.get("line").and_then(Value::as_u64) {
+        parts.push(format!("line {line}"));
+    }
+    let label = |key: &str| focus.get(key).and_then(|view| text(view, "label")).map(|label| super::change::one_line(&label, 40));
+    let mut views = Vec::new();
+    if let Some(main) = label("mainView") {
+        views.push(format!("view {main}"));
+    }
+    if let Some(editor) = label("editorView") {
+        views.push(format!("editor {editor}"));
+    }
+    if let Some(panes) = focus.get("panes").and_then(Value::as_array).filter(|panes| !panes.is_empty()) {
+        let open: Vec<String> =
+            panes.iter().filter_map(|pane| text(pane, "label")).map(|label| super::change::one_line(&label, 40)).collect();
+        views.push(format!("also open {}", open.join(", ")));
+    }
+    if focus.get("browser") == Some(&Value::Bool(true)) {
+        views.push("the browser open".into());
+    }
+    let mut said = if parts.is_empty() { "nothing".to_owned() } else { parts.join("; ") };
+    if !views.is_empty() {
+        said.push_str(&format!(". In {}", views.join(", ")));
+    }
+    if let Some(busy) = text(focus, "busy") {
+        said.push_str(&format!(". The DAW is busy ({}), so this may be stale", super::change::one_line(&busy, 80)));
+    }
+    said
 }
 
 /// `text` cut to at most `most` characters, saying how much more there was (the saying included).
@@ -296,4 +383,28 @@ fn quarantined(folder: &std::path::Path) -> Value {
         *counted.borrow_mut() = Some((folder.to_path_buf(), std::time::Instant::now(), value.clone()));
         value
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FOCUS in words keeps every ref the model acts on, says a track with no name has none (never `""`), shows only a
+    /// file's name, and never prints the focus as JSON.
+    #[test]
+    fn the_focus_is_said_in_words_with_its_refs() {
+        let focus = json!({
+            "track": {"name": "", "kind": "audio"}, "trackRef": "r:track:{AAAA}",
+            "item": {"kind": "take", "itemRef": "r:take:{T1}", "name": "/Users/me/Samples/kick.wav"},
+            "mainView": {"kind": "timeline", "label": "Arrange"},
+        });
+        let mut focus = focus;
+        connection::names_only(&mut focus);
+        let said = focus_words(&focus);
+        assert!(said.contains("r:track:{AAAA}") && said.contains("r:take:{T1}"), "{said}");
+        assert!(said.contains("no name") && !said.contains("\"\""), "{said}");
+        assert!(said.contains("kick.wav") && !said.contains("/Users"), "{said}");
+        assert!(!said.contains("\"track\""), "no JSON: {said}");
+        assert_eq!(focus_words(&json!({})), "nothing");
+    }
 }

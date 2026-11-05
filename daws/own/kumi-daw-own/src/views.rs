@@ -529,9 +529,9 @@ pub fn track_kind(kind: &str) -> Option<TrackKind> {
     })
 }
 
-/// The track a focus names, with its chip.
+/// The track a focus names, with its chip: none when the DAW says none is selected (`"track": null`).
 pub fn focus_track(selection: &Value) -> Option<FocusTrack> {
-    let track = selection.get("track")?;
+    let track = selection.get("track").filter(|track| track.is_object())?;
     Some(FocusTrack {
         name: text(track, "name"),
         color: color(track),
@@ -584,7 +584,17 @@ pub fn body_args(kind: &str, reference: Option<&str>) -> JsonObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use serde_json::json;
+
+    /// No track selected (REAPER's focus says `"track": null`) is no track, never a track with no name.
+    #[test]
+    fn no_selected_track_is_no_track() {
+        assert_eq!(focus_track(&json!({"track": null, "trackCount": 0})), None);
+        assert_eq!(focus_track(&json!({})), None);
+        let track = focus_track(&json!({"track": {"name": "Drums", "type": "audio"}})).unwrap();
+        assert_eq!((track.name.as_str(), track.kind), ("Drums", Some(TrackKind::Audio)));
+    }
 
     #[test]
     fn a_routes_tap_is_named_for_every_send_mode_reaper_has() {
