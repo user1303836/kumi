@@ -479,6 +479,7 @@
   }
 
   // src/shared/MapCanvas.tsx
+  var MATCHES_LISTED = 6;
   function resolve(canvas) {
     const style = getComputedStyle(canvas);
     const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -516,6 +517,10 @@
         return !searched || searched.has(point.id);
       };
     }, [model, hidden, searched]);
+    const matches = useMemo(() => {
+      const ids = searched ?? foundIds;
+      return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
+    }, [searched, foundIds, indexOf, visible]);
     useEffect(() => {
       const box = boxRef.current;
       if (!box) return;
@@ -639,6 +644,30 @@
           group.key
         );
       }) }),
+      matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? "Sounds that match" : "Sounds Kumi found", role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+        matches.slice(0, MATCHES_LISTED).map((id) => {
+          const sound = model.sounds[id];
+          return /* @__PURE__ */ jsxs(
+            "button",
+            {
+              "aria-pressed": selected === id,
+              onClick: () => onPick(id),
+              type: "button",
+              style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+              children: [
+                /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                sound?.class && /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+              ]
+            },
+            id
+          );
+        }),
+        matches.length > MATCHES_LISTED && /* @__PURE__ */ jsxs("span", { style: { ...S.faint, padding: "0 6px" }, children: [
+          "and ",
+          matches.length - MATCHES_LISTED,
+          " more on the map"
+        ] })
+      ] }),
       /* @__PURE__ */ jsxs("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
         /* @__PURE__ */ jsx(
           "canvas",
