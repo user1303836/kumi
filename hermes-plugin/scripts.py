@@ -101,15 +101,21 @@ def taints(tool: str) -> str | None:
 
 class Trust:
     """Each chat's provenance (CC-19 19a–19c, r1), kept in the plugin's data so a restart doesn't clean a chat. One
-    lock for the file; a failure to write leaves the chat as the stricter of what was known."""
+    lock for the file; a failure to write leaves the chat as the stricter of what was known. Another Hermes process
+    (the gateway, a terminal resuming the same chat) may write it too, so it's read again whenever it changed."""
 
     def __init__(self, path: Path):
         self._path = path
         self._lock = threading.Lock()
         self._sessions: dict[str, dict] | None = None
+        self._read_at: int | None = None  # the file's modification time when it was last read
 
     def _load(self) -> dict[str, dict]:
-        if self._sessions is None:
+        try:
+            changed: int | None = self._path.stat().st_mtime_ns
+        except OSError:
+            changed = None
+        if self._sessions is None or changed != self._read_at:
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 sessions = data.get("sessions") if isinstance(data, dict) else None
@@ -122,6 +128,7 @@ class Trust:
                 log.warning("Kumi couldn't read its record of which chats read outside content: every chat counts as "
                             "having read some", exc_info=True)
                 self._sessions = {}
+            self._read_at = changed
         return self._sessions
 
     def _save(self) -> None:

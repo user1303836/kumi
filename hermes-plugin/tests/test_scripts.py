@@ -94,6 +94,9 @@ class Scripts(unittest.TestCase):
         self.assertEqual(again.state("resumed"), (scripts.TAINTED, scripts.NO_RECORD))
         again.first_turn("read-the-web", surface="tui")
         self.assertEqual(again.state("read-the-web")[0], scripts.TAINTED, "a first turn never cleans a chat")
+        self.assertEqual(again.state("clean"), (scripts.CLEAN, ""))
+        self.finished("web_search", {}, "clean")  # in this process: another one (`again`) has the chat as clean
+        self.assertEqual(again.state("clean"), (scripts.TAINTED, "web_search"), "another process's taint is read again")
 
     def test_with_approvals_off_a_clean_chats_script_goes_to_hermes_and_a_tainted_chats_is_refused(self):
         self.start()
