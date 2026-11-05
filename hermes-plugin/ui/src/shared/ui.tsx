@@ -21,8 +21,20 @@ export const S = {
   text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: 'anywhere' },
   muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: 'anywhere' },
   faint: { fontSize: 11.5, color: T.faint },
-  ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
+  ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
+  // Read by a screen reader, not drawn: hints and live announcements.
+  hidden: { position: 'absolute', width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }
 } satisfies Record<string, CSSProperties>
+
+/** The class every Kumi control carries, so the keyboard's focus shows on it. */
+export const FOCUSABLE = 'kumi-focusable'
+
+/** The focus ring for Kumi's controls, in the host theme's colour. Desktop turns focus rings off for every element
+ *  (`*:focus-visible { outline: none }`); this rule's class beats that one, and only a keyboard focus shows it. Each UI
+ *  root renders it once. */
+export function FocusStyle() {
+  return <style>{`.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}`}</style>
+}
 
 export function Chip({ children, title, tone }: { children: ReactNode; title?: string; tone?: 'accent' | 'bad' | 'good' | 'warn' }) {
   const color = tone === 'accent' ? T.accent : tone === 'good' ? T.good : tone === 'warn' ? T.warn : tone === 'bad' ? T.bad : T.secondary
@@ -37,22 +49,30 @@ export function Dot({ color, size = 7, title }: { color: string; size?: number; 
   return <span aria-hidden={!title} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none' }} />
 }
 
-/** A plain text button in the theme's colours: the shared views' only control. */
+/** A plain text button in the theme's colours: the shared views' only control. `label` names it for a screen reader
+ *  when its face is a symbol (▶, ■). */
 export function TextButton({
   children,
   onClick,
   title,
+  label,
+  pressed,
   disabled,
   strong
 }: {
   children: ReactNode
   onClick: () => void
   title?: string
+  label?: string
+  pressed?: boolean
   disabled?: boolean
   strong?: boolean
 }) {
   return (
     <button
+      aria-label={label}
+      aria-pressed={pressed}
+      className={FOCUSABLE}
       disabled={disabled}
       onClick={onClick}
       title={title}
@@ -80,7 +100,8 @@ export function Section({ title, right, children }: { title: ReactNode; right?: 
   return (
     <section style={S.section}>
       <div style={{ ...S.heading, justifyContent: 'space-between' }}>
-        <span style={{ ...S.row, gap: 6 }}>{title}</span>
+        {/* A heading, so a screen reader can jump between FOCUS, NOW and HISTORY; drawn as the small caps line. */}
+        <h3 style={{ ...S.row, gap: 6, margin: 0, fontSize: 'inherit', fontWeight: 'inherit' }}>{title}</h3>
         {right}
       </div>
       {children}

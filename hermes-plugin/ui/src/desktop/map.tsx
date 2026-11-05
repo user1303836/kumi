@@ -66,6 +66,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         setSelected(id)
         play(id)
       }}
+      onSelect={setSelected}
       playing={playing}
       selected={selected}
     />
