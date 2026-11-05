@@ -106,7 +106,7 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
   assert.ok(cleared.includes('>Undo<'))
 })
 
-test("while Kumi is connected, the pane doesn't ask to install the DAW's part it's connected through; otherwise it still does", async () => {
+test("while Kumi is connected through a current DAW part setup didn't install, the pane doesn't ask to install it; an older one still asks", async () => {
   const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
   const setup = { state: 'needs_daw_component', daw: 'ableton', message: "Kumi's runtime is ready; next, install Kumi's part in Live." }
@@ -119,12 +119,18 @@ test("while Kumi is connected, the pane doesn't ask to install the DAW's part it
     await store.refreshStatus()
     return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
   }
-  // Connected through an install setup didn't make (an adopted Kumi's): that part evidently works.
-  const connected = await render({ connected: true, owner: { session_id: 's1' } })
-  assert.ok(!connected.includes('Set up Kumi for Live') && !connected.includes("install Kumi's part"), connected)
+  const asks = html => html.includes('Set up Kumi for Live') || html.includes("install Kumi's part")
+  const part = (installed, version) => ({ setup: { component: { installed, version, bundled: '1.0.104' }, daw_open: true } })
+  // Connected through the part this Kumi bundles (an adopted Kumi's, or one put in place by hand): it evidently works.
+  assert.equal(asks(await render({ connected: true, owner: { session_id: 's1' }, ...part(true, '1.0.104') })), false)
+  // A runtime that doesn't report its part: nothing says it's out of date.
+  assert.equal(asks(await render({ connected: true })), false)
+  // Connected through an older part (just after a bridge bump), or none the runtime can see: the update is next.
+  assert.equal(asks(await render({ connected: true, ...part(true, '1.0.103') })), true)
+  assert.equal(asks(await render({ connected: true, ...part(false, null) })), true)
   // Not connected, or missing the runtime itself, setup is still the next step.
-  assert.ok((await render({ connected: false })).includes('Set up Kumi for Live'))
-  assert.ok((await render({ connected: true }, { ...setup, state: 'needs_runtime' })).includes('Set up Kumi for Live'))
+  assert.equal(asks(await render({ connected: false, ...part(true, '1.0.104') })), true)
+  assert.equal(asks(await render({ connected: true, ...part(true, '1.0.104') }, { ...setup, state: 'needs_runtime' })), true)
 })
 
 test('"Last heard" counts from when the runtime was last heard, so it keeps moving while nothing new is read', async () => {

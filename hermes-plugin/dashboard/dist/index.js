@@ -1703,7 +1703,10 @@
   function dawPartWorks(state) {
     const setup = state.setup;
     const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
-    return Boolean(onlyDawPart && state.status?.connected);
+    if (!onlyDawPart || !state.status?.connected) return false;
+    const component = state.status.setup?.component;
+    if (!component) return true;
+    return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
   }
   function jobOf(result) {
     let value = result;

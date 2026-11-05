@@ -255,13 +255,19 @@ export class KumiStore {
   }
 }
 
-/** Whether setup only lacks the DAW's part while Kumi is connected through one. An install setup didn't make (an
- *  adopted Kumi's, say) evidently works, so no surface asks to install it then, or shows setup's "install Kumi's part"
- *  as the word of the moment. The settings page still lists what setup knows. */
+/** Whether setup only lacks the DAW's part while Kumi is connected through one that's current. An install setup didn't
+ *  make (an adopted Kumi's, say) evidently works, so no surface asks to install it then, or shows setup's "install
+ *  Kumi's part" as the word of the moment. The runtime's own look at the part (`status.setup.component`) decides: the
+ *  bundled version installed, or no report at all (an older runtime), hides the step. An older part, or none
+ *  installed, still asks: right after a bridge bump, that update is the next step (rgzm, #1019). The settings page
+ *  still lists what setup knows. */
 export function dawPartWorks(state: KumiState): boolean {
   const setup = state.setup
   const onlyDawPart = setup?.state === 'needs_daw_component' || (setup?.state === 'ready' && setup.next_step === 'install_daw_component')
-  return Boolean(onlyDawPart && state.status?.connected)
+  if (!onlyDawPart || !state.status?.connected) return false
+  const component = state.status.setup?.component
+  if (!component) return true
+  return component.installed === true && typeof component.version === 'string' && component.version === component.bundled
 }
 
 /** The job a tool's result started or reports (`{job_id}`), however the event carried the result. */
