@@ -95,6 +95,25 @@ class Runtimes(unittest.TestCase):
                                   hermes=("relative/home", None))
         self.assertNotIn("--hermes-home", argv, "only a full path")
 
+    def test_every_flag_the_plugin_passes_kumi_serve_is_one_the_pinned_runtime_takes(self):
+        """kumi_release.json records the pinned release's `kumi serve` options (scripts/hermes_pin.py reads them from
+        that runtime when it pins it). Every flag serve_argv can pass must be one of them, or the pinned runtime refuses
+        to start, and nothing works for a new producer: #1028 passed --hermes-home to 1.24.67, which has none."""
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        ffmpeg = self.data / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ffmpeg.write_bytes(b"#!/bin/sh\n")
+        ffmpeg.chmod(0o755)
+        allowed = support.module("setup")._identity(os.path.realpath(ffmpeg))
+        install = runtime.Install(pin["kumi"], "any", self.data / "kumi", self.data / "kumi-home", allowed)
+        argv = runtime.serve_argv(install, self.data / "state", "reaper", [str(self.data)], [str(self.data)],
+                                  hermes=(str(self.data / "hermes"), str(self.data)))
+        passed = {part for part in argv if part.startswith("--")}
+        self.assertLessEqual({"--library-root", "--media-root", "--tool", "--hermes-home", "--hermes-root"}, passed,
+                             "every flag it can pass, each given what makes it pass it")
+        taken = set(pin["serve_options"])
+        self.assertLessEqual(passed, taken, f"kumi serve {pin['kumi']} doesn't take {sorted(passed - taken)}: "
+                                            "pin a release that does (scripts/hermes_pin.py)")
+
     @unittest.skipIf(os.name == "nt", "a session of its own is POSIX's; Windows gives it no console")
     def test_the_runtime_runs_in_a_session_of_its_own_so_hermess_ctrl_c_never_reaches_it(self):
         live = self.start()
