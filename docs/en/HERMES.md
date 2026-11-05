@@ -94,8 +94,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change Hermes asks about.
 - "Put it on pad 2" puts it on that Drum Rack pad in Live: into the pad's Simpler, or onto an empty pad in a new
-  Simpler. Kumi can't undo a load onto an empty pad: its approval says how many presses of Live's Undo take it back.
-  Kumi never clears a pad to make room. In Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
+  Simpler, one pad a change. Kumi can't undo a load onto an empty pad, and says so before you approve: Live's Undo
+  usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
+  empty. Live's Redo won't bring the sample back: ask Kumi to load it again. Kumi never clears a pad to make room. In
+  Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
 
 ### And the everyday ones
 
@@ -235,10 +237,10 @@ run without asking there, and Kumi can't tell it from a chat.
   to your DAW for a chat). A job it's running, such as a library scan, keeps it going for up to 6 hours.
   After it stops, the change stays in HISTORY, and your DAW's own Undo is the way back.
 - In Live, a few changes only Live's own Undo takes back: adding a chain to a rack, and loading a sample onto a pad.
-  Kumi says so before you approve, with how many presses of Cmd+Z (Ctrl+Z on Windows) take the change back, and
-  HISTORY marks the row. Undo right away: if you've done anything in Live since, Cmd+Z takes that back first. Such a
-  change holds nothing else: Kumi asks for any other steps separately. A script is the same in every DAW: Kumi can't
-  undo it, and the DAW's own Undo may.
+  Kumi says so before you approve, with how Cmd+Z (Ctrl+Z on Windows) takes the change back, and HISTORY marks the
+  row. Undo right away: if you've done anything in Live since, Cmd+Z takes that back first. Such a change holds
+  nothing else: Kumi asks for any other steps separately. A script is the same in every DAW: Kumi can't undo it, and
+  the DAW's own Undo may.
 - In Live, Kumi won't undo a change to a track's mixer, the tempo or a device's parameters if you've changed that
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand

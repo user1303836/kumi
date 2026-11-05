@@ -208,7 +208,7 @@ project as…** with **Copy all media into project directory**), or they'll miss
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
   refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway. A few
   changes only the DAW's own Undo takes back: in Live, adding a chain to a rack and loading a sample onto a pad, each
-  a change of its own, with the number of Cmd+Z (Ctrl+Z) presses said before you approve; and a script, in any DAW.
+  a change of its own, with how Cmd+Z (Ctrl+Z) takes it back said before you approve; and a script, in any DAW.
 - **Listening:** Kumi measures audio files on this computer. In REAPER and Renoise it can also listen to a track or
   the mix: after you approve, the DAW renders only that window (60 seconds at most, with the DAW stopped) into the
   listening folder of Kumi's part in that DAW, and Kumi copies that one file into its data. The render's temporary
