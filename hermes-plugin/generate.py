@@ -186,11 +186,10 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
         result = live.call("generate", {"action": "create", "quote_id": quote_id}, identity, timeout=TIMEOUT,
                            private=sealed)
     except runtime.NotSent as failure:  # refused before a byte reached the runtime: nothing reached Mirelo either
-        _refuse(ledger, reservation_id, failure.reason)
-        return error(failure.code, failure.reason, _snapshot(ledger))
+        return _freed(ledger, reservation_id, failure.reason, error(failure.code, failure.reason))
     except runtime.Refused as refused:
         if refused.code == "not_submitted":  # the runtime's proof nothing was posted (13-R8)
-            _refuse(ledger, reservation_id, refused.reason)
+            return _freed(ledger, reservation_id, refused.reason, refused.as_json())
         return {**refused.as_json(), "ledger": _snapshot(ledger)}
     except runtime.Unavailable as failure:  # posted or not is unknown: the reservation stays, and nothing is resent
         return {"state": "unsure", "code": failure.code, "quote_id": quote_id, "reason": failure.reason,
@@ -199,7 +198,7 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
                 "ledger": _snapshot(ledger)}
     if isinstance(result.get("error"), dict):
         if result["error"].get("code") == "not_submitted":
-            _refuse(ledger, reservation_id, str(result["error"].get("reason") or "not submitted"))
+            return _freed(ledger, reservation_id, str(result["error"].get("reason") or "not submitted"), result)
         return {**result, "ledger": _snapshot(ledger)}
     job_id = result.get("job_id")
     if isinstance(job_id, str) and job_id and not _bind(ledger, reservation_id, job_id):
@@ -209,11 +208,17 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
     return {**result, "ledger": _snapshot(ledger)}
 
 
-def _refuse(ledger: Any, reservation_id: str, reason: str) -> None:
+def _freed(ledger: Any, reservation_id: str, reason: str, answer: dict) -> dict:
+    """`answer` to a create that provably never left, its reservation freed (`not_submitted`, the only release the
+    model's calls make); when the ledger couldn't free it, the answer says it's still reserved, and how it can be."""
     try:
         ledger.refuse(reservation_id, not_submitted=True, reason=reason[:200])
     except Exception:
         log.warning("Kumi couldn't free a reservation its runtime didn't submit")
+        answer = {**answer, "hint": (f"Nothing was sent, but Kumi couldn't free its reservation {reservation_id}: "
+                                     "its credits stay reserved until the producer releases it in a terminal (hermes "
+                                     "kumi credits).")}
+    return {**answer, "ledger": _snapshot(ledger)}
 
 
 def _bind(ledger: Any, reservation_id: str, job_id: str) -> bool:

@@ -35,10 +35,18 @@ class Tty(io.StringIO):
         return True
 
 
+class Unfreeable(fake_ledger.Ledger):
+    """A ledger whose lock is busy just when a reservation is to be freed."""
+
+    def refuse(self, reservation_id: str, *, not_submitted: bool, reason: str) -> dict:
+        raise fake_ledger.LedgerError("ledger_unavailable", "Kumi's credit ledger is busy.")
+
+
 class Generation(unittest.TestCase):
-    def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY):
+    def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY,
+             ledger: type = fake_ledger.Ledger):
         host, ctx, data = support.host(self, dict(ON if settings is None else settings), *fixture_args,
-                                       ledger=fake_ledger.Ledger, mirelo_key=key)
+                                       ledger=ledger, mirelo_key=key)
         support.call(host, "kumi_connect", {}, session_id="s1")
         return host, ctx, data
 
@@ -164,6 +172,11 @@ class Generation(unittest.TestCase):
         with mock.patch.object(generate, "TIMEOUT", 0.3):
             unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((unsure["state"], unsure["ledger"]["reserved"]), ("unsure", 15), "kept, never sent again")
+        host, _, _ = self.host(None, "--generate-create", "not_submitted", ledger=Unfreeable)
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        stuck = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+        self.assertEqual((stuck["error"]["code"], stuck["ledger"]["reserved"]), ("not_submitted", 15), stuck)
+        self.assertIn("hint", stuck, "not freed: the model is told its credits stay reserved, and how they can go")
 
     def test_a_create_kumi_can_not_send_holds_no_credits(self):
         host, _, data = self.host()
@@ -224,7 +237,8 @@ class Generation(unittest.TestCase):
                                     answers):
                 policy.post_tool_call(host, tool_name=tool, tool_call_id="c", result=json.dumps(answer), status="ok",
                                       session_id="s1")
-            os.kill(host.runtimes.get(data).client.pid, getattr(signal, "SIGKILL", signal.SIGTERM))  # killed
+            started = json.loads((data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
+            os.kill(started["pid"], getattr(signal, "SIGKILL", signal.SIGTERM))  # the fixture itself, not kumi.bat
             self.assertTrue(support.eventually(lambda: host.runtimes.get(data) is None))
         self.assertEqual(len(events), 5, "a card for each quote, create and job")
         said = [json.dumps(answers), json.dumps(events)]

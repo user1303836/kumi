@@ -85,7 +85,8 @@ class Fixture:
         self.writing = threading.Lock()
         self.counting = threading.Lock()
         self.beating = threading.RLock()  # owner.json's writes: a heartbeat never lands after stopped()'s
-        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ)})
+        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ),
+                                           "pid": os.getpid()})  # its own: on Windows the client's is kumi.bat's cmd.exe
         if options.stderr_flood:
             sys.stderr.write("noise " * (options.stderr_flood // 6) + "\n")
             sys.stderr.flush()
