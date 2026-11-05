@@ -21,12 +21,14 @@ In Hermes Desktop, also switch on Kumi under **Capabilities → Plugins**: a plu
 ## Set up
 
 Ask Hermes to "set up Kumi for Live" (or REAPER, or Renoise), or run `hermes kumi setup` in a terminal. Setup has two
-steps, and Hermes asks before each:
+steps and an optional third, and Hermes asks before each:
 
 1. **Kumi's runtime:** Kumi's official release for your computer, 25–32 MB, from Kumi's GitHub releases. It's checked
    against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (77–113 MB).
 2. **Kumi's part in your DAW:** Live's Remote Script (with the Kumi Ears device, for listening to tracks), REAPER's
    extension or Renoise's tool, at the exact paths setup shows you.
+3. **Optional, ffmpeg:** if an ffmpeg is already on your computer, setup offers to let Kumi use it to read MP3, FLAC
+   and other compressed audio. Setup is done either way; without it, Kumi reads WAV and AIFF only.
 
 Then, in your DAW:
 - **Live:** choose **AbletonMcpBridge** as a Control Surface in Settings → Link, Tempo & MIDI.
@@ -46,6 +48,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Put it on pad 2." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to HISTORY.
 - "Is it actually darker?" Kumi measures both files: loudness, true peak, spectrum.
 - "Undo the snare change." Kumi undoes that entry while it can still be undone.
+
+Hermes asks before each change because its approvals are on. With `--yolo`, a chat's `/yolo` or `approvals.mode: off`,
+Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi` says so.
 
 ## Where things are
 

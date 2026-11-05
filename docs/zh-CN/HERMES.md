@@ -17,10 +17,11 @@ hermes plugins enable kumi
 
 ## 设置
 
-让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup`。设置分两步，每一步之前 Hermes 都会征求你的同意：
+让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup`。设置分两步，另有可选的第三步，每一步之前 Hermes 都会征求你的同意：
 
 1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（25–32 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（77–113 MB）。
 2. **DAW 里的 Kumi 部分：** Live 的 Remote Script（含用于聆听音轨的 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。
+3. **可选的 ffmpeg：** 如果你的电脑上已有 ffmpeg，设置会询问是否让 Kumi 用它读取 MP3、FLAC 等压缩音频。无论是否允许，设置都会完成；不使用时，Kumi 只能读取 WAV 和 AIFF。
 
 然后在 DAW 中：
 - **Live：** 在设置 → Link, Tempo & MIDI 中把 **AbletonMcpBridge** 选为控制界面。
@@ -38,6 +39,8 @@ hermes plugins enable kumi
 - “把它放到第 2 个打击垫上。”Hermes 先准确说明会改变什么并征求同意，Kumi 再做修改并记入 HISTORY。
 - “真的更暗了吗？”Kumi 测量两个文件：响度、真峰值、频谱。
 - “撤销军鼓那次修改。”只要还能撤销，Kumi 就撤销那一条。
+
+Hermes 会在每次修改前征求同意，因为它的确认功能是开启的。使用 `--yolo`、对话中的 `/yolo` 或 `approvals.mode: off` 时，Hermes 会不经询问直接执行 Kumi 的修改、音轨聆听和设置步骤；`/kumi` 会说明这一点。
 
 ## 东西在哪里
 

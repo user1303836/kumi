@@ -17,10 +17,11 @@ Hermes Desktop では、**Capabilities → Plugins** で Kumi もオンにして
 
 ## セットアップ
 
-Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renoise でも）と頼むか、ターミナルで `hermes kumi setup` を実行します。セットアップは 2 段階で、それぞれの前に Hermes が確認します。
+Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renoise でも）と頼むか、ターミナルで `hermes kumi setup` を実行します。セットアップは 2 段階と任意の 3 段階目で、それぞれの前に Hermes が確認します。
 
 1. **Kumi のランタイム:** お使いのコンピューター向けの Kumi 公式リリース（25〜32 MB）を Kumi の GitHub リリースからダウンロードします。プラグインが固定している SHA-256 と照合し、このプロファイル用の Hermes のデータ内に展開します（77〜113 MB）。
 2. **DAW 側の Kumi:** Live の Remote Script（トラックを聴くための Kumi Ears デバイスを含む）、REAPER の拡張機能、または Renoise のツールを、セットアップが示す正確な場所にインストールします。
+3. **任意の ffmpeg:** すでにコンピューターに ffmpeg がある場合、MP3、FLAC などの圧縮音声を読むために Kumi がそれを使ってよいかを確認します。どちらを選んでもセットアップは完了します。使わない場合、Kumi が読めるのは WAV と AIFF だけです。
 
 そのあと DAW で:
 - **Live:** 設定 → Link, Tempo & MIDI で **AbletonMcpBridge** をコントロールサーフェスに選びます。
@@ -38,6 +39,8 @@ Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renois
 - 「それをパッド 2 に入れて」何が変わるかを Hermes が正確に示して確認し、Kumi が変更して HISTORY に加えます。
 - 「本当に暗くなった？」Kumi が両方のファイルを測ります（ラウドネス、トゥルーピーク、スペクトラム）。
 - 「スネアの変更を取り消して」取り消せるあいだは、その項目を取り消します。
+
+Hermes が変更の前に確認するのは、承認がオンになっているからです。`--yolo`、チャットの `/yolo`、または `approvals.mode: off` のとき、Hermes は Kumi の変更、トラックの試聴、セットアップの各段階を確認せずに実行します。`/kumi` がそのことを伝えます。
 
 ## どこに何があるか
 

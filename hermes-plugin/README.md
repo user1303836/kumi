@@ -59,6 +59,8 @@ Kumi needs two things on the machine that runs Hermes, and asks before each:
 2. **Its part in your DAW:** Live's Remote Script, REAPER's extension or Renoise's tool, installed only at the location
    shown to you. If another Kumi installation already put it there, setup offers to use that installation instead of
    replacing it.
+3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
+   MP3, FLAC and other compressed audio. Setup is done either way; without it, Kumi reads WAV and AIFF only.
 
 Ask Hermes to "set up Kumi for Live" from any surface, or run `hermes kumi setup` in a terminal. Then, in the DAW:
 
@@ -103,10 +105,12 @@ and installs under this profile's plugin-data folder; setup shows the download a
 Live Remote Script with its Kumi Ears device, a REAPER extension or a Renoise tool, only at the locations you approve.
 Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on loopback only, and stop
 when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps running. Kumi reads the open
-project and the sample folders you list. Changes to your project go through Hermes's approval, and HISTORY records what
-actually happened, including when an outcome is uncertain; undo is available only while the recorded change can still
-be reversed. Listening to a track or the mix also asks first: it plays only the beat window you approve (60 seconds at
-most), only while the DAW is stopped, and may change routing and transport briefly, restoring them after. Live captures
+project and the sample folders you list. Changes to your project go through Hermes's approval (unless Hermes's
+approvals are off: `--yolo`, a chat's `/yolo` or `approvals.mode: off` run them without asking, and `/kumi` says so),
+and HISTORY records what actually happened, including when an outcome is uncertain; undo is available only while the
+recorded change can still be reversed. Listening to a track or the mix also asks first: it plays only the beat window
+you approve (60 seconds at most), only while the DAW is stopped, and may change routing and transport briefly,
+restoring them after. Live captures
 it through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
 that owns their component, and Kumi copies the file it asked for and removes exactly that file. Listening to a REAPER
 or Renoise track needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise
