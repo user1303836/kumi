@@ -28,20 +28,41 @@ export function ownerSession(state: KumiState): null | string {
   return typeof session === 'string' && session ? session : null
 }
 
-// Setup states (W5's `setup.status()`) that a setup request fixes. `no_pin` and `unsupported_platform` it can't, and
-// `choose_control_surface` is the producer's step in the DAW, which setup's message explains.
+// Setup states (W5's `setup.status()`) that a setup request fixes. `no_pin` and `unsupported_platform` it can't.
 const NEEDS_SETUP: Record<string, true> = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true }
+// Setup's last steps, taken in the DAW (choose Kumi's control surface, restart the DAW so it loads Kumi's part, turn on
+// its tool): setup's message says what to do there until Kumi connects.
+const IN_DAW: Record<string, true> = { choose_control_surface: true, restart_daw: true, enable_tool: true }
+// The DAWs setup is offered for before one is chosen in Kumi's settings, as setup names them.
+const SETUP_DAWS = ['ableton', 'reaper', 'renoise']
 
-/** Setup's next step, when there is one, as the button that asks for it (its label in `t`'s words; the request stays
- *  English, C5). */
-export function nextStep(state: KumiState, t: Translate = english): { label: string; request: string } | null {
+/** Whether a DAW is chosen in Kumi's settings. A backend from before `daw_chosen` reads as chosen, as it always did. */
+export function dawChosen(state: KumiState): boolean {
+  return state.setup?.daw_chosen !== false
+}
+
+/** Setup's next step, as the buttons that ask for it (labels in `t`'s words; the requests stay English, C5). Until a
+ *  DAW is chosen in Kumi's settings, setup is offered for each DAW: setting one up makes it Kumi's DAW in the same
+ *  approval (setup's `use_daw`). */
+export function nextSteps(state: KumiState, t: Translate = english): { label: string; request: string }[] {
   const setup = state.setup
   const daw = state.status?.daw ?? setup?.daw
   if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
-    return { label: t('step.setup', dawName(daw, t)), request: setupRequest(daw) }
+    return (dawChosen(state) ? [daw] : SETUP_DAWS).map(each => ({ label: t('step.setup', dawName(each, t)), request: setupRequest(each) }))
   }
-  if (setup?.state === 'ready' && !state.status?.connected) return { label: t('step.connect', dawName(daw, t)), request: connectRequest(daw) }
-  return null
+  if (setup?.state === 'ready' && !state.status?.connected) return [{ label: t('step.connect', dawName(daw, t)), request: connectRequest(daw) }]
+  return []
+}
+
+/** Setup's own words for the pane: only while there's something to do, and not ones that name a DAW nobody chose. */
+export function setupWords(state: KumiState): string | null {
+  const setup = state.setup
+  const said = setup?.state
+  if (typeof setup?.message !== 'string' || !setup.message || !said || said === 'unknown' || dawPartWorks(state)) return null
+  if (said === 'ready') return !state.status?.connected && IN_DAW[setup.next_step ?? ''] ? setup.message : null
+  // "next, setup installs Kumi's part in Live" for a producer who hasn't said Live: the buttons name each DAW instead.
+  if (said === 'needs_daw_component' && !dawChosen(state)) return null
+  return setup.message
 }
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
@@ -62,12 +83,10 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
     return <div style={{ ...S.muted, padding: 14 }}>{t('pane.reading')}</div>
   }
   const words = chipWords(state.status, state.focus?.transport?.tempo, t)
-  const step = nextStep(state, t)
+  const steps = nextSteps(state, t)
   const session = ownerSession(state)
   const connected = Boolean(state.status?.connected)
-  // Setup's word only when there's something to do; an unknown state is the settings page's to explain.
-  const setupState = state.setup?.state
-  const setupMessage = typeof state.setup?.message === 'string' && setupState && setupState !== 'ready' && setupState !== 'unknown' && !dawPartWorks(state) ? state.setup.message : null
+  const setupMessage = setupWords(state)
   const undoable = (state.history?.items ?? []).filter(item => canUndo(state.status, item)).length
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>
@@ -95,11 +114,13 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
             </div>
           </div>
         )}
-        {step && (
-          <div style={S.row}>
-            <TextButton onClick={() => void ask(ctx, step.request, { send: true, session: connected ? session : null })} strong>
-              {step.label}
-            </TextButton>
+        {steps.length > 0 && (
+          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
+            {steps.map(step => (
+              <TextButton key={step.request} onClick={() => void ask(ctx, step.request, { send: true, session: connected ? session : null })} strong={steps.length === 1}>
+                {step.label}
+              </TextButton>
+            ))}
           </div>
         )}
       </div>
@@ -135,10 +156,11 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
             ) : null
           }
         />
+        {/* Rows are kept while Kumi is away, but undoing one needs it back: said under them, and only when there are some. */}
+        {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
       </Section>
       <div style={{ ...S.row, padding: '10px 12px', gap: 8 }}>
         <TextButton onClick={onOpenMap}>{t('pane.openMap')}</TextButton>
-        {!connected && state.status?.owner && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
       </div>
     </div>
   )

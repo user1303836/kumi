@@ -380,6 +380,20 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(state["daw_component"]["version"], "1.0.105")
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none")
 
+    def test_a_part_the_daw_loads_when_it_starts_is_the_next_step_until_kumi_connects(self) -> None:
+        # REAPER and Renoise load Kumi's part when they start, so one open during the install needs a restart; until a
+        # connect, status names that step (not "open the DAW and connect"), wherever it's shown.
+        self.install_runtime()
+        for after in ("restart_daw", "enable_tool"):
+            with self.subTest(after):
+                runtime = Runtime(after=after)
+                self.plan(setup_daw=runtime)
+                self.assertTrue(self.install(Served(b""), setup_daw=runtime)["ok"])
+                self.assertEqual((self.status()["state"], self.status()["next_step"]), ("ready", after))
+        (self.data / "state").mkdir(exist_ok=True)
+        (self.data / "state" / "status.json").write_text(json.dumps({"connected": True}))
+        self.assertEqual((self.status()["state"], self.status()["next_step"]), ("ready", None))
+
     def test_the_runtime_installs_only_the_daw_step_that_was_approved(self) -> None:
         self.install_runtime()
         approved = "a1" * 32

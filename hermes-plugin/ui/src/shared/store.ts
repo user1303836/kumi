@@ -160,7 +160,9 @@ export class KumiStore {
       if (liveness || moved('focus')) reads.push(this.refresh('focus'))
       if (liveness || moved('history')) reads.push(this.refresh('history'))
       if ((this.wanted.get('map') ?? 0) > 0 && moved('map')) reads.push(this.refresh('map'))
-      if (first || (this.wanted.get('setup') ?? 0) > 0) reads.push(this.refresh('setup'))
+      // Setup moves while Kumi isn't connected (a step a chat just installed, the DAW restarted to load Kumi's part),
+      // and the pane's next step is read from it: read it on every poll until Kumi connects, and when liveness changes.
+      if (first || liveness || !status.connected || (this.wanted.get('setup') ?? 0) > 0) reads.push(this.refresh('setup'))
       await Promise.all(reads)
     })
   }

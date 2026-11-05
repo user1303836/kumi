@@ -148,7 +148,7 @@
       keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
-      empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
+      empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
       search: "Search sounds",
       searchHint: "Search the map: name, kind or folder",
       count: (n) => `${n} sounds`,
@@ -305,7 +305,7 @@
       copied: "Copied",
       copyRequest: "Copy request",
       copyUndo: "Copy undo",
-      mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+      mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
       askLook: "Ask Hermes in your chat to look again before another change."
     }
   };
@@ -413,7 +413,7 @@
       keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
-      empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+      empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
       search: "サウンドを検索",
       searchHint: "マップを検索: 名前・種類・フォルダ",
       count: (n) => `${n} 個のサウンド`,
@@ -570,7 +570,7 @@
       copied: "コピーしました",
       copyRequest: "依頼をコピー",
       copyUndo: "取り消しをコピー",
-      mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。",
+      mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
       askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
     }
   };
@@ -678,7 +678,7 @@
       keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
-      empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。",
+      empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
       search: "搜索声音",
       searchHint: "搜索地图：名称、种类或文件夹",
       count: (n) => `${n} 个声音`,
@@ -835,7 +835,7 @@
       copied: "已复制",
       copyRequest: "复制请求",
       copyUndo: "复制撤销",
-      mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。",
+      mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
       askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
     }
   };
@@ -1885,7 +1885,7 @@
         if (liveness || moved("focus")) reads.push(this.refresh("focus"));
         if (liveness || moved("history")) reads.push(this.refresh("history"));
         if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
-        if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
+        if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
         await Promise.all(reads);
       });
     }
