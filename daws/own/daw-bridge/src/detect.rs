@@ -1405,9 +1405,10 @@ mod tests {
     /// process in both is in the kernel's list, another account's too, in the same order. Where both name it alike, this
     /// account's are named as `ps` names them: on Linux every one (an AppImage's entry, `AppRun` to `ps`, by its program's
     /// path, as Kumi lists it), and on macOS those it names by a path, as a DAW started from the Finder or the Dock is (and
-    /// a child known only by its argv[0] by it). Other names aren't
-    /// compared: on macOS `ps`, setuid root, reads any process's argv[0], which can be a title ("Core Audio Driver
-    /// (NullAudio.driver)" on a runner), where Kumi, not root, names another account's by its program's path.
+    /// a child known only by its argv[0] by it). Another account's path names on macOS agree by base name: the program's
+    /// path can take a different form through framework links. Names without a path aren't compared: `ps`, setuid root,
+    /// reads any process's argv[0], which can be a title ("Core Audio Driver (NullAudio.driver)" on a runner), where Kumi,
+    /// not root, names another account's by its program's path.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_kernels_listing_is_what_ps_lists() {
@@ -1460,9 +1461,8 @@ mod tests {
         assert!(steady.iter().any(|(_, uid, _)| *uid != me), "another account's processes are among them");
         // Named so here too: this account's processes, the producer's own, among which Kumi looks for a DAW. On Linux
         // every one (`comm`, which `ps` reads from the same place); on macOS those named by their path, as DAWs started
-        // from the Finder or the Dock are, since a name without one can be a title only `ps`, as root, reads. Another
-        // account's aren't compared: `ps` reads their argv[0], where Kumi, not root, names them by their program's
-        // path. The named child above holds argv[0] being read.
+        // from the Finder or the Dock are, since a name without one can be a title only `ps`, as root, reads.
+        // The named child above holds argv[0] being read.
         let compared: Vec<_> =
             steady.iter().filter(|(_, uid, name)| *uid == me && (cfg!(target_os = "linux") || name.starts_with('/'))).collect();
         assert!(!compared.is_empty(), "this account's processes are compared");
@@ -1473,6 +1473,16 @@ mod tests {
                 name.clone()
             };
             assert_eq!(kernel[pid], &name, "pid {pid}");
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // For another account, Kumi falls back to proc_pidpath: compare it where ps also gives a path, rather than
+            // a title. Framework symlinks can name the same program by different paths, so compare their base names.
+            let others: Vec<_> = steady.iter().filter(|(_, uid, name)| *uid != me && name.starts_with('/')).collect();
+            assert!(!others.is_empty(), "another account's processes named by their paths are compared");
+            for (pid, _, name) in others {
+                assert_eq!(Path::new(kernel[pid]).file_name(), Path::new(name).file_name(), "another account's pid {pid}");
+            }
         }
         let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
         let ps_order: Vec<u32> = before.iter().map(|(pid, _, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
