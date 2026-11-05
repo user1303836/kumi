@@ -20,6 +20,9 @@ const MAX_INTEGER: u64 = (1_u64 << 53) - 1;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The task switches this ledger accepts. The release pin reads these through MCP discovery.
+pub const POLICY_KEYS: &[&str] = &["audio_to_midi", "sfx"];
+
 pub struct Authority {
     ledger: Ledger,
     committed: u64,
@@ -532,7 +535,7 @@ fn decode_file<T: serde::de::DeserializeOwned>(file: File) -> Result<T, OpError>
 }
 
 fn valid_kind(kind: &str) -> bool {
-    matches!(kind, "sfx" | "audio_to_midi")
+    POLICY_KEYS.contains(&kind)
 }
 
 fn valid_id(id: &str) -> bool {
@@ -888,6 +891,38 @@ mod tests {
         value.as_object_mut().unwrap().remove("policy");
         fixture.put(&value);
         assert_eq!(code(fixture.authority().approve(&claim())), "not_submitted");
+    }
+
+    #[test]
+    fn advertised_policy_switches_are_accepted_independently_and_unlisted_keys_are_refused() {
+        let descriptor = super::super::mcp::tool_descriptor(&super::super::generate::GENERATE);
+        let keys: Vec<&str> =
+            descriptor["_meta"]["kumi/ledger_policy_keys"].as_array().unwrap().iter().map(|key| key.as_str().unwrap()).collect();
+        let fixture = Fixture::new();
+        let mut value = record();
+        value["policy"]["enabled"] = Value::Object(keys.iter().map(|&kind| (kind.to_owned(), Value::Bool(false))).collect());
+        fixture.put(&value);
+        let authority = fixture.authority();
+        for &kind in &keys {
+            assert_eq!(code(authority.policy(kind)), "not_enabled");
+        }
+        for &selected in &keys {
+            value["policy"]["enabled"][selected] = json!(true);
+            fixture.put(&value);
+            let authority = fixture.authority();
+            for &kind in &keys {
+                if kind == selected {
+                    assert!(authority.policy(kind).is_ok(), "{kind}");
+                } else {
+                    assert_eq!(code(authority.policy(kind)), "not_enabled", "{selected} must not enable {kind}");
+                }
+            }
+            value["policy"]["enabled"][selected] = json!(false);
+        }
+        assert!(!keys.contains(&"not_a_generation_kind"));
+        value["policy"]["enabled"]["not_a_generation_kind"] = json!(true);
+        fixture.put(&value);
+        assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
     }
 
     #[test]
