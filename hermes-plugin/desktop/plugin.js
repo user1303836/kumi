@@ -83,6 +83,8 @@ var en = {
   },
   job: {
     scanning: "Scanning",
+    generating: "Generating",
+    generation: "Generation",
     scan: "Scan",
     job: "Job",
     running: (kind) => `${kind} running`,
@@ -201,6 +203,18 @@ var en = {
       unknown: "unknown"
     }
   },
+  generate: {
+    generated: "generated",
+    generatedTitle: (provider) => `Made by ${provider || "a generator"} from your words. It isn't in your project until you place it.`,
+    credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
+    cost: (credits, estimate) => `${credits} (est. ${estimate})`,
+    estimateOnly: (shown) => `about ${shown} credits`,
+    left: (left, cap) => `${left} of ${cap} credits left under your cap`,
+    capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
+    place: "Place…",
+    placeTitle: "Put a request to place this file in your project in the chat, to finish and send",
+    midi: "MIDI file"
+  },
   palette: {
     map: "Kumi: open the sound map",
     undo: "Kumi: undo the last change",
@@ -303,6 +317,8 @@ var ja = {
   },
   job: {
     scanning: "スキャン中",
+    generating: "生成中",
+    generation: "生成",
     scan: "スキャン",
     job: "ジョブ",
     running: (kind) => `${kind} 実行中`,
@@ -421,6 +437,18 @@ var ja = {
       unknown: "不明"
     }
   },
+  generate: {
+    generated: "生成",
+    generatedTitle: (provider) => `${provider || "生成ツール"} があなたの言葉から作りました。配置するまでプロジェクトには入りません。`,
+    credits: (_n, shown) => `${shown} クレジット`,
+    cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
+    estimateOnly: (shown) => `約 ${shown} クレジット`,
+    left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
+    capTitle: "有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。",
+    place: "配置…",
+    placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
+    midi: "MIDI ファイル"
+  },
   palette: {
     map: "Kumi: サンプルマップを開く",
     undo: "Kumi: 最後の変更を取り消す",
@@ -523,6 +551,8 @@ var zh = {
   },
   job: {
     scanning: "正在扫描",
+    generating: "正在生成",
+    generation: "生成",
     scan: "扫描",
     job: "任务",
     running: (kind) => `${kind} 运行中`,
@@ -640,6 +670,18 @@ var zh = {
       outdated: "版本过旧",
       unknown: "未知"
     }
+  },
+  generate: {
+    generated: "生成",
+    generatedTitle: (provider) => `由 ${provider || "生成工具"} 根据你的描述生成。放入项目之前，它不会出现在你的项目中。`,
+    credits: (_n, shown) => `${shown} 积分`,
+    cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
+    estimateOnly: (shown) => `约 ${shown} 积分`,
+    left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
+    capTitle: "Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。",
+    place: "放入…",
+    placeTitle: "把放入这个文件的请求放进对话，补充完整后发送",
+    midi: "MIDI 文件"
   },
   palette: {
     map: "Kumi：打开采样地图",
@@ -761,7 +803,10 @@ function seconds(value) {
   if (typeof value !== "number" || !(value >= 0)) return "";
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
-var JOB_KINDS = { scan: { running: "job.scanning", noun: "job.scan" } };
+var JOB_KINDS = {
+  scan: { running: "job.scanning", noun: "job.scan" },
+  generate: { running: "job.generating", noun: "job.generation" }
+};
 function count(value) {
   if (Array.isArray(value)) return value.length;
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -776,11 +821,17 @@ function jobWords(job, t = english) {
   const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
   const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
   if (job.state === "running" || job.state === void 0) {
-    const count2 = done === null ? "" : total === null ? num(done, 0) : t("job.of", num(done, 0), num(total, 0));
-    return { title: running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+    const count3 = done === null ? "" : total === null ? num(done, 0) : t("job.of", num(done, 0), num(total, 0));
+    return { title: running, detail: [message, count3].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
   }
   if (job.state === "done") {
     const result = job.result && typeof job.result === "object" ? job.result : {};
+    if (kind === "generate") {
+      const file = typeof result.file === "string" ? clean(result.file.split(/[\\/]/).pop() ?? "", 60) : "";
+      const credits = result.credits && typeof result.credits === "object" ? count(result.credits.actual) : null;
+      const detail2 = [file, credits === null ? "" : t("generate.credits", credits, num(credits, 0))];
+      return { title: t("job.done", noun), detail: detail2.filter(Boolean).join(" · "), fraction: 1, tone: "good" };
+    }
     const sounds = count(result.sounds);
     const failed = count(result.failed);
     const detail = [sounds === null ? "" : t("job.sounds", sounds, num(sounds, 0)), failed ? t("job.unreadable", num(failed, 0)) : ""];
@@ -801,15 +852,17 @@ function canUndo(status, item) {
 function undoRequest(item) {
   return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
 }
-var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g;
-function quotable(name, max = 80) {
-  return clean(typeof name === "string" ? name.replace(QUOTE_MARKS, " ") : name, max).replace(QUOTE_MARKS, " ").replace(/\s+/g, " ").trim();
+function placeRequest(artifactId, name) {
+  const id = plainId(artifactId);
+  if (!id) return null;
+  const said = clean(name ?? "", 80);
+  return said ? `Place “${said}” (artifact ${id}) in my project` : `Place artifact ${id} in my project`;
 }
 function soundRequest(soundId, name, revision) {
   const id = plainId(soundId);
   if (!id) return null;
   const from = revision ? plainId(revision) : null;
-  const said = quotable(name);
+  const said = clean(name ?? "", 80);
   const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
   return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
 }
@@ -1397,7 +1450,7 @@ async function peaksOf(dataUrl, buckets = 96) {
   const top = Math.max(...peaks, 1e-6);
   return peaks.map((peak) => peak / top);
 }
-function Wave({ audition, id, label }) {
+function Wave({ audition, id, label, caption = label }) {
   const t = useT();
   const [peaks, setPeaks] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -1411,7 +1464,7 @@ function Wave({ audition, id, label }) {
   }, [audition, id]);
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3, flex: "1 1 160px", minWidth: 140 }, children: [
     /* @__PURE__ */ jsxs2("div", { style: { ...S.row, justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx2("span", { style: { ...S.faint, ...S.ellipsis }, children: label }),
+      /* @__PURE__ */ jsx2("span", { style: { ...S.faint, ...S.ellipsis }, children: caption }),
       /* @__PURE__ */ jsx2(TextButton, { onClick: () => playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)), children: playing ? "■" : "▶" })
     ] }),
     /* @__PURE__ */ jsxs2("svg", { "aria-label": t("listen.waveform", label), height: 36, preserveAspectRatio: "none", role: "img", viewBox: "0 0 96 36", width: "100%", children: [
@@ -1524,9 +1577,54 @@ function ListenResultCard({ result, audition, fallback }) {
   );
 }
 
-// src/desktop/composer.tsx
-import { host as host2 } from "@hermes/plugin-sdk";
-import { useCallback, useSyncExternalStore as useSyncExternalStore2 } from "react";
+// src/shared/generate.ts
+var count2 = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+function objectOf(value) {
+  let found = value;
+  if (typeof found === "string") {
+    try {
+      found = JSON.parse(found);
+    } catch {
+      return null;
+    }
+  }
+  return found && typeof found === "object" && !Array.isArray(found) ? found : null;
+}
+function parseGenerated(value) {
+  const outer = objectOf(value);
+  if (!outer) return null;
+  let done = outer;
+  if ("job_id" in outer) {
+    const result = objectOf(outer.result);
+    if (outer.kind !== "generate" || outer.state !== "done" || !result) return null;
+    done = result;
+  }
+  const credits = objectOf(done.credits) ?? {};
+  const ledger = objectOf(done.ledger) ?? {};
+  const artifactId = plainId(done.artifact_id);
+  const file = typeof done.file === "string" ? clean(done.file.split(/[\\/]/).pop() ?? "", 80) : "";
+  if (!file || !artifactId && typeof done.prompt !== "string") return null;
+  return {
+    artifactId,
+    file,
+    kind: typeof done.kind === "string" ? clean(done.kind, 24) : "",
+    prompt: typeof done.prompt === "string" ? clean(done.prompt, 300) : "",
+    seconds: count2(done.seconds),
+    provider: typeof done.provider === "string" ? clean(done.provider, 24) : "",
+    actual: count2(credits.actual),
+    estimate: count2(credits.estimate),
+    cap: count2(ledger.cap),
+    left: count2(ledger.left)
+  };
+}
+function costWords(made, t = english) {
+  if (made.actual === null) return made.estimate === null ? "" : t("generate.estimateOnly", num(made.estimate, 0));
+  const spent = t("generate.credits", made.actual, num(made.actual, 0));
+  return made.estimate === null || made.estimate === made.actual ? spent : t("generate.cost", spent, num(made.estimate, 0));
+}
+function capWords(made, t = english) {
+  return made.cap === null || made.left === null ? "" : t("generate.left", num(made.left, 0), num(made.cap, 0));
+}
 
 // src/desktop/pane.tsx
 import { useEffect as useEffect3, useState as useState2 } from "react";
@@ -1741,8 +1839,57 @@ function KumiPane({ ctx, store, onOpenMap }) {
   ] });
 }
 
-// src/desktop/composer.tsx
+// src/desktop/generate.tsx
 import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+function GenerateCard({ media, audition, ctx, store }) {
+  const t = useT();
+  const made = parseGenerated(media.result);
+  if (!made) return media.fallback;
+  const request = made.artifactId ? placeRequest(made.artifactId, made.file) : null;
+  const cost = costWords(made, t);
+  const left = capWords(made, t);
+  const audio = media.file?.kind === "audio";
+  return /* @__PURE__ */ jsxs6(
+    "div",
+    {
+      "data-kumi-card": "generate",
+      style: { display: "flex", flexDirection: "column", gap: 8, maxWidth: 560, padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text },
+      children: [
+        /* @__PURE__ */ jsxs6("div", { style: { ...S.row, justifyContent: "space-between", alignItems: "flex-start", gap: 8 }, children: [
+          /* @__PURE__ */ jsxs6("span", { style: { ...S.text, fontWeight: 600, minWidth: 0 }, children: [
+            /* @__PURE__ */ jsx6("span", { style: { color: T.accent }, children: audio ? "♪" : "▤" }),
+            " ",
+            made.file
+          ] }),
+          /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 4 }, children: [
+            made.kind === "audio_to_midi" && /* @__PURE__ */ jsx6(Chip, { children: t("generate.midi") }),
+            made.seconds !== null && /* @__PURE__ */ jsx6(Chip, { children: seconds(made.seconds) }),
+            /* @__PURE__ */ jsx6(Chip, { title: t("generate.generatedTitle", made.provider), tone: "accent", children: t("generate.generated") })
+          ] })
+        ] }),
+        made.prompt && /* @__PURE__ */ jsxs6("span", { style: { ...S.muted, whiteSpace: "normal" }, children: [
+          "“",
+          made.prompt,
+          "”"
+        ] }),
+        audio && made.artifactId ? (
+          // In a row, as in the listen card: the waveform's flex basis is a width there, not a height.
+          /* @__PURE__ */ jsx6("div", { style: { display: "flex" }, children: /* @__PURE__ */ jsx6(Wave, { audition, caption: "", id: made.artifactId, label: made.file }) })
+        ) : media.fallback,
+        (cost || left) && /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+          cost && /* @__PURE__ */ jsx6(Chip, { children: cost }),
+          left && /* @__PURE__ */ jsx6("span", { style: S.faint, title: t("generate.capTitle"), children: left })
+        ] }),
+        request && /* @__PURE__ */ jsx6("span", { children: /* @__PURE__ */ jsx6(TextButton, { onClick: () => void ask(ctx, request, { send: false, session: ownerSession(store.get()) }), strong: true, title: t("generate.placeTitle"), children: t("generate.place") }) })
+      ]
+    }
+  );
+}
+
+// src/desktop/composer.tsx
+import { host as host2 } from "@hermes/plugin-sdk";
+import { useCallback, useSyncExternalStore as useSyncExternalStore2 } from "react";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 var noChange = () => () => {
 };
 function useFocusedChat() {
@@ -1765,15 +1912,15 @@ function FocusHint({ store }) {
   if (!path.length) return null;
   const tempo = bpm(state.focus?.transport?.tempo);
   const unsure = Boolean(state.status?.unsure);
-  return /* @__PURE__ */ jsxs6(
+  return /* @__PURE__ */ jsxs7(
     "div",
     {
       "data-unsure": unsure || void 0,
       style: { ...S.row, gap: 6, padding: "2px 10px", maxWidth: "100%", opacity: unsure ? 0.5 : 1 },
       title: unsure ? t("hint.titleUnsure") : t("hint.title"),
       children: [
-        /* @__PURE__ */ jsx6(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
-        /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? t("hint.lastSaw") : t("hint.sees")} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
+        /* @__PURE__ */ jsx7(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
+        /* @__PURE__ */ jsx7("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? t("hint.lastSaw") : t("hint.sees")} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
       ]
     }
   );
@@ -1781,7 +1928,7 @@ function FocusHint({ store }) {
 
 // src/desktop/chip.tsx
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, StatusDot } from "@hermes/plugin-sdk";
-import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function StatusChip({
   ctx,
   store,
@@ -1794,8 +1941,8 @@ function StatusChip({
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
   const step = nextStep(state, t);
   const connected = Boolean(state.status?.connected);
-  return /* @__PURE__ */ jsxs7(DropdownMenu, { children: [
-    /* @__PURE__ */ jsx7(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs7(
+  return /* @__PURE__ */ jsxs8(DropdownMenu, { children: [
+    /* @__PURE__ */ jsx8(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs8(
       "button",
       {
         "aria-label": t("chip.label", words.text),
@@ -1817,16 +1964,16 @@ function StatusChip({
           whiteSpace: "nowrap"
         },
         children: [
-          /* @__PURE__ */ jsx7(StatusDot, { tone: words.tone }),
+          /* @__PURE__ */ jsx8(StatusDot, { tone: words.tone }),
           words.text
         ]
       }
     ) }),
-    /* @__PURE__ */ jsxs7(DropdownMenuContent, { align: "end", side: "top", children: [
-      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
-      step && /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
-      /* @__PURE__ */ jsx7(DropdownMenuSeparator, {}),
-      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
+    /* @__PURE__ */ jsxs8(DropdownMenuContent, { align: "end", side: "top", children: [
+      /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
+      step && /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
+      /* @__PURE__ */ jsx8(DropdownMenuSeparator, {}),
+      /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
     ] })
   ] });
 }
@@ -1976,7 +2123,7 @@ function frame(model, ids, width, height, margin = 48) {
 }
 
 // src/shared/MapCanvas.tsx
-import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
 function resolve(canvas) {
   const style = getComputedStyle(canvas);
@@ -2096,15 +2243,15 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
   };
   if (!model.points.length) {
-    return /* @__PURE__ */ jsx8("div", { style: { ...S.muted, padding: 16 }, children: empty });
+    return /* @__PURE__ */ jsx9("div", { style: { ...S.muted, padding: 16 }, children: empty });
   }
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-  const shown = model.points.reduce((count2, _, index) => count2 + (visible(index) ? 1 : 0), 0);
-  return /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
-    /* @__PURE__ */ jsxs8("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsx8(
+  const shown = model.points.reduce((count3, _, index) => count3 + (visible(index) ? 1 : 0), 0);
+  return /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
+    /* @__PURE__ */ jsxs9("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsx9(
         "input",
         {
           "aria-label": t("map.search"),
@@ -2114,14 +2261,14 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           value: query
         }
       ),
-      /* @__PURE__ */ jsxs8("span", { style: S.faint, children: [
+      /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
         shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
         model.revision ? ` · ${t("map.revision", model.revision)}` : ""
       ] })
     ] }),
-    /* @__PURE__ */ jsx8("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
+    /* @__PURE__ */ jsx9("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
       const off = hidden.has(group.key);
-      return /* @__PURE__ */ jsxs8(
+      return /* @__PURE__ */ jsxs9(
         "button",
         {
           onClick: () => setHidden((current) => {
@@ -2134,19 +2281,19 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           type: "button",
           style: { ...S.row, gap: 4, font: "inherit", fontSize: 11, padding: "1px 6px", borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.6 : 1 },
           children: [
-            /* @__PURE__ */ jsx8("span", { style: { width: 8, height: 8, borderRadius: "50%", background: group.color, opacity: off ? 0.3 : 1 } }),
+            /* @__PURE__ */ jsx9("span", { style: { width: 8, height: 8, borderRadius: "50%", background: group.color, opacity: off ? 0.3 : 1 } }),
             group.name,
             " ",
-            /* @__PURE__ */ jsx8("span", { style: { color: T.faint }, children: group.count })
+            /* @__PURE__ */ jsx9("span", { style: { color: T.faint }, children: group.count })
           ]
         },
         group.key
       );
     }) }),
-    matches.length > 0 && /* @__PURE__ */ jsxs8("div", { "aria-label": searched ? t("map.matches") : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+    matches.length > 0 && /* @__PURE__ */ jsxs9("div", { "aria-label": searched ? t("map.matches") : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
       matches.slice(0, MATCHES_LISTED).map((id) => {
         const sound = model.sounds[id];
-        return /* @__PURE__ */ jsxs8(
+        return /* @__PURE__ */ jsxs9(
           "button",
           {
             "aria-pressed": selected === id,
@@ -2154,17 +2301,17 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
             type: "button",
             style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
             children: [
-              /* @__PURE__ */ jsx8("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-              sound?.class && /* @__PURE__ */ jsx8("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+              /* @__PURE__ */ jsx9("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+              sound?.class && /* @__PURE__ */ jsx9("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
             ]
           },
           id
         );
       }),
-      matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx8("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+      matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx9("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
     ] }),
-    /* @__PURE__ */ jsxs8("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsx8(
+    /* @__PURE__ */ jsxs9("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsx9(
         "canvas",
         {
           ref: canvasRef,
@@ -2200,14 +2347,14 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           style: { position: "absolute", inset: 0, width: "100%", height: "100%", cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
         }
       ),
-      hovered && hoveredSound && hover && /* @__PURE__ */ jsxs8(
+      hovered && hoveredSound && hover && /* @__PURE__ */ jsxs9(
         "div",
         {
           style: { position: "absolute", left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: "none", padding: "3px 7px", borderRadius: 3, background: T.card, border: `1px solid ${T.border}`, fontSize: 11.5, color: T.text, ...S.ellipsis },
           children: [
             clean(hoveredSound.name, 48),
             " ",
-            /* @__PURE__ */ jsxs8("span", { style: { color: T.muted }, children: [
+            /* @__PURE__ */ jsxs9("span", { style: { color: T.muted }, children: [
               "· ",
               clean(hoveredSound.class ?? "", 16)
             ] })
@@ -2215,23 +2362,23 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         }
       )
     ] }),
-    selected && chosen && /* @__PURE__ */ jsxs8("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
-        /* @__PURE__ */ jsx8("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
-        /* @__PURE__ */ jsxs8("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
-          chosen.class && /* @__PURE__ */ jsx8(Chip, { children: clean(chosen.class, 16) }),
-          chosen.kind && /* @__PURE__ */ jsx8(Chip, { children: clean(chosen.kind, 16) }),
-          typeof chosen.duration === "number" && /* @__PURE__ */ jsx8(Chip, { children: seconds(chosen.duration) }),
-          chosen.folder && /* @__PURE__ */ jsx8("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
+    selected && chosen && /* @__PURE__ */ jsxs9("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
+        /* @__PURE__ */ jsx9("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
+        /* @__PURE__ */ jsxs9("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
+          chosen.class && /* @__PURE__ */ jsx9(Chip, { children: clean(chosen.class, 16) }),
+          chosen.kind && /* @__PURE__ */ jsx9(Chip, { children: clean(chosen.kind, 16) }),
+          typeof chosen.duration === "number" && /* @__PURE__ */ jsx9(Chip, { children: seconds(chosen.duration) }),
+          chosen.folder && /* @__PURE__ */ jsx9("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx8("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+      /* @__PURE__ */ jsx9("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
     ] })
   ] });
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment2, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 function errorText(error) {
   const text = error instanceof Error ? error.message : String(error ?? "");
   const json = text.indexOf("{");
@@ -2255,14 +2402,14 @@ function MapWorkspace({ ctx, store, audition }) {
   };
   const map = state.map;
   const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : t("map.empty");
-  return /* @__PURE__ */ jsx9(
+  return /* @__PURE__ */ jsx10(
     MapCanvas,
     {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision);
-        return /* @__PURE__ */ jsxs9(Fragment2, { children: [
-          /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
-          request && /* @__PURE__ */ jsx9(
+        return /* @__PURE__ */ jsxs10(Fragment2, { children: [
+          /* @__PURE__ */ jsx10(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
+          request && /* @__PURE__ */ jsx10(
             TextButton,
             {
               onClick: () => void ask(ctx, request, { send: false, session: ownerSession(state) }),
@@ -2287,28 +2434,28 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment3, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
-  const note = (text) => /* @__PURE__ */ jsx10("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx10("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
-    /* @__PURE__ */ jsx10("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
-    /* @__PURE__ */ jsx10(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result })
+  const note = (text) => /* @__PURE__ */ jsx11("span", { style: S.muted, children: text });
+  return /* @__PURE__ */ jsx11("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs11(Fragment3, { children: [
+    /* @__PURE__ */ jsx11("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
+    /* @__PURE__ */ jsx11(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result })
   ] }) });
 }
 
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState5 } from "react";
-import { Fragment as Fragment4, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
+import { Fragment as Fragment4, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
 function Line({ label, children }) {
-  return /* @__PURE__ */ jsxs11("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
-    /* @__PURE__ */ jsx11("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx11("span", { style: { ...S.text, minWidth: 0 }, children })
+  return /* @__PURE__ */ jsxs12("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
+    /* @__PURE__ */ jsx12("span", { style: S.muted, children: label }),
+    /* @__PURE__ */ jsx12("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -2326,61 +2473,61 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const component = setup?.daw_component;
   const setupState = setup?.state ?? "unknown";
   const componentState = component?.state ?? "unknown";
-  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
-    /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-      /* @__PURE__ */ jsx11("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsx11("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
+  return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
+    /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+      /* @__PURE__ */ jsx12("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
+      /* @__PURE__ */ jsx12("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx11("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs11(Fragment4, { children: [
-      /* @__PURE__ */ jsxs11("div", { children: [
-        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.setup") }),
-        /* @__PURE__ */ jsx11(Line, { label: t("settings.state"), children: STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        setup?.message && /* @__PURE__ */ jsx11(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
-        runtime && /* @__PURE__ */ jsxs11(Line, { label: t("settings.runtime"), children: [
+    state.available === false ? /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs12(Fragment4, { children: [
+      /* @__PURE__ */ jsxs12("div", { children: [
+        /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.setup") }),
+        /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        setup?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
-          setup?.pinned_version && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
+          setup?.pinned_version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " · ",
             t("settings.pinned", clean(setup.pinned_version, 20))
           ] }),
-          setup?.target && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
+          setup?.target && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " · ",
             clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs11(Line, { label: t("settings.download"), children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs12(Line, { label: t("settings.download"), children: [
           megabytes(setup?.download_bytes),
-          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
+          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " ",
             t("settings.unpacked", megabytes(setup?.unpacked_bytes))
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs11(Line, { label: t("settings.part", dawName(daw, t)), children: [
+        component && /* @__PURE__ */ jsxs12(Line, { label: t("settings.part", dawName(daw, t)), children: [
           t(
             "settings.componentLine",
             clean(component.name ?? t("settings.dawComponent"), 40),
             COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
           ),
-          component.path && /* @__PURE__ */ jsx11("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          component.path && /* @__PURE__ */ jsx12("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: t("settings.standalone"), children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs12(Line, { label: t("settings.standalone"), children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
+          /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " · ",
             setup.existing_kumi.adopted ? t("settings.adopted") : t("settings.leftAsIs")
           ] })
         ] }),
-        setup?.compressed_audio?.message && /* @__PURE__ */ jsx11(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx11("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx12("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
-      /* @__PURE__ */ jsxs11("div", { children: [
-        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.connection") }),
-        /* @__PURE__ */ jsx11(Line, { label: t("settings.now"), children: (() => {
+      /* @__PURE__ */ jsxs12("div", { children: [
+        /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.connection") }),
+        /* @__PURE__ */ jsx12(Line, { label: t("settings.now"), children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-          return /* @__PURE__ */ jsx11(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+          return /* @__PURE__ */ jsx12(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx11(Line, { label: t("settings.chat"), children: clean(state.status.owner.session_id, 80) })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: clean(state.status.owner.session_id, 80) })
       ] }),
-      /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step && /* @__PURE__ */ jsx11(
+      /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+        step && /* @__PURE__ */ jsx12(
           TextButton,
           {
             onClick: () => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
@@ -2388,14 +2535,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             children: step.label
           }
         ),
-        /* @__PURE__ */ jsx11(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
-        /* @__PURE__ */ jsx11(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
+        /* @__PURE__ */ jsx12(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
+        /* @__PURE__ */ jsx12(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs11("div", { children: [
-      /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.thisWindow") }),
-      /* @__PURE__ */ jsxs11("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx11(
+    /* @__PURE__ */ jsxs12("div", { children: [
+      /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.thisWindow") }),
+      /* @__PURE__ */ jsxs12("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx12(
           "input",
           {
             checked: openOnFind,
@@ -2406,14 +2553,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx11("span", { style: S.text, children: t("settings.openOnFind") })
+        /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.openOnFind") })
       ] })
     ] })
   ] });
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx12 } from "react/jsx-runtime";
+import { jsx as jsx13 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
 var MEASUREMENTS_WORKSPACE = "kumi-measurements";
@@ -2423,7 +2570,7 @@ var JOB_POLL_MS = 2e3;
 var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
-  return /* @__PURE__ */ jsx12(I18n.Provider, { value: t, children });
+  return /* @__PURE__ */ jsx13(I18n.Provider, { value: t, children });
 }
 var plugin = {
   id: PLUGIN_ID,
@@ -2435,7 +2582,7 @@ var plugin = {
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;
-    const mapView = () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store }) });
+    const mapView = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
@@ -2459,7 +2606,7 @@ var plugin = {
     let closeMeasurements = null;
     let measurementsPane = null;
     const openMeasurements = () => {
-      const render = () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(MeasurementsWorkspace, { audition, store }) });
+      const render = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MeasurementsWorkspace, { audition, store }) });
       const title = wordsOf(ctx)("measurements.tab");
       if (typeof host6.openWorkspace === "function") {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
@@ -2574,13 +2721,13 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(KumiPane, { ctx, onOpenMap: openMap, store }) })
+        render: () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(KumiPane, { ctx, onOpenMap: openMap, store }) })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
+        render: () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
       }
     ];
     if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
@@ -2589,7 +2736,15 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(ListenCard, { audition, media: props }) })
+          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(ListenCard, { audition, media: props }) })
+        }
+      });
+      contributions.push({
+        id: "generate-card",
+        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        data: {
+          tools: ["kumi_generate", "kumi_job"],
+          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });
     }
@@ -2597,7 +2752,7 @@ var plugin = {
       contributions.push({
         id: "focus-hint",
         area: sdk.COMPOSER_AREAS.underside,
-        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(FocusHint, { store }) })
+        render: () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(FocusHint, { store }) })
       });
     }
     ctx.registerMany(contributions);
@@ -2641,7 +2796,7 @@ var plugin = {
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(SettingsPage, { ctx, onOpenMap: openMap, store }) })
+      render: () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(SettingsPage, { ctx, onOpenMap: openMap, store }) })
     });
   }
 };

@@ -433,7 +433,7 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   const sources = walk(fileURLToPath(new URL('../src', import.meta.url))).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
   const keys = new Set()
   // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
-  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|palette|notify|dashboard)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
+  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|notify|dashboard)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
   for (const file of sources) for (const match of readFileSync(file, 'utf8').matchAll(pattern)) keys.add(match[1])
   // The keys built from a state's name.
   for (const state of ['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown']) keys.add(`settings.states.${state}`)
@@ -444,4 +444,36 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
     const missing = [...keys].filter(key => !has(i18n.MESSAGES[locale], key))
     assert.deepEqual(missing, [], `${locale} lacks these keys`)
   }
+})
+
+const generate = await load('src/shared/generate.ts')
+
+test('a finished generation reads as its file, its words, its cost against the estimate and what is left under the cap', () => {
+  const job = {
+    job_id: 'j-gen-1',
+    kind: 'generate',
+    state: 'done',
+    result: {
+      artifact_id: 'a-12',
+      file: '/Users/producer/.hermes/cache/generated/audio/Riser 01.wav',
+      kind: 'sfx',
+      prompt: 'a rising white-noise sweep',
+      seconds: 4,
+      provider: 'mirelo',
+      credits: { estimate: 15, actual: 12 },
+      ledger: { cap: 100, spent: 52, reserved: 0, left: 48 }
+    }
+  }
+  const made = generate.parseGenerated(JSON.stringify(job))
+  assert.equal(made.file, 'Riser 01.wav', 'a name, never the path')
+  assert.equal(generate.costWords(made), '12 credits (est. 15)')
+  assert.equal(generate.capWords(made), '48 of 100 credits left under your cap')
+  assert.equal(generate.costWords(made, i18n.translator('ja')), '12 クレジット（見積 15）')
+  assert.deepEqual(format.jobWords(job), { title: 'Generation done', detail: 'Riser 01.wav · 12 credits', fraction: 1, tone: 'good' })
+  // The request to place it names the artifact (CC-11's {artifact_id} source) and stays English.
+  assert.equal(format.placeRequest('a-12', made.file), 'Place “Riser 01.wav” (artifact a-12) in my project')
+  // Not a generation: a scan's answer, a quote, a failure.
+  assert.equal(generate.parseGenerated({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 640 } }), null)
+  assert.equal(generate.parseGenerated({ state: 'quoted', quote_id: 'q-1', estimate: { credits: 12, max_credits: 15 } }), null)
+  assert.equal(generate.parseGenerated({ job_id: 'j-gen-2', kind: 'generate', state: 'failed', error: { reason: 'over the cap' } }), null)
 })

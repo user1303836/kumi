@@ -86,7 +86,7 @@ test('it registers the pane, the chip, its palette commands, the listen card, th
   assert.deepEqual(byArea.panes.map(pane => [pane.id, pane.title, pane.data.placement]), [['pane', 'Kumi', 'right']])
   assert.equal(byArea['statusBar.right'].length, 1)
   assert.deepEqual(byArea.palette.map(entry => entry.data.id), ['kumi.map', 'kumi.undo-last', 'kumi.settings'])
-  assert.deepEqual(byArea['transcript.toolMedia'].map(card => card.data.tools), [['kumi_listen']])
+  assert.deepEqual(byArea['transcript.toolMedia'].map(card => card.data.tools), [['kumi_listen'], ['kumi_generate', 'kumi_job']])
   assert.deepEqual(byArea['composer.underside'].map(hint => hint.id), ['focus-hint'])
   assert.deepEqual(h.settings.map(page => page.id), ['kumi'])
 })

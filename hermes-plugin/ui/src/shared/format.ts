@@ -114,7 +114,10 @@ export function seconds(value: unknown): string {
 }
 
 // A job's kind as a producer says it, running and once it ended (catalog keys).
-const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'job.scanning', noun: 'job.scan' } }
+const JOB_KINDS: Record<string, { running: string; noun: string }> = {
+  scan: { running: 'job.scanning', noun: 'job.scan' },
+  generate: { running: 'job.generating', noun: 'job.generation' }
+}
 
 /** A count a job's result gives as a number or as a list of what it counted; null when it gives neither. */
 function count(value: unknown): number | null {
@@ -139,6 +142,13 @@ export function jobWords(job: Job, t: Translate = english): { title: string; det
   }
   if (job.state === 'done') {
     const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
+    if (kind === 'generate') {
+      // A generation's result: the file it made, and the credits it used (C7).
+      const file = typeof result.file === 'string' ? clean(result.file.split(/[\\/]/).pop() ?? '', 60) : ''
+      const credits = result.credits && typeof result.credits === 'object' ? count((result.credits as Record<string, unknown>).actual) : null
+      const detail = [file, credits === null ? '' : t('generate.credits', credits, num(credits, 0))]
+      return { title: t('job.done', noun), detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: 'good' }
+    }
     // A scan's result (W3): `sounds` indexed, `failed` files it couldn't read, as counts.
     const sounds = count(result.sounds)
     const failed = count(result.failed)
@@ -181,6 +191,15 @@ const QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g
  *  or a sample pack stays inside the request's quotes. */
 export function quotable(name: unknown, max = 80): string {
   return clean(typeof name === 'string' ? name.replace(QUOTE_MARKS, ' ') : name, max).replace(QUOTE_MARKS, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Left unsent in the input, like `soundRequest`: a generated file, by its artifact id, so the model can hand CC-11's
+ *  `{artifact_id}` source to the DAW's file step. The producer says where before sending. */
+export function placeRequest(artifactId: string, name?: string): string | null {
+  const id = plainId(artifactId)
+  if (!id) return null
+  const said = clean(name ?? '', 80)
+  return said ? `Place “${said}” (artifact ${id}) in my project` : `Place artifact ${id} in my project`
 }
 
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime

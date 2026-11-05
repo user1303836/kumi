@@ -121,6 +121,8 @@
     },
     job: {
       scanning: "Scanning",
+      generating: "Generating",
+      generation: "Generation",
       scan: "Scan",
       job: "Job",
       running: (kind) => `${kind} running`,
@@ -239,6 +241,18 @@
         unknown: "unknown"
       }
     },
+    generate: {
+      generated: "generated",
+      generatedTitle: (provider) => `Made by ${provider || "a generator"} from your words. It isn't in your project until you place it.`,
+      credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
+      cost: (credits, estimate) => `${credits} (est. ${estimate})`,
+      estimateOnly: (shown) => `about ${shown} credits`,
+      left: (left, cap) => `${left} of ${cap} credits left under your cap`,
+      capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
+      place: "Place…",
+      placeTitle: "Put a request to place this file in your project in the chat, to finish and send",
+      midi: "MIDI file"
+    },
     palette: {
       map: "Kumi: open the sound map",
       undo: "Kumi: undo the last change",
@@ -341,6 +355,8 @@
     },
     job: {
       scanning: "スキャン中",
+      generating: "生成中",
+      generation: "生成",
       scan: "スキャン",
       job: "ジョブ",
       running: (kind) => `${kind} 実行中`,
@@ -459,6 +475,18 @@
         unknown: "不明"
       }
     },
+    generate: {
+      generated: "生成",
+      generatedTitle: (provider) => `${provider || "生成ツール"} があなたの言葉から作りました。配置するまでプロジェクトには入りません。`,
+      credits: (_n, shown) => `${shown} クレジット`,
+      cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
+      estimateOnly: (shown) => `約 ${shown} クレジット`,
+      left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
+      capTitle: "有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。",
+      place: "配置…",
+      placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
+      midi: "MIDI ファイル"
+    },
     palette: {
       map: "Kumi: サンプルマップを開く",
       undo: "Kumi: 最後の変更を取り消す",
@@ -561,6 +589,8 @@
     },
     job: {
       scanning: "正在扫描",
+      generating: "正在生成",
+      generation: "生成",
       scan: "扫描",
       job: "任务",
       running: (kind) => `${kind} 运行中`,
@@ -678,6 +708,18 @@
         outdated: "版本过旧",
         unknown: "未知"
       }
+    },
+    generate: {
+      generated: "生成",
+      generatedTitle: (provider) => `由 ${provider || "生成工具"} 根据你的描述生成。放入项目之前，它不会出现在你的项目中。`,
+      credits: (_n, shown) => `${shown} 积分`,
+      cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
+      estimateOnly: (shown) => `约 ${shown} 积分`,
+      left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
+      capTitle: "Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。",
+      place: "放入…",
+      placeTitle: "把放入这个文件的请求放进对话，补充完整后发送",
+      midi: "MIDI 文件"
     },
     palette: {
       map: "Kumi：打开采样地图",

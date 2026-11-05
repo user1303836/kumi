@@ -26,6 +26,7 @@ import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
 import { I18n } from '../shared/ui.tsx'
 import { ask, wordsOf } from './actions.ts'
 import { ListenCard } from './card.tsx'
+import { GenerateCard } from './generate.tsx'
 import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
 import { callId, Calls, forAnotherProfile, forChatInFront, payloadOf } from './events.ts'
@@ -252,6 +253,20 @@ const plugin: HermesPlugin = {
           render: (props: ToolMediaRendererProps) => (
             <WithT>
               <ListenCard audition={audition} media={props} />
+            </WithT>
+          )
+        }
+      })
+      // A sound Kumi had made: `kumi_job`'s answer once the generation is done (or `kumi_generate`'s, if it answers
+      // with the file). Any other result of theirs keeps Desktop's own player or chip.
+      contributions.push({
+        id: 'generate-card',
+        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        data: {
+          tools: ['kumi_generate', 'kumi_job'],
+          render: (props: ToolMediaRendererProps) => (
+            <WithT>
+              <GenerateCard audition={audition} ctx={ctx} media={props} store={store} />
             </WithT>
           )
         }
