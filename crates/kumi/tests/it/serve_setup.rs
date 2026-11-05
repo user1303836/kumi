@@ -77,10 +77,16 @@ fn bundled() -> String {
     kumi_daw_ableton::app::bridge_setup::bundled_bridge_version().unwrap()
 }
 
+/// `relative`'s folders (written with `/`) under `base`, each its own component: the path spelled as the system spells
+/// it (on Windows, with `\` throughout), as the paths a plan names are.
+fn at(base: &Path, relative: &str) -> PathBuf {
+    relative.split('/').fold(base.to_path_buf(), |path, part| path.join(part))
+}
+
 /// A runtime's bundle of Live's bridge, as a release lays it out: `prepared.json` and the tarball it names, which holds
 /// `package/` (the server and its package.json).
 fn bundle(root: &Path) -> PathBuf {
-    let prepared = root.join("runtime/bridge");
+    let prepared = at(root, "runtime/bridge");
     let package = prepared.join("package");
     std::fs::create_dir_all(&package).unwrap();
     std::fs::write(package.join(executable_name("ableton-mcp-server")), b"the bridge\n").unwrap();
@@ -127,7 +133,7 @@ fn tar(files: &BTreeMap<String, Vec<u8>>) -> Vec<u8> {
 /// bridge's own lifecycle installs it as it would a release's.
 fn release(root: &Path) -> PathBuf {
     use std::io::Write;
-    let prepared = root.join("runtime/bridge");
+    let prepared = at(root, "runtime/bridge");
     let (binary, worker) = (executable_name("ableton-mcp-server"), executable_name("ableton-mcp-analysis-worker"));
     let target = if cfg!(windows) {
         "x86_64-pc-windows-msvc"
@@ -266,10 +272,10 @@ impl Lab {
     /// REAPER's extension and Renoise's tool come from a release-laid-out bundle (`<root>/runtime/daws/…`).
     fn with(daw: DawId, adopted: bool, real: bool) -> Lab {
         let root = tempfile::tempdir().unwrap();
-        let home = if adopted { root.path().join("standalone/.kumi") } else { root.path().join("plugin/kumi-home") };
-        std::fs::create_dir_all(root.path().join("User Library/Remote Scripts")).unwrap();
-        std::fs::create_dir_all(root.path().join("Renoise/V3.5.4/Scripts/Tools")).unwrap();
-        std::fs::create_dir_all(root.path().join("REAPER/UserPlugins")).unwrap();
+        let home = if adopted { at(root.path(), "standalone/.kumi") } else { at(root.path(), "plugin/kumi-home") };
+        std::fs::create_dir_all(at(root.path(), "User Library/Remote Scripts")).unwrap();
+        std::fs::create_dir_all(at(root.path(), "Renoise/V3.5.4/Scripts/Tools")).unwrap();
+        std::fs::create_dir_all(at(root.path(), "REAPER/UserPlugins")).unwrap();
         if adopted {
             std::fs::create_dir_all(&home).unwrap();
         }
@@ -300,7 +306,7 @@ fn env_for(root: &Path, home: &Path, renoise: &Path) -> Env {
         ("KUMI_HOME".into(), home.display().to_string()),
         ("KUMI_NO_UPDATE_CHECK".into(), "1".into()),
         ("KUMI_PROCESSES".into(), "none".into()),
-        ("KUMI_REMOTE_SCRIPTS_DIR".into(), root.join("User Library/Remote Scripts").display().to_string()),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), at(root, "User Library/Remote Scripts").display().to_string()),
         ("KUMI_RENOISE_PREFS_DIR".into(), renoise.display().to_string()),
         ("KUMI_REAPER_RESOURCE_DIR".into(), root.join("REAPER").display().to_string()),
     ])
@@ -336,15 +342,15 @@ fn copy_folder(from: &Path, to: &Path) {
 /// and this checkout's Renoise tool, saying `tool` as its version when given: laid out as a release lays them out.
 fn carried(root: &Path, name: &str, tool: Option<&str>, extension: &[u8]) -> PathBuf {
     let app = root.join(name);
-    let folder = app.join("daws/renoise/com.kumi.Bridge.xrnx");
+    let folder = at(&app, "daws/renoise/com.kumi.Bridge.xrnx");
     copy_folder(&kumi_testkit::workspace_path("daws/renoise/com.kumi.Bridge.xrnx"), &folder);
-    let lua = folder.join("payload/version.lua");
+    let lua = at(&folder, "payload/version.lua");
     let text = std::fs::read_to_string(&lua).unwrap();
     let version = text.split('"').nth(1).unwrap().to_string();
     if let Some(tool) = tool {
         std::fs::write(&lua, text.replace(&format!("\"{version}\""), &format!("\"{tool}\""))).unwrap();
     }
-    let reaper = app.join("daws/reaper");
+    let reaper = at(&app, "daws/reaper");
     std::fs::create_dir_all(&reaper).unwrap();
     std::fs::write(reaper.join(daw_bridge::install::reaper_extension_name(daw_bridge::detect::Os::current())), extension).unwrap();
     std::fs::write(reaper.join("reaper_kumi.version"), format!("{}\n", tool.unwrap_or(&version))).unwrap();
@@ -353,7 +359,7 @@ fn carried(root: &Path, name: &str, tool: Option<&str>, extension: &[u8]) -> Pat
 
 impl Lab {
     fn path(&self, path: &str) -> PathBuf {
-        self.root.path().join(path)
+        at(self.root.path(), path)
     }
 
     fn scripts(&self) -> PathBuf {
@@ -452,7 +458,7 @@ case!(setup_daw_puts_lives_part_in_exactly_as_planned_and_again_changes_nothing,
         for call in calls.iter() {
             assert_eq!(call[1..3], ["lifecycle".to_string(), "install".to_string()]);
             assert_eq!(flag(call, "--remote-scripts-dir"), lab.scripts().display().to_string());
-            assert_eq!(flag(call, "--state-dir"), lab.home.join("bridge/state").display().to_string());
+            assert_eq!(flag(call, "--state-dir"), at(&lab.home, "bridge/state").display().to_string());
             let package = PathBuf::from(flag(call, "--package-root"));
             assert!(package.starts_with(lab.home.join("bridge")) && package.ends_with("package"), "{}", package.display());
             assert!(package.join("package.json").is_file(), "the bundle's tarball unpacked in a generation of the home's own");
@@ -471,7 +477,7 @@ case!(setup_daw_leaves_another_kumis_part_in_live_as_it_is_in_either_layout, asy
     for earlier in [false, true] {
         let lab = Lab::new(DawId::Ableton, false);
         let other = lab.path("standalone/.kumi");
-        let config_dir = if earlier { lab.path(".config/ableton-mcp-release-a8a291e") } else { other.join("bridge/state") };
+        let config_dir = if earlier { lab.path(".config/ableton-mcp-release-a8a291e") } else { at(&other, "bridge/state") };
         installed_by(&other, &bundled(), &lab.scripts(), &config_dir);
         let plan = lab.setup(true).await.unwrap();
         let owner = json!({"kumi_home": std::fs::canonicalize(&other).unwrap().display().to_string()});
@@ -486,7 +492,7 @@ case!(setup_daw_leaves_another_kumis_part_in_live_as_it_is_in_either_layout, asy
 
 case!(setup_daw_never_puts_an_older_bridge_in_live_over_a_newer_one, async {
     let lab = Lab::new(DawId::Ableton, false);
-    installed_by(&lab.home, "99.0.0", &lab.scripts(), &lab.home.join("bridge/state"));
+    installed_by(&lab.home, "99.0.0", &lab.scripts(), &at(&lab.home, "bridge/state"));
     let plan = lab.setup(true).await.unwrap();
     assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("99.0.0"), &json!([])));
     let before = lab.tree();
@@ -496,7 +502,7 @@ case!(setup_daw_never_puts_an_older_bridge_in_live_over_a_newer_one, async {
 
 case!(setup_daw_reports_an_adopted_installation_and_never_writes_into_it, async {
     let lab = Lab::new(DawId::Ableton, true);
-    installed_by(&lab.home, &bundled(), &lab.scripts(), &lab.home.join("bridge/state"));
+    installed_by(&lab.home, &bundled(), &lab.scripts(), &at(&lab.home, "bridge/state"));
     let plan = lab.setup(true).await.unwrap();
     assert_eq!((plan["state"].as_str(), &plan["paths"]), (Some("missing"), &json!([])), "{plan}");
     assert_eq!(plan["parts"][0]["state"], "same");
@@ -543,7 +549,7 @@ case!(setup_daw_puts_renoises_tool_in_exactly_as_planned_and_leaves_another_kumi
     let before = lab.tree();
     let plan = lab.setup(true).await.unwrap();
     assert_eq!(lab.tree(), before, "a dry run writes nothing");
-    assert_eq!(plan["paths"], strings(&[&tool, &lab.home.join("bridges/renoise")]), "{plan}");
+    assert_eq!(plan["paths"], strings(&[&tool, &at(&lab.home, "bridges/renoise")]), "{plan}");
     assert_eq!(
         (plan["state"].as_str(), plan["after"].as_str(), plan["component"].as_str()),
         (Some("missing"), Some("restart_daw"), Some("Renoise tool"))
@@ -565,7 +571,7 @@ case!(setup_daw_puts_renoises_tool_in_exactly_as_planned_and_leaves_another_kumi
     assert_eq!(plan["owner"], json!({"kumi_home": lab.home.display().to_string()}));
     let before = lab.tree();
     assert_eq!(refused(setup_on(&other, false).await).0, "owned_elsewhere");
-    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &home.join("serve/renoise.lease"));
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &at(&home, "serve/renoise.lease"));
 });
 
 case!(setup_daw_puts_lives_part_in_through_the_bridges_own_lifecycle_writing_only_what_it_planned, async {
@@ -578,7 +584,7 @@ case!(setup_daw_puts_lives_part_in_through_the_bridges_own_lifecycle_writing_onl
     let script = lab.scripts().join("AbletonMcpBridge");
     assert!(script.join("ableton_mcp_remote_script.py").is_file(), "the release's Remote Script is in Live's folder");
     assert!(script.join("bridge-reference.json").is_file());
-    assert!(lab.home.join("bridge/state/install-receipt.json").is_file(), "the lifecycle's receipt is in the home's bridge folder");
+    assert!(at(&lab.home, "bridge/state/install-receipt.json").is_file(), "the lifecycle's receipt is in the home's bridge folder");
     assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file());
     let again = lab.setup(true).await.unwrap();
     assert_eq!((again["state"].as_str(), &again["paths"]), (Some("same"), &json!([])), "{again}");
@@ -632,7 +638,7 @@ case!(setup_daw_puts_reapers_extension_in_exactly_as_planned_and_never_into_an_a
     let before = lab.tree();
     let plan = lab.setup(true).await.unwrap();
     assert_eq!(lab.tree(), before, "a dry run writes nothing");
-    assert_eq!(plan["paths"], strings(&[&extension, &reference, &lab.home.join("bridges/reaper")]), "{plan}");
+    assert_eq!(plan["paths"], strings(&[&extension, &reference, &at(&lab.home, "bridges/reaper")]), "{plan}");
     assert_eq!((plan["state"].as_str(), plan["component"].as_str()), (Some("missing"), Some("REAPER extension")));
     let done = lab.install(&plan["digest"]).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
@@ -669,7 +675,7 @@ case!(setup_daw_leaves_another_homes_copy_in_another_renoise_folder_alone, async
     std::fs::create_dir_all(lab.path("Renoise/V3.5.5/Scripts/Tools")).unwrap();
     let tool = lab.path("Renoise/V3.5.5/Scripts/Tools/com.kumi.Bridge.xrnx");
     let plan = lab.setup(true).await.unwrap();
-    assert_eq!(plan["paths"], strings(&[&tool, &lab.home.join("bridges/renoise")]), "an equal payload isn't this home's: {plan}");
+    assert_eq!(plan["paths"], strings(&[&tool, &at(&lab.home, "bridges/renoise")]), "an equal payload isn't this home's: {plan}");
     let before = lab.tree();
     lab.install(&plan["digest"]).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
@@ -708,7 +714,7 @@ case!(setup_daw_puts_back_what_renoises_tool_needs_and_clears_what_an_interrupte
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
     assert!(!leftover.exists());
     // The tool loses where it finds Kumi: setup puts that back without replacing the tool.
-    let reference = tools.join("com.kumi.Bridge.xrnx/bridge-reference.json");
+    let reference = at(&tools, "com.kumi.Bridge.xrnx/bridge-reference.json");
     std::fs::remove_file(&reference).unwrap();
     let plan = lab.setup(true).await.unwrap();
     assert_eq!(plan["state"], "older", "a tool that can't reach Kumi isn't the same: {plan}");
@@ -732,8 +738,9 @@ case!(setup_daw_wont_replace_reapers_extension_while_reaper_holds_it_open, async
     let update = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env, carrying(&lab, "update"));
     let plan = setup_on(&update, true).await.unwrap();
     assert_eq!(plan["state"], "older", "{plan}");
-    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&extension).unwrap();
+    // (Taken before the DLL is held: a held file can't be read either.)
     let before = lab.tree();
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&extension).unwrap();
     match call(&update, json!({"daw": "reaper", "dry_run": false, "expected": plan["digest"]})).await {
         Err(OpError::Refused { code: "in_use", .. }) => {}
         other => panic!("replaced while held: {other:?}"),

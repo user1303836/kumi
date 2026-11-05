@@ -894,7 +894,8 @@ impl Own {
             _ => PartState::Older,
         };
         let (name, shown) = (self.name(), path.display().to_string());
-        let ours = home.join(self.bridge_folder);
+        // ("bridges/reaper": each its own component, so the path reads as the system writes it.)
+        let ours = self.bridge_folder.split('/').fold(home.to_path_buf(), |path, part| path.join(part));
         let version = bundled.as_deref().unwrap_or("this Kumi's");
         let (mut paths, mut effects) = (vec![], vec![]);
         match state {
