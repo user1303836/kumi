@@ -1263,6 +1263,7 @@ struct Guarded {
 
 struct GuardedState {
     refuse: Cell<bool>,
+    unsure: std::cell::RefCell<Option<String>>,
     undos: Cell<usize>,
     lease: std::cell::RefCell<std::rc::Weak<Ctx>>,
     held: Cell<Option<bool>>,
@@ -1312,7 +1313,8 @@ impl kumi_agent::core::contracts::Integration for Guarded {
             return Ok(Err(kumi_agent::core::contracts::UndoRefusal { code: "changed_since", reason }));
         }
         state.undos.set(state.undos.get() + 1);
-        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": "undone", "at": 2})).unwrap()))
+        let note = state.unsure.borrow().clone();
+        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": if note.is_some() { "unsure" } else { "undone" }, "note": note, "at": 2})).unwrap()))
     }
     async fn undo_preview(&self, _: &str, _: Signal) -> Result<Option<kumi_agent::core::contracts::UndoPreview>, RuntimeError> {
         let refusal = self.state.refuse.get().then(|| kumi_agent::core::contracts::UndoRefusal {
@@ -1338,7 +1340,13 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
         ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
         ("KUMI_PROCESSES".into(), "none".into()),
     ]);
-    let live = Rc::new(GuardedState { refuse: Cell::new(true), undos: Cell::new(0), lease: Default::default(), held: Cell::new(None) });
+    let live = Rc::new(GuardedState {
+        refuse: Cell::new(true),
+        unsure: Default::default(),
+        undos: Cell::new(0),
+        lease: Default::default(),
+        held: Cell::new(None),
+    });
     let factory = {
         let live = live.clone();
         AbletonFactory(Rc::new(move |options| {
@@ -1385,5 +1393,20 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
     live.refuse.set(false);
     let (undone, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-2")).await;
     assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
+    // Live's integration returns its ChangeRecord to serve. Its bounded bridge cause must survive into both the
+    // response and the single unsure audit row; UndoResult's separate text is not available on this path.
+    let diagnostic = "Live didn't confirm the undo; inspect the Set before another change. Bridge: device move was not confirmed";
+    *live.unsure.borrow_mut() = Some(diagnostic.into());
+    let made = json!({"id": "c2", "family": "device", "title": "Move SoftClip", "state": "applied", "at": 3});
+    let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
+    let before_rows = ctx.history().rows(100).len();
+    let (unsure, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-3")).await;
+    assert_eq!((unsure["state"].clone(), live.undos.get()), (json!("unsure"), 2), "{unsure}");
+    assert_eq!(unsure["reason"], diagnostic);
+    assert_eq!(ctx.history().rows(100).len(), before_rows + 1);
+    let audit = ctx.history().row(unsure["history_ids"][0].as_str().unwrap()).unwrap();
+    assert_eq!(audit.note.as_deref(), Some(diagnostic));
+    assert_eq!(audit.tool_call_id.as_deref(), Some("tc-undo-3"));
+    assert!(!audit.undo_available);
     wire.end().await;
 });

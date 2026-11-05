@@ -142,6 +142,181 @@ fn two_tracks() -> Rc<DeterministicLiveSimulator> {
     }
     live
 }
+
+/// Like Live, every device ref names its current position; its object identity survives a move. The ordinary
+/// simulator keeps stable refs, which cannot catch an undo accidentally following a shifted neighbor's old ref.
+struct PositionalDevices {
+    sim: Rc<DeterministicLiveSimulator>,
+    moves: RefCell<Vec<Value>>,
+}
+impl PositionalDevices {
+    fn new(names: &[&str]) -> Rc<Self> {
+        let sim = Rc::new(DeterministicLiveSimulator::new());
+        sim.state.borrow_mut()["tracks"][0]["devices"] = json!(names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| json!({"ref":format!("7:device:0:{index}"),"parentRef":"track:track-1",
+                "objectIdentity":format!("device:{name}"),"name":name,"kind":"audio-effect","enabled":true,"parameters":[]}))
+            .collect::<Vec<_>>());
+        Rc::new(Self { sim, moves: RefCell::new(vec![]) })
+    }
+    fn reindex(&self) {
+        let mut state = self.sim.state.borrow_mut();
+        for (index, device) in state["tracks"][0]["devices"].as_array_mut().unwrap().iter_mut().enumerate() {
+            device["ref"] = json!(format!("7:device:0:{index}"));
+        }
+    }
+    fn identities(&self) -> Vec<String> {
+        self.sim.state.borrow()["tracks"][0]["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|device| device["objectIdentity"].as_str().unwrap().to_owned())
+            .collect()
+    }
+}
+impl LiveAdapter for PositionalDevices {
+    fn status(&self) -> Result<LiveStatus, LiveError> {
+        self.sim.status()
+    }
+    fn snapshot(&self) -> Result<LiveSnapshot, LiveError> {
+        self.sim.snapshot()
+    }
+    fn get(&self, reference: &LiveRef) -> Result<Option<Value>, LiveError> {
+        self.sim.get(reference)
+    }
+    fn invoke(&self, invocation: &LiveInvocation) -> Result<Value, LiveError> {
+        let mut result = self.sim.invoke(invocation)?;
+        if invocation.operation == "device.move" {
+            self.moves.borrow_mut().push(json!(invocation.args));
+            self.reindex();
+            let state = self.sim.state.borrow();
+            let device = state["tracks"][0]["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|device| device["objectIdentity"] == invocation.args["expectedObjectIdentity"])
+                .unwrap();
+            result["ref"] = device["ref"].clone();
+        }
+        Ok(result)
+    }
+    fn subscribe(&self, listener: LiveListener) -> Result<Unsubscribe, LiveError> {
+        self.sim.subscribe(listener)
+    }
+    fn reconnect(&self) -> Result<LiveStatus, LiveError> {
+        self.sim.reconnect()
+    }
+}
+#[async_trait::async_trait(?Send)]
+impl AsyncLiveAdapter for PositionalDevices {
+    async fn snapshot_async(
+        &self,
+        context: Option<&LiveOperationContext>,
+        request: Option<&LiveSnapshotRequest>,
+    ) -> Result<LiveSnapshot, LiveError> {
+        self.sim.snapshot_async(context, request).await
+    }
+    async fn discover_async(
+        &self,
+        request: &LiveDiscoveryRequest,
+        context: Option<&LiveOperationContext>,
+    ) -> Result<LiveDiscoveryResult, LiveError> {
+        self.sim.discover_async(request, context).await
+    }
+    async fn get_async(&self, reference: &LiveRef, context: Option<&LiveOperationContext>) -> Result<Option<Value>, LiveError> {
+        self.sim.get_async(reference, context).await
+    }
+    async fn invoke_async(&self, invocation: &LiveInvocation, _: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+        self.invoke(invocation)
+    }
+    async fn reconnect_async(&self, context: Option<&LiveOperationContext>) -> Result<LiveStatus, LiveError> {
+        self.sim.reconnect_async(context).await
+    }
+    async fn close(&self) -> Result<(), LiveError> {
+        self.sim.close().await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn moving_a_loaded_device_and_undoing_only_its_move_preserves_exact_devices() {
+    for (names, from, to) in [(vec!["Kit", "Saturator", "SoftClip"], 2, 1), (vec!["Saturator", "Utility"], 1, 0)] {
+        let live = PositionalDevices::new(&names);
+        let before = live.identities();
+        let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+        let body = |result: Value| -> Value {
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        let preview = body(
+            host.live_device_preview_async(&json!(1), &json!({"action":"move","deviceRef":format!("7:device:0:{from}"),"index":to})).await,
+        );
+        let transaction = preview["transactionId"].clone();
+        let applied = body(
+            host.live_device_apply_async(
+                &json!(2),
+                &json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":"apply-move"}),
+                None,
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(applied["result"]["ref"], format!("7:device:0:{to}"));
+        assert_eq!(live.identities()[to], before[from]);
+        let undo = json!({"transactionId":transaction,"confirmation":"undo","idempotencyKey":"undo-move"});
+        let undone = body(
+            host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_device_basic_async(&json!(3), &undo, None).await) }).await.unwrap(),
+        );
+        assert_eq!(undone["state"], "undone");
+        assert_eq!(live.identities(), before, "the loaded device stays, at its original position");
+        let calls = live.moves.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            (calls[1]["ref"].clone(), calls[1]["index"].clone(), calls[1]["expectedObjectIdentity"].clone()),
+            (json!(format!("7:device:0:{to}")), json!(from), json!(before[from]))
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn device_move_undo_refuses_changed_neighbors_owners_and_a_reused_position() {
+    for edit in ["neighbor-replaced", "neighbors-reordered", "track-replaced", "mover-shifted"] {
+        let live = PositionalDevices::new(&["Kit", "Saturator", "SoftClip"]);
+        let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+        let body = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+        let preview = body(host.live_device_preview_async(&json!(1), &json!({"action":"move","deviceRef":"7:device:0:2","index":1})).await);
+        let transaction = preview["transactionId"].clone();
+        let applied = body(
+            host.live_device_apply_async(
+                &json!(2),
+                &json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":"apply-move"}),
+                None,
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(applied["state"], "applied", "{applied}");
+        {
+            let mut state = live.sim.state.borrow_mut();
+            match edit {
+                "neighbor-replaced" => state["tracks"][0]["devices"][2]["objectIdentity"] = json!("replacement-saturator"),
+                "neighbors-reordered" => state["tracks"][0]["devices"].as_array_mut().unwrap().swap(0, 2),
+                "track-replaced" => state["tracks"][0]["objectIdentity"] = json!("replacement-track"),
+                "mover-shifted" => state["tracks"][0]["devices"].as_array_mut().unwrap().swap(0, 1),
+                _ => unreachable!(),
+            }
+        }
+        live.reindex();
+        let before = live.sim.state.borrow().clone();
+        let undo = json!({"transactionId":transaction,"confirmation":"undo","idempotencyKey":"undo-move"});
+        let refused =
+            host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_device_basic_async(&json!(3), &undo, None).await) }).await.unwrap();
+        assert_eq!(refused["result"]["isError"], true, "{edit}: {refused}");
+        assert!(body(refused)["reason"].as_str().unwrap().contains("undo refused"));
+        assert_eq!(live.moves.borrow().len(), 1, "{edit}: no inverse move was sent");
+        assert_eq!(*live.sim.state.borrow(), before, "{edit}: every producer edit stays");
+    }
+}
 #[tokio::test(flavor = "current_thread")]
 async fn a_cross_target_move_refuses_its_own_owner_and_a_target_whose_devices_changed() {
     let live = two_tracks();
