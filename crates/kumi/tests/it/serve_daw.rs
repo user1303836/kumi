@@ -760,8 +760,9 @@ case!(serve_undoes_a_whole_reaper_change_newest_first_in_one_call_unless_its_ste
     assert!(undone["rows"].as_array().unwrap().iter().all(|row| row["state"] == "undone"), "{undone}");
     assert_eq!((volumes(), lab.ctx.link().epoch()), (before.clone(), moved_from + 1));
 
-    // Another change, its newest step undone by id after the approval: the approved set is stale and nothing is undone;
-    // undone whole without a set to hold to, the step undone already is passed over and the rest are undone.
+    // Another change, its newest step undone by id after the approval: the approved set is stale and nothing is undone,
+    // and an undo of the whole change that names no set is refused; previewed again, the step undone already is passed
+    // over and the rest are undone.
     let (key, epoch, tracks) = looked_tracks(&mut wire).await;
     let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks)), Some("tc-4")).await;
     let made = changed["history_ids"].as_array().unwrap().clone();
@@ -775,7 +776,16 @@ case!(serve_undoes_a_whole_reaper_change_newest_first_in_one_call_unless_its_ste
     let (stale, _) = wire.call("undo", approved, Some("tc-7")).await;
     assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
     assert_eq!(volumes(), one_back, "nothing undone of a stale set");
-    let (rest, _) = wire.call("undo", whole(&made[0]), Some("tc-8")).await;
+    let (unbound, refused) = wire.call("undo", whole(&made[0]), Some("tc-8")).await;
+    assert_eq!((refused, unbound["error"]["code"].clone()), (true, json!("invalid")), "{unbound}");
+    assert_eq!(volumes(), one_back, "nothing undone without the set its preview gave");
+    let mut asked = whole(&made[0]);
+    asked["preview"] = json!(true);
+    let (again, _) = wire.call("undo", asked, Some("tc-9")).await;
+    assert_eq!(again["rows"][0]["state"], "undone", "listed, undone already: {again}");
+    let mut approved = whole(&made[0]);
+    approved["expect_rows"] = again["rows_digest"].clone();
+    let (rest, _) = wire.call("undo", approved, Some("tc-10")).await;
     assert_eq!(rest["state"], "undone", "{rest}");
     assert_eq!(listed(&rest), made.iter().rev().cloned().collect::<Vec<_>>());
     assert_eq!(volumes(), before);
@@ -811,7 +821,9 @@ case!(serve_stops_a_whole_reaper_change_undo_at_the_first_step_reaper_wont_undo_
     let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks[..2])), Some("tc-1")).await;
     let made = changed["history_ids"].as_array().unwrap().clone();
     assert_eq!(made.len(), 2, "{changed}");
-    let (whole, _) = wire.call("undo", json!({"history_id": made[0], "whole_change": true}), Some("tc-2")).await;
+    let (preview, _) = wire.call("undo", json!({"history_id": made[0], "whole_change": true, "preview": true}), Some("tc-2")).await;
+    let approved = json!({"history_id": made[0], "whole_change": true, "expect_rows": preview["rows_digest"]});
+    let (whole, _) = wire.call("undo", approved, Some("tc-3")).await;
     let rows = whole["rows"].as_array().unwrap();
     assert_eq!((rows[0]["history_id"].clone(), rows[0]["state"].clone()), (made[1].clone(), json!("refused")), "{whole}");
     assert_eq!((rows[1]["history_id"].clone(), rows[1]["state"].clone()), (made[0].clone(), json!("not_tried")), "{whole}");

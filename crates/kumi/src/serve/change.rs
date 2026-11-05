@@ -776,12 +776,22 @@ async fn whole_change(ctx: &Ctx, call: &Call, row: &Row) -> Result<Value, OpErro
     let rows = change_rows(ctx, row);
     let digest = rows_digest(&rows);
     let previewed = previewing(&call.args);
-    // The approval listed these rows as they were: a set that's changed since (a row undone by id, or expired) is
-    // refused before the DAW is asked anything.
-    if !previewed && call.args.get("expect_rows").and_then(Value::as_str).is_some_and(|expected| expected != digest) {
-        return Ok(
-            json!({"state": "refused", "code": "stale", "reason": "This change's steps aren't as they were when its undo was approved: preview it again."}),
-        );
+    // The real call names the set its approval listed (the preview's `rows_digest`), and a set that's changed since (a
+    // row undone by id, or expired) is refused before the DAW is asked anything.
+    if !previewed {
+        match call.args.get("expect_rows").and_then(Value::as_str) {
+            None => {
+                return Err(OpError::Invalid {
+                    reason: "Undoing a whole change takes expect_rows, the rows_digest its preview gave: preview it first.".into(),
+                })
+            }
+            Some(expected) if expected != digest => {
+                return Ok(
+                    json!({"state": "refused", "code": "stale", "reason": "This change's steps aren't as they were when its undo was approved: preview it again."}),
+                );
+            }
+            Some(_) => {}
+        }
     }
     let connection = match ctx.connection() {
         Ok(connection) => connection,
