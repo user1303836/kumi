@@ -566,8 +566,8 @@ class Runtimes:
             runtime = self._running.get(data_dir.resolve())
         return runtime if runtime is not None and runtime.client.running and not runtime.closing else None
 
-    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *,
-              library_roots: Iterable[str] = (), profile: str = "") -> Runtime:
+    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *, profile: str,
+              library_roots: Iterable[str] = ()) -> Runtime:
         """The profile's runtime, started for `session_id` when none runs: this process takes the profile's state
         lock (CC-6), then the runtime is initialized and checked to be the pinned runtime (its name, version and
         protocol, before anything else is asked of it), and its snapshots are watched for C5's events. A runtime that
@@ -695,13 +695,20 @@ class Runtimes:
     def _watch_snapshots(self, runtime: Runtime) -> None:
         """C5's events from the snapshots the runtime publishes (C3): every `WATCH_EVERY` seconds while it runs, each
         file that changed since becomes its event. What's there when it starts isn't news."""
-        seen = _snapshot_marks(runtime.state_dir)
+        seen: dict[str, tuple] = {}
+        try:
+            seen = _snapshot_marks(runtime.state_dir)
+        except Exception:
+            log.exception("Kumi couldn't look at its runtime's snapshots")
         while not runtime.gone.wait(WATCH_EVERY):
-            marks = _snapshot_marks(runtime.state_dir)
-            changed = sorted(name for name, mark in marks.items() if seen.get(name) != mark)
-            seen = marks
-            for name in changed:
-                self._snapshot_changed(runtime, name)
+            try:  # one bad pass (a file mid-replace, an unreadable folder) mustn't end the events
+                marks = _snapshot_marks(runtime.state_dir)
+                changed = sorted(name for name, mark in marks.items() if seen.get(name) != mark)
+                seen = marks
+                for name in changed:
+                    self._snapshot_changed(runtime, name)
+            except Exception:
+                log.exception("Kumi couldn't look at its runtime's snapshots")
 
     def _snapshot_changed(self, runtime: Runtime, name: str) -> None:
         state, profile = runtime.state_dir, runtime.profile
@@ -794,4 +801,4 @@ def _mark(path: Path) -> tuple | None:
         found = path.stat()
     except OSError:
         return None
-    return found.st_mtime_ns, found.st_size
+    return found.st_mtime_ns, found.st_size, found.st_ino  # the inode too: a snapshot is replaced, never rewritten

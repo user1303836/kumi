@@ -75,9 +75,10 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(self.started()["argv"], ["serve", "--stdio", "--state-dir", str(self.data / "state"),
                                                   "--kumi-home", str(self.data / "kumi-home"), "--daw", "ableton"])
         self.assertIs(self.runtimes.get(self.data), live)
-        self.assertIs(self.runtimes.start(self.data, live.install, "ableton", "s2"), live, "one runtime a profile")
+        self.assertIs(self.runtimes.start(self.data, live.install, "ableton", "s2", profile="studio"), live,
+                      "one runtime a profile")
         with self.assertRaises(runtime.Unavailable) as other:
-            self.runtimes.start(self.data, live.install, "reaper", "s2")
+            self.runtimes.start(self.data, live.install, "reaper", "s2", profile="studio")
         self.assertEqual(other.exception.code, "other_daw")
 
     def test_the_runtime_gets_no_key_and_never_checks_for_updates(self):
