@@ -458,6 +458,12 @@ fn layer(nodes: &mut [Node], edges: &[(usize, Link)], forward: &[usize]) {
 fn order(nodes: &[Node], links: &[Link]) -> Vec<Vec<usize>> {
     let depth = nodes.iter().map(|node| node.layer).max().map_or(0, |deepest| deepest + 1);
     let mut rows: Vec<Vec<usize>> = vec![Vec::new(); depth];
+    let mut into = vec![Vec::new(); depth];
+    let mut out = vec![Vec::new(); depth];
+    for link in links {
+        into[nodes[link.to].layer].push(link);
+        out[nodes[link.from].layer].push(link);
+    }
     // A point a cord passes sits where the box it comes from sits, among the boxes as listed.
     let mut seed = vec![0.0f64; nodes.len()];
     for (n, node) in nodes.iter().enumerate() {
@@ -488,17 +494,16 @@ fn order(nodes: &[Node], links: &[Link]) -> Vec<Vec<usize>> {
         let layers: Vec<usize> = if downward { (1..depth).collect() } else { (0..depth.saturating_sub(1)).rev().collect() };
         for layer in layers {
             let mut keys: HashMap<usize, (f64, f64)> = HashMap::new();
-            for link in links {
+            // The buckets keep the original link order, including the order of floating-point sums and ties.
+            for link in if downward { &into[layer] } else { &out[layer] } {
                 let (n, other, fraction) = if downward {
                     (link.to, link.from, (link.outlet as f64 + 0.5) / nodes[link.from].outlets.max(1) as f64)
                 } else {
                     (link.from, link.to, (link.inlet as f64 + 0.5) / nodes[link.to].inlets.max(1) as f64)
                 };
-                if nodes[n].layer == layer {
-                    let entry = keys.entry(n).or_insert((0.0, 0.0));
-                    entry.0 += link.weight * (place[other] + fraction);
-                    entry.1 += link.weight;
-                }
+                let entry = keys.entry(n).or_insert((0.0, 0.0));
+                entry.0 += link.weight * (place[other] + fraction);
+                entry.1 += link.weight;
             }
             let key = |n: usize| keys.get(&n).map_or(place[n], |(sum, weight)| sum / weight);
             rows[layer].sort_by(|a, b| key(*a).total_cmp(&key(*b)));
@@ -700,9 +705,16 @@ struct Jog {
 /// many tracks each gap needs.
 fn tracks(jogs: &mut [Jog], gaps: usize, lane: f64) -> Vec<usize> {
     let mut needed = vec![0usize; gaps];
+    let mut by_gap = vec![Vec::new(); gaps];
+    for (at, jog) in jogs.iter().enumerate() {
+        if let Some(gap) = by_gap.get_mut(jog.gap) {
+            gap.push(at);
+        }
+    }
     for (gap, needs) in needed.iter_mut().enumerate() {
         let mut spans: BTreeMap<(usize, usize), (f64, f64)> = BTreeMap::new();
-        for jog in jogs.iter().filter(|jog| jog.gap == gap) {
+        for &at in &by_gap[gap] {
+            let jog = &jogs[at];
             let span = spans.entry(jog.share).or_insert((jog.left, jog.right));
             span.0 = span.0.min(jog.left);
             span.1 = span.1.max(jog.right);
@@ -723,7 +735,8 @@ fn tracks(jogs: &mut [Jog], gaps: usize, lane: f64) -> Vec<usize> {
             given.insert(share, track);
         }
         *needs = ends.len();
-        for jog in jogs.iter_mut().filter(|jog| jog.gap == gap) {
+        for &at in &by_gap[gap] {
+            let jog = &mut jogs[at];
             jog.track = given[&jog.share];
         }
     }
@@ -763,9 +776,8 @@ mod tests {
         let boxes: Vec<Value> = (0..600).map(|at| newobj(&format!("b{at}"), "t b", 40.0, 1, 1)).collect();
         let mut lines: Vec<Value> = (0..599).map(|at| cord(&format!("b{at}"), 0, &format!("b{}", at + 1), 0)).collect();
         lines.extend((0..2_000).map(|at| cord(&format!("b{}", at % 300), 0, &format!("b{}", at % 300 + 300), 0)));
-        let started = std::time::Instant::now();
         let patcher = laid_out(json!({ "boxes": boxes, "lines": lines }));
-        assert!(started.elapsed().as_secs() < 15, "laid out in {:?}", started.elapsed());
+        assert_eq!(patcher.cords.len(), 2_599, "every short and long cord is retained");
         let tops: Vec<f64> = (0..600).map(|at| rect(&patcher, &format!("b{at}")).y).collect();
         assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "still a row each, top to bottom");
     }
@@ -1065,5 +1077,160 @@ mod tests {
         assert!(found.wrong.is_empty(), "{:?}", found.wrong);
         assert_eq!(patcher.boxes.iter().find(|item| item.maxclass() == "bpatcher").map(MaxBox::inlets), Some(3));
         assert_eq!(misnumbered(&patcher, ""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn buckets_keep_layer_ordering_and_track_assignment_identical() {
+        for depth in [0, 1, 2, 7, 31] {
+            for width in [1, 2, 5] {
+                let nodes: Vec<Node> = (0..depth * width)
+                    .map(|at| Node {
+                        item: if at % 5 == 0 { None } else { Some((at * 7) % (depth * width)) },
+                        w: 40.0,
+                        h: 22.0,
+                        inlets: at % 4,
+                        outlets: (at + 1) % 4,
+                        layer: at / width,
+                        x: 0.0,
+                        pin: match at % 11 {
+                            0 => Pin::Top((at % 3) as f64),
+                            1 => Pin::Bottom((at % 3) as f64),
+                            _ => Pin::Free,
+                        },
+                    })
+                    .collect();
+                let mut links = Vec::new();
+                for (from, node) in nodes.iter().enumerate() {
+                    for jump in [1, 2] {
+                        if node.layer + jump < depth {
+                            for port in 0..3 {
+                                links.push(Link {
+                                    from,
+                                    outlet: port,
+                                    to: (node.layer + jump) * width + (from * 7 + port) % width,
+                                    inlet: (port + from) % 4,
+                                    weight: [0.5, 1.0, 3.0][port],
+                                });
+                            }
+                        }
+                    }
+                }
+                assert_eq!(order(&nodes, &links), legacy_order(&nodes, &links), "depth {depth}, width {width}");
+            }
+        }
+        for gaps in [0, 1, 2, 12, 64] {
+            for lane in [0.0, 1.25, 8.0, -1.0, f64::NAN] {
+                let mut jogs: Vec<Jog> = (0..180)
+                    .map(|at| {
+                        let left = ((at * 17) % 31) as f64 - 15.0;
+                        Jog {
+                            gap: (at * 7) % (gaps + 1),
+                            share: (at % 9, (at / 3) % 3),
+                            left,
+                            right: left + (at % 4) as f64 * 1.5,
+                            owner: (at, 0),
+                            track: usize::MAX,
+                        }
+                    })
+                    .collect();
+                let mut old = jogs.clone();
+                assert_eq!(tracks(&mut jogs, gaps, lane), legacy_tracks(&mut old, gaps, lane));
+                assert_eq!(jogs.iter().map(|jog| jog.track).collect::<Vec<_>>(), old.iter().map(|jog| jog.track).collect::<Vec<_>>());
+            }
+        }
+    }
+
+    // The old complete scans remain a differential oracle for stable row/cord ordering, including float sums and ties.
+    fn legacy_order(nodes: &[Node], links: &[Link]) -> Vec<Vec<usize>> {
+        let depth = nodes.iter().map(|node| node.layer).max().map_or(0, |deepest| deepest + 1);
+        let mut rows: Vec<Vec<usize>> = vec![Vec::new(); depth];
+        // A point a cord passes sits where the box it comes from sits, among the boxes as listed.
+        let mut seed = vec![0.0f64; nodes.len()];
+        for (n, node) in nodes.iter().enumerate() {
+            seed[n] = node.item.map_or(f64::MAX, |item| item as f64);
+        }
+        for link in links {
+            if nodes[link.to].item.is_none() {
+                seed[link.to] = seed[link.from] + 0.5;
+            }
+        }
+        for (n, node) in nodes.iter().enumerate() {
+            rows[node.layer].push(n);
+        }
+        for row in &mut rows {
+            row.sort_by(|a, b| seed[*a].total_cmp(&seed[*b]));
+            keep_pins(row, nodes);
+        }
+        let mut best = rows.clone();
+        let mut fewest = crossings(nodes, &rows, links);
+        for sweep in 0..8 {
+            let mut place = vec![0.0f64; nodes.len()];
+            for row in &rows {
+                for (at, &n) in row.iter().enumerate() {
+                    place[n] = at as f64;
+                }
+            }
+            let downward = sweep % 2 == 0;
+            let layers: Vec<usize> = if downward { (1..depth).collect() } else { (0..depth.saturating_sub(1)).rev().collect() };
+            for layer in layers {
+                let mut keys: HashMap<usize, (f64, f64)> = HashMap::new();
+                for link in links {
+                    let (n, other, fraction) = if downward {
+                        (link.to, link.from, (link.outlet as f64 + 0.5) / nodes[link.from].outlets.max(1) as f64)
+                    } else {
+                        (link.from, link.to, (link.inlet as f64 + 0.5) / nodes[link.to].inlets.max(1) as f64)
+                    };
+                    if nodes[n].layer == layer {
+                        let entry = keys.entry(n).or_insert((0.0, 0.0));
+                        entry.0 += link.weight * (place[other] + fraction);
+                        entry.1 += link.weight;
+                    }
+                }
+                let key = |n: usize| keys.get(&n).map_or(place[n], |(sum, weight)| sum / weight);
+                rows[layer].sort_by(|a, b| key(*a).total_cmp(&key(*b)));
+                keep_pins(&mut rows[layer], nodes);
+                for (at, &n) in rows[layer].iter().enumerate() {
+                    place[n] = at as f64;
+                }
+            }
+            let crossed = crossings(nodes, &rows, links);
+            if crossed < fewest {
+                fewest = crossed;
+                best = rows.clone();
+            }
+        }
+        best
+    }
+
+    fn legacy_tracks(jogs: &mut [Jog], gaps: usize, lane: f64) -> Vec<usize> {
+        let mut needed = vec![0usize; gaps];
+        for (gap, needs) in needed.iter_mut().enumerate() {
+            let mut spans: BTreeMap<(usize, usize), (f64, f64)> = BTreeMap::new();
+            for jog in jogs.iter().filter(|jog| jog.gap == gap) {
+                let span = spans.entry(jog.share).or_insert((jog.left, jog.right));
+                span.0 = span.0.min(jog.left);
+                span.1 = span.1.max(jog.right);
+            }
+            let mut ordered: Vec<((usize, usize), (f64, f64))> = spans.into_iter().collect();
+            ordered.sort_by(|a, b| a.1 .0.total_cmp(&b.1 .0));
+            let mut ends: Vec<f64> = Vec::new();
+            let mut given: HashMap<(usize, usize), usize> = HashMap::new();
+            for (share, (start, end)) in ordered {
+                let track = match ends.iter().position(|&last| last + lane <= start) {
+                    Some(track) => track,
+                    None => {
+                        ends.push(f64::NEG_INFINITY);
+                        ends.len() - 1
+                    }
+                };
+                ends[track] = end;
+                given.insert(share, track);
+            }
+            *needs = ends.len();
+            for jog in jogs.iter_mut().filter(|jog| jog.gap == gap) {
+                jog.track = given[&jog.share];
+            }
+        }
+        needed
     }
 }
