@@ -113,12 +113,24 @@ class Host:
             return 30.0
 
     def data_dir(self) -> Path:
+        """`data_path`, created (empty) on the first call, as Hermes's `plugin_data_dir` does; the only write a read
+        tool makes."""
+        path = self.data_path()
+        if path is None:
+            raise RuntimeError("Hermes's home can't be read, so Kumi has no plugin data folder")
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def data_path(self) -> Path | None:
+        """Where Kumi's plugin data is, without creating it: `setup.default_data_dir` (Hermes's documented
+        `<hermes home>/plugin-data/kumi`, `plugin_data_dir`'s folder), or the tests' own. What only reads
+        (`hermes kumi doctor`) uses it. None where Hermes's home can't be read."""
         if self._data_dir is not None:
             return self._data_dir()
-        # Hermes's, documented: <profile home>/plugin-data/kumi, which it creates (empty) on the first call; the only
-        # write a read tool makes.
-        from plugins.plugin_storage import plugin_data_dir
-        return plugin_data_dir(PLUGIN)
+        try:
+            return setup.default_data_dir()
+        except Exception:  # Hermes's home isn't readable (hermes_constants missing or failing)
+            return None
 
     def daw(self) -> str:
         daw = self._ctx.get_config("daw", "ableton")

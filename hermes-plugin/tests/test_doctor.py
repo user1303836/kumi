@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import tempfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -34,17 +35,19 @@ ASKS = {"approvals": {"mode": "manual"}}
 
 
 def publish(data: Path, *, connected: bool = True, key: str | None = "p-1", scan: str | None = "done",
-            sounds: int = 3) -> None:
-    """What a running runtime leaves in its plugin data: its lease (heartbeat now), status, a scan job and a map."""
+            sounds: int = 3, daw: str = "ableton", component: dict | None = None, stopped: bool = False) -> None:
+    """What a runtime leaves in its plugin data: its lease (heartbeat now; `stopped`: its last word was a stop), status
+    (`component`: its own reading of Kumi's part in the DAW), a scan job and a map."""
     state = data / "state"
     (state / "jobs").mkdir(parents=True, exist_ok=True)
     (state / "map").mkdir(parents=True, exist_ok=True)
     now = int(time.time() * 1000)
     write = lambda name, body: (state / f"{name}.json").write_text(json.dumps({"schema": 1, "seq": 1, **body}),
                                                                    encoding="utf-8")
-    write("owner", {"heartbeat": now, "running": True, "owner": {"pid": 1, "session_id": "s1"}})
+    write("owner", {"heartbeat": now, "running": not stopped, "owner": {"pid": 1, "session_id": "s1"}})
     project = {"name": "Night Drive", "epoch": "1", **({"key": key} if key else {})}
-    write("status", {"connected": connected, "daw": "ableton", "project": project})
+    write("status", {"connected": connected, "daw": daw, "project": project,
+                     **({"setup": {"component": component, "daw_open": True}} if component else {})})
     if scan:
         write("jobs/j1", {"job_id": "j1", "kind": "scan", "state": scan, "at": now,
                           "progress": {"done": 1, "total": 2}})
@@ -59,10 +62,15 @@ def tree(folder: Path) -> dict:
 
 class Doctor(unittest.TestCase):
     def setUp(self):
-        environ = mock.patch.dict("os.environ", {key: value for key, value in os.environ.items()
-                                                 if key not in ("HERMES_YOLO_MODE", tools.PLUGIN_HOST_ENV)}, clear=True)
+        # A home of the test's own: setup's look for another Kumi on this computer reads HOME and KUMI_HOME.
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        kept = {key: value for key, value in os.environ.items()
+                if key not in ("HERMES_YOLO_MODE", "KUMI_HOME", tools.PLUGIN_HOST_ENV)}
+        environ = mock.patch.dict("os.environ", {**kept, "HOME": home.name, "USERPROFILE": home.name}, clear=True)
         environ.start()
         self.addCleanup(environ.stop)
+        self.home = Path(home.name)
 
     def ready(self, hermes: dict | None = None, settings: dict | None = None, **published):
         host, ctx, data = support.host(self, {"daw": "ableton", "library_folders": [str(support.DRUMS)],
@@ -144,13 +152,45 @@ class Doctor(unittest.TestCase):
         project = self.item(doctor.checks(host), "Project")
         self.assertEqual(project["state"], doctor.FIX)
         self.assertIn("Save the project", project["fix"])
-        for scan, sounds, state in (("running", 0, doctor.CHECK), ("failed", 3, doctor.FIX), (None, 0, doctor.FIX),
-                                    ("done", 3, doctor.OK)):
-            with self.subTest(scan=scan):
-                host, _, _ = self.ready(scan=scan, sounds=sounds)
-                self.assertEqual(self.item(doctor.checks(host), "Sound map")["state"], state)
+        for scan, sounds, stopped, state, said in (
+                ("running", 0, False, doctor.CHECK, "Wait until it shows done"),
+                ("running", 0, True, doctor.FIX, "Connect again"),
+                ("failed", 3, False, doctor.FIX, "scan the folders again"),
+                (None, 0, False, doctor.FIX, "scan them"),
+                ("done", 0, False, doctor.FIX, "WAV or AIFF"),
+                ("done", 3, False, doctor.OK, "")):
+            with self.subTest(scan=scan, sounds=sounds, stopped=stopped):
+                host, _, _ = self.ready(scan=scan, sounds=sounds, stopped=stopped)
+                found = self.item(doctor.checks(host), "Sound map")
+                self.assertEqual(found["state"], state, found)
+                self.assertIn(said, found["fix"])
         host, _, _ = self.ready(settings={"library_folders": []})
         self.assertEqual(self.item(doctor.checks(host), "Sound map")["state"], doctor.CHECK, "a map is optional")
+
+    def test_the_runtimes_own_reading_of_the_daw_part_comes_before_setups_record(self):
+        part = lambda **published: self.item(doctor.checks(self.ready(**published)[0]), "Kumi's part in Live")
+        reading = lambda version: {"installed": True, "version": version, "bundled": "1.0.105"}
+        older = part(component=reading("1.0.99"))
+        self.assertEqual(older["state"], doctor.FIX, "setup's record says the same; the runtime knows better")
+        self.assertIn("older than this Kumi's 1.0.105", older["detail"])
+        self.assertIn("hermes kumi setup", older["fix"])
+        self.assertEqual(part(component=reading("1.0.106"))["state"], doctor.CHECK)
+        self.assertIn("as its runtime read it just now", part(component=reading("1.0.105"))["detail"])
+        for published in ({"component": reading("1.0.99"), "stopped": True},
+                          {"component": reading("1.0.99"), "daw": "reaper"}, {}):
+            with self.subTest(published=published):
+                last = part(**published)
+                self.assertEqual(last["state"], doctor.OK, "only setup's record to go on")
+                self.assertIn("as setup last recorded it", last["detail"])
+
+    def test_the_connection_names_the_daw_the_runtime_runs_for(self):
+        host, _, _ = self.ready(daw="reaper")
+        connection = self.item(doctor.checks(host), "Connection")
+        self.assertEqual(connection["state"], doctor.CHECK)
+        self.assertEqual(connection["detail"], "Connected to REAPER: Night Drive. Kumi's DAW setting is Live.")
+        self.assertIn("hermes kumi setup --daw reaper --use", connection["fix"])
+        host, _, _ = self.ready()
+        self.assertEqual(self.item(doctor.checks(host), "Connection")["detail"], "Connected to Live: Night Drive.")
 
     def test_not_connected_is_left_to_check_and_the_project_waits_for_it(self):
         host, _, _ = self.ready(connected=False)
@@ -202,6 +242,18 @@ class Doctor(unittest.TestCase):
         self.assertFalse([path for path in opened if Path(path).name in (".env", "auth.json")], opened)
         self.assertNotIn(str(data), said, "no folder on this computer")
         self.assertNotIn(str(support.DRUMS), said)
+
+    def test_a_profile_kumi_never_ran_in_keeps_no_plugin_data_folder(self):
+        hermes_home = self.home / "hermes"
+        constants = SimpleNamespace(get_hermes_home=lambda: hermes_home)
+        host, _, _ = support.host(self, hermes_config=ASKS)
+        host._data_dir = None  # Hermes's own folder, as outside the tests
+        with mock.patch.dict("sys.modules", {"hermes_constants": constants}):
+            items = doctor.checks(host)
+            self.assertEqual(self.item(items, "Kumi's runtime")["state"], doctor.FIX)
+            self.assertFalse((hermes_home / "plugin-data").exists(), "Hermes's plugin_data_dir would have made it")
+            self.assertEqual(host.data_dir(), host.data_path(), "what writes uses the same folder")
+            self.assertTrue((hermes_home / "plugin-data" / "kumi").is_dir(), "made on first use")
 
 
 if __name__ == "__main__":

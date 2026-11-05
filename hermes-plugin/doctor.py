@@ -1,10 +1,12 @@
 """`hermes kumi doctor` and `/kumi doctor`: what Kumi needs in this Hermes profile, item by item, each with what to do.
 
 Read only. Hermes's settings come through the host (`Host.hermes_config`, Hermes's documented config reader, and the
-plugin's own settings); Kumi's state from its plugin data: setup's records, what the runtime last published, and its job
-records. It never opens Hermes's .env or auth.json, starts no runtime, writes nothing and asks nothing. Hermes Desktop
-keeps its plugin switches itself, so they're the one item it can only describe. Nothing it prints names a folder on
-this computer: `/kumi doctor`'s answer stays in a chat's transcript.
+plugin's own settings); Kumi's state from its plugin data, found without creating it (`Host.data_path`): setup's
+records, what the runtime last published, and its job records. It never opens Hermes's .env or auth.json, starts no
+runtime, writes nothing and asks nothing. (Reading Hermes's settings is Hermes's own: on a cache miss it keeps a backup
+of a config.yaml it hasn't seen, as every `hermes` command does.) Hermes Desktop keeps its plugin switches itself, so
+they're the one item it can only describe. Nothing it prints names a folder on this computer: `/kumi doctor`'s answer
+stays in a chat's transcript.
 """
 from __future__ import annotations
 
@@ -21,17 +23,22 @@ _WIDTH = 400  # one item's words, as one line
 def checks(host: tools.Host, **chat: Any) -> list[dict]:
     """Every item, in the order the report shows them. `chat` is a chat's call context (`/kumi doctor`): a chat's own
     /yolo is then read too, which a terminal can't see."""
-    data = Path(host.data_dir())
+    data = host.data_path()
+    config = host.hermes_config()
+    items = [_approvals(host, config, chat=bool(chat.get("session_id"))), _isolation(config), _hook(host),
+             _listening(host, config), _hermes()]
+    if data is None:
+        missing = _item("Kumi's data", FIX, "Kumi can't find this profile's Hermes home, so it can't read its own data.",
+                        "Check that Hermes runs with this profile, then try again.")
+        return [*items, missing, _desktop()]
     state = data / "state"
     daw = host.daw()
     app = schemas.DAW_NAMES.get(daw, daw)
-    config = host.hermes_config()
     report = setup.status(daw=daw, data_dir=data, plugin_dir=host.plugin_dir)
     shown = setup.for_model(report)  # setup's words naming no path on this computer
     status = snapshots.status(state)
-    items = [_approvals(host, config, chat=bool(chat.get("session_id"))), _isolation(config), _hook(host),
-             _listening(host, config), _hermes(), _runtime(report, shown), _part(report, shown, app),
-             _connection(status, report, app), _project(status, app), _library(host, state), _audio(shown)]
+    items += [_runtime(report, shown), _part(report, shown, status, daw, app), _connection(status, report, daw),
+              _project(status), _library(host, state, live=not status.get("stale")), _audio(shown)]
     mirelo = getattr(host, "mirelo_status", None)  # Mirelo's readiness, where this version of Kumi has it
     if callable(mirelo):
         items.append(_mirelo(mirelo()))
@@ -41,7 +48,7 @@ def checks(host: tools.Host, **chat: Any) -> list[dict]:
 
 def report(items: list[dict]) -> str:
     """The items as the terminal and the chat show them, then what's left to do."""
-    lines = ["Kumi doctor: what Kumi needs in this profile (read only: nothing was changed)."]
+    lines = ["Kumi doctor: what Kumi needs in this profile (read only: Kumi changed nothing)."]
     for item in items:
         lines.append(f"{_MARKS.get(item['state'], 'CHECK')} {_said(item['name'], 60)}: {_said(item['detail'])}")
         if item.get("fix"):
@@ -154,7 +161,15 @@ def _runtime(report: dict, shown: dict) -> dict:
     return _item(name, OK, f"Kumi {_said(version, 40)}'s runtime is installed, the version this plugin pins.")
 
 
-def _part(report: dict, shown: dict, app: str) -> dict:
+def _version(text: Any) -> tuple[int, ...] | None:
+    numbers = [int(part) for part in str(text or "").split("-")[0].split(".") if part.isdigit()]
+    return tuple(numbers) if numbers else None
+
+
+def _part(report: dict, shown: dict, status: dict, daw: str, app: str) -> dict:
+    """Kumi's part in the DAW. What the runtime itself last read of it (`status.setup.component`, when it runs for this
+    DAW) comes first: setup's record survives a runtime upgrade, so only the runtime can say the part is this Kumi's
+    version. Without a running runtime, setup's record is the last word, and is labelled so."""
     name = f"Kumi's part in {app}"
     if report.get("state") in ("no_pin", "unsupported_platform", "needs_runtime", "outdated_runtime",
                                "damaged_runtime"):
@@ -163,6 +178,17 @@ def _part(report: dict, shown: dict, app: str) -> dict:
     existing = shown.get("existing_kumi") or {}
     if component.get("state") == "not_installed":
         return _item(name, FIX, f"Kumi's part in {app} isn't set up in this profile.", _SET_UP)
+    setup_now = status.get("setup") if isinstance(status.get("setup"), dict) else {}
+    live = setup_now.get("component") if not status.get("stale") and status.get("daw") == daw else None
+    if isinstance(live, dict) and live.get("installed"):
+        have, bundled = _version(live.get("version")), _version(live.get("bundled"))
+        said, ours = _said(live.get("version"), 40), _said(live.get("bundled"), 40)
+        if have and bundled and have < bundled:
+            return _item(name, FIX, f"Kumi's part in {app} is {said}, older than this Kumi's {ours}.", _SET_UP)
+        if have and bundled and have > bundled:
+            return _item(name, CHECK, f"Kumi's part in {app} is {said}, newer than this Kumi's {ours}.",
+                         "Update the Kumi plugin (hermes plugins update kumi).")
+        return _item(name, OK, f"Kumi's part in {app} is {said}, this Kumi's own, as its runtime read it just now.")
     if component.get("state") == "unknown" or existing.get("adopted"):
         return _item(name, OK, f"Kumi uses another Kumi installation's part in {app}: set up and updated there.")
     parts = [part for part in component.get("parts") or [] if isinstance(part, dict)]
@@ -170,16 +196,26 @@ def _part(report: dict, shown: dict, app: str) -> dict:
     version = _said(component.get("version"), 40)
     if behind:
         return _item(name, FIX, f"Kumi's part in {app} ({version}) isn't complete: {', '.join(behind)}.", _SET_UP)
-    return _item(name, OK, f"Kumi's part in {app} is set up ({_said(component.get('name'), 60)} {version}).")
+    return _item(name, OK, f"Kumi's part in {app} is set up ({_said(component.get('name'), 60)} {version}), as setup "
+                           "last recorded it; Kumi's runtime checks it against its own when it runs.")
 
 
-def _connection(status: dict, report: dict, app: str) -> dict:
+def _connection(status: dict, report: dict, daw: str) -> dict:
+    """The connection the runtime last published, named by the DAW it runs for (a chat can connect another DAW
+    without changing the setting)."""
     name = "Connection"
+    setting = schemas.DAW_NAMES.get(daw, daw)
+    running_for = status.get("daw") if status.get("daw") in schemas.DAW_NAMES else daw
+    app = schemas.DAW_NAMES[running_for] if running_for in schemas.DAW_NAMES else setting
     if status.get("connected"):
         project = status.get("project") if isinstance(status.get("project"), dict) else {}
-        return _item(name, OK, f"Connected to {app}: {_said(project.get('name') or 'a project', 80)}.")
+        connected = f"Connected to {app}: {_said(project.get('name') or 'a project', 80)}."
+        if running_for != daw:
+            return _item(name, CHECK, f"{connected} Kumi's DAW setting is {setting}.",
+                         f"To make {app} Kumi's DAW, run hermes kumi setup --daw {running_for} --use.")
+        return _item(name, OK, connected)
     if report.get("state") != "ready":
-        return _item(name, OFF, f"Set Kumi up for {app} first.")
+        return _item(name, OFF, f"Set Kumi up for {setting} first.")
     if report.get("next_step") == "choose_control_surface":
         return _item(name, FIX, "Live doesn't run Kumi's Remote Script yet.",
                      "In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI).")
@@ -188,10 +224,11 @@ def _connection(status: dict, report: dict, app: str) -> dict:
     return _item(name, CHECK, running, f"Open {app}, then ask Hermes to connect to it.")
 
 
-def _project(status: dict, app: str) -> dict:
+def _project(status: dict) -> dict:
     name = "Project"
+    app = schemas.DAW_NAMES.get(status.get("daw"), "the DAW")
     if not status.get("connected"):
-        return _item(name, OFF, f"Connect to {app} first: then the open project's key and epoch show here.")
+        return _item(name, OFF, "Connect first: then the open project's key and epoch show here.")
     project = status.get("project") if isinstance(status.get("project"), dict) else {}
     if not project.get("key"):
         return _item(name, FIX, "The open project has no key yet, so Kumi can't keep its changes apart from another "
@@ -201,7 +238,10 @@ def _project(status: dict, app: str) -> dict:
                            f"{_said(project.get('epoch'), 40)}.")
 
 
-def _library(host: tools.Host, state: Path) -> dict:
+def _library(host: tools.Host, state: Path, *, live: bool) -> dict:
+    """The sound map: its approved folders, and its last scan as the runtime's job record says, taken with the
+    runtime's liveness (a scan left "running" by a runtime that was stopped is marked interrupted only at its next
+    start)."""
     name = "Sound map"
     folders = host.library_folders()
     if not folders:
@@ -212,6 +252,9 @@ def _library(host: tools.Host, state: Path) -> dict:
     sounds = (snapshots.map_revision(state) or {}).get("sounds")
     count = len(sounds) if isinstance(sounds, dict) else 0
     approved = f"{len(folders)} approved folder{'s' if len(folders) != 1 else ''}"
+    if scan.get("state") == "running" and not live:
+        return _item(name, FIX, "The last scan stopped when Kumi's runtime did (its record still says running).",
+                     "Connect again, then ask Hermes to scan the folders again.")
     if scan.get("state") == "running":
         done, total = progress.get("done"), progress.get("total")
         so_far = f" ({_said(done, 12)} of {_said(total, 12)})" if done is not None and total is not None else ""
@@ -219,6 +262,11 @@ def _library(host: tools.Host, state: Path) -> dict:
     if scan.get("state") in ("failed", "cancelled", "interrupted"):
         return _item(name, FIX, f"The last scan was {_said(scan['state'], 20)}; the map has {count} sounds.",
                      "Ask Hermes to scan the folders again.")
+    if not count and scan.get("state") == "done":
+        return _item(name, FIX, f"The last scan of the {approved} found no audio Kumi can read: it reads WAV and "
+                                "AIFF, and more with an ffmpeg allowed at setup.",
+                     "Approve a folder that holds WAV or AIFF files (or allow ffmpeg with hermes kumi setup for MP3 "
+                     "and FLAC), then scan it.")
     if not count:
         return _item(name, FIX, f"The {approved} haven't been scanned yet.", "Ask Hermes to scan them.")
     return _item(name, OK, f"{count} sounds on the map, from the {approved}.")
