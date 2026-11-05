@@ -14,7 +14,7 @@ import time
 from typing import Any, Callable
 import uuid
 
-from . import calls, generate, listening, runtime, schemas, scripts, setup, snapshots
+from . import calls, devices, generate, listening, runtime, schemas, scripts, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -683,6 +683,31 @@ def kumi_script(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "script", script, kwargs)
 
 
+# A device build whose answer never came: a file may be in the User Library, and building again would write another.
+DEVICE_UNSURE_HINT = ("Whether the device was written is unknown. Don't build it again: ask the producer to look in "
+                      "User Library/Kumi/Audio Effects in Live's Browser.")
+
+
+def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-22: a Max for Live audio effect, built once as the producer approved it. The spec is written in its one
+    canonical form, the bytes the approval hashed: serve hashes what it receives and refuses a build whose spec isn't
+    the approved SHA-256 (`stale`), or whose file isn't the one the approval named. A refusal or a stale answer goes
+    back as serve gave it; a built device comes with the next step, loading and placing it in a change of its own."""
+    call = kwargs.get("kumi_call")
+    approved = call.extra.get("sha256") if isinstance(call, calls.Entry) else None
+    spec = args.get("spec")
+    spec_json = devices.canonical(spec) if devices.problem(spec) is None else None
+    if spec_json is None or not isinstance(approved, str) or scripts.sha256(spec_json) != approved:
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't build the device: it isn't the spec the "
+                                                            "producer approved."}}
+    built = _write(host, "device", {"action": "build", "spec_json": spec_json, "sha256": approved}, kwargs)
+    if built.get("state") == "unsure":
+        return {**built, "hint": DEVICE_UNSURE_HINT}
+    if isinstance(built.get("item"), str):
+        return {**built, "next": devices.next_step(built)}
+    return built
+
+
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
@@ -1152,6 +1177,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_transport", schemas.KUMI_TRANSPORT, kumi_transport, "▶️"),
     ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
     ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
+    ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1160,7 +1186,7 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo", "kumi_script")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device")
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))

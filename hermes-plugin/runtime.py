@@ -99,18 +99,22 @@ class NotSent(Unavailable):
 
 
 class Refused(Exception):
-    """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`)."""
+    """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`). A device
+    spec's refusal (CC-22) also lists the builder's findings, which the model needs to fix it."""
 
-    def __init__(self, code: str, reason: str, owner: dict | None = None):
+    def __init__(self, code: str, reason: str, owner: dict | None = None, findings: list | None = None):
         super().__init__(reason)
         self.code = code
         self.reason = reason
         self.owner = owner
+        self.findings = findings
 
     def as_json(self) -> dict:
         error = {"code": self.code, "reason": self.reason}
         if self.owner:
             error["owner"] = self.owner
+        if self.findings:
+            error["findings"] = self.findings
         return {"error": error}
 
 
@@ -653,7 +657,8 @@ class Runtime:
         if result.get("isError"):
             error = content.get("error") if isinstance(content.get("error"), dict) else {}
             raise Refused(str(error.get("code") or "failed"), str(error.get("reason") or f"Kumi's {tool} failed."),
-                          error.get("owner") if isinstance(error.get("owner"), dict) else None)
+                          error.get("owner") if isinstance(error.get("owner"), dict) else None,
+                          error.get("findings") if isinstance(error.get("findings"), list) else None)
         return content
 
     def close_if_idle(self, idle_after: float, now: float) -> bool:
