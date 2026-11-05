@@ -249,6 +249,7 @@ function usePlaying(audition) {
 
 // src/shared/store.ts
 var JOB_KEPT_MS = 6e4;
+var MOST_JOBS = 20;
 var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} };
 function finished(job) {
   return typeof job.state === "string" && job.state !== "running";
@@ -379,29 +380,32 @@ var KumiStore = class {
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
   trackJob(id) {
     const jobId = plainId(id);
-    if (!jobId) return;
-    if (!this.state.jobs[jobId]) this.set({ jobs: { ...this.state.jobs, [jobId]: { job_id: jobId, state: "running", ended_at: null } } });
+    if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
     void this.refreshJob(jobId);
   }
-  /** Read every job still running (not while the runtime is quiet: nothing moves then), and forget the finished
-   *  ones kept long enough. */
+  /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
+   *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
+   *  with it. */
   refreshJobs(now = Date.now()) {
     const kept = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
     if (kept.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept) });
-    if (this.state.status?.stale) return Promise.resolve();
-    return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id))).then(() => void 0);
+    const stopped = this.state.status?.stale === true && this.state.status.running === false;
+    if (this.state.status?.stale && !stopped) return Promise.resolve();
+    return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id, stopped))).then(() => void 0);
   }
-  refreshJob(id) {
+  refreshJob(id, stopped = false) {
     return this.once(`job:${id}`, async () => {
       const generation = this.generation;
       try {
-        const job = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
-        if (generation !== this.generation || !this.state.jobs[id]) return;
+        const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
+        if (generation !== this.generation) return;
         const before = this.state.jobs[id];
-        const ended_at = finished(job) ? before.ended_at ?? Date.now() : null;
+        if (!before && finished(read)) return;
+        const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
+        const ended_at = finished(job) ? before?.ended_at ?? Date.now() : null;
         this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } });
       } catch (error) {
-        if (generation !== this.generation || statusOf(error) !== 404) return;
+        if (generation !== this.generation || statusOf(error) !== 404 || !this.state.jobs[id]) return;
         const { [id]: _gone, ...rest } = this.state.jobs;
         this.set({ jobs: rest });
       }
