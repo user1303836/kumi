@@ -456,19 +456,25 @@ impl Session {
             for name in names {
                 self.suggest_remembered(&mut evolution, &mut searches, &name, &target).await;
             }
-            let winner = evolution.slots.first().cloned().ok_or_else(|| RuntimeError::plain("Empty goal rig"))?;
+            let Some(winner) = evolution.slots.first().cloned() else {
+                let mut notes = rig.close().await.unwrap_or_default();
+                notes.extend(rig.put_back(abort::timeout(120_000)).await);
+                return Ok(Some(format!("[Kumi] The candidate for {label} is no longer available, so its knob search stopped. {}", notes.join(" ")).trim_end().into()));
+            };
 
             let knobs = winner.knobs;
             let start = winner.elite;
             let mut from = None;
             let mut to = None;
             let mut kept = None;
+            let mut gone = false;
 
             let trial = |knobs, values, fresh| GenerationTrial { slot: winner.name.clone(), knobs, values, fresh };
 
             let search: Result<(), RuntimeError> = async {
                 let first = [trial(knobs.clone(), start.clone(), None)];
                 let heard = rig.generation(&first, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
+                gone = heard.gone.contains(&winner.name);
                 self.remember_trials(SearchKind::Match, &searches, &first, &heard, &target, None, &[]);
                 from = heard.scores.get(&winner.name).copied();
 
@@ -484,6 +490,11 @@ impl Session {
                     let remembered = remembered_slots(&trials);
 
                     let result = rig.generation(&requests, op.signal.clone(), Some(GenerationOptions { screen: Some(rig.screens()) })).await?;
+                    if result.gone.contains(&winner.name) {
+                        gone = true;
+                        evolution.remove(&winner.name);
+                        break;
+                    }
 
                     evolution.scored(&trials, &result.scores);
                     self.remember_trials(SearchKind::Match, &searches, &requests, &result, &target, Some(evolution.generation), &remembered);
@@ -509,6 +520,7 @@ impl Session {
                     if moved {
                         let last = [trial(best.knobs.clone(), best.elite.clone(), Some(true))];
                         let heard = rig.generation(&last, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
+                        gone = heard.gone.contains(&winner.name);
                         self.remember_trials(SearchKind::Match, &searches, &last, &heard, &target, None, &[]);
                         to = heard.scores.get(&winner.name).copied();
                     }
@@ -529,8 +541,10 @@ impl Session {
             let (final_knobs, final_values) = kept.as_ref().map(|(k, v)| (k.as_slice(), v.as_slice())).unwrap_or((&knobs, &start));
 
             let cleanup = abort::timeout(120_000);
-            if let Some(reason) = rig.settle(&winner.name, final_knobs, final_values, cleanup.clone()).await?.filter(|s| !s.is_empty()) {
-                notes.push(format!("Its settings couldn't all be put back ({reason}); check {}.", winner.name));
+            if !gone {
+                if let Some(reason) = rig.settle(&winner.name, final_knobs, final_values, cleanup.clone()).await?.filter(|s| !s.is_empty()) {
+                    notes.push(format!("Its settings couldn't all be put back ({reason}); check {}.", winner.name));
+                }
             }
             notes.extend(rig.put_back(cleanup).await);
             if let Err(error) = search {
@@ -539,6 +553,9 @@ impl Session {
                     self.notice(notes.join(" "));
                 }
                 return Err(error);
+            }
+            if gone {
+                return Ok(Some(format!("[Kumi] “{}” left the search, so its knob search stopped. {}", winner.name, notes.join(" ")).trim_end().into()));
             }
             let Some(from) = from else {
                 return Ok(None);

@@ -101,7 +101,7 @@ impl LiveRenderer {
         beats: Option<f64>,
         signal: Signal,
     ) -> Result<Rig, RuntimeError> {
-        self.open_rig_with(candidates, from, beats, false, signal).await
+        self.open_rig_with(candidates, from, beats, false, false, signal).await
     }
     /// A rig that, with `before_main` and Kumi Ears, also hears the mix as it comes into Main's chain.
     pub(super) async fn open_rig_with(
@@ -110,6 +110,7 @@ impl LiveRenderer {
         from: Option<f64>,
         beats: Option<f64>,
         before_main: bool,
+        missing_ok: bool,
         signal: Signal,
     ) -> Result<Rig, RuntimeError> {
         let mut rig = Rig {
@@ -153,10 +154,13 @@ impl LiveRenderer {
                 .iter()
                 .find(|track| track.get("ref").and_then(Value::as_str) == Some(&candidate.track))
                 .or_else(|| tracks.iter().find(|track| track.get("name").and_then(Value::as_str) == Some(&candidate.track)));
-            let name = found
-                .and_then(|track| track.get("name"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| observation(format!("{} isn't a track in this turn's discovery; discover again.", candidate.track)))?;
+            let Some(name) = found.and_then(|track| track.get("name")).and_then(Value::as_str) else {
+                if missing_ok {
+                    rig.notes.push(super::goal::left_search(&candidate.track));
+                    continue;
+                }
+                return Err(observation(format!("{} isn't a track in this turn's discovery; discover again.", candidate.track)));
+            };
             if tracks.iter().filter(|track| track.get("name").and_then(Value::as_str) == Some(name)).count() > 1 {
                 if link.is_none() {
                     return Err(observation(format!("Two tracks are named “{name}”; rename one so Kumi can render it.")));
@@ -176,6 +180,11 @@ impl LiveRenderer {
                 mix: false,
                 quiet: false,
             });
+        }
+        // A resumed goal may have lost every candidate. It still opens an empty rig so its session can retire the
+        // saved slots and finish with an honest reason, without making a recording track or arming an empty pass.
+        if rig.sources.is_empty() {
+            return Ok(rig);
         }
         let mut steps = vec![];
         let result: Result<(),RuntimeError> = self.history.quietly(Some(&mut steps),async {

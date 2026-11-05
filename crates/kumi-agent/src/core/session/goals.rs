@@ -52,6 +52,12 @@ fn candidates(e: &Evolution, clips: bool) -> Vec<AuditionCandidate> {
         .map(|s| AuditionCandidate { track: s.name.clone(), label: Some(s.label.clone()), clip: clips.then(|| "first".into()), mix: None })
         .collect()
 }
+fn remove_gone(e: &mut Evolution, full: &mut IndexMap<String, f64>, gone: &[String]) {
+    for name in gone {
+        e.remove(name);
+        full.shift_remove(name);
+    }
+}
 /// A goal run's hold on the session's goal flags: from its first moment a /loop stop stops this run (not an older
 /// paused goal), and however the run ends, the flags go with it (unless a newer run holds them by then).
 struct GoalHold {
@@ -324,6 +330,11 @@ impl Session {
             self.goal_event(GoalPhase::Running, Some(&state), None, started, Some(&evolution), &full, screening);
 
             while !op.signal.is_cancelled() {
+                if evolution.slots.is_empty() {
+                    state.status = GoalRun::Done;
+                    state.why = Some("all the candidates left the search".into());
+                    break;
+                }
                 let reached = if screening {
                     reported(&evolution, &full, screening).and_then(|s| s.score).unwrap_or(0.)
                 } else {
@@ -348,6 +359,7 @@ impl Session {
 
                     let checked = rig.generation(&elites, op.signal.clone(), Some(GenerationOptions { screen: Some(false) })).await?;
                     self.remember_trials(SearchKind::Goal, &searches, &elites, &checked, &target, None, &[]);
+                    remove_gone(&mut evolution, &mut full, &checked.gone);
 
                     // Stable slot order preserves source Map ties in the displayed leader.
                     for slot in &evolution.slots {
@@ -357,6 +369,7 @@ impl Session {
                     }
                     evolution.rendered += checked.scores.len() as u32;
                     sync(&mut state, &evolution, started);
+                    self.persist_goal(&place, &state);
                     self.goal_event(GoalPhase::Running, Some(&state), None, started, Some(&evolution), &full, screening);
                     continue;
                 }
@@ -370,8 +383,14 @@ impl Session {
                 let remembered = remembered_slots(&trials);
                 let result = rig.generation(&requests, op.signal.clone(), Some(GenerationOptions { screen: Some(screening) })).await?;
 
+                remove_gone(&mut evolution, &mut full, &result.gone);
                 evolution.scored(&trials, &result.scores);
                 self.remember_trials(SearchKind::Goal, &searches, &requests, &result, &target, Some(evolution.generation), &remembered);
+                if evolution.slots.is_empty() {
+                    state.status = GoalRun::Done;
+                    state.why = Some("all the candidates left the search".into());
+                    break;
+                }
                 silent_runs = if result.scores.is_empty() { silent_runs + 1 } else { 0 };
 
                 if silent_runs >= 2 {
@@ -459,7 +478,10 @@ impl Session {
                     };
                     open = true;
 
-                    for slot in rig.slots() {
+                    let slots = rig.slots();
+                    let gone: Vec<_> = evolution.slots.iter().filter(|s| !slots.iter().any(|slot| slot.name == s.name)).map(|s| s.name.clone()).collect();
+                    remove_gone(&mut evolution, &mut full, &gone);
+                    for slot in slots {
                         let search =
                             searches.entry(slot.name.clone()).or_insert_with(|| SlotSearch::new(&slot.name, &slot.knobs, BTreeMap::new()));
                         search.extend(&slot.knobs, &slot.devices);

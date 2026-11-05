@@ -818,6 +818,9 @@ pub struct Generation {
     pub gaps: HashMap<String, Vec<String>>,
     pub silent: Vec<String>,
     pub frozen: HashMap<String, HashSet<String>>,
+    /// Slots whose candidate track is no longer available. They have left the rig, including its render sources;
+    /// the session drops their saved search state too. A missing knob alone belongs in `frozen`.
+    pub gone: Vec<String>,
     /// Each slot's gap no knob closes, when it has one.
     pub structural: HashMap<String, StructuralMove>,
     /// Rendered on the short window, and how many trials were heard from the cache.

@@ -2319,6 +2319,9 @@ struct SearchRig {
     /// A generation fails.
     fails: bool,
     kept_only: Option<String>,
+    names: Vec<&'static str>,
+    /// Candidate names that disappear on this generation (zero based).
+    gone_after: Option<(usize, Vec<&'static str>)>,
 }
 impl SearchRig {
     fn new(scores: Vec<f64>) -> Self {
@@ -2336,6 +2339,8 @@ impl SearchRig {
             put_back_says: None,
             fails: false,
             kept_only: None,
+            names: vec!["Candidate"],
+            gone_after: None,
         }
     }
     fn knob() -> Knob {
@@ -2354,13 +2359,17 @@ impl SearchRig {
 #[async_trait(?Send)]
 impl GoalRig for SearchRig {
     fn slots(&self) -> Vec<GoalSlotInfo> {
-        vec![GoalSlotInfo {
-            name: "Candidate".into(),
-            label: "Drift".into(),
-            chain: "Operator".into(),
-            knobs: vec![Self::knob()],
-            devices: Default::default(),
-        }]
+        self.names
+            .iter()
+            .filter(|name| !self.gone_after.as_ref().is_some_and(|(after, gone)| self.calls.borrow().len() > *after && gone.contains(name)))
+            .map(|name| GoalSlotInfo {
+                name: (*name).into(),
+                label: "Drift".into(),
+                chain: "Operator".into(),
+                knobs: vec![Self::knob()],
+                devices: Default::default(),
+            })
+            .collect()
     }
     fn screens(&self) -> bool {
         self.screens
@@ -2381,7 +2390,15 @@ impl GoalRig for SearchRig {
         self.calls.borrow_mut().push((trials.to_vec(), options));
         tokio::select! {_=signal.cancelled()=>return Err(RuntimeError::Aborted),_=delay(self.ms)=>{}}
         let mut result = Generation::default();
+        if let Some((after, gone)) = &self.gone_after {
+            if at == *after {
+                result.gone = gone.iter().map(|name| (*name).into()).collect();
+            }
+        }
         for trial in trials {
+            if result.gone.contains(&trial.slot) {
+                continue;
+            }
             if !self.silent {
                 let score = if self.values_score {
                     trial.values[0] * 100.
@@ -2460,6 +2477,70 @@ async fn generation(session: &Session, n: u32) {
     }
     panic!("goal did not reach generation {n}: {:?}", session.goal_status());
 }
+local_test!(a_goal_retires_gone_candidates_before_choosing_or_saving_its_winner, {
+    for all in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = create_goal_store(dir.path().join("goals"));
+        let mut raw = SearchRig::new(vec![80., 60., 96.]);
+        raw.names = vec!["Candidate", "Stays"];
+        raw.gone_after = Some((1, if all { vec!["Candidate", "Stays"] } else { vec!["Candidate"] }));
+        let rig = Rc::new(raw);
+        let h = goal_harness(rig.clone(), true, |o| o.goals = Some(store.clone()));
+        h.session.start().await.unwrap();
+        h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+        let status = h.session.goal_status().unwrap();
+        assert_eq!(status.state, GoalPhase::Done);
+        assert_eq!(status.candidates, if all { 0 } else { 1 });
+        assert!(!rig.cleanup.borrow().iter().any(|step| step == "keep:Candidate"));
+        if all {
+            assert_eq!(status.why.as_deref(), Some("all the candidates left the search"));
+            assert!(status.best.is_none());
+            assert!(!rig.cleanup.borrow().iter().any(|step| step.starts_with("keep:")));
+        } else {
+            assert_eq!(status.best.unwrap().score, 96.);
+            assert!(rig.calls.borrow()[2].0.iter().all(|trial| trial.slot == "Stays"));
+            assert!(rig.cleanup.borrow().iter().any(|step| step == "keep:Stays"));
+        }
+        h.session.close().await.unwrap();
+        let mut saved = store.load("unsaved").await.unwrap().unwrap();
+        assert_eq!(saved.slots.iter().map(|slot| slot.name.as_str()).collect::<Vec<_>>(), if all { vec![] } else { vec!["Stays"] });
+        if !all {
+            // A pre-fix paused file can still retain a deleted winner: the reopened rig's actual slots retire it
+            // before its stored score can win, and the next save repairs the same version-1 file.
+            saved.status = GoalRun::Paused;
+            saved.slots[0].score = Some(70.);
+            let mut deleted = saved.slots[0].clone();
+            deleted.name = "Missing".into();
+            deleted.score = Some(99.);
+            saved.slots.insert(0, deleted);
+            for all_missing_on_resume in [false, true] {
+                store.save("unsaved", &saved).await.unwrap();
+                let mut raw = SearchRig::new(vec![96.]);
+                raw.names = if all_missing_on_resume { vec![] } else { vec!["Stays"] };
+                let resumed = Rc::new(raw);
+                let h = goal_harness(resumed.clone(), true, |o| o.goals = Some(store.clone()));
+                h.session.start().await.unwrap();
+                h.session.submit("/loop", None).await.unwrap();
+                assert_eq!(
+                    h.record.goal_requests.borrow()[0].candidates.iter().map(|c| c.track.as_str()).collect::<Vec<_>>(),
+                    ["Missing", "Stays"]
+                );
+                let kept: Vec<_> = resumed.cleanup.borrow().iter().filter(|step| step.starts_with("keep:")).cloned().collect();
+                assert_eq!(kept, if all_missing_on_resume { vec![] } else { vec!["keep:Stays"] });
+                if all_missing_on_resume {
+                    assert!(resumed.calls.borrow().is_empty(), "no generation or stale best is tried on an empty reopened rig");
+                    assert_eq!(h.session.goal_status().unwrap().why.as_deref(), Some("all the candidates left the search"));
+                }
+                h.session.close().await.unwrap();
+                assert_eq!(
+                    store.load("unsaved").await.unwrap().unwrap().slots.iter().map(|slot| slot.name.as_str()).collect::<Vec<_>>(),
+                    if all_missing_on_resume { vec![] } else { vec!["Stays"] }
+                );
+            }
+        }
+    }
+});
+
 local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_goal_store(dir.path().join("goals"));
@@ -3760,6 +3841,24 @@ local_test!(a_match_whose_search_failed_still_says_what_putting_back_said, {
     assert!(h.notice("Kumi couldn't put “Drift” back as the goal found it."));
     h.session.close().await.unwrap();
 });
+local_test!(a_match_stops_polishing_a_gone_winner_without_settling_it, {
+    for after in [0, 1] {
+        let mut raw = SearchRig::new(vec![50.]);
+        raw.gone_after = Some((after, vec!["Candidate"]));
+        let rig = Rc::new(raw);
+        let h = match_harness(vec![Some(("Drift", 50.)), None], |o| {
+            o.match_budget = Some(MatchBudget { rounds: 0, polish_ms: Some(50), ..MATCH_BUDGET });
+        });
+        *h.record.goal_rig.borrow_mut() = Some(rig.clone());
+        h.session.start().await.unwrap();
+        h.session.submit("match this reference", None).await.unwrap();
+        assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "put back"]);
+        assert!(rig.settled.borrow().is_empty());
+        assert!(h.record.calls.borrow()[1].contains("left the search"));
+        h.session.close().await.unwrap();
+    }
+});
+
 local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not_better, {
     // Exercise the full search budget independently of the host timer resolution.
     tokio::time::pause();

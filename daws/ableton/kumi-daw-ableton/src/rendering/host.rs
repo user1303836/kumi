@@ -78,7 +78,7 @@ impl Renderer for LiveHost {
     async fn hear_pass(&self, candidates: &[AuditionCandidate], window: Window, before_main: bool, signal: Signal) -> Pass {
         let mut rig = None;
         let rendered: Result<(IndexMap<String, Render>, Vec<(String, bool)>), RuntimeError> = async {
-            rig = Some(self.open_rig_with(candidates, Some(window.from), Some(window.beats), before_main, signal.clone()).await?);
+            rig = Some(self.open_rig_with(candidates, Some(window.from), Some(window.beats), before_main, false, signal.clone()).await?);
             let rig = rig.as_mut().unwrap();
             let files = self.render_pass(rig, signal.clone()).await?;
             Ok((files, rig.sources.iter().map(|source| (source.name.clone(), source.mix)).collect()))

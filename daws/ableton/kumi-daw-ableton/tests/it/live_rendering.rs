@@ -37,6 +37,8 @@ use std::{
 struct Fixture {
     case: Value,
     calls: Cell<usize>,
+    /// A goal generation checks availability before setting and before rendering. The old recording's Set is static.
+    availability_reads: Cell<usize>,
     original: RefCell<Signal>,
     cancelled: Cell<bool>,
     tag: RefCell<String>,
@@ -96,6 +98,20 @@ impl McpEndpoint for Fixture {
         let index = self.calls.get();
         let actual = json!({"name":name,"args":args});
         let mut expected = self.case["calls"][index].clone();
+        // (#789) Two availability reads are new: unchanged and cached trials used to keep missing candidates too.
+        // Reuse only this exact track projection, at most twice a generation, from the latest recorded reply. The
+        // real disappearing-track cases exercise both render paths in `live_goal`; the immutable oracle is unchanged.
+        if self.availability_reads.get() > 0
+            && name == "live_discover"
+            && actual["args"]["kind"] == "track"
+            && actual["args"]["fields"] == json!(["ref", "name", "color"])
+            && actual != expected
+        {
+            if let Some(read) = (0..index).rev().find(|at| self.case["calls"][*at] == actual) {
+                self.availability_reads.set(self.availability_reads.get() - 1);
+                return self.answer(read);
+            }
+        }
         // Goals now read the immutable product name and enabled state before reusing a limiter, and each device's identity, to
         // find it again however the chain moves (#399).
         // Adapt only that exact read projection; keep the frozen oracle's data, mutations and
@@ -282,6 +298,7 @@ impl Bench {
         let endpoint = Rc::new(Fixture {
             case: case.clone(),
             calls: Cell::new(0),
+            availability_reads: Cell::new(0),
             original: RefCell::new(Signal::new()),
             cancelled: Cell::new(false),
             tag: RefCell::new("tag".into()),
@@ -384,6 +401,7 @@ impl Bench {
     }
     /// One of a case's operations; what it comes to.
     async fn run(&self, goal: &mut Option<Rc<dyn GoalRig>>, op: &Value, signal: Signal) -> Result<Value, RuntimeError> {
+        self.endpoint.availability_reads.set(if op["type"] == "generation" { 2 } else { 0 });
         let (connection, rendering) = (&self.connection, &self.rendering);
         let result:Result<Value,RuntimeError>=async{Ok(match op["type"].as_str().unwrap(){
     "reset"=>{rendering.reset_turn(op["continuing"].as_bool().unwrap_or(false));Value::Null},
@@ -694,6 +712,7 @@ async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal
             let endpoint = Rc::new(Fixture {
                 case: case.clone(),
                 calls: Cell::new(0),
+                availability_reads: Cell::new(0),
                 original: RefCell::new(controller.clone()),
                 cancelled: Cell::new(false),
                 tag: RefCell::new("tag".into()),
