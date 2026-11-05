@@ -77,7 +77,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - **Listening to a track or the mix** asks first, and plays only the beat window you approve (60 seconds at most),
   only while the DAW is stopped. Routing and transport may change briefly and are put back after. Live captures it
   through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
-  that owns their part, and Kumi copies that one file and removes it.
+  that owns their part, and Kumi copies that one file and removes it. REAPER may show the project as modified after
+  a track listen, since only saving clears that flag; Kumi never saves.
 - Kumi in Hermes never uses Kumi's own sign-in, model providers or updater, and sends no telemetry.
 
 ## Limits
