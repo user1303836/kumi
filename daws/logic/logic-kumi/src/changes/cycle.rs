@@ -506,6 +506,7 @@ pub fn apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     let after = write(ctx, seen, &wanted)?;
     Ok(Applied {
         applied: after.clone(),
+        target: None,
         material: Some(json!({"undo": {"mode": "value"}})),
         display: json!({"title": title(&after), "before": public(&now), "after": public(&after)}),
         created: None,
