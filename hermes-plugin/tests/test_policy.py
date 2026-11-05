@@ -393,6 +393,17 @@ class CallIds(unittest.TestCase):
         support.handle(self.host, "kumi_history", {"limit": 5}, session_id="s1", task_id="t1")
         self.assertEqual(self.received("history")[-1]["_host"]["tool_call_id"], "coerced")
 
+    def test_a_preview_the_hook_asks_for_names_the_same_call_as_its_dispatch(self):
+        # The runtime keys what a preview pinned on the call it's for (#1005), so the hook's preview and the
+        # approved call carry the same tool-call id.
+        self.hook("kumi_change", change(), "w-1")
+        self.assertEqual(support.handle(self.host, "kumi_change", change(), session_id="s1", task_id="t1")["state"],
+                         "applied")
+        sent = [m["params"]["arguments"] for m in support.requests(self.data / "state")
+                if m.get("params", {}).get("name") == "change"]
+        self.assertEqual([(args.get("preview") is True, args["_host"]["session_id"], args["_host"]["tool_call_id"])
+                          for args in sent], [(True, "s1", "w-1"), (False, "s1", "w-1")])
+
 
 class ThroughHermes(unittest.TestCase):
     """Hermes's own gate (v0.22.7) with Kumi's hook: a denied or unanswered approval sends no change."""
