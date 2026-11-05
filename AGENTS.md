@@ -25,7 +25,7 @@ crates/                     Kumi itself; DAW-neutral
   kumi-library/             L2 the producer's library, plug-in formats, samples on disk
   kumi-web/                 L2 web and video tools
   kumi-media/, kumi-net/    L1 audio, voice, ffmpeg/yt-dlp/whisper; HTTP clients, proxies
-  kumi-store/, kumi-genexpr/ L1 SQLite; gen~ test interpreter
+  kumi-store/, kumi-genexpr/ L1 SQLite; gen~ interpreter (tests, and the Hermes device build's limits and output-stage proof)
   kumi-layout/              L1 the map's layout (t-SNE), built optimized even in tests
   kumi-types/, kumi-common/ L0 what every layer names; utilities (Live's bridge links kumi-common)
   kumi-testkit/             test support: dev-dependency only, depends on nothing
