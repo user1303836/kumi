@@ -87,6 +87,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
+- Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
+  computer, if you allow it at setup; it never downloads one. A file it measures can be up to 50 MB.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 

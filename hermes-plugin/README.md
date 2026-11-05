@@ -89,8 +89,11 @@ Under Settings → Plugins → Kumi in Hermes Desktop, or `plugins.entries.kumi.
 ## Files
 
 Everything Kumi writes for Hermes stays in this profile's `plugin-data/kumi/` folder: the runtime, the library index
-and map, HISTORY, measurements and job records. Outside it, setup writes only Kumi's part in your DAW, at the location
-you approved. Removing the plugin keeps `plugin-data/kumi/`; delete it to remove everything.
+and map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
+changed) and job records. Outside it, setup writes only Kumi's part in your DAW, at the location you approved. Kumi
+reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already on your computer, if you
+allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`; delete it to remove
+everything.
 
 ## Disclosure
 

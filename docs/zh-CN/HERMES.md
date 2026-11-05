@@ -67,6 +67,7 @@ hermes plugins enable kumi
 
 - 你的 DAW 必须运行在运行 Hermes 的那台电脑上。连接到远程 Hermes 的 Hermes Desktop 控制的是那台电脑上的 DAW，而不是你本机的。
 - Live 支持 macOS 和 Windows；REAPER 和 Renoise 支持 macOS、Windows 和 Linux。
+- Kumi 能直接读取 WAV 和 AIFF。对于 MP3、FLAC 等压缩音频，如果你在设置时允许，它会使用电脑上已有的 ffmpeg（绝不下载）。可测量的文件最大 50 MB。
 - Hermes 中的 Kumi 不包含任何会绕过 Hermes 确认的功能：在 DAW 内运行代码、操作 Live 的菜单、录音，以及保存或打开工程。
 
 ## 遇到问题时
