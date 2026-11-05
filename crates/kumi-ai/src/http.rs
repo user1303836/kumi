@@ -443,12 +443,12 @@ mod cause_tests {
         address
     }
 
-    /// An address nothing listens on.
-    async fn closed_port() -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap().to_string();
-        drop(listener);
-        address
+    /// An address nothing listens on, held so another test's server can't take it.
+    fn closed_port() -> (tokio::net::TcpSocket, String) {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let address = socket.local_addr().unwrap().to_string();
+        (socket, address)
     }
 
     async fn failed(fetch: &HttpFetch, url: &str) -> LanguageModelError {
@@ -468,7 +468,8 @@ mod cause_tests {
         // closed port again for a second or two before it says refused: these two wait as long as they need.
         let patient = direct(Duration::from_secs(5));
         // Refused.
-        let refused = failed(&patient, &format!("http://{}/", closed_port().await)).await;
+        let (_held, address) = closed_port();
+        let refused = failed(&patient, &format!("http://{address}/")).await;
         assert_eq!(NetCause::of_call(&refused), Some(NetCause::Offline), "{refused:?}");
         // A name that never resolves (RFC 6761).
         let unknown = failed(&patient, "http://kumi-net-cause.invalid/").await;

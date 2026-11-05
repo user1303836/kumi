@@ -11,8 +11,9 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use tokio::time::Instant;
 
 /// One example track to measure.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -870,4 +871,34 @@ pub fn embed_entity(page: &str) -> Option<Value> {
     let data: Value = serde_json::from_str(&page[open..close]).ok()?;
     let entity = data["props"]["pageProps"]["state"]["data"]["entity"].clone();
     (!entity.is_null()).then_some(entity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn musicbrainz_waits_for_its_pace_before_sending_again() {
+        // Check the send boundary itself: a server's arrival time also includes connection and scheduling delays.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let pace = Duration::from_secs(1);
+        let sources = Sources::new(&url, &url, &url).pace(pace);
+        let previous = Instant::now();
+        sources.last.set(Some(previous));
+        let signal = Signal::new();
+        let request = sources.text_once(&url, &signal);
+        tokio::pin!(request);
+        assert!(futures::poll!(&mut request).is_pending());
+        assert_eq!(sources.last.get(), Some(previous), "waiting before sending");
+        tokio::time::advance(pace / 2).await;
+        assert!(futures::poll!(&mut request).is_pending());
+        assert_eq!(sources.last.get(), Some(previous), "still waiting before the pace");
+        tokio::time::advance(pace).await;
+        assert!(futures::poll!(&mut request).is_pending());
+        assert_eq!(sources.last.get(), Some(Instant::now()), "sent once the pace allows it");
+        // The listener holds the request open; cancellation ends it without a real-time timeout.
+        signal.cancel();
+        assert_eq!(request.await, Err("stopped".into()));
+    }
 }

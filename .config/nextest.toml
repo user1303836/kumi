@@ -13,16 +13,6 @@ filter = '''
 '''
 threads-required = "num-cpus"
 
-[[profile.default.overrides]]
-# Stopgap for #979: two kumi-ai tests against 127.0.0.1 listeners sometimes fail at once (0.00 s) on CI's Linux runner,
-# and a red main blocks a release. Each gets two retries until #979's real fix; nothing else here retries.
-filter = '''
-binary_id(kumi-ai)
-  & (test(=http::cause_tests::kumis_own_http_keeps_what_went_wrong_for_each_cause)
-     | test(=http::transport_tests::a_list_and_a_model_call_through_one_fetch_share_one_connection))
-'''
-retries = 2
-
 # CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request runs `ci` on Linux; main, after a merge, runs
 # `ci` on Linux and `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, each week and by
 # hand. What `ci` leaves out, and why:
