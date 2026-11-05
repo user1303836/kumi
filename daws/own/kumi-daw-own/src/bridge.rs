@@ -725,7 +725,42 @@ fn busy_words(code: &str, profile: &DawProfile) -> String {
     }
 }
 
+/// What a transport action's outcome says of the play: an error is the DAW's words (one it may or may not have run says
+/// so).
+fn played(outcome: kumi_agent::core::plan::ActionOutcome) -> Result<Played, RuntimeError> {
+    if outcome.is_error {
+        return Err(RuntimeError::plain(outcome.text));
+    }
+    let said: Value = serde_json::from_str(&outcome.text).unwrap_or_default();
+    Ok(Played {
+        playing: outcome
+            .done
+            .as_ref()
+            .and_then(|done| done.playing)
+            .or_else(|| said.get("playing").and_then(Value::as_bool))
+            .unwrap_or(false),
+        position_beats: said.get("positionBeats").and_then(Value::as_f64),
+    })
+}
+
 impl<S: RefScheme + 'static> OwnIntegration<S> {
+    /// The DAW's own action by its tool's name.
+    fn action(&self, tool: &str) -> Option<&'static crate::changes::OwnAction> {
+        self.daw.changes.actions.iter().find(|action| action.tool == tool)
+    }
+
+    /// A bar in quarter notes where the transport is, from the DAW's time signature (6/8's is 3).
+    async fn bar_quarter_notes(&self, signal: Signal) -> Result<f64, RuntimeError> {
+        let unknown =
+            || RuntimeError::plain(format!("Kumi can't tell {}'s bar length: play from a beat instead.", self.profile().words.app));
+        let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Err(unknown()) };
+        let signature = focus.pointer("/transport/timeSignature").and_then(Value::as_array);
+        match signature.map(|parts| (parts.first().and_then(Value::as_f64), parts.get(1).and_then(Value::as_f64))) {
+            Some((Some(beats), Some(unit))) if beats > 0. && unit > 0. => Ok(beats * 4. / unit),
+            _ => Err(unknown()),
+        }
+    }
+
     fn set_connected(&self, connected: bool) {
         if self.connected.replace(connected) != connected || !connected {
             let state = if connected { ConnectionState::Connected } else { ConnectionState::Disconnected };
@@ -1816,6 +1851,71 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Ok(None) };
         let on = |key: &str| focus.pointer(&format!("/transport/{key}")).and_then(Value::as_bool);
         Ok(on("playing").map(|playing| playing && on("recording") == Some(true)))
+    }
+    /// Whether a play would record, as the transport says whatever plays: REAPER's record, Renoise's edit mode.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        if self.closed.get() || !self.connected.get() {
+            return Ok(None);
+        }
+        let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Ok(None) };
+        let on = |key: &str| focus.pointer(&format!("/transport/{key}")).and_then(Value::as_bool);
+        Ok(match (on("recording"), on("editMode")) {
+            (None, None) => None,
+            (recording, edit) => Some(recording == Some(true) || edit == Some(true)),
+        })
+    }
+    /// What the DAW's own transport actions take: a timeline's (REAPER's: a cursor to move first) plays from a bar or a
+    /// beat, a tracker's (Renoise's: play takes a sequence slot) from a slot and line; neither has Live's clips or scenes.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        let app = self.profile().words.app;
+        let timeline = self.action("set_cursor").is_some();
+        let tracker = self
+            .action("play")
+            .and_then(|play| serde_json::from_str::<Value>(play.schema).ok())
+            .is_some_and(|schema| schema.pointer("/properties/sequence").is_some());
+        match from {
+            PlayFrom::Here if self.action("play").is_some() => Ok(()),
+            PlayFrom::Bar(_) | PlayFrom::Beat(_) if timeline => Ok(()),
+            PlayFrom::Slot { .. } if tracker => Ok(()),
+            PlayFrom::Clip(_) | PlayFrom::Scene(_) => Err(format!("{app} has no Session clips or scenes to launch: those are Live's.")),
+            _ if tracker => Err(format!("{app} plays from a sequence slot and a line (from_slot, from_line), not a bar or a beat.")),
+            _ if timeline => Err(format!("{app} plays from a bar or a beat (from_bar, from_beat), not a sequence slot.")),
+            _ => Err(format!("Kumi doesn't start {app}'s playback.")),
+        }
+    }
+    /// The DAW's own play, after its cursor moves to the bar or beat asked (an action each: no HISTORY row).
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        self.plays_from(from).map_err(RuntimeError::plain)?;
+        let beats = match from {
+            PlayFrom::Beat(beats) => Some(*beats),
+            PlayFrom::Bar(bar) => Some(f64::from(bar.saturating_sub(1)) * self.bar_quarter_notes(signal.clone()).await?),
+            _ => None,
+        };
+        if let (Some(beats), Some(cursor)) = (beats, self.action("set_cursor")) {
+            let mut at = JsonObject::new();
+            at.insert("positionBeats".into(), json!(beats));
+            let moved = self.changes.one_action(cursor, at, signal.clone()).await;
+            if moved.is_error {
+                return Err(RuntimeError::plain(moved.text));
+            }
+        }
+        let mut input = JsonObject::new();
+        if let PlayFrom::Slot { slot, line } = from {
+            if let Some(slot) = slot {
+                input.insert("sequence".into(), json!(slot));
+            }
+            if let Some(line) = line {
+                input.insert("line".into(), json!(line));
+            }
+        }
+        let play = self.action("play").ok_or_else(|| RuntimeError::plain("no play action"))?;
+        played(self.changes.one_action(play, input, signal).await)
+    }
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let stop = self
+            .action("stop")
+            .ok_or_else(|| RuntimeError::plain(format!("Kumi doesn't stop {}'s playback.", self.profile().words.app)))?;
+        played(self.changes.one_action(stop, JsonObject::new(), signal).await)
     }
     /// A fixed phrase as the DAW's change, in the project the session's look just read: one plan, so it lands in HISTORY
     /// with Kumi's undo and Kumi says what changed. A phrase the DAW has no such thing for is refused in its words; one

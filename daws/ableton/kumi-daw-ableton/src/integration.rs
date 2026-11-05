@@ -213,6 +213,48 @@ impl Ableton {
     fn user_library(&self) -> String {
         self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None))
     }
+    /// A ref as the model gave it (its short name, or the long ref), as Live's bridge spells it.
+    fn long_ref(&self, reference: &str, field: &str) -> String {
+        self.connection.references.borrow().lengthen(&json!({field: reference}))[field].as_str().unwrap_or(reference).to_owned()
+    }
+    /// Live's transport as its session-playback read gives it: playing, and Session and Arrangement Record.
+    async fn session_transport(&self, signal: Signal) -> Result<Value, RuntimeError> {
+        let read = payload(
+            &self
+                .connection
+                .call("live_discover", views::object(json!({"kind":"session-playback","limit":1})), self.combined(signal))
+                .await?,
+        )?;
+        Ok(read.get("items").and_then(|items| items.get(0)).and_then(|item| item.get("transport")).cloned().unwrap_or_default())
+    }
+    /// The scene at `index` (from 0), by a fresh read of the Set's scenes.
+    async fn scene_ref(&self, index: u32, signal: Signal) -> Result<String, RuntimeError> {
+        let read = payload(
+            &self
+                .connection
+                .call("live_discover", views::object(json!({"kind":"scene","limit":512,"fields":["name","index"]})), self.combined(signal))
+                .await?,
+        )?;
+        read.get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("index").and_then(Value::as_u64) == Some(u64::from(index)))
+            .and_then(|item| item.get("ref").and_then(Value::as_str))
+            .map(str::to_owned)
+            .ok_or_else(|| RuntimeError::plain(format!("The Set has no scene {}.", index + 1)))
+    }
+    /// One of Live's transport actions, as its tool runs it (Live's one call at a time), and where it left the play.
+    async fn transport_action(&self, tool: &str, input: Value, signal: Signal) -> Result<Played, RuntimeError> {
+        let kind = ACTIONS.iter().find(|kind| kind.tool == tool).ok_or_else(|| RuntimeError::plain(format!("Live has no {tool} here.")))?;
+        let stopping = input.get("action").and_then(Value::as_str) == Some("stop");
+        let _live = self.rendering.hold(&signal).await?;
+        let outcome = self.mutations.act(kind, views::object(input), signal, false).await;
+        if outcome.is_error {
+            return Err(RuntimeError::plain(outcome.text));
+        }
+        Ok(Played { playing: outcome.done.as_ref().and_then(|done| done.playing).unwrap_or(!stopping), position_beats: None })
+    }
     fn tool(&self, name: &str, description: &str, schema: JsonObject) -> Rc<dyn KernelTool> {
         Rc::new(LiveTool {
             owner: self.weak.upgrade().unwrap(),
@@ -895,16 +937,58 @@ impl Integration for Ableton {
         if !self.connection.has("live_discover") {
             return Ok(None);
         }
-        let read = payload(
-            &self
-                .connection
-                .call("live_discover", views::object(json!({"kind":"session-playback","limit":1})), self.combined(signal))
-                .await?,
-        )?;
-        let transport =
-            &read.get("items").and_then(|items| items.get(0)).and_then(|item| item.get("transport")).cloned().unwrap_or_default();
+        let transport = self.session_transport(signal).await?;
         let on = |key: &str| transport.get(key) == Some(&Value::Bool(true));
         Ok(Some(on("playing") && (on("sessionRecord") || on("arrangementRecord"))))
+    }
+    /// Session or Arrangement Record on, whatever Live plays: a play would record.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        if !self.connection.available() || !self.connection.has("live_discover") {
+            return Ok(None);
+        }
+        let transport = self.session_transport(signal).await?;
+        let on = |key: &str| transport.get(key).and_then(Value::as_bool);
+        Ok(match (on("sessionRecord"), on("arrangementRecord")) {
+            (None, None) => None,
+            (session, arrangement) => Some(session == Some(true) || arrangement == Some(true)),
+        })
+    }
+    /// Live plays from its start marker, or launches a Session clip or a scene. Moving the start marker is a change in
+    /// Kumi (set_transport), so a bar or a beat waits for a way that isn't.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        match from {
+            PlayFrom::Here | PlayFrom::Scene(_) => Ok(()),
+            PlayFrom::Clip(clip) if self.long_ref(clip, "clipRef").contains(":clip:") => Ok(()),
+            PlayFrom::Clip(_) => Err("Only a Session clip is launched; an Arrangement clip plays from its bar, which Kumi can't start Live at yet.".into()),
+            PlayFrom::Bar(_) | PlayFrom::Beat(_) => Err("Live plays from its start marker, and Kumi can't move it there yet without a change: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
+            PlayFrom::Slot { .. } => Err("Live has no sequence slots: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
+        }
+    }
+    /// Live's own play from its start marker, a Session clip's launch (its slot's) or a scene's: actions, no HISTORY row.
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        self.plays_from(from).map_err(RuntimeError::plain)?;
+        let signal = self.combined(signal);
+        match from {
+            PlayFrom::Clip(clip) => {
+                let slot = self.long_ref(clip, "clipRef").replacen(":clip:", ":clip_slot:", 1);
+                self.transport_action("launch_clip", json!({"slotRef": slot}), signal).await
+            }
+            PlayFrom::Scene(index) => {
+                let scene = self.scene_ref(*index, signal.clone()).await?;
+                self.transport_action("fire_scene", json!({"ref": scene}), signal).await
+            }
+            _ => self.transport_action("play", json!({"action": "start"}), signal).await,
+        }
+    }
+    /// Live's own stop, only while it plays: a stop with Live stopped moves its start marker back to the Set's start
+    /// (the #1074 trace saw it), which a producer's "stop" never asks for.
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let signal = self.combined(signal);
+        if self.connection.has("live_discover") && self.session_transport(signal.clone()).await?.get("playing") == Some(&Value::Bool(false))
+        {
+            return Ok(Played::default());
+        }
+        self.transport_action("play", json!({"action": "stop"}), signal).await
     }
     async fn instant(&self, intent: &kumi_agent::core::phrases::Intent, signal: Signal) -> Result<Option<InstantOutcome>, RuntimeError> {
         let Some(plan) = instant::steps(intent, &self.observer.model(), self.observer.beats_per_bar.get()) else { return Ok(None) };

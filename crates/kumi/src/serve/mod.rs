@@ -26,6 +26,7 @@ pub mod registry;
 pub mod script;
 pub mod setup;
 pub mod snapshots;
+pub mod transport;
 
 mod core;
 mod generate;

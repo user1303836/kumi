@@ -47,6 +47,8 @@ pub enum Effect {
     Write,
     /// Plays or captures the project (a track listen), changing settings while it does.
     Playback,
+    /// Starts or stops the DAW's playback (`transport`): no lease, so a stop is never held up by a call that has one.
+    Transport,
     /// Places a file in the project.
     Import,
     /// Reads a folder the producer approved.
@@ -1349,6 +1351,7 @@ mod tests {
             Effect::Write,
             Effect::Playback,
             Effect::Import,
+            Effect::Transport,
             Effect::FolderRead,
             Effect::Setup,
             Effect::Upload,

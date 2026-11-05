@@ -1,11 +1,12 @@
 //! What Kumi tells a producer working in Live: a line in Live's status bar, only through a bridge that shows it as
-//! the Control Surface's own line (an older one showed a modal alert that held Live), and whether Live records.
+//! the Control Surface's own line (an older one showed a modal alert that held Live), whether Live records or a play
+//! would, and Live's own play and stop.
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_agent::core::contracts::Integration;
+use kumi_agent::core::contracts::{Integration, PlayFrom};
 use kumi_agent::mcp::{
     client::{McpEndpoint, StderrStatus},
     types::{CallToolResult, Implementation, ListToolsResult},
@@ -17,7 +18,8 @@ use kumi_types::contracts::JsonObject;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
-/// A bridge of a given version, answering the status-bar line and Live's playback with what it's given.
+/// A bridge of a given version, answering the status-bar line and Live's playback with what it's given, and previewing
+/// and applying Live's play and a clip's launch.
 struct Bridge {
     version: &'static str,
     transport: Value,
@@ -33,7 +35,16 @@ impl McpEndpoint for Bridge {
         Some(serde_json::from_value(json!({"name":"fixture","version":self.version})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let tools = ["live_status", "live_message", "live_discover"].map(|name| json!({"name":name,"inputSchema":{"type":"object"}}));
+        let tools = [
+            "live_status",
+            "live_message",
+            "live_discover",
+            "live_transport_action_preview",
+            "live_transport_action_apply",
+            "live_clip_launch_preview",
+            "live_clip_launch_apply",
+        ]
+        .map(|name| json!({"name":name,"inputSchema":{"type":"object"}}));
         Ok(serde_json::from_value(json!({"tools":tools})).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
@@ -42,6 +53,10 @@ impl McpEndpoint for Bridge {
             "live_status" => json!({"connected":true,"adapter":"remote-script","epoch":7}),
             "live_message" => json!({"shown":true,"modal":args["modal"]}),
             "live_discover" => json!({"items":[{"transport":self.transport,"firedTargets":[],"playingTargets":[]}]}),
+            "live_transport_action_preview" | "live_clip_launch_preview" => {
+                json!({"transactionId":"t1","epoch":7,"confirmation":"go","proposed":args})
+            }
+            "live_transport_action_apply" | "live_clip_launch_apply" => json!({"applied":true,"epoch":8}),
             _ => panic!("unexpected bridge call {name}"),
         };
         Ok(serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&result)}]})).unwrap())
@@ -104,17 +119,63 @@ fn a_line_in_lives_status_bar_only_through_a_bridge_that_never_shows_it_as_a_dia
 }
 
 #[test]
-fn live_records_only_while_it_plays_with_session_or_arrangement_recording_on() {
+fn live_records_only_while_it_plays_with_session_or_arrangement_recording_on_and_a_play_would_record_with_either_on() {
     local(async {
-        for (transport, recording) in [
-            (json!({"playing":true,"arrangementRecord":true,"sessionRecord":false}), true),
-            (json!({"playing":true,"arrangementRecord":false,"sessionRecord":true}), true),
-            (json!({"playing":true,"arrangementRecord":false,"sessionRecord":false}), false),
-            (json!({"playing":false,"arrangementRecord":true,"sessionRecord":false}), false),
+        for (transport, recording, armed) in [
+            (json!({"playing":true,"arrangementRecord":true,"sessionRecord":false}), true, true),
+            (json!({"playing":true,"arrangementRecord":false,"sessionRecord":true}), true, true),
+            (json!({"playing":true,"arrangementRecord":false,"sessionRecord":false}), false, false),
+            // Stopped with Arrangement Record on: it records nothing now, and a play would.
+            (json!({"playing":false,"arrangementRecord":true,"sessionRecord":false}), false, true),
         ] {
             let bridge = Rc::new(Bridge { version: "1.0.92", transport: transport.clone(), calls: RefCell::default() });
             let integration = connected(bridge).await;
             assert_eq!(integration.recording(signal()).await.unwrap(), Some(recording), "{transport}");
+            assert_eq!(integration.record_armed(signal()).await.unwrap(), Some(armed), "{transport}");
+        }
+    })
+}
+
+#[test]
+fn kumi_stops_live_only_while_it_plays_and_launches_a_session_clip_by_its_slot() {
+    local(async {
+        let asked = |bridge: &Bridge, tool: &str| -> Vec<Value> {
+            bridge.calls.borrow().iter().filter(|(name, _)| name == tool).map(|(_, args)| args.clone()).collect()
+        };
+        // Stopped: a stop would move Live's start marker back to the Set's start, so Kumi sends none.
+        let stopped = Rc::new(Bridge { version: "1.0.92", transport: json!({"playing":false}), calls: RefCell::default() });
+        let integration = connected(stopped.clone()).await;
+        assert!(!integration.stop_playback(signal()).await.unwrap().playing);
+        assert!(asked(&stopped, "live_transport_action_preview").is_empty() && asked(&stopped, "live_transport_action_apply").is_empty());
+        // Playing: Live's own stop, previewed and applied.
+        let playing = Rc::new(Bridge { version: "1.0.92", transport: json!({"playing":true}), calls: RefCell::default() });
+        let integration = connected(playing.clone()).await;
+        // As a look leaves it (serve's connect looks first): Live's epoch, the fake's 7.
+        integration.connection.epoch.set(Some(7.0));
+        assert!(!integration.stop_playback(signal()).await.unwrap().playing);
+        assert_eq!(asked(&playing, "live_transport_action_preview")[0]["action"], "stop");
+        assert_eq!(asked(&playing, "live_transport_action_apply").len(), 1);
+        // A Session clip is launched by its slot; a play from a bar, a beat, a sequence slot or an Arrangement clip is
+        // refused before Live is asked anything.
+        // As serve's read of a track's clip slots leaves them: each slot and its clip discovered this turn, and the clip
+        // named to the model by its short name, which is what a play gives back.
+        let slot: JsonObject =
+            serde_json::from_value(json!({"ref":"1:clip_slot:2:0","clipRef":"1:clip:2:0","parentRef":"1:track:2"})).unwrap();
+        integration.connection.register_rows("clip-slot", &[slot], &JsonObject::new(), None).unwrap();
+        let named = integration.connection.references.borrow_mut().short_ref("1:clip:2:0");
+        assert!(integration.plays_from(&PlayFrom::Clip(named.clone())).is_ok(), "{named}");
+        assert!(integration.play(&PlayFrom::Clip(named), signal()).await.unwrap().playing);
+        assert_eq!(asked(&playing, "live_clip_launch_preview")[0]["slotRef"], "1:clip_slot:2:0");
+        for refused in [
+            PlayFrom::Bar(5),
+            PlayFrom::Beat(8.0),
+            PlayFrom::Slot { slot: Some(1), line: None },
+            PlayFrom::Clip("1:arrangement_clip:2:0".into()),
+        ] {
+            assert!(integration.plays_from(&refused).is_err(), "{refused:?}");
+        }
+        for allowed in [PlayFrom::Here, PlayFrom::Scene(0), PlayFrom::Clip("1:clip:2:0".into())] {
+            assert!(integration.plays_from(&allowed).is_ok(), "{allowed:?}");
         }
     })
 }

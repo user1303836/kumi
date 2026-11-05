@@ -6,6 +6,7 @@ use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{
     host::Host,
     reaper::simulator::ReaperScript,
+    renoise::simulator::RenoiseScript,
     simulator::{Simulator, SimulatorConfig},
 };
 use futures::FutureExt;
@@ -1685,5 +1686,90 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
     assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
     wire.end().await;
 });
+
+/// What the host sent the simulator, each request as JSON, in order.
+fn requests(lab: &Lab) -> Vec<Value> {
+    let simulator = lab.simulator.as_ref().unwrap();
+    simulator.transcript().into_iter().filter(|line| line.from_host).filter_map(|line| serde_json::from_str(&line.text).ok()).collect()
+}
+
+case!(serve_plays_reaper_from_a_bar_with_its_own_transport_and_never_while_it_would_record, async {
+    let script = ReaperScript::new(3, 0);
+    script.set_time_signature(4, 4);
+    let knobs = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, _, _, _) = looked(&mut wire).await;
+    let played_any = |lab: &Lab| requests(lab).iter().any(|sent| sent["method"] == "transport_play");
+    let play = |extra: Value| {
+        let mut args = json!({"action": "play", "expected_project_key": key.clone()});
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        args
+    };
+    // What it would do, in its words; a place REAPER doesn't play from, in its words; nothing played.
+    let (preview, _) = wire.call("transport", play(json!({"from_bar": 9, "preview": true})), None).await;
+    assert!(preview["text"].as_str().unwrap().contains("from bar 9"), "{preview}");
+    let (slot, error) = wire.call("transport", play(json!({"from_slot": 2})), Some("tc-slot")).await;
+    assert!(error && slot["error"]["code"] == "invalid", "{slot}");
+    // REAPER's record on: refused before anything is sent.
+    knobs.set_recording(true);
+    let (recording, error) = wire.call("transport", play(json!({"from_bar": 9})), Some("tc-record")).await;
+    assert!(error && recording["error"]["code"] == "recording", "{recording}");
+    assert!(!played_any(&lab), "nothing played");
+    knobs.set_recording(false);
+    // Bar 9 in 4/4 is beat 32: the cursor goes there, then REAPER plays; no change is kept.
+    let (played, error) = wire.call("transport", play(json!({"from_bar": 9})), Some("tc-play")).await;
+    assert!(!error && played["state"] == "playing", "{played}");
+    let sent = requests(&lab);
+    let cursor = sent.iter().position(|sent| sent["method"] == "cursor_set").expect("the cursor moved");
+    assert_eq!(sent[cursor]["params"]["positionBeats"], json!(32.0));
+    assert!(sent.iter().skip(cursor).any(|sent| sent["method"] == "transport_play"), "then played");
+    let (history, _) = wire.call("history", json!({}), None).await;
+    assert_eq!(history["items"], json!([]), "no HISTORY row: {history}");
+    // A listen holds the DAW: a play waits for it, and a stop doesn't.
+    let release = Rc::new(tokio::sync::Notify::new());
+    let held = release.clone();
+    lab.ctx
+        .start_job("listen", move |_, _| async move {
+            held.notified().await;
+            Ok(json!({}))
+        })
+        .unwrap();
+    let (busy, error) = wire.call("transport", play(json!({})), Some("tc-busy")).await;
+    assert!(error && busy["error"]["code"] == "busy", "{busy}");
+    let (stopped, error) = wire.call("transport", json!({"action": "stop"}), Some("tc-stop")).await;
+    assert!(!error && stopped["state"] == "stopped", "{stopped}");
+    release.notify_one();
+    wire.end().await;
+});
+
+case!(serve_plays_renoise_from_a_sequence_slot_and_line_and_never_in_edit_mode, async {
+    let script = RenoiseScript::new();
+    let knobs = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let key = seen["project_key"].clone();
+    let (bar, error) = wire.call("transport", json!({"action": "play", "from_bar": 9, "expected_project_key": key}), Some("tc-bar")).await;
+    assert!(error && bar["error"]["code"] == "invalid" && bar["error"]["reason"].as_str().unwrap().contains("sequence slot"), "{bar}");
+    // Edit mode records while it plays: refused.
+    knobs.set_song("editMode", json!(true));
+    let (edit, error) =
+        wire.call("transport", json!({"action": "play", "from_slot": 3, "expected_project_key": key}), Some("tc-edit")).await;
+    assert!(error && edit["error"]["code"] == "recording", "{edit}");
+    knobs.set_song("editMode", json!(false));
+    let args = json!({"action": "play", "from_slot": 3, "from_line": 16, "expected_project_key": key});
+    let (played, error) = wire.call("transport", args, Some("tc-play")).await;
+    assert!(!error && played["state"] == "playing", "{played}");
+    let sent = requests(&lab);
+    let play = sent.iter().find(|sent| sent["method"] == "transport_play").expect("Renoise played");
+    assert_eq!((play["params"]["sequence"].clone(), play["params"]["line"].clone()), (json!(3), json!(16)), "{play}");
+    let (stopped, _) = wire.call("transport", json!({"action": "stop"}), Some("tc-stop")).await;
+    assert_eq!(stopped["state"], "stopped", "{stopped}");
+    wire.end().await;
+});
+
 #[path = "serve_listen.rs"]
 mod track_listening;
