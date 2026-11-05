@@ -237,6 +237,13 @@ async fn routing_validation_matches_source() {
             .unwrap()
             .map(|v| v.unwrap_or(Value::Null))
             .unwrap_or_else(|e| json!({"error":e.message()}));
+        if result.to_string().contains("Update Kumi's Live bridge") {
+            assert!(row["args"].get("inputType").is_some() || row["args"].get("inputSubRouting").is_some());
+            assert_eq!(result["result"]["isError"], true);
+            // The old recording has no semantic RoutingType facts. Its input-write
+            // success is no longer authorized; retain the source bytes as history.
+            continue;
+        }
         same(&clean(result), &row["result"], &format!("validation {index} {}", row["args"]));
     }
 }
@@ -288,6 +295,14 @@ async fn routing_apply_identity_based_undo_and_recovery_match_source() {
         }
         let preview = host.live_routing_preview_async(&json!(1), &args).await.unwrap();
         let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        if body["reason"].as_str().is_some_and(|reason| reason.contains("Update Kumi's Live bridge")) {
+            assert!(proposed.get("inputType").is_some() || proposed.get("inputSubRouting").is_some());
+            assert_eq!(preview["result"]["isError"], true);
+            assert!(adapter.calls.borrow().iter().all(|call| call["method"] != "invoke"));
+            // This is an explicit compatibility refusal prefix, not a replay of the
+            // recorded input mutations against facts that the old bridge never gave.
+            continue;
+        }
         let mut results = vec![clean(preview)];
         let mut states = vec![];
         if let Some(txid) = body.get("transactionId") {
@@ -401,15 +416,82 @@ fn deadline_polls(value: &Value) -> Value {
 #[tokio::test]
 async fn an_input_from_main_is_refused_since_it_crashes_live() {
     // #195: Live 12.4 crashed, losing the producer's unsaved work, when an audio track's input was set to Main.
-    let host = McpHost::new(Rc::new(DeterministicLiveSimulator::new()), McpHostOptions::default()).unwrap();
-    for input in ["Main", "Master", " Main "] {
-        let result = host.live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":input})).await.unwrap();
+    let adapter = Rc::new(Adapter::new());
+    adapter.sim.state.borrow_mut()["tracks"][0]["routing"]["inputTypeSafety"] = json!([
+        {"name":"Main","isMain":true},{"name":"Master","isMain":true},
+        {"name":"主出力","isMain":true},{"name":"主输出","isMain":true},{"name":"Hauptausgang","isMain":true},
+        {"name":"Ext. In","isMain":false},{"name":"Unknown","isMain":null}
+    ]);
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    for input in ["Main", "Master", "主出力", "主输出", "Hauptausgang"] {
+        let result = host
+            .live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":input,"outputType":"Other"}))
+            .await
+            .unwrap();
         assert_eq!(result["result"]["isError"], true, "{result}");
         let body: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert!(body["reason"].as_str().unwrap().starts_with("Live crashes when a track's input is set to Main"), "{body}");
         assert_eq!(body["remediation"], "Record the mix with inputType \"Resampling\" instead.");
     }
+    let unknown = host
+        .live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":"Unknown","outputType":"Other"}))
+        .await
+        .unwrap();
+    assert!(unknown.to_string().contains("Update Kumi's Live bridge"));
+    // Baseline240 preview allowed an input that appears only after an output
+    // switch. New semantic-capable answers retain that transition; the native
+    // guard resolves and checks the future RoutingType before its setter.
+    let future = host
+        .live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":"Future input","outputType":"Other"}))
+        .await
+        .unwrap();
+    assert_eq!(future["result"]["isError"], false, "{future}");
+    let unchanged_output = host
+        .live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":"Future input","outputType":"Main"}))
+        .await
+        .unwrap();
+    assert!(unchanged_output.to_string().contains("Update Kumi's Live bridge"));
+    let valid_facts = adapter.sim.state.borrow()["tracks"][0]["routing"]["inputTypeSafety"].clone();
+    for malformed in [json!([{"name":"Ext. In"}]), json!([{"name":null,"isMain":false}]), json!({})] {
+        adapter.sim.state.borrow_mut()["tracks"][0]["routing"]["inputTypeSafety"] = malformed;
+        let refused = host
+            .live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":"Future input","outputType":"Other"}))
+            .await
+            .unwrap();
+        assert!(refused.to_string().contains("Update Kumi's Live bridge"));
+    }
+    adapter.sim.state.borrow_mut()["tracks"][0]["routing"]["inputTypeSafety"] = valid_facts;
     // An output to Main is a track's usual output, and fine.
     let output = host.live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","outputType":"Main"})).await.unwrap();
     assert!(!output.to_string().contains("crashes"), "{output}");
+    assert!(adapter.calls.borrow().iter().all(|call| call["method"] != "invoke"));
+    // An ordinary track can be named Main. The normalized fact, not its label,
+    // authorizes preview/apply; deleting the facts then fences an old-bridge undo.
+    adapter.sim.state.borrow_mut()["tracks"][0]["routing"]["inputTypeSafety"][0]["isMain"] = json!(false);
+    let preview = host.live_routing_preview_async(&json!(1), &json!({"trackRef":"track:track-1","inputType":"Main"})).await.unwrap();
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(preview["result"]["isError"], false, "{preview}");
+    let args = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"localized-route"});
+    let applied = host.live_routing_apply_async(&json!(2), &args, None).await.unwrap();
+    assert_eq!(applied["result"]["isError"], false, "{applied}");
+    adapter.sim.state.borrow_mut()["tracks"][0]["routing"].as_object_mut().unwrap().remove("inputTypeSafety");
+    let before = adapter.sim.state.borrow().clone();
+    adapter.calls.borrow_mut().clear();
+    let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"localized-undo"});
+    let refused = host.undo_routing_async(&json!(3), &undo, None).await;
+    assert_eq!(refused["result"]["isError"], true);
+    assert!(refused.to_string().contains("Update Kumi's Live bridge"));
+    assert_eq!(*adapter.sim.state.borrow(), before);
+    assert!(adapter.calls.borrow().iter().all(|call| call["method"] != "invoke"));
+    for proposed in [json!({"inputType":"Ext. In"}), json!({"inputSubRouting":"1/2"})] {
+        let mut request = proposed;
+        request["trackRef"] = json!("track:track-1");
+        let refused = host.live_routing_preview_async(&json!(4), &request).await.unwrap();
+        assert!(refused.to_string().contains("Update Kumi's Live bridge"));
+    }
+    let legacy_future = host
+        .live_routing_preview_async(&json!(4), &json!({"trackRef":"track:track-1","inputType":"Future input","outputType":"Other"}))
+        .await
+        .unwrap();
+    assert!(legacy_future.to_string().contains("Update Kumi's Live bridge"));
 }

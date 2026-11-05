@@ -6,7 +6,36 @@ use sha2::{Digest, Sha256};
 const FIELDS: &[&str] = &["inputType", "inputSubRouting", "outputType", "outputSubRouting", "arm", "monitoring"];
 /// Live 12.4 crashes, losing unsaved work, when a track's input is set to Main, the main output (#195);
 /// Live 11 called it Master. "Resampling" records what Main plays.
-const INPUT_FROM_MAIN: &str = "Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. To record the mix, set inputType to \"Resampling\", which is what Main plays. A track the producer named Main or Master can't be told from it by name: rename that track to take it as an input.";
+const INPUT_FROM_MAIN: &str = "Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. To record the mix, set inputType to \"Resampling\", which is what Main plays.";
+const INPUT_IDENTITY_UNAVAILABLE: &str = "Live's input routing identity cannot be verified; nothing was sent to Live. Update Kumi's Live bridge and restart Live before changing an input route.";
+fn safe_input_routing(track: &Value, proposed: &Value) -> Result<(), LiveError> {
+    if proposed.get("inputType").is_none() && proposed.get("inputSubRouting").is_none() {
+        return Ok(());
+    }
+    let label = proposed.get("inputType").or_else(|| track["routing"].get("inputType")).and_then(Value::as_str);
+    let facts = track["routing"].get("inputTypeSafety").and_then(Value::as_array);
+    let (Some(label), Some(facts)) = (label, facts) else { return Err(LiveError::error(INPUT_IDENTITY_UNAVAILABLE)) };
+    if !facts.iter().all(|fact| fact["name"].is_string() && fact.get("isMain").is_some_and(|value| value.is_boolean() || value.is_null())) {
+        return Err(LiveError::error(INPUT_IDENTITY_UNAVAILABLE));
+    }
+    let matching: Vec<_> = facts.iter().filter(|fact| fact["name"] == label).collect();
+    let changes_output =
+        proposed["outputType"].as_str().zip(track["routing"]["outputType"].as_str()).is_some_and(|(next, current)| next != current);
+    if matching.is_empty() && proposed["inputType"].is_string() && changes_output {
+        // This answer comes from the native semantic guard. An output switch can
+        // expose an input not offered yet; the native dispatch must resolve and
+        // check that actual RoutingType before its setter, rolling back on refusal.
+        return Ok(());
+    }
+    if matching.len() != 1 {
+        return Err(LiveError::error(INPUT_IDENTITY_UNAVAILABLE));
+    }
+    match matching[0]["isMain"].as_bool() {
+        Some(false) => Ok(()),
+        Some(true) => Err(LiveError::error(INPUT_FROM_MAIN)),
+        None => Err(LiveError::error(INPUT_IDENTITY_UNAVAILABLE)),
+    }
+}
 fn tracks(snapshot: &Value) -> impl Iterator<Item = &Value> {
     snapshot["tracks"].as_array().into_iter().flatten()
 }
@@ -177,9 +206,6 @@ impl McpHost {
         if proposed.as_object().unwrap().is_empty() {
             return Ok(error(id, -32602, "at least one routing field is required", None));
         }
-        if proposed.get("inputType").and_then(Value::as_str).is_some_and(|input| ["Main", "Master"].contains(&input.trim())) {
-            return Ok(adapter_tool_error(id, &LiveError::error(INPUT_FROM_MAIN), "Record the mix with inputType \"Resampling\" instead."));
-        }
         let result = async {
             let status = self.fresh_status(Some(&LiveOperationContext::with_deadline(self.deadline(AUDITION_DEADLINE_MS)))).await?;
             if !status.connected || !status.capabilities.iter().any(|c| c.as_str() == "session.read") {
@@ -194,6 +220,7 @@ impl McpHost {
                 .find(|t| t["ref"] == params["trackRef"])
                 .filter(|t| t["routing"].is_object() && is_non_empty_string(&t["objectIdentity"], 256))
                 .ok_or_else(|| LiveError::error("track with exact authoritative routing identity is required"))?;
+            safe_input_routing(track, &proposed)?;
             if routing_cycle(&snapshot, params["trackRef"].as_str().unwrap(), &proposed) {
                 return Err(LiveError::error("routing would create a direct or transitive feedback loop"));
             }
@@ -219,7 +246,17 @@ impl McpHost {
             Ok(success_text(id, &json!({"transactionId":transaction["id"],"epoch":transaction["epoch"],"trackRef":params["trackRef"],"prior":prior,"proposed":proposed,"impact":"edits-routing","confirmation":"apply","expiresAt":transaction["expiresAt"]})))
         }
         .await;
-        Ok(result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Routing preview requires fresh authoritative state.")))
+        Ok(result.unwrap_or_else(|e| {
+            adapter_tool_error(
+                id,
+                &e,
+                if e.message() == INPUT_FROM_MAIN {
+                    "Record the mix with inputType \"Resampling\" instead."
+                } else {
+                    "Routing preview requires fresh authoritative state."
+                },
+            )
+        }))
     }
     pub async fn live_routing_apply_async(&self, id: &Value, params: &Value, signal: Option<&Signal>) -> Option<Value> {
         if !valid_transaction_params(params, "apply") {
@@ -252,10 +289,19 @@ impl McpHost {
             }
             let adapter = self.async_adapter();
             let context = self.transaction_context(params, signal, AUDITION_DEADLINE_MS);
+            if reconciliation && (t["payload"].get("inputType").is_some() || t["payload"].get("inputSubRouting").is_some()) {
+                let snapshot = serde_json::to_value(self.routing_view_async(Some(&context), &t["clipRef"], &t["payload"]).await?).unwrap();
+                let track =
+                    tracks(&snapshot).find(|v| v["ref"] == t["clipRef"]).ok_or_else(|| LiveError::error(INPUT_IDENTITY_UNAVAILABLE))?;
+                safe_input_routing(track, &t["payload"])?;
+            }
             if !reconciliation {
                 let snapshot = self.routing_view_async(Some(&context), &t["clipRef"], &t["payload"]).await?;
                 let snapshot = serde_json::to_value(snapshot).unwrap();
                 let track = tracks(&snapshot).find(|v| v["ref"] == t["clipRef"]);
+                if let Some(track) = track {
+                    safe_input_routing(track, &t["payload"])?;
+                }
                 if track.is_none_or(|track| routing_fence(track, &t["clipRef"]) != t["fence"]) {
                     return Ok(transaction_error(id, "routing target or state changed since preview; preview again"));
                 }
@@ -322,13 +368,33 @@ impl McpHost {
             return transaction_error(id, "Only an applied or exact-key uncertain routing transaction can be undone");
         }
         let result = async {
-            self.begin_undo_recovery(&record, params["idempotencyKey"].as_str().unwrap())?;
             let status = self.require_connected(Some("session.read"))?;
             if json!(status.epoch) != t["epoch"] {
                 return Ok(transaction_error(id, "Live connection epoch changed; undo refused"));
             }
             let adapter = self.async_adapter();
             let context = self.transaction_context(params, signal, AUDITION_DEADLINE_MS);
+            // An older recovery plan may restore an input. Check its native semantic facts
+            // before replaying any step; an old bridge's name-only answer cannot make it safe.
+            if t["prior"].get("inputType").is_some() || t["prior"].get("inputSubRouting").is_some() {
+                let snapshot = serde_json::to_value(
+                    self.routing_identity_view_async(Some(&context), &t["payload"]["expectedObjectIdentity"], &t["prior"]).await?,
+                )
+                .unwrap();
+                let matches: Vec<_> =
+                    tracks(&snapshot).filter(|track| track["objectIdentity"] == t["payload"]["expectedObjectIdentity"]).collect();
+                if matches.len() != 1 {
+                    return Ok(adapter_tool_error(
+                        id,
+                        &LiveError::error(INPUT_IDENTITY_UNAVAILABLE),
+                        "Inspect the input route in Live before undoing.",
+                    ));
+                }
+                if let Err(error) = safe_input_routing(matches[0], &t["prior"]) {
+                    return Ok(adapter_tool_error(id, &error, "Inspect the input route in Live before undoing."));
+                }
+            }
+            self.begin_undo_recovery(&record, params["idempotencyKey"].as_str().unwrap())?;
             record.borrow_mut()["undoKey"] = params["idempotencyKey"].clone();
             if reconciliation {
                 self.replay_undo_recovery(&record, &*adapter, &context).await?;
@@ -366,6 +432,7 @@ impl McpHost {
                 }
                 restore["expectedObjectIdentity"] = t["payload"]["expectedObjectIdentity"].clone();
                 restore["expectedStateRevision"] = json!(routing_revision(track)?);
+                safe_input_routing(track, &restore)?;
                 if routing_cycle(&snapshot, reference.as_str().unwrap(), &restore) {
                     return Ok(transaction_error(id, "routing restoration would create a feedback loop"));
                 }

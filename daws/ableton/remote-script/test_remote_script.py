@@ -1,5 +1,6 @@
 import base64
 import copy
+import enum
 import hashlib
 import io
 import json
@@ -3804,6 +3805,45 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^Live doesn't offer Kumi Pad for this track now; nothing changed$"): mapper.invoke("routing.set", args)
         self.assertEqual(mapper.snapshot()["tracks"][0]["routing"]["inputType"], "Ext. In")
 
+        # #1145: the same unsafe source has a translated label. Category/attached
+        # identity win over text, and unknown native reads must not become safe.
+        class RoutingTypeCategory(enum.IntEnum):
+            master = enum.auto()
+            track = enum.auto()
+        main = FakeTrack(); main.name = "Hauptausgang"; song.master_track = main
+        normal = FakeTrack(); normal.name = "Main"
+        class Unreadable(FakeRouteChoice):
+            @property
+            def category(self): raise AttributeError("native category unreadable")
+        unsafe = [types.SimpleNamespace(name=name, category=RoutingTypeCategory.master) for name in ("主出力", "主输出", "Hauptausgang")]
+        unsafe.append(types.SimpleNamespace(name="Sortie principale", attached_object=main))
+        unreadable_attached = Unreadable("Unreadable attached"); unreadable_attached.attached_object = normal
+        unsafe.extend([Unreadable("不明"), unreadable_attached, types.SimpleNamespace(name="Unknown enum", category=object()), types.SimpleNamespace(name="主输出", category=None)])
+        for candidate in unsafe:
+            with self.subTest(name=candidate.name):
+                track.available_input_routing_types = [FakeRouteChoice("Ext. In"), candidate]
+                before = track.input_routing_type
+                with self.assertRaisesRegex(ValueError, "crashes|unreadable"):
+                    mapper.invoke("routing.set", {**args, "inputType": candidate.name, "arm": True})
+                self.assertIs(track.input_routing_type, before)
+                self.assertFalse(track.arm, "refused before any other write")
+                fact = mapper._routing_row(track)["inputTypeSafety"][-1]
+                self.assertIsNot(fact["isMain"], False)
+        for candidate in [types.SimpleNamespace(name="Main", category=RoutingTypeCategory.track), types.SimpleNamespace(name="Master", attached_object=normal)]:
+            with self.subTest(name=candidate.name):
+                self.assertIs(mapper._input_from_main(candidate), False, "an ordinary track can have an English main label")
+                track.available_input_routing_types = [FakeRouteChoice("Ext. In"), candidate]
+                self.assertTrue(mapper.invoke("routing.set", {**args, "inputType": candidate.name})["changed"])
+                self.assertIs(track.input_routing_type, candidate)
+                track.input_routing_type = track.available_input_routing_types[0]
+        self.assertIs(mapper._input_from_main(FakeRouteChoice("Main")), True, "old APIs retain the English fallback")
+        self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Ext. In", category=object())), None)
+        live = types.SimpleNamespace(Routing=types.SimpleNamespace(RoutingTypeCategory=RoutingTypeCategory))
+        with patch.dict(sys.modules, {"Live": live}):
+            self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="主出力", category=RoutingTypeCategory.master.value)), True)
+            self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Main", category=RoutingTypeCategory.track.value)), False)
+        self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Localized", category=object(), attached_object=main)), True)
+
     def test_mixer_multi_field_failure_rolls_back_exact_prior_state(self):
         class FailingPan(FakeParameter):
             def __init__(self): self._value = 0.0; self.reject = False; super().__init__(); self._value = 0.0; self.reject = True
@@ -3844,6 +3884,17 @@ class ControlSurfaceTests(unittest.TestCase):
         a.input_routing_type = ext; a.output_routing_type = route_b; a.input_routing_channel = channel; a.output_routing_channel = channel; a.route_log.clear(); a.reject_arm = True; row = mapper.snapshot()["tracks"][0]; routing = row["routing"]; state = {"inputType": routing["inputType"], "inputSubRouting": routing["inputSubRouting"], "outputType": routing["outputType"], "outputSubRouting": routing["outputSubRouting"], "arm": row["armed"], "monitoring": row["monitoringState"]}; args.update({"inputSubRouting": "2", "outputSubRouting": "2", "arm": True, "expectedObjectIdentity": row["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(state).encode()).hexdigest()})
         with self.assertRaisesRegex(RuntimeError, "injected arm failure"): mapper.invoke("routing.set", args)
         self.assertEqual(a.output_routing_type.name, "B"); self.assertEqual(a.input_routing_type.name, "Ext. In"); self.assertEqual(a.input_routing_channel.name, "1"); self.assertEqual(a.output_routing_channel.name, "1")
+        # The input can appear only after the output switches. Re-resolve its actual
+        # native identity then; a misleading track label must never reach the setter.
+        song.master_track = FakeTrack(); song.master_track.name = "主出力"
+        unsafe = types.SimpleNamespace(name="B", attached_object=song.master_track)
+        a.input_types_by_output["Main"] = [ext, route_a, unsafe]
+        a.reject_arm = False; a.route_log.clear()
+        with self.assertRaisesRegex(ValueError, "Live crashes"):
+            mapper.invoke("routing.set", args)
+        self.assertIn(("output_routing_type", "Main"), a.route_log)
+        self.assertNotIn(("input_routing_type", "B"), a.route_log)
+        self.assertEqual((a.input_routing_type.name, a.output_routing_type.name), ("Ext. In", "B"))
 
 
 if __name__ == "__main__":
@@ -9241,10 +9292,25 @@ class PythonRunTests(unittest.TestCase):
                 self.assertTrue(result["error"]["message"].startswith("Live crashes when a track's input is set to Main"), result["error"]["message"])
                 self.assertIn('"Resampling"', result["error"]["message"])
                 self.assertEqual(self.song.tempo, 120, "nothing in the script ran")
+        # No name literal can establish which actual RoutingType an arbitrary script
+        # assigns. Recognized writes use the typed path instead, before any script runs.
+        for statement in [
+            "t.input_routing_type = t.available_input_routing_types[0]",
+            "t.input_routing_channel = t.available_input_routing_channels[0]",
+            "t.current_input_routing = 'Resampling'",
+            "t.input_routing_type = next(r for r in t.available_input_routing_types if r.category == Live.Routing.RoutingTypeCategory.master)",
+            "setattr(t, 'input_routing_type', t.available_input_routing_types[0])",
+            "def route(t):\n t.input_routing_type = t.available_input_routing_types[0]\nroute(t)",
+        ]:
+            result = self.run_python("song.tempo = 126\nt = song.tracks[0]\n" + statement)
+            self.assertFalse(result["ok"])
+            self.assertIn("typed routing", result["error"]["message"])
+            self.assertEqual(self.song.tempo, 120)
         # An output to Main, an input read or compared, and an input from Resampling all run.
         for code in [
             "t = song.tracks[0]\nresult = [r.display_name for r in t.available_output_routing_types if r.display_name == 'Main']",
             "result = song.tracks[0].input_routing_type == 'Main'",
+            "result = getattr(song.tracks[0], 'input_routing_type', None)",
             "t = song.tracks[0]\nchoices = [r for r in t.available_input_routing_types if r.display_name == 'Resampling']\nresult = len(choices)",
         ]:
             with self.subTest(code=code):

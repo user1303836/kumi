@@ -3129,7 +3129,7 @@ const VOLATILE_TRACK_FIELDS: &[&str] = &[
 ];
 const VOLATILE_SLOT_FIELDS: &[&str] = &["playingStatus", "willRecordOnStart", "fireButtonState"];
 const VOLATILE_ROUTING_FIELDS: &[&str] =
-    &["availableInputTypes", "availableInputChannels", "availableOutputTypes", "availableOutputChannels"];
+    &["availableInputTypes", "availableInputChannels", "availableOutputTypes", "availableOutputChannels", "inputTypeSafety"];
 const VOLATILE_CLIP_FIELDS: &[&str] = &["playingPosition", "isPlaying", "isTriggered", "fireButtonState", "willRecordOnStart"];
 
 pub fn without_playback_state(value: &Value) -> Value {
