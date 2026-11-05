@@ -379,10 +379,12 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
         return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo"), {}
     rows = [row for row in answer.get("rows") or [] if isinstance(row, dict)]
     digest = answer.get("rows_digest")
-    families = sorted({one_line(row.get("family"), 40) for row in rows if isinstance(row.get("family"), str)})
-    if not rows or not isinstance(digest, str) or not digest or not families:
-        return block("Kumi didn't undo anything: its runtime couldn't say which steps that change made."), {}
     pending = [row for row in rows if row.get("state") != "undone"]
+    # Every row to be undone names its family, so the key names every family undone, and no rule for fewer covers it.
+    if (not pending or not isinstance(digest, str) or not digest
+            or not all(isinstance(row.get("family"), str) and row["family"].strip() for row in pending)):
+        return block("Kumi didn't undo anything: its runtime couldn't say which steps that change made."), {}
+    families = sorted({one_line(row["family"], 40) for row in pending})
     shown = [f"• {one_line(row.get('text') or row.get('title'), STEP_LINE)}" for row in pending[:UNDO_ROWS]]
     more = len(pending) - len(shown)
     lines = [f"Kumi: undo a whole change, {len(pending)} step{'s' if len(pending) != 1 else ''}, newest first",

@@ -56,9 +56,11 @@ class Host:
         self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
-        # A chat's session id → the HISTORY ids its newest kumi_change made, as that change answered them, in this
-        # Hermes process: what kumi_undo with no id undoes, whole (CC-3 amendment A2). Never another chat's.
-        self._changes: dict[str, list[str]] = {}
+        # A chat's session id → the HISTORY ids of each change its kumi_change made, oldest first, in this Hermes
+        # process: what kumi_undo with no id undoes, whole (CC-3 amendment A2), never another chat's. With the rows
+        # this process saw undone, a second "undo that" reaches the change before (rgzm, #1088).
+        self._changes: dict[str, list[list[str]]] = {}
+        self._undone: set[str] = set()
         self._changes_lock = threading.Lock()
 
     def remember_change(self, kwargs: dict, answer: Any) -> None:
@@ -69,14 +71,25 @@ class Host:
         if (isinstance(session, str) and session and isinstance(ids, list) and ids
                 and all(isinstance(each, str) and each for each in ids)):
             with self._changes_lock:
-                self._changes[session] = list(ids)
+                self._changes[session] = [*self._changes.get(session, [])[1 - CHANGES_KEPT:], list(ids)]
+
+    def remember_undo(self, asked: dict, answer: Any) -> None:
+        """Note the rows an undo took back: the one row it named, or each row of a whole change its answer says."""
+        if not isinstance(answer, dict):
+            return
+        rows = answer.get("rows") if isinstance(answer.get("rows"), list) else []
+        undone = {row.get("history_id") for row in rows if isinstance(row, dict) and row.get("state") == "undone"}
+        if not rows and answer.get("state") == "undone":
+            undone = {asked.get("history_id")}
+        with self._changes_lock:
+            self._undone |= {each for each in undone if isinstance(each, str)}
 
     def latest_change(self, kwargs: dict) -> str | None:
-        """A HISTORY id of this chat's newest change (its last row), or None when this chat made none here."""
+        """A HISTORY id of this chat's newest change not yet undone (its last row), or None when it has none here."""
         session = kwargs.get("session_id")
         with self._changes_lock:
-            ids = self._changes.get(session) if isinstance(session, str) else None
-        return ids[-1] if ids else None
+            changes = self._changes.get(session, []) if isinstance(session, str) else []
+            return next((ids[-1] for ids in reversed(changes) if not set(ids) <= self._undone), None)
 
     def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
         """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
@@ -633,9 +646,11 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     return answer
 
 
-# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2).
-NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started. "
-                   "kumi_history lists Kumi's changes; undo one by its id.")
+# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), and how many of a chat's
+# changes Kumi keeps for it.
+NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started, or it "
+                   "undid them all. kumi_history lists Kumi's changes; undo one by its id.")
+CHANGES_KEPT = 20
 
 
 def undo_target(host: Host, args: dict, kwargs: dict) -> tuple[dict | None, str | None]:
@@ -665,7 +680,9 @@ def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
                     "reason": "Kumi didn't undo anything: what this chat would undo isn't what was approved (a newer "
                               "change came since). Ask again."}
         asked = {**asked, "expect_rows": approved["rows_digest"]}
-    return _write(host, "undo", asked, kwargs)
+    answer = _write(host, "undo", asked, kwargs)
+    host.remember_undo(asked, answer)
+    return answer
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's

@@ -289,6 +289,31 @@ class Approvals(unittest.TestCase):
         rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
         self.assertEqual((rows[mine["history_ids"][0]], rows[theirs["history_ids"][0]]), ("applied", "applied"))
 
+    def test_a_second_undo_that_reaches_the_change_before_and_a_row_undone_since_the_approval_is_stale(self):
+        """rgzm's review of #1088: each "undo that" takes this chat's newest change not yet undone; and a whole undo
+        whose rows changed between the approval and the dispatch (one undone by id) is refused by its digest."""
+        first = support.call(self.host, "kumi_change", change(volume("t1", -6), title="First"), session_id="s1")
+        second = support.call(self.host, "kumi_change", change(volume("t2", -3), title="Second"), session_id="s1")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1")["state"], "undone")
+        self.assertIn("Undo First (mixer)", self.hook("kumi_undo", {})["message"], "the change before")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1")["state"], "undone")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual((rows[first["history_ids"][0]], rows[second["history_ids"][0]]), ("undone", "undone"))
+        self.assertEqual(self.hook("kumi_undo", {}), {"action": "block", "message": tools.NOTHING_TO_UNDO})
+
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        both = support.call(self.host, "kumi_change", change(sample, volume("t2", -10)), session_id="s1")
+        approved = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s1", tool_call_id="u7")
+        policy.post_approval_response(self.host, tool_call_id="u7", choice="once")
+        self.assertEqual(approved["action"], "approve")
+        one = support.call(self.host, "kumi_undo", {"history_id": both["history_ids"][0]}, session_id="s1")
+        self.assertEqual(one["state"], "undone")
+        stale = support.handle(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual(stale["error"]["code"], "stale", "its rows aren't the ones the producer approved")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual(rows[both["history_ids"][1]], "applied", "nothing more was undone")
+
     def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
         undo = {"history_id": applied["history_ids"][0]}
