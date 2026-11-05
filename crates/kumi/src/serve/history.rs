@@ -220,11 +220,13 @@ impl History {
                         row.at,
                     );
                     let daw_undo = (row.reason.as_deref() == Some(DAW_UNDO)).then(|| (row.reason.clone(), row.note.clone()));
-                    // A script's row stays the script's (CC-19): its title, family and code, and never Kumi's to undo.
-                    let script = row.script.clone().map(|script| (row.title.clone(), row.family.clone(), script));
+                    // A script's row stays the script's (CC-19): its title, family and code, never Kumi's to undo, and
+                    // its note when the executor's word on it brings none.
+                    let script = row.script.clone().map(|script| (row.title.clone(), row.family.clone(), row.note.clone(), script));
                     *row = Row { project_key, profile_id, session_id, tool_call_id, digest, call_outcome, change_id, sources, at, ..fresh };
-                    if let Some((title, family, script)) = script {
+                    if let Some((title, family, note, script)) = script {
                         (row.title, row.family, row.script, row.undo_available) = (title, family, Some(script), false);
+                        row.note = row.note.take().or(note);
                     }
                     // A change only the DAW's own Undo takes back stays one, with its words, whatever its state since.
                     if let Some((reason, note)) = daw_undo {
@@ -336,16 +338,17 @@ impl History {
         *self.scripting.borrow_mut() = Some((title.to_string(), script.clone()));
     }
 
-    /// The `script` call ends: its one row, in `state` (`applied`, `failed` or `unsure`) with `note`, marked with its
-    /// host call. That's the row the DAW's executor made for it (REAPER's and Renoise's run_lua), or, when it made none
-    /// (Live's run_python never does, and nothing may have run), a row of the runtime's own.
-    pub fn end_script(&self, identity: CallIdentity, project_key: &str, state: &str, note: Option<String>, snapshots: &Snapshots) -> Row {
+    /// The `script` call ends: its one row, in `state` (`applied`, `failed` or `unsure`) with `note` (every script row
+    /// has one: why Kumi can't undo it), marked with its host call. That's the row the DAW's executor made for it
+    /// (REAPER's and Renoise's run_lua), or, when it made none (Live's run_python never does, and nothing may have run),
+    /// a row of the runtime's own.
+    pub fn end_script(&self, identity: CallIdentity, project_key: &str, state: &str, note: String, snapshots: &Snapshots) -> Row {
         let made = self.collecting.borrow_mut().take().unwrap_or_default();
         let (title, script) = self.scripting.borrow_mut().take().unwrap_or_default();
         let mark = |row: &mut Row| {
             row.state = state.to_string();
             row.undo_available = false;
-            row.note = note.clone().or(row.note.take());
+            row.note = Some(note.clone());
             row.profile_id = identity.profile_id.map(str::to_string);
             row.session_id = identity.session_id.map(str::to_string);
             row.tool_call_id = identity.tool_call_id.map(str::to_string);

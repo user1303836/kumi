@@ -275,7 +275,14 @@ async fn script(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         "failed" => ("failed", None),
         _ => ("unsure", Some(ran.error.clone().and_then(|error| error.as_str().map(str::to_string)).unwrap_or_default())),
     };
-    let row = history.end_script(identity, &project.key, row_state, unsure.clone(), ctx.snapshots());
+    // Every script row says why Kumi can't undo it: a readout takes an applied row it can't undo, with no note, for one
+    // from before Kumi restarted.
+    let words = cant_undo(ctx.daw());
+    let note = match &unsure {
+        Some(reason) if !reason.is_empty() => format!("{} {words}", reason.trim_end()),
+        _ => words,
+    };
+    let row = history.end_script(identity, &project.key, row_state, note, ctx.snapshots());
     history.call_came_to(std::slice::from_ref(&row.id), ran.state, ctx.snapshots());
     if let Some(reason) = &unsure {
         ctx.link().note_unsure(SCRIPT.name, reason, "unsure");
@@ -296,7 +303,9 @@ async fn script(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 }
 
 /// The code a run is about to run, kept beside HISTORY by its SHA-256 (`<state>/scripts/<sha256>.py|.lua`, the owner's
-/// alone), with the code no row still names taken away. Refused, with nothing run, when it can't be kept.
+/// alone; the plugin may have written the same bytes there first, for its approval). Refused, with nothing run, when
+/// it can't be kept. The folder is shared with the plugin (a pending approval's code, and other kinds of file), so the
+/// only code taken away is a script's that no kept row names and that's older than [`STALE_CODE`].
 fn keep_code(ctx: &Ctx, run: &ScriptRun, code: &str) -> Result<(), OpError> {
     let folder = ctx.paths().state_dir.join("scripts");
     let extension = if run.language == "python" { "py" } else { "lua" };
@@ -313,10 +322,22 @@ fn keep_code(ctx: &Ctx, run: &ScriptRun, code: &str) -> Result<(), OpError> {
     }
     let named: Vec<String> =
         ctx.history().rows(super::history::KEPT).into_iter().filter_map(|row| row.script.map(|script| script.sha256)).collect();
+    let now = std::time::SystemTime::now();
     for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
         let path = entry.path();
+        if !matches!(path.extension().and_then(|extension| extension.to_str()), Some("py" | "lua")) {
+            continue;
+        }
         let sha = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
-        if sha != run.sha256 && !named.iter().any(|named| named == sha) {
+        if sha == run.sha256 || named.iter().any(|named| named == sha) {
+            continue;
+        }
+        // A file whose age can't be read is kept: it may be another chat's pending approval.
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age > STALE_CODE));
+        if old {
             if let Err(error) = std::fs::remove_file(&path) {
                 super::say(&format!("kumi serve: an old script's code not removed: {error}"));
             }
@@ -324,6 +345,9 @@ fn keep_code(ctx: &Ctx, run: &ScriptRun, code: &str) -> Result<(), OpError> {
     }
     Ok(())
 }
+
+/// How old a script's code no kept row names must be before a run takes it away: a pending approval's is younger.
+const STALE_CODE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// What came of a run: `ran`, `failed` (the script raised, or returned an error) or `unsure` (the DAW didn't say), and
 /// what it said.
@@ -455,13 +479,17 @@ fn lua_ran(app: &str, ran: Result<ToolResult, RuntimeError>) -> Ran {
 
 /// `undo` of a script's row (CC-19): Kumi can't, and says so in the preview and the undo alike, without asking the DAW.
 pub fn not_undoable(ctx: &Ctx, previewing: bool) -> Value {
-    let note =
-        format!("Kumi can't undo a script: {}'s own Undo may, if its step is still the latest there.", ctx.daw().profile().words.app);
+    let note = cant_undo(ctx.daw());
     if previewing {
         json!({"state": "preview", "undo_available": false, "reason": "not_undoable", "note": note})
     } else {
         json!({"state": "refused", "code": "not_undoable", "reason": note})
     }
+}
+
+/// Why Kumi can't undo a script in `daw`: the undo's words, and every script row's note.
+fn cant_undo(daw: DawId) -> String {
+    format!("Kumi can't undo a script: {}'s own Undo may, if its step is still the latest there.", daw.profile().words.app)
 }
 
 #[cfg(test)]
@@ -822,6 +850,22 @@ mod tests {
             let done = json!({"ok": true, "result": {"named": 4}, "stdout": "renamed 4 tracks\n", "error": null});
             let key = looked(&ctx, Rc::new(Python { answer: Some(done), given: given.clone() }));
             let before = ctx.link().epoch();
+            // The folder is the plugin's too: another chat's pending code, and files of other kinds, old or not.
+            let scripts = ctx.paths().state_dir.join("scripts");
+            std::fs::create_dir_all(&scripts).unwrap();
+            let two_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+            let put = |name: &str, old: bool| {
+                let file = std::fs::File::create(scripts.join(name)).unwrap();
+                if old {
+                    file.set_modified(two_days_ago).unwrap();
+                }
+            };
+            let pending = format!("{}.py", "1".repeat(64));
+            put(&pending, false);
+            put(&format!("{}.py", "2".repeat(64)), true);
+            put(&format!("{}.lua", "3".repeat(64)), true);
+            put(&format!("{}.device.json", "4".repeat(64)), true);
+            put(&format!("{}.genexpr", "5".repeat(64)), true);
             let args = json!({"language": "python", "purpose": "Name the drums", "code": "abc", "expected_project_key": key, "expected_sha256": ABC});
             let ran = call(&ctx, &SCRIPT, args).await;
             assert_eq!(*given.borrow(), [json!({"code": "abc", "mode": "exec"})], "once, in exec mode");
@@ -841,9 +885,22 @@ mod tests {
             ctx.snapshots().flush();
             let published: Value = serde_json::from_slice(&std::fs::read(dir.path().join("history.json")).unwrap()).unwrap();
             assert_eq!(published["items"][0]["script"], json!({"sha256": ABC, "language": "python"}));
+            assert_eq!(
+                published["items"][0]["note"],
+                "Kumi can't undo a script: Live's own Undo may, if its step is still the latest there.",
+                "so it isn't taken for a change from before a restart"
+            );
             assert!(!published.to_string().contains("\"abc\""), "the code itself isn't published");
             let kept = std::fs::read_to_string(ctx.paths().state_dir.join("scripts").join(format!("{ABC}.py"))).unwrap();
             assert_eq!(kept, "abc");
+            let mut left: Vec<String> =
+                std::fs::read_dir(&scripts).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            left.sort();
+            assert_eq!(
+                left,
+                [pending, format!("{}.device.json", "4".repeat(64)), format!("{}.genexpr", "5".repeat(64)), format!("{ABC}.py")],
+                "only old code no row names goes; a pending approval's and other kinds of file stay"
+            );
             // Undo: Kumi can't, and says the DAW's own undo may, in the preview and the undo alike.
             let note = "Kumi can't undo a script: Live's own Undo may, if its step is still the latest there.";
             assert_eq!(
