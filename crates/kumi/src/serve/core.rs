@@ -235,8 +235,9 @@ pub fn publish_owner(ctx: &Ctx, running: bool) {
     }
 }
 
-/// What `status` answers (C1): `runtime` (its version, protocol and Kumi home), `daw`, `setup`, `connected`,
-/// `project` (`{name, key, epoch}` once seen), `owner` and `capabilities` (the operations offered, by name).
+/// What `status` answers (C1): `runtime` (its version, protocol and generation, which its HISTORY rows carry; no path
+/// on this computer), `daw`, `setup`, `connected`, `project` (`{name, key, epoch}` once seen), `owner` and
+/// `capabilities` (the operations offered, by name).
 pub async fn status(ctx: &Ctx) -> Value {
     let (installed, version, bundled, daw_open) = match crate::daw::provider(ctx.daw()) {
         Some(provider) => {
@@ -246,12 +247,10 @@ pub async fn status(ctx: &Ctx) -> Value {
         }
         None => (false, None, None, false),
     };
-    // The process's own, which every part of Kumi reads: `main` set it before anything else ran.
-    let home = std::env::var_os("KUMI_HOME").map(|home| home.to_string_lossy().into_owned());
     let capabilities: Vec<&str> = ctx.offered().iter().map(|operation| operation.name).collect();
     let connected = ctx.link().connection().is_some_and(|connection| connection.answering());
     json!({
-        "runtime": {"version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL, "home": home},
+        "runtime": {"version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL, "generation": ctx.history().generation()},
         "daw": ctx.daw().as_str(),
         "setup": {"component": {"installed": installed, "version": version, "bundled": bundled}, "daw_open": daw_open},
         "connected": connected,
