@@ -1,7 +1,7 @@
 //! Live's change records and its ways back: the revert script, the bridge's transactions, material made again,
 //! Live's own undo and the emergency stop. HISTORY itself is core's (`core::history`).
 use super::{
-    changes::{undo_note, EMERGENCY_STOP},
+    changes::{undo_note, EMERGENCY_STOP, MAKES_A_DEVICE},
     connection::LiveConnection,
     context,
     fast::revert_script,
@@ -144,6 +144,9 @@ impl ChangeHost for LiveChanges {
     ) -> Result<UndoResult, RuntimeError> {
         history.undo_material(entry, snapshot, material, undo_key, discard, signal).await
     }
+    /// The change's own undo through the bridge. One that takes out a device the change made runs inside one Live undo
+    /// step: the bridge's delete outside one leaves Live's own undo naming the device that's gone, and the producer's
+    /// Cmd-Z after it stops Live (#1101). Without that step Kumi removes nothing, and says Live's undo takes it back.
     async fn undo_transaction(
         &self,
         history: &History,
@@ -152,8 +155,29 @@ impl ChangeHost for LiveChanges {
         undo_key: &str,
         discard: bool,
     ) -> Result<Option<UndoResult>, RuntimeError> {
-        history.bridge_undo(entry, snapshot, undo_key, discard).await
+        if !removes_a_device(snapshot) {
+            return history.bridge_undo(entry, snapshot, undo_key, discard).await;
+        }
+        let bound = abort::any([self.connection.lifetime.clone(), abort::timeout(10_000)]);
+        let Some(step) = history.open_undo_step(bound).await else {
+            return Ok(Some(UndoResult::error(format!(
+                "Kumi couldn't open one Live undo step to take “{}” back safely, so it removed nothing: Live's own undo (Cmd-Z in Live) takes it back.",
+                snapshot.record.title
+            ))));
+        };
+        // Closed whatever the undo came to, a failure included: an open step would fold whatever happens next into it.
+        let undone = history.bridge_undo(entry, snapshot, undo_key, discard).await;
+        history.close_undo_step(Some(step)).await;
+        undone
     }
+}
+
+/// A change whose undo takes out a device it made: by the tool that made it, by the device the bridge said it made, or,
+/// read back from disk with its tool forgotten, by its family.
+fn removes_a_device(snapshot: &Applied) -> bool {
+    snapshot.tool.as_deref().is_some_and(|tool| MAKES_A_DEVICE.contains(&tool))
+        || snapshot.created.is_some()
+        || (snapshot.tool.is_none() && snapshot.record.family == ChangeFamily::Device)
 }
 
 /// What Live's HISTORY does that only Live's does: running Live's fast code, putting a change back in Live, its undo.
