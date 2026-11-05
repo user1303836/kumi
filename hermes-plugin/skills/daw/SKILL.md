@@ -68,14 +68,14 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 ## Notes (MIDI)
 - **Read first,** and keep the producer's meter and key unless they ask otherwise:
   - Live: `read_notes` (`format: "json"` gives note ids);
-  - REAPER: `reaper_read` with `kind: "note"`;
-  - Renoise: `renoise_read` with `kind: "line"`.
+  - REAPER: `reaper_read` with `kind: "note"` and the item or take as `parent`;
+  - Renoise: `renoise_read` with `kind: "line"`, the pattern as `parent`, and `trackRef`.
 
   Say what you wrote: bars, notes, and anything cut.
-- **Kumi never deletes notes or clips here.** The plugin refuses Live's `delete_clip`, `clear_range`, `delete_notes` and `edit_notes` `delete-range`, REAPER's `notes_delete`, and Renoise's clearing.
+- **The plugin refuses the delete steps,** but replacing is allowed. It refuses Live's `delete_clip`, `clear_range`, `delete_notes` and `edit_notes` `delete-range`, REAPER's `notes_delete`, and Renoise's clearing.
 - **Live: new notes go in a new clip, where there's room.**
   - `write_midi_clip` writes into an empty Session slot: `trackRef`, `sceneIndex`, `name`, and `length` in beats (1024 at most). A new Session clip takes the Set's meter.
-  - `write_arrangement_clip` writes only where the Arrangement is empty: `trackRef`, with `start` and `length` (a `length` without a `start` is dropped), or `clips: [...]` for several.
+  - `write_arrangement_clip` writes only where the Arrangement is empty: `trackRef`, with `start` and `length`, or `clips: [...]` for several. It cuts notes past `length`. Without `start`, a lane's `*` can't see the clip's length.
   - A slot or a stretch that holds a clip is refused.
   - **To change notes already there, use `change_notes`,** by the ids `read_notes` gives with `format: "json"`, in the clip's own time.
 - **Live's notes are in Kumi's notation** (the write steps' `notation`, and what `read_notes` gives). A line is settings, a sequence, a lane, a copy or a key.
@@ -136,8 +136,8 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 - **"Write me a drum beat", on a new track, in Live:**
   1. Look first (`kumi_observe` with `scope: focus`) for the project key, the epoch and the Set's tempo and meter, and ask what's missing: style, tempo feel, how many bars.
   2. Plan one `kumi_change` with three steps:
-     - `add_tracks_and_scenes` adds a MIDI track (`as: "drums"`);
-     - `load_device` puts a drum kit on `@drums`: one the producer names, or `instruments/Drum Rack`. An empty Drum Rack plays nothing until its pads hold sounds; fill them with skill `kumi:sounds`.
+     - `add_tracks_and_scenes` adds the track: `{"tracks": [{"name": "Drums", "kind": "midi"}], "scenes": []}`, `as: "drums"`;
+     - `load_device` puts a ready-made kit on it (`itemId`, `trackRef: "@drums"`): one the producer names, or a Drum Rack kit preset under `instruments/Drum Rack/…`. Never an empty Drum Rack: it plays nothing, and the plugin can't fill its pads yet.
      - `write_midi_clip` writes into its first empty Session slot (`trackRef: "@drums"`, `sceneIndex`, `name`, and `length`), with lanes such as:
 
        ```
@@ -148,7 +148,8 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   3. The producer approves it as one change. Report the track, the clip, its bars and the pattern in words, and the HISTORY id.
   4. To hear it, the producer plays the clip in Live. Offer variations as new clips in empty slots, never by deleting this one.
 
-  REAPER builds the same with `track_add`, `fx_add` (a drum instrument), `item_add` and `notes_add`. Renoise uses an instrument with a drum kit and `notes_write` on a pattern's track.
+  - **REAPER:** `track_add`, then `fx_add` with a drum plug-in the producer has (as REAPER's FX browser names it), then `item_add` and `notes_add`. Use General MIDI keys (36 kick, 38 snare, 42 hat), or the plug-in's own map. REAPER's `drum_kit` step is refused.
+  - **Renoise:** an existing kit instrument, or `instrument_add`, then `sample_load` for each sound, then `keyzone_drumkit`. Then `notes_write` on an existing pattern, with keys from `C-4`. Renoise's `instrument_kit` step is refused.
 
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
