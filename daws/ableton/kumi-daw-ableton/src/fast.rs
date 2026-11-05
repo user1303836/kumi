@@ -69,3 +69,8 @@ pub fn set_script(items: &Value) -> String {
 pub fn revert_script(items: &Value) -> String {
     with_args("fast-revert", items, include_str!("assets/fast-revert.py"))
 }
+/// Reads the parameters `items` name (as the revert script finds them) and what Live shows for each, setting nothing:
+/// the guarded undo's check (`undo_guard`).
+pub fn read_script(items: &Value) -> String {
+    with_args("fast-read", items, include_str!("assets/fast-read.py"))
+}

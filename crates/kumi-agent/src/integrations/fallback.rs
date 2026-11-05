@@ -94,6 +94,16 @@ impl Integration for FallbackIntegration {
         }
         current.undo(id, signal).await
     }
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        let current = self.current();
+        if !current.has_undo() {
+            return Err(KumiError::new(FailureKind::Request, self.not_connected("undo")).into());
+        }
+        current.guarded_undo(id, signal).await
+    }
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        self.current().undo_preview(id, signal).await
+    }
     fn fingerprint(&self) -> Option<Value> {
         self.current().fingerprint()
     }

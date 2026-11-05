@@ -20,6 +20,9 @@ use kumi_listening::listener::ListenerSource;
 pub struct HostPolicy {
     /// May keep project and track identities in the DAW's saved document.
     pub persist_identity: bool,
+    /// Kumi's undo of a value it set (a mixer, the tempo, a device's parameters) first reads it again, right before the
+    /// DAW is asked, and refuses when it's changed since (`Integration::guarded_undo`): the plugin host's.
+    pub guards_undo: bool,
     pub listening: ListeningPolicy,
 }
 
@@ -34,11 +37,11 @@ pub enum ListeningPolicy {
 
 impl HostPolicy {
     pub fn standalone() -> Self {
-        Self { persist_identity: true, listening: ListeningPolicy::Standalone }
+        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone }
     }
 
     pub fn plugin(listen_root: PathBuf) -> Self {
-        Self { persist_identity: false, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
+        Self { persist_identity: false, guards_undo: true, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
     }
 }
 

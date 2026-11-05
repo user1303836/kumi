@@ -55,6 +55,7 @@ pub mod samples;
 pub mod set_model;
 pub mod snapshots;
 pub mod track_ids;
+pub mod undo_guard;
 pub mod variations;
 pub mod waves;
 pub mod willington;

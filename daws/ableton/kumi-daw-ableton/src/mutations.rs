@@ -417,6 +417,11 @@ impl Mutations {
                 })
             })
         });
+        // The plugin host keeps what Live read back of each value it set, for its undo to check against (`undo_guard`).
+        if applied && history.host.guard.on.get() && super::undo_guard::GUARDED.contains(&kind.tool.as_str()) {
+            let set = super::undo_guard::applied(connection, &kind.tool, &args, &preview, &result, &signal).await;
+            history.host.guard.keep(&record.id, set);
+        }
         history.remember(record.clone(), transaction.into(), restore);
         if applied {
             super::parameters::curve_later(history, kind, args.get("deviceRef"), &record.id, final_summary.picture.as_ref());
