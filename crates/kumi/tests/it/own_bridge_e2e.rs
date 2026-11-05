@@ -1938,3 +1938,93 @@ async fn logics_complete_known_marker_additions_and_moves_remain_reversible() {
         })
         .await;
 }
+
+/// The first M4 slice is a controlled cycle value; unrelated M4 writes remain unavailable.
+#[tokio::test(flavor = "current_thread")]
+async fn logics_loop_range_uses_explicit_timebase_fences_noops_and_truthful_refusals() {
+    fn fixture(script: &LogicScript, numerator: u64, on: bool, start: u64, end: u64) -> Value {
+        let position = |beats: u64| json!({"bar":beats/numerator+1,"beat":beats%numerator+1,"division":1,"tick":1});
+        let project = script.project();
+        json!({"on":on,"startBeats":start as f64,"endBeats":end as f64,"start":position(start),"end":position(end),
+            "timebase":{"project":{"id":project.id,"path":project.path,"name":project.name},"meter":[numerator,4],"division":16,"ticksPerBeat":960,
+                "signature":[{"position":{"bar":1,"beat":1,"division":1,"tick":1},"meter":[numerator,4]}]}})
+    }
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let paths = BridgePaths::new(home.path(), Daw::Logic);
+            let script = LogicScript::new();
+            let readiness = json!({"lcd":"Custom","signatureVisible":true,"signatureComplete":true});
+            let original = fixture(&script, 3, false, 0, 16);
+            script.set_loop_fixture(original.clone(), readiness.clone());
+            let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
+            config.discovery_dir = Some(paths.discovery());
+            let simulator = Simulator::start(config).await.unwrap();
+            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+            let connect: Connect = Rc::new(move |_| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+            });
+            let told: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
+            let into = told.clone();
+            let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+            context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
+            let logic =
+                create_logic_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect), open_file: None });
+            logic.start(Signal::new()).await.unwrap();
+            let look = logic.observe(Signal::new(), None).await.unwrap();
+            let plan = tool(&look, "make_changes");
+            let schema = serde_json::to_string(&plan.input_schema()).unwrap();
+            assert!(schema.contains("loop_range"));
+            for unavailable in ["region_move", "signature_set", "track_stack", "project_save"] {
+                assert!(!schema.contains(unavailable), "only the Loop Range M4 slice is authorized: {unavailable}");
+            }
+            let ask = |start, end| input(json!({"steps":[{"tool":"loop_range","input":{"startBeats":start,"endBeats":end}}]}));
+            let noop = plan.execute(ask(0, 0), Signal::new()).await.unwrap();
+            assert!(!noop.is_error, "{}", noop.text);
+            assert!(told.borrow().is_empty(), "no-op has no HISTORY row");
+            let done = plan.execute(ask(9, 18), Signal::new()).await.unwrap();
+            assert!(!done.is_error, "{}", done.text);
+            assert_eq!(told.borrow().last().unwrap().state, ChangeState::Applied);
+            assert_eq!(script.cycle(), fixture(&script, 3, true, 9, 18));
+            let rows = told.borrow().len();
+            let applies = script.asked().iter().filter(|(method, _)| method == "change_apply").count();
+            let noop = plan.execute(ask(9, 18), Signal::new()).await.unwrap();
+            assert!(!noop.is_error, "{}", noop.text);
+            assert_eq!(told.borrow().len(), rows);
+            assert_eq!(script.asked().iter().filter(|(method, _)| method == "change_apply").count(), applies);
+            assert_eq!(logic.undo(None, Signal::new()).await.unwrap().state, ChangeState::Undone);
+            assert_eq!(script.cycle(), original);
+            assert!(script.undo_titles().is_empty(), "Cycle makes no native Undo step");
+
+            for changed_timebase in [false, true] {
+                script.set_loop_fixture(original.clone(), readiness.clone());
+                let done = plan.execute(ask(3, 12), Signal::new()).await.unwrap();
+                assert!(!done.is_error, "{}", done.text);
+                let id = told.borrow().last().unwrap().id.clone();
+                let producer = if changed_timebase { fixture(&script, 4, true, 3, 12) } else { fixture(&script, 3, true, 6, 15) };
+                script.set_loop_fixture(producer.clone(), readiness.clone());
+                let refused = logic.undo(Some(&id), Signal::new()).await.unwrap();
+                assert_eq!(refused.state, ChangeState::Kept, "never report a restore that was refused");
+                let again = tool(&look, "undo_change").execute(input(json!({"change":id,"discard":true})), Signal::new()).await.unwrap();
+                assert!(again.is_error, "discard never bypasses cycle/timebase fences: {}", again.text);
+                assert_eq!(script.cycle(), producer);
+            }
+            script.set_loop_fixture(original, readiness);
+            script.uncertain_once();
+            let unsure = plan.execute(ask(3, 12), Signal::new()).await.unwrap();
+            assert!(unsure.is_error, "{}", unsure.text);
+            let record = told.borrow().last().cloned().unwrap();
+            assert_eq!(record.state, ChangeState::Unsure, "unanswered cycle apply is never promoted to confirmed manual-only");
+            let writes = script.asked().iter().filter(|(method, _)| method == "change_apply" || method == "change_restore").count();
+            for _ in 0..2 {
+                let refused = tool(&look, "undo_change").execute(input(json!({"change":record.id})), Signal::new()).await.unwrap();
+                assert!(refused.is_error, "{}", refused.text);
+            }
+            assert_eq!(script.asked().iter().filter(|(method, _)| method == "change_apply" || method == "change_restore").count(), writes);
+            assert_eq!((script.track_count(), script.epoch()), (2, 1));
+            logic.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}

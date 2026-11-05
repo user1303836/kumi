@@ -1,0 +1,10 @@
+{
+  "commit": "6f8f6e9bbc3666159ce68be1ce7466aa30e82670",
+  "files": [
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-loop-range/scene.json.gz",
+      "path": "change-loop-range/scene.json.gz",
+      "sha256": "78d113acd5f286a4ef95eee7f2e656cc48b1479a6a0ccee11ca58c08158cb3b7"
+    }
+  ]
+}

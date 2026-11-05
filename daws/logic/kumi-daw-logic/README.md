@@ -1,4 +1,4 @@
-# Kumi's Logic Pro adapter: M2, M3
+# Kumi's Logic Pro adapter: M2, M3 and Loop Range preview
 
 - The app adapter for the original Logic M2 reader. It reads project, track, region, note, plug-in, send, marker and tempo rows through `logic_read` and draws four FOCUS bodies: Channel Strip, Piano Roll, Tracks and Routing.
 - Requires Logic Pro 12 on macOS. The bridge attaches to an open Logic; it installs nothing into Logic and requires no Logic restart. Its binary, built Accessibility helper and connection reference go in `KUMI_HOME/bridges/logic/bridge/logic-kumi`.
@@ -10,3 +10,5 @@
 Native acceptance on a disposable project requires `accept_logic --changes --scratch-confirmed`; failed undo may leave edits. Recorded source evidence is not a current native acceptance result.
 
 Added tracks, deleted tracks and deleted markers require manual Logic Undo History; Kumi never presses a native Undo step identified only by its title. Marker additions/moves also require manual undo if any captured original identity field (including Text) was unavailable; showing the field later cannot recover its old value. Complete known marker row/list identity permits value restores, and discard never overrides unknown identity. Confirmed manual-only changes stay Kept in HISTORY and block default Undo from skipping to an earlier change; uncertain deletions remain uncertain. Native marker, note and structural undo attribution is not inferred from titles alone.
+
+The first M4 preview adds only `loop_range` (17 kinds total): quarter-note start/end locators, 0/0 off while retaining them, 960 ticks per quarter note, with no silent rounding. Custom LCD and the complete Signature List must already be visible, with stopped nonrecording transport and a fresh complete N/4 timebase (N from 1 through 16, /16 division). That identity and both locator values fence apply/restore. Unknown or changed identity refuses even with discard; no native Undo is pressed and no entity is deleted. Missing original restore evidence is manual-only. Other M4 kinds and project saving remain disabled; simulator timebase fixtures are explicit synthetic state, and current native acceptance remains pending.

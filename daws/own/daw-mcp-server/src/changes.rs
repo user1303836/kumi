@@ -144,7 +144,7 @@ pub struct Journal {
     /// The change kinds the DAW's own undo never takes back.
     outside_undo: &'static [&'static str],
     /// A DAW may publish a validated restore hint without exposing its private undo material.
-    restore_hint: Option<fn(&str, &Value) -> Option<Value>>,
+    restore_hint: Option<fn(&str, &Value, &Value) -> Option<Value>>,
 }
 
 /// Four base-36 characters from a counter and the clock, unique among the records kept.
@@ -341,7 +341,7 @@ impl Journal {
                         reply.insert(field.into(), value.clone());
                     }
                 }
-                if let Some(hint) = self.restore_hint.and_then(|derive| derive(&record.kind, applied)) {
+                if let Some(hint) = self.restore_hint.and_then(|derive| derive(&record.kind, &record.prior, applied)) {
                     let undo = reply.entry("undo".to_owned()).or_insert_with(|| json!({}));
                     if !undo.is_object() {
                         *undo = json!({});

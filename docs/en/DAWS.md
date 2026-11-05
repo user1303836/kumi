@@ -37,6 +37,16 @@ Note reads still require only the requested region selected; normal launch
 creates no MIDI ports. The change methods may activate Logic and operate its
 controls.
 
+The first M4 preview adds only `loop_range` to the 16 M3 kinds. Pass `startBeats`
+and `endBeats` in quarter notes to set and enable Cycle; `0, 0` disables it while
+keeping its locators. Values must align to 960 ticks per quarter note; other fractions are refused. Kumi requires a fresh,
+complete N/4 timebase (N from 1 through 16, /16 division), Custom LCD and the complete Signature List already visible, and stopped nonrecording transport. It fences the cycle's on/off state, both locators
+and meter identity. Unknown or multiple meters, producer cycle edits and changed
+timebase refuse writes or restores; `discard` does not override these checks.
+Cycle changes create no native Undo step. Kumi can restore confirmed values;
+missing original evidence stays in HISTORY with manual guidance. The remaining
+M4 kinds and project saving are not enabled, and current native acceptance is pending.
+
 The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
 limits. Replay tests do not establish native acceptance on the current Logic
 version. Developers can build and explicitly run the `accept_logic` example on

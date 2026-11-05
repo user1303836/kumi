@@ -316,6 +316,45 @@ fn original_change_scenes_replay_with_explicit_unsupported_restore_boundaries() 
 }
 
 #[test]
+fn the_original_cycle_scene_is_preserved_and_its_incomplete_setup_refuses_without_a_write() {
+    let source: Value = serde_json::from_str(include_str!("../fixtures/cycle-source.json")).unwrap();
+    assert_eq!(source["commit"], "6f8f6e9bbc3666159ce68be1ce7466aa30e82670");
+    let files = source["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    let bytes = std::fs::read(fixtures().join(files[0]["path"].as_str().unwrap())).unwrap();
+    assert_eq!(daw_bridge::auth::sha256_hex(&bytes), files[0]["sha256"]);
+    let scene = load("change-loop-range");
+    let records = scene.logic["steps"].as_array().unwrap();
+    assert_eq!(records.len(), 7);
+    assert_eq!(records[0]["step"]["method"], "change_preview");
+    assert_eq!(records[0]["answer"]["ok"], true, "the historical answer remains evidence, not the new expected answer");
+    // These two observed replies supply only a read-only prefix. The stronger request asks for writable facts
+    // absent from the recording; this test doesn't invent them or pretend to replay the original mutation suffix.
+    let windows = scene.calls.iter().find(|call| call.op == "windows").unwrap().reply.clone();
+    let bar =
+        scene.calls.iter().find(|call| call.op == "tree" && call.params["path"] == "5" && call.params["depth"] == 3).unwrap().reply.clone();
+    assert_eq!(bar["node"]["c"][0]["c"][0]["value"], "Beats & Project");
+    let hands = logic_kumi::helper::MockHands::new();
+    hands.reply("windows", Ok(windows));
+    hands.reply("tree", Ok(bar));
+    let mut helper = hands.clone().launch().unwrap();
+    let saved = &scene.logic["project"];
+    let mut state = Project::new(Strings::english());
+    state.set_identity(saved["id"].as_str(), saved["path"].as_str(), saved["name"].as_str().unwrap());
+    state.layout.control_bar = Some("5".into());
+    state.layout.headers = Some("7.1.0.0.0".into());
+    let refused =
+        serve::answer_change(&mut state, &mut Changes::default(), helper.as_mut(), 1, "change_preview", &records[0]["step"]["params"])
+            .unwrap_err();
+    assert_eq!(refused.0, "failed");
+    assert!(refused.1.contains("LCD must already show Custom"), "{}", refused.1);
+    assert_eq!(hands.calls().iter().map(|(op, _)| op.as_str()).collect::<Vec<_>>(), ["windows", "tree"]);
+    assert_eq!(records[1..].len(), 6, "all six dependent recorded requests remain explicitly unconsumed");
+    assert_eq!(records[1]["step"]["method"], "change_apply");
+    assert_eq!(records[6]["step"]["method"], "change_restore");
+}
+
+#[test]
 fn a_tracks_volume_pan_mute_solo_and_arm_go_through_its_header_and_come_back_by_value() {
     for (name, field, wanted, prior, step) in [
         ("change-track-volume", "volumeDb", json!(-6.0), json!(0.0), "Vocal volume −6 dB"),

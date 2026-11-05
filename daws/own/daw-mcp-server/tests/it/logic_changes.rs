@@ -449,7 +449,6 @@ async fn markers_and_the_tempo_change_and_come_back_in_logics_words() {
 
     // What the bridge can't make yet is refused saying why; what it makes beyond the simulator says so too.
     for (kind, why) in [
-        ("loop-range", "the cycle locators have no field Accessibility can set"),
         ("marker-rename", "a marker's name cell in the Marker List isn't a text field"),
         ("fx-add", "the insert slot's pop-up menu can't be driven from outside"),
         ("send-volume", "the send slot's pop-up menu can't be driven from outside"),
@@ -804,6 +803,190 @@ async fn showing_text_later_never_recovers_unknown_original_marker_contents_even
             assert_eq!(lab.script.markers(), markers);
             assert_eq!(lab.script.undo_titles(), titles);
         }
+        lab.simulator.stop();
+    }
+}
+
+/// Explicit synthetic facts for the first M4 slice; none are inferred from M2's hidden locators/signature list.
+fn loop_fixture(script: &LogicScript, numerator: u64, on: bool, start: f64, end: f64) -> Value {
+    let position = |beats: f64| {
+        let ticks = (beats * 960.0).round() as u64;
+        json!({"bar":ticks/(numerator*960)+1,"beat":(ticks%(numerator*960))/960+1,"division":(ticks%960)/240+1,"tick":ticks%240+1})
+    };
+    let project = script.project();
+    json!({"on":on,"startBeats":(start*1.0e6).round()/1.0e6,"endBeats":(end*1.0e6).round()/1.0e6,"start":position(start),"end":position(end),
+        "timebase":{"project":{"id":project.id,"path":project.path,"name":project.name},"meter":[numerator,4],"division":16,"ticksPerBeat":960,
+            "signature":[{"position":{"bar":1,"beat":1,"division":1,"tick":1},"meter":[numerator,4]}]}})
+}
+fn loop_ready() -> Value {
+    json!({"lcd":"Custom","signatureVisible":true,"signatureComplete":true})
+}
+
+#[tokio::test]
+async fn the_first_m4_cycle_slice_restores_known_values_and_preserves_locators_while_off() {
+    for numerator in [4, 3] {
+        let mut lab = Lab::start().await;
+        let original = loop_fixture(&lab.script, numerator, false, 0.0, 16.0);
+        lab.script.set_loop_fixture(original.clone(), loop_ready());
+        let (cycle, applied) = lab.make("loop-range", json!({"startBeats":8,"endBeats":20}), "enable").await;
+        assert_eq!(cycle["prior"], original);
+        assert_eq!(cycle["fence"], original);
+        assert_eq!(applied["undo"]["restore"], json!({"mode":"value"}));
+        assert_eq!(applied["undo"]["entry"], false);
+        assert!(applied.get("material").is_none(), "private hints do not expose material");
+        let enabled = loop_fixture(&lab.script, numerator, true, 8.0, 20.0);
+        assert_eq!(lab.script.cycle(), enabled);
+        let (focus, error) = lab.tool("focus", json!({})).await;
+        assert!(!error && focus["transport"]["cycle"] == true, "fresh cycle status: {focus}");
+        let noop = lab.preview("loop-range", json!({"startBeats":8,"endBeats":20})).await;
+        assert_eq!(noop["display"]["unchanged"], true);
+        let (off, _) = lab.make("loop-range", json!({"startBeats":0,"endBeats":0}), "disable").await;
+        assert_eq!(
+            (lab.script.cycle()["on"].clone(), lab.script.cycle()["startBeats"].clone(), lab.script.cycle()["endBeats"].clone()),
+            (json!(false), json!(8.0), json!(20.0))
+        );
+        let (back, error) = lab.undo(&off, "restore-enabled", false).await;
+        assert!(!error && back["state"] == "undone", "{back}");
+        assert_eq!(lab.script.cycle(), enabled);
+        let (back, error) = lab.undo(&cycle, "restore-original", false).await;
+        assert!(!error && back["state"] == "undone", "{back}");
+        assert_eq!(lab.script.cycle(), original);
+        assert_eq!(lab.script.track_count(), 2);
+        assert_eq!(lab.script.epoch(), 1);
+        assert!(lab.script.undo_titles().is_empty(), "no native Undo entry is created or pressed");
+        let (tick, applied) = lab.make("loop-range", json!({"startBeats":1.0/960.0,"endBeats":16}), "one-tick").await;
+        assert_eq!(applied["applied"]["start"]["tick"], 2);
+        assert_eq!(applied["applied"]["startBeats"], 0.001042);
+        assert_eq!(applied["undo"]["restore"], json!({"mode":"value"}));
+        assert!(!lab.undo(&tick, "one-tick-back", false).await.1);
+        assert_eq!(lab.script.cycle(), original);
+
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn cycle_writes_require_complete_known_preconditions_and_tick_aligned_input() {
+    let mut lab = Lab::start().await;
+    let (refused, error) = lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await;
+    assert!(error && refused["code"] == "failed", "unknown facts are not inferred as4/4: {refused}");
+    for path in [
+        "/timebase/meter",
+        "/timebase/division",
+        "/timebase/ticksPerBeat",
+        "/timebase/project/path",
+        "/timebase/signature",
+        "/start/tick",
+        "/on",
+    ] {
+        let mut state = loop_fixture(&lab.script, 4, false, 0.0, 16.0);
+        *state.pointer_mut(path).unwrap() = Value::Null;
+        lab.script.set_loop_fixture(state.clone(), loop_ready());
+        let (refused, error) = lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await;
+        assert!(error && refused["code"] == "failed", "{path}: {refused}");
+        assert_eq!(lab.script.cycle(), state);
+    }
+    let mut multiple = loop_fixture(&lab.script, 4, false, 0.0, 16.0);
+    multiple["timebase"]["signature"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"position":{"bar":9,"beat":1,"division":1,"tick":1},"meter":[3,4]}));
+    lab.script.set_loop_fixture(multiple, loop_ready());
+    assert!(lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await.1);
+    let original = loop_fixture(&lab.script, 4, false, 0.0, 16.0);
+    for readiness in [
+        Value::Null,
+        json!({"lcd":"Beats","signatureVisible":true,"signatureComplete":true}),
+        json!({"lcd":"Custom","signatureVisible":false,"signatureComplete":true}),
+    ] {
+        lab.script.set_loop_fixture(original.clone(), readiness);
+        assert!(lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await.1);
+        assert_eq!(lab.script.cycle(), original);
+    }
+    lab.script.set_loop_fixture(original.clone(), loop_ready());
+    for input in [
+        json!({"startBeats":8,"endBeats":4}),
+        json!({"start":4,"end":8}),
+        json!({"startBeats":0.0001,"endBeats":16}),
+        json!({"startBeats":8}),
+        json!({"startBeats":-1,"endBeats":16}),
+        json!({"startBeats":100000,"endBeats":100016}),
+    ] {
+        let (refused, error) = lab.try_preview("loop-range", input).await;
+        assert!(error && refused["code"] == "bad-params", "{refused}");
+        assert_eq!(lab.script.cycle(), original);
+    }
+    let crossing = loop_fixture(&lab.script, 4, true, 7.9, 8.1);
+    lab.script.set_loop_fixture(crossing.clone(), loop_ready());
+    let (refused, error) = lab.try_preview("loop-range", json!({"startBeats":7.5,"endBeats":7.75})).await;
+    assert!(error && refused["code"] == "bad-params", "every possible lower-segment reset must keep locators ordered: {refused}");
+    assert_eq!(lab.script.cycle(), crossing);
+    lab.script.set_loop_fixture(original.clone(), loop_ready());
+    // Ten-step increments make action cost nonmonotonic: reset distance9 costs9, distance10 only1.
+    // Both higher bar fields change, so lower ticks must use max(action cost), not cost(max(distance)).
+    let costly = loop_fixture(&lab.script, 4, false, 19.0 / 960.0, 2000.0 + 19.0 / 960.0);
+    lab.script.set_loop_fixture(costly.clone(), loop_ready());
+    let (refused, error) = lab.try_preview("loop-range", json!({"startBeats":1120.0+9.0/960.0,"endBeats":3120.0+9.0/960.0})).await;
+    assert!(error && refused["code"] == "bad-params", "every possible lower-field reset must fit the64action budget: {refused}");
+    assert_eq!(lab.script.cycle(), costly);
+    lab.script.set_loop_fixture(original.clone(), loop_ready());
+    lab.tool("transport_play", json!({})).await;
+    assert!(lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await.1);
+    lab.tool("transport_stop", json!({})).await;
+    lab.script.set_recording(true);
+    assert!(lab.try_preview("loop-range", json!({"startBeats":8,"endBeats":16})).await.1);
+    assert_eq!(lab.script.cycle(), original);
+    assert!(lab.script.undo_titles().is_empty());
+    lab.simulator.stop();
+}
+
+#[tokio::test]
+async fn cycle_fences_refuse_producer_edits_and_changed_or_unknown_timebase_even_with_discard() {
+    for edit in ["values", "meter", "unknown", "project"] {
+        let mut lab = Lab::start().await;
+        let original = loop_fixture(&lab.script, 4, false, 0.0, 16.0);
+        lab.script.set_loop_fixture(original.clone(), loop_ready());
+        let stale = lab.preview("loop-range", json!({"startBeats":8,"endBeats":16})).await;
+        let mut changed = match edit {
+            "values" => loop_fixture(&lab.script, 4, true, 4.0, 12.0),
+            "meter" => loop_fixture(&lab.script, 3, false, 0.0, 16.0),
+            _ => original.clone(),
+        };
+        if edit == "unknown" {
+            changed["start"]["tick"] = Value::Null;
+        }
+        if edit == "project" {
+            changed["timebase"]["project"]["id"] = json!("another-project");
+        }
+        lab.script.set_loop_fixture(changed.clone(), loop_ready());
+        let (refused, error) = lab.apply(&stale, "stale").await;
+        assert!(error && matches!(refused["code"].as_str(), Some("failed" | "changed")), "{edit}: {refused}");
+        assert_eq!(lab.script.cycle(), changed);
+        lab.script.set_loop_fixture(original, loop_ready());
+        let (cycle, _) = lab.make("loop-range", json!({"startBeats":8,"endBeats":16}), "apply").await;
+        lab.script.set_loop_fixture(changed.clone(), loop_ready());
+        for (key, discard) in [("normal", false), ("discard", true)] {
+            let (refused, error) = lab.undo(&cycle, key, discard).await;
+            assert!(error && matches!(refused["code"].as_str(), Some("failed" | "changed")), "{edit}: {refused}");
+            assert_eq!(lab.script.cycle(), changed);
+        }
+        assert!(lab.script.undo_titles().is_empty());
+        let before = lab.script.asked().iter().filter(|(method, _)| method == "change_apply").count();
+        let (cached, error) = lab.apply(&cycle, "apply").await;
+        assert!(!error && cached["state"] == "applied", "refusal does not claim an undo: {cached}");
+        assert_eq!(
+            lab.script.asked().iter().filter(|(method, _)| method == "change_apply").count(),
+            before,
+            "the journal never resends a confirmed apply"
+        );
+        let response = (lab.script.respond())(
+            "change_restore",
+            &json!({"kind":"loop-range","prior":{"on":false,"startBeats":0,"endBeats":16},"applied":cached["applied"],"discard":true}),
+        )
+        .unwrap();
+        assert!(matches!(response,Err((code,_)) if code=="failed"), "a legacy saved cycle cannot authorize any write");
+        assert_eq!(lab.script.cycle(), changed);
+
         lab.simulator.stop();
     }
 }

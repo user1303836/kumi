@@ -5,7 +5,7 @@ use kumi_agent::core::{
 use kumi_daw_logic::{LogicRefs, DAW};
 use serde_json::json;
 
-/// The model can ask for exactly the native M3 kinds, including the seven writes Logic's own undo skips.
+/// The model can ask for exactly the 16 M3 kinds and first M4 Loop Range slice, including the eight writes Logic's own undo skips.
 #[test]
 fn the_change_tools_match_the_native_bridge_and_name_its_undo_limits() {
     use std::{collections::BTreeSet, path::Path};
@@ -25,19 +25,19 @@ fn the_change_tools_match_the_native_bridge_and_name_its_undo_limits() {
         }
     }
     let ours: BTreeSet<String> = kinds.kinds.iter().map(|kind| kind.kind.to_owned()).collect();
-    assert_eq!(ours.len(), 16);
+    assert_eq!(ours.len(), 17);
     assert_eq!(ours, native);
     assert_eq!(
         kinds.kinds.iter().filter(|kind| kind.skipped_by_daw_undo).map(|kind| kind.kind).collect::<BTreeSet<_>>(),
-        BTreeSet::from(["track-volume", "track-pan", "track-mute", "track-solo", "track-arm", "tempo-set", "fx-bypass"])
+        BTreeSet::from(["track-volume", "track-pan", "track-mute", "track-solo", "track-arm", "tempo-set", "fx-bypass", "loop-range"])
     );
     assert_eq!(
         kinds.kinds.iter().filter(|kind| kind.manual_undo.is_some()).map(|kind| kind.kind).collect::<BTreeSet<_>>(),
         BTreeSet::from(["track-add", "track-delete", "marker-delete"])
     );
     assert!(!kinds.plan_steps, "Logic has no atomic undo block for a plan");
-    for kind in kinds.kinds.iter().filter(|kind| ["marker-add", "marker-move"].contains(&kind.kind)) {
-        let decide = kind.manual_undo_when.expect("marker undo depends on validated original contents");
+    for kind in kinds.kinds.iter().filter(|kind| ["marker-add", "marker-move", "loop-range"].contains(&kind.kind)) {
+        let decide = kind.manual_undo_when.expect("conditional undo depends on validated original contents");
         for reply in [
             json!({}),
             json!({"undo":{"restore":null}}),

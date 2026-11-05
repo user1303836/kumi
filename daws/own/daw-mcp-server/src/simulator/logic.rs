@@ -54,8 +54,7 @@ const CHANGE_METHODS: [&str; 8] = [
 ];
 const MANUAL_UNDO: &str = "Logic Pro's Undo title cannot identify Kumi's specific step. Kumi won't undo a possibly unrelated producer edit; use Logic Pro's own undo manually.";
 /// The kinds the bridge can't make yet, and why, as it refuses them.
-const NOT_YET: [(&str, &str); 9] = [
-    ("loop-range", "the cycle locators have no field Accessibility can set"),
+const NOT_YET: [(&str, &str); 8] = [
     ("marker-rename", "a marker's name cell in the Marker List isn't a text field"),
     ("fx-add", "the insert slot's pop-up menu can't be driven from outside"),
     ("fx-delete", "the insert slot's pop-up menu can't be driven from outside"),
@@ -413,6 +412,10 @@ struct State {
     /// The number Logic gives the next marker it makes ("Marker 2").
     next_marker: usize,
     tempo: f64,
+    /// Loop Range facts are deliberately unknown in the M2 recordings. Positives opt into explicit synthetic state.
+    cycle: Value,
+    loop_readiness: Value,
+    recording: bool,
     /// The playhead, in beats from the project's start.
     playhead: f64,
     playing: bool,
@@ -499,6 +502,86 @@ fn bar_text(beats: f64) -> String {
 /// A marker's or the playhead's beat: Logic's displays place them on the bar and beat.
 fn on_the_beat(beats: f64) -> f64 {
     beats.floor()
+}
+
+fn loop_position(beats: f64, numerator: u64) -> Value {
+    let ticks = (beats * 960.0).round() as u64;
+    let per_bar = numerator * 960;
+    json!({"bar":ticks/per_bar+1,"beat":(ticks%per_bar)/960+1,"division":(ticks%960)/240+1,"tick":ticks%240+1})
+}
+
+fn loop_public(state: &Value) -> Value {
+    json!({"on":state["on"],"startBeats":state["startBeats"],"endBeats":state["endBeats"]})
+}
+fn loop_preflight(from: &Value, to: &Value) -> Result<(), Fault> {
+    let mut steps = u64::from(from["on"] != to["on"]);
+    for locator in ["start", "end"] {
+        let mut higher_changed = false;
+        for field in ["bar", "beat", "division", "tick"] {
+            let (from, to) = (from[locator][field].as_u64().unwrap(), to[locator][field].as_u64().unwrap());
+            let cost = |distance: u64| distance / 10 + distance % 10;
+            steps += cost(from.abs_diff(to)).max(if higher_changed { cost(1u64.abs_diff(to)) } else { 0 });
+            higher_changed |= from != to;
+        }
+    }
+    if steps > 64 {
+        return Err(bad("the cycle edit exceeds the bounded locator step count; choose a nearer range"));
+    }
+    // Native can reset lower segments when a higher one changes. Every possible reset must preserve order
+    // before the first dispatch; the synthetic mutation is atomic but must not promise an unsupported path.
+    let parts = |state: &Value, locator: &str| ["bar", "beat", "division", "tick"].map(|field| state[locator][field].as_u64().unwrap());
+    let targets = [parts(to, "start"), parts(to, "end")];
+    let numerator = from["timebase"]["meter"][0].as_u64().unwrap();
+    let ticks = |position: [u64; 4]| ((position[0] - 1) * numerator + position[1] - 1) * 960 + (position[2] - 1) * 240 + position[3] - 1;
+    let order = if to["endBeats"].as_f64() >= from["endBeats"].as_f64() { [1, 0] } else { [0, 1] };
+    let mut possible = vec![[parts(from, "start"), parts(from, "end")]];
+    for index in order {
+        for segment in 0..4 {
+            let mut next = vec![];
+            for mut pair in possible {
+                if pair[index][segment] == targets[index][segment] {
+                    if !next.contains(&pair) {
+                        next.push(pair);
+                    }
+                    continue;
+                }
+                pair[index][segment] = targets[index][segment];
+                for reset in 0..(1 << (3 - segment)) {
+                    let mut branch = pair;
+                    for lower in segment + 1..4 {
+                        if reset & (1 << (lower - segment - 1)) != 0 {
+                            branch[index][lower] = 1;
+                        }
+                    }
+                    if ticks(branch[0]) >= ticks(branch[1]) {
+                        return Err(bad("this locator transition could cross the other locator while a higher segment resets lower fields; set this range manually"));
+                    }
+                    if !next.contains(&branch) {
+                        next.push(branch);
+                    }
+                }
+            }
+            possible = next;
+        }
+    }
+    Ok(())
+}
+
+fn loop_title(state: &Value) -> String {
+    if state["on"] == false {
+        return "Cycle off".into();
+    }
+    let label = |position: &Value| {
+        let mut text = format!("bar {}", position["bar"]);
+        if position["beat"] != 1 || position["division"] != 1 || position["tick"] != 1 {
+            text.push_str(&format!(" beat {}", position["beat"]));
+            if position["division"] != 1 || position["tick"] != 1 {
+                text.push_str(&format!(".{}.{}", position["division"], position["tick"]));
+            }
+        }
+        text
+    };
+    format!("Cycle {} to {}", label(&state["start"]), label(&state["end"]))
 }
 
 /// The project the vectors were recorded over, as the bridge's `status` named it: what the welcome and the discovery
@@ -662,6 +745,9 @@ impl State {
             markers,
             next_marker,
             tempo,
+            cycle: Value::Null,
+            loop_readiness: Value::Null,
+            recording: false,
             playhead: focus["transport"]["beat"].as_f64().unwrap_or(0.0),
             playing: focus["transport"]["playing"] == true,
             undo: vec![],
@@ -814,6 +900,7 @@ impl State {
             return Err(bad(format!("Logic Pro's bridge can't make a {kind} change yet: {why}")));
         }
         match kind.as_str() {
+            "loop-range" => self.loop_range(method, params),
             "track-add" => self.track_add(method, params),
             "track-delete" => self.track_delete(method, params),
             "marker-add" => self.marker_add(method, params),
@@ -824,7 +911,7 @@ impl State {
                 Some(prop) => self.track_prop(prop, method, params),
                 None if NOT_SIMULATED.contains(&kind.as_str()) => Err(bad(format!(
                     "the simulated Logic Pro makes only {} (not {kind:?}); the bridge makes {} too",
-                    "track-volume, track-pan, track-mute, track-solo, track-arm, track-rename, track-add, track-delete, marker-add, marker-move, marker-delete and tempo-set",
+                    "track-volume, track-pan, track-mute, track-solo, track-arm, track-rename, track-add, track-delete, marker-add, marker-move, marker-delete, loop-range and tempo-set",
                     NOT_SIMULATED.join(", ")
                 ))),
                 None => Err(bad(format!("Logic Pro has no change kind {kind:?}"))),
@@ -1361,13 +1448,104 @@ impl State {
         }
     }
 
+    // ----- first M4 slice: controlled Loop Range only -----
+
+    fn loop_now(&self) -> Result<Value, Fault> {
+        if self.playing || self.recording {
+            return Err(failed("Loop Range requires Logic Pro stopped and not recording"));
+        }
+        if self.loop_readiness != json!({"lcd":"Custom","signatureVisible":true,"signatureComplete":true}) {
+            return Err(failed("Loop Range requires Custom LCD and a complete visible Signature List; Kumi does not change the view"));
+        }
+        if !crate::logic::complete_loop_state(&self.cycle) {
+            return Err(failed("Loop Range needs complete locators and a proven single N/4 meter at the project start with /16 division"));
+        }
+        let current = another_project(&serde_json::to_value(project()).unwrap(), self.project);
+        if self.cycle["timebase"]["project"] != current {
+            return Err(changed("the saved project identity changed; no cycle value was written"));
+        }
+        Ok(self.cycle.clone())
+    }
+
+    fn loop_range(&mut self, method: &str, params: &Value) -> Answer {
+        if method == "change_restore" {
+            let (prior, applied) = (&params["prior"], &params["applied"]);
+            if !crate::logic::complete_loop_state(prior)
+                || !crate::logic::complete_loop_state(applied)
+                || prior["timebase"] != applied["timebase"]
+            {
+                return Err(failed(crate::logic::MANUAL_LOOP));
+            }
+            let now = self.loop_now()?;
+            if now["timebase"] != prior["timebase"] {
+                return Err(changed("the cycle meter/timebase changed; nothing was restored"));
+            }
+            if now != *prior && now != *applied {
+                return Err(changed("the cycle has been changed in Logic Pro since Kumi set it"));
+            }
+            let desc = Self::desc(params)?;
+            if now != *prior {
+                loop_preflight(&now, prior)?;
+                self.cycle = prior.clone();
+            }
+            let undo = self.restored(None, &desc)?;
+            return Ok(json!({"epoch":self.epoch_text(),"restored":prior,
+                "display":{"title":format!("{} (put back)",loop_title(prior)),"before":loop_public(&now),"after":loop_public(prior)},"undo":undo}));
+        }
+        let input = &params["input"];
+        if input.get("start").is_some() || input.get("end").is_some() {
+            return Err(bad("Logic Pro's bridge places the cycle by startBeats and endBeats, not seconds"));
+        }
+        let beat = |key: &str| -> Result<f64, Fault> {
+            let n = input[key]
+                .as_f64()
+                .filter(|n| n.is_finite() && (0.0..=1.0e6).contains(n))
+                .ok_or_else(|| bad(format!("{key} must be a number from 0 through 1000000")))?;
+            if (n * 960.0 - (n * 960.0).round()).abs() >= 1.0e-7 {
+                return Err(bad("cycle locators must align to Logic Pro's 960 ticks per beat"));
+            }
+            Ok(n)
+        };
+        let (start, end) = (beat("startBeats")?, beat("endBeats")?);
+        let on = start != 0.0 || end != 0.0;
+        if on && end <= start {
+            return Err(bad("the cycle must end after it starts (0 and 0 turn it off)"));
+        }
+        let now = self.loop_now()?;
+        let mut after = now.clone();
+        after["on"] = on.into();
+        if on {
+            let numerator = now["timebase"]["meter"][0].as_u64().unwrap();
+            after["start"] = loop_position(start, numerator);
+            after["end"] = loop_position(end, numerator);
+            after["startBeats"] = json!(crate::logic::loop_position_beats(&after["start"], numerator).unwrap());
+            after["endBeats"] = json!(crate::logic::loop_position_beats(&after["end"], numerator).unwrap());
+        }
+        loop_preflight(&now, &after)?;
+        let mut display = json!({"title":loop_title(&after),"before":loop_public(&now),"after":loop_public(&after)});
+        if now == after {
+            display["unchanged"] = true.into();
+        }
+        if method == "change_preview" {
+            return Ok(json!({"epoch":self.epoch_text(),"target":{"ref":null,"kind":"project"},"prior":now,"fence":now,"display":display}));
+        }
+        if !crate::logic::complete_loop_state(&params["fence"]) || params["fence"] != now {
+            return Err(changed("the cycle or meter/timebase changed since the preview"));
+        }
+        let desc = Self::desc(params)?;
+        self.cycle = after.clone();
+        let undo = self.applied(None, &desc)?;
+        Ok(json!({"epoch":self.epoch_text(),"applied":after,"material":{"undo":{"mode":"value"}},"display":display,"undo":undo}))
+    }
+
     // ----- the transport and the plan's steps -----
 
     fn transport(&mut self, method: &str, params: &Value) -> Answer {
         match method {
             "transport_stop" => {
                 let was = std::mem::replace(&mut self.playing, false);
-                Ok(json!({"stopped": was, "wasRecording": false}))
+                let recording = std::mem::replace(&mut self.recording, false);
+                Ok(json!({"stopped": was, "wasRecording": recording}))
             }
             "transport_play" => {
                 let was = std::mem::replace(&mut self.playing, true);
@@ -1444,6 +1622,12 @@ impl State {
         let patch_transport = |transport: &mut Value| {
             transport["playing"] = self.playing.into();
             transport["tempo"] = self.tempo.into();
+            if let Some(on) = self.cycle.get("on").filter(|on| on.is_boolean()) {
+                transport["cycle"] = on.clone();
+            }
+            if self.recording {
+                transport["recording"] = true.into();
+            }
         };
         let playhead = || {
             let position = position_of(self.playhead);
@@ -1609,6 +1793,19 @@ impl LogicScript {
             "volumeDb" => track.volume_db = value.as_f64().unwrap_or(track.volume_db),
             _ => track.row[field] = value,
         }
+    }
+
+    /// Explicit controlled M4 fixture, not an inferred extension of the frozen M2 recording.
+    pub fn set_loop_fixture(&self, cycle: Value, readiness: Value) {
+        let mut state = self.state.lock().unwrap();
+        state.cycle = cycle;
+        state.loop_readiness = readiness;
+    }
+    pub fn cycle(&self) -> Value {
+        self.state.lock().unwrap().cycle.clone()
+    }
+    pub fn set_recording(&self, recording: bool) {
+        self.state.lock().unwrap().recording = recording;
     }
 
     pub fn tempo(&self) -> f64 {

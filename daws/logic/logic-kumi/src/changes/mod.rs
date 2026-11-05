@@ -4,6 +4,7 @@
 //! pressing native Undo. The observer names only value-proven reversions; generic titles and header lists do not
 //! establish ownership of a producer's structural, marker or note step.
 
+mod cycle;
 mod front;
 mod fx;
 mod marks;
@@ -116,11 +117,11 @@ pub enum Kind {
     Tempo,
     Notes(notes::Mode),
     FxBypass,
+    LoopRange,
 }
 
 /// The kinds Logic's bridge can't make yet, and why, so the refusal says so.
-const NOT_YET: [(&str, &str); 9] = [
-    ("loop-range", "the cycle locators have no field Accessibility can set"),
+const NOT_YET: [(&str, &str); 8] = [
     ("marker-rename", "a marker's name cell in the Marker List isn't a text field"),
     ("fx-add", "the insert slot's pop-up menu can't be driven from outside"),
     ("fx-delete", "the insert slot's pop-up menu can't be driven from outside"),
@@ -144,6 +145,7 @@ impl std::fmt::Debug for Kind {
             Kind::Tempo => f.write_str("Tempo"),
             Kind::Notes(mode) => write!(f, "Notes({mode:?})"),
             Kind::FxBypass => f.write_str("FxBypass"),
+            Kind::LoopRange => f.write_str("LoopRange"),
         }
     }
 }
@@ -164,12 +166,13 @@ pub fn kind(name: &str) -> Option<Kind> {
         "notes-change" => Some(Kind::Notes(notes::Mode::Change)),
         "notes-delete" => Some(Kind::Notes(notes::Mode::Delete)),
         "fx-bypass" => Some(Kind::FxBypass),
+        "loop-range" => Some(Kind::LoopRange),
         _ => None,
     }
 }
 
 /// Every kind the bridge makes, by its wire name.
-pub const KINDS: [&str; 16] = [
+pub const KINDS: [&str; 17] = [
     "track-volume",
     "track-pan",
     "track-mute",
@@ -186,6 +189,7 @@ pub const KINDS: [&str; 16] = [
     "notes-change",
     "notes-delete",
     "fx-bypass",
+    "loop-range",
 ];
 
 impl Kind {
@@ -201,6 +205,7 @@ impl Kind {
             Kind::Tempo => timeline::tempo_preview(ctx, input),
             Kind::Notes(mode) => notes::preview(ctx, input, mode),
             Kind::FxBypass => fx::bypass_preview(ctx, input),
+            Kind::LoopRange => cycle::preview(ctx, input),
         }
     }
 
@@ -216,6 +221,7 @@ impl Kind {
             Kind::Tempo => timeline::tempo_apply(ctx, input, fence),
             Kind::Notes(mode) => notes::apply(ctx, input, fence, mode),
             Kind::FxBypass => fx::bypass_apply(ctx, input, fence),
+            Kind::LoopRange => cycle::apply(ctx, input, fence),
         }
     }
 
@@ -231,6 +237,7 @@ impl Kind {
             Kind::Tempo => timeline::tempo_restore(ctx, restore),
             Kind::Notes(_) => notes::restore(ctx, restore),
             Kind::FxBypass => fx::bypass_restore(ctx, restore),
+            Kind::LoopRange => cycle::restore(ctx, restore),
         }
     }
 }

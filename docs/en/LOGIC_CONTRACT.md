@@ -1,4 +1,4 @@
-# Logic Pro bridge contract (M2, M3)
+# Logic Pro bridge contract (M2, M3 and Loop Range preview)
 
 What `logic-kumi` answers over `kumi-daw/1`, and which macOS channel each answer comes from. The
 wire, handshake, discovery files and lifecycle are daw-bridge's; this page is only Logic's shapes.
@@ -220,6 +220,28 @@ each change in the plan stays its own step of Logic's undo.
   added or deleted does **not** answer `stale`. A preview or an apply still refuses a ref from an
   earlier epoch as `stale`.
 
+### First M4 slice: Loop Range only
+
+`loop-range` (`loop_range`) is the 17th kind, ported only from the Loop Range slice
+of historical commit `6f8f6e9bbc3666159ce68be1ce7466aa30e82670`. Other M4 kinds and
+`project_save` remain disabled. The input requires nonnegative `startBeats` and
+`endBeats`, in quarter notes; end must follow start, except `0,0` disables Cycle
+without changing either locator. A preflight bound of 64 scrubber actions refuses distant ranges before writing; any transition that could cross locators when higher segments reset lower fields also requires manual editing. Locator values must align to 960 ticks per quarter note; other fractions are refused.
+
+The cycle is a controlled value: on/off plus both locators. Fresh, complete known
+single-meter N/4 identity (N from 1 through 16, /16 division) is required before preview, apply and restore. The Custom LCD and complete Signature List must already be visible, and Logic must be stopped and not recording; Kumi performs no setup or cleanup writes. The fence binds
+that timebase and the original cycle. Apply refuses a producer edit or timebase
+change before writing. Restore requires the complete original and applied values,
+unchanged meter/timebase, and either the exact applied or exact prior cycle; an
+unknown field or mismatch refuses even with `discard`. It never deletes an entity
+or presses native Undo. Successful readback creates an Applied HISTORY row; a
+no-op creates none. Missing legacy restore evidence is manual-only and cannot
+make default Undo skip to an earlier change. An unanswered write stays uncertain.
+
+The host simulator's cycle and single-meter timebase are explicit synthetic test
+state, not inferred from M2 recordings. The preserved original cycle scene is
+historical evidence; replay and fixture checks do not claim current native acceptance.
+
 ### The undo stack and `undone_in_daw`
 
 Logic's Edit menu exposes Undo/Redo titles, without a unique step token. A producer's edit can
@@ -234,7 +256,7 @@ attribution is deliberately absent. A selected menu may be cancelled before an a
 write; reading never presses the Edit menu merely to validate its title.
 
 `plan_steps` remains false: Logic provides no atomic undo block. A plan has separate native
-steps where Logic records them, and seven value kinds have no native undo step at all.
+steps where Logic records them, and the seven M3 value kinds plus Loop Range have no native undo step at all.
 
 The historical M3 gate and original transcript are preserved with source hashes. Their old
 automatic structural/unknown-Text marker restores are not current native parity. The current host fixture refuses the
