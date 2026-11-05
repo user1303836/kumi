@@ -1018,11 +1018,40 @@ unsafe extern "C" fn time_map_get_time_sig_at_time(_proj: *mut ReaProject, time:
         }
     })
 }
+/// Integrate the fake tempo map, including a marker's linear ramp to the next one.
+fn tempo_time(s: &State, value: f64, to_time: bool) -> f64 {
+    let mut at = 0.0;
+    let mut beat = 0.0;
+    let mut bpm = s.bpm;
+    let mut linear = false;
+    for marker in &s.tempo_markers {
+        let duration = marker.time - at;
+        if duration > 0.0 {
+            let slope = if linear { (marker.bpm - bpm) / duration } else { 0.0 };
+            let span = (bpm * duration + 0.5 * slope * duration * duration) / 60.0;
+            if (to_time && value <= beat + span) || (!to_time && value <= marker.time) {
+                if to_time {
+                    let area = (value - beat) * 60.0;
+                    let elapsed = if slope == 0.0 { area / bpm } else { 2.0 * area / (bpm + (bpm * bpm + 2.0 * slope * area).sqrt()) };
+                    return at + elapsed;
+                }
+                let elapsed = value - at;
+                return beat + (bpm * elapsed + 0.5 * slope * elapsed * elapsed) / 60.0;
+            }
+            beat += span;
+        }
+        at = marker.time;
+        bpm = marker.bpm;
+        linear = marker.linear;
+    }
+    if to_time { at + (value - beat) * 60.0 / bpm } else { beat + (value - at) * bpm / 60.0 }
+}
+
 unsafe extern "C" fn time_map2_time_to_qn(_proj: *mut ReaProject, time: f64) -> f64 {
-    counted(|s| time * s.bpm / 60.0)
+    counted(|s| tempo_time(s, time, false))
 }
 unsafe extern "C" fn time_map2_qn_to_time(_proj: *mut ReaProject, qn: f64) -> f64 {
-    counted(|s| qn * 60.0 / s.bpm)
+    counted(|s| tempo_time(s, qn, true))
 }
 unsafe extern "C" fn time_map2_time_to_beats(
     _proj: *mut ReaProject,

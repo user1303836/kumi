@@ -540,6 +540,15 @@ impl Reads {
     // ----- read -----
 
     pub fn read(&self, reaper: &Reaper, params: &Value) -> Answer {
+        if params.get("kind").and_then(Value::as_str) == Some("render_preflight") {
+            self.expect_epoch(params)?;
+            let (proj, _) = active(reaper)?;
+            let answer = crate::listening::render::preflight(reaper, proj, params)?;
+            if json_len(&answer) > ANSWER_BYTES {
+                return Err(("unsupported".into(), "complete render preflight exceeds the answer bound".into()));
+            }
+            return Ok(answer);
+        }
         // M5 listening (m5-reaper): what plays where.
         if params.get("kind").and_then(Value::as_str) == Some("spans") {
             return self.read_spans(reaper, params);

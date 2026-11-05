@@ -100,6 +100,45 @@ fn make_folder(folder: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Guarded renders may adopt only a private cache, never repair an existing directory's permissions.
+fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
+    let refuse = || failed("guarded render cache and its parent must be private owned directories, not symlinks");
+    let private = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| {
+            if !meta.is_dir() || meta.file_type().is_symlink() || !daw_bridge::owner::is_owner_only(path) {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                meta.permissions().mode() & 0o777 == 0o700
+            }
+            #[cfg(not(unix))]
+            { true }
+        })
+    };
+    let parent = folder.parent().ok_or_else(refuse)?;
+    if !private(parent) {
+        return Err(refuse());
+    }
+    match std::fs::symlink_metadata(folder) {
+        Ok(_) if private(folder) => Ok(()),
+        Ok(_) => Err(refuse()),
+        Err(error) if create && error.kind() == std::io::ErrorKind::NotFound => {
+            #[cfg(unix)]
+            let made = {
+                use std::os::unix::fs::DirBuilderExt;
+                std::fs::DirBuilder::new().mode(0o700).create(folder)
+            };
+            #[cfg(not(unix))]
+            let made = std::fs::create_dir(folder);
+            made.map_err(|error| failed(format!("couldn't create the private render cache: {error}")))?;
+            if private(folder) { Ok(()) } else { Err(refuse()) }
+        }
+        Err(_) => Err(refuse()),
+    }
+}
+
 /// What the main thread holds of listening.
 pub struct Listening {
     board: Arc<Board>,
@@ -241,12 +280,21 @@ impl Listening {
         if let Some(busy_now) = reaper.busy() {
             return Err(busy(format!("{}; nothing changed", busy_now.reason())));
         }
-        let folder = self.folder()?;
+        // Restricted planning must refuse before even preparing the listening directory.
+        let guarded = params.get("maxSeconds").is_some();
+        let folder = if guarded {
+            self.folder.borrow().clone().ok_or_else(|| failed("the bridge doesn't know Kumi's folder yet (no reference file)"))?
+        } else {
+            self.folder()?
+        };
         let info = reaper.current_project().ok_or_else(|| failed("REAPER has no project open"))?;
         if reaper.play_state(info.ptr).recording {
             return Err(failed("REAPER is recording: a render would stop the recording, so Kumi renders nothing"));
         }
         let plan = render::plan(reaper, reads, params, &folder)?;
+        if guarded {
+            guarded_folder(&folder, true)?;
+        }
         let answer = plan.answer();
         self.board.add(Job::new(&plan.job, Kind::Render, true));
         self.pressed.set(None);
@@ -592,9 +640,13 @@ impl Listening {
             }
             return;
         }
-        let Some(plan) = self.pending.borrow_mut().take() else { return };
+        let Some(mut plan) = self.pending.borrow_mut().take() else { return };
         if !self.board.start(&plan.job) {
             // Cancelled while it waited: nothing was done.
+            return;
+        }
+        if let Err((code, error)) = plan.recheck_start(reaper, reads) {
+            self.end(&plan.job, render::Ended::Failed { code, error, notes: vec![] });
             return;
         }
         if plan.items() {
@@ -716,6 +768,7 @@ impl Listening {
             folder && api.GetSetProjectInfo().is_some() && api.GetSetProjectInfo_String().is_some() && api.Main_OnCommandEx().is_some();
         let mut flags = json!({
             "render": render,
+            "render_preflight": render::preflight_supported(reaper),
             "capture": folder && audio && api.Audio_RegHardwareHook().is_some(),
             "audition": audio && api.PlayPreviewEx().is_some() && api.StopPreview().is_some() && api.PCM_Source_CreateFromFile().is_some(),
             "grid": api.TrackFX_FormatParamValueNormalized().is_some(),
