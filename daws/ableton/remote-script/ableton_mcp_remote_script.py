@@ -3996,6 +3996,9 @@ class LiveObjectMapper:
         # transport row but never written here.
         if loop_length is not None and loop_length <= 0:
             raise ValueError("loopLength is invalid")
+        # Where play starts is set on a stopped transport only: the producer moves it by stopping where they want.
+        if start_time is not None and self._read_attr(self.song, "is_playing") is True:
+            raise ValueError(f"Live is playing: stop playback first to set where play starts{UNRUN_SUFFIX}")
         # The playhead first, then where play starts: Live moves start_time with a playhead write, and applies the
         # playhead on its next tick, so an explicit start_time written after it is the one that stays.
         proposed = [("current_song_time", position), ("start_time", start_time), ("loop", loop_enabled), ("loop_start", loop_start), ("loop_length", loop_length), ("metronome", metronome), ("punch_in", punch_in), ("punch_out", punch_out)]; assignments = []
@@ -4004,6 +4007,9 @@ class LiveObjectMapper:
             prior = self._read_attr(self.song, attribute)
             if not isinstance(prior, (int, float, bool)) or isinstance(prior, bool) != isinstance(value, bool): raise ValueError(f"transport {attribute} prior state is unavailable")
             assignments.append((attribute, value, prior))
+        # A playhead write moves where play starts, so a rollback puts that back too, whether or not it was asked for.
+        start_before = self._read_attr(self.song, "start_time") if position is not None else None
+        if not isinstance(start_before, (int, float)) or isinstance(start_before, bool): start_before = None
         try:
             applied = []
             for attribute, value, prior in assignments:
@@ -4030,16 +4036,27 @@ class LiveObjectMapper:
             after_revision = self._playback()["revision"]
         except BaseException as error:
             rollback_failed = False
-            for attribute, prior in reversed(locals().get("applied", [])):
+            done = locals().get("applied", [])
+            # Everything else in reverse, then the playhead, then where play starts last: the playhead's write moves it.
+            for attribute, prior in [entry for entry in reversed(done) if entry[0] not in ("current_song_time", "start_time")]:
                 try: setattr(self.song, attribute, prior)
                 except BaseException: pass
-                if attribute == "current_song_time": continue  # applied on Live's next tick; not readable yet
                 restored = self._read_attr(self.song, attribute)
                 if isinstance(prior, bool): rollback_failed = rollback_failed or restored is not prior
                 elif not isinstance(restored, (int, float)) or not _same_number(restored, prior): rollback_failed = True
+            playhead = [prior for attribute, prior in done if attribute == "current_song_time"]
+            if playhead:
+                try: setattr(self.song, "current_song_time", playhead[0])  # applied on Live's next tick; not readable yet
+                except BaseException: pass
+            start = [prior for attribute, prior in done if attribute == "start_time"] or ([start_before] if playhead and start_before is not None else [])
+            if start:
+                try: setattr(self.song, "start_time", start[0])
+                except BaseException: pass
+                restored = self._read_attr(self.song, "start_time")
+                if not isinstance(restored, (int, float)) or isinstance(restored, bool) or not _same_number(restored, start[0]): rollback_failed = True
             if rollback_failed: raise ValueError("transport mutation failed and exact rollback failed") from error
             if isinstance(error, RuntimeError):
-                past = self._past_end(position, loop_start, loop_start + loop_length if loop_start is not None and loop_length is not None else None)
+                past = self._past_end(position, start_time, loop_start, loop_start + loop_length if loop_start is not None and loop_length is not None else None)
                 if past is not None: raise past from error
             raise
         return {"changed": True, "revision": after_revision}
@@ -11454,31 +11471,42 @@ class LiveObjectMapper:
     def _device_delete(self, args: dict[str, Any]) -> dict[str, Any]:
         reference = args.get("ref")
         keep = args.get("keepSelection")
-        keys = sorted(key for key, _, _ in self._SELECTION_KINDS)
-        def selection_row(row: Any) -> bool: return isinstance(row, dict) and sorted(row) == keys and all(value is None or isinstance(value, str) for value in row.values())
-        if keep is not None and not (isinstance(keep, dict) and sorted(keep) == ["left", "previous"] and all(selection_row(row) for row in keep.values())):
-            raise ValueError("keepSelection is invalid")
+        if keep is not None and not (isinstance(keep, dict) and sorted(keep) == ["left", "previous"] and all(self._selection_capture_valid(capture) for capture in keep.values())):
+            raise ValueError(f"keepSelection is invalid{UNRUN_SUFFIX}")
         owner, device, _, _, _ = self._device_location(str(reference), args.get("expectedObjectIdentity"), args.get("expectedOwnerRef"), args.get("expectedOwnerIdentity"), args.get("expectedSiblings"), args.get("expectedTrackRef"), args.get("expectedTrackIdentity"))
         deleter = getattr(owner, "delete_device", None)
         if not callable(deleter):
             raise ValueError("device deletion is unavailable")
         # Live selects the deleted device's neighbour, its track, slot and clip with it. With keepSelection the selection
-        # survives the delete: what was selected before Kumi's change (previous) while what's selected is still exactly
-        # what that change left (left), else what the producer has selected since, as they left it. Every part of it is
-        # found first, so a selection that can't come back deletes nothing.
-        targets: dict[str, Any] = {}; target: dict[str, Any] = {}; previous = False
+        # survives the delete, each part by its object: what was selected before Kumi's load (previous) while what's
+        # selected is still exactly what the load left (left), else what the producer has selected since, as it is.
+        # Every part is found first, so a selection that can't come back deletes nothing.
+        view = getattr(self.song, "view", None); targets: dict[str, Any] = {}; before: dict[str, Any] = {}; previous = False
         if keep is not None:
-            held = dict(self._selection_row_targeted()); previous = held == keep["left"]; target = dict(keep["previous"]) if previous else held
-            if target["parameterRef"] is not None: raise ValueError(f"a parameter is selected, and Live doesn't let a script select one again (Song.View.selected_parameter can only be read){UNRUN_SUFFIX}")
+            held_objects = {key: self._selected_object(view, attribute) for key, _, attribute in self._SELECTION_KINDS}
+            held = self._selection_capture()
+            previous = held["identities"] == keep["left"]["identities"]
             for key, kind, _ in self._SELECTION_KINDS:
-                value = target[key]
-                if value is None or key == "parameterRef": continue
+                was, left = keep["previous"]["identities"][key], keep["left"]["identities"][key]
+                # What the load didn't change, and all of a selection the producer made, is the object selected now.
+                if not previous or was == left:
+                    targets[key] = held_objects[key]; before[key] = held["row"][key]
+                    continue
+                before[key] = keep["previous"]["row"][key]
+                if was is None:
+                    targets[key] = None
+                    continue
+                value = keep["previous"]["row"][key]
+                if value is None: raise ValueError(f"what was selected before the load ({key}) can't be named, so it can't be selected again{UNRUN_SUFFIX}")
                 try:
                     if not value.startswith(f"{self.refs.epoch}:{kind}:"): raise KeyError(value)
-                    found = self.refs.get(value); inside = self._within(found, device)
+                    found = self.refs.get(value)
+                    if self._capture_object_identity(found) != was: raise KeyError(value)
                 except BaseException as error: raise ValueError(f"what was selected ({key}) is gone, so it can't be selected again{UNRUN_SUFFIX}") from error
-                if inside: raise ValueError(f"what's selected ({key}) is in the device being removed, so it can't be selected again{UNRUN_SUFFIX}")
                 targets[key] = found
+            if targets["parameterRef"] is not None: raise ValueError(f"a parameter is selected, and Live doesn't let a script select one again (Song.View.selected_parameter can only be read){UNRUN_SUFFIX}")
+            for key, found in targets.items():
+                if found is not None and self._within(found, device): raise ValueError(f"what's selected ({key}) is in the device being removed, so it can't be selected again{UNRUN_SUFFIX}")
         # Its siblings were checked device by device above, and are checked again after: the one
         # device goes, the rest stay in their order.
         devices_before = self._items(getattr(owner, "devices", []))
@@ -11493,8 +11521,24 @@ class LiveObjectMapper:
         # The device is gone: from here every outcome says so, the selection back or not.
         try: self._put_selection_back(targets)
         except BaseException: pass
-        after = dict(self._selection_row_targeted())
-        return {"deleted": reference, "selection": {"before": target, "after": after, "restored": after == target, "previous": previous}}
+        after = self._selection_capture()
+        restored = after["identities"] == {key: (None if found is None else self._capture_object_identity(found)) for key, found in targets.items()}
+        return {"deleted": reference, "selection": {"before": before, "after": after["row"], "restored": restored, "previous": previous}}
+
+    def _selection_capture(self) -> dict[str, Any]:
+        """What Live has selected, each of the seven parts by the snapshot's ref (None when nothing is, or when the
+        object can't be named, as an Arrangement clip in Detail View) and by its object identity (None when nothing is)."""
+        view = getattr(self.song, "view", None)
+        identities = {}
+        for key, _, attribute in self._SELECTION_KINDS:
+            found = self._selected_object(view, attribute)
+            identities[key] = None if found is None else self._capture_object_identity(found)
+        return {"row": dict(self._selection_row_targeted()), "identities": identities}
+
+    def _selection_capture_valid(self, capture: Any) -> bool:
+        keys = sorted(key for key, _, _ in self._SELECTION_KINDS)
+        def part(row: Any) -> bool: return isinstance(row, dict) and sorted(row) == keys and all(value is None or (isinstance(value, str) and 0 < len(value) <= 256) for value in row.values())
+        return isinstance(capture, dict) and sorted(capture) == ["identities", "row"] and part(capture["row"]) and part(capture["identities"])
 
     def _within(self, value: Any, device: Any) -> bool:
         """Whether value is the device or lives in it (a parameter, a chain, a device in a chain), up Live's canonical_parent."""
@@ -11505,21 +11549,28 @@ class LiveObjectMapper:
             value = getattr(value, "canonical_parent", None)
         return False
 
-    def _put_selection_back(self, held: dict[str, Any]) -> None:
-        """Selects again what was selected: the track first (Live moves the rest with it), then the scene, slot, clip
-        shown, device and chain. A parameter can only be read (Song.View.selected_parameter), so it is compared, not set."""
+    def _put_selection_back(self, targets: dict[str, Any]) -> None:
+        """Selects again each part of targets (the objects that were selected; None where nothing was) that isn't
+        selected now, read again before each write, since selecting a track moves the rest with it: the track first,
+        then the scene, slot, clip shown, device and chain. Nothing is written for a part that already matches. A
+        parameter can only be read (Song.View.selected_parameter), and no device or chain can be unselected, so those
+        are compared, not set."""
         view = getattr(self.song, "view", None)
         if view is None: return
+        def differs(key: str, attribute: str) -> bool:
+            now, wanted = self._selected_object(view, attribute), targets.get(key)
+            if now is None or wanted is None: return now is not wanted
+            return self._capture_object_identity(now) != self._capture_object_identity(wanted)
         for key, attribute in (("trackRef", "selected_track"), ("sceneRef", "selected_scene"), ("slotRef", "highlighted_clip_slot"), ("detailClipRef", "detail_clip")):
-            value = held.get(key)
-            if value is not None or key == "detailClipRef":
-                try: setattr(view, attribute, value)
-                except BaseException: pass
-        if held.get("deviceRef") is not None and callable(getattr(view, "select_device", None)):
-            try: view.select_device(held["deviceRef"])
+            if key not in targets or not differs(key, attribute): continue
+            if targets[key] is None and key not in ("slotRef", "detailClipRef"): continue
+            try: setattr(view, attribute, targets[key])
             except BaseException: pass
-        if held.get("chainRef") is not None:
-            try: view.selected_chain = held["chainRef"]
+        if targets.get("deviceRef") is not None and differs("deviceRef", "selected_device") and callable(getattr(view, "select_device", None)):
+            try: view.select_device(targets["deviceRef"])
+            except BaseException: pass
+        if targets.get("chainRef") is not None and differs("chainRef", "selected_chain"):
+            try: view.selected_chain = targets["chainRef"]
             except BaseException: pass
 
     def _device_on_parameter(self, device: Any) -> Any | None:
@@ -11845,6 +11896,13 @@ class LiveObjectMapper:
         return self._browser_find(args.get("itemId"))[1]
 
     def _browser_load(self, args: dict[str, Any]) -> dict[str, Any]:
+        # With reportSelection, what's selected is read first, in the load's own step, before anything is selected
+        # for the load: what its undo selects again (previous) is what was selected as it ran, never an older reading.
+        report = args.get("reportSelection")
+        if report is not None and not isinstance(report, bool): raise ValueError(f"reportSelection is invalid{UNRUN_SUFFIX}")
+        selection_before = self._selection_capture() if report else None
+        if selection_before is not None and selection_before["identities"]["parameterRef"] is not None:
+            raise ValueError(f"a parameter is selected, and Live doesn't let a script select one again, so this load's undo couldn't keep the selection{UNRUN_SUFFIX}")
         item, metadata = self._browser_find(args.get("itemId")); track_ref = args.get("trackRef")
         if metadata["isDevice"] is not True or args.get("expectedName") != metadata["name"] or not isinstance(args.get("expectedItemIdentity"), str) or not hmac.compare_digest(metadata["objectIdentity"], args["expectedItemIdentity"]):
             raise ValueError("browser item identity is not an exact loadable device")
@@ -11854,7 +11912,7 @@ class LiveObjectMapper:
             raise ValueError("browser loading is unavailable")
         if not isinstance(track_ref, str) or not track_ref.startswith(f"{self.refs.epoch}:track:"):
             raise ValueError("an exact regular-track reference is required")
-        if args.get("chainRef") is not None: return self._browser_load_into_chain(args, item, metadata, loader)
+        if args.get("chainRef") is not None: return self._browser_load_into_chain(args, item, metadata, loader, selection_before)
         # A regular track, a return or Main (by its snapshot index: the regular tracks, then the returns, then Main).
         self._refresh(track_ref); track = self.refs.get(track_ref); track_identity = self._capture_object_identity(track)
         regular_tracks = self._items(getattr(self.song, "tracks", [])); return_tracks = self._items(getattr(self.song, "return_tracks", []))
@@ -11943,8 +12001,8 @@ class LiveObjectMapper:
             self.refs.restore(registry_checkpoint)
             raise ValueError("browser load result mapping failed without a residual device") from error
         result = {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": device_identity, "createdFingerprint": fingerprint}
-        # What the load left selected, read in the same step: an undo keeping the selection tells it from the producer's.
-        if args.get("reportSelection") is True: result["selection"] = dict(self._selection_row_targeted())
+        # And what the load left selected, read in the same step: an undo keeping the selection tells it from the producer's.
+        if selection_before is not None: result["selection"] = {"previous": selection_before, "left": self._selection_capture()}
         return result
 
     # The native device that holds a chain's place for each kind of item, by Live's device type: its name and that type.
@@ -11979,7 +12037,7 @@ class LiveObjectMapper:
                 if pattern.fullmatch(folder.strip()): return device_type
         return None
 
-    def _browser_load_into_chain(self, args: dict[str, Any], item: Any, metadata: dict[str, Any], loader: Any) -> dict[str, Any]:
+    def _browser_load_into_chain(self, args: dict[str, Any], item: Any, metadata: dict[str, Any], loader: Any, selection_before: dict[str, Any] | None = None) -> dict[str, Any]:
         """A Browser item into one chain of a rack (at any depth). Live's Browser loads next to
         what's selected, and an instrument replaces the track's instrument whatever is selected, so
         the place is held explicitly: a native device of the item's kind goes where the item
@@ -12075,7 +12133,7 @@ class LiveObjectMapper:
         device_index, device = created[0]
         created_ref = self.refs.put("device", device, f"{chain_path}:{device_index}")
         result = {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": self._capture_object_identity(device), "createdFingerprint": self._mapped_fingerprint(created_ref)}
-        if args.get("reportSelection") is True: result["selection"] = dict(self._selection_row_targeted())
+        if selection_before is not None: result["selection"] = {"previous": selection_before, "left": self._selection_capture()}
         return result
 
     @staticmethod

@@ -365,3 +365,70 @@ async fn a_start_time_live_doesnt_report_is_refused_before_anything_changes() {
     assert!(refused.to_string().contains("where play starts"), "{refused}");
     assert_eq!(adapter.sim.state.borrow()["playback"], before);
 }
+
+fn transport_host(position: f64, start: f64) -> (Rc<Adapter>, McpHost) {
+    let adapter = Rc::new(Adapter::new());
+    {
+        let mut state = adapter.sim.state.borrow_mut();
+        state["playback"]["transport"]["position"] = json!(position);
+        state["playback"]["transport"]["startTime"] = json!(start);
+    }
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    (adapter, host)
+}
+async fn apply_and_undo(host: &McpHost, proposed: Value, between: impl FnOnce()) -> Value {
+    let preview = body(&host.live_transport_preview_async(&json!(1), &proposed).await);
+    let tx = preview["transactionId"].as_str().unwrap().to_owned();
+    let apply = json!({"transactionId": tx, "confirmation": "apply", "idempotencyKey": "where-play-starts-apply"});
+    assert_eq!(body(&host.live_transport_apply_async(&json!(2), &apply, None).await.unwrap())["state"], "applied");
+    between();
+    let undo = json!({"transactionId": tx, "confirmation": "undo", "idempotencyKey": "where-play-starts-undo"});
+    body(&host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_transport_async(&json!(3), &undo, None).await) }).await.unwrap())
+}
+
+/// A playhead write moves where play starts with it (as Live does), so undoing a position-only change puts where play
+/// starts back too, while it's still what the apply left; one the producer set since stays theirs.
+#[tokio::test]
+async fn undoing_a_playhead_change_puts_where_play_starts_back_while_its_still_the_changes_own() {
+    let (adapter, host) = transport_host(28.1456, 0.0);
+    let transport = |key: &str| adapter.sim.state.borrow()["playback"]["transport"][key].as_f64();
+    let undone = apply_and_undo(&host, json!({"position": 8.0}), || {}).await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!((transport("position"), transport("startTime")), (Some(28.1456), Some(0.0)));
+    let (adapter, host) = transport_host(28.1456, 0.0);
+    let transport = |key: &str| adapter.sim.state.borrow()["playback"]["transport"][key].as_f64();
+    let undone = apply_and_undo(&host, json!({"position": 8.0}), || {
+        adapter.sim.state.borrow_mut()["playback"]["transport"]["startTime"] = json!(4.0)
+    })
+    .await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!((transport("position"), transport("startTime")), (Some(28.1456), Some(4.0)), "the producer's start is kept");
+}
+
+/// Where play starts is set and put back on a stopped transport only.
+#[tokio::test]
+async fn where_play_starts_is_refused_while_live_plays() {
+    let (adapter, host) = transport_host(28.0, 0.0);
+    adapter.sim.state.borrow_mut()["playback"]["transport"]["playing"] = json!(true);
+    let refused = host.live_transport_preview_async(&json!(1), &json!({"startTime": 8.0})).await;
+    assert!(refused.to_string().contains("stop playback first"), "{refused}");
+    let (adapter, host) = transport_host(28.0, 0.0);
+    let refused = apply_and_undo(&host, json!({"position": 8.0, "startTime": 8.0}), || {
+        adapter.sim.state.borrow_mut()["playback"]["transport"]["playing"] = json!(true)
+    })
+    .await;
+    assert!(refused.to_string().contains("stop playback first"), "{refused}");
+    assert_eq!(adapter.sim.state.borrow()["playback"]["transport"]["startTime"].as_f64(), Some(8.0), "still applied");
+}
+
+/// A start the producer moved after the change is theirs: the undo of an explicit start refuses rather than move it.
+#[tokio::test]
+async fn an_explicit_start_moved_after_the_change_refuses_its_undo() {
+    let (adapter, host) = transport_host(28.0, 0.0);
+    let refused = apply_and_undo(&host, json!({"position": 8.0, "startTime": 8.0}), || {
+        adapter.sim.state.borrow_mut()["playback"]["transport"]["startTime"] = json!(12.0)
+    })
+    .await;
+    assert!(refused.to_string().contains("changed after apply"), "{refused}");
+    assert_eq!(adapter.sim.state.borrow()["playback"]["transport"]["startTime"].as_f64(), Some(12.0));
+}

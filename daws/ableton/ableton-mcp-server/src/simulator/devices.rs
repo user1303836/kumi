@@ -62,6 +62,20 @@ const SELECTION_FIELDS: &[&str] = &["trackRef", "sceneRef", "slotRef", "detailCl
 fn selection_row(selection: &Value) -> Value {
     Value::Object(SELECTION_FIELDS.iter().map(|key| ((*key).into(), selection.get(*key).cloned().unwrap_or(Value::Null))).collect())
 }
+/// The selection by ref and by object, as the Remote Script reads it: the simulator's objects are its refs.
+fn selection_capture(selection: &Value) -> Value {
+    let row = selection_row(selection);
+    json!({"row":row,"identities":row})
+}
+fn selection_capture_valid(capture: &Value) -> bool {
+    let part = |row: &Value| {
+        row.as_object().is_some_and(|row| {
+            row.len() == SELECTION_FIELDS.len()
+                && SELECTION_FIELDS.iter().all(|key| row.get(*key).is_some_and(|v| v.is_null() || v.is_string()))
+        })
+    };
+    capture.as_object().is_some_and(|capture| capture.len() == 2) && part(&capture["row"]) && part(&capture["identities"])
+}
 
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_devices(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
@@ -134,24 +148,30 @@ impl DeterministicLiveSimulator {
                 let identity = string_arg(args, "expectedObjectIdentity")?;
                 let owner_ref = string_arg(args, "expectedOwnerRef")?;
                 let owner_identity = string_arg(args, "expectedOwnerIdentity")?;
-                // The simulator's selection doesn't move with a delete. keepSelection keeps what was selected before
-                // Kumi's change while the selection is still what that change left, else what's selected now: checked
-                // first, as the Remote Script checks it.
+                // The simulator's selection doesn't move with a delete. keepSelection keeps, part by part, what was
+                // selected before Kumi's load while the selection is still exactly what the load left, else what's
+                // selected now: checked first, as the Remote Script checks it.
                 let keep = args.get("keepSelection").filter(|v| !v.is_null()).cloned();
                 let (mut target, mut previous) = (Value::Null, false);
                 if let Some(keep) = &keep {
-                    let valid = |row: &Value| {
-                        row.as_object().is_some_and(|row| {
-                            row.len() == SELECTION_FIELDS.len()
-                                && SELECTION_FIELDS.iter().all(|key| row.get(*key).is_some_and(|v| v.is_null() || v.is_string()))
-                        })
-                    };
-                    if !keep.as_object().is_some_and(|keep| keep.len() == 2) || !valid(&keep["previous"]) || !valid(&keep["left"]) {
-                        return Err(LiveError::error("keepSelection is invalid"));
+                    if !keep.as_object().is_some_and(|keep| keep.len() == 2)
+                        || !selection_capture_valid(&keep["previous"])
+                        || !selection_capture_valid(&keep["left"])
+                    {
+                        return Err(LiveError::error("keepSelection is invalid; nothing changed"));
                     }
-                    let held = selection_row(&self.state.borrow()["selection"]);
-                    previous = held == keep["left"];
-                    target = if previous { keep["previous"].clone() } else { held };
+                    let held = selection_capture(&self.state.borrow()["selection"]);
+                    previous = held["identities"] == keep["left"]["identities"];
+                    target = Value::Object(
+                        SELECTION_FIELDS
+                            .iter()
+                            .map(|key| {
+                                let unchanged = keep["previous"]["identities"][*key] == keep["left"]["identities"][*key];
+                                let from = if !previous || unchanged { &held["row"] } else { &keep["previous"]["row"] };
+                                ((*key).into(), from[*key].clone())
+                            })
+                            .collect(),
+                    );
                     if !target["parameterRef"].is_null() {
                         return Err(LiveError::error(
                             "a parameter is selected, and Live doesn't let a script select one again; nothing changed",
@@ -312,6 +332,14 @@ impl DeterministicLiveSimulator {
                 Err(LiveError::error("unknown device reference"))
             }
             "browser.load" => {
+                // What's selected, read first in the load's own step, as the Remote Script reads it.
+                let selection_before =
+                    (args.get("reportSelection") == Some(&json!(true))).then(|| selection_capture(&self.state.borrow()["selection"]));
+                if selection_before.as_ref().is_some_and(|before| !before["identities"]["parameterRef"].is_null()) {
+                    return Err(LiveError::error(
+                        "a parameter is selected, and Live doesn't let a script select one again, so this load's undo couldn't keep the selection; nothing changed",
+                    ));
+                }
                 let item_id = string_arg(args, "itemId")?;
                 let catalog = Self::browser_catalog();
                 let item = catalog.iter().find(|item| item["id"] == item_id);
@@ -358,9 +386,9 @@ impl DeterministicLiveSimulator {
                 drop(state);
                 let inserted = self.invoke_operation("device.insert", insert.as_object().unwrap())?;
                 let mut loaded = json!({"loaded":true,"deviceRef":inserted["ref"],"deviceObjectIdentity":inserted["objectIdentity"],"createdFingerprint":inserted["createdFingerprint"]});
-                // What the load left selected (the simulator's load leaves it as it was).
-                if args.get("reportSelection") == Some(&json!(true)) {
-                    loaded["selection"] = selection_row(&self.state.borrow()["selection"]);
+                // What was selected as the load ran and what it left (the simulator's load leaves it as it was).
+                if let Some(previous) = selection_before {
+                    loaded["selection"] = json!({"previous":previous,"left":selection_capture(&self.state.borrow()["selection"])});
                 }
                 Ok(loaded)
             }

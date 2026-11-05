@@ -3999,71 +3999,314 @@ var ableton_live_v1_operations_default = {
           selection: {
             type: "object",
             properties: {
-              trackRef: {
-                type: [
-                  "string",
-                  "null"
+              previous: {
+                type: "object",
+                properties: {
+                  row: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
+                    ],
+                    additionalProperties: false
+                  },
+                  identities: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
+                    ],
+                    additionalProperties: false
+                  }
+                },
+                required: [
+                  "row",
+                  "identities"
                 ],
-                minLength: 1,
-                maxLength: 256
+                additionalProperties: false
               },
-              sceneRef: {
-                type: [
-                  "string",
-                  "null"
+              left: {
+                type: "object",
+                properties: {
+                  row: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
+                    ],
+                    additionalProperties: false
+                  },
+                  identities: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
+                    ],
+                    additionalProperties: false
+                  }
+                },
+                required: [
+                  "row",
+                  "identities"
                 ],
-                minLength: 1,
-                maxLength: 256
-              },
-              slotRef: {
-                type: [
-                  "string",
-                  "null"
-                ],
-                minLength: 1,
-                maxLength: 256
-              },
-              detailClipRef: {
-                type: [
-                  "string",
-                  "null"
-                ],
-                minLength: 1,
-                maxLength: 256
-              },
-              deviceRef: {
-                type: [
-                  "string",
-                  "null"
-                ],
-                minLength: 1,
-                maxLength: 256
-              },
-              parameterRef: {
-                type: [
-                  "string",
-                  "null"
-                ],
-                minLength: 1,
-                maxLength: 256
-              },
-              chainRef: {
-                type: [
-                  "string",
-                  "null"
-                ],
-                minLength: 1,
-                maxLength: 256
+                additionalProperties: false
               }
             },
             required: [
-              "trackRef",
-              "sceneRef",
-              "slotRef",
-              "detailClipRef",
-              "deviceRef",
-              "parameterRef",
-              "chainRef"
+              "previous",
+              "left"
             ],
             additionalProperties: false
           }
@@ -6320,142 +6563,304 @@ var ableton_live_v1_operations_default = {
               previous: {
                 type: "object",
                 properties: {
-                  trackRef: {
-                    type: [
-                      "string",
-                      "null"
+                  row: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
                     ],
-                    minLength: 1,
-                    maxLength: 256
+                    additionalProperties: false
                   },
-                  sceneRef: {
-                    type: [
-                      "string",
-                      "null"
+                  identities: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
                     ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  slotRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  detailClipRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  deviceRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  parameterRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  chainRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
+                    additionalProperties: false
                   }
                 },
                 required: [
-                  "trackRef",
-                  "sceneRef",
-                  "slotRef",
-                  "detailClipRef",
-                  "deviceRef",
-                  "parameterRef",
-                  "chainRef"
+                  "row",
+                  "identities"
                 ],
                 additionalProperties: false
               },
               left: {
                 type: "object",
                 properties: {
-                  trackRef: {
-                    type: [
-                      "string",
-                      "null"
+                  row: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
                     ],
-                    minLength: 1,
-                    maxLength: 256
+                    additionalProperties: false
                   },
-                  sceneRef: {
-                    type: [
-                      "string",
-                      "null"
+                  identities: {
+                    type: "object",
+                    properties: {
+                      trackRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      sceneRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      slotRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      detailClipRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      deviceRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      parameterRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      },
+                      chainRef: {
+                        type: [
+                          "string",
+                          "null"
+                        ],
+                        minLength: 1,
+                        maxLength: 256
+                      }
+                    },
+                    required: [
+                      "trackRef",
+                      "sceneRef",
+                      "slotRef",
+                      "detailClipRef",
+                      "deviceRef",
+                      "parameterRef",
+                      "chainRef"
                     ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  slotRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  detailClipRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  deviceRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  parameterRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
-                  },
-                  chainRef: {
-                    type: [
-                      "string",
-                      "null"
-                    ],
-                    minLength: 1,
-                    maxLength: 256
+                    additionalProperties: false
                   }
                 },
                 required: [
-                  "trackRef",
-                  "sceneRef",
-                  "slotRef",
-                  "detailClipRef",
-                  "deviceRef",
-                  "parameterRef",
-                  "chainRef"
+                  "row",
+                  "identities"
                 ],
                 additionalProperties: false
               }

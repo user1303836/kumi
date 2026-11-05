@@ -372,7 +372,7 @@ Live が接続している間、ブリッジは 10 秒ごとに拡張機能を�
 
 | ツール | クラス | 内容 |
 | --- | --- | --- |
-| `live_transport_preview/apply` | performance | ソングの位置、ループ、パンチ、メトロノーム（取り消し可能）。 |
+| `live_transport_preview/apply` | performance | ソングの位置、再生の開始位置、ループ、パンチ、メトロノーム（取り消し可能。再生の開始位置は停止中のみ）。 |
 | `live_transport_action_preview/apply` | performance | 開始、続きから再生、停止、選択範囲の再生、すべてのクリップの停止、アレンジメントに戻る、スクラブ、タップテンポ、ナッジ、ジャンプ、セッション録音のトリガー。 |
 | `live_clip_launch_preview/apply/stop` | performance | Set が再生中でもそうでなくても、クリップを一つ起動し、そのクリップをまた止めます。 |
 | `live_scene_fire_preview/apply` | performance | シーンを起動します。 |

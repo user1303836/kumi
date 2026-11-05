@@ -201,9 +201,9 @@ impl McpHost {
             let Some(track)=track.filter(|t|["regular","group","audio","midi","return","main"].contains(&t["kind"].as_str().unwrap_or("")))else{return Err(LiveError::error("browser loading is limited to the Set's tracks"));};
             let authority=if let Some(t)=&target{self.chain_device_authority(track,&t.chain)?}else{self.track_device_authority(track)?};
             let mut payload=json!({"itemId":p["itemId"],"trackRef":reference,"expectedName":item["name"],"expectedItemIdentity":item["objectIdentity"]});payload.as_object_mut().unwrap().extend(authority.as_object().unwrap().clone());
-            // What's selected now is what its undo selects again (while the selection is still what the load left), so
-            // it's read before anything loads, and refused if a script couldn't select it: Live lets a script read the
-            // selected parameter, never set it. The load reports what it left selected, in the same step.
+            // Its undo keeps the selection only if a script can select it again: Live lets a script read the selected
+            // parameter, never set it, so that's refused now, with nothing loaded. The load reads what's selected again in
+            // its own step, with what it leaves, and that reading is the one the undo keeps.
             let selection=if p.get("preserveSelection")==Some(&json!(true)){
                 let view=self.selection_view(None).await?;
                 if !view["selection"].is_object(){return Ok(transaction_error(id,"This Live doesn't say what's selected, so a load's undo can't keep the selection. Nothing was loaded."));}
@@ -212,7 +212,7 @@ impl McpHost {
                 Some(selection)
             }else{None};
             let mut transaction=json!({"id":tempo::transaction_id("browserload"),"epoch":status.epoch,"kind":"browser-load","fence":track_fence(&reference,&authority),"clipRef":reference,"payload":payload,"expiresAt":now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});
-            if let Some(selection)=&selection{transaction["payload"]["reportSelection"]=json!(true);transaction["keepSelection"]=json!({"previous":selection});}
+            if selection.is_some(){transaction["payload"]["reportSelection"]=json!(true);transaction["preserveSelection"]=json!(true);}
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions,transaction.clone(),"browser load")?;
             let mut item=fields(&item,&["id","name","path","category"]);item["isDevice"]=json!(true);
             let mut reply=json!({"transactionId":transaction["id"],"epoch":transaction["epoch"],"item":item,"trackRef":reference});
@@ -283,7 +283,8 @@ impl McpHost {
                     if recorded["settled"]!=true||recorded["fingerprint"]!=fingerprint{return Err(LiveError::error("browser-loaded device settled state was not recorded"));}
                 }
             }
-            if t["keepSelection"].is_object()&&loaded["selection"].is_object(){record.borrow_mut()["keepSelection"]["left"]=loaded["selection"].clone();}
+            // What was selected as the load ran, and what it left, both read in its own step: what the undo keeps.
+            if t["preserveSelection"]==true&&loaded["selection"]["previous"].is_object()&&loaded["selection"]["left"].is_object(){record.borrow_mut()["keepSelection"]=loaded["selection"].clone();}
             record.borrow_mut()["created"]=json!({"deviceRef":loaded["deviceRef"],"objectIdentity":loaded["deviceObjectIdentity"],"fingerprint":fingerprint});record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");
             // The created device's identity goes back too: what a client may remove in its place if the undo can't run.
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"deviceObjectIdentity":loaded["deviceObjectIdentity"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
@@ -316,15 +317,15 @@ impl McpHost {
         {
             return transaction_error(id, "Browser load lacks exact created device identity");
         }
-        // Keeping the selection is for a load previewed to keep it, whose apply recorded what it left selected.
+        // Keeping the selection is for a load previewed to keep it, whose own step said what was selected and what it left.
         let keep = (p.get("preserveSelection") == Some(&json!(true))).then(|| t["keepSelection"].clone());
-        if keep.as_ref().is_some_and(|keep| !keep["previous"].is_object()) {
+        if keep.is_some() && t["preserveSelection"] != true {
             return transaction_error(
                 id,
                 "This Browser load wasn't previewed with preserveSelection, so its undo can't keep the selection",
             );
         }
-        if keep.as_ref().is_some_and(|keep| !keep["left"].is_object()) {
+        if keep.as_ref().is_some_and(|keep| !keep["previous"].is_object() || !keep["left"].is_object()) {
             return transaction_error(id, "This Browser load didn't say what it left selected, so its undo can't keep the selection");
         }
         let result = async {
@@ -354,9 +355,22 @@ impl McpHost {
                 .await?;
             record.borrow_mut()["state"] = json!("undone");
             let mut answer = json!({"transactionId":t["id"],"state":"undone","idempotent":false});
-            if keep.is_some() {
-                // Deleted either way: what the delete kept selected, and whether it held, are the Remote Script's reading.
-                let kept = selection.unwrap_or_else(|| json!({"before":null,"after":null,"restored":false,"previous":false}));
+            if let Some(keep) = &keep {
+                // Deleted either way. What the delete kept and whether it held are the Remote Script's reading in the
+                // delete's own step. A replay of a delete that already ran knows neither, so nothing is said to be kept.
+                let mut kept =
+                    selection.unwrap_or_else(|| json!({"before":keep["previous"]["row"],"after":null,"restored":false,"previous":false}));
+                // Read again now, after that step: Live may move a selection on its next tick, as it does the playhead.
+                match self.selection_view(Some(&context)).await.ok().filter(|view| view["selection"].is_object()) {
+                    Some(view) => {
+                        let now = super::selection::selected(&view);
+                        if kept["after"] != now {
+                            kept["restored"] = json!(false);
+                        }
+                        kept["after"] = now;
+                    }
+                    None => kept["restored"] = json!(false),
+                }
                 answer["deleted"] = json!(true);
                 answer["selection"] = kept.clone();
                 record.borrow_mut()["undoSelection"] = kept;
@@ -365,6 +379,17 @@ impl McpHost {
         }
         .await;
         result.unwrap_or_else(|e| {
+            // A selection the delete couldn't keep refuses before anything is deleted: the load stays, and a plain undo
+            // still removes it.
+            if keep.is_some() && nothing_changed(&e) {
+                record.borrow_mut()["state"] = json!("applied");
+                self.delete_undo_plan(&record);
+                let reason = format!("The selection couldn't be kept: {}", adapter_reason(e.message()));
+                return response(
+                    id,
+                    json!({"content":[text_content(&kumi_common::js::json::stringify(&json!({"reason":reason,"remediation":"Nothing changed in Live, and the loaded device is still there. Undo again without preserveSelection to remove it (Live then selects what it chooses).","code":"selection_not_kept"})))],"isError":true}),
+                );
+            }
             record.borrow_mut()["state"] = json!("uncertain");
             adapter_tool_error(id, &e, "Browser-load undo is uncertain; inspect the exact created device.")
         })
