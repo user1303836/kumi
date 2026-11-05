@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tarfile
 import tempfile
@@ -93,10 +94,22 @@ class FakeGitHub:
         return path
 
 
-def run(github: FakeGitHub, *args: str) -> tuple[int, str]:
+# What a pinned `kumi serve` prints for an argument it doesn't take: the error line (which quotes it, and names --help),
+# the usage line, its indented continuations, then a line that isn't the usage's (which names --verbose).
+USAGE = (f'kumi serve: unknown argument "{pin.PROBE}" (try --help)\n'
+         "usage: kumi serve --stdio --state-dir <folder> --kumi-home <folder> --daw <ableton|reaper|renoise>\n"
+         "                  [--library-root <folder>]... [--media-root <folder>]... [--tool <name>=<path>]...\n"
+         "                  [--hermes-home <folder>] [--hermes-root <folder>]\n"
+         "Kumi's runtime for a host such as Hermes; see --verbose\n")
+OPTIONS = ["--daw", "--hermes-home", "--hermes-root", "--kumi-home", "--library-root", "--media-root", "--state-dir",
+           "--stdio", "--tool"]
+
+
+def run(github: FakeGitHub, *args: str, probe=None) -> tuple[int, str]:
+    """hermes_pin.py's main on `github`, with `probe` standing in for running the runtime (USAGE by default)."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
-        code = pin.main(list(args), github=github)
+        code = pin.main(list(args), github=github, probe=probe or (lambda kumi, scratch: USAGE))
     return code, err.getvalue()
 
 
@@ -170,12 +183,52 @@ class PinTest(unittest.TestCase):
     def test_check_passes_on_the_written_pin_and_fails_on_an_edited_one(self) -> None:
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out))[0], 0)
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--check")[0], 0)
-        edited = json.loads(self.out.read_text())
-        edited["targets"]["x86_64-apple-darwin"]["sha256"] = "e" * 64
-        self.out.write_text(json.dumps(edited))
-        code, err = run(self.github, VERSION, "--out", str(self.out), "--check")
-        self.assertEqual(code, 1)
-        self.assertIn("doesn't match the published v1.24.66", err)
+        written = json.loads(self.out.read_text())
+        for edit in ("sha256", "serve_options"):
+            with self.subTest(edit):
+                edited = copy.deepcopy(written)
+                if edit == "sha256":
+                    edited["targets"]["x86_64-apple-darwin"]["sha256"] = "e" * 64
+                else:
+                    edited["serve_options"] = [*OPTIONS, "--newer-than-the-release"]
+                self.out.write_text(json.dumps(edited))
+                code, err = run(self.github, VERSION, "--out", str(self.out), "--check")
+                self.assertEqual(code, 1)
+                self.assertIn("doesn't match the published v1.24.66", err)
+
+    def test_the_pin_records_the_options_kumi_serve_takes_from_its_usage_lines_only(self) -> None:
+        given: list[bytes] = []
+
+        def probe(kumi: Path, scratch: Path) -> str:
+            given.append(kumi.read_bytes())
+            return USAGE
+
+        code, err = run(self.github, VERSION, "--out", str(self.out), probe=probe)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(self.out.read_text())["serve_options"], OPTIONS,
+                         "sorted; neither the error line's --help nor the line after the usage's --verbose")
+        self.assertEqual(given, [f"kumi for {pin.host_target()}".encode()], "this computer's runtime, run once")
+
+    def test_a_runtime_whose_usage_names_no_options_is_refused(self) -> None:
+        for printed, said in (("kumi: unknown command\n", "no usage line"),
+                              ("usage: kumi serve\n", "names no options"),
+                              (f'error: "{pin.PROBE}"\nusage: kumi serve {pin.PROBE}\n', "names no options")):
+            with self.subTest(printed):
+                code, err = run(self.github, VERSION, "--out", str(self.out), probe=lambda kumi, scratch: printed)
+                self.assertEqual(code, 1, err)
+                self.assertIn(said, err)
+                self.assertFalse(self.out.exists(), "a refused release must leave no pin behind")
+
+    @unittest.skipIf(os.name == "nt", "the stand-in runtime is a POSIX shell script")
+    def test_the_runtime_itself_is_run_with_a_scratch_home_to_read_its_usage(self) -> None:
+        target = pin.host_target()
+        stand_in = (f'#!/bin/sh\n[ "$1 $2" = "serve {pin.PROBE}" ] || exit 9\n'
+                    'case "$HOME" in *probe-home) ;; *) exit 8 ;; esac\n'
+                    f"cat >&2 <<'USAGE'\n{USAGE}USAGE\nexit 2\n").encode()
+        self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): stand_in}))
+        code, err = run(self.github, VERSION, "--out", str(self.out), probe=pin.serve_usage)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(self.out.read_text())["serve_options"], OPTIONS)
 
     def test_a_downloaded_bundle_that_differs_from_the_records_is_refused(self) -> None:
         self.github.files["kumi-x86_64-apple-darwin.tar.xz"] = tar_xz({"kumi": b"tampered"})

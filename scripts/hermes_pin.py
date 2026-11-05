@@ -16,17 +16,23 @@ Both also download each bundle once (about 170 MB, one at a time, deleted after)
 and read it as setup will: a `.tar.xz` of plain files and folders, with `kumi` (`kumi.exe` on Windows) at its root.
 
 The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256, download size and
-unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. When a `plugin.yaml` sits beside
-it, the script also sets that manifest's one top-level `version: "x.y.z"` line to the pinned version (the catalog
-shows it as the plugin's version), and `--check` fails when the two differ. It changes nothing else in the manifest.
+unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. It also holds `serve_options`, the
+long options the pinned `kumi serve` takes, read from that runtime itself: the bundle for this computer's target is run
+once as `kumi serve <an argument it doesn't know>`, which prints its usage and stops (with a scratch HOME and
+KUMI_HOME). The plugin's tests check every flag it passes `kumi serve` against them, so a plugin that needs a newer
+runtime than its pin fails before it reaches anyone. When a `plugin.yaml` sits beside it, the script also sets that
+manifest's one top-level `version: "x.y.z"` line to the pinned version (the catalog shows it as the plugin's version),
+and `--check` fails when the two differ. It changes nothing else in the manifest.
 """
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import subprocess
@@ -51,6 +57,8 @@ VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 # The DAW component versions each target's release file names, carried into the pin for setup to show.
 COMPONENTS = ("bridge", "reaper", "renoise")
+# The argument `kumi serve` is run with to read its usage: one it doesn't take, so it prints the usage and stops.
+PROBE = "--hermes-pin-probe"
 
 
 class Refused(Exception):
@@ -192,10 +200,69 @@ def unpacked_bytes(path: Path, target: str) -> int:
     return sum(member.size for member in members if member.isfile())
 
 
-def measured(github: GitHub, pin: dict) -> dict:
+def host_target() -> str | None:
+    """This computer's release target, as the Installer names them; None for a system no release is built for."""
+    arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}.get(platform.machine().lower())
+    system = {"Darwin": "apple-darwin", "Linux": "unknown-linux-gnu", "Windows": "pc-windows-msvc"}.get(platform.system())
+    target = f"{arch}-{system}" if arch and system else None
+    return target if target in TARGETS else None
+
+
+def extracted(path: Path, target: str, into: Path) -> Path:
+    """The bundle's Kumi executable, alone, extracted into `into` and made executable."""
+    name = executable(target)
+    with tarfile.open(path, "r:xz") as archive:
+        member = next(member for member in archive.getmembers()
+                      if member.isfile() and member.name.removeprefix("./") == name)
+        data = archive.extractfile(member).read()
+    out = into / "probe" / name
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(data)
+    out.chmod(0o755)
+    return out
+
+
+def serve_usage(kumi: Path, scratch: Path) -> str:
+    """What `kumi serve` prints for an argument it doesn't take: its usage, on stderr. Run with a scratch HOME and
+    KUMI_HOME, so nothing of this computer's Kumi is read or written."""
+    home = scratch / "probe-home"
+    home.mkdir(exist_ok=True)
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "KUMI_HOME": str(home / "kumi")}
+    try:
+        result = subprocess.run([str(kumi), "serve", PROBE], capture_output=True, stdin=subprocess.DEVNULL, env=env,
+                                timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refused(f"couldn't run the pinned kumi to read kumi serve's options: {error}") from None
+    return result.stderr.decode(errors="replace") + result.stdout.decode(errors="replace")
+
+
+def serve_options(usage: str) -> list[str]:
+    """`kumi serve`'s long options, sorted, from the usage it printed: the `usage:` line and the indented lines that
+    continue it, never the error line above them, which quotes the argument it didn't take."""
+    lines = usage.splitlines()
+    start = next((index for index, line in enumerate(lines) if line.lstrip().startswith("usage:")), None)
+    if start is None:
+        raise Refused("the pinned kumi serve printed no usage line, so its options can't be recorded")
+    block = [lines[start]]
+    for line in lines[start + 1:]:
+        if not line.strip() or not line[:1].isspace():
+            break
+        block.append(line)
+    options = sorted(set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", "\n".join(block))))
+    if not options or PROBE in options:
+        raise Refused(f"the pinned kumi serve's usage names no options of its own: {block[0].strip()!r}")
+    return options
+
+
+def measured(github: GitHub, pin: dict, probe: Callable[[Path, Path], str] | None = None) -> dict:
     """The pin with each target's unpacked size, after downloading each bundle (one at a time, deleted after) and
-    confirming its size and SHA-256 against the release's own records."""
-    targets = {}
+    confirming its size and SHA-256 against the release's own records; and `serve_options`, read by running the
+    bundle for this computer's target (`probe`: how it's run, `serve_usage` unless a test says otherwise)."""
+    host = host_target()
+    if host not in pin["targets"]:
+        raise Refused(f"run this on one of the release's targets ({', '.join(TARGETS)}): it reads kumi serve's "
+                      "options by running the pinned runtime")
+    targets, options = {}, []
     with tempfile.TemporaryDirectory(prefix="hermes-pin-") as scratch:
         for target, record in pin["targets"].items():
             name = record["url"].rsplit("/", 1)[1]
@@ -208,10 +275,13 @@ def measured(github: GitHub, pin: dict) -> dict:
             if size != record["size"] or digest.hexdigest() != record["sha256"]:
                 raise Refused(f"the downloaded {name} doesn't match its pin ({size} bytes, sha256 {digest.hexdigest()})")
             unpacked = unpacked_bytes(path, target)
+            if target == host:
+                options = serve_options((probe or serve_usage)(extracted(path, target, Path(scratch)), Path(scratch)))
+                print(f"  kumi serve {pin['kumi']} takes {' '.join(options)}")
             path.unlink()
             targets[target] = {**record, "unpacked_bytes": unpacked}
             print(f"  {target}: {name} matches ({size} bytes, {unpacked} unpacked)")
-    return {**pin, "targets": targets}
+    return {**pin, "serve_options": options, "targets": targets}
 
 
 def text_of(pin: dict) -> str:
@@ -245,7 +315,8 @@ def manifest_line(manifest: Path) -> tuple[str, re.Match[str]] | None:
     return text, lines[0]
 
 
-def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
+def main(argv: list[str] | None = None, github: GitHub | None = None,
+         probe: Callable[[Path, Path], str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pin the Kumi release that Kumi's Hermes plugin installs.")
     parser.add_argument("version", help="a published Kumi version, e.g. 1.24.67 (never 'latest')")
     parser.add_argument("--repository", default=REPOSITORY, help=f"owner/name (default {REPOSITORY})")
@@ -257,7 +328,7 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
         if not VERSION.fullmatch(version):
             raise Refused(f"{args.version!r} isn't a version like 1.24.67: the pin names one exact release")
         github = github or GitHub(args.repository)
-        pin = measured(github, read_pin(github, version))
+        pin = measured(github, read_pin(github, version), probe)
         manifest = args.out.parent / "plugin.yaml"
         line = manifest_line(manifest)
         if args.check:
