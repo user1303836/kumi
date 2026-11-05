@@ -226,6 +226,35 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(host.runtimes.get(data), "the next start uses the adopted Kumi home")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
+    def test_the_first_daw_set_up_becomes_kumis_daw_in_the_same_approval(self):
+        host, ctx, data = desktop_host(self, daw_component=False)  # the DAW setting says Live; nothing is set up
+        plan = support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s1")
+        self.assertEqual((plan["step"], plan["use_daw"]), ("daw_component", True))
+        asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1",
+                                     tool_call_id="c1")
+        self.assertIn("Make REAPER Kumi's DAW in this profile", asked["message"], "the producer approves that too")
+        policy.post_approval_response(host, tool_call_id="c1", choice="once")
+        installed = support.handle(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1")
+        self.assertTrue(installed["ok"], installed)
+        self.assertEqual(ctx.settings["daw"], "reaper", "kumi_connect now goes to REAPER")
+        self.assertIsNone(host.runtimes.get(data), "and the runtime starts again for it")
+
+    def test_a_second_daw_set_up_leaves_the_one_set_up_as_kumis_daw_unless_asked(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        self.assertTrue(support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")["ok"])  # Live
+        host.runtimes.stop_all()  # its chat ended
+        plan = support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s2")
+        self.assertEqual((plan["step"], plan["use_daw"]), ("daw_component", False))
+        installed = support.call(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s2")
+        self.assertTrue(installed["ok"], installed)
+        self.assertEqual(ctx.settings["daw"], "ableton", "Live, which is set up, stays Kumi's DAW")
+        self.assertIn("hermes kumi setup --daw reaper --use", installed["message"], "the exact next step")
+        out = Tty()
+        self.assertEqual(commands.cli_setup(host, "reaper", use=True, stdin=Tty("y\n"), stdout=out), 0, out.getvalue())
+        self.assertIn("Kumi: make REAPER Kumi's DAW in this profile", out.getvalue(), "asked first")
+        self.assertEqual(ctx.settings["daw"], "reaper", "asked for, and approved")
+
     def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_the_older_runtime(self):
         host, _, data = desktop_host(self)  # Kumi 1.24.66's runtime, set up
         support.call(host, "kumi_connect", {}, session_id="s1")

@@ -494,8 +494,12 @@ def plan_for_model(plan: Mapping[str, Any]) -> dict:
         "daw_component": f"Install Kumi's part in {daw}; the approval lists everything it writes.",
         "owned_elsewhere": f"Another Kumi installation already serves {daw}: adopt it rather than replace it.",
         "ffmpeg": "Optional: let Kumi's runtime use the ffmpeg already on this computer for compressed audio.",
+        "use_daw": f"Make {daw} Kumi's DAW in this profile, so Kumi connects to it.",
         "none": f"Kumi is set up for {daw}.",
     }.get(str(plan.get("step")), "")
+    shown["use_daw"] = isinstance(plan.get("use_daw"), str)
+    if shown["use_daw"] and plan.get("step") != "use_daw":
+        shown["summary"] += f" The same approval makes {daw} Kumi's DAW in this profile."
     return shown
 
 
@@ -560,7 +564,7 @@ _RESTART = ("If Kumi's runtime is running in this Hermes, it stops: a chat conne
 
 
 def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: Path, plugin_dir: Path | None,
-                  target: str | None) -> dict:
+                  target: str | None, current: str | None = None, use: bool = False) -> dict:
     if daw not in DAWS:
         raise SetupError("bad_daw", f"Kumi supports {', '.join(DAWS)}, not {daw!r}.")
     pin = load_pin(plugin_dir)
@@ -584,7 +588,10 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime to plan the DAW step.")
     dry = _ask_runtime(setup_daw, {"daw": daw, "dry_run": True}, f"Kumi's runtime couldn't plan the step for {DAWS[daw]}")
-    if dry["state"] in ("same", "newer"):
+    using = _use_line(daw, current) if _switches(daw, current, use, data_dir) else None
+    if dry["state"] in ("same", "newer") and using:  # the DAW is set up; making it Kumi's DAW comes before ffmpeg
+        plan.update(step="use_daw", paths=[], effects=[], component=dry, use_daw=using)
+    elif dry["state"] in ("same", "newer"):
         found = None if _allowed_ffmpeg(data_dir)[0] == "available" else find_ffmpeg()
         if found is None:
             plan.update(step="none", paths=[], effects=[], component=dry)
@@ -595,11 +602,36 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
                 "Kumi doesn't download or install ffmpeg. Without it, Kumi reads WAV and AIFF only.", _RESTART])
     elif dry["state"] == "other_owner":
         plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
-                    component=dry)
+                    component=dry, **({"use_daw": using} if using else {}))
     else:
         plan.update(step="daw_component", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
-                    component=dry)
+                    component=dry, **({"use_daw": using} if using else {}))
     return plan
+
+
+def _set_up(daw: str, data_dir: Path) -> bool:
+    """Whether this profile's setup has `daw`'s part in place (its receipt names it)."""
+    components = (_read_json(data_dir / "setup" / "receipt.json") or {}).get("daw_components")
+    return isinstance(components, dict) and daw in components
+
+
+def _switches(daw: str, current: str | None, use: bool, data_dir: Path) -> bool:
+    """Whether setting `daw` up also makes it Kumi's DAW in this profile (the plugin's `daw` setting, now `current`):
+    when the producer asks (`use`), or when `current`'s part isn't set up here, so `daw` is the first DAW set up. A
+    second DAW never takes the place of one that's set up, unasked (kumi-adv)."""
+    return current in DAWS and current != daw and (use or not _set_up(current, data_dir))
+
+
+def _use_line(daw: str, current: str) -> str:
+    return f"Make {DAWS[daw]} Kumi's DAW in this profile, instead of {DAWS[current]}: Kumi then connects to {DAWS[daw]}"
+
+
+def next_daw(daw: str, current: str | None) -> str:
+    """The exact next step when `daw` is set up but another DAW stays Kumi's (said after setup, never done unasked)."""
+    if current not in DAWS or current == daw:
+        return ""
+    return (f"Kumi still connects to {DAWS[current]} in this profile; to use {DAWS[daw]}, run hermes kumi setup "
+            f"--daw {daw} --use.")
 
 
 # CC-8: what REAPER's and Renoise's components write into a project by themselves, said in their DAW step.
@@ -616,18 +648,21 @@ def _tagging(daw: str, component: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
-         plugin_dir: Path | None = None, target: str | None = None) -> dict:
+         plugin_dir: Path | None = None, target: str | None = None, current: str | None = None,
+         use: bool = False) -> dict:
     """The next setup step and its exact effects, recorded in `<data>/setup/plan.json` for approval. No network.
-    `setup_daw` calls the runtime's `setup_daw` tool; it is needed only once the runtime is installed. Raises only
-    SetupError, including when the plan can't be written (`io_failed`)."""
+    `setup_daw` calls the runtime's `setup_daw` tool; it is needed only once the runtime is installed. `current` is the
+    plugin's DAW setting: the DAW step for another DAW also makes this one Kumi's DAW (`use_daw`, in the same approval)
+    when `current`'s part isn't set up here, or when the producer asks (`use`). Raises only SetupError, including when
+    the plan can't be written (`io_failed`)."""
     data_dir = data_dir or default_data_dir()
-    result = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target or host_target())
+    result = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target or host_target(), current, use)
     result["made_at"] = _now_ms()
     result["digest"] = _digest(result)
     try:
         _write_json(data_dir / "setup" / "plan.json", result)
         component = result.get("component") or {}
-        if result["step"] in ("none", "ffmpeg") and component.get("state") == "same":  # installed by this Kumi home
+        if result["step"] in ("none", "ffmpeg", "use_daw") and component.get("state") == "same":  # this home's
             receipt = _read_json(data_dir / "setup" / "receipt.json") or {}
             if daw not in (receipt.get("daw_components") or {}):
                 _record_component(data_dir, daw, component, installed_at=None)
@@ -673,7 +708,9 @@ def approval(daw: str, *, action: str = "install", data_dir: Path | None = None,
 
 
 def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str] | None:
-    """The approval's title, then each effect of the plan and each path it writes, as the producer reads them."""
+    """The approval's title, then each effect of the plan and each path it writes, as the producer reads them, and
+    whether it makes the DAW Kumi's DAW in this profile (`use_daw`)."""
+    using = [plan["use_daw"]] if isinstance(plan.get("use_daw"), str) else []
     if action == "adopt":
         home = _owner_home(plan)
         if plan.get("step") != "owned_elsewhere" or home is None:
@@ -682,13 +719,16 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
         return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
-                f"The {component} it installed stays as it is", _RESTART, *_tagging(daw, plan["component"])]
-    if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg"):
+                f"The {component} it installed stays as it is", _RESTART, *_tagging(daw, plan["component"]), *using]
+    if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg", "use_daw"):
+        return None
+    if plan["step"] == "use_daw" and not using:
         return None
     title = {"runtime": f"Kumi: set up Kumi {plan['version']}'s runtime",
              "daw_component": f"Kumi: install Kumi's part in {DAWS[daw]}",
-             "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer"}[plan["step"]]
-    return [title, *plan["effects"], *(f"Writes: {path}" for path in plan["paths"])]
+             "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer",
+             "use_daw": f"Kumi: make {DAWS[daw]} Kumi's DAW in this profile"}[plan["step"]]
+    return [title, *plan["effects"], *(f"Writes: {path}" for path in plan["paths"]), *using]
 
 
 def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:
@@ -758,27 +798,31 @@ def _owner_home(plan: Mapping[str, Any]) -> str | None:
 
 
 def adopt(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], Any] | None = None,
-          data_dir: Path | None = None, plugin_dir: Path | None = None, target: str | None = None) -> dict:
+          data_dir: Path | None = None, plugin_dir: Path | None = None, target: str | None = None,
+          current: str | None = None, use: bool = False) -> dict:
     """Adopt the Kumi installation that owns this DAW's component, after the user approved `approval(daw,
     action="adopt")` (`expected_digest` is that approval's digest): from now on the runtime runs with `--kumi-home
-    <that folder>`, so it uses the bridge that is already installed instead of replacing it. Re-plans first and
-    refuses if anything changed. Setup itself never reads that installation's files, account or settings: it records
-    the folder in `current.json` and the receipt. A runtime already running keeps its old home until W2 restarts it.
-    Returns `{"ok": ...}` like `install()`; never raises."""
+    <that folder>`, so it uses the bridge that is already installed instead of replacing it. Re-plans first (with the
+    `current` DAW setting and `use` the plan had) and refuses if anything changed. Setup itself never reads that
+    installation's files, account or settings: it records the folder in `current.json` and the receipt. A runtime
+    already running keeps its old home until W2 restarts it. Returns `{"ok": ...}` like `install()`; never raises."""
     data_dir = data_dir or default_data_dir()
     target = target or host_target()
     try:
         with _setup_lock(data_dir):
             approved = _claim(daw, data_dir, expected_digest, "adopt")
-            current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
-            if _digest(current) != _digest(_unstamped(approved)):
+            replanned = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target, current, use)
+            if _digest(replanned) != _digest(_unstamped(approved)):
                 raise SetupError("plan_changed", "What setup found changed since it was approved; plan again.")
             home = _owner_home(approved)
             if not Path(home).is_dir():
                 raise SetupError("not_found", f"{home} isn't a folder any more; plan again.")
             _adopt(approved, daw, home, data_dir)
-        return {"ok": True, "step": "adopt",
-                "message": f"Kumi now uses the Kumi installation that already serves {DAWS[daw]}.",
+        using = isinstance(approved.get("use_daw"), str)
+        message = f"Kumi now uses the Kumi installation that already serves {DAWS[daw]}."
+        if not using:
+            message = f"{message} {next_daw(daw, current)}".strip()
+        return {"ok": True, "step": "adopt", "message": message, **({"use_daw": daw} if using else {}),
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
@@ -808,25 +852,32 @@ def _adopt(approved: Mapping[str, Any], daw: str, home: str, data_dir: Path) -> 
 def install(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], Any] | None = None,
             progress: Callable[[int, int], None] | None = None, data_dir: Path | None = None,
             plugin_dir: Path | None = None, target: str | None = None,
-            opener: Callable[..., Any] | None = None) -> dict:
+            opener: Callable[..., Any] | None = None, current: str | None = None, use: bool = False) -> dict:
     """Do the step the user approved, and only that: the plan whose digest `approval()` gave (`expected_digest`),
-    taken so it runs once, re-planned and refused if anything changed since, one setup step at a time. Returns
-    `{"ok": True, "step", "status", "message"}` or `{"ok": False, "error": {"code", "message"}}`; never raises."""
+    taken so it runs once, re-planned (with the `current` DAW setting and `use` the plan had) and refused if anything
+    changed since, one setup step at a time. Returns `{"ok": True, "step", "status", "message"}`, with `"use_daw":
+    daw` when the approved plan makes it Kumi's DAW (the caller sets the plugin's `daw` setting: setup has no say in
+    Hermes's settings), or `{"ok": False, "error": {"code", "message"}}`; never raises."""
     data_dir = data_dir or default_data_dir()
     target = target or host_target()
     try:
         with _setup_lock(data_dir):
             approved = _claim(daw, data_dir, expected_digest, "install")
-            current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
-            if _digest(current) != _digest(_unstamped(approved)):
+            replanned = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target, current, use)
+            if _digest(replanned) != _digest(_unstamped(approved)):
                 raise SetupError("plan_changed", "What setup would do changed since it was approved; plan again.")
             if approved["step"] == "runtime":
                 message = _install_runtime(approved, data_dir, target, progress, opener or _open_url)
             elif approved["step"] == "ffmpeg":
                 message = _allow_ffmpeg(approved, data_dir)
+            elif approved["step"] == "use_daw":
+                message = ""
             else:
                 message = _install_component(approved, setup_daw, data_dir)
+                if not isinstance(approved.get("use_daw"), str):
+                    message = f"{message} {next_daw(daw, current)}".strip()
         return {"ok": True, "step": approved["step"], "message": message,
+                **({"use_daw": daw} if isinstance(approved.get("use_daw"), str) else {}),
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
@@ -968,23 +1019,29 @@ def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, 
 
 def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None = None,
              data_dir: Path | None = None, plugin_dir: Path | None = None, target: str | None = None,
-             opener: Callable[..., Any] | None = None, stdin: Any = None, stdout: Any = None) -> int:
-    """`hermes kumi setup`: show each step, ask before it, refuse without a terminal. There is no --yes."""
+             opener: Callable[..., Any] | None = None, stdin: Any = None, stdout: Any = None,
+             current: str | None = None, use: bool = False, make_current: Callable[[str], None] | None = None) -> int:
+    """`hermes kumi setup`: show each step, ask before it, refuse without a terminal. There is no --yes. `current` is
+    the plugin's DAW setting (else read from Hermes's config); when a step the producer approved makes `daw` Kumi's
+    DAW (`plan`'s `use_daw`; `use` asks for it even when `current` is set up), `make_current(daw)` sets it."""
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     if not (stdin.isatty() and stdout.isatty()):
         print("hermes kumi setup asks before each step, so it needs a terminal; in a chat, ask Hermes to set up Kumi.",
               file=stdout)
         return 1
-    daw = daw if daw in DAWS else _configured_daw()
-    for _ in range(4):  # the runtime, the DAW component, ffmpeg if there is one, then a final check
+    current = current if current in DAWS else _configured_daw()
+    daw = daw if daw in DAWS else current
+    for _ in range(5):  # the runtime, the DAW component, making it Kumi's DAW, ffmpeg if there is one, a final check
         try:
-            step = plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)
+            step = plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target,
+                        current=current, use=use)
         except SetupError as error:
             print(error.message, file=stdout)
             return 1
         if step["step"] == "none":
             now = status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)
-            print(now["message"], now["compressed_audio"]["message"], sep="\n", file=stdout)
+            print(now["message"], now["compressed_audio"]["message"], *filter(None, [next_daw(daw, current)]),
+                  sep="\n", file=stdout)
             return 0
         adopting = step["step"] == "owned_elsewhere"
         lines = _approval_lines(step, daw, "adopt" if adopting else "install")  # what a chat's approval shows
@@ -1003,14 +1060,25 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
             return 1
         if adopting:
             result = adopt(daw, expected_digest=step["digest"], setup_daw=setup_daw, data_dir=data_dir,
-                           plugin_dir=plugin_dir, target=target)
+                           plugin_dir=plugin_dir, target=target, current=current, use=use)
         else:
             result = install(daw, expected_digest=step["digest"], setup_daw=setup_daw, data_dir=data_dir,
-                             plugin_dir=plugin_dir, target=target, opener=opener)
+                             plugin_dir=plugin_dir, target=target, opener=opener, current=current, use=use)
         if not result["ok"]:
             print(result["error"]["message"], file=stdout)
             return 1
-        print(result["message"], file=stdout)
+        message = result["message"]
+        if result.get("use_daw") == daw:
+            try:
+                if make_current is None:
+                    raise RuntimeError("no settings writer")
+                make_current(daw)
+                current = daw
+                message = f"{message} {DAWS[daw]} is Kumi's DAW in this profile now.".strip()
+            except Exception:
+                message = (f"{message} Kumi couldn't change its DAW setting: set it to {daw} in Hermes's settings for "
+                           "the Kumi plugin.").strip()
+        print(message, file=stdout)
         if adopting:
             return 0
         if step["step"] == "runtime" and setup_daw is None:
