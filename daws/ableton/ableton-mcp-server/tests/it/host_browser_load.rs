@@ -184,3 +184,20 @@ async fn a_selection_the_undo_cant_keep_refuses_and_a_plain_undo_still_removes_t
     assert_eq!(undone["state"], "undone", "{undone}");
     assert_eq!(sim.state.borrow()["tracks"][0]["devices"], devices);
 }
+
+/// A loaded device the producer has removed already can't be removed keeping the selection: nothing is selected or
+/// claimed, and the undo doesn't say it's undone.
+#[tokio::test]
+async fn a_loaded_device_already_gone_keeps_the_selection_as_it_is_and_claims_nothing() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let devices = sim.state.borrow()["tracks"][0]["devices"].clone();
+    let (tx, _) = load_keeping_the_selection(&host, &sim).await;
+    sim.state.borrow_mut()["tracks"][0]["devices"] = devices;
+    sim.state.borrow_mut()["selection"]["sceneRef"] = Value::Null;
+    let chosen = sim.state.borrow()["selection"].clone();
+    let undone = undo_keeping_the_selection(&host, &tx, 3).await;
+    assert_ne!(undone["state"], "undone", "{undone}");
+    assert!(undone.get("selection").is_none(), "{undone}");
+    assert_eq!(sim.state.borrow()["selection"], chosen);
+}
