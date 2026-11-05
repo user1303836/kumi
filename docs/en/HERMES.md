@@ -78,8 +78,11 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - **Listening to a track or the mix** asks first, and plays only the beat window you approve (60 seconds at most),
   only while the DAW is stopped. Routing and transport may change briefly and are put back after. Live captures it
   through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
-  that owns their part, and Kumi copies that one file and removes it. REAPER may show the project as modified after
-  a track listen, since only saving clears that flag; Kumi never saves.
+  that owns their part, and Kumi copies that one file and removes it. A REAPER or Renoise track needs Kumi's newer
+  part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise listens only to a window that
+  starts and ends on whole pattern lines inside the song, and refuses any other rather than play more than you
+  approved. REAPER may show the project as modified after a track listen, since only saving clears that flag; Kumi
+  never saves.
 - Kumi in Hermes never uses Kumi's own sign-in, model providers or updater, and sends no telemetry.
 
 ## Limits
@@ -89,12 +92,17 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. A file it measures can be up to 50 MB.
+- Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its Renoise tool one for
+  each song in the song's tool data, saved with them.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 
 ## If something isn't working
 
-- `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs.
+- `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs, and whether Kumi can read compressed
+  audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
+  chat instead.
+- Listening to a REAPER or Renoise track says Kumi's part in the DAW is too old: run setup again, then restart the DAW.
 - Nothing from Kumi in Hermes Desktop: check that Kumi is switched on under Capabilities → Plugins, and enabled in
   Hermes (`hermes plugins enable kumi`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.

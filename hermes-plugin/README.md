@@ -108,18 +108,23 @@ actually happened, including when an outcome is uncertain; undo is available onl
 be reversed. Listening to a track or the mix also asks first: it plays only the beat window you approve (60 seconds at
 most), only while the DAW is stopped, and may change routing and transport briefly, restoring them after. Live captures
 it through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
-that owns their component, and Kumi copies the file it asked for and removes exactly that file. REAPER may show the
-project as modified after a track listen, since only saving clears that flag; Kumi never saves. Audio is measured on
-this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you ask
-Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
+that owns their component, and Kumi copies the file it asked for and removes exactly that file. Listening to a REAPER
+or Renoise track needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise
+listens only to a window that starts and ends on whole pattern lines inside the song, and refuses any other rather than
+play more than you approved. REAPER may show the project as modified after a track listen, since only saving clears
+that flag; Kumi never saves. Kumi's REAPER extension keeps an id for each saved project in the project (ext state),
+and its Renoise tool one for each song in the song's tool data, saved with them. With your approval at setup, Kumi's
+runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi never downloads one. Audio is measured
+on this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you
+ask Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
 and the measurements it returns, go to the model you use in Hermes as part of the conversation. With
-`listen_interpretation` on, Kumi also
-sends the measurements and a small image of the measured band energy (never the audio or file paths) through Hermes's
-own model access: to the auxiliary model you choose for the `kumi_listen` task in Hermes (it must accept images), or to
-the fallback providers Hermes is configured to try for that task. Hermes retries a failed attempt and may fall back,
-which can add time and token cost. If you let Kumi use an existing Kumi installation, its runtime reads that
-installation's DAW connection files and writes its own connection state there, never its sign-in or settings. Kumi's
-own sign-in, model providers, account files and updater are never used. No telemetry.
+`listen_interpretation` on, Kumi also sends the measurements and a small image of the measured band energy (never the
+audio or file paths) through Hermes's own model access: to the auxiliary model you choose for the `kumi_listen` task in
+Hermes (it must accept images), or to the fallback providers Hermes is configured to try for that task. Hermes retries
+a failed attempt and may fall back, which can add time and token cost. If you let Kumi use an existing Kumi
+installation, its runtime reads that installation's DAW connection files and writes its own connection state there,
+never its sign-in or settings. Kumi's own sign-in, model providers, account files and updater are never used. No
+telemetry.
 
 ## Compatibility
 
