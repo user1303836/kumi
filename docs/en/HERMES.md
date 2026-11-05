@@ -148,6 +148,9 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 
 ## If something isn't working
 
+- `hermes kumi doctor` (or `/kumi doctor` in a chat) checks what Kumi needs in this Hermes profile: Hermes's approval
+  settings, setup, the connection, the open project and the sound map. For each problem it says what to do. It changes
+  nothing.
 - `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs, and whether Kumi can read compressed
   audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
   chat in Hermes Desktop instead.

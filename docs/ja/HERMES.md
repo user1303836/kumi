@@ -89,6 +89,7 @@ Hermes が変更の前に確認するのは、承認がオンになっている�
 
 ## うまくいかないとき
 
+- `hermes kumi doctor`（チャットでは `/kumi doctor`）で、この Hermes プロファイルで Kumi に必要なもの（Hermes の承認の設定、セットアップ、接続、開いているプロジェクト、サウンドマップ）を確かめられます。問題ごとに、することを伝えます。何も変更しません。
 - `/kumi`（ターミナルでは `hermes kumi status`）で、セットアップに足りないものと、圧縮音声を読めるかどうかがわかります。`plugins.isolation: host` のとき、Hermes は `hermes kumi` のようなプラグインのコマンドを読み込みません。Hermes Desktop のチャットからセットアップしてください。
 - REAPER や Renoise のトラックを聴くときに DAW 用の Kumi の部品が古いと言われる: セットアップをもう一度実行してから DAW を再起動してください。
 - Hermes Desktop に Kumi が出てこない: スキルとツール → プラグインで Kumi の **Agent** と **Desktop** のスイッチがオンか、Hermes で有効か（`hermes plugins enable kumi`）を確かめてください。
