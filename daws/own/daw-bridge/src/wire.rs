@@ -116,7 +116,7 @@ pub struct Identity {
     /// Checked preset-file formats this bridge can load. Absent in older bridges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preset_files: Vec<String>,
-    /// The DAW's id (`reaper`, `renoise`, `soundcraft`), kept as text so another DAW's bridge is reported, not a parse error.
+    /// The DAW's id (`reaper`, `renoise`, `soundcraft`, `lynx`), kept as text so another DAW's bridge is reported, not a parse error.
     pub daw: String,
     /// The bridge's own version.
     pub bridge: String,
@@ -125,7 +125,8 @@ pub struct Identity {
     /// The DAW's process id; 0 when the bridge can't learn it (Renoise's Lua on Windows), and then the host checks
     /// the bridge is alive by connecting.
     pub pid: u32,
-    /// REAPER's resource folder, Renoise's preferences folder or SoundCraft's settings folder: what tells several
+    /// REAPER's resource folder, Renoise's preferences folder, SoundCraft's settings folder or LYNX's control folder:
+    /// what tells several
     /// instances apart.
     pub resource: String,
     pub project: Option<Project>,

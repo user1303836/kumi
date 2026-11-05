@@ -1,11 +1,11 @@
-//! What Kumi's own DAW bridges (REAPER's, Renoise's, SoundCraft's) share: the loopback wire, its handshake and auth,
+//! What Kumi's own DAW bridges (REAPER's, Renoise's, SoundCraft's and LYNX's) share: the loopback wire, its handshake and auth,
 //! discovery files, and the lifecycle of the bridge files installed into each DAW. Ableton's bridge has its own crate and
 //! wire.
 //!
 //! # The wire, `kumi-daw/1`
 //!
 //! The bridge is the server, inside the DAW (REAPER's extension, Renoise's tool) or beside it (SoundCraft's
-//! `soundcraft-kumi`, which Kumi's host starts); Kumi's host connects to it.
+//! `soundcraft-kumi`, LYNX's `lynx-kumi`, which Kumi's host starts); Kumi's host connects to it.
 //! The JSON test vectors in `tests/vectors/` pin every rule below for each implementation (this crate, the REAPER
 //! extension through it, and the Renoise tool's Lua tests).
 //!
@@ -24,7 +24,8 @@
 //!
 //! ## Ports
 //!
-//! 127.0.0.1 only. REAPER 9770–9779, Renoise 9780–9789, SoundCraft 9800–9809 ([`daw::Daw::ports`]; 9790–9799 are kept for
+//! 127.0.0.1 only. REAPER 9770–9779, Renoise 9780–9789, SoundCraft 9800–9809 and LYNX 9810–9819
+//! ([`daw::Daw::ports`]; 9790–9799 are kept for
 //! Logic): the bridge takes the first free one from the reference's port and publishes it in its discovery file. Ableton
 //! keeps 9765 and 9766.
 //!
