@@ -6,6 +6,7 @@ mod delivery;
 pub mod ears;
 pub mod library;
 mod listening;
+pub mod plugin_steps;
 mod projects;
 mod provider;
 mod routing;

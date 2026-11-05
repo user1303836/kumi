@@ -22,6 +22,7 @@ use kumi_types::{daw::DawId, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::{cell::Cell, rc::Rc, sync::Arc};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Kumi's host, called in process.
 struct InProcess {
@@ -357,4 +358,221 @@ case!(serve_connects_to_live_through_the_bridge_its_own_home_installed, async {
     let status = connected.expect("its own bridge");
     assert!(started, "Live's integration started");
     assert_eq!((status["daw"].clone(), status["project"].clone()), (json!("ableton"), Value::Null), "no look yet: Live isn't open");
+});
+
+/// The runtime served over MCP on in-memory pipes, as Hermes's host drives it: `_host` and all.
+struct Wire {
+    to: Option<tokio::io::DuplexStream>,
+    from: BufReader<tokio::io::DuplexStream>,
+    served: tokio::task::JoinHandle<std::io::Result<()>>,
+    asked: u64,
+}
+
+impl Wire {
+    async fn start(ctx: Rc<Ctx>) -> Wire {
+        let (to, runtime_in) = tokio::io::duplex(1 << 20);
+        let (runtime_out, from) = tokio::io::duplex(1 << 20);
+        let served = tokio::task::spawn_local(kumi::serve::mcp::serve_with(
+            ctx,
+            registry::OPERATIONS,
+            runtime_in,
+            runtime_out,
+            std::future::pending(),
+        ));
+        let mut wire = Wire { to: Some(to), from: BufReader::new(from), served, asked: 0 };
+        wire.request("initialize", json!({"protocolVersion": "2025-06-18"})).await;
+        wire.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
+        wire
+    }
+
+    async fn send(&mut self, message: Value) {
+        let to = self.to.as_mut().unwrap();
+        to.write_all(format!("{message}\n").as_bytes()).await.unwrap();
+        to.flush().await.unwrap();
+    }
+
+    /// A request's answer; what comes out meanwhile (progress) is passed over.
+    async fn request(&mut self, method: &str, params: Value) -> Value {
+        self.asked += 1;
+        let id = self.asked;
+        self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await;
+        loop {
+            let mut line = String::new();
+            let read =
+                tokio::time::timeout(std::time::Duration::from_secs(30), self.from.read_line(&mut line)).await.expect("an answer in time");
+            assert!(read.unwrap() > 0, "the runtime stopped before answering {method}");
+            let message: Value = serde_json::from_str(&line).unwrap();
+            if message["id"] == id {
+                return message;
+            }
+        }
+    }
+
+    /// A tool call as Hermes's host makes it (with its tool call's id, when it has one): the result's structured
+    /// content, and whether it's an error.
+    async fn call(&mut self, name: &str, mut arguments: Value, tool_call_id: Option<&str>) -> (Value, bool) {
+        if let Some(id) = tool_call_id {
+            arguments["_host"] = json!({"tool_call_id": id});
+        }
+        let answer = self.request("tools/call", json!({"name": name, "arguments": arguments})).await;
+        (answer["result"]["structuredContent"].clone(), answer["result"]["isError"] == true)
+    }
+
+    async fn end(mut self) {
+        drop(self.to.take());
+        let mut rest = String::new();
+        while self.from.read_line(&mut rest).await.unwrap_or(0) > 0 {}
+        tokio::time::timeout(std::time::Duration::from_secs(30), self.served).await.unwrap().unwrap().unwrap();
+    }
+}
+
+/// A connected runtime's first look: the project's key and epoch, and a track's ref and label.
+async fn looked(wire: &mut Wire) -> (Value, u64, String, String) {
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let track = seen["refs"].as_array().unwrap().iter().find(|candidate| candidate["kind"] == "track").unwrap().clone();
+    let reference = track["reference"]["node"]["ref"].as_str().unwrap().to_string();
+    (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap(), reference, track["label"].as_str().unwrap().to_string())
+}
+
+/// A plan as the host sends it: the epoch as its digits (CC-2).
+fn plan(key: &Value, epoch: u64, steps: Value) -> Value {
+    json!({"title": "Bring the track down", "steps": steps, "expected_project_key": key, "expected_epoch": epoch.to_string()})
+}
+
+case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, reference, label) = looked(&mut wire).await;
+    let volumes = || (0..4).map(|n| script.volume(n)).collect::<Vec<f64>>();
+    let before = volumes();
+    let down = json!([{"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6}}]);
+
+    // The approval's preview (CC-3), sent with the call's id as the hook does: it reads, and records nothing.
+    let mut asked = plan(&key, epoch, down.clone());
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("change", asked, Some("tc-1")).await;
+    assert_eq!((preview["state"].clone(), preview["steps"][0]["family"].clone()), (json!("preview"), json!("mixer")), "{preview}");
+    let text = preview["steps"][0]["text"].as_str().unwrap();
+    assert!(text.contains(&label) && text.contains("-6"), "{text}");
+    let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
+    let sent = lab.methods_sent();
+    assert!(sent.iter().all(|method| reads.contains(&method.as_str())), "a preview sends REAPER nothing but reads: {sent:?}");
+    assert_eq!(volumes(), before);
+
+    // What a plugin's plan may not hold is refused before anything runs: code, a file by path, a wait.
+    for (n, steps) in [
+        json!([{"tool": "run_lua", "input": {"code": "x = 1"}}]),
+        json!([{"tool": "take_add", "input": {"ref": reference, "path": "/Users/me/Samples/kick.wav"}}]),
+        json!([{"tool": "wait", "input": {"seconds": 1800}}]),
+        // A file goes in only through the import step: not in this runtime yet, whatever the field holds.
+        json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]),
+        json!([{"tool": "item_import", "input": {"ref": reference, "path": {"folders": ["/Users/me/Private"], "random": true}}}]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
+        assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
+    }
+
+    // Once per host call: it runs, and the same call asked again gets that answer without running again.
+    let (first, _) = wire.call("change", plan(&key, epoch, down.clone()), Some("tc-1")).await;
+    assert_eq!(first["state"], "applied", "{first}");
+    assert_eq!((first["history_ids"].as_array().unwrap().len(), first["epoch"].as_u64()), (1, Some(epoch + 1)), "refs move on with it");
+    assert!(volumes().contains(&-6.0), "{:?}", volumes());
+    let steps_made = script.undo_history().len();
+    let (again, _) = wire.call("change", plan(&key, epoch, down.clone()), Some("tc-1")).await;
+    assert_eq!(again, first);
+    assert_eq!(script.undo_history().len(), steps_made, "not run again");
+    let other = plan(&key, epoch + 1, json!([{"tool": "track_volume", "input": {"ref": reference, "volumeDb": -3}}]));
+    let (duplicate, error) = wire.call("change", other, Some("tc-1")).await;
+    assert_eq!((error, duplicate["error"]["code"].clone()), (true, json!("duplicate")));
+    // The plan made on the old epoch, asked by another call: stale, and nothing runs.
+    let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
+    assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")));
+
+    // HISTORY's row: its family, its project, and the host call that made it with what it asked (C5-3).
+    let (history, _) = wire.call("history", json!({}), None).await;
+    let row = &history["items"][0];
+    assert_eq!(
+        (row["id"].clone(), row["family"].clone(), row["project_key"].clone()),
+        (first["history_ids"][0].clone(), json!("mixer"), key.clone())
+    );
+    assert_eq!(row["tool_call_id"], "tc-1");
+    assert_eq!(row["digest"].as_str().map(str::len), Some(64));
+
+    // Undo, previewed then made once.
+    let id = first["history_ids"][0].clone();
+    let (preview, _) = wire.call("undo", json!({"history_id": id, "preview": true}), Some("tc-3")).await;
+    assert_eq!((preview["state"].clone(), preview["undo_available"].clone()), (json!("preview"), json!(true)), "{preview}");
+    let (undone, _) = wire.call("undo", json!({"history_id": id}), Some("tc-3")).await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(volumes(), before);
+    let kept = lab.state("history.json");
+    assert_eq!((kept["items"][0]["state"].clone(), kept["items"][0]["undo_available"].clone()), (json!("undone"), json!(false)));
+    let (twice, _) = wire.call("undo", json!({"history_id": id}), Some("tc-4")).await;
+    assert_eq!(twice["state"], "refused", "{twice}");
+    wire.end().await;
+});
+
+case!(serve_runs_nothing_of_a_plan_made_before_reaper_switched_project_tabs, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, reference, _) = looked(&mut wire).await;
+    let before: Vec<f64> = (0..4).map(|n| script.volume(n)).collect();
+    // The producer switches tabs while the approval waits: refs from the look before no longer hold.
+    script.switch_tab();
+    let down = json!([{"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6}}]);
+    let (changed, _) = wire.call("change", plan(&key, epoch, down), Some("tc-1")).await;
+    assert_eq!(changed["state"], "refused", "{changed}");
+    assert_eq!((0..4).map(|n| script.volume(n)).collect::<Vec<f64>>(), before, "nothing changed");
+    assert_eq!(changed["history_ids"], json!([]));
+    wire.end().await;
+});
+
+case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = sim.config(secret, "/lab/REAPER");
+            let answer = config.respond.take().unwrap();
+            // REAPER makes the change, but its answer is lost: whether it happened isn't known.
+            config.respond = Some(Arc::new(move |method, params| {
+                let answered = answer(method, params);
+                if method == "change_apply" {
+                    Some(Err(("uncertain".into(), "REAPER stopped answering".into())))
+                } else {
+                    answered
+                }
+            }));
+            config
+        })),
+    )
+    .await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, reference, _) = looked(&mut wire).await;
+    let down = json!([{"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6}}]);
+    let (changed, error) = wire.call("change", plan(&key, epoch, down.clone()), Some("tc-1")).await;
+    assert_eq!((error, changed["state"].clone(), changed["undo_available"].clone()), (false, json!("unsure"), json!(false)), "{changed}");
+    assert_eq!(changed["epoch"].as_u64(), Some(epoch + 1), "refs from before may not hold");
+    let kept = lab.state("history.json");
+    let audit = kept["items"].as_array().unwrap().iter().find(|row| row["family"] == "unsure").unwrap().clone();
+    assert_eq!((audit["undo_available"].clone(), audit["tool_call_id"].clone()), (json!(false), json!("tc-1")));
+    assert!(changed["history_ids"].as_array().unwrap().contains(&audit["id"]));
+    assert_eq!(lab.state("status.json")["unsure"]["op"], "change");
+    let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
+    assert_eq!(stale["code"], "stale");
+    // The next look sees the project as it is: nothing is unsure any more.
+    wire.call("observe", json!({"scope": "focus"}), None).await;
+    assert_eq!(lab.state("status.json")["unsure"], Value::Null);
+    wire.end().await;
 });

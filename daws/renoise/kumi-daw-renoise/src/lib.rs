@@ -11,6 +11,7 @@ pub mod library;
 mod lines;
 mod listening;
 mod mapping;
+pub mod plugin_steps;
 mod provider;
 pub mod songs;
 mod variations;

@@ -17,6 +17,7 @@ pub static PROVIDER: Own = Own {
     profile: &DawProfile::RENOISE,
     presentation: &crate::PRESENTATION,
     view: &crate::VIEW,
+    plugin_steps: crate::plugin_steps::PLUGIN_STEPS,
     library: &crate::library::LIBRARY,
     site: "renoise.com",
     bridge: "Kumi's tool",

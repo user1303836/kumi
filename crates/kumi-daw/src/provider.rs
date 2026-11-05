@@ -169,6 +169,17 @@ pub trait DawProvider {
     fn presentation(&self) -> &'static ToolPresentation;
     /// How the app reads the DAW's focus and devices.
     fn view(&self) -> &'static ViewPresentation;
+    /// The change steps an agent host's plugin may use in the DAW (Kumi for Hermes, C2's allowlist), with what of their
+    /// input each refuses: none by default, so a plugin changes nothing in a DAW whose crate gives no list.
+    fn plugin_steps(&self) -> &'static [crate::plugin::PluginStep] {
+        &[]
+    }
+    /// Why this input to an allowed step can't run in a plugin's plan all the same: the DAW keeps no undo Kumi can use
+    /// for it (a permanent change). None by default.
+    fn plugin_refuses(&self, tool: &str, input: &serde_json::Value) -> Option<String> {
+        let _ = (tool, input);
+        None
+    }
     /// What the DAW tells the library: its places, its own library, the projects it opened lately, its manual.
     fn library(&self) -> &'static dyn LibrarySources;
     /// Where the DAW is downloaded from, as setup names it.

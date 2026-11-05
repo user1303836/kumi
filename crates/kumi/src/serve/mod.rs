@@ -7,9 +7,13 @@
 //!
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
+pub mod change;
 pub mod connection;
 pub mod ctx;
+pub mod history;
+pub mod inflight;
 pub mod jobs;
+pub mod lease;
 pub mod mcp;
 pub mod registry;
 pub mod snapshots;

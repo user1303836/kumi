@@ -12,9 +12,11 @@ use kumi_agent::core::context::{HostPolicy, IntegrationContext};
 use kumi_agent::core::contracts::{CatchUp, ConnectionState, Integration, Observation, Reference};
 use kumi_agent::core::view::{DawFocus, Transport};
 use kumi_daw::provider::DawSession;
+use kumi_types::contracts::{KernelTool, ToolRole};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -104,6 +106,12 @@ pub struct Link {
     /// The connection's returns when the project was last seen: a return since makes every plan stale.
     returns_seen: Cell<u64>,
     epoch: Cell<u64>,
+    /// The tools the last look offered (the plan's among them).
+    tools: RefCell<Vec<Rc<dyn KernelTool>>>,
+    /// The names the last look gave its refs, for saying what a plan's steps are on.
+    ref_names: RefCell<HashMap<String, String>>,
+    /// A write whose outcome is unsure, until the next look (CC-2's R6): `{at, op, reason, cleanup}`.
+    unsure: RefCell<Option<Value>>,
 }
 
 impl Link {
@@ -116,6 +124,9 @@ impl Link {
             project: RefCell::new(None),
             returns_seen: Cell::new(0),
             epoch: Cell::new(base),
+            tools: RefCell::new(Vec::new()),
+            ref_names: RefCell::new(HashMap::new()),
+            unsure: RefCell::new(None),
         }
     }
 
@@ -125,6 +136,52 @@ impl Link {
 
     pub fn project(&self) -> Option<Project> {
         self.project.borrow().clone()
+    }
+
+    /// The DAW's plan tool, as the last look offered it (`make_changes`).
+    pub fn plan_tool(&self) -> Option<Rc<dyn KernelTool>> {
+        self.tools.borrow().iter().find(|tool| tool.role() == Some(ToolRole::Plan)).cloned()
+    }
+
+    /// The tools the last look offered.
+    pub fn tools(&self) -> Vec<Rc<dyn KernelTool>> {
+        self.tools.borrow().clone()
+    }
+
+    /// The names the last look gave its refs (`refs`' label, with its detail).
+    pub fn ref_names(&self) -> HashMap<String, String> {
+        self.ref_names.borrow().clone()
+    }
+
+    /// The refs a look gave (`observe`'s `refs`), kept for naming what a plan is on.
+    pub fn keep_refs(&self, refs: &[Value]) {
+        let names = refs
+            .iter()
+            .filter_map(|candidate| {
+                let reference = candidate["reference"]["node"]["ref"].as_str()?;
+                let label = candidate["label"].as_str()?;
+                let named = match candidate["detail"].as_str() {
+                    Some(detail) => format!("{label} ({detail})"),
+                    None => label.to_string(),
+                };
+                Some((reference.to_string(), named))
+            })
+            .collect();
+        *self.ref_names.borrow_mut() = names;
+    }
+
+    /// A write ended unsure: said in `status.json` until the next completed `observe` (R6).
+    pub fn note_unsure(&self, op: &str, reason: &str, cleanup: &str) {
+        *self.unsure.borrow_mut() = Some(json!({"at": kumi_common::time::now_ms(), "op": op, "reason": reason, "cleanup": cleanup}));
+    }
+
+    pub fn unsure(&self) -> Option<Value> {
+        self.unsure.borrow().clone()
+    }
+
+    /// An `observe` completed: the model sees the project as it is now, so nothing is unsure any more (R6).
+    pub fn clear_unsure(&self) {
+        *self.unsure.borrow_mut() = None;
     }
 
     /// The project `observation` is about, as the runtime keys it (the integration's key with the DAW's identity for
@@ -143,6 +200,7 @@ impl Link {
         let name = observation.identity.as_ref().map_or_else(|| observation.label.clone(), |identity| identity.name.clone());
         let project = Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms() };
         *self.project.borrow_mut() = Some(project.clone());
+        *self.tools.borrow_mut() = observation.tools.clone();
         project
     }
 
@@ -157,6 +215,17 @@ impl Link {
     /// The write's plan was made on `key` at `epoch`: refused unless that's the project and epoch now, the DAW answers,
     /// and it hasn't gone and come back since the last look.
     pub fn expect(&self, key: &str, epoch: u64) -> Result<Project, OpError> {
+        let project = self.expect_project(key)?;
+        if project.epoch != epoch {
+            let reason = "The project has changed since that plan was made (its refs no longer hold): observe again.";
+            return Err(OpError::Refused { code: "stale", reason: reason.into(), owner: None });
+        }
+        Ok(project)
+    }
+
+    /// A write on `key`'s project that no epoch binds (an undo): refused unless it's the project open now, the DAW
+    /// answers, and it hasn't gone and come back since the last look.
+    pub fn expect_project(&self, key: &str) -> Result<Project, OpError> {
         let connection = self.connection().filter(|connection| connection.answering());
         let (Some(connection), Some(project)) = (connection, self.project()) else {
             return Err(OpError::NotConnected {
@@ -169,10 +238,7 @@ impl Link {
             return stale("The DAW went away and came back since the last look, so its refs may not hold: observe again.");
         }
         if project.key != key {
-            return stale("That plan was made for another project than the one open now: observe again.");
-        }
-        if project.epoch != epoch {
-            return stale("The project has changed since that plan was made (its refs no longer hold): observe again.");
+            return stale("That was made on another project than the one open now: observe again.");
         }
         Ok(project)
     }
@@ -296,6 +362,15 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
                     kept.drain(..older);
                 }
             }
+        })
+    });
+    // Each change Kumi records (made, undone, kept, unsure) becomes or updates a HISTORY row, on the project open now.
+    context.on_change = Some({
+        let ctx = ctx.handle();
+        Rc::new(move |record| {
+            let Some(ctx) = ctx.upgrade() else { return };
+            let key = ctx.link().project().map(|project| project.key).unwrap_or_default();
+            ctx.history().record(&record, &key, ctx.snapshots());
         })
     });
     let session = DawSession {
