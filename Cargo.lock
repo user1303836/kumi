@@ -1375,6 +1375,7 @@ dependencies = [
  "kumi-common",
  "kumi-daw",
  "kumi-daw-ableton",
+ "kumi-daw-lynx",
  "kumi-daw-own",
  "kumi-daw-reaper",
  "kumi-daw-renoise",
@@ -1548,6 +1549,25 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "kumi-daw-lynx"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "kumi-agent",
+ "kumi-common",
+ "kumi-daw",
+ "kumi-library",
+ "kumi-types",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

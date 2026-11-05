@@ -385,3 +385,13 @@ saves the song, instruments and device presets.
   changes made since, together. Kumi's undo still works change by change.
 - FOCUS's Mixer has no meters: Renoise's API has none.
 - A render of a dense song can be refused as busy for a moment; ask again.
+
+## LYNX SHARE (experimental)
+
+- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching `lynx-kumi/1` native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
+- Start LYNX with `LYNX_KUMI_DISCOVERY` set to an absolute discovery-file path. Set `KUMI_LYNX_CONFIG` to the same path, or use `KUMI_HOME/bridges/lynx/connection.json` for both. Discovery is owner-only, and the endpoint listens only on loopback with a private token; no credentials belong in chat.
+- Reads the live project, patterns, devices, parameters and current Playlist arrangement; changes tempo, channel/mixer settings and notes; controls playback and shared native undo/redo.
+- Parameter edits target hosted instruments or mixer effects, use the normalized values returned by the device read, and check each observed `expectedValue` before changing anything. Native instrument synthesis parameters are not exposed. Effects load only from the built-in or scanned-effect catalog.
+- Playlist edits atomically add, update, duplicate or remove clips referencing existing pattern, audio-channel or automation sources. Omitted properties are preserved, and locked tracks are refused. Read paginated clips before editing; other arrangements are listed but are not edited. Existing source routing is preserved; the adapter does not create patterns, auto-route linked tracks or switch arrangements.
+- Every mutation checks the project and revision. Stop playback before device/effect or Playlist edits; recording blocks project edits. Full note replacement also requires the revision and every note property returned by its read. Native undo/redo is shared with the producer's own edits.
+- New tool groups are offered only when the connected native build advertises them. Saving, live audio capture and rendering are not implemented by this adapter.

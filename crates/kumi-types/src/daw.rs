@@ -11,10 +11,11 @@ pub enum DawId {
     Reaper,
     Renoise,
     SoundCraft,
+    Lynx,
 }
 
 impl DawId {
-    pub const ALL: [DawId; 4] = [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft];
+    pub const ALL: [DawId; 5] = [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft, DawId::Lynx];
 
     /// Its profile.
     pub fn profile(self) -> &'static DawProfile {
@@ -23,6 +24,7 @@ impl DawId {
             DawId::Reaper => &DawProfile::REAPER,
             DawId::Renoise => &DawProfile::RENOISE,
             DawId::SoundCraft => &DawProfile::SOUNDCRAFT,
+            DawId::Lynx => &DawProfile::LYNX,
         }
     }
 
@@ -33,6 +35,7 @@ impl DawId {
             DawId::Reaper => "reaper",
             DawId::Renoise => "renoise",
             DawId::SoundCraft => "soundcraft",
+            DawId::Lynx => "lynx",
         }
     }
 
@@ -1156,6 +1159,22 @@ impl DawProfile {
         },
     };
 
+    /// LYNX SHARE's native local control integration. Other features stay unavailable until implemented.
+    pub const LYNX: DawProfile = DawProfile {
+        id: Some(DawId::Lynx),
+        words: DawWords { app: "LYNX SHARE", place: "project", places: "projects", master: "Master", timeline: "Playlist" },
+        caps: Capabilities { stop_transport: true, ..Capabilities::NONE },
+        vocab: PromptVocab {
+            cant_reach: "Start the LYNX control build with the supplied launcher, then run kumi --daw lynx.",
+            voice_project: "LYNX SHARE project",
+            project_parts: "channels, mixer inserts, patterns and Playlist clips",
+            own_undo: "LYNX's own undo history",
+            listen_method: "This adapter does not capture live audio yet.",
+            tutorial_words: "LYNX SHARE: Channel Rack, Piano Roll, Playlist and Mixer",
+            ..Self::UNKNOWN.vocab
+        },
+    };
+
     /// The same DAW with nothing it can do now: its words stay (the producer still calls it by its name).
     pub const fn without_caps(self) -> DawProfile {
         DawProfile { caps: Capabilities::NONE, ..self }
@@ -1405,7 +1424,7 @@ mod tests {
     fn daw_ids_keep_their_names() {
         assert_eq!(
             serde_json::to_string(&DawId::ALL).unwrap(),
-            r#"["ableton","reaper","renoise","soundcraft"]"#,
+            r#"["ableton","reaper","renoise","soundcraft","lynx"]"#,
             "what files and settings keep"
         );
         assert!(DawId::ALL.iter().all(|daw| DawId::parse(daw.as_str()) == Some(*daw)), "and --daw reads back");

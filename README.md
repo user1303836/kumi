@@ -126,3 +126,13 @@ To build Kumi from source, see [DEVELOPMENT.md](DEVELOPMENT.md) and the [develop
 ## License
 
 [MIT](LICENSE.md); the parts from other people's work, and the models Kumi fetches, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ableton Live is a trademark of Ableton AG; Kumi is not affiliated with, associated with, sponsored by or endorsed by Ableton, Cockos (REAPER), Renoise or the makers of the plug-ins it works with; product names only identify compatible software.
+
+## LYNX SHARE (experimental)
+
+- `kumi --daw lynx` connects to [LYNX SHARE](https://github.com/Ka1-S/LYNX-SHARE) builds with the matching `lynx-kumi/1` native-control changes. The native endpoint currently supports macOS and Linux; an ordinary LYNX build without it cannot connect.
+- Reads the live project, patterns, devices, parameters and current Playlist arrangement; changes tempo, channel/mixer settings and notes; controls playback and shared native undo/redo.
+- Parameter edits target hosted instruments or mixer effects, use the normalized values returned by the device read, and check each observed `expectedValue` before changing anything. Native instrument synthesis parameters are not exposed. Effects load only from the built-in or scanned-effect catalog.
+- Playlist edits atomically add, move, resize, duplicate or remove clips using existing sources and preserve routing and omitted properties.
+- New tool groups are offered only when the connected native build advertises them. Saving, live audio capture and rendering are not implemented by this adapter.
+
+See [LYNX setup and limits](docs/en/DAWS.md#lynx-share-experimental).
