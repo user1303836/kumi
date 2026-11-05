@@ -244,7 +244,7 @@ class SetupTool(unittest.TestCase):
             installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
         self.assertTrue(installed["ok"], installed)
         self.assertIsNone(host.runtimes.get(data), "the older runtime is stopped: the next start is the newer one")
-        self.assertFalse(older.client.running)
+        self.assertTrue(support.eventually(lambda: not older.client.running), "its process ended")
         self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
 
     def test_allowing_an_ffmpeg_restarts_the_runtime_with_it(self):
@@ -265,7 +265,7 @@ class SetupTool(unittest.TestCase):
             installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
         self.assertTrue(installed["ok"], installed)
         self.assertIsNone(host.runtimes.get(data), "stopped, so the next start passes --tool ffmpeg")
-        self.assertFalse(running.client.running)
+        self.assertTrue(support.eventually(lambda: not running.client.running), "its process ended")
         self.assertEqual(installed["status"]["compressed_audio"]["state"], "available")
         argv = runtime.serve_argv(host.install(data), data / "state", "ableton")
         self.assertEqual(argv[-2:], ["--tool", f"ffmpeg={setup.os.path.realpath(program)}"],

@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import secrets
 import shutil
@@ -203,7 +204,11 @@ _FFMPEG_FOLDERS = {"darwin": ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local
 _IDENTITY = ("path", "size", "mtime_ns", "ino")
 _WINDOWS_LOCAL = re.compile(r"[A-Za-z]:[\\/]")
 _DRIVE_FIXED = 3  # GetDriveTypeW's local disk: not removable, a network drive, a CD or a RAM disk
-_AUTOMOUNTS = ("/net/", "/network/")  # macOS mounts a server's share there on first touch
+# Where the automounter mounts a server's share on first touch: `/net`, macOS's `/Network`, both again under macOS's
+# firmlinked `/System/Volumes/Data`, and on macOS `/home` (auto_home; Linux's is a plain folder). snapshots.local keeps
+# the same list.
+_AUTOMOUNTS = ("/net/", "/network/", "/system/volumes/data/net/", "/system/volumes/data/network/")
+_AUTO_HOME = ("/home/", "/system/volumes/data/home/")
 
 
 def _local(path: str, windows: bool | None = None) -> bool:
@@ -221,15 +226,17 @@ def _drive_type(root: str) -> int:
     return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(root))
 
 
-def _on_this_computer(path: str, windows: bool | None = None) -> bool:
+def _on_this_computer(path: str, windows: bool | None = None, darwin: bool | None = None) -> bool:
     """Whether `path` can be touched without reaching another computer: `_local()`, then on Windows a fixed drive
-    (never a mapped network drive such as `Z:\\`), elsewhere nothing under an automount folder (`/net`, `/Network`)."""
+    (never a mapped network drive such as `Z:\\`), elsewhere nothing under an automount folder (`_AUTOMOUNTS`)."""
     windows = os.name == "nt" if windows is None else windows
     if not _local(path, windows):
         return False
     if windows:
         return _drive_type(path[0].upper() + ":\\") == _DRIVE_FIXED
-    return not (path + "/").casefold().startswith(_AUTOMOUNTS)
+    folded = (posixpath.normpath(path) + "/").casefold()
+    darwin = sys.platform == "darwin" if darwin is None else darwin
+    return not folded.startswith(_AUTOMOUNTS) and not (darwin and folded.startswith(_AUTO_HOME))
 
 
 def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | None = None) -> list[str]:
@@ -249,9 +256,10 @@ def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | No
 
 def _resolved(path: str) -> str | None:
     """`path` with every link in it followed from the root down, as `realpath` would (a Homebrew link becomes its
-    Cellar file), except that each link's target is read without following it (`readlink`) and must be on this
-    computer before anything under it is touched: a folder linked to a network share is never reached. None if a
-    target isn't, or the links loop."""
+    Cellar file), except that nothing is looked up before it's known to be on this computer: each step on the way (a
+    relative link can climb into `/net`), and each link's target, read without following it (`readlink`). A folder
+    linked to a network share is never reached. None if a step or target isn't, or the links loop. snapshots.follow
+    keeps the same rules (the dashboard loads each file on its own, so neither can import the other)."""
     if not _on_this_computer(path):
         return None
     anchor, *names = Path(path).parts
@@ -264,9 +272,10 @@ def _resolved(path: str) -> str | None:
             resolved = os.path.dirname(resolved)
             continue
         step = os.path.join(resolved, name)
+        if not _on_this_computer(step):  # before its lstat: looking up a network root mounts it
+            return None
         try:  # lstat and readlink: neither follows `step`, and everything above it is already resolved
-            linked = os.path.islink(step) or getattr(os.path, "isjunction", lambda _: False)(step)
-            target = os.readlink(step) if linked else None
+            target = os.readlink(step) if _linked(step) else None
         except (OSError, ValueError):
             return None
         if target is None:
@@ -287,6 +296,17 @@ def _resolved(path: str) -> str | None:
         return None
     real = os.path.realpath(resolved)  # no links are left: this only spells it canonically (Windows: 8.3 names, case)
     return real if _on_this_computer(real) else None
+
+
+def _linked(path: str) -> bool:
+    """Whether `path` is a link, or on Windows a junction (a mount-point reparse point, which `os.path.isjunction` sees
+    only from Python 3.12), from one `lstat` that follows neither. A path that isn't there is no link."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(info.st_mode) or (getattr(info, "st_reparse_tag", 0) != 0
+                                          and info.st_reparse_tag == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", -1))
 
 
 def _identity(path: str) -> dict | None:
