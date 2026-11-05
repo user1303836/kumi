@@ -34,7 +34,7 @@ pub fn schema() -> Value {
         "type": "object", "additionalProperties": false, "required": ["action"],
         "properties": {
             "action": {"enum": ["quote", "create", "job"]},
-            "kind": {"enum": ["sfx", "audio_to_midi"]},
+            "kind": {"type": "string", "enum": super::generate_ledger::POLICY_KEYS},
             "prompt": {"type": "string", "minLength": 1, "maxLength": 500},
             "seconds": {"type": "number", "exclusiveMinimum": 0, "default": 5},
             "source": super::change::source_schema(),
