@@ -15,6 +15,11 @@ pub(super) struct State {
     position: Cell<f64>,
     seek_delay_reads: Cell<u8>,
     pending_position: Cell<Option<(f64, u8)>>,
+    ears_position: Cell<f64>,
+    ears_seek_delay_reads: Cell<u8>,
+    pending_ears_position: Cell<Option<(f64, u8)>>,
+    false_end: Cell<bool>,
+    captured_frames: Cell<usize>,
     looped: Cell<bool>,
     tempo: Cell<f64>,
     recording: Cell<bool>,
@@ -24,6 +29,11 @@ pub(super) struct State {
     ignore_stop: Cell<bool>,
     selected_track: Cell<usize>,
     selected_device: RefCell<Value>,
+    selection_extra: RefCell<JsonObject>,
+    selection_fences: RefCell<std::collections::HashMap<String, Value>>,
+    after_delete: RefCell<Option<Box<dyn Fn(&State)>>>,
+    applies: Cell<usize>,
+    selection_writes: Cell<usize>,
     missing: Cell<Option<(&'static str, &'static str)>>,
     switch_set: Cell<bool>,
     cancel: RefCell<Option<Signal>>,
@@ -46,6 +56,11 @@ impl State {
             position: Cell::new(12.),
             seek_delay_reads: Cell::new(0),
             pending_position: Cell::new(None),
+            ears_position: Cell::new(12.),
+            ears_seek_delay_reads: Cell::new(0),
+            pending_ears_position: Cell::new(None),
+            false_end: Cell::new(false),
+            captured_frames: Cell::new(0),
             looped: Cell::new(true),
             epoch: Cell::new(7.),
             transactions: RefCell::new(std::collections::HashMap::new()),
@@ -57,6 +72,17 @@ impl State {
             ignore_stop: Cell::new(false),
             selected_track: Cell::new(0),
             selected_device: RefCell::new(json!("7:device:0:d0")),
+            selection_extra: RefCell::new(
+                json!({"sceneRef":null,"slotRef":null,"detailClipRef":null,
+                "parameterRef":null,"chainRef":null})
+                .as_object()
+                .unwrap()
+                .clone(),
+            ),
+            selection_fences: RefCell::new(std::collections::HashMap::new()),
+            after_delete: RefCell::new(None),
+            applies: Cell::new(0),
+            selection_writes: Cell::new(0),
             missing: Cell::new(None),
             switch_set: Cell::new(false),
             cancel: RefCell::new(None),
@@ -70,7 +96,7 @@ impl State {
             armed_locations: RefCell::new(Vec::new()),
             tap_version: Cell::new(EARS_VERSION as f64),
             tap_available: Cell::new(true),
-            raw_frames: Cell::new(16_000),
+            raw_frames: Cell::new(usize::MAX),
         })
     }
     pub(super) fn epoch(&self) -> f64 {
@@ -96,6 +122,27 @@ impl State {
                 let (parent, key) = pointer.rsplit_once('/').unwrap();
                 row.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(key);
             }
+        }
+    }
+    fn selection(&self) -> Value {
+        let mut selection = Value::Object(self.selection_extra.borrow().clone());
+        selection["trackRef"] = json!(format!("7:track:{}", self.selected_track.get()));
+        selection["deviceRef"] = self.selected_device.borrow().clone();
+        self.omit("selection_snapshot", &mut selection);
+        selection
+    }
+    pub(super) fn selection_preview(&self, transaction: &str, args: &JsonObject) -> Value {
+        let selection = self.selection();
+        let prior: JsonObject = args.keys().filter_map(|key| selection.get(key).map(|value| (key.clone(), value.clone()))).collect();
+        self.selection_fences.borrow_mut().insert(transaction.to_owned(), selection);
+        Value::Object(prior)
+    }
+    pub(super) fn deleted(&self, track: usize, at: usize, remaining: usize) {
+        self.selected_track.set(track);
+        *self.selected_device.borrow_mut() =
+            if remaining == 0 { Value::Null } else { json!(format!("7:device:{track}:d{}", at.saturating_sub(1).min(remaining - 1))) };
+        if let Some(after) = self.after_delete.borrow_mut().take() {
+            after(self);
         }
     }
     pub(super) fn discover(&self, set: &Set, args: &JsonObject) -> Option<Vec<Value>> {
@@ -162,6 +209,7 @@ impl State {
         Some(rows)
     }
     pub(super) fn apply(&self, set: &Set, tool: &str, args: &JsonObject, transaction: &str) -> Option<Value> {
+        self.applies.set(self.applies.get() + 1);
         let mut answer = json!({"transactionId":transaction,"state":"applied"});
         match tool {
             "live_transport" => {
@@ -172,6 +220,7 @@ impl State {
                         } else {
                             self.pending_position.set(Some((position, self.seek_delay_reads.get())));
                         }
+                        self.pending_ears_position.set(Some((position, self.ears_seek_delay_reads.get())));
                     }
                 }
                 if let Some(looped) = args.get("loopEnabled").and_then(Value::as_bool) {
@@ -192,6 +241,10 @@ impl State {
                 other => panic!("a restricted capture cannot perform {other:?}"),
             },
             "live_selection" => {
+                if self.selection_fences.borrow_mut().remove(transaction).as_ref() != Some(&self.selection()) {
+                    return Some(json!({"transactionId":transaction,"state":"refused","reason":"selection changed"}));
+                }
+                self.selection_writes.set(self.selection_writes.get() + 1);
                 if let Some(track) = args.get("trackRef").and_then(Value::as_str) {
                     self.selected_track.set(places(track)[0]);
                 }
@@ -207,8 +260,8 @@ impl State {
                 let mut tracks = set.tracks.borrow_mut();
                 tracks[at].devices.push(device);
                 answer["deviceRef"] = json!(format!("7:device:{at}:d{}", tracks[at].devices.len() - 1));
-                self.selected_track.set(at);
-                *self.selected_device.borrow_mut() = answer["deviceRef"].clone();
+                // The real browser loader restores the original selection. Exact device
+                // deletion, not loading, later selects the prior sibling on this track.
             }
             _ => return None,
         }
@@ -258,14 +311,16 @@ impl EarsLink for Ears {
         assert!(!quiet, "a listen cannot mute the producer's track");
         self.state.arms.borrow_mut().push(seconds);
         self.state.armed_locations.borrow_mut().push(tap.path.clone());
-        self.state.armed_from.set(self.state.position.get());
-        Ok(Armed { beats: self.state.position.get(), running: self.set.playing.get(), sample_rate: 8000. })
+        self.state.armed_from.set(self.state.ears_position.get());
+        self.state.captured_frames.set(0);
+        Ok(Armed { beats: self.state.ears_position.get(), running: self.set.playing.get(), sample_rate: 8000. })
     }
     async fn write(&self, _: &Tap, file: &str, _: Option<Signal>) -> Result<Written, EarsError> {
         self.state.written.set(self.state.written.get() + 1);
         let mut raw = std::fs::File::create(file).unwrap();
-        // Four channels, 8 kHz: a known two-second tone, sample clock and actual beat positions.
-        for frame in 0..self.state.raw_frames.get() {
+        // The captured duration comes from playback, never from a successful tool reply.
+        // raw_frames can truncate it to model a short/incomplete device capture.
+        for frame in 0..self.state.raw_frames.get().min(self.state.captured_frames.get()) {
             let beat = self.state.armed_from.get() + frame as f64 / 4000.;
             let sample = (frame as f64 * std::f64::consts::TAU * 200. / 8000.).sin() as f32 * 0.2;
             for value in [sample, sample, 1. + beat.fract() as f32, beat as f32] {
@@ -279,16 +334,32 @@ impl EarsLink for Ears {
         Some(tap.clone())
     }
     async fn transport(&self, _: &Tap, _: Option<Signal>) -> Result<Option<Transport>, EarsError> {
-        if let Some(cancel) = self.state.cancel.borrow_mut().take() {
-            cancel.cancel();
+        if !self.set.playing.get() {
+            if let Some((position, left)) = self.state.pending_ears_position.get() {
+                if left == 0 {
+                    self.state.ears_position.set(position);
+                    self.state.pending_ears_position.set(None);
+                } else {
+                    self.state.pending_ears_position.set(Some((position, left - 1)));
+                }
+            }
+        } else {
+            let seconds = 60. / self.state.tempo.get();
+            tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
+            self.state.captured_frames.set(self.state.captured_frames.get() + (seconds * 8000.).round() as usize);
+            if let Some(cancel) = self.state.cancel.borrow_mut().take() {
+                cancel.cancel();
+            }
+            if self.state.switch_set.get() {
+                *self.state.identity.borrow_mut() = "another-song".into();
+                self.state.position.set(77.);
+            } else if self.state.advancing.get() {
+                self.state.position.set(self.state.position.get() + 1.);
+            }
+            self.state.ears_position.set(self.state.position.get());
         }
-        if self.state.switch_set.get() {
-            *self.state.identity.borrow_mut() = "another-song".into();
-            self.state.position.set(77.);
-        } else if self.state.advancing.get() {
-            self.state.position.set(self.state.position.get() + 4.);
-        }
-        Ok(Some(Transport { beats: self.state.position.get(), running: self.set.playing.get() }))
+        let beats = self.state.ears_position.get() + if self.set.playing.get() && self.state.false_end.get() { 100. } else { 0. };
+        Ok(Some(Transport { beats, running: self.set.playing.get() }))
     }
     async fn close(&self) {
         self.state.closed.set(self.state.closed.get() + 1);
@@ -351,7 +422,7 @@ fn preview_reads_only_and_names_a_bounded_ears_capture() {
         assert_eq!(preview.method, HearMethod::Ears);
         assert!((1..=360).contains(&preview.deadline_seconds));
         assert_eq!(state.opened.get(), 0);
-        assert_eq!(live.set.next.get(), 0, "no mutation preview or apply during a listen preview");
+        assert_eq!(state.applies.get(), 0, "a listen preview changes nothing in Live");
         restored(&live, &state);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
@@ -410,7 +481,7 @@ fn back_to_arrangement_playback_and_recording_refuse_before_mutation() {
                 matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Refused { .. }))),
                 "{case}"
             );
-            assert_eq!(live.set.next.get(), 0, "{case}");
+            assert_eq!(state.applies.get(), 0, "{case}");
             assert_eq!(state.opened.get(), 0, "{case}");
         }
     });
@@ -443,7 +514,7 @@ fn windows_are_explicit_finite_single_source_and_at_most_sixty_seconds() {
         invalid.mix = None;
         invalid.tracks[0] = "Bass".into();
         assert!(live.rendering.preview_hear(&invalid, Signal::new()).await.is_err());
-        assert_eq!(live.set.next.get(), 0);
+        assert_eq!(state.applies.get(), 0);
         assert_eq!(state.opened.get(), 0);
     });
 }
@@ -550,7 +621,7 @@ fn a_changed_set_identity_at_the_observed_epoch_is_refused_before_preview_or_cap
         ));
         assert_eq!(state.opened.get(), 0);
         assert_eq!(state.starts.get(), 0);
-        assert_eq!(live.set.next.get(), 0, "no native mutation was even previewed");
+        assert_eq!(state.applies.get(), 0);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
 }
@@ -629,7 +700,7 @@ fn a_partial_observation_cannot_replace_the_mix_requests_retained_epoch() {
             Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))
         ));
         assert_eq!(state.opened.get(), 0);
-        assert_eq!(live.set.next.get(), 0);
+        assert_eq!(state.applies.get(), 0);
     });
 }
 
@@ -686,7 +757,7 @@ fn a_slower_tempo_after_approval_is_stale_before_any_device_or_transport_change(
             ));
             assert_eq!(state.starts.get(), 0);
             assert_eq!(state.opened.get(), 0);
-            assert_eq!(live.set.next.get(), 0);
+            assert_eq!(state.applies.get(), 0);
             assert_eq!(state.tempo.get(), 60., "the producer's tempo change is preserved");
             restored(&live, &state);
         }
@@ -709,7 +780,7 @@ fn a_capture_requires_approval_with_room_for_its_native_cleanup() {
         ));
         assert_eq!(state.opened.get(), 0);
         assert_eq!(state.starts.get(), 0);
-        assert_eq!(live.set.next.get(), 0);
+        assert_eq!(state.applies.get(), 0);
         restored(&live, &state);
     });
 }
@@ -728,7 +799,7 @@ fn missing_preinstalled_ears_is_typed_and_never_loads_or_writes_a_device() {
         }
         assert_eq!(live.set.asked_for("live_browser_inspect"), 2, "exercise the actual preinstalled-item lookup");
         assert_eq!(state.opened.get(), 0);
-        assert_eq!(live.set.next.get(), 0);
+        assert_eq!(state.applies.get(), 0);
         for call in live.set.asked.borrow().iter() {
             let name = call["name"].as_str().unwrap();
             assert!(
@@ -764,7 +835,7 @@ fn an_unreadable_preflight_refuses_without_claiming_uncertain_restoration() {
                 assert!(!reason.contains("/private/"));
             }
             assert_eq!(state.opened.get(), 0);
-            assert_eq!(live.set.next.get(), 0);
+            assert_eq!(state.applies.get(), 0);
             restored(&live, &state);
             assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
         }
@@ -789,12 +860,8 @@ fn an_acknowledged_stop_that_leaves_live_playing_is_unsure_and_discards_audio() 
 fn a_changed_selected_device_after_cleanup_is_unsure_and_discards_audio() {
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
-        let s = state.clone();
-        *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
-            if name == "live_undo" {
-                *s.selected_device.borrow_mut() = json!("7:device:1:d0");
-            }
-            Ok(())
+        *state.after_delete.borrow_mut() = Some(Box::new(|state| {
+            *state.selected_device.borrow_mut() = json!("7:device:1:d0");
         }));
         assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert_eq!(*state.selected_device.borrow(), "7:device:1:d0", "do not overwrite the producer's selection");
@@ -811,8 +878,13 @@ fn every_required_state_field_must_be_read_before_and_after_capture() {
         for missing in [
             ("set", "/objectIdentity"),
             ("set", "/tempo"),
-            ("selection", "/selectedTrackRef"),
-            ("selection", "/selectedDeviceRef"),
+            ("selection_snapshot", "/trackRef"),
+            ("selection_snapshot", "/deviceRef"),
+            ("selection_snapshot", "/sceneRef"),
+            ("selection_snapshot", "/slotRef"),
+            ("selection_snapshot", "/detailClipRef"),
+            ("selection_snapshot", "/parameterRef"),
+            ("selection_snapshot", "/chainRef"),
             ("track", "/objectIdentity"),
             ("track", "/armed"),
             ("track", "/monitoringState"),
@@ -855,7 +927,7 @@ fn every_required_state_field_must_be_read_before_and_after_capture() {
                 if before {
                     assert!(matches!(result, Err(RuntimeError::Hear(HearFailure::Refused { .. }))), "{missing:?}: {result:?}");
                     assert_eq!(state.opened.get(), 0);
-                    assert_eq!(live.set.next.get(), 0);
+                    assert_eq!(state.applies.get(), 0);
                 } else {
                     assert!(matches!(result, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{missing:?}: {result:?}");
                     assert_eq!(state.written.get(), 1);
@@ -898,7 +970,7 @@ fn deferred_live_seek_is_confirmed_before_ears_arms_and_playback_starts() {
 }
 
 #[test]
-fn loading_ears_on_another_track_restores_the_original_selection() {
+fn deleting_ears_on_another_track_restores_the_original_selection() {
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
         state.selected_track.set(1);
@@ -944,11 +1016,139 @@ fn native_and_observed_track_refs_name_the_same_track_but_old_epochs_refuse() {
         assert_eq!(takes[0].label, "Bass");
         restored(&live, &state);
         request.tracks[0] = "8:track:0".into();
-        let mutations = live.set.next.get();
+        let mutations = state.applies.get();
         assert!(matches!(
             live.rendering.preview_hear(&request, Signal::new()).await,
             Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))
         ));
-        assert_eq!(live.set.next.get(), mutations);
+        assert_eq!(state.applies.get(), mutations);
+    });
+}
+
+#[test]
+fn ears_must_read_back_the_stopped_seek_before_arming() {
+    on_a_paused_clock(async {
+        let (live, state, mut request) = bounded(true).await;
+        request.from_beat = Some(0.);
+        state.ears_seek_delay_reads.set(3);
+        let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
+        assert!((takes[0].seconds.unwrap() - 2.).abs() < 0.001);
+        assert_eq!(state.armed_from.get(), 0.);
+        assert_eq!(state.starts.get(), 1);
+        restored(&live, &state);
+    });
+}
+
+#[test]
+fn an_ears_clock_that_never_confirms_the_seek_is_never_armed_or_played() {
+    on_a_paused_clock(async {
+        let (live, state, mut request) = bounded(true).await;
+        request.from_beat = Some(0.);
+        state.ears_seek_delay_reads.set(u8::MAX);
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", .. }))
+        ));
+        assert!(state.arms.borrow().is_empty());
+        assert_eq!(state.starts.get(), 0);
+        assert_eq!(state.written.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn an_apparent_ears_end_before_the_native_end_discards_the_capture() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.false_end.set(true);
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", .. }))
+        ));
+        assert_eq!(state.starts.get(), 1);
+        assert_eq!(state.written.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn a_selection_field_unrelated_to_tap_deletion_is_not_overwritten() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.selected_track.set(1);
+        *state.selected_device.borrow_mut() = json!("7:device:1:d0");
+        *state.after_delete.borrow_mut() = Some(Box::new(|state| {
+            state.selection_extra.borrow_mut()["sceneRef"] = json!("7:scene:1");
+        }));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert_eq!(state.selection_extra.borrow()["sceneRef"], "7:scene:1");
+        assert_eq!(state.selection_writes.get(), 0);
+        assert_eq!(state.selected_track.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn a_producer_change_after_the_restore_preview_is_refused_by_the_native_fence() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.selected_track.set(1);
+        *state.selected_device.borrow_mut() = json!("7:device:1:d0");
+        let s = state.clone();
+        *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
+            if name == "live_selection_apply" {
+                s.selection_extra.borrow_mut()["sceneRef"] = json!("7:scene:1");
+            }
+            Ok(())
+        }));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert_eq!(state.selection_extra.borrow()["sceneRef"], "7:scene:1");
+        assert_eq!(state.selection_writes.get(), 0);
+        assert_eq!(state.selected_track.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn cancellation_cannot_cancel_the_cleanup_selection_restore() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.selected_track.set(1);
+        *state.selected_device.borrow_mut() = json!("7:device:1:d0");
+        let cancel = Signal::new();
+        *state.cancel.borrow_mut() = Some(cancel.clone());
+        assert!(matches!(live.rendering.hear_in_set(&request, cancel).await, Err(RuntimeError::Aborted)));
+        assert_eq!(state.selected_track.get(), 1);
+        assert_eq!(*state.selected_device.borrow(), "7:device:1:d0");
+        assert_eq!(state.selection_writes.get(), 1);
+        assert_eq!(state.written.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn a_changed_selection_at_restore_preview_is_not_mistaken_for_our_delete() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.selected_track.set(1);
+        *state.selected_device.borrow_mut() = json!("7:device:1:d0");
+        let s = state.clone();
+        *live.set.on_call.borrow_mut() = Some(Box::new(move |name, args| {
+            if name == "live_selection_preview" && args.get("trackRef").is_some_and(Value::is_string) {
+                s.selection_extra.borrow_mut()["sceneRef"] = json!("7:scene:1");
+            }
+            Ok(())
+        }));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert_eq!(state.selection_extra.borrow()["sceneRef"], "7:scene:1");
+        assert_eq!(state.selection_writes.get(), 0);
+        assert_eq!(state.selected_track.get(), 0);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
 }

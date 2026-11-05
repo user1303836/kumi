@@ -392,9 +392,14 @@ impl Set {
             None => vec![],
         };
         let epoch = self.bounded.borrow().as_ref().map_or(7., |state| state.prepared(&transaction));
-        Ok(
-            json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}),
-        )
+        let mut answer = json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply",
+            "prior":{"tracks":prior,"scenes":[]},"proposed":proposed});
+        if tool == "live_selection" {
+            if let Some(state) = self.bounded.borrow().as_ref() {
+                answer["prior"] = state.selection_preview(&transaction, args);
+            }
+        }
+        Ok(answer)
     }
     fn apply(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]).to_owned();
@@ -504,8 +509,13 @@ impl Set {
                 }
             }
             Some(Undo::RemoveDevice(identity)) => {
-                for track in tracks.iter_mut() {
-                    track.devices.retain(|device| device.identity != identity);
+                for (at, track) in tracks.iter_mut().enumerate() {
+                    if let Some(index) = track.devices.iter().position(|device| device.identity == identity) {
+                        track.devices.remove(index);
+                        if let Some(state) = self.bounded.borrow().as_ref() {
+                            state.deleted(at, index, track.devices.len());
+                        }
+                    }
                 }
             }
             None => {}

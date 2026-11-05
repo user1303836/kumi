@@ -16,6 +16,13 @@ use tokio::time::Instant;
 const MAX_AUDIO_SECONDS: f64 = 65.0;
 const MAX_WAV_BYTES: u64 = 50 * 1024 * 1024;
 const CALL_DEADLINE_SECONDS: u64 = 300;
+const SELECTION_FIELDS: [&str; 7] = ["trackRef", "sceneRef", "slotRef", "detailClipRef", "deviceRef", "parameterRef", "chainRef"];
+
+fn selection_after_delete_matches(before: &Value, neighbor: &Value, current: &Value) -> bool {
+    SELECTION_FIELDS
+        .iter()
+        .all(|field| &current[*field] == if matches!(*field, "trackRef" | "deviceRef") { &neighbor[*field] } else { &before[*field] })
+}
 
 #[derive(Debug, PartialEq)]
 struct CaptureState {
@@ -311,54 +318,76 @@ impl LiveRenderer {
         }
     }
 
-    async fn capture_selection(&self, signal: Signal) -> Result<Value, RuntimeError> {
-        let selection = only(self.rows("selection", json!({"fields":["selectedTrackRef","selectedDeviceRef"]}), signal).await?)?;
-        for key in ["selectedTrackRef", "selectedDeviceRef"] {
-            if !selection.contains_key(key) {
-                return Err(unreadable());
+    async fn capture_selection(&self, epoch: f64, signal: Signal) -> Result<Value, RuntimeError> {
+        // Discovery exposes only part of selection. A never-applied, null-valued
+        // preview reads the native fence's seven fields without reading the whole Set.
+        let input = SELECTION_FIELDS.into_iter().map(|field| (field.to_owned(), Value::Null)).collect();
+        let answer = self.connection().call("live_selection_preview", input, signal).await?;
+        if answer.is_error == Some(true) {
+            return Err(unreadable());
+        }
+        let mut preview = payload(&answer)?;
+        if preview.get("epoch").and_then(Value::as_f64) != Some(epoch) {
+            return Err(refused("stale", "The selection snapshot belongs to another Set epoch."));
+        }
+        let selection = preview.remove("prior").ok_or_else(unreadable)?;
+        let fields = selection.as_object().ok_or_else(unreadable)?;
+        if fields.len() != SELECTION_FIELDS.len()
+            || SELECTION_FIELDS.iter().any(|field| {
+                !fields.get(*field).is_some_and(|value| value.is_null() || value.as_str().is_some_and(|text| !text.is_empty()))
+            })
+            || !fields["trackRef"].is_string()
+        {
+            return Err(unreadable());
+        }
+        Ok(selection)
+    }
+
+    async fn capture_selection_restore(&self, ready: &Ready, signal: Signal) -> Result<(Value, Value), RuntimeError> {
+        self.capture_set_at(ready.state.epoch, &ready.state.identity, signal.clone()).await?;
+        let devices = self.rows("device", json!({"parent":ready.target,"fields":["objectIdentity"]}), signal.clone()).await?;
+        // Browser load appends exactly one top-level device. Its preceding root device,
+        // not a rack's last descendant, is the only selection its deletion may explain.
+        if devices.len() != ready.state.devices.len() + 1
+            || devices.iter().zip(&ready.state.devices).any(|(device, prior)| object_identity(device) != *prior)
+        {
+            return Err(unsure());
+        }
+        let neighbor = {
+            let references = self.connection().references.borrow();
+            let parent = references.short.get(&ready.target).ok_or_else(unreadable)?;
+            let tap = devices.last().ok_or_else(unreadable)?;
+            if tap.get("parentRef").and_then(Value::as_str) != Some(parent.as_str()) || ready.state.devices.contains(&object_identity(tap))
+            {
+                return Err(unsure());
             }
-        }
-        let selected = object(self.connection().references.borrow().lengthen(&Value::Object(selection)));
-        Ok(json!({"track":selected.get("selectedTrackRef"),"device":selected.get("selectedDeviceRef")}))
+            let previous = devices[..devices.len() - 1]
+                .iter()
+                .rev()
+                .find(|device| device.get("parentRef").and_then(Value::as_str) == Some(parent.as_str()));
+            references.lengthen(&json!({"trackRef":parent,"deviceRef":previous.and_then(|device| device.get("ref"))}))
+        };
+        let before = self.capture_selection(ready.state.epoch, signal).await?;
+        Ok((before, neighbor))
     }
 
-    /// Only the selection of the one device this call added is ours to put back.
-    async fn capture_tap_selection(&self, ready: &Ready, signal: Signal) -> Result<Option<Value>, RuntimeError> {
+    async fn restore_capture_selection(&self, ready: &Ready, before: &Value, neighbor: &Value, signal: Signal) -> Result<(), RuntimeError> {
         self.capture_set_at(ready.state.epoch, &ready.state.identity, signal.clone()).await?;
-        let selected = self.capture_selection(signal.clone()).await?;
-        if selected == ready.state.selection {
-            return Ok(None);
-        }
-        if selected["track"].as_str() != Some(ready.target.as_str()) {
-            return Err(unsure());
-        }
-        let devices = self.rows("device", json!({"parent":ready.target,"fields":["objectIdentity"]}), signal).await?;
-        let mut added = devices.iter().filter(|device| !ready.state.devices.contains(&object_identity(device)));
-        let device = added.next().filter(|_| added.next().is_none()).ok_or_else(unsure)?;
-        let reference = device.get("ref").and_then(Value::as_str).ok_or_else(unreadable)?;
-        let native = self.connection().references.borrow().lengthen(&json!({"deviceRef":reference}));
-        if selected["device"] != native["deviceRef"] {
-            return Err(unsure());
-        }
-        Ok(Some(selected))
-    }
-
-    async fn restore_capture_selection(&self, ready: &Ready, placed: &Value, signal: Signal) -> Result<(), RuntimeError> {
-        self.capture_set_at(ready.state.epoch, &ready.state.identity, signal.clone()).await?;
-        let selected = self.capture_selection(signal.clone()).await?;
-        if selected == ready.state.selection {
+        let selected = self.capture_selection(ready.state.epoch, signal.clone()).await?;
+        if &selected == before {
             return Ok(());
         }
-        if &selected != placed {
-            return Err(unsure()); // The producer selected something else: leave it alone.
+        // The revision is a hash of all seven fields, not an event counter. Derive
+        // the allowed post-delete content from the pre-delete snapshot, changing only
+        // our tap's predicted track/device selection. Any other difference refuses.
+        // An ABA back to identical content is indistinguishable; no different current
+        // choice is overwritten. The native preview/apply fence closes the final gap.
+        if !selection_after_delete_matches(before, neighbor, &selected) {
+            return Err(unsure());
         }
         let prepared = self
             .connection()
-            .call(
-                "live_selection_preview",
-                object(json!({"trackRef":ready.state.selection["track"],"deviceRef":ready.state.selection["device"]})),
-                signal.clone(),
-            )
+            .call("live_selection_preview", object(json!({"trackRef":before["trackRef"],"deviceRef":before["deviceRef"]})), signal.clone())
             .await?;
         if prepared.is_error == Some(true) {
             return Err(unsure());
@@ -366,7 +395,7 @@ impl LiveRenderer {
         let preview = payload(&prepared)?;
         if preview.get("epoch").and_then(Value::as_f64) != Some(ready.state.epoch)
             || preview.get("confirmation").and_then(Value::as_str) != Some("apply")
-            || self.capture_selection(signal.clone()).await? != *placed
+            || !selection_after_delete_matches(before, neighbor, &self.capture_selection(ready.state.epoch, signal.clone()).await?)
         {
             return Err(unsure());
         }
@@ -377,7 +406,7 @@ impl LiveRenderer {
             .call(
                 "live_selection_apply",
                 object(json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":uuid::Uuid::new_v4().to_string()})),
-                self.history.change_signal(),
+                signal.clone(),
             )
             .await?;
         if applied.is_error == Some(true) || payload(&applied)?.get("state").and_then(Value::as_str) != Some("applied") {
@@ -385,7 +414,7 @@ impl LiveRenderer {
         }
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            if self.capture_selection(signal.clone()).await? == ready.state.selection {
+            if self.capture_selection(ready.state.epoch, signal.clone()).await? == *before {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -411,7 +440,7 @@ impl LiveRenderer {
             self.rows("track", light.clone(), signal.clone()),
             self.rows("return-track", light.clone(), signal.clone()),
             self.rows("main-track", light, signal.clone()),
-            self.capture_selection(signal.clone()),
+            self.capture_selection(epoch, signal.clone()),
             async {
                 payload(&self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await?).map_err(RuntimeError::from)
             },
@@ -546,16 +575,11 @@ impl LiveRenderer {
         let mut steps = Vec::new();
         let mut started = false;
         let mut transport_touched = false;
-        let mut placed_selection = None;
         let result = self
             .history
             .quietly(Some(&mut steps), async {
                 // The tap is the only device mutation, never a recording-track fallback.
                 let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await;
-                // A silent/incompatible device was still loaded and may have selected its track.
-                if tap.is_ok() || tap.as_ref().is_err_and(|error| error.silent) {
-                    placed_selection = self.capture_tap_selection(&ready, cleanup.clone()).await?;
-                }
                 let tap = tap.map_err(|error| {
                     if error.silent {
                         refused("ears_missing", "The installed Kumi Ears did not start with the required version. Max for Live is required; listening never installs it.")
@@ -573,6 +597,7 @@ impl LiveRenderer {
         rig.steps.extend(steps);
         // Never restore a different Set after the producer changed documents.
         let same_set = self.capture_set_matches(&ready.state, cleanup.clone()).await;
+        let mut selection_restored = true;
         if same_set {
             for tap in rig.ears.as_ref().expect("per-call Ears").taps.values() {
                 link.stop(tap);
@@ -580,18 +605,30 @@ impl LiveRenderer {
             if started {
                 let _ = self.capture_transport(&ready, CaptureTransport::Stop, cleanup.clone()).await;
             }
-            // Select the original device before removing the tap, so deleting a selected
-            // Ears cannot move the selection again. Never overwrite a producer's new choice.
-            if let Some(placed) = &placed_selection {
-                let _ = self.restore_capture_selection(&ready, placed, cleanup.clone()).await;
-            }
+            // Snapshot immediately before deletion, including any producer choice made
+            // during capture. Cleanup uses its independent signal even after cancellation.
+            let selection = if rig.steps.is_empty() {
+                None
+            } else {
+                match self.capture_selection_restore(&ready, cleanup.clone()).await {
+                    Ok(selection) => Some(selection),
+                    Err(_) => {
+                        selection_restored = false;
+                        None
+                    }
+                }
+            };
             let _ = tokio::time::timeout_at(cleanup_deadline, self.close_rig(&mut rig)).await;
+            if let Some((before, expected)) = selection {
+                selection_restored = self.restore_capture_selection(&ready, &before, &expected, cleanup.clone()).await.is_ok();
+            }
             if transport_touched {
                 let _ = self.capture_transport(&ready, CaptureTransport::Restore, cleanup.clone()).await;
             }
         }
         link.close().await;
-        let restored = same_set && self.capture_state(request, cleanup).await.is_ok_and(|(after, _, _)| after == ready.state);
+        let after = if same_set { self.capture_state(request, cleanup).await } else { Err(unsure()) };
+        let restored = same_set && selection_restored && after.is_ok_and(|(after, _, _)| after == ready.state);
         drop(rendering);
         if !restored {
             return Err(unsure());
@@ -649,7 +686,30 @@ impl LiveRenderer {
         }
         *transport_touched = true;
         self.capture_transport(ready, CaptureTransport::Prepare, signal.clone()).await?;
-        link.arm(tap, cap, false, Some(signal.clone())).await.map_err(|_| refused("ears_unavailable", "Kumi Ears did not arm."))?;
+        // Live's control-thread seek can settle before Max's audio clock. Do not arm
+        // from the old cursor, and never "fix" a missed start by playing another window.
+        let settled = Instant::now() + Duration::from_secs(5);
+        let beat_tolerance = (ready.state.tempo / 60.0 / tap.sample_rate).max(1e-6);
+        loop {
+            signal.check()?;
+            let clock = link.transport(tap, Some(signal.clone())).await.map_err(|_| unreadable())?;
+            if clock.is_some_and(|clock| !clock.running && (clock.beats - ready.window.from).abs() <= beat_tolerance) {
+                break;
+            }
+            if Instant::now() >= settled {
+                return Err(refused("capture_incomplete", "Kumi Ears did not confirm the stopped start of the approved window."));
+            }
+            delay(20., signal.clone()).await?;
+        }
+        let armed =
+            link.arm(tap, cap, false, Some(signal.clone())).await.map_err(|_| refused("ears_unavailable", "Kumi Ears did not arm."))?;
+        if armed.running
+            || !armed.beats.is_finite()
+            || (armed.beats - ready.window.from).abs() > beat_tolerance
+            || armed.sample_rate != tap.sample_rate
+        {
+            return Err(refused("capture_incomplete", "Kumi Ears armed outside the approved stopped window."));
+        }
         *started = true;
         let deadline = Instant::now() + Duration::from_secs_f64(cap);
         let end = ready.window.from + ready.window.beats;
@@ -659,6 +719,15 @@ impl LiveRenderer {
                 signal.check()?;
                 if let Some(now) = link.transport(tap, Some(signal.clone())).await.map_err(|_| unreadable())? {
                     if now.running && now.beats >= end {
+                        let playback = only(self.rows("session-playback", json!({}), signal.clone()).await?)?;
+                        let transport = playback.get("transport").and_then(Value::as_object).ok_or_else(unreadable)?;
+                        if !flag(transport, "playing")?
+                            || number(transport, "position")? < end
+                            || flag(transport, "arrangementRecord")?
+                            || flag(transport, "sessionRecord")?
+                        {
+                            return Err(refused("capture_incomplete", "Kumi Ears reported an end the native playhead did not confirm."));
+                        }
                         break;
                     }
                 }
