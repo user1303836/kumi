@@ -97,10 +97,10 @@ async fn mixer_from_display(input: &JsonObject, context: &dyn ChangeContext) -> 
         asked["volume"] = json!(label);
     }
     if let Some(pan) = input.get("panDisplay") {
-        let Some(label) = pan.as_str().map(str::trim).filter(|label| !label.is_empty()) else {
-            return Ok(Err("panDisplay is the pan as Live shows it (\"25L\", \"C\", \"50R\").".into()));
+        let Some(label) = pan.as_str().filter(|label| pan_label(label)) else {
+            return Ok(Err("panDisplay is the pan as Live shows it: \"C\", or 1 to 50 then L or R (\"25L\", \"50R\").".into()));
         };
-        asked["pan"] = json!(label.to_ascii_uppercase());
+        asked["pan"] = json!(label);
     }
     if let Some(sends) = input.get("sendsDb") {
         let labels: Option<Vec<Value>> =
@@ -175,6 +175,11 @@ fn db_label(value: &Value) -> Option<String> {
         Value::String(text) if text.trim().eq_ignore_ascii_case("-inf") => Some("-inf dB".into()),
         _ => None,
     }
+}
+/// Whether `label` is a pan as Live writes one: "C", or a number from 1 (no sign, no leading zero) then L or R. Live's
+/// own go to 50; one past them is Live's to refuse, with its ends.
+fn pan_label(label: &str) -> bool {
+    label == "C" || matches!(label.as_bytes(), [b'1'..=b'9', rest @ ..] if matches!(rest, [b'L' | b'R'] | [b'0'..=b'9', b'L' | b'R']))
 }
 /// The notes for `wanted` samples loaded onto a Drum Rack without one: its next empty pads in the order Live lays them
 /// out, row by row from its first (C1, C#1, D1, D#1, then E1 above on a new rack), past the notes `given` to the others.
@@ -780,7 +785,7 @@ impl ChangeKind {
                 properties.insert("volumeDb".into(), volume);
                 properties.insert(
                     "panDisplay".into(),
-                    json!({"type":"string","minLength":1,"maxLength":4,"description":"The pan as Live shows it (\"25L\", \"C\", \"50R\"), instead of pan"}),
+                    json!({"type":"string","pattern":"^(C|[1-9][0-9]?[LR])$","description":"The pan as Live shows it (\"25L\", \"C\", \"50R\"), instead of pan"}),
                 );
                 properties.insert(
                     "sendsDb".into(),

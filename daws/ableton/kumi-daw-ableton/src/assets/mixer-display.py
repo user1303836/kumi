@@ -1,4 +1,9 @@
+import re
+
 obj_mixer = obj.mixer_device
+# Labels as Live writes them, and nothing else: a level ("-6.0 dB", "-inf dB"), or a pan ("C", "25L", "50R").
+LEVEL = re.compile(r'(-?[0-9]+(\.[0-9]+)?|-inf) ?dB')
+PAN = re.compile(r'C|([1-9][0-9]?)([LR])')
 
 
 def plain(text):
@@ -6,18 +11,18 @@ def plain(text):
 
 
 def order(text):
-    # Where a label sits in its parameter's own order: a level in dB (-inf lowest), or a pan position (L below C below R).
+    # Where a label sits in its parameter's own order: a level in dB (-inf lowest), or a pan position (L below C below
+    # R). Any other text is no label: refused, never read as the nearest number.
     t = plain(text)
-    if t.endswith('dB'):
-        n = t[:-2].strip()
-        return float('-inf') if n.lower() == '-inf' else float(n)
-    if t == 'C':
+    level = LEVEL.fullmatch(t)
+    if level:
+        return float('-inf') if level.group(1) == '-inf' else float(level.group(1))
+    pan = PAN.fullmatch(t)
+    if pan and pan.group(0) == 'C':
         return 0.0
-    if t.endswith('L'):
-        return -float(t[:-1])
-    if t.endswith('R'):
-        return float(t[:-1])
-    return float(t)
+    if pan:
+        return -float(pan.group(1)) if pan.group(2) == 'L' else float(pan.group(1))
+    raise ValueError('not a label: %r' % t)
 
 
 def exact(p, text):
