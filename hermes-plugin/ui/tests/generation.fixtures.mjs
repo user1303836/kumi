@@ -118,3 +118,48 @@ export const RAW_FROZEN = { ...FROZEN, result: frozenRaw }
 /** CC-13 amendment A's upload preview: the approval hook's own Read before a MIDI quote. It names the file Mirelo would
  *  get, its size and its content SHA-256; it isn't a job, and the UI never reads it as one. */
 export const PREVIEW = { state: 'preview', upload: { file: 'Bass Loop 03.wav', bytes: 1048576, identity_sha256: 'a'.repeat(64) } }
+
+/** CC-15's kinds (W4-c), drafted by W4 from the agreed fields for W3 to confirm against real outputs. Each has a
+ *  create answer, a running job, a done job and one that ended with its charge unknown. `seconds` is the billed span
+ *  (the video's window, the appended span, the region's width), never the returned file's length; `source_seconds`
+ *  is the measured source. A done job's `file` is its own output, a new artifact: the source is never overwritten. */
+function windowed(kind, fields, prompt = null) {
+  const asked = { quote_id: `q-${kind}`, kind, prompt, ...fields }
+  const run = {
+    ...running,
+    ...asked,
+    model: kind === 'video_to_sfx' ? 'sfx-2.0' : 'sfx-1.6',
+    credits: { estimate: 20, reserved: 20, actual: null },
+    ledger: ledger({ reserved: 20, left: 60 })
+  }
+  const made = {
+    ...run,
+    artifact_id: `a-${kind}`,
+    file: `a-${kind}.wav`,
+    output_type: 'audio',
+    outputs: [{ artifact_id: `a-${kind}`, file: `a-${kind}.wav`, type: 'audio', mime: 'audio/wav', bytes: 960044 }],
+    media_tag: `MEDIA:/profile-local/state/artifacts/a-${kind}.wav`,
+    credits: { estimate: 20, reserved: 20, actual: 18 },
+    ledger: ledger({ spent: 38, left: 62 })
+  }
+  return {
+    CREATE: { state: 'running', job_id: `job-${kind}`, ...asked, estimate: { credits: 20, max_credits: 20 }, credit_unit: 'mirelo_credits', ledger: ledger({ reserved: 20, left: 60 }) },
+    RUNNING: { job_id: `job-${kind}`, kind: 'generate', state: 'running', progress: { done: 0, message: 'Mirelo is generating' }, result: run },
+    DONE: { job_id: `job-${kind}`, kind: 'generate', state: 'done', progress: { done: 1, total: 1 }, result: made },
+    FAILED_UNKNOWN: {
+      job_id: `job-${kind}-2`,
+      kind: 'generate',
+      state: 'failed',
+      progress: { done: 0 },
+      error: { code: 'submission_unknown', reason: 'Mirelo didn’t answer after the request was sent' },
+      result: { ...run, submission: 'unknown' }
+    }
+  }
+}
+
+/** Sound for the first 6 s of a 12.48 s video. */
+export const VIDEO = windowed('video_to_sfx', { seconds: 6, source_seconds: 12.48 }, 'rain on glass')
+/** 3 s appended to a 12 s loop: the file returned is the loop and the new 3 s. */
+export const EXTEND = windowed('extend', { seconds: 3, source_seconds: 12, append_seconds: 3 })
+/** 2–4 s of a 12 s loop replaced: the file returned is the whole loop. */
+export const INPAINT = windowed('inpaint', { seconds: 2, source_seconds: 12, region_start_seconds: 2, region_end_seconds: 4 }, 'a cleaner snare')

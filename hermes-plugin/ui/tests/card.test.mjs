@@ -390,4 +390,8 @@ test('the generate card shows what was asked, the file, the waveform, the cost a
   // A scan's answer, or an upload preview (CC-13 amendment A), keeps Desktop's own player, unchanged.
   assert.equal(card({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), '<i>player</i>')
   assert.equal(card(fixtures.PREVIEW), '<i>player</i>')
+  // CC-15: the window, never the billed seconds as the file's length; with no prompt, the kind's own title.
+  const extended = card(fixtures.EXTEND.DONE)
+  for (const text of ['Extended audio', 'Extended by 3 s (source 12 s)', 'a-extend.wav', 'Place…']) assert.ok(extended.includes(text), `${text} in ${extended}`)
+  assert.ok(!extended.includes('>3 s<'), 'no bare seconds chip')
 })
