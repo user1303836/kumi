@@ -165,11 +165,41 @@ pub fn close_inherited_on_exec() {
     }
 }
 
+/// On Windows, every program the runtime starts (a DAW's host, Live's bridge) runs in a job that ends with the runtime,
+/// so ending `kumi.exe` ends them too. The job's handle stays open for the runtime's life: when the process ends, the
+/// job closes and its programs with it. On any failure the runtime runs on without it, as before, and says so.
+#[cfg(windows)]
+fn end_programs_with_the_runtime() {
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // SAFETY: an unnamed job object, its limits set from a zeroed structure of the size Windows reads, and this process
+    // assigned to it; nothing else holds the handle, which is never closed.
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            say("kumi serve: the programs it starts can't be tied to it: they may outlive it if it's ended");
+            return;
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+        let set = SetInformationJobObject(job, JobObjectExtendedLimitInformation, (&raw const limits).cast(), size);
+        if set == 0 || AssignProcessToJobObject(job, GetCurrentProcess()) == 0 {
+            say("kumi serve: the programs it starts can't be tied to it: they may outlive it if it's ended");
+        }
+    }
+}
+
 /// `kumi serve` with the arguments after `serve`: serves until stdin ends or it's told to stop; the exit code.
 pub fn main(args: &[String]) -> i32 {
     // Before anything starts a program.
     #[cfg(unix)]
     close_inherited_on_exec();
+    #[cfg(windows)]
+    end_programs_with_the_runtime();
     let args = match parse(args) {
         Ok(args) => args,
         Err(why) => {
