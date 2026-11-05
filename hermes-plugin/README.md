@@ -35,11 +35,11 @@ a DAW to work in.
 | `kumi_sounds` | Searches your sound library | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
-| `kumi_generate` | Mirelo sound effects from a prompt and MIDI notes from an audio file, if you've set Mirelo up | yes: each paid generation, and each file sent |
+| `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |
 
-Four skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds`, `kumi:listening` and `kumi:generate`. In any
-message, write `@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the DAW,
-its recent changes, or its connection. They only read what Kumi has already published, so nothing asks first.
+Skills teach Hermes the workflows: `kumi:daw`, `kumi:sounds` and `kumi:listening`, plus `kumi:generate` for Mirelo. In
+any message, write `@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the
+DAW, its recent changes, or its connection. They only read what Kumi has already published, so nothing asks first.
 
 ## Install
 
@@ -88,11 +88,6 @@ Setup never starts or quits your DAW, picks a Control Surface for you, or saves 
 | `/kumi` in a chat, `hermes kumi status` in a terminal | Where Kumi stands in this profile: what setup still needs, the DAW connection, whether Kumi can read compressed audio, and whether Hermes's approvals are off |
 | `/kumi doctor`, `hermes kumi doctor` | Checks what Kumi needs in this profile and says what to do about each problem. It changes nothing |
 | `hermes kumi setup --daw <daw>` | Sets Kumi up for `ableton`, `reaper` or `renoise`, asking before each step; `--use` also makes that DAW Kumi's |
-| `hermes kumi credits` | Mirelo credits: what's spent, reserved and left, and the reservations still open |
-| `hermes kumi credits unfreeze` | Lets paid generations start again after a charge came in above its estimate |
-| `hermes kumi credits release <id>` | Releases a reservation whose charge stayed unknown, once you've checked it on Mirelo's dashboard |
-
-The `credits` commands that change something ask for your yes in a terminal; no tool can run them.
 
 ## Settings
 
@@ -105,10 +100,6 @@ settings:
 | `library_folders` | none | The folders Kumi may read to build your sound map. Nothing else is scanned |
 | `inject_focus` | on | Adds the short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
 | `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes (Vision's, unless you change it; it must accept images) to interpret measurements (see below) |
-| `mirelo_api_key` | none | Your Mirelo API key, a Hermes secret (`MIRELO_API_KEY`). Kumi sends it only to Mirelo, with a generation you approved |
-| `mirelo_acknowledged` | off | Lets Hermes ask for paid Mirelo generations, each approved with its estimate in Mirelo API credits |
-| `mirelo_sfx_enabled`, `mirelo_midi_enabled` | off | Allow each kind: sound effects from a prompt, MIDI notes from an audio file |
-| `mirelo_credit_cap` | 0 | The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation |
 
 ## Hermes Desktop and the dashboard
 
@@ -123,11 +114,35 @@ Everything Kumi writes for Hermes stays in this profile's `plugin-data/kumi/` fo
 and map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
 changed) and job records. Outside it, setup writes only Kumi's part in your DAW, at the location you approved. Kumi
 reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already on your computer, if you
-allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`. A sound Kumi made or copied
-(Mirelo's, or another Hermes plugin's) that you put in a project stays there, and the project plays it from there:
-before you delete the folder, save such projects with their files copied in (Live: **File → Collect All and Save**;
-REAPER: **Save project as…** with **Copy all media into project directory**), or they'll miss those samples.
-Deleting the folder removes everything Kumi wrote for Hermes.
+allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`; deleting it removes
+everything Kumi wrote for Hermes, including sounds from integrations that your projects may play (see Integrations).
+
+## Integrations (optional)
+
+Core Kumi needs neither of these.
+
+**Sounds from other Hermes plugins (ElevenLabs).** Kumi can measure a finished sound another Hermes plugin saved in
+`<HERMES_HOME>/cache/generated/audio`, or put it in your project after you approve the change; it copies the file into
+its own data first.
+
+**Mirelo (paid).** `kumi_generate` asks Mirelo for sound effects from a prompt and for MIDI notes from an audio file.
+It's off until you set all four:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `mirelo_api_key` | none | Your Mirelo API key, a Hermes secret (`MIRELO_API_KEY`). Kumi sends it only to Mirelo, with a generation you approved |
+| `mirelo_acknowledged` | off | Lets Hermes ask for paid Mirelo generations, each approved with its estimate in Mirelo API credits |
+| `mirelo_sfx_enabled`, `mirelo_midi_enabled` | off | Allow each kind: sound effects from a prompt, MIDI notes from an audio file |
+| `mirelo_credit_cap` | 0 | The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation |
+
+In a terminal, `hermes kumi credits` shows what's spent, reserved and left. `hermes kumi credits unfreeze` lets paid
+generations start again after a charge came in above its estimate, and `hermes kumi credits release <id>` releases a
+reservation whose charge stayed unknown, once you've checked it on Mirelo's dashboard. Both ask for your yes in a
+terminal, and no tool can run them. What leaves your computer, and how credits are reserved: see Disclosure.
+
+**Their sounds in your projects** stay in `plugin-data/kumi/`, and the project plays them from there. Before deleting
+that folder, save such projects with their files copied in (Live: **File → Collect All and Save**; REAPER: **Save
+project as…** with **Copy all media into project directory**), or they'll miss those samples.
 
 ## Disclosure
 
@@ -140,34 +155,19 @@ Deleting the folder removes everything Kumi wrote for Hermes.
   loopback only. They stop when the chat ends, when the plugin unloads or Hermes exits, or after 15 minutes idle (2
   hours while connected to your DAW for a chat); a job still running, such as a scan or a Mirelo generation, keeps
   them up for at most 6 hours. Your DAW keeps running.
-- **Mirelo** (off until you add a key, acknowledge it, turn a kind on and set a cap above 0): your prompt, and for MIDI
-  the audio file you approve, go with your key to `api.mirelo.ai` and to the upload and download links Mirelo's API
-  gives for each job, on hosts Mirelo chooses (its storage or delivery network), so they aren't a fixed list. Whether
-  Mirelo trains on what you send follows your Mirelo account's settings; Kumi has no setting of its own for it.
-  - **Credits, never money:** each generation is approved with Mirelo's estimate in API credits and reserves up to it
-    against a lifetime cap (0 by default, which refuses every paid generation); sending a file is approved on its own.
-    A charge may stay unknown until Mirelo reports it, and its reservation keeps counting against the cap meanwhile. A
-    charge above its estimate pauses new paid generations.
-  - **Yours alone, in a terminal:** letting paid generations start again (`hermes kumi credits unfreeze`) and
-    releasing a reservation whose charge stayed unknown (`hermes kumi credits release <id>`).
-  - **Never unattended:** nothing is paid for or uploaded in scheduled jobs, `hermes chat -q`, webhooks or Hermes's
-    API server.
-  - What Mirelo makes is saved in this profile's plugin data, and placing it in your project is a separate approved
-    change. Switching a kind off stops new jobs (one already running is still fetched while the key is set); removing
-    the key stops Kumi contacting Mirelo.
 - **Reads:** the open project; the sample folders you list (never a whole drive or volume, your home folder or above,
   or inside or above HERMES_HOME; links never lead it outside them); and finished audio other Hermes plugins saved in
   `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
 - **Approvals:** changes to your project go through Hermes's approval. Allowing a Kumi call for the session or always
   covers that kind of call (changes, undos, sample-folder adds and scans) in this chat only, including a one-shot run
   that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
-  refused. An upload to Mirelo is allowed that way for its one file, in this chat; a setup step's approval covers its
-  own plan, and a paid generation's only its own estimate, once. Choosing Always leaves an entry in Hermes's
-  `command_allowlist` (the profile's config.yaml) that Kumi never edits; to remove it, delete the `plugin_rule:kumi:`
-  entries there. When Hermes's approvals are off (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs
-  Kumi's changes, undos, sample-folder adds and scans, setup steps, and paid Mirelo generations and audio uploads (up
-  to your credit cap) without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't
-  tell it apart.
+  refused. A setup step's approval covers its own plan; with Mirelo, an upload's covers its one file in this chat, and
+  a paid generation's only its own estimate, once. Choosing Always leaves an entry in Hermes's `command_allowlist` (the
+  profile's config.yaml) that Kumi never edits; to remove it, delete the `plugin_rule:kumi:` entries there. When
+  Hermes's approvals are off (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs Kumi's changes, undos,
+  sample-folder adds and scans, setup steps, and, with Mirelo set up, its paid generations and uploads (up to your
+  credit cap) without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't tell it
+  apart.
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
   refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway.
@@ -193,6 +193,21 @@ Deleting the folder removes everything Kumi wrote for Hermes.
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published; a job's answer (change
   titles, track names) leaves this computer only through where that job delivers, and Kumi's job blueprints deliver
   locally by default.
+- **Mirelo** (off until you add a key, acknowledge it, turn a kind on and set a cap above 0): your prompt, and for MIDI
+  the audio file you approve, go with your key to `api.mirelo.ai` and to the upload and download links Mirelo's API
+  gives for each job, on hosts Mirelo chooses (its storage or delivery network), so they aren't a fixed list. Whether
+  Mirelo trains on what you send follows your Mirelo account's settings; Kumi has no setting of its own for it.
+  - **Credits, never money:** each generation is approved with Mirelo's estimate in API credits and reserves up to it
+    against a lifetime cap (0 by default, which refuses every paid generation); sending a file is approved on its own.
+    A charge may stay unknown until Mirelo reports it, and its reservation keeps counting against the cap meanwhile. A
+    charge above its estimate pauses new paid generations.
+  - **Yours alone, in a terminal:** letting paid generations start again (`hermes kumi credits unfreeze`) and
+    releasing a reservation whose charge stayed unknown (`hermes kumi credits release <id>`).
+  - **Never unattended:** nothing is paid for or uploaded in scheduled jobs, `hermes chat -q`, webhooks or Hermes's
+    API server.
+  - What Mirelo makes is saved in this profile's plugin data, and placing it in your project is a separate approved
+    change. Switching a kind off stops new jobs (one already running is still fetched while the key is set); removing
+    the key stops Kumi contacting Mirelo.
 - No telemetry.
 
 ## Compatibility
