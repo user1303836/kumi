@@ -1,6 +1,6 @@
 //! A tool input checked against the tool's own JSON schema before Kumi runs it, for the tools the model
 //! didn't see up front (see `deferred`). It covers what Kumi's tool schemas use: type, properties,
-//! required, additionalProperties, items, enum, const, anyOf, the numeric bounds, lengths, item and field
+//! required, additionalProperties, items, enum, const, anyOf, oneOf, not, the numeric bounds, lengths, item and field
 //! counts, and pattern. The first problem comes back in words naming the field, so the model can fix it.
 
 use std::collections::HashMap;
@@ -196,19 +196,34 @@ fn check(schema: &Value, value: &Value, path: &str) -> Result<(), String> {
     let Some(schema) = schema.as_object() else { return Ok(()) };
     if let Some(forms) = schema.get("anyOf").and_then(Value::as_array) {
         let mut first = None;
+        let mut typed = None;
+        let mut matched = false;
         for form in forms {
             match check(form, value, path) {
-                Ok(()) => return Ok(()),
-                // The form of the value's own type explains best why it doesn't fit.
-                Err(why) if form.get("type").and_then(Value::as_str).is_some_and(|name| is_type(name, value)) => return Err(why),
+                Ok(()) => {
+                    matched = true;
+                    break;
+                }
+                // Prefer a same-type explanation only after every alternative has failed.
+                Err(why) if form.get("type").and_then(Value::as_str).is_some_and(|name| is_type(name, value)) => {
+                    typed.get_or_insert(why);
+                }
                 Err(why) => {
                     first.get_or_insert(why);
                 }
             }
         }
-        if let Some(why) = first {
-            return Err(why);
+        if !matched {
+            return Err(typed.or(first).unwrap_or_else(|| format!("{} has no allowed form.", field(path))));
         }
+    }
+    if let Some(forms) = schema.get("oneOf").and_then(Value::as_array) {
+        if forms.iter().filter(|form| check(form, value, path).is_ok()).take(2).count() != 1 {
+            return Err(format!("{} must fit exactly one allowed form.", field(path)));
+        }
+    }
+    if schema.get("not").is_some_and(|excluded| check(excluded, value, path).is_ok()) {
+        return Err(format!("{} includes a disallowed combination of fields.", field(path)));
     }
     match schema.get("type") {
         Some(Value::String(name)) if !is_type(name, value) => {
@@ -327,6 +342,39 @@ mod tests {
                 "either": {"type": ["string", "number"]}
             }
         })
+    }
+
+    #[test]
+    fn a_source_union_accepts_later_object_forms_without_bypassing_its_outer_bounds() {
+        let source = json!({
+            "anyOf": [
+                {"type": "object", "required": ["sound_id"], "properties": {"sound_id": {"type": "string"}}, "additionalProperties": false},
+                {"type": "object", "required": ["file"], "properties": {"file": {"type": "string"}}, "additionalProperties": false}
+            ]
+        });
+        assert!(problem(&source, &json!({"sound_id": "s1"})).is_none());
+        assert!(problem(&source, &json!({"file": "melody.wav"})).is_none());
+        assert!(problem(&source, &json!({"file": "melody.wav", "sound_id": "s1"})).is_some());
+        assert!(problem(&source, &json!({"file": 7})).is_some());
+        let bounded = json!({"anyOf": [{"type": "string", "minLength": 2}], "maxLength": 3});
+        assert!(problem(&bounded, &json!("abc")).is_none());
+        assert!(problem(&bounded, &json!("abcd")).is_some());
+        assert!(problem(&json!({"anyOf": []}), &json!({})).is_some());
+    }
+
+    #[test]
+    fn exclusive_forms_and_forbidden_combinations_reject_ambiguous_requests() {
+        let source = json!({"type": "object", "oneOf": [
+            {"required": ["file"], "not": {"required": ["artifact_id"]}},
+            {"required": ["artifact_id"], "not": {"required": ["file"]}}
+        ]});
+        assert!(problem(&source, &json!({"file": "melody.wav"})).is_none());
+        assert!(problem(&source, &json!({"artifact_id": "a1"})).is_none());
+        assert!(problem(&source, &json!({})).is_some());
+        assert!(problem(&source, &json!({"file": "melody.wav", "artifact_id": "a1"})).is_some());
+        let overlap = json!({"oneOf": [{"const": 1}, {"type": "integer", "minimum": 0}]});
+        assert!(problem(&overlap, &json!(1)).is_some());
+        assert!(problem(&overlap, &json!(2)).is_none());
     }
 
     #[test]
