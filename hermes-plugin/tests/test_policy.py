@@ -78,9 +78,11 @@ class Approvals(unittest.TestCase):
         self.ctx.surface = "desktop"
         self.assertEqual(self.hook("kumi_change", change())["action"], "approve")
 
-    def test_when_hermes_cant_say_whether_its_a_scheduled_job_its_taken_as_one(self):
+    def test_when_hermes_cant_say_who_is_there_nobody_is_assumed_there(self):
         self.ctx.cron_execution = RuntimeError("the plugin host's channel is gone")
         self.assertEqual(self.hook("kumi_change", change())["message"], tools.SCHEDULED)
+        self.ctx.cron_execution, self.ctx.surface = None, RuntimeError("the plugin host's channel is gone")
+        self.assertEqual(self.hook("kumi_change", change())["message"], policy.UNATTENDED)
 
     def test_a_scheduled_job_is_refused_by_the_handler_too_when_the_hook_didnt_run(self):
         before = support.requests(self.data / "state")

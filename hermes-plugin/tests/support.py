@@ -94,6 +94,8 @@ class Context:
         return self.cron_execution
 
     def session_surface(self) -> str:
+        if isinstance(self.surface, Exception):
+            raise self.surface
         return self.surface
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False,

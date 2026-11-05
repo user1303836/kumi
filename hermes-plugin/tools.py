@@ -134,13 +134,17 @@ class Host:
 
     def unattended(self) -> str | None:
         """Who can answer for this call: "scheduled" in a Hermes cron job (no chat, and nobody there), "unattended"
-        where nobody can answer an approval (a one-shot `hermes -q`, a webhook, Hermes's API server), else None (a
-        chat). Hermes's `ctx` methods are answered in the calling context, under `plugins.isolation: host` too.
+        where nobody can answer an approval (a webhook, Hermes's API server, a one-shot `hermes -q` run in this
+        process), else None (a chat). Hermes's `ctx` methods are answered in the calling context, under
+        `plugins.isolation: host` too. When Hermes can't say, nobody is assumed there.
 
-        A cron job is told by `ctx.current_cron_execution()`, bound for each fire; when Hermes can't say, it's taken as
-        one (nobody is assumed there). A webhook or an API call is told by `ctx.session_surface()`. Hermes's session
-        variables (`gateway.session_context.get_session_env`, which falls back to the process environment, or the
-        environment itself when that isn't importable) are read too: they're how `hermes -q` says it's one-shot."""
+        A cron job is told by `ctx.current_cron_execution()`, bound for each fire. A webhook or an API call is told by
+        `ctx.session_surface()`. Hermes's session variables (`gateway.session_context.get_session_env`, which falls back
+        to the process environment, or the environment itself when that isn't importable) are read too.
+
+        A stated gap: in Hermes v0.22.7 a `-q` or `-z` turn's tools run in the gateway (PLG-7), where neither is told
+        apart from a chat: `-q`'s mark stays in its own process, and `-z`'s (which Hermes treats as --yolo) is
+        private."""
         try:
             if self._ctx.current_cron_execution() is not None:
                 return "scheduled"
@@ -150,8 +154,9 @@ class Host:
         try:
             surface = str(self._ctx.session_surface() or "")
         except Exception:
-            log.warning("Kumi couldn't ask Hermes which surface this call comes from", exc_info=True)
-            surface = ""
+            log.warning("Kumi couldn't ask Hermes which surface this call comes from: taken as unattended",
+                        exc_info=True)
+            return "unattended"
         cron, single, platform = _session_values("HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
                                                  "HERMES_SESSION_PLATFORM")
         if _truthy(cron):
