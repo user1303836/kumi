@@ -474,7 +474,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: nextest-list-ci-os-macOS
-          path: ${{ runner.temp }}/nextest-list.json
+          path: ${{ runner.temp }}/nextest-list*.json  # with the library tests' list (test-isolated.sh's .lib.json)
           if-no-files-found: ignore
           retention-days: 14
 
@@ -550,7 +550,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: nextest-list-ci-os-Windows-${{ matrix.part }}
-          path: ${{ runner.temp }}/nextest-list.json
+          path: ${{ runner.temp }}/nextest-list*.json  # with the library tests' list (test-isolated.ps1's .lib.json)
           if-no-files-found: ignore
           retention-days: 14
 
