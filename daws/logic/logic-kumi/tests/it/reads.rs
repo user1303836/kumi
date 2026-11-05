@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use logic_kumi::ax::strings::Strings;
+use logic_kumi::ax::{paths, Node};
 use logic_kumi::fixtures::{Scene, SceneHands};
 use logic_kumi::helper::{Helper, HelperError, Launch};
 use logic_kumi::scenes;
@@ -15,6 +16,57 @@ fn fixtures() -> PathBuf {
 
 fn vectors_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/logic-reads.json")
+}
+
+/// Only pane buttons within the Control Bar and the four tabs of a List Editors radio group can be pressed by
+/// readers. Derive their addresses from this recording's labelled trees: Editors and list tabs move between scenes.
+fn navigation_controls(scene: &Scene) -> Vec<(Value, Value, String)> {
+    fn paths_in(node: &Node, strings: &Strings, out: &mut Vec<String>) {
+        if node.role == "AXGroup" && strings.is(&node.desc, "Control Bar") {
+            for label in ["Mixer", "Editors", "List Editors"] {
+                if let Some(button) = paths::view_button(node, strings, label) {
+                    out.push(button.path.clone());
+                }
+            }
+        }
+        let tabs: Vec<_> = node.children.iter().filter(|child| child.role == "AXRadioButton").collect();
+        let labels = ["Event", "Marker", "Tempo", "Signature"];
+        if node.role == "AXRadioGroup"
+            && tabs.len() == labels.len()
+            && labels.iter().all(|label| tabs.iter().filter(|tab| strings.is(&tab.desc, label)).count() == 1)
+        {
+            out.extend(tabs.iter().map(|tab| tab.path.clone()));
+        }
+        for child in &node.children {
+            paths_in(child, strings, out);
+        }
+    }
+    let strings = Strings::english();
+    let mut controls = vec![];
+    for call in scene.calls.iter().filter(|call| call.op == "tree") {
+        let Some(node) = call.reply.get("node") else { continue };
+        let mut paths = vec![];
+        paths_in(&Node::from_json(node), &strings, &mut paths);
+        for path in paths {
+            let control = (call.params["pid"].clone(), call.params["root"].clone(), path);
+            if !controls.contains(&control) {
+                controls.push(control);
+            }
+        }
+    }
+    assert!(!controls.is_empty(), "{} records its pane and tab controls", scene.name);
+    controls
+}
+
+fn assert_read_calls(calls: &[(String, Value)], controls: &[(Value, Value, String)]) {
+    for (op, params) in calls {
+        assert!(["tree", "get", "windows", "action"].contains(&op.as_str()), "a native read wrote through {op}: {params}");
+        if op == "action" {
+            assert_eq!(params["name"], "AXPress");
+            let target = (params["pid"].clone(), params["root"].clone(), params["path"].as_str().unwrap().to_string());
+            assert!(controls.contains(&target), "a read pressed outside the recording's labelled pane/tab controls: {params}");
+        }
+    }
 }
 
 /// The fixed request set over a scene: the cases, and the requests the scene couldn't answer.
@@ -34,16 +86,7 @@ fn run(name: &str) -> (Vec<Value>, Vec<(String, Value)>) {
     let hands = SceneHands::new(&scene);
     let mut helper = Launch::launch(&mut hands.clone()).unwrap();
     let cases = scenes::run(helper.as_mut(), pid, Strings::english(), status, (id.as_deref(), path.as_deref(), &pname));
-    for (op, params) in hands.calls() {
-        assert!(["tree", "get", "windows", "action"].contains(&op.as_str()), "a native read wrote through {op}: {params}");
-        if op == "action" {
-            assert_eq!(params["name"], "AXPress");
-            assert!(
-                ["5.17", "5.19", "8.0", "8.1", "8.2", "8.3"].contains(&params["path"].as_str().unwrap()),
-                "a read pressed outside the recorded pane/tab controls: {params}"
-            );
-        }
-    }
+    assert_read_calls(&hands.calls(), &navigation_controls(&scene));
     (cases, hands.unrecorded())
 }
 
@@ -117,6 +160,7 @@ impl Helper for StoppedList {
 fn notes_never_select_a_region_on_success_refusal_helper_failure_or_cancellation() {
     use logic_kumi::{project::Project, serve};
     let original = Scene::load(&fixtures().join("scratch")).unwrap();
+    let controls = navigation_controls(&original);
     for scenario in ["selected", "unselected", "multiple", "changed", "failed", "cancelled"] {
         for (method, params) in [
             ("read", json!({"kind":"note", "parent":"1:region:1"})),
@@ -132,7 +176,10 @@ fn notes_never_select_a_region_on_success_refusal_helper_failure_or_cancellation
                 "cancelled" => Some(HelperError::Gone("the bridge is stopping".into())),
                 _ => None,
             };
-            let mut helper = StoppedList { inner, error: None, scenario: "prime", contents_reads: 0 };
+            // The multiple-selection scenario already has both regions when first observed. Adding a new region
+            // after priming would correctly advance the epoch and make the explicit target ref stale instead.
+            let mut helper =
+                StoppedList { inner, error: None, scenario: if scenario == "multiple" { "multiple" } else { "prime" }, contents_reads: 0 };
             let mut project = Project::new(Strings::english());
             // Follow the original fixed request sequence through its first note read: the Mixer and list pane
             // recordings then describe the same state. This is not a substitute simulator for navigation.
@@ -147,24 +194,21 @@ fn notes_never_select_a_region_on_success_refusal_helper_failure_or_cancellation
             let primed_calls = hands.calls().len();
             helper.error = error;
             helper.scenario = scenario;
+            helper.contents_reads = 0;
             let answer = serve::answer(&mut project, &mut helper, pid, method, &params);
             match scenario {
                 "selected" => assert!(answer.is_ok(), "{method} {params}: {answer:?}"),
                 "failed" | "cancelled" => assert!(answer.is_err(), "{scenario}: {answer:?}"),
                 _ => {
                     let (code, message) = answer.unwrap_err();
-                    assert_eq!(code, "failed");
+                    assert_eq!(code, "failed", "{scenario} {method} {params}: {message}");
                     assert!(message.contains("select only that region") && message.contains("selection unchanged"), "{message}");
                 }
             }
             let calls = hands.calls();
-            assert!(calls.iter().all(|(op, _)| op != "set" && op != "click" && !op.starts_with("midi.")), "{scenario}: {calls:?}");
+            assert_read_calls(&calls, &controls);
             // The only AX writes reachable by reads press the recorded pane/tab buttons. None targets a track,
             // region or event selection. Errors and stop cannot invoke a selection-restoration write either.
-            for (_, params) in calls[primed_calls..].iter().filter(|(op, _)| op == "action") {
-                assert_eq!(params["name"], "AXPress");
-                assert!(["5.19", "8.0", "8.1"].contains(&params["path"].as_str().unwrap()), "{params}");
-            }
             if matches!(scenario, "unselected" | "multiple") {
                 assert!(calls[primed_calls..].iter().all(|(op, _)| op != "action"), "an unselected notes refusal doesn't navigate panes");
             }
