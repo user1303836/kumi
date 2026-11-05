@@ -1151,17 +1151,25 @@ function M.editor(params, env)
   return { epoch = env.epoch(), layout = env.layout(), visible = device.external_editor_visible, label = label }
 end
 
--- Renoise's user library, where it was made at its first start (Documents/Renoise/User Library). The host says where that
--- is (`given`), since Windows can keep Documents outside the home folder (OneDrive) and only the host can ask it: taken when
--- it's there. Otherwise the home folder's, for an older host or a Renoise that made it there, and `given` to name when
--- neither is there.
+-- Renoise's documented Linux library is ~/Renoise/User Library; other systems use Documents.
+-- Keep the old Linux Documents library usable, without moving presets. A host hint has no
+-- provenance: even the exact old default can be an intentional destination, so do not rewrite it.
 function M.user_library(given)
   if type(given) ~= "string" or given == "" then given = nil end
-  if given and io.exists(given) then return given end
   local home = os.getenv("HOME") or os.getenv("USERPROFILE")
-  local guess = home and home .. "/Documents/Renoise/User Library"
-  if guess and io.exists(guess) then return guess end
-  return given or guess
+  local legacy = home and home .. "/Documents/Renoise/User Library"
+  if os.platform and os.platform() == "LINUX" then
+    if given then return given end
+    local documented = home and home .. "/Renoise/User Library"
+    if documented and io.exists(documented) then return documented end
+    if legacy and io.exists(legacy) then return legacy end
+    return documented
+  end
+  -- Windows' moved Documents is supplied by the host when it exists. Older hosts, or a
+  -- Renoise that did not follow Documents, retain their existing home-folder fallback.
+  if given and io.exists(given) then return given end
+  if legacy and io.exists(legacy) then return legacy end
+  return given or legacy
 end
 
 -- The folder a native device's presets go in, as Renoise's library names them: its name without its * or # ("LFO", "Send").

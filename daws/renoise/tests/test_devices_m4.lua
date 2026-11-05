@@ -1338,6 +1338,58 @@ test("devices m4: a native device's settings are saved as a preset in the user l
   if not done then error(err, 0) end
 end)
 
+test("devices m4: Linux preset saves prefer the documented library and preserve legacy-only and explicit destinations", function()
+  for _, exists in ipairs({ { false, false }, { false, true }, { true, false }, { true, true } }) do
+    local env, peer = setup({ { name = "Kick", devices = { eq5() } } })
+    local home = env.dir .. "/linux-home"
+    local function mkdir(path) if not io.exists(path) then assert(os.mkdir(path)) end end
+    mkdir(home)
+    local documented = home .. "/Renoise/User Library"
+    local legacy = home .. "/Documents/Renoise/User Library"
+    if exists[1] then mkdir(home .. "/Renoise"); mkdir(documented) end
+    if exists[2] then mkdir(home .. "/Documents"); mkdir(home .. "/Documents/Renoise"); mkdir(legacy) end
+    local real_getenv, platform = os.getenv, mock.platform
+    os.getenv = function(name) if name == "HOME" then return home end; return real_getenv(name) end
+    mock.platform = "LINUX"
+    local done, err = pcall(function()
+      local epoch, layout = place(peer)
+      local function save(name, library)
+        return call(peer, "preset_save", { ref = epoch .. ":device:1.2", name = name, epoch = epoch, layout = layout, library = library })
+      end
+      if not exists[1] and not exists[2] then
+        local answer = save("Missing")
+        failure(answer, "failed", "user library")
+        ok(answer.error.message:find(documented, 1, true), "no existing library reports the documented Linux default")
+        ok(not io.exists(documented) and not io.exists(legacy), "a missing library is not created or moved")
+      else
+        local root = exists[1] and documented or legacy
+        local answer = save("Linux")
+        ok(answer.result, json.encode(answer.error or {}))
+        eq(answer.result.file, root .. "/Effect Presets/EQ 5/Linux.xrdp")
+        local other = root == documented and legacy or documented
+        ok(not io.exists(other .. "/Effect Presets/EQ 5/Linux.xrdp"), "the other library is untouched")
+        -- A current host gives the same existing root it selected before the request.
+        eq(save("Hinted", root).result.file, root .. "/Effect Presets/EQ 5/Hinted.xrdp")
+      end
+      local custom = home .. "/Explicit Library"
+      mkdir(custom)
+      eq(save("Custom", custom).result.file, custom .. "/Effect Presets/EQ 5/Custom.xrdp")
+      local missing_custom = home .. "/Missing Explicit Library"
+      local missing = save("NoRedirect", missing_custom)
+      failure(missing, "failed", "user library")
+      ok(missing.error.message:find(missing_custom, 1, true), "an explicit missing path cannot redirect a write")
+      if exists[1] and exists[2] then
+        -- Old wire hints carry no default/custom provenance. Preserve a supplied legacy
+        -- path rather than guessing that an intentional explicit destination is a default.
+        eq(save("LegacyHint", legacy).result.file, legacy .. "/Effect Presets/EQ 5/LegacyHint.xrdp")
+      end
+      eq(steps(), 0, "saving presets makes no undo step")
+    end)
+    os.getenv, mock.platform = real_getenv, platform
+    if not done then error(err, 0) end
+  end
+end)
+
 -- device-params (M5's listening sets several of one device's parameters at once)
 
 local Q1, Q2 = "\226\128\156", "\226\128\157"

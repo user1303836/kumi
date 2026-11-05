@@ -521,22 +521,28 @@ pub fn renoise_config(prefs: &Path, tool_id: &str) -> Option<RenoiseConfig> {
     })
 }
 
-/// Where Renoise's user library may be, likeliest first: in the Documents folder Windows says it keeps (OneDrive, or the
-/// producer, can move it out of the home folder), and in the home folder's, where it's guessed when Windows doesn't say or
-/// on any other system.
+/// Renoise's User Library candidates, in preference order. Linux uses ~/Renoise/User Library;
+/// the old ~/Documents guess remains readable for presets Kumi already saved there. macOS uses
+/// Documents, and Windows first asks where the system keeps Documents (which OneDrive can move).
+/// The platform locations are documented at https://tutorials.renoise.com/wiki/Libraries.
 pub fn renoise_user_libraries(home: &Path) -> Vec<PathBuf> {
     #[cfg(windows)]
     let documents = windows_documents();
     #[cfg(not(windows))]
     let documents = None;
-    user_libraries_in(documents, home)
+    user_libraries_in(Os::current(), documents, home)
 }
 
-/// [`renoise_user_libraries`] with the system's Documents folder given: None to look only in `home`.
-pub fn user_libraries_in(documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
-    let library = |documents: &Path| documents.join("Renoise").join("User Library");
+/// [`renoise_user_libraries`] with an explicit platform and optional Windows Documents folder.
+/// Keeping the platform explicit also lets library discovery honor an injected home/platform.
+pub fn user_libraries_in(os: Os, documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
+    let library = |parent: &Path| parent.join("Renoise").join("User Library");
     let guess = library(&home.join("Documents"));
-    let mut libraries: Vec<PathBuf> = documents.map(|documents| library(&documents)).into_iter().collect();
+    let mut libraries: Vec<PathBuf> = match os {
+        Os::Linux => vec![library(home)],
+        Os::Windows => documents.map(|documents| library(&documents)).into_iter().collect(),
+        Os::Mac => vec![],
+    };
     if !libraries.contains(&guess) {
         libraries.push(guess);
     }
@@ -1121,14 +1127,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn renoises_user_library_is_looked_for_in_the_documents_folder_the_system_says_then_the_homes() {
+    fn renoises_user_libraries_follow_the_platform_and_keep_linux_legacy_access() {
         let home = Path::new("home");
         let in_home = home.join("Documents").join("Renoise").join("User Library");
         let moved = Path::new("OneDrive").join("Documents");
-        assert_eq!(user_libraries_in(Some(moved.clone()), home), [moved.join("Renoise").join("User Library"), in_home.clone()]);
+        assert_eq!(
+            user_libraries_in(Os::Windows, Some(moved.clone()), home),
+            [moved.join("Renoise").join("User Library"), in_home.clone()]
+        );
         // Not moved, or the system doesn't say: the home folder's, once.
-        assert_eq!(user_libraries_in(Some(home.join("Documents")), home), [in_home.clone()]);
-        assert_eq!(user_libraries_in(None, home), [in_home]);
+        assert_eq!(user_libraries_in(Os::Windows, Some(home.join("Documents")), home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Windows, None, home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Mac, None, home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Mac, Some(moved.clone()), home), [in_home.clone()]);
+        let linux = [home.join("Renoise").join("User Library"), in_home];
+        assert_eq!(user_libraries_in(Os::Linux, None, home), linux);
+        assert_eq!(user_libraries_in(Os::Linux, Some(moved), home), linux);
     }
 
     /// The call itself, which only Windows has.
