@@ -159,6 +159,11 @@ class Host:
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)
 
+    def set_daw(self, daw: str) -> None:
+        """Make `daw` Kumi's DAW in this profile (the plugin's `daw` setting), after the producer approved a setup
+        plan that says so."""
+        self._ctx.set_config("daw", daw)
+
     def install(self, data_dir: Path) -> runtime.Install:
         return runtime.installed(data_dir, self._pinned())
 
@@ -416,14 +421,20 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
         return {"error": {"code": "invalid", "reason": f"Kumi works in {', '.join(schemas.DAWS)}, not {daw!r}."}}
     data_dir = host.data_dir()
     setup_daw = setup_daw_caller(host, daw, kwargs)
+    current = host.daw()  # the plugin's DAW setting: a DAW set up first becomes it, in the plan's own approval
     if action == "plan":
         try:
-            planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir)
+            planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir,
+                                 current=current)
         except setup.SetupError as error:
             return {"error": {"code": error.code, "reason": setup.reason_for_model(error.code, error.message)}}
         next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt",
+                       "use_daw": "install",
                        "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
-        return {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
+        shown = {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
+        if planned["step"] == "none" and setup.next_daw(daw, current):  # set up, but another DAW stays Kumi's
+            shown["next"] = setup.next_daw(daw, current) + " The producer runs it in a terminal."
+        return shown
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
     if not isinstance(digest, str) or not digest:
@@ -431,14 +442,25 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
                                                             "approved setup plan. Run kumi_setup plan first."}}
     if action == "install":
         result = setup.install(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
-                               plugin_dir=host.plugin_dir)
+                               plugin_dir=host.plugin_dir, current=current)
     else:
         result = setup.adopt(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
-                             plugin_dir=host.plugin_dir)
+                             plugin_dir=host.plugin_dir, current=current)
     if not result.get("ok"):
         error = result.get("error") or {}
         code = error.get("code") or "failed"
         return {"error": {"code": code, "reason": setup.reason_for_model(code, error.get("message"))}}
+    if result.get("use_daw") == daw:  # the producer approved making it Kumi's DAW (the runtime already works in it)
+        name = schemas.DAW_NAMES[daw]
+        try:
+            host.set_daw(daw)
+            said = f"{name} is Kumi's DAW in this profile now."
+        except Exception:
+            log.warning("Kumi couldn't change its DAW setting")
+            said = (f"Kumi couldn't change its DAW setting, so it still connects to {schemas.DAW_NAMES[current]}: "
+                    f"the producer sets it to {daw} in Hermes's settings for the Kumi plugin.")
+            result = {key: value for key, value in result.items() if key != "use_daw"}
+        result = {**result, "message": f"{result['message']} {said}".strip()}
     if action == "adopt" or result.get("step") in ("runtime", "ffmpeg"):
         host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home or the ffmpeg
     return {**result, "status": setup.for_model(result.get("status") or {})}
