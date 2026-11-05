@@ -174,7 +174,7 @@ class SetupTool(unittest.TestCase):
         self.assertFalse(older.client.running)
         self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
 
-    def test_allowing_an_ffmpeg_stops_the_runtime_so_its_next_start_has_it(self):
+    def test_allowing_an_ffmpeg_stops_the_profiles_runtime(self):
         host, _, data = support.host(self, None, "--component-state", "same")  # set up for Live already
         support.call(host, "kumi_connect", {}, session_id="s1")
         running = host.runtimes.get(data)
@@ -186,7 +186,7 @@ class SetupTool(unittest.TestCase):
         with mock.patch.object(setup, "_ffmpeg_search", return_value=[folder.name]):
             plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
             self.assertEqual((plan["step"], plan["optional"], plan["next"]),
-                             ("ffmpeg", True, "kumi_setup install (optional: ask the producer)"))
+                             ("ffmpeg", True, "kumi_setup install (optional: ask the producer; setup is done either way)"))
             self.assertIn(f"Kumi's runtime will run {setup.os.path.realpath(program)}",
                           setup.approval("ableton", data_dir=data)["message"])
             installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")

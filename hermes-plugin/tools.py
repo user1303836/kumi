@@ -247,7 +247,7 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
         except setup.SetupError as error:
             return {"error": {"code": error.code, "reason": error.message}}
         next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt",
-                       "ffmpeg": "install (optional: ask the producer)"}.get(planned["step"])
+                       "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
         return {**planned, "next": f"kumi_setup {next_action}" if next_action else None}
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None

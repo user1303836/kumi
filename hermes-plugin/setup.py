@@ -202,6 +202,8 @@ _FFMPEG_FOLDERS = {"darwin": ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local
                    "linux": ("/usr/bin", "/usr/local/bin", "/snap/bin")}
 _IDENTITY = ("path", "size", "mtime_ns", "ino")
 _WINDOWS_LOCAL = re.compile(r"[A-Za-z]:[\\/]")
+_DRIVE_FIXED = 3  # GetDriveTypeW's local disk: not removable, a network drive, a CD or a RAM disk
+_AUTOMOUNTS = ("/net/", "/network/")  # macOS mounts a server's share there on first touch
 
 
 def _local(path: str, windows: bool | None = None) -> bool:
@@ -211,6 +213,23 @@ def _local(path: str, windows: bool | None = None) -> bool:
     if os.name == "nt" if windows is None else windows:
         return _WINDOWS_LOCAL.match(path) is not None
     return path.startswith("/") and not path.startswith("//")
+
+
+def _drive_type(root: str) -> int:
+    """Windows's kind of drive for `root` (`C:\\`), from its drive table: it needn't reach the drive to tell."""
+    import ctypes
+    return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(root))
+
+
+def _on_this_computer(path: str, windows: bool | None = None) -> bool:
+    """Whether `path` can be touched without reaching another computer: `_local()`, then on Windows a fixed drive
+    (never a mapped network drive such as `Z:\\`), elsewhere nothing under an automount folder (`/net`, `/Network`)."""
+    windows = os.name == "nt" if windows is None else windows
+    if not _local(path, windows):
+        return False
+    if windows:
+        return _drive_type(path[0].upper() + ":\\") == _DRIVE_FIXED
+    return not (path + "/").casefold().startswith(_AUTOMOUNTS)
 
 
 def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | None = None) -> list[str]:
@@ -229,25 +248,42 @@ def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | No
 
 
 def _resolved(path: str) -> str | None:
-    """`path` with its links followed, each link's target read without following it (`readlink`) and checked to be
-    local first, then made canonical (`realpath`: a Homebrew link becomes its Cellar file). None if any step isn't
-    local."""
-    for _ in range(16):
-        try:
-            if not os.path.islink(path):
-                break
-            target = os.readlink(path)
+    """`path` with every link in it followed from the root down, as `realpath` would (a Homebrew link becomes its
+    Cellar file), except that each link's target is read without following it (`readlink`) and must be on this
+    computer before anything under it is touched: a folder linked to a network share is never reached. None if a
+    target isn't, or the links loop."""
+    if not _on_this_computer(path):
+        return None
+    anchor, *names = Path(path).parts
+    resolved, hops = anchor, 0
+    while names:
+        name = names.pop(0)
+        if name in ("", "."):
+            continue
+        if name == "..":
+            resolved = os.path.dirname(resolved)
+            continue
+        step = os.path.join(resolved, name)
+        try:  # lstat and readlink: neither follows `step`, and everything above it is already resolved
+            linked = os.path.islink(step) or getattr(os.path, "isjunction", lambda _: False)(step)
+            target = os.readlink(step) if linked else None
         except (OSError, ValueError):
             return None
+        if target is None:
+            resolved = step
+            continue
         if target.startswith("\\\\?\\") and _local(target[4:], windows=True):  # Windows's long form of a local path
             target = target[4:]
-        path = os.path.join(os.path.dirname(path), target)
-        if not _local(path):
+        hops, linked_to = hops + 1, Path(target)
+        if hops > 32 or (linked_to.anchor and not linked_to.is_absolute()):  # a loop, or `\x` or `C:x` on Windows
             return None
-    else:
-        return None
-    real = os.path.realpath(path)
-    return real if _local(real) else None
+        if linked_to.is_absolute():
+            if not _on_this_computer(target):
+                return None
+            resolved, names = linked_to.anchor, [*linked_to.parts[1:], *names]
+        else:
+            names = [*linked_to.parts, *names]
+    return resolved if _on_this_computer(resolved) else None
 
 
 def _identity(path: str) -> dict | None:
@@ -277,12 +313,15 @@ def find_ffmpeg(env: Mapping[str, str] | None = None) -> dict | None:
 
 def _allowed_ffmpeg(data_dir: Path) -> tuple[str, str | None]:
     """The ffmpeg the producer allowed (`tools.ffmpeg` in `current.json`), and whether it's still that program, as
-    runtime.py checks at each start: `available`, `changed`, `gone` or `not_allowed`."""
+    runtime.py checks at each start: `available`, `changed`, `gone` or `not_allowed`. A path that now leads elsewhere
+    through a link is `changed`, and isn't touched."""
     tools = (_read_json(data_dir / "runtime" / "current.json") or {}).get("tools")
     allowed = tools.get("ffmpeg") if isinstance(tools, dict) else None
     path = allowed.get("path") if isinstance(allowed, dict) else None
     if not isinstance(path, str) or not _local(path):
         return "not_allowed", None
+    if _resolved(path) != path:
+        return "changed", path
     if _identity(path) == {key: allowed.get(key) for key in _IDENTITY}:
         return "available", path
     return ("changed" if os.path.lexists(path) else "gone"), path
@@ -797,7 +836,7 @@ def _record_component(data_dir: Path, daw: str, component: Mapping[str, Any], *,
 def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
     """Record the ffmpeg the producer allowed, as the program it is now, where runtime.py reads it (CC-10)."""
     chosen = {key: approved["ffmpeg"][key] for key in _IDENTITY}
-    if _identity(chosen["path"]) != chosen:
+    if _resolved(chosen["path"]) != chosen["path"] or _identity(chosen["path"]) != chosen:
         raise SetupError("plan_changed", f"{chosen['path']} changed since it was approved; plan again.")
     record = _read_json(data_dir / "runtime" / "current.json")
     if not record:

@@ -470,7 +470,7 @@ class SetupTest(unittest.TestCase):
                          "a binary that is a link out of the data folder isn't trusted")
 
     def test_setup_looks_for_ffmpeg_only_in_local_absolute_folders(self) -> None:
-        tools = str(self.data.parent / "tools")
+        tools = "/opt/tools/bin"  # the search is text only, so a POSIX path, whatever system runs the test
         self.assertEqual(SEARCH({"PATH": ":".join([".", "", "relative/bin", tools, "//server/share/bin"])}, "darwin"),
                          [tools, "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"],
                          "never the working folder, a relative or empty entry, or a network path")
@@ -494,8 +494,19 @@ class SetupTest(unittest.TestCase):
         finally:
             os.chdir(here)
 
+    def test_a_mapped_network_drive_or_an_automount_folder_is_never_touched(self) -> None:
+        kinds = {"C": setup._DRIVE_FIXED, "Z": 4}  # 4: DRIVE_REMOTE, a mapped network drive
+        with mock.patch.object(setup, "_drive_type", side_effect=lambda root: kinds[root[0]]):
+            self.assertTrue(setup._on_this_computer(r"C:\ffmpeg\bin\ffmpeg.exe", windows=True))
+            self.assertFalse(setup._on_this_computer(r"Z:\ffmpeg\bin\ffmpeg.exe", windows=True),
+                             "a mapped drive can make Windows authenticate to its server")
+            self.assertFalse(setup._on_this_computer(r"\\server\share\ffmpeg.exe", windows=True))
+        for path in ("/net/server/bin/ffmpeg", "/Network/Servers/server/ffmpeg", "/NET/server/ffmpeg"):
+            self.assertFalse(setup._on_this_computer(path, windows=False), f"{path} mounts a server's share")
+        self.assertTrue(setup._on_this_computer("/opt/homebrew/bin/ffmpeg", windows=False))
+
     @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
-    def test_a_linked_ffmpeg_is_offered_as_the_program_it_links_to_and_only_a_local_one(self) -> None:
+    def test_links_are_followed_only_to_this_computer_from_the_root_down(self) -> None:
         cellar = self.data.parent / "Cellar" / "ffmpeg" / "8.1" / "bin"
         cellar.mkdir(parents=True)
         (cellar / FFMPEG).write_bytes(b"#!/bin/sh\n")
@@ -507,8 +518,18 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(setup.find_ffmpeg()["path"], os.path.realpath(cellar / FFMPEG), "Homebrew's link is resolved")
         (brew / FFMPEG).unlink()
         (brew / FFMPEG).symlink_to("//server/share/ffmpeg")
-        with mock.patch.object(setup.os.path, "realpath", side_effect=AssertionError("followed a network link")):
-            self.assertIsNone(setup.find_ffmpeg(), "a link to a network path is never followed")
+        self.assertIsNone(setup.find_ffmpeg(), "a link to a network path is never followed")
+        tools = self.data.parent / "tools"
+        tools.symlink_to("//server/share")  # a folder above the candidate, linked to a share
+        self.search.return_value = [str(tools / "bin")]
+        touched = []
+        islink = os.path.islink
+        with mock.patch.object(setup.os.path, "islink", side_effect=lambda path: touched.append(path) or islink(path)):
+            self.assertIsNone(setup.find_ffmpeg())
+        self.assertTrue(touched, "the candidate's folders were looked at")
+        under = tuple(os.path.join(parent, "tools") + os.sep  # as given, and with the temp folder's own links resolved
+                      for parent in (str(self.data.parent), os.path.realpath(self.data.parent)))
+        self.assertFalse([path for path in touched if path.startswith(under)], "nothing under the linked folder")
 
     def test_allowing_ffmpeg_is_an_optional_last_step_that_binds_the_program(self) -> None:
         self.install_runtime()
@@ -553,6 +574,17 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "ffmpeg", "setup offers it again")
         program.unlink()
         self.assertEqual(self.status()["compressed_audio"]["state"], "gone")
+
+    @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
+    def test_an_allowed_ffmpeg_whose_folder_became_a_link_isnt_used(self) -> None:
+        self.install_runtime()
+        program = self.ffmpeg()
+        self.plan(setup_daw=Runtime("same"))
+        self.assertTrue(self.install(None, setup_daw=Runtime("same"))["ok"])
+        folder = program.parent
+        folder.rename(folder.with_name("bin-elsewhere"))
+        folder.symlink_to(folder.with_name("bin-elsewhere"))  # the same file, now reached through a link
+        self.assertEqual(self.status()["compressed_audio"]["state"], "changed", "its path now leads through a link")
 
     def test_in_the_terminal_ffmpeg_is_asked_last_and_no_keeps_wav_and_aiff(self) -> None:
         self.install_runtime()
