@@ -574,6 +574,14 @@ impl SoundIndex {
         true
     }
     pub fn search(&self, query: &SoundQuery) -> SearchResult<SoundHit> {
+        self.search_with_reasons(query, false)
+    }
+    /// The same ranking with model-facing reasons: no seed name, and only canonical musical values,
+    /// caller words or fixed measured-descriptor labels. Callers still bound the projected text.
+    pub fn search_indexed(&self, query: &SoundQuery) -> SearchResult<SoundHit> {
+        self.search_with_reasons(query, true)
+    }
+    fn search_with_reasons(&self, query: &SoundQuery, indexed: bool) -> SearchResult<SoundHit> {
         let words = words(&query.words);
         let describing: Vec<_> = words.iter().filter_map(|word| descriptor(word)).collect();
         let naming: Vec<_> = words.into_iter().filter(|word| !is_descriptor(word)).collect();
@@ -687,17 +695,33 @@ impl SoundIndex {
                         why.push(format!(
                             "{} BPM{}",
                             to_string(actual),
-                            if (actual / bpm).log2().abs() < 0.03 { "" } else { " (half or double)" }
+                            if (actual / bpm).log2().abs() < 0.03 {
+                                ""
+                            } else if !indexed {
+                                " (half or double)"
+                            } else if actual < bpm {
+                                " (half time)"
+                            } else {
+                                " (double time)"
+                            }
                         ));
                     }
                     if let Some(key) = &key {
-                        why.push(if entry.key.as_ref() == Some(key) {
-                            key.clone()
-                        } else if entry.key.is_some() && entry.key == relative {
-                            format!("{} (relative key)", entry.key.as_ref().unwrap())
+                        if indexed {
+                            if let Some(actual) = entry.key.as_deref().and_then(parse_key) {
+                                why.push(format!("{}key: {actual}", if entry.key == relative { "relative " } else { "" }));
+                            } else if let Some(note) = entry.note.as_deref().and_then(super::classify::parse_note) {
+                                why.push(format!("note {}", note.name));
+                            }
                         } else {
-                            format!("note {}", entry.note.as_deref().unwrap_or("undefined"))
-                        });
+                            why.push(if entry.key.as_ref() == Some(key) {
+                                key.clone()
+                            } else if entry.key.is_some() && entry.key == relative {
+                                format!("{} (relative key)", entry.key.as_ref().unwrap())
+                            } else {
+                                format!("note {}", entry.note.as_deref().unwrap_or("undefined"))
+                            });
+                        }
                     }
                     for (word, class) in naming.iter().zip(&classes) {
                         if made.lower.contains(word) {
@@ -714,14 +738,16 @@ impl SoundIndex {
                     }
                     for (describe, rank) in describing.iter().zip(&ranks) {
                         if let Some(value) = measure_of(entry, describe.measure) {
-                            if rank.get(&row).copied().unwrap_or(0.) >= 0.6 {
-                                why.push(format!("{}: {}", describe.says, measure_words(describe.measure, value)));
+                            if (!indexed || value.is_finite()) && rank.get(&row).copied().unwrap_or(0.) >= 0.6 {
+                                why.push(format!("{}{}: {}", if indexed { "measured " } else { "" }, describe.says, measure_words(describe.measure, value)));
                             }
                         }
                     }
                     let close = closeness.get(&row).copied();
                     if let (Some(close), Some(like)) = (close, &query.like) {
-                        why.insert(0, format!("{}% like {}{}", to_string(round(close)), like.name, differences(entry, like)));
+                        if !indexed {
+                            why.insert(0, format!("{}% like {}{}", to_string(round(close)), like.name, differences(entry, like)));
+                        }
                     }
                     SoundHit {
                         // A hit's own copy: a search gives few.
