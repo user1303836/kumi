@@ -151,6 +151,23 @@ const en = {
     inReply: 'Kumi measured it: the numbers are in its reply in the chat.',
     measured: (ago: string) => `Measured ${ago}`
   },
+  script: {
+    waiting: 'Script waiting for your approval',
+    says: (purpose: string) => `Hermes says: ${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    in: (language: string, daw: string) => `${language} in ${daw}`,
+    lines: (count: number) => (count === 1 ? '1 line' : `${count} lines`),
+    sha: (short: string) => `SHA-256 ${short}…`,
+    shaTitle: (sha: string) => `SHA-256 ${sha}: the hash of the code the approval names`,
+    code: 'The script’s code',
+    codeTitle: 'Every line of the code as it will run. Nothing runs from here.',
+    reading: 'Reading the code Kumi saved…',
+    unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
+    show: 'Show code',
+    hide: 'Hide code',
+    showTitle: 'The code this script ran, as Kumi saved it when its approval asked'
+  },
   listen: {
     measured: 'measured',
     measuredTitle: 'Measured on this computer by Kumi, from the audio file itself',
@@ -450,6 +467,23 @@ const ja: Shape<typeof en> = {
     inReply: 'Kumi は測定しました。数値はチャットの返答にあります。',
     measured: ago => `測定: ${ago}`
   },
+  script: {
+    waiting: '承認待ちのスクリプト',
+    says: purpose => `Hermes の説明: ${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    in: (language, daw) => `${daw} の ${language}`,
+    lines: count => `${count} 行`,
+    sha: short => `SHA-256 ${short}…`,
+    shaTitle: sha => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
+    code: 'スクリプトのコード',
+    codeTitle: '実行されるとおりのコードの全行です。ここからは何も実行されません。',
+    reading: 'Kumi が保存したコードを読み込み中…',
+    unreadable: '保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。',
+    show: 'コードを表示',
+    hide: 'コードを隠す',
+    showTitle: 'このスクリプトが実行したコード（承認を求めたときに Kumi が保存したもの）'
+  },
   listen: {
     measured: '測定値',
     measuredTitle: 'Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました',
@@ -744,6 +778,23 @@ const zh: Shape<typeof en> = {
     tooMuch: 'Kumi 已完成测量，但内容太多无法在此显示：数值在它在对话中的回复里。',
     inReply: 'Kumi 已完成测量：数值在它在对话中的回复里。',
     measured: ago => `测量于 ${ago}`
+  },
+  script: {
+    waiting: '等待你批准的脚本',
+    says: purpose => `Hermes 说：${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    in: (language, daw) => `${daw} 中的 ${language}`,
+    lines: count => `${count} 行`,
+    sha: short => `SHA-256 ${short}…`,
+    shaTitle: sha => `SHA-256 ${sha}：批准所指代码的哈希`,
+    code: '脚本代码',
+    codeTitle: '将要运行的完整代码。这里不会运行任何东西。',
+    reading: '正在读取 Kumi 保存的代码…',
+    unreadable: 'Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。',
+    show: '显示代码',
+    hide: '隐藏代码',
+    showTitle: '这个脚本运行的代码（在请求批准时由 Kumi 保存）'
   },
   listen: {
     measured: '实测',

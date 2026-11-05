@@ -12,6 +12,7 @@ import { Dot, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
 import { JobsView } from './jobs.tsx'
+import { PendingScriptView, SavedScript } from './script.tsx'
 
 /** The time, re-read every `every` ms while mounted, for "4 min ago" labels. */
 export function useNow(every = 30_000): number {
@@ -94,6 +95,8 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const undoable = changes.filter(rows => canUndoChange(state.status, rows)).length
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>
+      {/* A script waiting for its approval comes first, whole (CC-19): it's what the producer is deciding on now. */}
+      {state.script && <PendingScriptView daw={state.status?.daw} script={state.script} />}
       <div style={{ ...S.section, gap: 8 }}>
         <div style={{ ...S.row, gap: 8 }}>
           <Dot color={TONE[words.tone]} size={8} />
@@ -149,6 +152,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
           target={state.setup?.target}
+          detail={item => (item.script ? <SavedScript item={item} store={store} /> : null)}
           action={item => {
             const rows = changeOf.get(item)
             if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null

@@ -117,11 +117,13 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
 }
 
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
- *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. */
+ *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. `detail` adds
+ *  a surface's own part under a row's words (a script's code). */
 export function HistoryView({
   history,
   now,
   action,
+  detail,
   live = false,
   daw,
   target
@@ -129,6 +131,7 @@ export function HistoryView({
   history: History | null
   now?: number
   action?: (item: HistoryItem) => ReactNode
+  detail?: (item: HistoryItem) => ReactNode
   live?: boolean
   daw?: unknown
   target?: string
@@ -174,6 +177,7 @@ export function HistoryView({
                 )
               )}
               {dawUndo && <DawUndo daw={daw} how={dawUndo} keys={undoKeys(target)} />}
+              {detail?.(item)}
             </span>
             {dawUndo ? null : action?.(item)}
           </li>

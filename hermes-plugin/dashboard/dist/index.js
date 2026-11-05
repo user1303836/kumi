@@ -180,6 +180,23 @@
       inReply: "Kumi measured it: the numbers are in its reply in the chat.",
       measured: (ago2) => `Measured ${ago2}`
     },
+    script: {
+      waiting: "Script waiting for your approval",
+      says: (purpose) => `Hermes says: ${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      in: (language, daw) => `${language} in ${daw}`,
+      lines: (count) => count === 1 ? "1 line" : `${count} lines`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}: the hash of the code the approval names`,
+      code: "The script’s code",
+      codeTitle: "Every line of the code as it will run. Nothing runs from here.",
+      reading: "Reading the code Kumi saved…",
+      unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
+      show: "Show code",
+      hide: "Hide code",
+      showTitle: "The code this script ran, as Kumi saved it when its approval asked"
+    },
     listen: {
       measured: "measured",
       measuredTitle: "Measured on this computer by Kumi, from the audio file itself",
@@ -473,6 +490,23 @@
       inReply: "Kumi は測定しました。数値はチャットの返答にあります。",
       measured: (ago2) => `測定: ${ago2}`
     },
+    script: {
+      waiting: "承認待ちのスクリプト",
+      says: (purpose) => `Hermes の説明: ${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      in: (language, daw) => `${daw} の ${language}`,
+      lines: (count) => `${count} 行`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
+      code: "スクリプトのコード",
+      codeTitle: "実行されるとおりのコードの全行です。ここからは何も実行されません。",
+      reading: "Kumi が保存したコードを読み込み中…",
+      unreadable: "保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。",
+      show: "コードを表示",
+      hide: "コードを隠す",
+      showTitle: "このスクリプトが実行したコード（承認を求めたときに Kumi が保存したもの）"
+    },
     listen: {
       measured: "測定値",
       measuredTitle: "Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました",
@@ -764,6 +798,23 @@
       tooMuch: "Kumi 已完成测量，但内容太多无法在此显示：数值在它在对话中的回复里。",
       inReply: "Kumi 已完成测量：数值在它在对话中的回复里。",
       measured: (ago2) => `测量于 ${ago2}`
+    },
+    script: {
+      waiting: "等待你批准的脚本",
+      says: (purpose) => `Hermes 说：${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      in: (language, daw) => `${daw} 中的 ${language}`,
+      lines: (count) => `${count} 行`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}：批准所指代码的哈希`,
+      code: "脚本代码",
+      codeTitle: "将要运行的完整代码。这里不会运行任何东西。",
+      reading: "正在读取 Kumi 保存的代码…",
+      unreadable: "Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。",
+      show: "显示代码",
+      hide: "隐藏代码",
+      showTitle: "这个脚本运行的代码（在请求批准时由 Kumi 保存）"
     },
     listen: {
       measured: "实测",
@@ -1328,6 +1379,7 @@
     history,
     now,
     action,
+    detail,
     live = false,
     daw,
     target
@@ -1353,7 +1405,8 @@
             // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
             item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
           ),
-          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) })
+          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
+          detail?.(item)
         ] }),
         dawUndo ? null : action?.(item)
       ] }, item.id);
@@ -1930,7 +1983,18 @@
   var MOST_JOBS = 20;
   var MOST_ROUNDS = 6;
   var MOST_REFERENCES = 8;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null };
+  var SHA256 = /^[0-9a-f]{64}$/;
+  function pendingScriptOf(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const value = payload;
+    const id = plainId(value.tool_call_id);
+    const language = value.language === "python" || value.language === "lua" ? value.language : null;
+    if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
+    const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
+    const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
+    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning") };
+  }
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
   }
@@ -2081,6 +2145,34 @@
       const keys = Object.keys(rounds);
       if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
       this.set({ rounds });
+    }
+    /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
+     *  no plain call id, exact SHA-256 or known language shows nothing. */
+    scriptPending(payload) {
+      const pending = pendingScriptOf(payload);
+      if (!pending) return;
+      this.set({ script: { pending, code: null } });
+      const generation = this.generation;
+      void this.readScript(pending.sha256, pending.language).then((code) => {
+        if (generation !== this.generation || this.state.script?.pending !== pending) return;
+        this.set({ script: { pending, code: code ?? false } });
+      });
+    }
+    /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
+    scriptSettled(toolCallId) {
+      const id = plainId(toolCallId);
+      if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null });
+    }
+    /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
+     *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
+    async readScript(sha256, language) {
+      if (!SHA256.test(sha256)) return null;
+      try {
+        const read = await this.fetch(`/script?sha=${sha256}&language=${language}`);
+        return read && read.sha256 === sha256 && typeof read.code === "string" ? read : null;
+      } catch {
+        return null;
+      }
     }
     /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
      *  the source says it was running: a call that started it, or an event that reported it running. */

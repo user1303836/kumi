@@ -584,6 +584,39 @@ test("a job's words say what it does, how far it got and how it ended", () => {
   assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')
 })
 
+test("a pending script (CC-19) shows only when well formed, with its code read by hash and checked, until it settles", async () => {
+  const sha = 'a'.repeat(64)
+  const code = 'import Live\nsong.tempo = 120\n'
+  const asked = []
+  const kumi = new store.KumiStore(async path => {
+    asked.push(path)
+    if (path === `/script?sha=${sha}&language=python`) return { sha256: sha, language: 'python', code, lines: 2 }
+    if (path.startsWith('/script?sha=b')) return { sha256: 'c'.repeat(64), language: 'lua', code: 'os.exit()', lines: 1 }
+    throw new Error('404: no')
+  })
+  const pending = { tool_call_id: 'call-7', language: 'python', sha256: sha, purpose: 'Set the tempo', lines: 2, warning: "Runs with the DAW's access to your computer" }
+  // Nothing that isn't a plain call id, an exact SHA-256 and a known language shows, or is read.
+  for (const bad of [{ ...pending, sha256: sha.toUpperCase() }, { ...pending, sha256: `../${sha}` }, { ...pending, language: 'sh' }, { ...pending, tool_call_id: '../x' }]) {
+    kumi.scriptPending(bad)
+  }
+  assert.equal(kumi.get().script, null)
+  assert.deepEqual(asked, [])
+  kumi.scriptPending(pending)
+  assert.equal(kumi.get().script.code, null, 'shown while its code is read')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(kumi.get().script.code.code, code)
+  assert.equal(kumi.get().script.pending.purpose, 'Set the tempo')
+  // Another call's settling leaves it; its own clears it.
+  kumi.scriptSettled('call-8')
+  assert.notEqual(kumi.get().script, null)
+  kumi.scriptSettled('call-7')
+  assert.equal(kumi.get().script, null)
+  // A read that answers with other code than the hash named is never shown as the script's code.
+  kumi.scriptPending({ ...pending, tool_call_id: 'call-9', language: 'lua', sha256: 'b'.repeat(64) })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(kumi.get().script.code, false)
+})
+
 test('a job shows only once its profile answers for it, as news when first seen finished only if reported running, and ends when Kumi stops', async () => {
   let release
   let answer = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 1, total: 4 } }

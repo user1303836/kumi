@@ -286,6 +286,24 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
 })
 
+test("a pending script (CC-19) shows Hermes's claim as one, its facts, the approval's warning and every numbered line", async () => {
+  const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const sha = 'f'.repeat(64)
+  const pending = { tool_call_id: 'call-7', language: 'lua', sha256: sha, purpose: 'Rename every pattern', lines: 3, warning: "Runs with the DAW's access to your computer; Kumi can't undo it" }
+  // A right-to-left override (Trojan Source) that got past serve is drawn where it is, never applied.
+  const code = 'for i = 1, #song.patterns do\n  song.patterns[i].name = "Part " .. i -- \u202E edit\nend\n'
+  const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: { sha256: sha, language: 'lua', code, lines: 3 } } }))
+  for (const text of [english('script.says', 'Rename every pattern'), 'Lua in Renoise', '3 lines', 'SHA-256 ffffffffffff', 'Kumi can&#x27;t undo it', 'for i = 1, #song.patterns do', '>3<', 'U+202E']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.ok(!html.includes('\u202E'), 'the override character itself never reaches the page')
+  // While its code is read, and when it can't be, the section says so rather than showing anything else.
+  const reading = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: null } }))
+  assert.ok(reading.includes(english('script.reading')) && !reading.includes('<pre'))
+  const unreadable = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: false } }))
+  assert.ok(unreadable.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !unreadable.includes('<pre'))
+})
+
 test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
   const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })

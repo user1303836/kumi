@@ -209,6 +209,16 @@ const plugin: HermesPlugin = {
         }, LISTEN_FALLBACK_MS)
       )
     })
+    // CC-19: a script's approval waits in the chat in front. The pane shows its whole code, read by its SHA-256 from
+    // the file the plugin saved, until the approval settles (any outcome) or the call completes.
+    ctx.onEvent(`plugin.${PLUGIN_ID}.script.pending`, event => {
+      const payload = payloadOf(event)
+      if (forChatInFront(payload)) store.scriptPending(payload)
+    })
+    ctx.onEvent(`plugin.${PLUGIN_ID}.script.settled`, event => {
+      const payload = payloadOf(event)
+      if (forChatInFront(payload)) store.scriptSettled(payload.tool_call_id)
+    })
     ctx.onEvent('tool.complete', event => {
       const payload = payloadOf(event)
       const name = typeof payload.name === 'string' ? payload.name : ''
@@ -218,6 +228,7 @@ const plugin: HermesPlugin = {
       // ended. `kumi_job` only reads a job that exists, which may have ended long ago.
       store.trackJob(jobOf(payload.result), name !== 'kumi_job')
       const id = callId(payload.tool_id)
+      if (name === 'kumi_script') store.scriptSettled(id)
       if (name === 'kumi_listen') store.noteListen(payload.result)
       if (name === 'kumi_listen' && id) {
         // Its tool part shows, card and all: no tab.
