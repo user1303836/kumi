@@ -1,6 +1,7 @@
 use lynx_kumi::native::{proof, PROTOCOL};
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -21,7 +22,13 @@ pub struct State {
     pub gui_value: f64,
     pub opaque_device_state: String,
     pub drop_mutation_response: bool,
-    history: Vec<(Value, Vec<Value>)>,
+    pattern_notes: HashMap<String, Vec<Value>>,
+    history: Vec<Saved>,
+}
+struct Saved {
+    session: Value,
+    notes: Vec<Value>,
+    pattern_notes: HashMap<String, Vec<Value>>,
 }
 pub struct Fake {
     directory: tempfile::TempDir,
@@ -36,7 +43,7 @@ impl Fake {
         let path = directory.path().join("native.json");
         daw_bridge::owner::write_owner_only(&path,json!({"protocol":PROTOCOL,"host":"127.0.0.1","port":listener.local_addr().unwrap().port(),"token":"a".repeat(64),"pid":std::process::id(),"appVersion":"0.1.23-test"}).to_string().as_bytes()).unwrap();
         let state = Arc::new(Mutex::new(State {
-            session: json!({"project":{"id":"1234567890abcdef1234567890abcdef","name":"Instrument test","path":"/tmp/fixture.lynx","modified":false},"controlEpoch":"b".repeat(64),"revision":1,"appVersion":"0.1.23-test","bpm":120,"beatsPerBar":4,"playing":false,"recording":false,"songMode":false,"positionTicks":0,"currentPattern":0,"channels":[{"index":0,"channelId":"01","name":"Synth","instrument":"native:4","volume":0.78,"pan":0,"muted":false,"mixer":1},{"index":1,"channelId":"02","name":"Kick","instrument":"native:0","volume":0.6,"pan":0.1,"muted":false,"mixer":2}],"mixer":[{"index":0,"name":"Master","volume":1,"pan":0,"muted":false,"solo":false}],"patterns":[{"index":0,"patternId":"03","name":"Pattern 1","noteCount":3}],"playlist":[],"capabilities":{"instruments":true,"effects":true,"playlist":true,"pluginParameters":true},"canUndo":false,"canRedo":false}),
+            session: json!({"project":{"id":"1234567890abcdef1234567890abcdef","name":"Instrument test","path":"/tmp/fixture.lynx","modified":false},"controlEpoch":"b".repeat(64),"revision":1,"appVersion":"0.1.23-test","bpm":120,"beatsPerBar":4,"playing":false,"recording":false,"songMode":false,"positionTicks":0,"currentPattern":0,"channels":[{"index":0,"channelId":"01","name":"Synth","instrument":"native:4","volume":0.78,"pan":0,"muted":false,"mixer":1},{"index":1,"channelId":"02","name":"Kick","instrument":"native:0","volume":0.6,"pan":0.1,"muted":false,"mixer":2}],"mixer":[{"index":0,"name":"Master","volume":1,"pan":0,"muted":false,"solo":false}],"patterns":[{"index":0,"patternId":"03","name":"Pattern 1","noteCount":3,"lengthTicks":0,"colour":9}],"playlist":[],"capabilities":{"patterns":true,"instruments":true,"effects":true,"playlist":true,"pluginParameters":true},"canUndo":false,"canRedo":false}),
             notes: vec![json!({"key":60,"channel":0}), json!({"key":64,"channel":1}), json!({"key":67,"channel":0})],
             calls: vec![],
             authenticated: 0,
@@ -45,6 +52,7 @@ impl Fake {
             gui_value: 0.5,
             opaque_device_state: "fixture-state".into(),
             drop_mutation_response: false,
+            pattern_notes: HashMap::new(),
             history: vec![],
         }));
         let (stop, mut stopped) = oneshot::channel();
@@ -146,9 +154,11 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
         "pattern.notes" => {
             let offset = args["offset"].as_u64().unwrap_or(0) as usize;
             let limit = args["limit"].as_u64().unwrap_or(256) as usize;
-            let notes = state.notes.iter().skip(offset).take(limit).cloned().collect::<Vec<_>>();
-            let mut result = json!({"index":0,"offset":offset,"notes":notes,"totalNotes":state.notes.len()});
-            if offset + limit < state.notes.len() {
+            let index = args["index"].as_u64().unwrap() as usize;
+            let source = notes_for(state, index);
+            let notes = source.iter().skip(offset).take(limit).cloned().collect::<Vec<_>>();
+            let mut result = json!({"index":index,"offset":offset,"notes":notes,"totalNotes":source.len()});
+            if offset + limit < source.len() {
                 result["nextOffset"] = (offset + limit).into();
             }
             metadata(state, result)
@@ -170,7 +180,7 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
                 )
             }
         }
-        "tempo.set" | "pattern.replace_notes" | "project.edit" | "history.undo" => {
+        "tempo.set" | "pattern.replace_notes" | "pattern.create" | "pattern.clone" | "pattern.set" | "project.edit" | "history.undo" => {
             if args["expectedProjectId"] != state.session["project"]["id"]
                 || args["expectedEpoch"] != state.session["controlEpoch"]
                 || args["expectedRevision"].as_u64() != state.session["revision"].as_u64()
@@ -178,12 +188,25 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
                 return json!({"ok":false,"error":"stale native guard"});
             }
             let revision = state.session["revision"].as_u64().unwrap() + 1;
+            let mut pattern_index = args["index"].as_u64().unwrap_or(state.session["patterns"].as_array().unwrap().len() as u64) as usize;
+            if op == "pattern.set" {
+                let old = &state.session["patterns"][pattern_index];
+                let changed = ["name", "lengthTicks"].iter().any(|key| args.get(*key).is_some_and(|value| value != &old[*key]));
+                if !changed {
+                    return metadata(state, pattern_result(state, pattern_index, false));
+                }
+            }
             if op == "history.undo" {
-                let Some((session, notes)) = state.history.pop() else { return json!({"ok":false,"error":"no undo"}) };
-                state.session = session;
-                state.notes = notes;
+                let Some(saved) = state.history.pop() else { return json!({"ok":false,"error":"no undo"}) };
+                state.session = saved.session;
+                state.notes = saved.notes;
+                state.pattern_notes = saved.pattern_notes;
             } else {
-                state.history.push((state.session.clone(), state.notes.clone()));
+                state.history.push(Saved {
+                    session: state.session.clone(),
+                    notes: state.notes.clone(),
+                    pattern_notes: state.pattern_notes.clone(),
+                });
                 if op == "tempo.set" {
                     state.session["bpm"] = args["bpm"].clone();
                 } else if op == "project.edit" {
@@ -198,15 +221,60 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
                             _ => panic!("test patch path not implemented"),
                         }
                     }
-                } else {
-                    state.notes = args["notes"].as_array().unwrap().clone();
-                    state.session["patterns"][0]["noteCount"] = state.notes.len().into();
+                } else if op == "pattern.replace_notes" {
+                    let notes = args["notes"].as_array().unwrap().clone();
+                    let id = state.session["patterns"][pattern_index]["patternId"].as_str().unwrap().to_owned();
+                    state.session["patterns"][pattern_index]["noteCount"] = notes.len().into();
+                    if id == "03" {
+                        state.notes = notes;
+                    } else {
+                        state.pattern_notes.insert(id, notes);
+                    }
+                } else if op == "pattern.set" {
+                    for field in ["name", "lengthTicks"] {
+                        if let Some(value) = args.get(field) {
+                            state.session["patterns"][pattern_index][field] = value.clone();
+                        }
+                    }
+                } else if op == "pattern.create" || op == "pattern.clone" {
+                    let id = format!("{:016x}", 0x100 + revision);
+                    let mut row = if op == "pattern.clone" {
+                        let notes = notes_for(state, pattern_index).to_vec();
+                        state.pattern_notes.insert(id.clone(), notes);
+                        let source = state.session["patterns"][pattern_index].clone();
+                        pattern_index += 1;
+                        source
+                    } else {
+                        state.pattern_notes.insert(id.clone(), vec![]);
+                        json!({"name":format!("Pattern {}", state.session["patterns"].as_array().unwrap().len()+1),"noteCount":0,"lengthTicks":args["lengthTicks"].as_u64().unwrap_or(0),"colour":0})
+                    };
+                    row["patternId"] = id.into();
+                    if let Some(name) = args.get("name") {
+                        row["name"] = name.clone();
+                    } else if op == "pattern.clone" {
+                        row["name"] = format!("{} #2", row["name"].as_str().unwrap()).into();
+                    }
+                    let patterns = state.session["patterns"].as_array_mut().unwrap();
+                    patterns.insert(pattern_index, row);
+                    for (index, row) in patterns.iter_mut().enumerate() {
+                        row["index"] = index.into();
+                    }
+                    for clip in state.session["playlist"].as_array_mut().unwrap() {
+                        if clip["kind"] == "pattern" && clip["pattern"].as_u64().is_some_and(|p| p >= pattern_index as u64) {
+                            clip["pattern"] = (clip["pattern"].as_u64().unwrap() + 1).into();
+                        }
+                    }
+                    state.session["currentPattern"] = pattern_index.into();
                 }
             }
             state.session["revision"] = revision.into();
             state.session["canUndo"] = (!state.history.is_empty()).into();
             state.session["canRedo"] = (op == "history.undo").into();
-            metadata(state, json!({"changed":true,"bpm":state.session["bpm"]}))
+            if matches!(op, "pattern.create" | "pattern.clone" | "pattern.set") {
+                metadata(state, pattern_result(state, pattern_index, true))
+            } else {
+                metadata(state, json!({"changed":true,"bpm":state.session["bpm"]}))
+            }
         }
         "transport.stop" => {
             state.session["playing"] = false.into();
@@ -214,6 +282,18 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
         }
         _ => json!({"ok":false,"error":"unsupported fake operation"}),
     }
+}
+fn notes_for(state: &State, index: usize) -> &[Value] {
+    let id = state.session["patterns"][index]["patternId"].as_str().unwrap();
+    if id == "03" {
+        &state.notes
+    } else {
+        &state.pattern_notes[id]
+    }
+}
+fn pattern_result(state: &State, index: usize, changed: bool) -> Value {
+    let row = &state.session["patterns"][index];
+    json!({"changed":changed,"index":index,"patternId":row["patternId"],"name":row["name"],"lengthTicks":row["lengthTicks"],"patternCount":state.session["patterns"].as_array().unwrap().len()})
 }
 async fn read(stream: &mut BufReader<TcpStream>) -> Option<Value> {
     let mut line = String::new();
@@ -227,7 +307,18 @@ async fn send(stream: &mut BufReader<TcpStream>, value: &Value) -> bool {
 }
 
 fn document(state: &State) -> Value {
-    json!({"format":"lynx","projectId":state.session["project"]["id"],"tempo":state.session["bpm"],"channels":state.session["channels"],"mixer":state.session["mixer"],"patterns":[{"name":state.session["patterns"][0]["name"],"notes":state.notes}],"playlist":state.session["playlist"]})
+    let patterns = state.session["patterns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let mut row = row.clone();
+            row["notes"] = json!(notes_for(state, index));
+            row
+        })
+        .collect::<Vec<_>>();
+    json!({"format":"lynx","projectId":state.session["project"]["id"],"tempo":state.session["bpm"],"channels":state.session["channels"],"mixer":state.session["mixer"],"patterns":patterns,"playlist":state.session["playlist"]})
 }
 fn device_hash(state: &State) -> String {
     daw_bridge::auth::sha256_hex(format!("{}:{}", state.gui_value, state.opaque_device_state).as_bytes())

@@ -210,3 +210,85 @@ async fn instrument_insertion_uses_shared_preview_apply_history_and_targeted_und
         })
         .await;
 }
+
+#[test]
+fn pattern_change_inputs_require_revision_and_keep_metadata_bounded() {
+    for tool in ["lynx_pattern_create", "lynx_pattern_clone", "lynx_pattern_set"] {
+        let kind = KINDS.iter().find(|kind| kind.tool == tool).unwrap();
+        let schema = Value::Object(kind.input_schema());
+        let valid = match tool {
+            "lynx_pattern_create" => json!({"name":"Verse","lengthTicks":3840,"expectedRevision":7}),
+            "lynx_pattern_clone" => json!({"index":0,"name":"Verse double","expectedRevision":7}),
+            _ => json!({"index":0,"name":"Verse final","lengthTicks":0,"expectedRevision":7}),
+        };
+        assert!(problem(&schema, &valid).is_none(), "{tool}");
+        for field in ["expectedRevision", "index"] {
+            if field == "index" && tool == "lynx_pattern_create" {
+                continue;
+            }
+            let mut missing = valid.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(problem(&schema, &missing).is_some(), "{tool} must reject missing {field}");
+        }
+        let mut invalid = valid.clone();
+        invalid["name"] = "x".repeat(257).into();
+        assert!(problem(&schema, &invalid).is_some(), "{tool}: overlong name");
+        invalid["name"] = "".into();
+        assert!(problem(&schema, &invalid).is_some(), "{tool}: empty name");
+        invalid = valid.clone();
+        invalid["unknown"] = true.into();
+        assert!(problem(&schema, &invalid).is_some(), "{tool}: unexpected field");
+        if tool != "lynx_pattern_clone" {
+            for length in [-1.0, 0.5, 1_000_000_001.0] {
+                invalid = valid.clone();
+                invalid["lengthTicks"] = json!(length);
+                assert!(problem(&schema, &invalid).is_some(), "{tool}: invalid length {length}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn pattern_tools_use_shared_preview_apply_history_and_targeted_undo() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (tool, kind, input) in [
+                ("lynx_pattern_create", "pattern.create", json!({"name":"Verse","lengthTicks":3840,"expectedRevision":7})),
+                ("lynx_pattern_clone", "pattern.clone", json!({"index":0,"name":"Verse double","expectedRevision":7})),
+                ("lynx_pattern_set", "pattern.set", json!({"index":0,"lengthTicks":0,"expectedRevision":7})),
+            ] {
+                let host = Rc::new(Host { requests: RefCell::default(), revision: Cell::new(7) });
+                let connected: Rc<dyn McpEndpoint> = host.clone();
+                let changes = Rc::new(RefCell::new(Vec::new()));
+                let recorded = changes.clone();
+                let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+                context.on_change = Some(Rc::new(move |change| recorded.borrow_mut().push(change)));
+                let home = tempfile::tempdir().unwrap();
+                let integration = create_lynx_integration(OwnOptions {
+                    context,
+                    kumi_home: home.path().into(),
+                    connect: Some(Rc::new(move |_| {
+                        let host = connected.clone();
+                        async move { Ok(host) }.boxed_local()
+                    })),
+                });
+                let observation = integration.observe(Signal::new(), None).await.unwrap();
+                let edit = observation.tools.iter().find(|entry| entry.name() == tool).unwrap();
+                let edited = edit.execute(input.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+                assert!(!edited.is_error, "{tool}: {}", edited.text);
+                assert_eq!(changes.borrow().len(), 1, "{tool}");
+                assert_eq!(changes.borrow()[0].family, ChangeFamily::Clip);
+                assert_eq!(integration.undo(None, Signal::new()).await.unwrap().state, ChangeState::Undone);
+                integration.close().await.unwrap();
+                let requests = host.requests.borrow();
+                let previews = requests.iter().filter(|(name, _)| name == "change_preview").collect::<Vec<_>>();
+                assert_eq!(previews.len(), 1, "{tool}");
+                assert_eq!(previews[0].1["kind"], kind);
+                assert_eq!(previews[0].1["input"], input);
+                assert_eq!(requests.iter().filter(|(name, _)| name == "change_apply").count(), 1);
+                assert!(requests.iter().any(|(name, _)| name == "change_undo"));
+                assert!(!requests.iter().any(|(name, _)| name.starts_with("history.")));
+            }
+        })
+        .await;
+}

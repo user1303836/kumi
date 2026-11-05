@@ -404,6 +404,49 @@ fn validate_target(kind: &str, input: &Value, session: &Value) -> Result<()> {
                 }
             }
         }
+        "pattern.create" | "pattern.clone" | "pattern.set" => {
+            if session.pointer("/capabilities/patterns") != Some(&Value::Bool(true)) {
+                return Err(Error::bad(
+                    "This LYNX build does not support pattern creation and metadata edits; use the matching native-control build",
+                ));
+            }
+            let allowed = if kind == "pattern.clone" {
+                &["index", "name", "expectedRevision"][..]
+            } else {
+                &["index", "name", "lengthTicks", "expectedRevision"][..]
+            };
+            if input.as_object().is_none_or(|fields| fields.keys().any(|key| !allowed.contains(&key.as_str()))) {
+                return Err(Error::bad("Pattern edits contain an unsupported field"));
+            }
+            let count = array(session, "patterns").len();
+            if input.get("index").is_some() && integer(input, "index")? > 100000 {
+                return Err(Error::bad("index must be at most 100000"));
+            }
+            if kind != "pattern.set" && count >= 100000 {
+                return Err(Error::bad("The pattern count has reached the adapter's 100000-pattern limit"));
+            }
+            if kind == "pattern.create" {
+                if input.get("index").is_some() {
+                    index("index", count, true)?;
+                }
+            } else {
+                index("index", count, false)?;
+            }
+            if let Some(name) = input.get("name") {
+                let name = name.as_str().ok_or_else(|| Error::bad("name must be a string"))?;
+                if name.trim().is_empty() || name.chars().count() > 256 || name.chars().any(char::is_control) {
+                    return Err(Error::bad(
+                        "name must contain 1–256 characters, with a non-whitespace character and no control characters",
+                    ));
+                }
+            }
+            if input.get("lengthTicks").is_some() && integer(input, "lengthTicks")? > 1_000_000_000 {
+                return Err(Error::bad("lengthTicks must be from 0 (automatic) to 1000000000 ticks"));
+            }
+            if kind == "pattern.set" && input.get("name").is_none() && input.get("lengthTicks").is_none() {
+                return Err(Error::bad("pattern.set requires name, lengthTicks or both"));
+            }
+        }
         "mixer.set" => index("index", array(session, "mixer").len(), false)?,
         "channel.set" => index("index", array(session, "channels").len(), false)?,
         "pattern.replace_notes" => {
@@ -430,12 +473,15 @@ fn target(kind: &str, input: &Value, session: &Value) -> Value {
     let field = match kind {
         "mixer.set" => Some("mixer"),
         "channel.set" | "instrument.replace" => Some("channels"),
-        "pattern.replace_notes" => Some("patterns"),
+        "pattern.replace_notes" | "pattern.clone" | "pattern.set" => Some("patterns"),
         _ => None,
     };
     if let Some(field) = field {
-        let index = input.get("index").or_else(|| input.get("channelIndex")).and_then(Value::as_u64).unwrap_or(0) as usize;
+        let index = integer(input, "index").or_else(|_| integer(input, "channelIndex")).unwrap_or(0) as usize;
         return array(session, field).get(index).cloned().unwrap_or(Value::Null);
+    }
+    if kind == "pattern.create" {
+        return json!({"operation":kind,"index":input.get("index").cloned().unwrap_or_else(|| array(session,"patterns").len().into()),"patternCount":array(session,"patterns").len()});
     }
     input.get("target").cloned().unwrap_or_else(|| json!({"operation":kind}))
 }
@@ -455,6 +501,24 @@ fn display(kind: &str, input: &Value, session: &Value) -> Value {
         "instrument.replace" => format!("Replace instrument on channel {}", input["channelIndex"]),
         "channel.set" => format!("Change channel {}: {}", input["index"], settings(input)),
         "mixer.set" => format!("Change mixer insert {}: {}", input["index"], settings(input)),
+        "pattern.create" => format!(
+            "Create pattern {} at {}",
+            input["name"].as_str().unwrap_or("(automatic name)"),
+            input.get("index").cloned().unwrap_or_else(|| array(session, "patterns").len().into())
+        ),
+        "pattern.clone" => {
+            format!("Clone pattern {}{}", input["index"], input["name"].as_str().map(|name| format!(" as {name}")).unwrap_or_default())
+        }
+        "pattern.set" => format!(
+            "Change pattern {}: {}{}",
+            input["index"],
+            ["name", "lengthTicks"]
+                .iter()
+                .filter_map(|key| input.get(*key).map(|value| format!("{key} {value}")))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if input.get("lengthTicks").is_some() { "; untrimmed full-pattern Playlist clips follow its length" } else { "" }
+        ),
         "pattern.replace_notes" => {
             format!("Pattern {}: {} → {} notes", input["index"], target(kind, input, session)["noteCount"], array(input, "notes").len())
         }
@@ -465,7 +529,12 @@ fn display(kind: &str, input: &Value, session: &Value) -> Value {
         "project.edit" => format!("Edit project document in {} atomic operations", array(input, "patch").len()),
         _ => kind.into(),
     };
-    let unchanged = kind == "tempo.set" && input["bpm"].as_f64() == session["bpm"].as_f64();
+    let unchanged = (kind == "tempo.set" && input["bpm"].as_f64() == session["bpm"].as_f64())
+        || (kind == "pattern.set" && {
+            let before = target(kind, input, session);
+            input.get("name").is_none_or(|name| *name == before["name"])
+                && input.get("lengthTicks").is_none_or(|length| length.as_f64() == before["lengthTicks"].as_f64())
+        });
     json!({"title":title.chars().filter(|c|!c.is_control()).take(512).collect::<String>(),"unchanged":unchanged})
 }
 fn settings(input: &Value) -> String {

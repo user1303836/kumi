@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
 mod document;
+mod patterns;
 mod support;
 
 use daw_bridge::{
