@@ -4,6 +4,7 @@
 use super::connection::{self, Project};
 use super::ctx::{reads, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::PROTOCOL;
+use kumi_types::daw::DawId;
 use serde_json::{json, Value};
 
 pub static STATUS: Operation = Operation {
@@ -46,7 +47,11 @@ fn connects(_: &JsonObject) -> Effect {
 fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         if let Some(daw) = call.args.get("daw").and_then(Value::as_str).filter(|daw| *daw != ctx.daw().as_str()) {
-            let reason = format!("This runtime works with {}, not {daw}: change the DAW in the plugin's settings.", ctx.daw().as_str());
+            let asked = DawId::parse(daw).map_or(daw, |asked| asked.profile().words.app);
+            let reason = format!(
+                "Kumi's runtime works in {}, not {asked}: set Kumi's DAW to {asked} in Hermes's settings for the Kumi plugin. It takes effect once the chat that started this runtime ends.",
+                ctx.daw().profile().words.app
+            );
             return Err(OpError::Refused { code: "other_daw", reason, owner: None });
         }
         let connection = connection::connect(ctx, call.signal.clone()).await?;

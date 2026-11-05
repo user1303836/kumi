@@ -208,8 +208,8 @@ impl Look {
         if self.script_writes() {
             if self.scripts != self.live_scripts {
                 effects.push(format!(
-                    "The bridge's receipt names {} as Live's Remote Scripts folder, not the one Live uses now ({}): the update goes there",
-                    self.scripts, self.live_scripts
+                    "An earlier install put Kumi's Remote Script in {}, not the folder Live uses now ({}): the update goes to {}",
+                    self.scripts, self.live_scripts, self.scripts
                 ));
             }
             // The bridge's lifecycle writes its configuration, secret, receipt and journal in the state folder, and the
