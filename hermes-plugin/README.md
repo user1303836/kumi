@@ -58,8 +58,9 @@ Kumi needs two things on the machine that runs Hermes, can use a third, and asks
    unpacks it (82–120 MB) into this profile's plugin data, and refuses anything that doesn't match.
 2. **Its part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's extension or Renoise's tool,
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
-   If a standalone Kumi already put its part in Live, setup offers to use that installation instead of replacing it;
-   for REAPER and Renoise, Kumi for Hermes can't use a standalone Kumi's part yet. The first DAW you set up becomes
+   If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
+   part in Live, setup offers to use that installation instead of replacing it; for REAPER and Renoise, Kumi for Hermes
+   can't use another Kumi's part yet. The first DAW you set up becomes
    Kumi's `daw` in the same approval; setting up another one keeps the current DAW and ends with the step that
    switches: `hermes kumi setup --daw <daw> --use`, approved like the rest.
 3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
@@ -146,7 +147,7 @@ everything.
   the audio or file paths) through Hermes's own model access: to the model set for Kumi's listening task in Hermes (it
   must accept images), or to the fallback providers Hermes is configured to try for that task. Hermes retries a failed
   attempt and may fall back, which can add time and token cost.
-- **A standalone Kumi:** if you let Kumi for Hermes use a standalone Kumi's installation (Live only), its runtime
+- **Another Kumi's installation:** if you let Kumi for Hermes use another Kumi's installation (Live only), its runtime
   reads that installation's DAW connection files and writes its own connection state there, never its sign-in or
   settings. A standalone Kumi's sign-in, model providers, account files and updater are never used.
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published; a job's answer (change

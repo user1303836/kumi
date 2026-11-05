@@ -47,10 +47,10 @@ terminal, which asks before it changes the setting. You can also change the DAW 
 (`plugins.entries.kumi.settings.daw` in your profile's config.yaml). Where Hermes's settings can't be written, setup
 says so and where to set the DAW instead.
 
-If a standalone Kumi already put its part in Live, setup says so and offers to use that installation instead of
-replacing it. Kumi for Hermes then reads that installation's connection files and writes its own connection state
-there, never its sign-in or settings. For REAPER and Renoise, Kumi for Hermes can't use a standalone Kumi's part yet:
-setup says so and leaves it as it is.
+If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its part
+in Live, setup says so and offers to use that installation instead of replacing it. Kumi for Hermes then reads that
+installation's connection files and writes its own connection state there, never its sign-in or settings. For REAPER
+and Renoise, Kumi for Hermes can't use another Kumi's part yet: setup says so and leaves it as it is.
 
 Setup never starts or quits your DAW, chooses a Control Surface, or saves your project.
 
@@ -155,5 +155,6 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 - Nothing from Kumi in Hermes Desktop: check Kumi's **Agent** and **Desktop** switches under Capabilities → Plugins,
   and that it's enabled in Hermes (`hermes plugins enable kumi`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
-- Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi for Hermes uses a standalone Kumi's
-  installation, run `kumi --daw ableton bridge` with that Kumi instead. Kumi Ears needs Max for Live.
+- Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi for Hermes uses another Kumi's
+  installation, set Live up again with that Kumi (`kumi --daw ableton bridge` for a standalone Kumi, or setup in its
+  own Hermes profile). Kumi Ears needs Max for Live.

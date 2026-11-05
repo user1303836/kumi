@@ -32,7 +32,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 
-如果单独的 Kumi 已经安装了 Kumi 的 Live 组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样 Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。对于 REAPER 和 Renoise，Kumi for Hermes 目前还不能使用单独的 Kumi 的组件：设置会说明这一点，并保持原样。
+如果这台电脑上的另一套 Kumi（单独的 Kumi，或另一个 Hermes 配置中的 Kumi for Hermes）已经安装了 Kumi 的 Live 组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样 Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。对于 REAPER 和 Renoise，Kumi for Hermes 目前还不能使用另一套 Kumi 的组件：设置会说明这一点，并保持原样。
 
 设置不会启动或退出你的 DAW、替你选择控制界面，也不会保存你的工程。
 
@@ -93,4 +93,4 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - 聆听 REAPER 或 Renoise 音轨时提示 Kumi 的 DAW 组件太旧：再运行一次设置，然后重启 DAW。
 - Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
-- 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Kumi for Hermes 使用的是单独的 Kumi 的安装，请改用那套 Kumi 运行 `kumi --daw ableton bridge`。Kumi Ears 需要 Max for Live。
+- 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Kumi for Hermes 使用的是另一套 Kumi 的安装，请用那套 Kumi 重新设置 Live（单独的 Kumi 运行 `kumi --daw ableton bridge`，另一个 Hermes 配置则在那个配置中运行设置）。Kumi Ears 需要 Max for Live。

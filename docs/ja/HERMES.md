@@ -32,7 +32,7 @@ Hermes Desktop は各段階の確認内容をすべて表示します。ター�
 
 最初にセットアップした DAW が、同じ確認のなかで Kumi の DAW（DAW 設定）になります。あとから別の DAW をセットアップしても、Kumi は今の DAW のままです。その場合、セットアップの最後に切り替える手順（ターミナルで `hermes kumi setup --daw <daw> --use`）が示され、設定を変える前に確認されます。Kumi のプラグイン設定（プロファイルの config.yaml の `plugins.entries.kumi.settings.daw`）で DAW を変えることもできます。Hermes の設定に書き込めない環境では、セットアップがそのことと、DAW を設定する場所を伝えます。
 
-単体の Kumi がすでに Live 用の Kumi の部品をインストールしている場合、セットアップはそれを伝え、置き換えずにそのインストールを使うよう提案します。その場合、Kumi for Hermes はそのインストールの接続用ファイルを読み、自分の接続状態をそこに書き込みますが、サインイン情報や設定は使いません。REAPER と Renoise では、Kumi for Hermes はまだ単体の Kumi の部品を使えません。セットアップはそのことを伝え、そのままにします。
+このコンピューター上の別の Kumi（単体の Kumi、または別の Hermes プロファイルの Kumi for Hermes）がすでに Live 用の Kumi の部品をインストールしている場合、セットアップはそれを伝え、置き換えずにそのインストールを使うよう提案します。その場合、Kumi for Hermes はそのインストールの接続用ファイルを読み、自分の接続状態をそこに書き込みますが、サインイン情報や設定は使いません。REAPER と Renoise では、Kumi for Hermes はまだ別の Kumi の部品を使えません。セットアップはそのことを伝え、そのままにします。
 
 セットアップが DAW を起動・終了したり、コントロールサーフェスを選んだり、プロジェクトを保存したりすることはありません。
 
@@ -93,4 +93,4 @@ Hermes が変更の前に確認するのは、承認がオンになっている�
 - REAPER や Renoise のトラックを聴くときに DAW 用の Kumi の部品が古いと言われる: セットアップをもう一度実行してから DAW を再起動してください。
 - Hermes Desktop に Kumi が出てこない: スキルとツール → プラグインで Kumi の **Agent** と **Desktop** のスイッチがオンか、Hermes で有効か（`hermes plugins enable kumi`）を確かめてください。
 - Live につながらない: AbletonMcpBridge がコントロールサーフェスに選ばれているか確かめてください。
-- Live のトラックを聴くときに Kumi Ears がないと言われる: セットアップをもう一度実行してください。Kumi for Hermes が単体の Kumi のインストールを使っている場合は、その Kumi で `kumi --daw ableton bridge` を実行してください。Kumi Ears には Max for Live が必要です。
+- Live のトラックを聴くときに Kumi Ears がないと言われる: セットアップをもう一度実行してください。Kumi for Hermes が別の Kumi のインストールを使っている場合は、その Kumi で Live をセットアップし直してください（単体の Kumi なら `kumi --daw ableton bridge`、別の Hermes プロファイルならそのプロファイルでセットアップ）。Kumi Ears には Max for Live が必要です。
