@@ -88,7 +88,7 @@ Kumi のガイド付きセットアップに従ってください。
 <details>
 <summary><b>Hermes Agent から使えますか？</b></summary>
 
-はい。Kumi は [Hermes Agent](https://hermes-agent.nousresearch.com) のプラグインでもあります。`hermes plugins install kumi` と `hermes plugins enable kumi` のあと、DAW 用に Kumi をセットアップするよう Hermes に頼んでください。エージェントは Hermes のままで、変更の前には毎回確認があり、Kumi は取り消し付きの HISTORY を記録します。詳しくは [Kumi for Hermes Agent](docs/ja/HERMES.md) を見てください。
+はい。Kumi は [Hermes Agent](https://hermes-agent.nousresearch.com) のプラグインでもあります。`hermes plugins install kumi`（Hermes のプラグインカタログに載ってから。それまではガイドを見てください）と `hermes plugins enable kumi` のあと、DAW 用に Kumi をセットアップするよう Hermes に頼んでください。エージェントは Hermes のままで、変更の前には毎回確認があり（承認をオフにしていない限り）、Kumi は HISTORY を記録します。Kumi が動いているあいだは取り消せます。詳しくは [Kumi for Hermes Agent](docs/ja/HERMES.md) を見てください。
 
 </details>
 

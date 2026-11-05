@@ -88,7 +88,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 <details>
 <summary><b>能在 Hermes Agent 中使用吗？</b></summary>
 
-可以。Kumi 也是 [Hermes Agent](https://hermes-agent.nousresearch.com) 的插件：运行 `hermes plugins install kumi` 和 `hermes plugins enable kumi`，然后让 Hermes 为你的 DAW 设置 Kumi。智能体仍然是 Hermes，每次修改前都会征求你的同意，Kumi 会记录带撤销的 HISTORY。详见 [Kumi for Hermes Agent](docs/zh-CN/HERMES.md)。
+可以。Kumi 也是 [Hermes Agent](https://hermes-agent.nousresearch.com) 的插件：运行 `hermes plugins install kumi`（Kumi 列入 Hermes 插件目录之后；在此之前请看指南）和 `hermes plugins enable kumi`，然后让 Hermes 为你的 DAW 设置 Kumi。智能体仍然是 Hermes，每次修改前都会征求你的同意（除非你关闭了确认），Kumi 会记录 HISTORY，在 Kumi 运行期间可以撤销。详见 [Kumi for Hermes Agent](docs/zh-CN/HERMES.md)。
 
 </details>
 

@@ -3,14 +3,15 @@
 ![Kumi for Hermes](../docs/assets/hermes/banner.png)
 
 **Drive Ableton Live, REAPER and Renoise from Hermes.** Kumi reads the project you have open, makes typed changes
-in it after you approve each one, records every change in an undoable HISTORY, measures audio on your computer, and
+in it through Hermes's approval, records every change in its HISTORY, measures audio on your computer, and
 maps the sample folders you choose so you can find, audition and place sounds. Hermes stays the agent: Kumi gives it
 a DAW to work in.
 
 - **Ask in plain words, from any Hermes surface.** "Put a darker snare on pad 2", "bring the bass up 2 dB",
   "undo the snare change". The TUI, Hermes Desktop, the web dashboard and messaging all use the same tools.
-- **Every change is approved and reversible.** Hermes asks before Kumi changes your project, shows exactly what will
-  change, and Kumi records the result in its HISTORY, with undo while the Kumi runtime that made the change is running.
+- **Every change is approved by Hermes (unless its approvals are off) and undoable while Kumi runs.** Hermes asks
+  before Kumi changes your project and shows exactly what will change; Kumi records the result in its HISTORY, with an
+  undo while the Kumi runtime that made the change is running.
 - **Kumi knows what you're looking at.** When what you've selected changes, the chat connected to Kumi gets a short
   note of the track, device and clip (FOCUS), and what changed since Kumi last looked.
 - **Your own sounds, on a map.** Kumi learns the sample folders you list and lays them out by how they sound; in
@@ -30,11 +31,11 @@ a DAW to work in.
 | `kumi_change` | One typed change of one or more steps, recorded in HISTORY | yes |
 | `kumi_undo` | Undoes a HISTORY entry while it can still be undone | yes |
 | `kumi_history` | Lists recent changes and whether each can be undone | no |
-| `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or a REAPER or Renoise track or the mix (in Live it says it can't yet, and plays nothing) | for a track or the mix |
+| `kumi_listen` | Measures an audio file, a library sound or a result Kumi made. It doesn't listen to a track or the mix yet: it refuses, and plays nothing | no |
 | `kumi_sounds` | Searches your sound library | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
-| `kumi_generate` | Mirelo sound effects from a prompt and MIDI notes from an audio file, if you've set Mirelo up | yes: each quote, and each file sent |
+| `kumi_generate` | Mirelo sound effects from a prompt and MIDI notes from an audio file, if you've set Mirelo up | yes: each paid generation, and each file sent |
 
 Four skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds`, `kumi:listening` and `kumi:generate`. In any
 message, write `@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the DAW,
@@ -46,6 +47,9 @@ its recent changes, or its connection. They only read what Kumi has already publ
 hermes plugins install kumi
 hermes plugins enable kumi
 ```
+
+`kumi` is Kumi's name in Hermes's plugin catalog. Until Kumi is listed there, install it from Kumi's repository with
+`hermes plugins install user1303836/kumi#hermes-plugin`, then enable it the same way.
 
 In Hermes Desktop, also turn on Kumi's **Desktop** switch under **Capabilities → Plugins**: a plugin's Desktop switch
 starts off.
@@ -61,19 +65,34 @@ Kumi needs two things on the machine that runs Hermes, can use a third, and asks
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
    If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
    part in Live, setup offers to use that installation instead of replacing it; for REAPER and Renoise, Kumi for Hermes
-   can't use another Kumi's part yet. The first DAW you set up becomes
-   Kumi's `daw` in the same approval; setting up another one keeps the current DAW and ends with the step that
-   switches: `hermes kumi setup --daw <daw> --use`, approved like the rest.
+   can't use another Kumi's part yet. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up
+   another one keeps the current DAW and ends with the step that switches: `hermes kumi setup --daw <daw> --use`,
+   approved like the rest.
 3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
    MP3, FLAC and other compressed audio. Setup is done either way; without it, Kumi reads WAV and AIFF only.
 
-Ask Hermes to "set up Kumi for Live" from any surface, or run `hermes kumi setup` in a terminal. Then, in the DAW:
+Ask Hermes to "set up Kumi for Live" from any surface, or run `hermes kumi setup --daw reaper` in a terminal (`--daw`
+takes `ableton`, `reaper` or `renoise`; without it, setup is for the `daw` setting, Live unless you've changed it).
+Then, in the DAW:
 
 - **Live:** choose **AbletonMcpBridge** as a Control Surface in Settings → Link, Tempo & MIDI.
 - **REAPER:** restart REAPER.
 - **Renoise:** enable the Kumi tool.
 
 Setup never starts or quits your DAW, picks a Control Surface for you, or saves a project.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/kumi` in a chat, `hermes kumi status` in a terminal | Where Kumi stands in this profile: what setup still needs, the DAW connection, whether Kumi can read compressed audio, and whether Hermes's approvals are off |
+| `/kumi doctor`, `hermes kumi doctor` | Checks what Kumi needs in this profile and says what to do about each problem. It changes nothing |
+| `hermes kumi setup --daw <daw>` | Sets Kumi up for `ableton`, `reaper` or `renoise`, asking before each step; `--use` also makes that DAW Kumi's |
+| `hermes kumi credits` | Mirelo credits: what's spent, reserved and left, and the reservations still open |
+| `hermes kumi credits unfreeze` | Lets paid generations start again after a charge came in above its estimate |
+| `hermes kumi credits release <id>` | Releases a reservation whose charge stayed unknown, once you've checked it on Mirelo's dashboard |
+
+The `credits` commands that change something ask for your yes in a terminal; no tool can run them.
 
 ## Settings
 
@@ -82,10 +101,10 @@ settings:
 
 | Setting | Default | What it does |
 |---|---|---|
-| `daw` | Live (`ableton`) | Which DAW Kumi connects to. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
+| `daw` | Live (`ableton`) | Which DAW Kumi connects to: `ableton`, `reaper` or `renoise`. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
 | `library_folders` | none | The folders Kumi may read to build your sound map. Nothing else is scanned |
 | `inject_focus` | on | Adds the short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
-| `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes to interpret measurements (see below) |
+| `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes (Vision's, unless you change it; it must accept images) to interpret measurements (see below) |
 | `mirelo_api_key` | none | Your Mirelo API key, a Hermes secret (`MIRELO_API_KEY`). Kumi sends it only to Mirelo, with a generation you approved |
 | `mirelo_acknowledged` | off | Lets Hermes ask for paid Mirelo generations, each approved with its estimate in Mirelo API credits |
 | `mirelo_sfx_enabled`, `mirelo_midi_enabled` | off | Allow each kind: sound effects from a prompt, MIDI notes from an audio file |
@@ -104,8 +123,11 @@ Everything Kumi writes for Hermes stays in this profile's `plugin-data/kumi/` fo
 and map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
 changed) and job records. Outside it, setup writes only Kumi's part in your DAW, at the location you approved. Kumi
 reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already on your computer, if you
-allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`; delete it to remove
-everything.
+allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`. A sound Kumi made or copied
+(Mirelo's, or another Hermes plugin's) that you put in a project stays there, and the project plays it from there:
+before you delete the folder, save such projects with their files copied in (Live: **File → Collect All and Save**;
+REAPER: **Save project as…** with **Copy all media into project directory**), or they'll miss those samples.
+Deleting the folder removes everything Kumi wrote for Hermes.
 
 ## Disclosure
 
@@ -115,36 +137,42 @@ everything.
 - **Writes outside its data:** setup may install Live's Remote Script with its Kumi Ears device, a REAPER extension or
   a Renoise tool, only at the locations you approve.
 - **Processes:** Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on
-  loopback only. They stop when the chat ends, when the plugin unloads, or after 15 minutes idle (2 hours while
-  connected to your DAW); your DAW keeps running.
-- **Mirelo** (off until you add a key, acknowledge it, turn a kind on and set a cap): your prompt, and for MIDI the
-  audio file you approve, go to Mirelo's API with your key. Each generation is approved with Mirelo's estimate in API
-  credits, against a lifetime cap; sending a file is approved on its own. What Mirelo makes is saved in this profile's
-  plugin data, and placing it in your project is a separate approved change. Switching a kind off stops new jobs (one
-  already running is still fetched while the key is set); removing the key stops Kumi contacting Mirelo.
+  loopback only. They stop when the chat ends, when the plugin unloads or Hermes exits, or after 15 minutes idle (2
+  hours while connected to your DAW for a chat); a job still running, such as a scan or a Mirelo generation, keeps
+  them up for at most 6 hours. Your DAW keeps running.
+- **Mirelo** (off until you add a key, acknowledge it, turn a kind on and set a cap above 0): your prompt, and for MIDI
+  the audio file you approve, go with your key to `api.mirelo.ai` and to the upload and download links Mirelo's API
+  gives for each job, on hosts Mirelo chooses (its storage or delivery network), so they aren't a fixed list. Whether
+  Mirelo trains on what you send follows your Mirelo account's settings; Kumi has no setting of its own for it.
+  - **Credits, never money:** each generation is approved with Mirelo's estimate in API credits and reserves up to it
+    against a lifetime cap (0 by default, which refuses every paid generation); sending a file is approved on its own.
+    A charge may stay unknown until Mirelo reports it, and its reservation keeps counting against the cap meanwhile. A
+    charge above its estimate pauses new paid generations.
+  - **Yours alone, in a terminal:** letting paid generations start again (`hermes kumi credits unfreeze`) and
+    releasing a reservation whose charge stayed unknown (`hermes kumi credits release <id>`).
+  - **Never unattended:** nothing is paid for or uploaded in scheduled jobs, `hermes chat -q`, webhooks or Hermes's
+    API server.
+  - What Mirelo makes is saved in this profile's plugin data, and placing it in your project is a separate approved
+    change. Switching a kind off stops new jobs (one already running is still fetched while the key is set); removing
+    the key stops Kumi contacting Mirelo.
 - **Reads:** the open project; the sample folders you list (never a whole drive or volume, your home folder or above,
   or inside or above HERMES_HOME; links never lead it outside them); and finished audio other Hermes plugins saved in
   `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
-- **Approvals:** changes to your project go through Hermes's approval. Kumi's approvals apply to one chat, including a
-  one-shot run that resumes it (`hermes chat -q --resume`); a scheduled job, a new one-shot run or another chat always
-  asks or is refused. Choosing Always leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that
-  Kumi never edits; to remove it, delete the `plugin_rule:kumi:` entries there. When Hermes's approvals are off
-  (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs Kumi's changes, undos, track listens,
-  sample-folder adds and scans, and setup steps without asking, and `/kumi` says so; a one-shot `hermes -z` turn is
-  yolo too, and Kumi can't tell it apart.
+- **Approvals:** changes to your project go through Hermes's approval. Allowing a Kumi call for the session or always
+  covers that kind of call (changes, undos, sample-folder adds and scans) in this chat only, including a one-shot run
+  that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
+  refused. An upload to Mirelo is allowed that way for its one file, in this chat; a setup step's approval covers its
+  own plan, and a paid generation's only its own estimate, once. Choosing Always leaves an entry in Hermes's
+  `command_allowlist` (the profile's config.yaml) that Kumi never edits; to remove it, delete the `plugin_rule:kumi:`
+  entries there. When Hermes's approvals are off (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs
+  Kumi's changes, undos, sample-folder adds and scans, setup steps, and paid Mirelo generations and audio uploads (up
+  to your credit cap) without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't
+  tell it apart.
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
-  a change only while the runtime that made it is still running; after that, use your DAW's own Undo.
-- **Listening to a REAPER or Renoise track or the mix** also asks first: it plays only the beat window you approve (60
-  seconds at most), only while the DAW is stopped, and may change routing and transport briefly, restoring them after.
-  The DAW renders it into the listening folder of the Kumi installation that owns Kumi's part in that DAW, and Kumi
-  copies the file it asked for and removes exactly that file. It needs Kumi's newer part in that DAW: when Kumi says
-  so, run setup again and restart the DAW. Renoise listens only to a window that starts and ends on whole pattern
-  lines inside the song, and refuses any other rather than play more than you approved. Rendering can leave Renoise's
-  BPM and lines per beat at the values the song's own tempo commands reach by the window's end. When the listen ends,
-  fails or is cancelled, Kumi sets both back if they still have exactly those values. If either is different, Kumi
-  leaves both as they are and says it couldn't restore the tempo. REAPER may show the project as modified after a
-  track listen, since only saving clears that flag; Kumi never saves. In Live, Kumi for Hermes doesn't listen to a
-  track or the mix yet: it says so and plays nothing.
+  a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
+  refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway.
+- **Listening:** Kumi for Hermes doesn't listen to a track or the mix yet, in any DAW: it refuses and plays nothing.
+  It measures audio files, library sounds and its own results.
 - **Project ids:** Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its
   Renoise tool one for each song in the song's tool data, saved with them.
 - **ffmpeg:** with your approval at setup, Kumi's runtime runs an ffmpeg already on this computer to decode compressed
@@ -170,7 +198,8 @@ everything.
 ## Compatibility
 
 - Hermes 0.22.7 or later.
-- Ableton Live 12 on macOS and Windows; REAPER 7 or later and Renoise 3.5 or later on macOS, Windows and Linux.
+- Ableton Live 12.4.15b4 (beta) or later on macOS and Windows; REAPER 7 or later and Renoise 3.5 or later on macOS,
+  Windows and Linux.
 - The DAW must run on the machine that runs Hermes: a Desktop app connected to a remote Hermes controls that
   machine's DAW, not its own.
 
