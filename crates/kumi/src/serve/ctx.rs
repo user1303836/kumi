@@ -1093,7 +1093,8 @@ mod tests {
             command.push("\" \"");
             command.push(target.as_os_str());
             command.push("\"\"");
-            let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+            // cmd parses switches even in argv[0]; use native separators, not "System32/cmd.exe".
+            let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32").join("cmd.exe");
             let output = std::process::Command::new(cmd).args(["/d", "/s", "/c"]).raw_arg(&command).output().unwrap();
             assert!(
                 output.status.success(),
