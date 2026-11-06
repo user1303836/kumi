@@ -1093,18 +1093,20 @@ def _device_message(spec: dict, facts: dict, surface: str) -> str | None:
 
 # CC-26: a verified plug-in preset into Live's User Library, asked in the words of serve's preview (26-w2), under its
 # file's digest (26-w3). No code class: it's a verified writer's output (26c). The file stays after an undo (26e).
-PRESET = "Kumi didn't put the preset in your User Library: "
-PRESET_ONLY_LIVE = PRESET + "Kumi puts plug-in presets only into Ableton Live's User Library."
+PRESET = "Kumi didn't put the preset in your User Library"  # a refusal's head: refused() joins its reason
+PRESET_ONLY_LIVE = refused(PRESET, "Kumi puts plug-in presets only into Ableton Live's User Library.")
 # The owner's call for the hackathon: presets are Live's only for now, so a build elsewhere would make nothing it
 # could place.
-PRESET_BUILD_ONLY_LIVE = "Kumi didn't build the preset: Kumi builds plug-in presets only for Ableton Live for now."
+PRESET_BUILD_ONLY_LIVE = refused("Kumi didn't build the preset",
+                                 "Kumi builds plug-in presets only for Ableton Live for now.")
 PRESET_WARNING = "Writes a new preset file into your User Library (Kumi folder). It stays there after an undo."
 PRESET_VALUES = "Values as the preset file stores them; the plug-in may show them differently."
 PRESET_UNEDITED = "• No settings changed: Kumi's initialized template as it is."
 PRESET_STAYS = "The file stays after an undo."  # the short form's warning: its first line says what's written
-PRESET_UNSHOWN = PRESET + "its runtime's preview has something Kumi can't show as it is, so it isn't asked."
-PRESET_TOO_LONG = PRESET + ("its approval doesn't fit this window with every setting in view, and Kumi asks only with "
-                            "all of them shown. Build the preset with fewer changes, or ask in Hermes Desktop.")
+PRESET_UNSHOWN = refused(PRESET, "its runtime's preview has something Kumi can't show as it is, so it isn't asked.")
+PRESET_TOO_LONG = refused(PRESET, "its approval doesn't fit this window with every setting in view, and Kumi asks "
+                                  "only with all of them shown. Build the preset with fewer changes, or ask in "
+                                  "Hermes Desktop.")
 PRESET_FOLDERS = ("User Library/Kumi/Instruments/", "User Library/Kumi/Audio Effects/")
 MOST_PRESET_SETTINGS = 32  # W3's cap: the writer refuses more, never cuts them
 PRESET_PRODUCTS = {"serum-2": "Serum 2", "fabfilter-pro-q-4": "Pro-Q 4", "ozone-12": "Ozone 12"}  # catalog ids
@@ -1116,18 +1118,18 @@ def _preset(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     the preview's digest and file (26-r1), which the handler sends, so serve writes exactly that or nothing."""
     artifact = args.get("artifact_id")
     if not isinstance(artifact, str) or not artifact.strip():
-        return block(PRESET + "it needs the artifact_id kumi_preset_build gave."), {}
+        return block(refused(PRESET, "it needs the artifact_id kumi_preset_build gave.")), {}
     if host.daw() != "ableton":
         return block(PRESET_ONLY_LIVE), {}
     try:
         answer = _ask(host, "preset", {"action": "preview", "artifact_id": artifact}, kwargs)
-    except runtime.Refused as refused:
-        return block(PRESET + _with_findings(refused.reason, refused.findings)), {}
+    except runtime.Refused as refusal:
+        return block(refused(PRESET, _with_findings(refusal.reason, refusal.findings))), {}
     except runtime.Unavailable as failure:
-        return block(PRESET + _reason(failure)), {}
+        return block(refused(PRESET, _reason(failure))), {}
     if answer.get("state") != "preview":
-        return block(PRESET + _with_findings(answer.get("reason") or "its runtime refused it.",
-                                              answer.get("findings"))), {}
+        return block(refused(PRESET, _with_findings(answer.get("reason") or "its runtime refused it.",
+                                                    answer.get("findings")))), {}
     facts = _preset_facts(answer)
     if facts is None:
         return block(PRESET_UNSHOWN), {}
