@@ -5979,7 +5979,7 @@ class DeletePreservingSelectionTests(unittest.TestCase):
     (previous) and what it left (left) in its own step, each part by its ref and its object: what was selected comes
     back while the selection is still exactly what the load left; a selection the producer made since stays theirs."""
 
-    def load_ears(self, track_refused=False, kit=True, on_drums=False, before_load=None):
+    def load_ears(self, track_refused=False, kit=True, on_drums=False, before_load=None, application=None):
         song = FakeSong(); drums = song.tracks[0]; keys = FakeTrack(); keys.name = "Synth Keys"; song.tracks.append(keys)
         kit_device, tape = FakeDevice(), FakeDevice(); kit_device.name, tape.name = "Kit", "Tape Keys"
         drums.devices = [kit_device] if kit else []; keys.devices = [tape]
@@ -6014,6 +6014,7 @@ class DeletePreservingSelectionTests(unittest.TestCase):
             song.live_tick.append(move)
         drums.delete_device = delete_device
         mapper = LiveObjectMapper(song); browser = Browser(); mapper._browser = lambda: browser
+        if application is not None: mapper._application = lambda: application
         item = mapper.invoke("browser.search", {"category": "audio_effects", "limit": 10})["items"][0]
         row = mapper.snapshot()["tracks"][0]
         load = {"itemId": item["id"], "trackRef": row["ref"], "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"], "expectedTrackIdentity": row["objectIdentity"],
@@ -6069,6 +6070,24 @@ class DeletePreservingSelectionTests(unittest.TestCase):
         mapper.selection_tick()
         self.assertIs(song.view.detail_clip, chords, "the producer's clip stays")
         self.assertIsNone(mapper._put_back, "and the put-back is dropped")
+
+    def test_the_clip_the_producer_had_in_detail_view_is_shown_again_after_the_undo(self):
+        # #1181: Detail View showed a clip as Ears loaded, and the load switched it to the device (as Live does). The
+        # put-back shows the clip again, unless the producer chose something since the load: then their view stays.
+        for producer_chose in (False, True):
+            class AppView:
+                def __init__(self): self.visible = "Detail/Clip"; self.shown = []
+                def show_view(self, name): self.visible = name; self.shown.append(name)
+                def is_view_visible(self, name): return self.visible == name
+            application = type("Application", (), {})(); application.view = AppView()
+            song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(application=application)
+            application.view.visible = "Detail/DeviceChain"
+            if producer_chose:
+                song.view.detail_clip = chords
+            self.assertEqual(self.delete(mapper, request)["selection"]["previous"], not producer_chose)
+            self.settle(song, mapper)
+            self.assertEqual(application.view.shown, [] if producer_chose else ["Detail/Clip"], f"producer chose: {producer_chose}")
+            self.assertEqual(mapper._clip_view_at_load, {}, "what the load found is used once")
 
     def test_ears_left_selected_on_a_track_it_had_to_itself_goes_and_the_selection_before_it_comes_back(self):
         # The producer is on a track with no devices: Live selects the device a load adds, and a script can't select

@@ -1143,6 +1143,9 @@ class LiveObjectMapper:
         # What a keepSelection delete decided to select again ({targets, tick}): selected on the display tick after Live
         # has moved the selection to the deleted device's track (selection_tick), never in the delete's own step.
         self._put_back: dict[str, Any] | None = None
+        # Which devices a reportSelection load made while Live's Detail View showed a clip (Clip view), the newest 64:
+        # the load switches Detail View to the device, and the put-back after its undo shows the clip again (#1181).
+        self._clip_view_at_load: dict[str, bool] = {}
         self._display_ticks = 0
         # Fire buttons a client holds pressed, by ref ({target, owner, expiresAt}): released by the
         # client, or by a guard (its deadline, its connection closing, a reconnect, the bridge shutting down).
@@ -4723,6 +4726,9 @@ class LiveObjectMapper:
         if now != pending["left"] and now["trackRef"] != pending["moved_to"]: return
         try: self._put_selection_back(pending["targets"])
         except BaseException: pass
+        if pending.get("clip_view") and self._clip_view_shown() is False:
+            try: self._application().view.show_view("Detail/Clip")
+            except BaseException: pass
 
     def release_connection(self, owner: Any) -> None:
         """A connection went: what it held open in Live (an undo step, pressed fire buttons) is let go."""
@@ -11544,8 +11550,11 @@ class LiveObjectMapper:
         # or on the deleted device's track (Live's move).
         after = self._selection_capture()
         entry = self._track_entry(track_index)
+        # What the load found Detail View showing goes with its device; Clip view comes back only for a selection the
+        # producer hasn't changed since the load (previous).
+        clip_view = self._clip_view_at_load.pop(str(args.get("expectedObjectIdentity")), None) is True
         self._put_back = {"targets": targets, "tick": self._display_ticks, "left": after["identities"],
-                          "moved_to": None if entry is None else self._capture_object_identity(entry[0])}
+                          "moved_to": None if entry is None else self._capture_object_identity(entry[0]), "clip_view": previous and clip_view}
         restored = after["identities"] == {key: (None if found is None else self._capture_object_identity(found)) for key, found in targets.items()}
         return {"deleted": reference, "selection": {"before": before, "after": after["row"], "restored": restored, "previous": previous}}
 
@@ -11572,6 +11581,19 @@ class LiveObjectMapper:
             if self._capture_object_identity(value) == identity: return True
             value = getattr(value, "canonical_parent", None)
         return False
+
+    def _clip_view_shown(self) -> bool | None:
+        """Whether Live's Detail View shows a clip (Clip view, not the device chain); None when it can't be read."""
+        try:
+            visible = getattr(getattr(self._application(), "view", None), "is_view_visible", None)
+            return visible("Detail/Clip") is True if callable(visible) else None
+        except BaseException: return None
+
+    def _remember_clip_view(self, device_identity: str, shown: bool | None) -> None:
+        """What Detail View showed as a reportSelection load ran, by the device it made (only Clip view is kept)."""
+        self._clip_view_at_load.pop(device_identity, None)
+        if shown is True: self._clip_view_at_load[device_identity] = True
+        while len(self._clip_view_at_load) > 64: self._clip_view_at_load.pop(next(iter(self._clip_view_at_load)))
 
     def _put_selection_back(self, targets: dict[str, Any]) -> None:
         """Selects again each part of targets (the objects that were selected; None where nothing was) that isn't
@@ -11925,6 +11947,7 @@ class LiveObjectMapper:
         report = args.get("reportSelection")
         if report is not None and not isinstance(report, bool): raise ValueError(f"reportSelection is invalid{UNRUN_SUFFIX}")
         selection_before = self._selection_capture() if report else None
+        clip_view_before = self._clip_view_shown() if report else None
         if selection_before is not None and selection_before["identities"]["parameterRef"] is not None:
             raise ValueError(f"a parameter is selected, and Live doesn't let a script select one again, so this load's undo couldn't keep the selection{UNRUN_SUFFIX}")
         item, metadata = self._browser_find(args.get("itemId")); track_ref = args.get("trackRef")
@@ -11936,7 +11959,10 @@ class LiveObjectMapper:
             raise ValueError("browser loading is unavailable")
         if not isinstance(track_ref, str) or not track_ref.startswith(f"{self.refs.epoch}:track:"):
             raise ValueError("an exact regular-track reference is required")
-        if args.get("chainRef") is not None: return self._browser_load_into_chain(args, item, metadata, loader, selection_before)
+        if args.get("chainRef") is not None:
+            result = self._browser_load_into_chain(args, item, metadata, loader, selection_before)
+            if selection_before is not None: self._remember_clip_view(result["deviceObjectIdentity"], clip_view_before)
+            return result
         # A regular track, a return or Main (by its snapshot index: the regular tracks, then the returns, then Main).
         self._refresh(track_ref); track = self.refs.get(track_ref); track_identity = self._capture_object_identity(track)
         regular_tracks = self._items(getattr(self.song, "tracks", [])); return_tracks = self._items(getattr(self.song, "return_tracks", []))
@@ -12026,7 +12052,9 @@ class LiveObjectMapper:
             raise ValueError("browser load result mapping failed without a residual device") from error
         result = {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": device_identity, "createdFingerprint": fingerprint}
         # And what the load left selected, read in the same step: an undo keeping the selection tells it from the producer's.
-        if selection_before is not None: result["selection"] = {"previous": selection_before, "left": self._selection_capture()}
+        if selection_before is not None:
+            result["selection"] = {"previous": selection_before, "left": self._selection_capture()}
+            self._remember_clip_view(device_identity, clip_view_before)
         return result
 
     # The native device that holds a chain's place for each kind of item, by Live's device type: its name and that type.
