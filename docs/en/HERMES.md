@@ -71,6 +71,13 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   and dynamics. Wide and opposite-polarity stereo are measured accurately, spectral balance and crest factor included.
   A mono or silent file has no stereo width, and short audio may have no loudness or loudness range: Kumi shows them
   as unavailable rather than guess.
+- **Part of a reference, or several:** "Compare it with the reference from 1:00 for 30 seconds" (60 seconds at most,
+  inside the file), or with up to five references at once. Kumi measures them, weighted equally, into one target with
+  its spread, and says how many of the references each measure comes from. A measure a reference can't give is left
+  out of that measure, with the reason: a band above what its sample rate holds, say, or stereo width from a mono
+  file. The spread includes minimum tolerances; it isn't a confidence. There's no single "better" score, no averaged
+  audio and no true-peak target, and Kumi still proposes the mastering moves for you to approve. An excerpt Kumi keeps
+  plays from its own start.
 - **Master:** it proposes mastering moves on the master track (EQ, glue compression, a limiter) as one change Hermes
   asks about.
 - **Repeat:** it listens again (in Live, bounce again) and compares, for at most three rounds. Each round's change is

@@ -49,7 +49,7 @@ a DAW to work in.
 | `kumi_change` | One typed change of one or more steps, recorded in HISTORY | yes |
 | `kumi_undo` | Undoes a HISTORY entry while it can still be undone, or your newest change whole ("undo that") | yes |
 | `kumi_history` | Lists recent changes and whether each can be undone | no |
-| `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or (REAPER and Renoise) a window of a track or the mix, optionally beside a reference. In Live, a track or the mix: not yet (it says so and plays nothing) | a track or the mix: yes |
+| `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or (REAPER and Renoise) a window of a track or the mix, optionally beside a reference: part of one (up to 60 s), or up to five measured as one target. In Live, a track or the mix: not yet (it says so and plays nothing) | a track or the mix: yes |
 | `kumi_transport` | Starts playback, or stops it; changes nothing in the project but where play starts | play: yes; stop: no |
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | yes |
 | `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | yes, with its code |
