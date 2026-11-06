@@ -257,6 +257,26 @@ export function nearRequest(soundId: string, name?: string, revision?: string | 
   return said ? `Find more sounds like “${said}” (${which})` : `Find more sounds like ${which}`
 }
 
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+/** A MIDI note as Live names it on a Drum Rack pad: 36 is C1 (Live's middle C, 60, is C3). */
+export function liveNote(note: number): string {
+  return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 2}`
+}
+
+/** Left unsent, like Use…: put the sound on the drum pad that plays `note` on the selected track, an empty pad
+ *  included (flow C). Live's pad is named as Live shows it, with its note; another DAW's by its note alone, since each
+ *  names octaves its own way. Null for an id the runtime doesn't write or a note that isn't MIDI's. */
+export function padRequest(soundId: string, note: number, daw: unknown, name?: string, revision?: string | null): string | null {
+  const id = plainId(soundId)
+  if (!id || !Number.isInteger(note) || note < 0 || note > 127) return null
+  const from = revision ? plainId(revision) : null
+  const said = quotable(name)
+  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
+  const pad = daw === 'ableton' ? `the Drum Rack pad ${liveNote(note)} (note ${note})` : `the drum pad for note ${note}`
+  return `Put ${said ? `“${said}” (${which})` : which} on ${pad} on the selected track`
+}
+
 export function setupRequest(daw: unknown): string {
   return `Set up Kumi for ${dawName(daw)}`
 }
