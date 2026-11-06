@@ -1140,6 +1140,10 @@ class LiveObjectMapper:
         # The Live undo step a client opened ({stepId, expiresAt, owner, label}): closed by the client,
         # or by a guard (its deadline, its connection closing, a reconnect, the bridge shutting down).
         self._undo_step: dict[str, Any] | None = None
+        # What a keepSelection delete decided to select again ({targets, tick}): selected on the display tick after Live
+        # has moved the selection to the deleted device's track (selection_tick), never in the delete's own step.
+        self._put_back: dict[str, Any] | None = None
+        self._display_ticks = 0
         # Fire buttons a client holds pressed, by ref ({target, owner, expiresAt}): released by the
         # client, or by a guard (its deadline, its connection closing, a reconnect, the bridge shutting down).
         self._held_fire_buttons: dict[str, dict[str, Any]] = {}
@@ -4704,6 +4708,17 @@ class LiveObjectMapper:
         """Close an undo step whose deadline passed (checked on every display tick)."""
         step = self._undo_step
         if step is not None and int(time.time() * 1000) >= step["expiresAt"]: self._end_undo_step()
+
+    def selection_tick(self) -> None:
+        """Selects again what a keepSelection delete kept (checked on every display tick). Live moves the selection to the
+        deleted device's track, slot and clip on its next tick, after the delete's step, so what's selected in that step
+        doesn't hold: it's selected on the display tick after the delete's own, once Live has moved it."""
+        self._display_ticks += 1
+        pending = self._put_back
+        if pending is None or self._display_ticks <= pending["tick"] + 1: return
+        self._put_back = None
+        try: self._put_selection_back(pending["targets"])
+        except BaseException: pass
 
     def release_connection(self, owner: Any) -> None:
         """A connection went: what it held open in Live (an undo step, pressed fire buttons) is let go."""
@@ -11518,9 +11533,10 @@ class LiveObjectMapper:
         if [self._capture_object_identity(candidate) for candidate in self._items(getattr(owner, "devices", []))] != expected_order: raise ValueError("device deletion did not preserve the exact authorized siblings") from deletion_error
         self.refs.delete(str(reference))
         if keep is None: return {"deleted": reference}
-        # The device is gone: from here every outcome says so, the selection back or not.
-        try: self._put_selection_back(targets)
-        except BaseException: pass
+        # The device is gone: from here every outcome says so, the selection back or not. Live moves the selection to the
+        # deleted device's track on its next tick, after this step, so it's selected again on the display tick after that
+        # (selection_tick), and the host reads it until it holds. What's said here is the selection as this step reads it.
+        self._put_back = {"targets": targets, "tick": self._display_ticks}
         after = self._selection_capture()
         restored = after["identities"] == {key: (None if found is None else self._capture_object_identity(found)) for key, found in targets.items()}
         return {"deleted": reference, "selection": {"before": before, "after": after["row"], "restored": restored, "previous": previous}}
@@ -14264,6 +14280,7 @@ class AbletonMcpBridge:
         self.queue.drain()
         self.mapper.capture_tick()
         self.mapper.undo_step_tick()
+        self.mapper.selection_tick()
         self.mapper.fire_button_tick()
         self.mapper.structure_tick()
 

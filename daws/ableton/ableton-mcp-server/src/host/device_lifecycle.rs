@@ -11,6 +11,12 @@ use kumi_common::{
 };
 use std::time::Duration;
 
+/// How often, and how far apart, an undo keeping the selection reads it again after the delete: Live moves the selection
+/// to the deleted device's track on its next tick, and the Remote Script selects what the delete kept on the display tick
+/// after that, so it holds a few ticks after the delete's answer.
+const PUT_BACK_READS: usize = 12;
+const PUT_BACK_WAIT: Duration = Duration::from_millis(150);
+
 pub(super) struct ChainRow {
     pub track: Value,
     pub device: Value,
@@ -356,20 +362,34 @@ impl McpHost {
             record.borrow_mut()["state"] = json!("undone");
             let mut answer = json!({"transactionId":t["id"],"state":"undone","idempotent":false});
             if let Some(keep) = &keep {
-                // Deleted either way. What the delete kept and whether it held are the Remote Script's reading in the
-                // delete's own step. A replay of a delete that already ran knows neither, so nothing is said to be kept.
+                // Deleted either way. What the delete kept is the Remote Script's reading in the delete's own step. A
+                // replay of a delete that already ran knows nothing of it, so nothing is said to be kept.
+                let fresh = selection.is_some();
                 let mut kept =
                     selection.unwrap_or_else(|| json!({"before":keep["previous"]["row"],"after":null,"restored":false,"previous":null}));
-                // Read again now, after that step: Live may move a selection on its next tick, as it does the playhead.
-                match self.selection_view(Some(&context)).await.ok().filter(|view| view["selection"].is_object()) {
-                    Some(view) => {
-                        let now = super::selection::selected(&view);
-                        if kept["after"] != now {
-                            kept["restored"] = json!(false);
+                // Read again until the selection is what the delete kept, for a few ticks (a replay's, once): what holds
+                // then is what's said. An Arrangement clip in Detail View has no ref, so the row says it only as none.
+                let mut now = None;
+                for read in 0..if fresh { PUT_BACK_READS } else { 1 } {
+                    if read > 0 {
+                        let wait = PUT_BACK_WAIT.as_millis() as f64;
+                        if context.deadline_ms.is_some_and(|deadline| deadline - now_ms_f64() < 250.0 + wait) {
+                            break;
                         }
-                        kept["after"] = now;
+                        tokio::time::sleep(PUT_BACK_WAIT).await;
                     }
-                    None => kept["restored"] = json!(false),
+                    if let Some(view) = self.selection_view(Some(&context)).await.ok().filter(|view| view["selection"].is_object()) {
+                        let read = super::selection::selected(&view);
+                        let held = read == kept["before"];
+                        now = Some(read);
+                        if held {
+                            break;
+                        }
+                    }
+                }
+                kept["restored"] = json!(fresh && now.as_ref() == Some(&kept["before"]));
+                if let Some(now) = now {
+                    kept["after"] = now;
                 }
                 answer["deleted"] = json!(true);
                 answer["selection"] = kept.clone();

@@ -216,9 +216,27 @@ impl DeterministicLiveSimulator {
                             owner["devices"].as_array_mut().unwrap().remove(index);
                             let owner_ref = owner["ref"].as_str().unwrap().to_string();
                             drop(state);
-                            self.emit(LiveEventType::Object, Some(owner_ref.into()), json!({"operation":operation,"ref":reference}));
+                            self.emit(
+                                LiveEventType::Object,
+                                Some(owner_ref.clone().into()),
+                                json!({"operation":operation,"ref":reference}),
+                            );
                             if keep.is_some() {
                                 let mut state = self.state.borrow_mut();
+                                // As Live when a test says so (`liveMovesTheSelection`): the selection goes to the deleted
+                                // device's track, and what the delete kept holds only `reads` selection reads later (on the
+                                // bridge's display tick after Live's), or never when there are none (Live refuses it).
+                                if let Some(moves) = state.get("liveMovesTheSelection").filter(|moves| moves.is_object()).cloned() {
+                                    state["selection"]["trackRef"] = json!(owner_ref);
+                                    state["selection"]["deviceRef"] = Value::Null;
+                                    let after = selection_row(&state["selection"]);
+                                    if let Some(reads) = moves["reads"].as_u64() {
+                                        state["pendingPutBack"] = json!({"target": target, "reads": reads});
+                                    }
+                                    return Ok(
+                                        json!({"deleted":reference,"selection":{"before":target,"after":after,"restored":false,"previous":previous}}),
+                                    );
+                                }
                                 for key in SELECTION_FIELDS {
                                     state["selection"][*key] = target[*key].clone();
                                 }
@@ -393,6 +411,23 @@ impl DeterministicLiveSimulator {
                 Ok(loaded)
             }
             _ => unreachable!("device dispatcher routes only implemented operations"),
+        }
+    }
+
+    /// A selection read, as the bridge's display ticks come: what a keepSelection delete kept holds once its reads have
+    /// passed (`liveMovesTheSelection`).
+    pub(super) fn put_back_tick(&self) {
+        let mut state = self.state.borrow_mut();
+        let Some(reads) = state.get("pendingPutBack").and_then(|pending| pending["reads"].as_u64()) else { return };
+        if reads > 1 {
+            state["pendingPutBack"]["reads"] = json!(reads - 1);
+            return;
+        }
+        let target = state["pendingPutBack"]["target"].clone();
+        // shift_remove keeps the state's other keys in order.
+        state.as_object_mut().unwrap().shift_remove("pendingPutBack");
+        for key in SELECTION_FIELDS {
+            state["selection"][*key] = target[*key].clone();
         }
     }
 }

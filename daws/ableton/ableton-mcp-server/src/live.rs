@@ -4344,6 +4344,7 @@ impl AsyncLiveAdapter for DeterministicLiveSimulator {
         _: Option<&LiveOperationContext>,
         request: Option<&LiveSnapshotRequest>,
     ) -> Result<LiveSnapshot, LiveError> {
+        self.put_back_tick();
         self.snapshot_view(request)
     }
     async fn discover_async(

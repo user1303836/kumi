@@ -119,6 +119,38 @@ async fn a_selection_the_producer_makes_during_the_capture_stays_theirs() {
     assert_eq!(sim.state.borrow()["selection"], chosen, "still the producer's");
 }
 
+/// Live moves the selection to the deleted device's track on its next tick, and the Remote Script selects what the delete
+/// kept on its display tick after that: the undo reads the selection until it holds, and only then says it's kept.
+#[tokio::test]
+async fn the_undo_waits_for_the_selection_live_moved_to_come_back() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let (tx, selection) = load_keeping_the_selection(&host, &sim).await;
+    sim.state.borrow_mut()["liveMovesTheSelection"] = json!({"reads": 2});
+    let undone = undo_keeping_the_selection(&host, &tx, 3).await;
+    assert_eq!(undone["selection"], json!({"before":selection,"after":selection,"restored":true,"previous":true}), "{undone}");
+    assert_eq!(sim.state.borrow()["selection"], selection);
+}
+
+/// A selection Live won't take back: the device still goes, and the undo says the selection wasn't kept, and where it is.
+#[tokio::test]
+async fn a_selection_live_wont_take_back_is_said_and_the_device_still_goes() {
+    let sim = Rc::new(DeterministicLiveSimulator::new());
+    let host = McpHost::new(sim.clone(), McpHostOptions::default()).unwrap();
+    let (tx, selection) = load_keeping_the_selection(&host, &sim).await;
+    let devices = sim.state.borrow()["tracks"][0]["devices"].clone();
+    sim.state.borrow_mut()["liveMovesTheSelection"] = json!({});
+    let undone = undo_keeping_the_selection(&host, &tx, 3).await;
+    assert_eq!((undone["deleted"].clone(), undone["selection"]["restored"].clone()), (json!(true), json!(false)), "{undone}");
+    assert_eq!(undone["selection"]["after"], sim.state.borrow()["selection"], "where Live left it");
+    assert_ne!(undone["selection"]["after"], selection);
+    assert_eq!(array_len(&sim.state.borrow()["tracks"][0]["devices"]) + 1, array_len(&devices), "the loaded device is gone");
+}
+
+fn array_len(value: &Value) -> usize {
+    value.as_array().map_or(0, Vec::len)
+}
+
 /// Keeping the selection is only for a Browser load previewed to keep it; refused, the load stays undoable.
 #[tokio::test]
 async fn keeping_the_selection_is_refused_for_a_load_not_previewed_to_keep_it() {
