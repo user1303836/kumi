@@ -44,17 +44,9 @@ fn remaining_ms(deadline: Instant) -> u64 {
     deadline.saturating_duration_since(Instant::now()).as_millis().min(u64::MAX as u128) as u64
 }
 
+// The bridge exposes no dirty flag. Capture mutations cannot confirm that Live reports a modified Set.
 fn uncertainty(code: &'static str, reason: &str) -> RuntimeError {
-    HearFailure::Unsure { code: Some(code), reason: reason.into(), restored: false, marked_modified: true }.into()
-}
-
-fn modified(error: RuntimeError, touched: bool) -> RuntimeError {
-    match error {
-        RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) => {
-            HearFailure::Refused { code, reason, marked_modified: marked_modified || touched }.into()
-        }
-        other => other,
-    }
+    HearFailure::Unsure { code: Some(code), reason: reason.into(), restored: false, marked_modified: false }.into()
 }
 
 #[derive(Debug, PartialEq)]
@@ -97,7 +89,7 @@ fn unsure() -> RuntimeError {
             "Live's capture did not verify restoration. Observe again and check the transport and Kumi Ears device before another action."
                 .into(),
         restored: false,
-        marked_modified: true,
+        marked_modified: false,
     }
     .into()
 }
@@ -743,7 +735,6 @@ impl LiveRenderer {
                 .await
         }
         .await;
-        let marked_modified = receipt.is_some();
         // Disarm our local tap even if the Set/lifetime changed; do not mutate the new Set.
         if let Some(tap) = &tap {
             link.stop(tap);
@@ -789,25 +780,17 @@ impl LiveRenderer {
             return Err(unsure());
         }
         if original.is_cancelled() {
-            return Err(HearFailure::Cancelled { marked_modified }.into());
+            return Err(HearFailure::Cancelled { marked_modified: false }.into());
         }
         if remaining_ms(cleanup_deadline) == 0 {
-            return Err(modified(
-                refused("capture_deadline", "The original native capture deadline expired. No audio was published."),
-                marked_modified,
-            ));
+            return Err(refused("capture_deadline", "The original native capture deadline expired. No audio was published."));
         }
-        let (mut file, seconds) = result.map_err(|error| {
-            modified(
-                match error {
-                    RuntimeError::Hear(HearFailure::Refused { .. }) => error,
-                    _ => refused(
-                        "capture_incomplete",
-                        "The approved window was not captured completely; temporary state was restored. No audio was published.",
-                    ),
-                },
-                marked_modified,
-            )
+        let (mut file, seconds) = result.map_err(|error| match error {
+            RuntimeError::Hear(HearFailure::Refused { .. }) => error,
+            _ => refused(
+                "capture_incomplete",
+                "The approved window was not captured completely; temporary state was restored. No audio was published.",
+            ),
         })?;
         Ok(Ok(vec![HeardTake {
             label: ready.label,
@@ -818,7 +801,7 @@ impl LiveRenderer {
             note: Some(
                 "Captured after the target's devices, before its mixer (volume, pan and sends). Main's fader is not captured; changing it will not change these measurements.".into(),
             ),
-            marked_modified,
+            marked_modified: false,
         }]))
     }
 

@@ -549,6 +549,7 @@ fn capture_trims_the_approved_window_and_verifies_restoration() {
         assert_eq!(takes.len(), 1);
         assert_eq!(takes[0].start, 0.);
         assert!((takes[0].seconds.unwrap() - 2.).abs() < 0.001);
+        assert!(!takes[0].marked_modified, "Live's read state has no dirty flag; mutation is not a reported-modified claim");
         assert!(Path::new(&takes[0].file).starts_with(request.scratch_dir.as_ref().unwrap().canonicalize().unwrap()));
         let wav = std::fs::read(&takes[0].file).unwrap();
         assert_eq!(&wav[..4], b"RIFF");
@@ -712,7 +713,10 @@ fn cancellation_waits_for_cleanup_and_an_acknowledged_but_failed_restore_is_unsu
         let (live, state, request) = bounded(true).await;
         let cancel = Signal::new();
         *state.cancel.borrow_mut() = Some(cancel.clone());
-        assert!(matches!(live.rendering.hear_in_set(&request, cancel).await, Err(RuntimeError::Hear(HearFailure::Cancelled { .. }))));
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, cancel).await,
+            Err(RuntimeError::Hear(HearFailure::Cancelled { marked_modified: false }))
+        ));
         restored(&live, &state);
         assert_eq!(state.closed.get(), 1);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
@@ -721,7 +725,10 @@ fn cancellation_waits_for_cleanup_and_an_acknowledged_but_failed_restore_is_unsu
         state.ignore_restore.set(true);
         // End the simulated playback away from the original cursor, so an ignored restore is observable.
         request.from_beat = Some(4.);
-        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Unsure { marked_modified: false, .. }))
+        ));
         assert_eq!(state.closed.get(), 1);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
@@ -1126,7 +1133,7 @@ fn a_short_live_capture_is_refused_not_published_as_a_short_success() {
         state.raw_frames.set(8000);
         assert!(matches!(
             live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", .. }))
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", marked_modified: false, .. }))
         ));
         assert_eq!(state.written.get(), 1);
         assert_eq!(state.closed.get(), 1);
@@ -1320,7 +1327,7 @@ fn failure_to_open_an_undo_step_leaves_ears_disarmed_without_deleting() {
         state.begin_fails.set(true);
         assert!(matches!(
             live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_begin_failed"), .. }))
+            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_begin_failed"), marked_modified: false, .. }))
         ));
         assert_eq!(live.set.chain("Bass"), ["Synth", "Kumi Ears"]);
         assert_eq!(live.set.asked_for("live_undo"), 0);
