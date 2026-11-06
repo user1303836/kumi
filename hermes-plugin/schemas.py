@@ -187,13 +187,26 @@ KUMI_LISTEN = _tool(
         if TRACK_LISTEN_DAWS else {})},
     ("source",))
 
+SOUND_CLASSES = ("kick", "snare", "clap", "hat", "cymbal", "tom", "perc", "drums", "bass", "lead", "pad", "keys",
+                 "pluck", "stab", "synth", "guitar", "strings", "brass", "vocal", "fx", "noise", "texture")
+
 KUMI_SOUNDS = _tool(
     "kumi_sounds",
     "Search the producer's sound map (samples in the folders they approved) by words, or find sounds near one sound. "
-    "Returns sound ids for the map's current revision; pass them to kumi_listen, or place one with a kumi_change "
-    "file step, its file field {sound_id, map_revision}. Reads only.",
+    "Style words match the indexed names and folders; descriptors such as dark or punchy rank by what Kumi measured. "
+    "Filters, by the values Kumi indexed at the last scan: bpm (also matches half or double time), key (also its "
+    "relative major or minor, or a one-shot's root note), min_seconds and max_seconds, and class (what the sound is), "
+    "beside kind (loop or one-shot). A sound without the indexed value isn't found by its filter. Each hit says why it "
+    "matched; a near search adds closeness, 0 to 100 and relative to this map, never a percentage. Returns sound ids "
+    "for the map's current revision; pass them to kumi_listen, or place one with a kumi_change file step, its file "
+    "field {sound_id, map_revision}. Reads only.",
     {"query": {"type": "string"}, "near": {"type": "string", "description": "A sound id to find similar sounds to."},
-     "kind": {"type": "string", "description": "A kind of sound, e.g. kick, snare, pad, loop."},
+     "kind": {"type": "string", "description": "loop or one-shot, or a kind of sound such as kick or pad."},
+     "class": {"type": "string", "enum": list(SOUND_CLASSES), "description": "What the sound is, as Kumi indexed it."},
+     "bpm": {"type": "number", "exclusiveMinimum": 0, "description": "About this tempo, or half or double it."},
+     "key": {"type": "string", "description": "A key such as A minor or F#; its relative key matches too."},
+     "min_seconds": {"type": "number", "minimum": 0, "description": "At least this long, in seconds."},
+     "max_seconds": {"type": "number", "minimum": 0, "description": "At most this long, in seconds."},
      "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
     ("query",))
 

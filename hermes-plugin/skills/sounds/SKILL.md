@@ -16,16 +16,26 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
   - `action: status` says what's there.
 
 ## Finding sounds
-- **`kumi_sounds`** searches by words (`query`), by `kind` (kick, snare, pad, loop…), or `near` another sound's id.
+- **`kumi_sounds`** searches by words (`query`), or `near` another sound's id.
+  - **Words:** the producer's style words go in `query`. Artist and genre words match names and folders; descriptors such as "dark", "bright", "dusty" or "punchy" rank by what Kumi measured.
+  - **Filters,** by the values Kumi indexed at the folder's last scan:
+    - `class` says what the sound is (kick, snare, pad…), and `kind` says loop or one-shot: "a kick one-shot" is `{"kind": "one-shot", "class": "kick"}`;
+    - `bpm` matches about that tempo, or half or double it, and the hit says which;
+    - `key` matches that key, its relative major or minor, or a one-shot's root note. Nothing is transposed;
+    - `min_seconds` and `max_seconds` bound the length: "under 300 ms" is `{"max_seconds": 0.3}`.
+  - **A sound without the indexed value isn't found by that filter.** When a filtered search finds nothing, say so, and offer to search without it.
+  - "A dark kick under 300 ms" is `{"query": "dark", "class": "kick", "max_seconds": 0.3}`.
+- **Say why each sound matched in Kumi's words** (`why`): a name or folder matched a word, or a measurement ranked it. Never say Kumi, or you, recognised a style or a genre.
+- **A near search's `closeness`** (0 to 100) is relative to the producer's sounds on this map: say "closeness 87, relative to this map", never a percentage or a confidence.
 - **Sound ids belong to one map revision** (`map_revision`). After a rescan, search again rather than reuse old ids: an old id is refused as stale.
-- **Describe sounds from what Kumi returns:** name, kind, folder, length and measurements. Don't invent qualities you didn't measure.
+- **Describe sounds from what Kumi returns:** name, kind, folder, length, the indexed tempo, key or note, and measurements. Don't invent qualities you didn't measure.
 
 ## Auditioning
 - **`kumi_listen`** with `source: {"sound_id", "map_revision"}` measures a sound (skill `kumi:listening`), and with `compare_to` compares two.
 - **In Hermes Desktop the producer can click sounds on the map** to hear them locally. That plays nothing in the DAW.
 - **To let the producer hear a sound in a messaging chat** (Telegram, Discord…), put the `MEDIA:` line `kumi_listen` returned for it in your reply, on a line of its own. A `MEDIA:` line inside a tool result isn't delivered there.
 - **"Find me a darker snare", end to end:**
-  1. `kumi_sounds` with `{"query": "", "kind": "snare"}`, or `{"query": "", "near": "<the current snare's sound id>"}` when it's a map sound. `query` is always given, even empty.
+  1. `kumi_sounds` with `{"query": "dark", "class": "snare"}`, or `{"query": "", "near": "<the current snare's sound id>"}` when it's a map sound. `query` is always given, even empty.
   2. Measure the two or three likeliest with `kumi_listen`.
      - Set `compare_to` to the current snare when Kumi can name it: `{"sound_id", "map_revision"}` together, or a file Kumi kept (`{"artifact_id"}`). Otherwise measure the candidates against the first of them.
      - After the first answer, use its `compare.artifact_id` as `compare_to`.
