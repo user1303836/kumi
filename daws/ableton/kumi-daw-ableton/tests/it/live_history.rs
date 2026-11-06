@@ -34,8 +34,11 @@ impl McpEndpoint for Fixture {
         None
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let names =
-            ["live_status", "live_discover", "live_undo", "live_transaction_release", "live_run_python", "live_session_emergency_stop"];
+        let mut names =
+            vec!["live_status", "live_discover", "live_undo", "live_transaction_release", "live_run_python", "live_session_emergency_stop"];
+        if self.config["undoStep"] == true {
+            names.extend(["live_undo_step_begin", "live_undo_step_end"]);
+        }
         Ok(serde_json::from_value(json!({"tools":names.iter().filter(|name|!self.config["missing"].as_array().is_some_and(|a|a.contains(&json!(name)))).map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>()})).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
@@ -151,11 +154,122 @@ fn canonical(value: &Value) -> Value {
 fn normalized(value: &Value) -> String {
     let uuid = regex::Regex::new("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
     let group = regex::Regex::new(r"\bc\d+\b").unwrap();
-    let text = stringify(&canonical(value));
+    // The recorded TypeScript source predates bridge causes in unsure undo notes. Compare its other behavior
+    // unchanged; the focused regression below asserts the new note's exact cause, bounds and sanitization.
+    fn legacy_notes(value: &mut Value) {
+        match value {
+            Value::Object(fields) => {
+                if fields
+                    .get("note")
+                    .and_then(Value::as_str)
+                    .is_some_and(|note| note.starts_with("Live didn't confirm the undo; inspect the Set before another change."))
+                {
+                    fields.insert("note".into(), json!("Live didn't confirm the undo; try again."));
+                }
+                fields.values_mut().for_each(legacy_notes);
+            }
+            Value::Array(items) => items.iter_mut().for_each(legacy_notes),
+            _ => {}
+        }
+    }
+    let mut value = value.clone();
+    legacy_notes(&mut value);
+    let text = stringify(&canonical(&value));
     group.replace_all(&uuid.replace_all(&text, "<uuid>"), "<group>").into_owned()
 }
 fn eq(actual: &Value, expected: &Value, label: &str) {
     assert_eq!(normalized(actual), normalized(expected), "{label}")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_unsure_undo_keeps_the_bridge_cause_in_its_record_for_the_serve_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        // More than the text response's 2,048 UTF-16 units: the cause must be extracted before wire text is bounded.
+        let cause = format!("device move was not confirmed\n\t\u{202e}\u{200b}\x1b[31mactual index 1\x1b[0m {}", "é".repeat(2_500));
+        let plain_prefix = "device move was not confirmed actual index 1 ";
+        let expected_cause = format!("{plain_prefix}{}…", "é".repeat(399 - plain_prefix.chars().count()));
+        let replies = [
+            json!({"isError":true,"content":[{"type":"text","text":json!({"reason":cause,"remediation":"Device undo is uncertain"}).to_string()}],"structuredContent":{"state":"uncertain"}}),
+            json!({"isError":true,"content":[],"structuredContent":{"state":"uncertain","reason":cause}}),
+            json!({"content":[{"type":"text","text":json!({"state":"pending","reason":"device move confirmation is pending"}).to_string()}]}),
+        ];
+        for (index, reply) in replies.into_iter().enumerate() {
+            let endpoint = Rc::new(Fixture { config: json!({"responses":[{"reply":reply}]}), calls: RefCell::new(vec![]), original: RefCell::new(Signal::new()) });
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| { let endpoint: Rc<dyn McpEndpoint> = out.clone(); async move { Ok(endpoint) }.boxed_local() }));
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+            connection.available.set(true);
+            let history = History::new(connection.clone(), Remember::new(connection.clone(), None, None), Some(50), None);
+            history.remember(serde_json::from_value(json!({"id":"move-1","family":"device","title":"Move SoftClip","state":"applied","at":0})).unwrap(), "device-move-1".into(), None);
+            history.entries.borrow()["move-1"].borrow_mut().tool = Some("move_device".into());
+            let result = history.undo("move-1", Signal::new(), false).await.unwrap();
+            let record = result.record.unwrap();
+            assert_eq!(record.state, kumi_types::contracts::ChangeState::Unsure);
+            let note = record.note.unwrap();
+            assert!(note.starts_with("Live didn't confirm the undo; inspect the Set before another change. Bridge: "), "{note}");
+            if index < 2 {
+                assert_eq!(note, format!("Live didn't confirm the undo; inspect the Set before another change. Bridge: {expected_cause}"));
+                assert_eq!(note.split_once(" Bridge: ").unwrap().1.chars().count(), 400);
+            } else {
+                assert!(note.contains("device move confirmation is pending"), "{note}");
+            }
+            assert!(note.chars().count() <= 500, "{}", note.chars().count());
+            assert!(!note.chars().any(|c| c.is_control() || matches!(c, '\u{202e}' | '\u{200b}')));
+            assert!(!note.contains("[31m") && !note.contains("remediation") && !note.contains("{\"reason\"") && !note.contains("\\u"));
+            assert_eq!(endpoint.calls.borrow().len(), 1, "an uncertain write is never retried automatically");
+            connection.close().await.unwrap();
+        }
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_typed_pad_content_refusal_keeps_its_history_row_applied() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (tool, state) in ["load_sample_to_pad", "load_samples_to_pads"].into_iter().flat_map(|tool| {
+                [kumi_types::contracts::ChangeState::Applied, kumi_types::contracts::ChangeState::Unsure].map(|state| (tool, state))
+            }) {
+                let reason = "This request sent nothing to Live; a prior uncertain undo remains uncertain.";
+                let reply = json!({"isError":true,"content":[{"type":"text","text":json!({"code":"changed_since","reason":reason,"undoUnavailable":true}).to_string()}]});
+                let endpoint = Rc::new(Fixture {
+                    config: json!({"undoStep":true,"responses":[{"value":{"stepId":"pad-undo-step"}},{"reply":reply},{"value":{"closed":true}}]}),
+                    calls: RefCell::new(vec![]),
+                    original: RefCell::new(Signal::new()),
+                });
+                let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+                let out = endpoint.clone();
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                    async move { Ok(endpoint) }.boxed_local()
+                }));
+                let connection = LiveConnection::new(options);
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                connection.available.set(true);
+                let history = History::new(connection.clone(), Remember::new(connection.clone(), None, None), Some(50), None);
+                history.remember(
+                    serde_json::from_value(json!({"id":"pad-1","family":"device","title":"Load kick","state":state,"note":"Existing history note","at":0})).unwrap(),
+                    "pad-load-1".into(),
+                    None,
+                );
+                history.entries.borrow()["pad-1"].borrow_mut().tool = Some(tool.into());
+                history.entries.borrow()["pad-1"].borrow_mut().undo_key = Some("original-undo-key".into());
+                let before = serde_json::to_value(&*history.entries.borrow()["pad-1"].borrow()).unwrap();
+                let result = history.undo("pad-1", Signal::new(), false).await.unwrap();
+                assert!(result.record.is_none(), "a typed refusal does not move the history state on");
+                assert!(result.refused && result.stopped);
+                assert_eq!(serde_json::to_value(&*history.entries.borrow()["pad-1"].borrow()).unwrap(), before, "a no-write refusal preserves prior uncertainty and recovery keys");
+                let refusal = history.host.guard.take_refusal().unwrap();
+                assert_eq!((refusal.code, refusal.reason), ("changed_since", reason.into()));
+                assert_eq!(endpoint.calls.borrow().iter().map(|call| call["name"].as_str().unwrap()).collect::<Vec<_>>(),
+                    ["live_undo_step_begin", "live_undo", "live_undo_step_end"]);
+                connection.close().await.unwrap();
+            }
+        })
+        .await;
 }
 #[tokio::test(flavor = "current_thread")]
 async fn undo_quiet_groups_retirement_and_emergency_stop_match_source() {

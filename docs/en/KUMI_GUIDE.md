@@ -450,6 +450,8 @@ library or earlier conversations, or a Max for Live device's file.
   presets in the foreground. This works with Live, REAPER and Renoise.
 - **Ctrl-B** moves the answer's slow step that doesn't use Live (a video, pages)
   to the background, and the answer carries on. In tmux, press Ctrl-B twice.
+- **Live MIDI candidates:** ask for alternate MIDI ideas in the background. Kumi reads the source once, then generates a saved candidate board while you keep working. Identical running requests share the original job and board ID. Each candidate has a stable ID and independent note material; it has not been written or heard. Review the board and keep/drop candidates locally. Applying Live candidate boards is unavailable until the native bridge can atomically guard both the source and destination; review the note material manually.
+- **Candidate recovery:** quitting stops generation, while completed candidates remain in the original project's board. Candidate jobs do not run after Kumi quits and are never replayed by `/jobs`. They never write, play or capture Live. Background audio capture and a detached job service are unavailable.
 - **Stopping:** `x` on a JOBS row or in a job's details. Esc stops the answer,
   not the jobs. Quitting interrupts them; `/jobs` runs them again next time.
 - **Away:** while Kumi's window is behind another, a job's end is a notification
@@ -971,6 +973,20 @@ instrument is written in GenExpr, the language of Max's gen~. Effects get Mix
 and Output knobs; instruments play 8 notes at once, or up to 32. Both end in
 Kumi's output stage, which keeps their output safe (no NaN, denormals or DC,
 held under +6 dBFS). Kumi listens to what it made and fixes what it hears.
+
+Devices can also be patches of Max's objects. A patched instrument can ask for
+2–32 voices: Kumi allocates notes to independent copies of its voice patch and
+sums them through one output stage. Leaving voices out keeps the existing
+whole-instrument patch. Allocation follows pitch, like code instruments; it is
+not MPE or separate ownership of the same pitch on different MIDI channels.
+Multiple voices support channel messages, not arbitrary SysEx or realtime
+bytes; unsupported shared state or side effects are refused.
+
+For a patched MIDI effect, Kumi can run its tests through supported message
+objects before writing the device, with control values and a virtual clock.
+An unsupported object or message is reported as a test that could not run,
+never as passing. This checks MIDI behavior, not audio rendering or Live's
+actual scheduler timing; sound still needs listening in Live.
 
 A face styled beyond the knobs (panels, words, colours) is drawn by Max, which
 Kumi can't see. When a device from your User Library loads, Kumi reads its face

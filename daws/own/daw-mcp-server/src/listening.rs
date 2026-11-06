@@ -67,7 +67,20 @@ pub struct Jobs {
     inner: Mutex<JobsInner>,
 }
 
-/// Four base-36 characters from a counter and the clock: ids unique among what the host keeps.
+/// A scratch id carries an independent random nonce, in full, within both bridges' 32-character limit.
+/// Copy names retain this id, so a restart or two makes in the same clock tick cannot share a short tag.
+fn scratch_id(nonce: &str) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut n = u128::from_str_radix(nonce, 16).expect("a 16-byte random nonce");
+    let mut id = String::from("s");
+    for _ in 0..25 {
+        id.push(DIGITS[(n % 36) as usize] as char);
+        n /= 36;
+    }
+    id
+}
+
+/// Four base-36 characters from a counter and the clock, for a job or preview's opaque id.
 fn token(seed: u64) -> String {
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     let mut n = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (seed >> 7);
@@ -89,7 +102,11 @@ impl Jobs {
     pub fn id(&self, prefix: char) -> String {
         let mut inner = self.inner.lock().expect("jobs lock");
         inner.next += 1;
-        format!("{prefix}{}{}", inner.next, token(inner.next ^ now_ms()))
+        if prefix == 's' {
+            scratch_id(&daw_bridge::auth::random_hex16())
+        } else {
+            format!("{prefix}{}{}", inner.next, token(inner.next ^ now_ms()))
+        }
     }
 
     /// Forgets the jobs whose end was read a while ago, then keeps this one. Refused when the host already keeps
@@ -1076,6 +1093,15 @@ mod tests {
     #[test]
     fn jobs_are_kept_until_their_end_was_read_and_never_more_than_the_bound_running() {
         let jobs = Jobs::default();
+        for nonce in ["00000000000000000000000000000000", "00000000000000000000000000000001", "ffffffffffffffffffffffffffffffff"] {
+            let id = scratch_id(nonce);
+            assert_eq!(id.len(), 26, "the whole random nonce fits Renoise's 32-character bound");
+            let digits: String = id[1..].chars().rev().collect();
+            assert_eq!(u128::from_str_radix(&digits, 36).unwrap(), u128::from_str_radix(nonce, 16).unwrap());
+        }
+        let scratch = jobs.id('s');
+        assert_eq!(scratch.len(), 26);
+        assert!(scratch.starts_with('s') && scratch[1..].bytes().all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase()));
         let first = jobs.id('j');
         assert!(first.starts_with('j') && first != jobs.id('j'));
         for n in 0..MAX_JOBS {

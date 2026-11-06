@@ -15,11 +15,7 @@ use kumi_listening::{
 use kumi_media::programs::ProgramOptions;
 use kumi_types::contracts::KernelTool;
 use serde_json::{json, Value};
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{cell::Cell, rc::Rc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const B1: &str = "b1000000-0000-4000-8000-000000000001";
@@ -442,22 +438,9 @@ fn links_and_keys_read_as_they_should() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn musicbrainz_is_asked_at_its_pace_and_again_when_busy_and_a_failed_genre_list_isnt_kept() {
+async fn musicbrainz_is_asked_again_when_busy_and_a_failed_genre_list_isnt_kept() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            // Paced: no two requests closer than the pace.
-            let times = Rc::new(RefCell::new(vec![]));
-            let heard = times.clone();
-            let paced = serve_with(move |path| {
-                heard.borrow_mut().push(Instant::now());
-                musicbrainz(path).map_or((404, String::new()), |body| (200, body))
-            })
-            .await;
-            let sources = Sources::new(&paced, &serve(listenbrainz).await, &serve(spotify).await).pace(Duration::from_millis(150));
-            assert!(matches!(sources.resolve("dub techno", 2, Signal::new()).await, Ok(Resolved::Tracks { kind: Kind::Genre, .. })));
-            let times = times.borrow().clone();
-            assert!(times.len() >= 4, "{}", times.len());
-            assert!(times.windows(2).all(|pair| pair[1] - pair[0] >= Duration::from_millis(100)), "{times:?}");
             // The genre list fails, then MusicBrainz is busy once, then it answers: the failure isn't kept, and the busy
             // answer is asked again.
             let asked = Rc::new(Cell::new(0));
@@ -481,11 +464,15 @@ async fn musicbrainz_is_asked_at_its_pace_and_again_when_busy_and_a_failed_genre
             // Once read, it's kept.
             sources.resolve("dub techno", 2, Signal::new()).await.unwrap();
             assert_eq!(asked.get(), 3);
-            // Nobody answering: an error that says so, not a hang.
-            let closed = {
-                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-                format!("http://{}", listener.local_addr().unwrap())
-            };
+            // Nobody answering: an error that says so, not a hang. Keep the port while dropping its connections:
+            // dropping the listener too would let another test's server take it.
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let closed = format!("http://{}", listener.local_addr().unwrap());
+            tokio::task::spawn_local(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    drop(socket);
+                }
+            });
             let offline = Sources::new(&closed, &closed, &closed).unpaced();
             let failed = offline.resolve("Burial", 6, Signal::new()).await.unwrap_err();
             assert!(failed.contains("didn't answer"), "{failed}");

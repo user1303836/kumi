@@ -1,5 +1,6 @@
 import base64
 import copy
+import enum
 import hashlib
 import io
 import json
@@ -637,21 +638,26 @@ class RemoteScriptTests(unittest.TestCase):
             def __init__(self, *args, **kwargs): self.served = 0
             def update_display(self): self.served += 1
 
-        with patch.object(package, "_files_check", return_value=lambda: time.sleep(0.3)), patch.object(package, "_CHECK_ON_ITS_OWN_SECONDS", 0.05), \
+        release, waits, at = threading.Event(), [], [100.0]
+        self.addCleanup(release.set)
+        clock = types.SimpleNamespace(perf_counter=lambda: at[0], monotonic=time.monotonic)
+        with patch.object(package, "time", clock), patch.object(package, "_files_check", return_value=release.wait), \
                 patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
             surface = package.AbletonMcpBridge(FakeInstance())
             surface._keep_willington = lambda: None
-            surface.update_display()
-            self.assertIsNone(surface._bridge, "within the bound: not waited for")
-            time.sleep(0.06)
-            longest, deadline = 0.0, time.perf_counter() + 3
-            while surface._bridge is None and time.perf_counter() < deadline:
-                began = time.perf_counter()
+            checked = surface._checked
+            checked.wait = lambda seconds: (waits.append(seconds), False)[1]
+            try:
                 surface.update_display()
-                longest = max(longest, time.perf_counter() - began)
-                time.sleep(0.02)
+                self.assertEqual(waits, [], "within the bound: not waited for")
+                for tick in (100.5, 100.55, 100.7):
+                    at[0] = tick; surface.update_display()
+                self.assertIsNone(surface._bridge, "the check is still running")
+                self.assertEqual(waits, [0.01, 0.01], "only bounded waits, at most every 100 ms")
+            finally:
+                release.set(); self.wait_for_the_check(checked)
+            surface.update_display()
         self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after the check")
-        self.assertLess(longest, 0.08, f"no tick held long: {longest:.3f} s")
 
     def test_the_bound_and_the_100_ms_between_moments_are_timed_by_perf_counter(self):
         """Before 3.13, monotonic() on Windows moves in 15.6 ms steps: display ticks about 100 ms apart would read 93.75
@@ -3799,6 +3805,45 @@ class ControlSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^Live doesn't offer Kumi Pad for this track now; nothing changed$"): mapper.invoke("routing.set", args)
         self.assertEqual(mapper.snapshot()["tracks"][0]["routing"]["inputType"], "Ext. In")
 
+        # #1145: the same unsafe source has a translated label. Category/attached
+        # identity win over text, and unknown native reads must not become safe.
+        class RoutingTypeCategory(enum.IntEnum):
+            master = enum.auto()
+            track = enum.auto()
+        main = FakeTrack(); main.name = "Hauptausgang"; song.master_track = main
+        normal = FakeTrack(); normal.name = "Main"
+        class Unreadable(FakeRouteChoice):
+            @property
+            def category(self): raise AttributeError("native category unreadable")
+        unsafe = [types.SimpleNamespace(name=name, category=RoutingTypeCategory.master) for name in ("主出力", "主输出", "Hauptausgang")]
+        unsafe.append(types.SimpleNamespace(name="Sortie principale", attached_object=main))
+        unreadable_attached = Unreadable("Unreadable attached"); unreadable_attached.attached_object = normal
+        unsafe.extend([Unreadable("不明"), unreadable_attached, types.SimpleNamespace(name="Unknown enum", category=object()), types.SimpleNamespace(name="主输出", category=None)])
+        for candidate in unsafe:
+            with self.subTest(name=candidate.name):
+                track.available_input_routing_types = [FakeRouteChoice("Ext. In"), candidate]
+                before = track.input_routing_type
+                with self.assertRaisesRegex(ValueError, "crashes|unreadable"):
+                    mapper.invoke("routing.set", {**args, "inputType": candidate.name, "arm": True})
+                self.assertIs(track.input_routing_type, before)
+                self.assertFalse(track.arm, "refused before any other write")
+                fact = mapper._routing_row(track)["inputTypeSafety"][-1]
+                self.assertIsNot(fact["isMain"], False)
+        for candidate in [types.SimpleNamespace(name="Main", category=RoutingTypeCategory.track), types.SimpleNamespace(name="Master", attached_object=normal)]:
+            with self.subTest(name=candidate.name):
+                self.assertIs(mapper._input_from_main(candidate), False, "an ordinary track can have an English main label")
+                track.available_input_routing_types = [FakeRouteChoice("Ext. In"), candidate]
+                self.assertTrue(mapper.invoke("routing.set", {**args, "inputType": candidate.name})["changed"])
+                self.assertIs(track.input_routing_type, candidate)
+                track.input_routing_type = track.available_input_routing_types[0]
+        self.assertIs(mapper._input_from_main(FakeRouteChoice("Main")), True, "old APIs retain the English fallback")
+        self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Ext. In", category=object())), None)
+        live = types.SimpleNamespace(Routing=types.SimpleNamespace(RoutingTypeCategory=RoutingTypeCategory))
+        with patch.dict(sys.modules, {"Live": live}):
+            self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="主出力", category=RoutingTypeCategory.master.value)), True)
+            self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Main", category=RoutingTypeCategory.track.value)), False)
+        self.assertIs(mapper._input_from_main(types.SimpleNamespace(name="Localized", category=object(), attached_object=main)), True)
+
     def test_mixer_multi_field_failure_rolls_back_exact_prior_state(self):
         class FailingPan(FakeParameter):
             def __init__(self): self._value = 0.0; self.reject = False; super().__init__(); self._value = 0.0; self.reject = True
@@ -3839,6 +3884,17 @@ class ControlSurfaceTests(unittest.TestCase):
         a.input_routing_type = ext; a.output_routing_type = route_b; a.input_routing_channel = channel; a.output_routing_channel = channel; a.route_log.clear(); a.reject_arm = True; row = mapper.snapshot()["tracks"][0]; routing = row["routing"]; state = {"inputType": routing["inputType"], "inputSubRouting": routing["inputSubRouting"], "outputType": routing["outputType"], "outputSubRouting": routing["outputSubRouting"], "arm": row["armed"], "monitoring": row["monitoringState"]}; args.update({"inputSubRouting": "2", "outputSubRouting": "2", "arm": True, "expectedObjectIdentity": row["objectIdentity"], "expectedStateRevision": hashlib.sha256(mapper._bounded_canonical(state).encode()).hexdigest()})
         with self.assertRaisesRegex(RuntimeError, "injected arm failure"): mapper.invoke("routing.set", args)
         self.assertEqual(a.output_routing_type.name, "B"); self.assertEqual(a.input_routing_type.name, "Ext. In"); self.assertEqual(a.input_routing_channel.name, "1"); self.assertEqual(a.output_routing_channel.name, "1")
+        # The input can appear only after the output switches. Re-resolve its actual
+        # native identity then; a misleading track label must never reach the setter.
+        song.master_track = FakeTrack(); song.master_track.name = "主出力"
+        unsafe = types.SimpleNamespace(name="B", attached_object=song.master_track)
+        a.input_types_by_output["Main"] = [ext, route_a, unsafe]
+        a.reject_arm = False; a.route_log.clear()
+        with self.assertRaisesRegex(ValueError, "Live crashes"):
+            mapper.invoke("routing.set", args)
+        self.assertIn(("output_routing_type", "Main"), a.route_log)
+        self.assertNotIn(("input_routing_type", "B"), a.route_log)
+        self.assertEqual((a.input_routing_type.name, a.output_routing_type.name), ("Ext. In", "B"))
 
 
 if __name__ == "__main__":
@@ -8084,23 +8140,34 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
 
     def test_requests_sent_right_after_their_answers_are_served_in_the_same_tick(self):
         client, channel = self.connect(); answered = []
-        def ask():
-            buffer = bytearray()
-            for sequence in (1, 2, 3):
-                client.sendall(self.frame(channel, sequence))
+        real_selector, test = remote_module.selectors.DefaultSelector, self
+        class NextStep:
+            """Send each next step once the tick's selector is waiting for it. The real sockets and
+            selector still carry the requests; no worker has to run within the production linger."""
+            def __init__(self): self.inner = real_selector(); self.buffer = bytearray()
+            def __enter__(self): self.inner.__enter__(); return self
+            def __exit__(self, *args): return self.inner.__exit__(*args)
+            def register(self, *args): return self.inner.register(*args)
+            def select(self, timeout):
+                test.assertGreater(timeout, 0, "the tick offers the next step a wait")
+                test.assertEqual(timeout, remote_module.PUMP_LINGER_SECONDS)
+                buffer = self.buffer
                 while b"\n" not in buffer:
                     chunk = client.recv(1 << 20)
-                    if not chunk: return
+                    test.assertTrue(chunk, "the tick answered before waiting for the next step")
                     buffer.extend(chunk)
                 index = buffer.find(b"\n"); answered.append(json.loads(bytes(buffer[:index]))); del buffer[:index + 1]
-        asker = threading.Thread(target=ask); asker.start()
-        deadline = time.time() + 2
-        while not answered and time.time() < deadline: self.bridge.update_display(); time.sleep(0.001)
-        ticks_after_first = 0
-        while len(answered) < 3 and time.time() < deadline: self.bridge.update_display(); ticks_after_first += 1
-        asker.join(timeout=2)
+                if len(answered) == 3: return []
+                client.sendall(test.frame(channel, len(answered) + 1))
+                return self.inner.select(5)
+        client.sendall(self.frame(channel, 1))
+        self.assertTrue(select_module.select([self.bridge._connections[0].socket], [], [], 5)[0])
+        # This test checks the next-step path within one tick. Budget expiry has its own tests: a
+        # descheduled runner mustn't spend the production tick's budget before it reaches this path.
+        with patch.object(remote_module.time, "perf_counter", return_value=1000.0), \
+                patch.object(remote_module.selectors, "DefaultSelector", NextStep):
+            self.bridge.update_display()
         self.assertEqual([item["id"] for item in answered], ["status-1", "status-2", "status-3"])
-        self.assertEqual(ticks_after_first, 0, "the two later steps were served in the tick that answered the first")
 
     def test_a_read_the_tick_takes_late_ends_with_the_tick(self):
         # A paged read served while the tick waited for the next request mustn't stretch the tick past its budget.
@@ -8232,7 +8299,9 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
             def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
             def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
         seen = {}
-        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+        # The runner's time serving a request mustn't spend the tick's budget or age the timer
+        # between stamping its last call and choosing the wait.
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording), patch.object(remote_module.time, "perf_counter", return_value=1000.0):
             for sequence, gap in enumerate((None, 0.0156, 0.013, 0.012, 0.010), 1):
                 self.bridge.timer_gap = gap; waits.clear()
                 with patch.object(self.bridge, "_timer_called"):
@@ -9223,10 +9292,25 @@ class PythonRunTests(unittest.TestCase):
                 self.assertTrue(result["error"]["message"].startswith("Live crashes when a track's input is set to Main"), result["error"]["message"])
                 self.assertIn('"Resampling"', result["error"]["message"])
                 self.assertEqual(self.song.tempo, 120, "nothing in the script ran")
+        # No name literal can establish which actual RoutingType an arbitrary script
+        # assigns. Recognized writes use the typed path instead, before any script runs.
+        for statement in [
+            "t.input_routing_type = t.available_input_routing_types[0]",
+            "t.input_routing_channel = t.available_input_routing_channels[0]",
+            "t.current_input_routing = 'Resampling'",
+            "t.input_routing_type = next(r for r in t.available_input_routing_types if r.category == Live.Routing.RoutingTypeCategory.master)",
+            "setattr(t, 'input_routing_type', t.available_input_routing_types[0])",
+            "def route(t):\n t.input_routing_type = t.available_input_routing_types[0]\nroute(t)",
+        ]:
+            result = self.run_python("song.tempo = 126\nt = song.tracks[0]\n" + statement)
+            self.assertFalse(result["ok"])
+            self.assertIn("typed routing", result["error"]["message"])
+            self.assertEqual(self.song.tempo, 120)
         # An output to Main, an input read or compared, and an input from Resampling all run.
         for code in [
             "t = song.tracks[0]\nresult = [r.display_name for r in t.available_output_routing_types if r.display_name == 'Main']",
             "result = song.tracks[0].input_routing_type == 'Main'",
+            "result = getattr(song.tracks[0], 'input_routing_type', None)",
             "t = song.tracks[0]\nchoices = [r for r in t.available_input_routing_types if r.display_name == 'Resampling']\nresult = len(choices)",
         ]:
             with self.subTest(code=code):

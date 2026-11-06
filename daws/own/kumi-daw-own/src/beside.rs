@@ -361,7 +361,7 @@ impl DawProvider for Beside {
     }
     fn integration(&self, context: IntegrationContext, session: &DawSession) -> Rc<dyn Integration> {
         let connect = session.answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
-        (self.create)(OwnOptions { context, kumi_home: kumi_home(&session.env), connect })
+        (self.create)(OwnOptions { open_file: None, context, kumi_home: kumi_home(&session.env), connect })
     }
     fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
         probe_host(self.create, kumi_home(env), answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id)))
@@ -857,15 +857,126 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_launch_returns_as_the_program_does_whatever_still_holds_its_stderr() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::{Read, Write};
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+        use std::process::{Child, Command, Stdio};
+        struct Peer(Child);
+        impl Drop for Peer {
+            fn drop(&mut self) {
+                self.0.stdin.take();
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
         let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("peer.sock");
+        let ready = socket.with_extension("ready");
+        let name = std::ffi::CString::new(ready.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `name` is a live C string; this creates only the fixture's FIFO in its temporary directory.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut ready = std::fs::OpenOptions::new().read(true).write(true).open(ready).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let mut peer = Peer(
+            Command::new(&executable)
+                .args(["--exact", "beside::tests::launch_stderr_fixture", "--nocapture"])
+                .env("KUMI_TEST_LAUNCH_SOCKET", &socket)
+                .env("KUMI_TEST_LAUNCH_ROLE", "hold")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let mut state = [0];
+        ready.read_exact(&mut state).unwrap();
+        assert_eq!(&state, b"R", "the owned peer is listening");
         let program = dir.path().join("program");
-        std::fs::write(&program, "#!/bin/sh\necho 'program: Renoise opened' >&2\nsleep 10 &\nexit 0\n").unwrap();
+        // The launcher gives the owned peer its actual stderr descriptor, then exits. The peer keeps that descriptor
+        // until explicitly released (or its parent's stdin pipe closes), so no scheduler deadline stands in for it.
+        let executable = executable.to_string_lossy().replace('\'', "'\\''");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\nKUMI_TEST_LAUNCH_ROLE=send exec '{executable}' --exact beside::tests::launch_stderr_fixture --nocapture\n"),
+        )
+        .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let started = std::time::Instant::now();
-        let launched = launch(&program, dir.path(), None, None);
-        assert!(started.elapsed() < Duration::from_secs(5), "waited {:?} for what the program left running", started.elapsed());
+        let launched = launch(&program, dir.path(), Some(("KUMI_TEST_LAUNCH_SOCKET", &socket)), None);
+        ready.read_exact(&mut state).unwrap();
+        assert_eq!(&state, b"H", "the peer holds the launcher's stderr");
+        assert!(peer.0.try_wait().unwrap().is_none(), "launch returned while its stderr was still held");
         assert_eq!(launched, Launched { opened: true, said: vec!["Renoise opened".into()] });
+        peer.0.stdin.take().unwrap().write_all(b"release").unwrap();
+        assert!(peer.0.wait().unwrap().success());
+    }
+
+    /// Runs as a separate test process only for the launch fixture above. The holder is a direct owned Child, not an
+    /// orphan grandchild of the launch script, and exits on release or parent EOF even while awaiting a connection.
+    #[cfg(unix)]
+    #[test]
+    fn launch_stderr_fixture() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let Some(socket) = std::env::var_os("KUMI_TEST_LAUNCH_SOCKET").map(PathBuf::from) else { return };
+        if std::env::var("KUMI_TEST_LAUNCH_ROLE").as_deref() == Ok("hold") {
+            std::thread::spawn(|| {
+                let _ = std::io::stdin().read(&mut [0]);
+                std::process::exit(0);
+            });
+            let listener = UnixListener::bind(&socket).unwrap();
+            let mut ready = std::fs::OpenOptions::new().write(true).open(socket.with_extension("ready")).unwrap();
+            ready.write_all(b"R").unwrap();
+            let (connection, _) = listener.accept().unwrap();
+            let _stderr = launch_fixture_descriptor(&connection, false).unwrap();
+            ready.write_all(b"H").unwrap();
+            loop {
+                std::thread::park();
+            }
+        } else {
+            let connection = UnixStream::connect(socket).unwrap();
+            launch_fixture_descriptor(&connection, true);
+            eprintln!("program: Renoise opened");
+        }
+    }
+
+    /// Passes the launcher's stderr over the fixture's Unix socket; receives an owned copy on the other side.
+    #[cfg(unix)]
+    fn launch_fixture_descriptor(connection: &std::os::unix::net::UnixStream, send: bool) -> Option<std::fs::File> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let mut byte = [0u8];
+        let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
+        let mut control = [0usize; 8];
+        // SAFETY: zero is a valid empty msghdr; its buffers below stay alive across the synchronous socket call.
+        let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
+        message.msg_iov = &mut iov;
+        message.msg_iovlen = 1;
+        message.msg_control = control.as_mut_ptr().cast();
+        // SAFETY: the ancillary buffer is aligned and larger than the space required for one descriptor.
+        message.msg_controllen = unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as _) } as _;
+        if send {
+            // SAFETY: the live message has enough ancillary space; SCM_RIGHTS copies the sender's descriptor.
+            unsafe {
+                let header = libc::CMSG_FIRSTHDR(&message);
+                (*header).cmsg_level = libc::SOL_SOCKET;
+                (*header).cmsg_type = libc::SCM_RIGHTS;
+                (*header).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as _) as _;
+                std::ptr::write_unaligned(libc::CMSG_DATA(header).cast::<libc::c_int>(), libc::STDERR_FILENO);
+                assert_eq!(libc::sendmsg(connection.as_raw_fd(), &message, 0), 1);
+            }
+            None
+        } else {
+            // SAFETY: recvmsg writes only within the live buffers. A successful SCM_RIGHTS message transfers ownership
+            // of a new descriptor, which the returned File closes when the peer is released or exits.
+            unsafe {
+                assert_eq!(libc::recvmsg(connection.as_raw_fd(), &mut message, 0), 1);
+                assert_eq!(message.msg_flags & libc::MSG_CTRUNC, 0);
+                let header = libc::CMSG_FIRSTHDR(&message);
+                assert!(!header.is_null());
+                assert_eq!((*header).cmsg_level, libc::SOL_SOCKET);
+                assert_eq!((*header).cmsg_type, libc::SCM_RIGHTS);
+                assert!((*header).cmsg_len as usize >= libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as _) as usize);
+                let descriptor = std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<libc::c_int>());
+                Some(std::fs::File::from_raw_fd(descriptor))
+            }
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

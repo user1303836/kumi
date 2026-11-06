@@ -565,11 +565,73 @@ fn drawn(id: &str, family: &str, title: &str, picture: Option<ChangePicture>) ->
     json!({"type": "change", "change": {"id": id, "family": family, "title": title, "state": "applied", "at": 1, "picture": picture}})
 }
 
-/// The change lands (NOW draws it), then the keyboard goes into HISTORY and opens it.
+/// The framed HISTORY's rows, without the frame's padding. NOW's copy of a picture is outside these rows.
+fn history_body(lines: &[String]) -> Vec<&str> {
+    let Some(strip) = lines.iter().position(|line| line.contains("HISTORY 1")) else { return Vec::new() };
+    lines[strip + 1..]
+        .iter()
+        .map_while(|line| {
+            let (inside, _) = line.rsplit_once('│')?;
+            let (_, inside) = inside.rsplit_once('│')?;
+            inside.strip_prefix(' ')?.strip_suffix(' ')
+        })
+        .collect()
+}
+
+/// Wait for a painted state, yielding to input and frame work without adding a timing assumption.
+async fn painted(h: &Harness, what: &str, ready: impl Fn(&[String]) -> bool) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if ready(&h.screen()) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("Waiting for {what}:\n{}", h.screen().join("\n")));
+}
+
+/// The change lands, HISTORY paints its row before Enter can open it, then the expanded body itself is painted.
+/// Below 100 columns Shift-Tab opens a drawer: its tab rows must exist before Enter can act on one of them.
 async fn opened(h: &Harness, change: Value) {
+    let record: ChangeRecord = serde_json::from_value(change["change"].clone()).unwrap();
+    let picture = record.picture.unwrap().as_kept();
     h.emit(change);
-    h.type_text("\x1b[Z").await;
-    h.type_text("\r").await;
+    h.wait_for("HISTORY 1").await;
+    h.input.write("\x1b[Z");
+    painted(h, "HISTORY's change row", |lines| history_body(lines).first().is_some_and(|row| row.contains("undo"))).await;
+    h.input.write("\r");
+    painted(h, "the expanded HISTORY picture", |lines| {
+        let body = history_body(lines);
+        let Some(first) = body.first() else { return false };
+        let width = kumi::tui::width::text_width(first);
+        // A change title occupies one row, or a second row for all its wrapped continuation. Neither can count as
+        // proof of an expanded picture, even when the title names the same values or notes.
+        let title = kumi::tui::wrap::wrap(
+            &[kumi::tui::wrap::Span::styled(&record.title, kumi::tui::style::Style::default())],
+            (width - 7).max(1), // the undo label and the gap beside the title
+        );
+        let body: Vec<&str> = body.iter().skip(title.len().min(2)).map(|row| row.trim_end()).collect();
+        let cols = (width - 2).max(4) as usize;
+        // The same fixture runs in cells and plain words. Match the visible prefix of the actual picture's rows:
+        // a narrow drawer clips a six-row scene before its caption, so a title or a caption alone is not enough.
+        [Graphics::Cells, Graphics::Words].into_iter().any(|graphics| {
+            let rows = if graphics == Graphics::Words { 0 } else { kumi::tui::pictures::height(&picture, cols) };
+            let drawn = kumi::tui::pictures::draw(&picture, cols, rows, graphics, 0, kumi::tui::style::palette::GROUND);
+            let expected: Vec<String> = drawn
+                .rows
+                .into_iter()
+                .chain(drawn.lines)
+                .map(|row| format!("  {}", row.into_iter().map(|span| span.text).collect::<String>()).trim_end().to_owned())
+                .collect();
+            let visible = body.len().min(expected.len());
+            visible > 0
+                && expected[..visible].iter().any(|row| !row.is_empty())
+                && expected[..visible].iter().map(String::as_str).eq(body[..visible].iter().copied())
+        })
+    })
+    .await;
 }
 
 // FOCUS

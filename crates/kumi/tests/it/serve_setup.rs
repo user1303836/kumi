@@ -693,7 +693,7 @@ case!(setup_daw_updates_a_kumi_ears_this_home_put_there_and_never_an_earlier_kum
     let sha = Sha256::digest(&old).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     let record = lab.home.join("kumi-ears.json");
     let mut noted: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
-    noted["sha256"] = json!(sha);
+    noted["versions"][0] = json!({"sha256": sha, "version": "0.0.0"});
     std::fs::write(&record, noted.to_string()).unwrap();
     let plan = lab.setup(true).await.unwrap();
     assert_eq!(plan["parts"][1]["state"], "older", "{plan}");
@@ -702,6 +702,50 @@ case!(setup_daw_updates_a_kumi_ears_this_home_put_there_and_never_an_earlier_kum
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
     assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "updated");
     assert_eq!(std::fs::read(&legacy).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "the earlier copy still stays");
+});
+
+case!(setup_daw_leaves_a_newer_or_unorderable_kumi_ears_in_this_home_as_it_is, async {
+    for version in [Some("999.0.0"), Some("1.24.68-dev"), None] {
+        let lab = Lab::new(DawId::Ableton, false);
+        lab.setup(false).await.unwrap();
+        let device = b"Kumi Ears from another runtime sharing this home";
+        std::fs::write(lab.ears(), device).unwrap();
+        let sha = sha256(&lab.ears());
+        let record = lab.home.join("kumi-ears.json");
+        let noted = match version {
+            Some(version) => json!({"path": lab.ears().display().to_string(), "versions": [{"sha256": sha, "version": version}]}),
+            // The original record proved ownership but kept no version: it cannot prove this device is older.
+            None => json!({"path": lab.ears().display().to_string(), "sha256": sha}),
+        };
+        std::fs::write(&record, noted.to_string()).unwrap();
+        let before = lab.tree();
+        let plan = lab.setup(true).await.unwrap();
+        assert_eq!((plan["state"].as_str(), plan["parts"][1]["state"].as_str()), (Some("newer"), Some("newer")), "{plan}");
+        assert_eq!(plan["paths"], json!([]), "the same bridge version cannot authorize replacing newer Ears");
+        assert_eq!(refused(lab.install(&plan["digest"]).await).0, "newer_installed");
+        within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+        assert_eq!(std::fs::read(lab.ears()).unwrap(), device);
+    }
+});
+
+case!(setup_daw_records_ears_before_replacing_it_and_an_obstructed_record_can_be_retried, async {
+    let lab = Lab::new(DawId::Ableton, false);
+    let record = lab.home.join("kumi-ears.json");
+    std::fs::create_dir_all(&record).unwrap();
+    assert!(matches!(lab.setup(false).await, Err(OpError::Failed { .. })));
+    assert!(!lab.ears().exists(), "a failed record never leaves an unrecorded device behind");
+    assert_eq!(lab.setup(true).await.unwrap()["parts"][0]["state"], "same", "the script was installed before Ears failed");
+    std::fs::remove_dir(&record).unwrap();
+    assert_eq!(lab.setup(false).await.unwrap()["state"], "same", "retry installs and records Ears");
+    let mut noted: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    assert_eq!(noted["versions"][0]["version"], kumi_types::version::KUMI_VERSION);
+    // The retried install's bytes as an earlier runtime's: a later update still knows they're this home's.
+    std::fs::write(lab.ears(), b"the retried runtime's earlier Ears").unwrap();
+    noted["versions"][0] = json!({"sha256": sha256(&lab.ears()), "version": "0.0.0"});
+    std::fs::write(&record, noted.to_string()).unwrap();
+    assert_eq!(lab.setup(true).await.unwrap()["parts"][1]["state"], "older");
+    assert_eq!(lab.setup(false).await.unwrap()["state"], "same");
+    assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file());
 });
 
 #[cfg(unix)]

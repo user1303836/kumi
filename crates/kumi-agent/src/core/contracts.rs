@@ -572,6 +572,17 @@ pub struct UndoPreview {
     pub refusal: Option<UndoRefusal>,
 }
 
+/// One pure candidate request, captured read-only before queueing. Running generates and persists material only:
+/// it must never read, write, play or capture the DAW. Any later apply requires a separately supported atomic native guard.
+pub type CandidateProgress = Rc<dyn for<'line> Fn(&'line str)>;
+
+#[async_trait(?Send)]
+pub trait BackgroundTakes {
+    fn board_id(&self) -> &str;
+    fn request_key(&self) -> &str;
+    async fn run(&self, signal: Signal, progress: CandidateProgress) -> Result<ToolResult, RuntimeError>;
+}
+
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.
 #[async_trait(?Send)]
 pub trait Integration {
@@ -609,6 +620,15 @@ pub trait Integration {
     /// Live's Browser to list it).
     fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {
         Vec::new()
+    }
+    /// Pure candidate planning after read-only source preparation, never a worker's DAW tool. Its input is the
+    /// integration's variations make schema; native audio and background writes are not implied.
+    fn background_takes_schema(&self) -> Option<JsonObject> {
+        None
+    }
+    async fn prepare_background_takes(&self, input: JsonObject, signal: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+        let _ = (input, signal);
+        Err(absent())
     }
     fn has_undo(&self) -> bool {
         self.profile().caps.undo
@@ -899,6 +919,9 @@ pub struct Generation {
     pub gaps: HashMap<String, Vec<String>>,
     pub silent: Vec<String>,
     pub frozen: HashMap<String, HashSet<String>>,
+    /// Slots whose candidate track is no longer available. They have left the rig, including its render sources;
+    /// the session drops their saved search state too. A missing knob alone belongs in `frozen`.
+    pub gone: Vec<String>,
     /// Each slot's gap no knob closes, when it has one.
     pub structural: HashMap<String, StructuralMove>,
     /// Rendered on the short window, and how many trials were heard from the cache.

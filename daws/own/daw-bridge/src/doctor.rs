@@ -49,16 +49,25 @@ pub struct Inputs<'a> {
     pub probe_timeout: Duration,
 }
 
+/// Whether the DAW loads the bridge or the host starts a program beside it.
+#[derive(Clone, Copy)]
+enum BridgeRuntime {
+    Loaded,
+    Program,
+}
+
 pub fn doctor(daw: Daw, inputs: &Inputs) -> Vec<Check> {
     let mut checks = vec![];
     let target = match daw {
-        Daw::Reaper => reaper_target(inputs, &mut checks),
-        Daw::Renoise => renoise_target(inputs, &mut checks),
-        // (its bridge goes in no folder of the DAW's: Kumi's SoundCraft provider checks it)
+        Daw::Reaper => reaper_target(inputs, &mut checks).map(|(target, archs)| (target, archs, BridgeRuntime::Loaded)),
+        Daw::Renoise => renoise_target(inputs, &mut checks).map(|(target, archs)| (target, archs, BridgeRuntime::Loaded)),
+        // Logic's app detection belongs to its provider; the owned program can be checked without an app installed.
+        Daw::Logic => Some((install::logic_target(inputs.kumi_home), vec![], BridgeRuntime::Program)),
+        // SoundCraft's beside provider owns its launch and bridge checks.
         Daw::SoundCraft => None,
     };
-    let Some((target, app_archs)) = target else { return checks };
-    bridge_checks(daw, &target, &app_archs, inputs, &mut checks);
+    let Some((target, app_archs, runtime)) = target else { return checks };
+    bridge_checks(daw, &target, &app_archs, runtime, inputs, &mut checks);
     checks
 }
 
@@ -164,7 +173,7 @@ fn renoise_target(inputs: &Inputs, checks: &mut Vec<Check>) -> Option<(Target, V
     Some((target, archs))
 }
 
-fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], inputs: &Inputs, checks: &mut Vec<Check>) {
+fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], runtime: BridgeRuntime, inputs: &Inputs, checks: &mut Vec<Check>) {
     let lifecycle = Lifecycle::new(inputs.kumi_home, target.clone());
     let paths = BridgePaths::new(inputs.kumi_home, daw);
     let installed_version = match lifecycle.status() {
@@ -239,16 +248,28 @@ fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], inputs: 
     }
     let file = target.path();
     if file.exists() {
-        let quarantined = if target.folder {
-            detect::quarantined(&file.join("main.lua")) || detect::quarantined(&file)
-        } else {
-            detect::quarantined(&file)
+        let marked = match runtime {
+            BridgeRuntime::Program => std::iter::once(file.clone())
+                .chain(std::fs::read_dir(&file).into_iter().flatten().filter_map(Result::ok).map(|entry| entry.path()))
+                .find(|path| detect::quarantined(path)),
+            BridgeRuntime::Loaded => {
+                let marked = if target.folder {
+                    detect::quarantined(&file.join("main.lua")) || detect::quarantined(&file)
+                } else {
+                    detect::quarantined(&file)
+                };
+                marked.then(|| file.clone())
+            }
         };
-        if quarantined {
+        if let Some(marked) = marked {
+            let why = match runtime {
+                BridgeRuntime::Loaded => format!("{daw} won't load it"),
+                BridgeRuntime::Program => "it won't run".into(),
+            };
             checks.push(check(
                 "quarantine",
                 Level::Fail,
-                format!("macOS marked {} as downloaded, so {daw} won't load it: set up the bridge again to clear it", file.display()),
+                format!("macOS marked {} as downloaded, so {why}: set up the bridge again to clear it", marked.display()),
             ));
         }
         if !target.folder && !install::arch_fits(&file, app_archs) {
@@ -284,7 +305,16 @@ fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], inputs: 
         ));
     }
     if !pids.is_empty() && alive.is_empty() && installed_version.is_some() {
-        checks.push(check("answering", Level::Warn, format!("{daw} is running without Kumi's bridge: restart {daw} to load it")));
+        checks.push(match runtime {
+            BridgeRuntime::Loaded => {
+                check("answering", Level::Warn, format!("{daw} is running without Kumi's bridge: restart {daw} to load it"))
+            }
+            BridgeRuntime::Program => check(
+                "answering",
+                Level::Note,
+                format!("{daw} is running without Kumi's bridge: Kumi starts its bridge when a session begins"),
+            ),
+        });
     }
     let secret = read_secret(&paths.secret()).ok();
     for discovery in &alive {
@@ -314,17 +344,24 @@ fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], inputs: 
                         format!("{daw} {} lacks what Kumi reads {feature} with: update to {daw} {needs} or newer", identity.daw_version),
                     ));
                 }
+                // Grants named by the bridge are failures even when the socket itself answers.
+                if let Some(permission) =
+                    found.status.as_ref().and_then(|status| status.get("permission")).and_then(|permission| permission.as_str())
+                {
+                    let message = match permission {
+                        "accessibility" => {
+                            "Accessibility isn't granted to Kumi's helper: System Settings > Privacy & Security > Accessibility".into()
+                        }
+                        other => format!("{daw}'s bridge lacks the {other} permission"),
+                    };
+                    checks.push(check("permission", Level::Fail, message));
+                }
                 if installed_version.as_ref().is_some_and(|installed| *installed != identity.bridge) {
-                    checks.push(check(
-                        "restart",
-                        Level::Warn,
-                        format!(
-                            "{daw} (pid {}) still runs bridge {}: restart {daw} to load {}",
-                            identity.pid,
-                            identity.bridge,
-                            installed_version.as_deref().unwrap_or("")
-                        ),
-                    ));
+                    let installed = installed_version.as_deref().unwrap_or("");
+                    checks.push(match runtime {
+                        BridgeRuntime::Loaded => check("restart", Level::Warn, format!("{daw} (pid {}) still runs bridge {}: restart {daw} to load {installed}", identity.pid, identity.bridge)),
+                        BridgeRuntime::Program => check("bridge-process", Level::Warn, format!("the bridge process for {daw} (pid {}) is {}, while {installed} is installed: end that bridge and start a new Kumi session", identity.pid, identity.bridge)),
+                    });
                 }
             }
             Err(error) => {
@@ -441,6 +478,108 @@ mod tests {
         let missing = checks.iter().find(|check| check.id == "missing").expect("what this Renoise lacks");
         assert_eq!(missing.message, "Renoise 3.5.4 lacks what Kumi reads markers and regions with: update to Renoise 3.6 or newer");
         assert_eq!(receipt.version.as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn logic_checks_its_owned_program_and_grant_without_an_app_folder_or_a_daw_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let kumi = root.path().join("kumi");
+        let none = |_: &str| None;
+        let inputs = |running: &'static dyn Fn(Daw) -> Vec<u32>| Inputs {
+            env: Env { os: Os::Mac, home: root.path().join("home"), var: &none, root: Some(root.path().join("sys")) },
+            kumi_home: &kumi,
+            bundled: None,
+            running,
+            probe_timeout: Duration::from_secs(5),
+        };
+        // No Logic app is installed in this fixture: app detection is its provider's job.
+        let checks = doctor(Daw::Logic, &inputs(&no_processes));
+        assert!(ids(&checks).contains(&("bridge", Level::Fail)) && ids(&checks).contains(&("secret", Level::Fail)), "{checks:?}");
+        assert!(doctor(Daw::SoundCraft, &inputs(&no_processes)).is_empty(), "the beside provider keeps its own checks");
+        let target = install::logic_target(&kumi);
+        let source = root.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join(install::LOGIC_BINARY), "program").unwrap();
+        std::fs::write(source.join(format!("{}arm64", install::LOGIC_HELPER_PREFIX)), "helper").unwrap();
+        std::fs::write(source.join(install::LOGIC_VERSION_FILE), "0.1.0\n").unwrap();
+        Lifecycle::new(&kumi, target.clone()).install(&source, "0.1.0").unwrap();
+        let checks = doctor(Daw::Logic, &inputs(&no_processes));
+        assert!(ids(&checks).contains(&("bridge", Level::Ok)), "{checks:?}");
+        assert!(!checks.iter().any(|check| matches!(check.id, "secret" | "reference")), "{checks:?}");
+        let checks = doctor(Daw::Logic, &inputs(&running));
+        assert!(ids(&checks).contains(&("answering", Level::Note)), "the host starts a program beside an already running DAW: {checks:?}");
+        assert!(checks.iter().all(|check| check.id != "restart" && !check.message.contains("restart Logic Pro")), "{checks:?}");
+        // The same receipt, reference, payload hash and bundled-version checks as loaded bridges.
+        let reference = std::fs::read(&target.reference).unwrap();
+        std::fs::remove_file(&target.reference).unwrap();
+        assert!(ids(&doctor(Daw::Logic, &inputs(&no_processes))).contains(&("reference", Level::Fail)));
+        std::fs::write(&target.reference, reference).unwrap();
+        std::fs::write(target.path().join(install::LOGIC_BINARY), "changed").unwrap();
+        assert!(ids(&doctor(Daw::Logic, &inputs(&no_processes))).contains(&("bridge", Level::Warn)));
+        std::fs::write(target.path().join(install::LOGIC_BINARY), "program").unwrap();
+        let mut with_bundle = inputs(&running);
+        with_bundle.bundled = Some(Bundled { version: "0.2.0".into(), sha256: "another".into() });
+        assert!(ids(&doctor(Daw::Logic, &with_bundle)).contains(&("update", Level::Warn)));
+        // An answering socket doesn't mean Accessibility has been granted. The old process is named separately
+        // from Logic itself, which loads nothing and never needs to quit for its bridge.
+        let identity = Identity {
+            preset_files: Vec::new(),
+            daw: "logic".into(),
+            bridge: "0.0.9".into(),
+            daw_version: "12.3.1".into(),
+            pid: std::process::id(),
+            resource: "com.apple.logic10".into(),
+            project: None,
+        };
+        let paths = BridgePaths::new(&kumi, Daw::Logic);
+        let bridge = crate::probe::testing::serve_with(
+            read_secret(&paths.secret()).unwrap(),
+            identity.clone(),
+            serde_json::json!({"permission":"accessibility"}),
+        );
+        let discovery = Discovery {
+            schema: DISCOVERY_SCHEMA.into(),
+            daw: identity.daw.clone(),
+            pid: identity.pid,
+            host: "127.0.0.1".into(),
+            port: bridge.address.port(),
+            protocol: PROTOCOL.into(),
+            version: identity.bridge.clone(),
+            daw_version: identity.daw_version.clone(),
+            resource: identity.resource.clone(),
+            project: None,
+            started_ms: 1,
+        };
+        write_discovery(&paths.discovery(), &discovery).unwrap();
+        let checks = doctor(Daw::Logic, &inputs(&running));
+        assert!(ids(&checks).contains(&("answering", Level::Ok)) && ids(&checks).contains(&("permission", Level::Fail)), "{checks:?}");
+        assert!(ids(&checks).contains(&("bridge-process", Level::Warn)), "{checks:?}");
+        assert!(checks.iter().all(|check| check.id != "restart" && !check.message.contains("restart Logic Pro")), "{checks:?}");
+        // A grant reported by status clears the permission failure.
+        std::fs::remove_file(paths.discovery().join(discovery.file_name())).unwrap();
+        let granted =
+            crate::probe::testing::serve_with(read_secret(&paths.secret()).unwrap(), identity, serde_json::json!({"permission":null}));
+        let discovery = Discovery { port: granted.address.port(), ..discovery };
+        write_discovery(&paths.discovery(), &discovery).unwrap();
+        let checks = doctor(Daw::Logic, &inputs(&running));
+        assert!(ids(&checks).contains(&("answering", Level::Ok)) && checks.iter().all(|check| check.id != "permission"), "{checks:?}");
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let helper = target.path().join(format!("{}arm64", install::LOGIC_HELPER_PREFIX));
+            let helper_c = std::ffi::CString::new(helper.as_os_str().as_bytes()).unwrap();
+            let attribute = std::ffi::CString::new("com.apple.quarantine").unwrap();
+            let value = b"0083;00000000;Safari;";
+            // SAFETY: both C strings and the value's pointer stay valid for the length passed to setxattr.
+            let set = unsafe { libc::setxattr(helper_c.as_ptr(), attribute.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+            assert_eq!(set, 0);
+            let checks = doctor(Daw::Logic, &inputs(&no_processes));
+            let quarantine = checks.iter().find(|check| check.id == "quarantine").expect("a downloaded helper won't run");
+            assert!(
+                quarantine.message.contains(&helper.display().to_string()) && quarantine.message.contains("won't run"),
+                "{quarantine:?}"
+            );
+        }
     }
 
     #[test]

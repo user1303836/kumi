@@ -468,6 +468,123 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
     gate.notify_one();
 });
 
+local_test!(candidate_jobs_are_discovered_through_fallback_and_duplicate_requests_keep_the_original_board, {
+    #[derive(Default)]
+    struct Candidates {
+        source: RefCell<String>,
+        prepared: Cell<usize>,
+        ran: Cell<usize>,
+        started: Notify,
+        finish: Notify,
+    }
+    struct CandidateDaw {
+        plain: Plain,
+        state: Rc<Candidates>,
+        unavailable: bool,
+    }
+    struct Prepared {
+        state: Rc<Candidates>,
+        material: String,
+        board: String,
+    }
+    #[async_trait(?Send)]
+    impl BackgroundTakes for Prepared {
+        fn board_id(&self) -> &str {
+            &self.board
+        }
+        fn request_key(&self) -> &str {
+            &self.material
+        }
+        async fn run(&self, signal: Signal, progress: CandidateProgress) -> Result<ToolResult, RuntimeError> {
+            self.state.ran.set(self.state.ran.get() + 1);
+            progress("Planning the captured notes");
+            self.state.started.notify_one();
+            tokio::select! {
+                _ = self.state.finish.notified() => {},
+                _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+            }
+            Ok(ToolResult::text(format!("Candidate board {}: {}", self.board, self.material)))
+        }
+    }
+    #[async_trait(?Send)]
+    impl Integration for CandidateDaw {
+        async fn start(&self, signal: Signal) -> Result<(), RuntimeError> {
+            if self.unavailable {
+                return Err(kumi_types::errors::KumiError::new(kumi_types::errors::FailureKind::Daw, "fixture DAW closed").into());
+            }
+            self.plain.start(signal).await
+        }
+        async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+            self.plain.observe(signal, hints).await
+        }
+        async fn close(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        fn background_takes_schema(&self) -> Option<JsonObject> {
+            Some(object(json!({"type":"object","properties":{"action":{"enum":["make"]}},"required":["action"]})))
+        }
+        async fn prepare_background_takes(&self, _: JsonObject, _: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+            let number = self.state.prepared.get() + 1;
+            self.state.prepared.set(number);
+            Ok(Rc::new(Prepared {
+                state: self.state.clone(),
+                material: self.state.source.borrow().clone(),
+                board: format!("00000000-0000-0000-0000-{number:012}"),
+            }))
+        }
+    }
+    for unavailable in [false, true] {
+        let state = Rc::new(Candidates::default());
+        *state.source.borrow_mut() = "captured C3 notes".into();
+        let fixture = state.clone();
+        let h = harness(Rc::new(|_| async { Ok(done()) }.boxed_local()), Rc::new(|_| panic!("candidate jobs have no worker")), |options| {
+            options.integration_factory = Box::new(move |listener| {
+                let primary = Rc::new(CandidateDaw {
+                    plain: Plain { world: Rc::new(World { observation_tools: vec![] }), listener: listener.clone() },
+                    state: fixture.clone(),
+                    unavailable,
+                });
+                kumi_agent::with_fallback(
+                    primary,
+                    Rc::new(move || Rc::new(Plain { world: Rc::new(World { observation_tools: vec![] }), listener: listener.clone() })),
+                    Rc::new(|_| {}),
+                )
+            });
+        });
+        h.session.start().await.unwrap();
+        h.session.submit("plan alternate notes", None).await.unwrap();
+        let offered = h.main_tools.borrow().clone();
+        if unavailable {
+            assert!(!offered.iter().any(|tool| tool.name() == "background_takes"));
+            assert_eq!((state.prepared.get(), state.ran.get()), (0, 0));
+            h.session.close().await.unwrap();
+            continue;
+        }
+        let candidate = tool(&offered, "background_takes");
+        assert!(candidate.deferred());
+        let shelf = kumi_agent::kernel::deferred::Shelf::new(offered.into_iter().filter(|tool| tool.deferred()).collect()).unwrap();
+        let found = tool(&shelf.tools(), "find_tools").execute(object(json!({"names":["background_takes"]})), Signal::new()).await.unwrap();
+        assert!(!found.is_error && found.text.contains("Live board apply is unavailable"), "{}", found.text);
+        let input = object(json!({"name":"background_takes","input":{"action":"make"}}));
+        let (tool, args) = shelf.resolve("call_tool", Some(&input)).unwrap().unwrap();
+        let first = tool.execute(args.clone(), Signal::new()).await.unwrap();
+        state.started.notified().await;
+        let duplicate = tool.execute(args, Signal::new()).await.unwrap();
+        let original = "00000000-0000-0000-0000-000000000001";
+        assert!(!first.is_error && !duplicate.is_error && first.text.contains(original) && duplicate.text.contains(original));
+        assert!(!duplicate.text.contains("00000000-0000-0000-0000-000000000002"));
+        assert_eq!((h.session.jobs().len(), state.prepared.get(), state.ran.get()), (1, 2, 1));
+        *state.source.borrow_mut() = "edited D3 notes".into();
+        state.finish.notify_one();
+        h.until("the captured candidate report", |h| h.last(1).is_some_and(|job| job.state.ended())).await;
+        assert_eq!(h.last(1).unwrap().state, JobState::Done);
+        assert_eq!(h.session.job(1).unwrap().report.as_deref(), Some(format!("Candidate board {original}: captured C3 notes").as_str()));
+        assert!(h.session.run_job_again(1).unwrap_err().contains("aren't replayed"));
+        assert!(h.worker_tools.borrow().is_empty());
+        h.session.close().await.unwrap();
+    }
+});
+
 local_test!(workers_can_call_the_builtin_vst3_catalog_for_every_daw, {
     for profile in [kumi_types::daw::DawProfile::ABLETON, kumi_types::daw::DawProfile::REAPER, kumi_types::daw::DawProfile::RENOISE] {
         let worker: Script = Rc::new(|turn: Turn| {
@@ -821,3 +938,109 @@ fn a_reports_first_line_is_plain_words() {
     assert_eq!(first_line("\n## What tape saturation emulates\n"), "What tape saturation emulates");
     assert_eq!(first_line("1. Groove Pool: repeatable swing"), "1. Groove Pool: repeatable swing");
 }
+
+local_test!(a_workers_tokens_count_finished_calls_while_it_runs_without_counting_the_final_total_twice, {
+    let first_seen = Rc::new(Notify::new());
+    let next_call = Rc::new(Notify::new());
+    let second_seen = Rc::new(Notify::new());
+    let finish = Rc::new(Notify::new());
+    let ended = Rc::new(Notify::new());
+    let first = Usage { input_tokens: 700., output_tokens: 100., cache_read_tokens: 200., cache_write_tokens: 50. };
+    let second = Usage { input_tokens: 500., output_tokens: 200., cache_read_tokens: 100., cache_write_tokens: 25. };
+    let total = Usage { input_tokens: 1200., output_tokens: 300., cache_read_tokens: 300., cache_write_tokens: 75. };
+    let worker: Script = {
+        let (first_seen, next_call, second_seen, finish) = (first_seen.clone(), next_call.clone(), second_seen.clone(), finish.clone());
+        let (first, second, total) = (first.clone(), second.clone(), total.clone());
+        Rc::new(move |turn| {
+            let (first_seen, next_call, second_seen, finish) = (first_seen.clone(), next_call.clone(), second_seen.clone(), finish.clone());
+            let (first, second, total) = (first.clone(), second.clone(), total.clone());
+            async move {
+                (turn.emit)(KernelEvent::Usage(first))?;
+                first_seen.notify_one();
+                next_call.notified().await;
+                (turn.emit)(KernelEvent::Usage(second))?;
+                second_seen.notify_one();
+                finish.notified().await;
+                (turn.emit)(KernelEvent::Text { text: "Found the vocal technique.".into() })?;
+                Ok(TurnResult { stop_reason: StopReason::Completed, usage: Some(total) })
+            }
+            .boxed_local()
+        })
+    };
+    let h = harness(starts_a_worker("tell"), worker, |options| {
+        let forward = options.on_event.clone();
+        let ended = ended.clone();
+        options.on_event = Rc::new(move |event| {
+            let finished = matches!(&event, SessionEvent::Job(status) if status.state.ended());
+            forward(event);
+            if finished {
+                ended.notify_one();
+            }
+        });
+    });
+    h.session.start().await.unwrap();
+    h.session.submit("research the vocals", None).await.unwrap();
+    first_seen.notified().await;
+    assert_eq!((h.last(1).unwrap().state, h.last(1).unwrap().tokens()), (JobState::Running, Some(800)));
+    assert_eq!(h.last(1).unwrap().usage, Some(first));
+    // Foreground turns don't reset the running worker's count.
+    h.session.submit("and carry on with the drums", None).await.unwrap();
+    assert_eq!(h.last(1).unwrap().tokens(), Some(800));
+    next_call.notify_one();
+    second_seen.notified().await;
+    assert_eq!((h.last(1).unwrap().state, h.last(1).unwrap().tokens()), (JobState::Running, Some(1500)));
+    assert_eq!(h.last(1).unwrap().usage, Some(total.clone()));
+    finish.notify_one();
+    ended.notified().await;
+    assert_eq!(h.last(1).unwrap().state, JobState::Done);
+    assert_eq!(h.last(1).unwrap().usage, Some(total));
+    h.session.close().await.unwrap();
+});
+
+local_test!(completed_worker_calls_keep_their_tokens_when_a_later_call_fails_or_the_worker_is_stopped, {
+    for stopped in [false, true] {
+        let seen = Rc::new(Notify::new());
+        let fail = Rc::new(Notify::new());
+        let ended = Rc::new(Notify::new());
+        let usage = Usage { input_tokens: 700., output_tokens: 100., cache_read_tokens: 200., cache_write_tokens: 50. };
+        let worker: Script = {
+            let (seen, fail, usage) = (seen.clone(), fail.clone(), usage.clone());
+            Rc::new(move |turn| {
+                let (seen, fail, usage) = (seen.clone(), fail.clone(), usage.clone());
+                async move {
+                    (turn.emit)(KernelEvent::Usage(usage))?;
+                    seen.notify_one();
+                    tokio::select! {
+                        _ = fail.notified() => Err(RuntimeError::plain("the next model call failed")),
+                        _ = turn.signal.cancelled() => Err(RuntimeError::Aborted),
+                    }
+                }
+                .boxed_local()
+            })
+        };
+        let h = harness(starts_a_worker("tell"), worker, |options| {
+            let forward = options.on_event.clone();
+            let ended = ended.clone();
+            options.on_event = Rc::new(move |event| {
+                let finished = matches!(&event, SessionEvent::Job(status) if status.state.ended());
+                forward(event);
+                if finished {
+                    ended.notify_one();
+                }
+            });
+        });
+        h.session.start().await.unwrap();
+        h.session.submit("research the vocals", None).await.unwrap();
+        seen.notified().await;
+        assert_eq!(h.last(1).unwrap().tokens(), Some(800));
+        if stopped {
+            assert!(h.session.stop_job(1));
+        } else {
+            fail.notify_one();
+        }
+        ended.notified().await;
+        assert_eq!(h.last(1).unwrap().state, if stopped { JobState::Stopped } else { JobState::Failed });
+        assert_eq!(h.last(1).unwrap().usage, Some(usage));
+        h.session.close().await.unwrap();
+    }
+});

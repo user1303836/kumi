@@ -123,8 +123,8 @@ test("scratch: make copies a track after the last sequencer track, OFF and outsi
   eq(made.undo.steps, 1)
   eq(steps(), 1, "one Renoise undo step")
   ok(newest():find("Kumi: scratch copies of \226\128\156Bass\226\128\157 for tune EQ 5 (s1a2b)", 1, true), newest())
-  eq(names(), "Kick,Hat,Bass,Pad,Bus,Kumi " .. DOT .. " try 1a2b 1,Kumi " .. DOT .. " try 1a2b 2,Kumi " .. DOT .. " try 1a2b 3,Master,Send 1")
-  eq(made.copies[1].name, "Kumi " .. DOT .. " try 1a2b 1")
+  eq(names(), "Kick,Hat,Bass,Pad,Bus,Kumi " .. DOT .. " try s1a2b 1,Kumi " .. DOT .. " try s1a2b 2,Kumi " .. DOT .. " try s1a2b 3,Master,Send 1")
+  eq(made.copies[1].name, "Kumi " .. DOT .. " try s1a2b 1")
   eq(made.copies[1].ref, made.epoch .. ":track:6")
   local copy = track(6)
   eq(copy.mute_state, OFF, "a copy processes nothing until Kumi solos it")
@@ -150,9 +150,28 @@ test("scratch: make copies a track after the last sequencer track, OFF and outsi
   local journal = read_journal(env)
   eq(#journal.entries, 1)
   eq(journal.entries[1].scratchId, "s1a2b")
-  eq(journal.entries[1].copies[3].name, "Kumi " .. DOT .. " try 1a2b 3")
+  eq(journal.entries[1].copies[3].name, "Kumi " .. DOT .. " try s1a2b 3")
   eq(journal.entries[1].copies[3].index, 8)
   eq(journal.entries[1].source.name, "Bass")
+  H.no_dialogs()
+end)
+
+test("scratch: complete ids with the same four-character tail keep separate copy sets", function()
+  local env, peer = setup()
+  local first = result(make(peer, "s1en5y", 1))
+  local second = result(make(peer, "s2en5y", 1))
+  eq(first.copies[1].name, "Kumi " .. DOT .. " try s1en5y 1")
+  eq(second.copies[1].name, "Kumi " .. DOT .. " try s2en5y 1")
+  ok(first.copies[1].ref ~= second.copies[1].ref)
+  result(call(peer, "scratch", { action = "set", scratchId = "s1en5y", values = {
+    { ref = first.copies[1].ref, device = 2, param = 1, value = -6 },
+  } }))
+  eq(track(6).devices[2].params[1].value, -6)
+  eq(track(7).devices[2].params[1].value, 0, "the other set is untouched")
+  local dropped = result(call(peer, "scratch", { action = "drop", scratchId = "s2en5y" }))
+  eq(dropped.dropped, 1)
+  eq(track(6).name, first.copies[1].name, "the first set survives dropping the second")
+  eq(track(6).devices[2].params[1].value, -6)
   H.no_dialogs()
 end)
 
@@ -347,7 +366,7 @@ test("scratch: a make past about a second of work is numbered steps, each its ow
   eq(steps(), made.undo.steps)
   ok(mock.data.undo.stack[1].desc:find("(1/", 1, true), mock.data.undo.stack[1].desc)
   eq(#made.copies, 16)
-  for n = 1, 16 do eq(track(5 + n).name, "Kumi " .. DOT .. " try 7 " .. n) end
+  for n = 1, 16 do eq(track(5 + n).name, "Kumi " .. DOT .. " try s7 " .. n) end
   H.no_dialogs()
 end)
 
@@ -367,7 +386,7 @@ test("scratch: copies a crash left are swept when the bridge loads (Kumi told wh
   end
   ok(swept, "Kumi is told")
   eq(swept.count, 2)
-  eq(swept.names[1], "Kumi " .. DOT .. " try 8 1")
+  eq(swept.names[1], "Kumi " .. DOT .. " try s8 1")
   eq(newest(), "Kumi: removed scratch copies left from before")
   eq(#read_journal(env).entries, 0)
   -- another song is opened while copies of this one are noted: they wait for it
@@ -377,10 +396,10 @@ test("scratch: copies a crash left are swept when the bridge loads (Kumi told wh
   H.tick(2)
   eq(#read_journal(env).entries, 1, "not this song's")
   mock.load_song(song_options())
-  mock.ops.insert_track(4, { name = "Kumi " .. DOT .. " try 9 1" })
+  mock.ops.insert_track(4, { name = "Kumi " .. DOT .. " try s9 1" })
   H.tick(2)
   eq(#read_journal(env).entries, 0)
-  for _, t in ipairs(mock.data.tracks) do ok(not t.name:find("try 9", 1, true), "swept when its song opened") end
+  for _, t in ipairs(mock.data.tracks) do ok(not t.name:find("try s9", 1, true), "swept when its song opened") end
   H.no_dialogs()
 end)
 
@@ -580,7 +599,7 @@ test("scratch-keep: the producer's undo in Renoise takes back the name only, and
   mock.song:undo()
   H.tick(2)
   call(peer, "ping")
-  eq(track(6).name, "Kumi " .. DOT .. " try 16 1", "the name back")
+  eq(track(6).name, "Kumi " .. DOT .. " try s16 1", "the name back")
   eq(track(6).mute_state, A, "the mute isn't Renoise's to take back")
   local told
   for _, event in ipairs(peer.events) do
@@ -622,7 +641,7 @@ test("scratch: players of phrases are empty tracks, each playing the instrument'
   eq(steps(), 1, "one Renoise undo step")
   ok(newest():find("players of", 1, true), newest())
   local t = 6
-  eq(track(t).name, "Kumi " .. DOT .. " try 9p1a 1")
+  eq(track(t).name, "Kumi " .. DOT .. " try s9p1a 1")
   eq(#track(t).devices, 1, "no device but the mixer")
   eq(track(t).mute_state, OFF)
   -- (beat 4 is slot 2's start, pattern 2 at LPB 4 with 16 lines: line 1)
@@ -631,7 +650,7 @@ test("scratch: players of phrases are empty tracks, each playing the instrument'
   eq(line:note_column(1).instrument_value, 0)
   eq(line:effect_column(1).number_string .. line:effect_column(1).amount_string, "0Z03")
   eq(mock.song:pattern(2):track(t + 1):line(1):effect_column(1).amount_string, "01")
-  ok(read_journal(env).entries[1].copies[2].name:find("try 9p1a 2", 1, true), "journaled, for a sweep to find")
+  ok(read_journal(env).entries[1].copies[2].name:find("try s9p1a 2", 1, true), "journaled, for a sweep to find")
   result(call(peer, "scratch", { action = "drop", scratchId = "s9p1a" }), "drop")
   eq(names(), "Kick,Hat,Bass,Pad,Bus,Master,Send 1")
   failure(call(peer, "scratch", { action = "make", scratchId = "s9p1b", count = 1, label = "v", epoch = epoch, layout = layout,

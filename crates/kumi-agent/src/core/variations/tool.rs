@@ -6,7 +6,8 @@
 use super::backend::{found, gone, Recipe, Rewritten, Room, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::{db_text, Fault, Heard};
 use super::{
-    bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
+    bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TakeVersion,
+    TRIES,
 };
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
@@ -19,9 +20,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+mod boards;
+pub use boards::PreparedMake;
+
 /// The most takes one request makes or changes, and the sets Kumi keeps for a project.
 const MOST_TAKES: usize = 16;
 const SETS_KEPT: usize = 8;
+/// A change can also redraw or turn a take down while listening: retain those writes too, so their undos are recognized.
+const PREVIOUS_WRITES: usize = 8;
 
 /// A take drawn, before it's written: its number, material, direction, what was done (and warnings) and its distance.
 pub struct Drawn<M> {
@@ -46,6 +52,7 @@ pub struct Variations<B: VariationsBackend> {
     hosted: bool,
     description: String,
     schema: JsonObject,
+    busy: tokio::sync::Mutex<()>,
 }
 
 impl<B: VariationsBackend + 'static> Variations<B> {
@@ -65,15 +72,24 @@ impl<B: VariationsBackend + 'static> Variations<B> {
 
     fn with(backend: B, home: PathBuf, hosted: bool) -> Rc<Self> {
         let words = backend.words();
+        let mut schema = schema(words);
+        let mut description = description(words);
+        if backend.can_apply_candidates() {
+            schema["properties"]["action"]["enum"].as_array_mut().expect("actions are an array").push(json!("apply"));
+            description.push_str(" This backend additionally supports explicit foreground apply of named planned/kept candidates with atomic source and destination guards.");
+        } else {
+            description.push_str(" Applying candidate boards in this DAW is unavailable. Review their note material manually.");
+        }
         Rc::new(Variations {
-            description: description(words),
-            schema: schema(words),
+            description,
+            schema,
             backend,
             home,
             sets: RefCell::default(),
             numbered: RefCell::default(),
             loaded: RefCell::default(),
             hosted,
+            busy: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -82,10 +98,14 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     }
 
     async fn run(&self, input: JsonObject, signal: Signal) -> Result<Value, String> {
+        let _held = self.busy.lock().await;
         let action = input.get("action").and_then(Value::as_str).unwrap_or("");
         // (the project's sets, as Kumi kept them: a restart of Kumi forgets nothing kept)
         let project = self.backend.project_key(&signal).await;
         self.load(project.as_deref());
+        if input.contains_key("board") {
+            return self.board_action(&input, &signal).await;
+        }
         if self.hosted {
             return self.run_hosted(action, &input, &signal).await;
         }
@@ -98,7 +118,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             "list" => return self.list(&input),
             _ => return Err(format!("action is {}", actions(self.backend.words()).join(", "))),
         };
-        self.save();
+        self.save()?;
         answer
     }
 
@@ -143,17 +163,16 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     }
 
     /// The project's sets in Kumi's folder, written whole and then moved into place.
-    fn save(&self) {
-        let Some(project) = self.loaded.borrow().clone() else { return };
+    fn save(&self) -> Result<(), String> {
+        let Some(project) = self.loaded.borrow().clone() else { return Ok(()) };
         let path = self.store_path(&project);
         let text = stringify(&self.json_of());
         if let Some(folder) = path.parent() {
-            let _ = std::fs::create_dir_all(folder);
+            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         }
         let partial = path.with_extension("json.partial");
-        if std::fs::write(&partial, text).is_ok() {
-            let _ = std::fs::rename(&partial, &path);
-        }
+        std::fs::write(&partial, text).map_err(|error| error.to_string())?;
+        std::fs::rename(&partial, &path).map_err(|error| error.to_string())
     }
 
     fn json_of(&self) -> Value {
@@ -168,7 +187,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     .iter()
                     .map(|take| {
                         json!({"number": take.number, "state": take.state.word(), "place": take.place, "change": take.change,
-                            "direction": take.direction, "digest": take.digest, "line": take.line, "material": backend.material_json(&take.material)})
+                            "direction": take.direction, "digest": take.digest, "line": take.line, "material": backend.material_json(&take.material),
+                            "previous": take.previous.iter().map(|version| json!({"digest": version.digest,
+                                "material": backend.material_json(&version.material)})).collect::<Vec<_>>()})
                     })
                     .collect();
                 json!({"id": set.id, "seed": set.seed, "floor": set.floor, "label": set.source.label, "short": set.source.short,
@@ -208,6 +229,23 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: text(take, "direction"),
                         digest: text(take, "digest"),
                         material,
+                        previous: take
+                            .get("previous")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .rev()
+                            .take(PREVIOUS_WRITES)
+                            .filter_map(|version| {
+                                Some(TakeVersion {
+                                    digest: version.get("digest")?.as_str()?.into(),
+                                    material: backend.material_of(version.get("material")?)?,
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect(),
                         line: text(take, "line"),
                     });
                 }
@@ -258,6 +296,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: drawn.direction.clone(),
                         digest: self.backend.digest(&drawn.material),
                         material: drawn.material,
+                        previous: vec![],
                         line,
                     });
                 }
@@ -307,6 +346,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 Some(mut set) => {
                     // (the source as it is now, its lines, anchors and settings; its takes and their places stay)
                     set.source = source;
+                    set.floor = set.floor.max(self.numbered.borrow().get(&set.source.short).copied().unwrap_or(0));
                     (set, true)
                 }
                 None => {
@@ -378,20 +418,19 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let mut skipped = Vec::new();
         let mut rewritten = BTreeMap::new();
         for ((number, mut recipe), row) in numbers.iter().copied().zip(recipes).zip(rows) {
-            let take = set.take(number).expect("a picked take").clone();
             if !found(&row) {
                 skipped.push(format!("V{number} isn't in the {} any more", self.backend.words().app));
                 continue;
             }
             // (a take that can't be read now is left: the takes rewritten before it stay told)
-            let current = match self.backend.current(&set, &row, signal).await {
+            let current = match self.current_take(&mut set, number, &row, signal).await {
                 Ok(current) => current,
                 Err(why) => {
                     skipped.push(format!("V{number} wasn't changed: Kumi couldn't read it ({why})"));
                     continue;
                 }
             };
-            if self.backend.digest(&current) != take.digest {
+            if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
                 skipped.push(format!("{}: left as it is", edited_line(&self.backend, number, &current)));
                 continue;
             }
@@ -413,8 +452,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     let reference = row.get("ref").and_then(Value::as_str).unwrap_or("");
                     lines_out.push(json!({"take": format!("V{number}"), "ref": self.backend.short(reference), "line": line}));
                     if let Some(take) = set.take_mut(number) {
-                        take.digest = self.backend.digest(&material);
-                        take.material = material;
+                        self.written(take, material);
                         take.direction = drawn.direction;
                         take.change = Some(change);
                         take.line = line;
@@ -521,7 +559,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 skipped.push(format!("Kumi can't find V{number} where it left it, nor by its name: left as it is"));
                 continue;
             }
-            let current = self.backend.current(&set, &row, signal).await?;
+            let current = self.current_take(&mut set, number, &row, signal).await?;
             if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
                 if !named.contains(&number) {
                     skipped.push(format!("{}: left as it is (name it to drop it anyway)", edited_line(&self.backend, number, &current)));
@@ -853,8 +891,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let done = self.backend.rewrite(set, &row, &before, &redrawn.material, signal).await.map_err(|(why, _)| why)?;
         let (change, material, line) = holding(&redrawn, done);
         if let Some(take) = set.take_mut(number) {
-            take.digest = self.backend.digest(&material);
-            take.material = material;
+            self.written(take, material);
             take.change = Some(change);
             take.line = line;
         }
@@ -881,11 +918,48 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             None => (quieter, None),
         };
         if let Some(take) = set.take_mut(number) {
-            take.digest = self.backend.digest(&material);
-            take.material = material;
+            self.written(take, material);
             take.change = Some(change.clone());
         }
         Ok((change, partly))
+    }
+
+    /// The take as last written, or as an earlier Kumi write an undo restored. Backends can normalize a read against
+    /// the kept material (REAPER's whole note ticks, for example), so a prior version is read with that material too.
+    async fn current_take(&self, set: &mut Set<B>, number: usize, row: &Value, signal: &Signal) -> Result<B::Material, String> {
+        let current = self.backend.current(set, row, signal).await?;
+        let take = set.take(number).expect("a picked take");
+        if self.backend.digest(&current) == take.digest {
+            return Ok(current);
+        }
+        let previous = take.previous.clone();
+        for (index, version) in previous.into_iter().enumerate().rev() {
+            let mut earlier = set.clone();
+            let take = earlier.take_mut(number).expect("a picked take");
+            take.material = version.material.clone();
+            take.digest = version.digest.clone();
+            let restored = self.backend.current(&earlier, row, signal).await?;
+            if self.backend.digest(&restored) == version.digest {
+                let take = set.take_mut(number).expect("a picked take");
+                take.material = version.material;
+                take.digest = version.digest;
+                // Newer versions were undone: don't accept them as an unedited take after it moves back again.
+                take.previous.truncate(index);
+                return Ok(restored);
+            }
+        }
+        Ok(current)
+    }
+
+    fn written(&self, take: &mut Take<Value, B::Material>, material: B::Material) {
+        let digest = self.backend.digest(&material);
+        if digest != take.digest {
+            take.previous.push(TakeVersion { digest: take.digest.clone(), material: take.material.clone() });
+            let excess = take.previous.len().saturating_sub(PREVIOUS_WRITES);
+            take.previous.drain(..excess);
+        }
+        take.digest = digest;
+        take.material = material;
     }
 
     fn put_back(&self, set: Set<B>) {
@@ -939,6 +1013,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: take.direction.clone(),
                         digest: self.backend.digest(&take.material),
                         material: take.material.clone(),
+                        previous: vec![],
                         line: String::new(),
                     });
                     drawn.push(take);
@@ -1004,6 +1079,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: take.direction.clone(),
                         digest: self.backend.digest(&take.material),
                         material: take.material,
+                        previous: vec![],
                         line,
                     });
                 }
@@ -1028,7 +1104,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         }
         if !written.is_empty() || continued {
             self.keep_set(set);
-            self.save();
+            self.save()?;
         }
         Ok(reply)
     }
@@ -1047,7 +1123,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 skipped.push(format!("V{number} isn't in the {app} any more"));
                 continue;
             }
-            let current = match self.backend.current(&set, &row, signal).await {
+            let current = match self.current_take(&mut set, number, &row, signal).await {
                 Ok(current) => current,
                 Err(why) => {
                     skipped.push(format!("V{number} wasn't changed: Kumi couldn't read it ({why})"));
@@ -1104,8 +1180,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     let reference = row.get("ref").and_then(Value::as_str).unwrap_or("");
                     lines_out.push(json!({"take": format!("V{number}"), "ref": self.backend.short(reference), "line": line}));
                     if let Some(held) = set.take_mut(number) {
-                        held.digest = self.backend.digest(&material);
-                        held.material = material;
+                        self.written(held, material);
                         held.direction = take.direction;
                         held.change = Some(change);
                         held.line = line;
@@ -1123,7 +1198,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         }
         let reply = json!({"set": set.id, "changed": lines_out, "skipped": skipped, "takes": set.lines()});
         self.put_back(set);
-        self.save();
+        self.save()?;
         Ok(reply)
     }
 
@@ -1153,7 +1228,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         }
         if !previewing {
             let reply = self.keep(input, signal).await?;
-            self.save();
+            self.save()?;
             return Ok(reply);
         }
         let mut takes = Vec::new();
@@ -1217,7 +1292,7 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
         text.push_str(" extract: ");
         text.push_str(extract);
     }
-    text.push(' ');
+    text.push_str(" Background candidate boards are separate: board names an immutable id. list inspects candidates; keep/drop select or discard unwritten candidates locally. No board audio is implied. Applied/uncertain entries, where supported, are never replayed or automatically deleted. ");
     text.push_str(words.idioms);
     text
 }
@@ -1228,6 +1303,7 @@ pub fn schema(words: &Words) -> JsonObject {
     let value = json!({"type": "object", "additionalProperties": false, "required": ["action"], "properties": {
         "action": {"type": "string", "enum": actions(words)},
         "set": {"type": ["integer", "string"], "description": "Which set of takes: its number, or its source's name (the latest by default)"},
+        "board": {"type":"string","description":"Immutable background candidate board id; list or keep/drop candidates locally. Native apply requires explicit backend support."},
         "source": part(words.source_schema),
         "anchors": {"type": "array", "maxItems": 512, "items": {"type": "integer", "minimum": 0}, "description": words.anchors},
         "place": {"type": "string", "enum": words.place_names},
@@ -1453,8 +1529,12 @@ impl<B: VariationsBackend + 'static> KernelTool for VariationsTool<B> {
     }
 
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let applying = input.get("action").and_then(Value::as_str) == Some("apply");
         Ok(match self.owner.run(input, signal).await {
-            Ok(answer) => ToolResult::text(stringify(&answer)),
+            Ok(answer) => ToolResult {
+                is_error: applying && answer.get("stopped").is_some_and(|reason| !reason.is_null()),
+                ..ToolResult::text(stringify(&answer))
+            },
             Err(why) => ToolResult::error(why),
         })
     }

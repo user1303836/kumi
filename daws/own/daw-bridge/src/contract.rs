@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 /// The kinds a ref names, for every own bridge's DAW (`r:track:{GUID}`, `E:pattern:3`, `s:clip:40`).
-const REF_KINDS: [&str; 26] = [
+const REF_KINDS: [&str; 27] = [
     "aitem",
     "track",
     "item",
@@ -35,6 +35,8 @@ const REF_KINDS: [&str; 26] = [
     "note",
     "playlist",
     "source",
+    // Logic's native plug-in rows and channel-strip bodies.
+    "plugin",
 ];
 
 /// What an item's or a take's row says of a MIDI source (`source`): REAPER's extension writes it, Kumi's REAPER side reads it.
@@ -129,6 +131,8 @@ mod tests {
             "s:param:12:a:high_shelf_gain",
             "s:note:40:480.60.0",
             "s:playlist:12:2",
+            "1:plugin:1.1",
+            "1:note:1.0",
         ] {
             assert!(looks_like_ref(ref_), "{ref_}");
         }
@@ -142,7 +146,7 @@ mod tests {
         let answer = json!({
             "ref": "r:track:{A}",
             "parent": "r:track:{B}",
-            "items": [{"ref": "r:item:{C}", "takeRef": "r:take:{D}", "trackRefs": ["r:track:{A}", "r:track:{B}"], "childRefs": []}],
+            "items": [{"ref": "r:item:{C}", "takeRef": "r:take:{D}", "trackRefs": ["r:track:{A}", "r:track:{B}"], "childRefs": [], "pluginRef": "1:plugin:1.1"}],
             "selection": {"trackRef": "r:track:{A}", "param": {"fxRef": "r:fx:{E}", "name": "Gain"}},
             "name": "bass: track: loud",
         });
@@ -153,7 +157,7 @@ mod tests {
     fn a_ref_anywhere_else_is_found_with_its_path() {
         let answer = json!({
             "items": [{"ref": "r:send:{A}:0:{B}", "dest": "r:track:{B}", "children": ["r:fx:{C}"]}],
-            "selection": {"track": "r:track:{A}", "takeRefs": "r:take:{D}", "itemRef": ["r:item:{E}"]},
+            "selection": {"track": "r:track:{A}", "takeRefs": "r:take:{D}", "itemRef": ["r:item:{E}"], "plugin": "1:plugin:1.1"},
         });
         let mut found = misplaced_refs(&answer);
         found.sort();
@@ -163,6 +167,7 @@ mod tests {
                 "items[0].children[0] = r:fx:{C}",
                 "items[0].dest = r:track:{B}",
                 "selection.itemRef[0] = r:item:{E}",
+                "selection.plugin = 1:plugin:1.1",
                 "selection.takeRefs = r:take:{D}",
                 "selection.track = r:track:{A}",
             ]

@@ -109,7 +109,7 @@ fn write(ctx: &Ctx, item: Item, take: Option<Take>, settings: &Settings) -> Done
             return Err(bad("notes: the item's take isn't MIDI"));
         }
         let item_qn = take_start_qn(reaper, ctx.proj, take);
-        let wanted = list.iter().map(|spec| notes::new_note(ctx, take, item_qn, spec)).collect::<Done<Vec<_>>>()?;
+        let wanted = list.iter().map(|spec| notes::variation_note(ctx, take, item_qn, spec)).collect::<Done<Vec<_>>>()?;
         let (now, events) = notes::read_all(ctx, take)?;
         notes::check_inside(ctx, take, item_qn, &events, &wanted)?;
         notes::write_notes(ctx, take, &events, &now, &wanted)?;

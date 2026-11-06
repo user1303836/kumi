@@ -79,7 +79,7 @@ pub(super) fn runs(changes: &[ChangeRecord]) -> Vec<Shown<'_>> {
 }
 
 /// The one record HISTORY shows for a run (oldest first): its words name the tracks, and its picture is each track's
-/// values that moved, when each change's picture is values or a route.
+/// values that moved or labelled panels of their curves, notes, lanes and other pictures.
 pub(super) fn run_record(run: &[&ChangeRecord]) -> ChangeRecord {
     let (first, last) = (run[0], run[run.len() - 1]);
     let parts: Option<Vec<(String, kumi_types::contracts::ChangePicture)>> =

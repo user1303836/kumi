@@ -29,6 +29,29 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// This scene inside one panel. Clip its unit coordinates before scaling so an edge never bleeds into a
+    /// neighbouring track; widths and radii still follow the panel's height.
+    pub(super) fn in_rect(mut self, [left, bottom, right, top]: [f64; 4]) -> Scene {
+        let point = |x: f64, y: f64| (left + x.clamp(0., 1.) * (right - left), bottom + y.clamp(0., 1.) * (top - bottom));
+        for shape in &mut self.shapes {
+            match shape {
+                Shape::Line { points, width, .. } => {
+                    points.iter_mut().for_each(|(x, y)| (*x, *y) = point(*x, *y));
+                    *width *= top - bottom;
+                }
+                Shape::Rect { x0, y0, x1, y1, .. } => {
+                    (*x0, *y0) = point(*x0, *y0);
+                    (*x1, *y1) = point(*x1, *y1);
+                }
+                Shape::Dot { x, y, radius, .. } => {
+                    (*x, *y) = point(*x, *y);
+                    *radius *= top - bottom;
+                }
+            }
+        }
+        self
+    }
+
     /// The scene in `theme`'s colours.
     pub fn in_theme(mut self, theme: &Theme) -> Scene {
         for shape in &mut self.shapes {
@@ -49,6 +72,7 @@ pub const GUIDE: Rgb = palette::RULE;
 /// The shapes for a picture that draws as one: curves, notes and lanes; None for values and levels (drawn as bars).
 pub fn scene_of(picture: &ChangePicture) -> Option<Scene> {
     match picture {
+        ChangePicture::Across { parts, .. } => super::across::scene(parts, 72, super::across::height(parts, 72)),
         ChangePicture::Eq { before, after, .. } => Some(eq_scene(before, after)),
         ChangePicture::Dynamics { before, after, .. } => Some(dynamics_scene(before, after)),
         ChangePicture::Notes { length, before, after, .. } => notes_scene(*length, before, after),

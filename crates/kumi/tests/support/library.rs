@@ -99,6 +99,23 @@ pub fn put(path: &std::path::Path, bytes: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();
 }
+/// A worker's startup marker, renamed into place only after its contents and the work it describes are ready. The
+/// deadline catches a broken fixture; startup itself is synchronized by the marker, never by a guessed sleep.
+pub async fn wait_for_worker_marker(path: &std::path::Path) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match tokio::fs::read_to_string(path).await {
+                Ok(text) => return text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("worker marker {}: {error}", path.display()),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("worker never wrote its startup marker {}", path.display()))
+}
+
 pub fn sound_cases() -> Vec<(&'static str, Vec<Vec<f32>>)> {
     vec![
         ("Kick Deep.wav", vec![kick(48., 0.6)]),
@@ -149,6 +166,7 @@ impl Studio {
         use kumi::daw::registry::library_sources;
         use kumi_library::sources::SourceOptions;
         kumi_library::learn::LearnPlan {
+            daw: None,
             dir: self.dir.to_string_lossy().into(),
             sources: library_sources(&SourceOptions {
                 home: Some(self.home.path().to_string_lossy().into()),

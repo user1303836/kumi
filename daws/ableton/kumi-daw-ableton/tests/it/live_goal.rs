@@ -18,6 +18,10 @@ use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
+use kumi_daw_ableton::ears::{
+    device::{EARS_ITEM, EARS_NAME, EARS_VERSION},
+    link::{Armed, EarsError, EarsLink, Tap, Transport, Written},
+};
 use kumi_daw_ableton::{
     connection::LiveConnection,
     history::{History, LiveHistory},
@@ -32,14 +36,50 @@ use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
+#[test]
+fn a_bests_playback_state_isnt_an_edit_but_its_device_settings_still_are() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let body = include_str!("../../src/assets/best-print.py");
+    let source = format!("BODY = {}\n", serde_json::to_string(body).unwrap())
+        + r#"
+import json
+from types import SimpleNamespace
+song = SimpleNamespace(tracks=[])
+ARGS = {"track": "Best"}
+exec(BODY)
+device = SimpleNamespace(class_name="Looper", state=0, playing_position_enabled=False, parameters=[], feedback=0.5)
+fingerprint = lambda: digest(device_row(device, []))
+before = fingerprint()
+device.state = 1
+device.playing_position_enabled = True
+assert fingerprint() == before, "playback alone doesn't preserve an otherwise unchanged best"
+device.feedback = 0.75
+assert fingerprint() != before, "a producer's device edit still preserves their best"
+device.class_name = "Wavetable"
+before = fingerprint()
+device.state = 2
+assert fingerprint() != before, "only Looper's state is known to follow playback"
+assert plain(SimpleNamespace(state=3))["state"] == 3
+"#;
+    let mut child = Command::new("python3").arg("-").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 38] = [
+const TOOLS: [&str; 41] = [
     "live_run_python",
     "server_status",
     "live_status",
     "live_discover",
     "live_snapshot",
     "live_undo",
+    "live_undo_step_begin",
+    "live_undo_step_end",
     "live_transaction_release",
     "live_tempo_preview",
     "live_tempo_apply",
@@ -59,6 +99,7 @@ const TOOLS: [&str; 38] = [
     "live_device_delete_apply",
     "live_browser_load_preview",
     "live_browser_load_apply",
+    "live_browser_inspect",
     "live_transport_preview",
     "live_song_state",
     "live_track_structure_preview",
@@ -139,6 +180,8 @@ impl Track {
 enum Undo {
     /// The tracks it made go, by who they are, whatever happened to them since (as Live's undo of a duplicated track does).
     Remove(Vec<u32>),
+    /// A listening device Kumi loaded, wherever its track or its place in the chain moved.
+    Device(u32),
     /// The track goes back as it was.
     Restore(Track),
 }
@@ -152,6 +195,8 @@ struct Set {
     next: Cell<u32>,
     previews: RefCell<HashMap<String, (String, JsonObject)>>,
     undos: RefCell<HashMap<String, Undo>>,
+    /// Removing a loaded device runs inside one Live undo step, so Live's own undo stays sound (#1101).
+    undo_step: Cell<bool>,
     /// How many looks Live takes to have stopped playing, after it's asked: till then it shows no take.
     lag: Cell<u32>,
     stopping: Cell<u32>,
@@ -164,6 +209,8 @@ struct Set {
     last_set: RefCell<Vec<(usize, usize, usize, f64)>>,
     /// Every call, as `{name, args}`.
     asked: RefCell<Vec<Value>>,
+    /// The actual armed destinations of each record pass, rather than the fixture's always-available take file.
+    recorded: RefCell<Vec<Vec<String>>>,
     /// A test's look at each call as it comes, which can make it fail.
     on_call: RefCell<Option<Box<dyn Fn(&str, &JsonObject) -> Result<(), RuntimeError>>>>,
 }
@@ -186,12 +233,14 @@ impl Set {
             next: Cell::new(0),
             previews: RefCell::default(),
             undos: RefCell::default(),
+            undo_step: Cell::new(false),
             lag: Cell::new(0),
             stopping: Cell::new(0),
             refused: RefCell::default(),
             identities: Cell::new(true),
             last_set: RefCell::default(),
             asked: RefCell::default(),
+            recorded: RefCell::default(),
             on_call: RefCell::new(None),
         })
     }
@@ -437,7 +486,15 @@ impl Set {
             }
             "live_browser_load" => {
                 let at = places(text(&asked["trackRef"]))[0];
-                tracks[at].devices.push(Device::limiter());
+                let device = if asked["itemId"] == EARS_ITEM {
+                    let mut device = Device::new(EARS_NAME);
+                    device.knobs.clear();
+                    self.undos.borrow_mut().insert(transaction, Undo::Device(device.identity));
+                    device
+                } else {
+                    Device::limiter()
+                };
+                tracks[at].devices.push(device);
                 answer["deviceRef"] = json!(format!("7:device:{at}:d{}", tracks[at].devices.len() - 1));
             }
             "live_device_parameter" => {
@@ -450,7 +507,13 @@ impl Set {
                     knob.1 = value["value"].as_f64().unwrap();
                 }
             }
-            "live_recording" => self.playing.set(asked.get("action").map(text) == Some("start")),
+            "live_recording" => {
+                let start = asked.get("action").map(text) == Some("start");
+                if start {
+                    self.recorded.borrow_mut().push(tracks.iter().filter(|track| track.armed).map(|track| track.name.clone()).collect());
+                }
+                self.playing.set(start);
+            }
             "live_transport_action" => {
                 if asked.get("action").map(text) == Some("stop") {
                     if self.playing.get() && self.lag.get() > 0 {
@@ -469,6 +532,12 @@ impl Set {
         let mut tracks = self.tracks.borrow_mut();
         match self.undos.borrow_mut().remove(transaction) {
             Some(Undo::Remove(made)) => tracks.retain(|track| !made.contains(&track.id)),
+            Some(Undo::Device(identity)) => {
+                assert!(self.undo_step.get(), "a listening device is removed inside one Live undo step");
+                for track in tracks.iter_mut() {
+                    track.devices.retain(|device| device.identity != identity);
+                }
+            }
             Some(Undo::Restore(was)) => {
                 if let Some(track) = tracks.iter_mut().find(|track| track.id == was.id) {
                     *track = was;
@@ -505,6 +574,15 @@ impl McpEndpoint for Set {
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
             "live_undo" => self.undo(&args),
+            "live_undo_step_begin" => {
+                assert!(!self.undo_step.replace(true), "a Live undo step is already open");
+                json!({"open":true,"stepId":"fixture_undo_step"})
+            }
+            "live_undo_step_end" => {
+                assert_eq!(args["stepId"], "fixture_undo_step");
+                assert!(self.undo_step.replace(false), "the Live undo step was open");
+                json!({"closed":true,"stepId":"fixture_undo_step"})
+            }
             "live_run_python" => self.python(&args),
             "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
             "live_transaction_release" => json!({}),
@@ -557,6 +635,85 @@ fn noise(path: &Path, seconds: usize) {
     std::fs::write(path, bytes).unwrap();
 }
 
+/// Listening devices that really disappear with their track. Their captures use the same take as the record path,
+/// plus beat phase and position, so this exercises `ears_pass` and its audio read rather than bypassing the renderer.
+struct FixtureEars {
+    set: Rc<Set>,
+    armed: RefCell<Vec<String>>,
+    advanced: RefCell<HashMap<u64, bool>>,
+    raw: Vec<u8>,
+}
+impl FixtureEars {
+    fn new(set: Rc<Set>) -> Rc<Self> {
+        let pcm = std::fs::read(&set.take).unwrap();
+        let samples = (pcm.len() - 44) / 4;
+        let mut raw = Vec::with_capacity(samples * 16);
+        for i in 0..samples {
+            let offset = 44 + i * 4;
+            let sample = i16::from_le_bytes([pcm[offset], pcm[offset + 1]]) as f32 / 32768.;
+            let beat = i as f64 / 24000.;
+            let phase = (1. + beat % 1.) as f32;
+            let position = i.saturating_sub(400) as f32 / 24000.;
+            for value in [sample, sample, phase, position] {
+                raw.extend(value.to_be_bytes());
+            }
+        }
+        Rc::new(Self { set, armed: RefCell::default(), advanced: RefCell::default(), raw })
+    }
+}
+#[async_trait(?Send)]
+impl EarsLink for FixtureEars {
+    fn port(&self) -> u16 {
+        47299
+    }
+    fn taps(&self) -> Vec<Tap> {
+        self.set
+            .tracks
+            .borrow()
+            .iter()
+            .enumerate()
+            .flat_map(|(track, row)| {
+                row.devices.iter().enumerate().filter(|(_, device)| device.name == EARS_NAME).map(move |(at, device)| Tap {
+                    id: device.identity as f64,
+                    port: 47300,
+                    path: format!("live_set tracks {track} devices {at}"),
+                    version: EARS_VERSION as f64,
+                    sample_rate: 48000.,
+                    seen_at: 0,
+                    loaded_at: None,
+                })
+            })
+            .collect()
+    }
+    async fn wait_for(&self, accept: Rc<dyn for<'a> Fn(&'a Tap) -> bool>, _: u64, _: Option<Signal>) -> Option<Tap> {
+        self.taps().into_iter().find(|tap| accept(tap))
+    }
+    async fn arm(&self, tap: &Tap, _: f64, quiet: bool, _: Option<Signal>) -> Result<Armed, EarsError> {
+        assert!(quiet, "goal candidates are heard privately");
+        let tracks = self.set.tracks.borrow();
+        let track = tracks
+            .iter()
+            .find(|track| track.devices.iter().any(|device| device.identity as f64 == tap.id))
+            .ok_or_else(|| EarsError("That candidate's listening device is gone.".into()))?;
+        self.armed.borrow_mut().push(track.name.clone());
+        self.advanced.borrow_mut().insert(tap.id.to_bits(), false);
+        Ok(Armed { beats: 0., running: true, sample_rate: 48000. })
+    }
+    async fn write(&self, _: &Tap, file: &str, _: Option<Signal>) -> Result<Written, EarsError> {
+        std::fs::write(file, &self.raw).unwrap();
+        Ok(Written { file: file.into(), sample_rate: 48000., channels: 4, beats: 0., running: true })
+    }
+    fn stop(&self, _: &Tap) {}
+    async fn ping(&self, tap: &Tap, _: Option<Signal>) -> Option<Tap> {
+        self.taps().into_iter().find(|found| found.id == tap.id)
+    }
+    async fn transport(&self, tap: &Tap, _: Option<Signal>) -> Result<Option<Transport>, EarsError> {
+        let before = self.advanced.borrow_mut().insert(tap.id.to_bits(), true).unwrap_or(false);
+        Ok(Some(Transport { beats: if before { 4. } else { 0. }, running: true }))
+    }
+    async fn close(&self) {}
+}
+
 /// A Live with this Set, and Kumi's rendering over it. A take runs three seconds, and the reference four.
 struct Live {
     set: Rc<Set>,
@@ -567,18 +724,30 @@ struct Live {
     /// What Kumi told the app, in passing.
     told: Rc<RefCell<Vec<String>>>,
     reference: PathBuf,
+    ears: Option<Rc<FixtureEars>>,
     _folder: tempfile::TempDir,
 }
 impl Live {
     async fn new(tracks: &[(&str, &[&str])]) -> Self {
         Self::configured(tracks, |_, _, _| {}).await
     }
+    async fn new_with_ears(tracks: &[(&str, &[&str])], ears: bool) -> Self {
+        Self::configured_with_ears(tracks, ears, |_, _, _| {}).await
+    }
     async fn configured(tracks: &[(&str, &[&str])], configure: impl FnOnce(&Rc<Set>, &mut AbletonOptions, &Path)) -> Self {
+        Self::configured_with_ears(tracks, false, configure).await
+    }
+    async fn configured_with_ears(
+        tracks: &[(&str, &[&str])],
+        ears: bool,
+        configure: impl FnOnce(&Rc<Set>, &mut AbletonOptions, &Path),
+    ) -> Self {
         let folder = tempfile::tempdir().unwrap();
         let (take, reference) = (folder.path().join("take.wav"), folder.path().join("reference.wav"));
         noise(&take, 3);
         noise(&reference, 4);
         let set = Set::new(&take, tracks);
+        let ears = ears.then(|| FixtureEars::new(set.clone()));
         let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
         let bridge = set.clone();
         options.connect = Some(Rc::new(move |_| {
@@ -591,6 +760,13 @@ impl Live {
         options.change_timeout_ms = Some(2000);
         options.fast = Some(false);
         options.ears = Some(EarsSetup::Disabled);
+        if let Some(ears) = &ears {
+            let link = ears.clone();
+            options.ears = Some(EarsSetup::Open(Rc::new(move || {
+                let link: Rc<dyn EarsLink> = link.clone();
+                async move { Ok(link) }.boxed_local()
+            })));
+        }
         options.low_disk = Some(Rc::new(|_, _, _| async { None }.boxed_local()));
         options.restore_file = Some(folder.path().join("restore.json").to_string_lossy().into_owned());
         let told: Rc<RefCell<Vec<String>>> = Rc::default();
@@ -632,7 +808,7 @@ impl Live {
                 async move { files.clip_file(&file, signal).await }.boxed_local()
             }),
         );
-        Self { set, rendering, observer, history, mutations, told, reference, _folder: folder }
+        Self { set, rendering, observer, history, mutations, told, reference, ears, _folder: folder }
     }
     /// A goal on these tracks, over two beats from the Set's start (one second at 120).
     async fn goal(&self, candidates: &[&str]) -> Rc<dyn GoalRig> {
@@ -716,6 +892,42 @@ fn on_a_paused_clock(work: impl std::future::Future<Output = ()>) {
     runtime.block_on(tokio::task::LocalSet::new().run_until(work));
 }
 
+#[test]
+fn a_trial_stopped_while_waiting_for_a_closing_rig_releases_its_rendering_flag() {
+    on_a_paused_clock(async {
+        for ears in [false, true] {
+            let live = Live::new_with_ears(&[("Candidate", &["Synth"])], ears).await;
+            let goal = live.goal(&["Candidate"]).await;
+            let slot = slot_named(&goal, "Candidate");
+            let before_close = live.set.asked.borrow().len();
+            let mut closing = goal.close();
+            // The fixture records each native call before yielding: close owns the rig while its call waits here.
+            assert!(closing.as_mut().now_or_never().is_none());
+            let while_closing = live.set.asked.borrow().len();
+            assert!(while_closing > before_close);
+
+            let signal = Signal::new();
+            let trials = [trial(&slot, &[("Synth", "Tone", 0.8)])];
+            let mut generation = goal.generation(&trials, signal.clone(), None);
+            assert!(generation.as_mut().now_or_never().is_none());
+            assert!(live.rendering.is_rendering());
+            assert_eq!(live.set.asked.borrow().len(), while_closing);
+
+            // Keep close unpolled: stopping only this trial must finish without acquiring its held rig or calling Live.
+            signal.cancel();
+            assert!(matches!(generation.as_mut().now_or_never(), Some(Err(RuntimeError::Aborted))));
+            assert!(!live.rendering.is_rendering());
+            assert_eq!(live.set.asked.borrow().len(), while_closing);
+            assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5);
+
+            closing.await.unwrap();
+            assert!(!live.set.tracks.borrow().iter().any(|track| track.name.starts_with("Kumi · render")));
+            assert!(!live.set.chain("Candidate").iter().any(|device| device == EARS_NAME));
+            assert!(!live.set.undo_step.get(), "cleanup closes its Live undo steps");
+        }
+    });
+}
+
 /// (#399) A device put in above moves the refs of everything below it, and neither the lease nor the epoch changes: a running
 /// search still finds each knob, rather than sending its values to whatever is at the old places.
 #[test]
@@ -779,26 +991,111 @@ fn a_trial_goes_to_its_own_track_once_another_was_put_in_above() {
     });
 }
 
-/// (#399) One candidate's track deleted mid-search: its knobs freeze and the search goes on with the others, as in REAPER and
-/// Renoise, and nothing goes to the track now at its place.
+/// (#789) A missing candidate leaves both the search and its real Ears/record pass. Cached, unchanged trials still
+/// notice it, the surviving source keeps its own sound, and rebuilding removes only Kumi's temporary listening assets.
 #[test]
-fn a_trial_for_a_track_thats_gone_freezes_its_knobs_and_the_others_go_on() {
-    on_a_paused_clock(async {
-        let live = Live::new(&[("Gone", &["Synth"]), ("Stays", &["Synth"])]).await;
-        let goal = live.goal(&["Gone", "Stays"]).await;
-        let (gone, stays) = (slot_named(&goal, "Gone"), slot_named(&goal, "Stays"));
-        let trials = |value: f64| [trial(&gone, &[("Synth", "Tone", value)]), trial(&stays, &[("Synth", "Tone", value)])];
-        goal.generation(&trials(0.6), Signal::new(), None).await.unwrap();
-        live.set.delete_track("Gone");
+fn a_gone_candidate_leaves_the_real_render_paths_and_the_others_go_on() {
+    for ears in [false, true] {
+        for renamed in [false, true] {
+            on_a_paused_clock(async {
+                let live = Live::new_with_ears(&[("Gone", &["Synth"]), ("Stays", &["Synth"])], ears).await;
+                let goal = live.goal(&["Gone", "Stays"]).await;
+                let (gone, stays) = (slot_named(&goal, "Gone"), slot_named(&goal, "Stays"));
+                let trials = |value| [trial(&gone, &[("Synth", "Tone", value)]), trial(&stays, &[("Synth", "Tone", value)])];
+                let first = goal.generation(&trials(0.6), Signal::new(), None).await.unwrap();
+                assert_eq!(first.scores.len(), 2, "both actual sources were heard: {first:?}");
+                if renamed {
+                    live.set.rename_track("Gone", "Renamed");
+                } else {
+                    live.set.delete_track("Gone");
+                }
+                live.set.ride_fader("Stays");
+                live.set.edit_clip("Stays");
+                live.set.put_device_in("Stays", 0, "New");
+                live.set.recorded.borrow_mut().clear();
+                if let Some(link) = &live.ears {
+                    link.armed.borrow_mut().clear();
+                }
 
-        let generation = goal.generation(&trials(0.7), Signal::new(), None).await.unwrap();
+                let generation = goal.generation(&trials(0.6), Signal::new(), None).await.unwrap();
 
-        let frozen: Vec<&String> = generation.frozen["Gone"].iter().collect();
-        assert_eq!(frozen, [&knob_key(&knob_on(&gone, "Synth", "Tone"))]);
-        assert!(!generation.frozen.contains_key("Stays"));
-        assert_eq!(live.set.knob("Stays", "Synth", "Tone"), 0.7, "the other candidate moved, once");
-        goal.close().await.unwrap();
-    });
+                assert_eq!(generation.gone, ["Gone"]);
+                assert_eq!(generation.scores.len(), 1, "a disappeared cached winner has no score");
+                assert!(generation.scores.contains_key("Stays"));
+                assert!(generation.frozen.is_empty(), "a missing track left, rather than becoming an empty chain");
+                assert_eq!(goal.slots().iter().map(|slot| slot.name.as_str()).collect::<Vec<_>>(), ["Stays"]);
+                let heard = goal.generation(&[trial(&stays, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.unwrap();
+                assert!(heard.scores.contains_key("Stays"), "the surviving real capture was heard: {heard:?}");
+                assert_eq!(live.set.knob("Stays", "Synth", "Tone"), 0.7);
+                assert_eq!(live.set.knob("Stays", "New", "Tone"), 0.5, "device identities survive a moved chain and a new rig");
+                let tracks = live.set.tracks.borrow();
+                let survivor = tracks.iter().find(|track| track.name == "Stays").unwrap();
+                assert_eq!(survivor.volume, 0.5);
+                assert_eq!(survivor.clips, ["edited notes"]);
+                drop(tracks);
+                if let Some(link) = &live.ears {
+                    assert_eq!(*link.armed.borrow(), ["Stays"], "only the surviving device is armed");
+                    assert_eq!(link.taps().len(), 1, "no duplicate capture devices after rebuilding");
+                    assert_eq!(live.set.chain("Stays"), ["New", "Synth", "Limiter", EARS_NAME]);
+                } else {
+                    let recorded = live.set.recorded.borrow();
+                    assert_eq!(recorded.len(), 1);
+                    assert_eq!(recorded[0].len(), 1, "the retired scratch track isn't armed or recorded");
+                    assert_eq!(live.set.tracks.borrow().iter().filter(|track| track.name.starts_with("Kumi · render")).count(), 1);
+                }
+                let said = goal.close().await.unwrap();
+                assert!(said.iter().any(|line| line.contains("“Gone”") && line.contains("left the search")), "{said:?}");
+                goal.put_back(Signal::new()).await;
+                assert!(!live.set.undo_step.get(), "cleanup closes its Live undo steps");
+                assert_eq!(live.set.chain("Stays"), ["New", "Synth"]);
+                assert_eq!(live.set.has_track("Renamed"), renamed, "a renamed producer track is kept");
+                if renamed {
+                    assert_eq!(live.set.chain("Renamed"), ["Synth"]);
+                    assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
+                }
+            });
+        }
+    }
+}
+
+/// (#789) Losing the last candidate doesn't attempt an empty Ears/record pass, and an older saved goal can reopen
+/// with whichever names still exist, including none. The session decides that an empty search is over.
+#[test]
+fn a_goal_reopens_with_its_remaining_candidates_and_losing_the_last_one_doesnt_render() {
+    for ears in [false, true] {
+        on_a_paused_clock(async {
+            let live = Live::new_with_ears(&[("Gone", &["Synth"]), ("Stays", &["Synth"])], ears).await;
+            let previous = live.goal(&["Gone", "Stays"]).await;
+            previous.close().await.unwrap();
+            previous.put_back(Signal::new()).await;
+            live.set.delete_track("Gone");
+            let resumed = live.goal(&["Gone", "Stays"]).await;
+            assert_eq!(resumed.slots().iter().map(|slot| slot.name.as_str()).collect::<Vec<_>>(), ["Stays"]);
+            let stays = slot_named(&resumed, "Stays");
+            assert!(resumed
+                .generation(&[trial(&stays, &[("Synth", "Tone", 0.6)])], Signal::new(), None)
+                .await
+                .unwrap()
+                .scores
+                .contains_key("Stays"));
+            live.set.delete_track("Stays");
+            let recorded = live.set.recorded.borrow().len();
+            let armed = live.ears.as_ref().map(|link| link.armed.borrow().len());
+            let empty = GenerationTrial { slot: "Stays".into(), knobs: vec![], values: vec![], fresh: None };
+            let result = resumed.generation(&[empty], Signal::new(), None).await.unwrap();
+            assert_eq!(result.gone, ["Stays"]);
+            assert!(result.scores.is_empty() && result.silent.is_empty());
+            assert!(resumed.slots().is_empty());
+            assert_eq!(live.set.recorded.borrow().len(), recorded);
+            assert_eq!(live.ears.as_ref().map(|link| link.armed.borrow().len()), armed);
+            resumed.close().await.unwrap();
+            resumed.put_back(Signal::new()).await;
+            assert!(live.set.tracks.borrow().is_empty(), "Kumi's scratch tracks went too");
+            let old_saved = live.goal(&["Gone", "Stays"]).await;
+            assert!(old_saved.slots().is_empty());
+            old_saved.close().await.unwrap();
+        });
+    }
 }
 
 /// (#399) A device deleted from a chain with another of its name: the knob is lost with it, not moved onto the other.
@@ -1503,10 +1800,10 @@ fn candidates_go_back_to_where_the_goal_first_found_them_across_a_leap() {
     });
 }
 
-/// (#399) A candidate tidied away or deleted has nothing to go back to, and that needs no word. Nothing goes to the track now at
-/// its old place either, though that track's devices have the same names, and though Live says nothing of who they are.
+/// (#399) A candidate tidied away or deleted is untouched, as is the track now at its old place. When Live gives no device
+/// identities, that reused position is indistinguishable from a rename: the uncertainty is said, with no device changed.
 #[test]
-fn a_track_thats_gone_is_skipped_without_a_word() {
+fn a_track_thats_gone_is_untouched_and_an_unidentified_old_position_is_reported() {
     for (gone_first, identities) in [(false, true), (true, true), (true, false)] {
         on_a_paused_clock(async {
             let case = format!("gone first {gone_first}, identities {identities}");
@@ -1514,6 +1811,7 @@ fn a_track_thats_gone_is_skipped_without_a_word() {
             let live = Live::new(&if gone_first { [gone, other] } else { [other, gone] }).await;
             live.set.identities.set(identities);
             live.set.turn("Other", "Synth", "Tone", 0.3);
+            live.set.turn("Other", "Limiter", "Gain", 0.1);
             let goal = live.goal(&["Gone"]).await;
             let slot = slot_named(&goal, "Gone");
             goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
@@ -1522,9 +1820,17 @@ fn a_track_thats_gone_is_skipped_without_a_word() {
 
             let said = goal.put_back(Signal::new()).await;
 
-            assert!(said.is_empty(), "{case}: {said:?}");
+            if identities || !gone_first {
+                assert!(said.is_empty(), "{case}: {said:?}");
+            } else {
+                // Without device identities a deletion followed by a track at the old place is indistinguishable
+                // from a rename: report the uncertainty without claiming that anything definitely remains.
+                assert_eq!(said.len(), 1, "{case}: {said:?}");
+                assert!(said[0].contains("didn't identify the devices from “Gone”") && said[0].contains("may still"), "{case}: {said:?}");
+            }
             assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.3, "{case}: the track now at its place");
             assert_eq!(live.set.chain("Other"), ["Synth", "Limiter"], "{case}: and its own Limiter");
+            assert_eq!(live.set.knob("Other", "Limiter", "Gain"), 0.1, "{case}: its own Limiter's gain is untouched too");
         });
     }
 }
@@ -1695,24 +2001,46 @@ fn a_knob_first_moved_after_a_leap_goes_back_to_its_own_value() {
     });
 }
 
-/// (#399) A candidate renamed during the search is still there at the search's values: its knobs are found at its old place by
-/// who their devices are, and it goes back. Nothing else at that place would answer to them.
+/// (#399, #789) A candidate renamed during the search goes back by its devices' identities. Without them, both the values
+/// and the limiter that may remain are said, and devices that could belong to another track are left untouched.
 #[test]
-fn a_candidate_renamed_during_the_search_still_goes_back() {
-    on_a_paused_clock(async {
-        let live = Live::new(&[("Candidate", &["Synth"])]).await;
-        let goal = live.goal(&["Candidate"]).await;
-        let slot = slot_named(&goal, "Candidate");
-        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
-        goal.close().await.unwrap();
-        live.set.rename_track("Candidate", "Renamed");
+fn a_renamed_candidate_goes_back_by_its_devices_identities_or_says_what_may_remain() {
+    for (identities, moved) in [(true, true), (false, true), (false, false)] {
+        on_a_paused_clock(async {
+            let live = Live::new(&[("Candidate", &["Synth"])]).await;
+            live.set.identities.set(identities);
+            let goal = live.goal(&["Candidate"]).await;
+            if moved {
+                let slot = slot_named(&goal, "Candidate");
+                goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+            }
+            goal.close().await.unwrap();
+            live.set.rename_track("Candidate", "Renamed");
+            let writes = live.set.asked_for("live_device_parameter_apply");
+            let deletes = live.set.asked_for("live_device_delete_apply");
 
-        let said = goal.put_back(Signal::new()).await;
+            let said = goal.put_back(Signal::new()).await;
 
-        assert!(said.is_empty(), "{said:?}");
-        assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
-        assert_eq!(live.set.chain("Renamed"), ["Synth"]);
-    });
+            if identities {
+                assert!(said.is_empty(), "{said:?}");
+                assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
+                assert_eq!(live.set.chain("Renamed"), ["Synth"]);
+            } else {
+                assert_eq!(said.len(), 1, "the uncertainty is said once: {said:?}");
+                assert!(
+                    said[0].contains("didn't identify the devices from “Candidate”")
+                        && said[0].contains("Limiter may still be turned down"),
+                    "{said:?}"
+                );
+                assert_eq!(said[0].contains("Synth Tone may still have the search's values"), moved, "{said:?}");
+                assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), if moved { 0.6 } else { 0.5 });
+                assert_eq!(live.set.chain("Renamed"), ["Synth", "Limiter"]);
+                assert_eq!(live.set.knob("Renamed", "Limiter", "Gain"), 0.25);
+                assert_eq!(live.set.asked_for("live_device_parameter_apply"), writes, "no unidentified device is written");
+                assert_eq!(live.set.asked_for("live_device_delete_apply"), deletes, "no unidentified device is deleted");
+            }
+        });
+    }
 }
 
 /// A goal without Kumi Ears holds its recording between passes, so nothing waits on stopping it: Live shows a take only once it

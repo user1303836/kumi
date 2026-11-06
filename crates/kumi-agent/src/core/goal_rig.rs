@@ -1,15 +1,20 @@
-//! What every DAW's goal rig does alike with a goal's own types (#399, K29): how a knob and its device are named, which of
-//! a trial's knobs moved, what a generation is told of a heard trial, and how a finished goal's candidates are tidied. The
-//! listening half (screening, keying and hearing a trial) is `kumi_listening::goal`; each DAW's rig sets, renders and
-//! keeps the best in its own way.
+//! A goal's shared generation engine and state (#399, K29). Backends retain native reads, writes, rendering and cleanup;
+//! the core owns accepted values, trial freshness, hearing, scoring and its bounded cache. The native IO and hearing
+//! orders are explicit policies, so sharing the engine does not change either backend's failure or commit ordering.
 use crate::core::{
-    contracts::{Generation, GenerationTrial},
+    contracts::{Generation, GenerationOptions, GenerationTrial},
     evolve::Knob,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use kumi_listening::goal::Told;
-use kumi_types::errors::RuntimeError;
+use kumi_common::{abort::Signal, time::now_ms};
+use kumi_listening::goal::{hear, tell, tell_timing, trial_key, HeardCache, Told};
+use kumi_media::audio::analyze::Analysis;
+use kumi_types::{
+    contracts::{Focus, Render},
+    errors::RuntimeError,
+};
+use std::{cell::RefCell, collections::HashSet};
 
 /// A knob as a search knows it: its device (as [`device_label`] names it) and its own name.
 pub fn knob_key(knob: &Knob) -> String {
@@ -117,6 +122,276 @@ pub fn tell_generation(generation: &mut Generation, slot: &str, told: Told, cach
     if let Some(structural) = told.structural {
         generation.structural.insert(slot.into(), structural);
     }
+}
+
+/// Whether all native reads must finish before any trial writes, or each trial is read and set in turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetOrder {
+    ReadAllThenSet,
+    OneAtATime,
+}
+
+/// Hearing is either committed as each result arrives, or only after the entire batch succeeds, in trial order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HearOrder {
+    AsCompleted,
+    AfterBatch,
+}
+
+/// A backend's cache payload and ordering, independent of a borrowed native pass.
+pub trait GoalBackend {
+    type Cached: Clone;
+    const SET_ORDER: SetOrder;
+    const HEAR_ORDER: HearOrder;
+    fn cached_told(cached: Self::Cached) -> Told;
+    fn cache(told: Told, render: &Render) -> Self::Cached;
+}
+
+/// A short reference stretch used while screening, relative to each candidate's window.
+pub struct GoalScreen {
+    pub offset: f64,
+    pub beats: f64,
+    pub reference: Analysis,
+}
+
+/// Native IO for one generation. A pass borrows its rig and owns any render/rig guards until the required boundary.
+#[async_trait(?Send)]
+pub trait GoalPass<B: GoalBackend> {
+    type Plan;
+    fn signal(&self, given: Signal) -> Signal;
+    fn begin(&mut self) -> Result<(), RuntimeError>;
+    /// Availability checks may also retire native sources and their shared current-value entries.
+    async fn before_set(&mut self, _signal: Signal) -> Result<Vec<String>, RuntimeError> {
+        Ok(vec![])
+    }
+    async fn before_render(&mut self, _signal: Signal) -> Result<Vec<String>, RuntimeError> {
+        Ok(vec![])
+    }
+    /// None means the slot cannot be set; every moved knob is frozen. No current value is accepted in that case.
+    async fn plan(&mut self, slot: &str, moved: &[(Knob, f64)], signal: Signal) -> Result<Option<Self::Plan>, RuntimeError>;
+    /// Returns exactly the refused knobs. Backend-owned restore history is recorded here; the core accepts the rest.
+    async fn set(&mut self, slot: &str, moved: &[(Knob, f64)], plan: Self::Plan, signal: Signal) -> Result<HashSet<String>, RuntimeError>;
+    async fn render(
+        &mut self,
+        fresh: &[&GenerationTrial],
+        screen: Option<&GoalScreen>,
+        signal: Signal,
+    ) -> Result<IndexMap<String, Render>, RuntimeError>;
+    /// Called even when rendering fails: a backend may release its rendering flag before hearing starts.
+    fn rendered(&mut self);
+    /// Beats and tempo to hear at. A backend releases a held rig here when hearing must not hold its mutex.
+    fn hearing_window(&mut self, screen: Option<&GoalScreen>) -> (f64, f64);
+    async fn hear(&self, render: &Render, beats: f64, tempo: f64, focus: Option<Focus>, signal: Signal) -> Result<Analysis, RuntimeError> {
+        hear(render, beats, tempo, focus, signal).await.map_err(|error| RuntimeError::plain(error.to_string()))
+    }
+    fn score(&self, heard: &Analysis, against: &Analysis, focus: Option<Focus>) -> Option<Told> {
+        tell(heard, against, focus)
+    }
+}
+
+/// The generation state shared by every goal backend. Native ownership and kept-best records stay on the renderer.
+pub struct GoalCore<B: GoalBackend> {
+    pub current: RefCell<IndexMap<String, IndexMap<String, f64>>>,
+    pub reference: Analysis,
+    pub focus: Option<Focus>,
+    pub screen: Option<GoalScreen>,
+    pub heard: RefCell<HeardCache<B::Cached>>,
+}
+
+struct Planned<P> {
+    moved: Vec<(Knob, f64)>,
+    native: Option<P>,
+}
+
+impl<B: GoalBackend> GoalCore<B> {
+    pub fn new(reference: Analysis, focus: Option<Focus>) -> Self {
+        Self { current: RefCell::default(), reference, focus, screen: None, heard: RefCell::new(HeardCache::default()) }
+    }
+
+    async fn plan<P: GoalPass<B>>(
+        &self,
+        pass: &mut P,
+        trial: &GenerationTrial,
+        generation: &mut Generation,
+        signal: Signal,
+    ) -> Result<Planned<P::Plan>, RuntimeError> {
+        let moved = moved(trial, self.current.borrow().get(&trial.slot));
+        let native = if moved.is_empty() { None } else { pass.plan(&trial.slot, &moved, signal).await? };
+        if !moved.is_empty() && native.is_none() {
+            generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| knob_key(knob)).collect());
+        }
+        Ok(Planned { moved, native })
+    }
+
+    async fn set<P: GoalPass<B>>(
+        &self,
+        pass: &mut P,
+        trial: &GenerationTrial,
+        plan: Planned<P::Plan>,
+        generation: &mut Generation,
+        signal: Signal,
+    ) -> Result<(), RuntimeError> {
+        let Some(native) = plan.native else { return Ok(()) };
+        let refused = pass.set(&trial.slot, &plan.moved, native, signal).await?;
+        let mut current = self.current.borrow_mut();
+        let last = current.entry(trial.slot.clone()).or_default();
+        for (knob, value) in plan.moved.iter().filter(|(knob, _)| !refused.contains(&knob_key(knob))) {
+            last.insert(knob_key(knob), *value);
+        }
+        if !refused.is_empty() {
+            generation.frozen.insert(trial.slot.clone(), refused);
+        }
+        Ok(())
+    }
+
+    /// One engine chooses moved values, freshness, hearing and result/cache commits. Backends supply only native IO.
+    pub async fn generation<P: GoalPass<B>>(
+        &self,
+        mut pass: P,
+        trials: &[GenerationTrial],
+        given: Signal,
+        options: Option<GenerationOptions>,
+    ) -> Result<Generation, RuntimeError> {
+        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
+        let signal = pass.signal(given);
+        let screened = options.and_then(|options| options.screen) == Some(true) && self.screen.is_some();
+        let screen = self.screen.as_ref().filter(|_| screened);
+        let cache_key = |trial: &GenerationTrial| trial_key(&trial.slot, screened, &trial.values);
+        pass.begin()?;
+        let set_from = now_ms();
+        let mut generation = Generation { screened, ..Default::default() };
+        generation.gone = pass.before_set(signal.clone()).await?;
+        let mut active: Vec<_> = trials.iter().filter(|trial| !generation.gone.contains(&trial.slot)).collect();
+        match B::SET_ORDER {
+            SetOrder::ReadAllThenSet => {
+                let mut plans = Vec::with_capacity(active.len());
+                for trial in &active {
+                    plans.push(self.plan(&mut pass, trial, &mut generation, signal.clone()).await?);
+                }
+                for (trial, plan) in active.iter().zip(plans) {
+                    self.set(&mut pass, trial, plan, &mut generation, signal.clone()).await?;
+                }
+            }
+            SetOrder::OneAtATime => {
+                for trial in &active {
+                    let plan = self.plan(&mut pass, trial, &mut generation, signal.clone()).await?;
+                    self.set(&mut pass, trial, plan, &mut generation, signal.clone()).await?;
+                }
+            }
+        }
+        generation.gone.extend(pass.before_render(signal.clone()).await?);
+        active.retain(|trial| !generation.gone.contains(&trial.slot));
+        let render_from = now_ms();
+        let fresh: Vec<_> =
+            active.iter().copied().filter(|trial| trial.fresh == Some(true) || !self.heard.borrow().contains(&cache_key(trial))).collect();
+        let rendered = if fresh.is_empty() { Ok(IndexMap::new()) } else { pass.render(&fresh, screen, signal.clone()).await };
+        pass.rendered();
+        let files = rendered?;
+        let heard_from = now_ms();
+        let (beats, tempo) = pass.hearing_window(screen);
+        let against = screen.map_or(&self.reference, |screen| &screen.reference);
+        match B::HEAR_ORDER {
+            HearOrder::AsCompleted => {
+                let generation = RefCell::new(&mut generation);
+                eager_hearing(active.iter().map(|trial| {
+                    let pass = &pass;
+                    let signal = signal.clone();
+                    let files = &files;
+                    let generation = &generation;
+                    let cache_key = &cache_key;
+                    async move {
+                        let key = cache_key(trial);
+                        let known = if trial.fresh != Some(true) { self.heard.borrow().get(&key) } else { None };
+                        if let Some(known) = known {
+                            tell_generation(&mut generation.borrow_mut(), &trial.slot, B::cached_told(known), true);
+                        } else if let Some(render) = files.get(&trial.slot) {
+                            let heard = pass.hear(render, beats, tempo, self.focus, signal).await?;
+                            if let Some(told) = pass.score(&heard, against, self.focus) {
+                                tell_generation(&mut generation.borrow_mut(), &trial.slot, told.clone(), false);
+                                self.heard.borrow_mut().insert(key, B::cache(told, render));
+                            } else {
+                                generation.borrow_mut().silent.push(trial.slot.clone());
+                            }
+                        } else {
+                            generation.borrow_mut().silent.push(trial.slot.clone());
+                        }
+                        Ok::<_, RuntimeError>(())
+                    }
+                }))
+                .await?;
+            }
+            HearOrder::AfterBatch => {
+                let known: Vec<_> = active
+                    .iter()
+                    .map(|trial| {
+                        let key = cache_key(trial);
+                        let cached = if trial.fresh != Some(true) { self.heard.borrow().get(&key) } else { None };
+                        (*trial, key, cached)
+                    })
+                    .collect();
+                let hearing = known
+                    .iter()
+                    .filter(|(_, _, cached)| cached.is_none())
+                    .filter_map(|(trial, _, _)| files.get(&trial.slot))
+                    .map(|render| pass.hear(render, beats, tempo, self.focus, signal.clone()));
+                let mut heard = futures::future::try_join_all(hearing).await?.into_iter();
+                for (trial, key, cached) in known {
+                    if let Some(cached) = cached {
+                        tell_generation(&mut generation, &trial.slot, B::cached_told(cached), true);
+                    } else if let Some(render) = files.get(&trial.slot) {
+                        let Some(heard) = heard.next() else { break };
+                        if let Some(told) = pass.score(&heard, against, self.focus) {
+                            tell_generation(&mut generation, &trial.slot, told.clone(), false);
+                            self.heard.borrow_mut().insert(key, B::cache(told, render));
+                        } else {
+                            generation.silent.push(trial.slot.clone());
+                        }
+                    } else {
+                        generation.silent.push(trial.slot.clone());
+                    }
+                }
+            }
+        }
+        tell_timing(active.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
+        Ok(generation)
+    }
+}
+
+/// Every ready hearing is polled before an error returns; an immediate error must not prevent later work dispatch.
+async fn eager_hearing<I, F, T, E>(work: I) -> Result<Vec<T>, E>
+where
+    I: IntoIterator<Item = F>,
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    use std::task::Poll;
+    let mut work: Vec<_> = work.into_iter().map(|future| Some(Box::pin(future))).collect();
+    let mut values: Vec<Option<T>> = std::iter::repeat_with(|| None).take(work.len()).collect();
+    std::future::poll_fn(move |cx| {
+        let mut error = None;
+        let mut pending = false;
+        for (index, future) in work.iter_mut().enumerate() {
+            let Some(active) = future else { continue };
+            match active.as_mut().poll(cx) {
+                Poll::Pending => pending = true,
+                Poll::Ready(value) => {
+                    *future = None;
+                    match value {
+                        Ok(value) => values[index] = Some(value),
+                        Err(why) if error.is_none() => error = Some(why),
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+        if let Some(error) = error {
+            Poll::Ready(Err(error))
+        } else if pending {
+            Poll::Pending
+        } else {
+            Poll::Ready(Ok(values.iter_mut().map(|value| value.take().unwrap()).collect()))
+        }
+    })
+    .await
 }
 
 /// What tidying a finished goal asks of a DAW's rig, slot by slot, by the slot's name.

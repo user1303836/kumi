@@ -70,6 +70,9 @@ struct FakeLive {
     failure: RefCell<Option<String>>,
     /// Setup asks before it opens Live, closed (a DAW Kumi only opens, to reach it).
     asks: Cell<bool>,
+    /// Attached bridges install beside an app that stays open, then wait for a separate permission.
+    restart: Cell<bool>,
+    enabled: Cell<Option<bool>>,
 }
 impl FakeLive {
     fn new(open: bool) -> Rc<Self> {
@@ -92,6 +95,8 @@ impl FakeLive {
             set_fails: Cell::new(false),
             failure: RefCell::default(),
             asks: Cell::new(false),
+            restart: Cell::new(true),
+            enabled: Cell::new(None),
         })
     }
     fn calls(&self) -> Vec<String> {
@@ -116,6 +121,15 @@ impl FakeLive {
 }
 #[async_trait(?Send)]
 impl LiveSetup for FakeLive {
+    fn needs_restart(&self) -> bool {
+        self.restart.get()
+    }
+    async fn enabled(&self) -> Option<bool> {
+        if self.enabled.get().is_some() {
+            self.calls.borrow_mut().push("enabled?".into());
+        }
+        self.enabled.get()
+    }
     async fn open_live(&self) -> Option<String> {
         self.calls.borrow_mut().push("open?".into());
         self.open.borrow().clone()
@@ -243,6 +257,28 @@ fn rows(h: &Harness) -> String {
     let last = lines.iter().rposition(|l| !l.trim().is_empty()).unwrap_or(0);
     lines[..=last].iter().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n")
 }
+
+case!(an_attached_bridge_installs_while_the_app_stays_open_and_waits_for_accessibility, async {
+    use kumi_types::daw::DawId;
+    kumi::daw::work_with(DawId::Logic);
+    let live = FakeLive::new(true);
+    live.restart.set(false);
+    live.enabled.set(Some(false));
+    let h = setup(80, FakeModels::catalog(), Some((Some("Logic's bridge isn't installed yet."), live.clone())), |_| {});
+    h.start().await;
+    live.wait_for_call("connect").await;
+    h.emit(json!({"type":"connection","state":"connected"}));
+    live.wait_for_call("enabled?").await;
+    assert!(!said(&h).contains("You're set."), "a connection alone does not grant Accessibility");
+    assert_eq!(live.calls().iter().filter(|call| matches!(call.as_str(), "quit" | "closed?" | "start")).count(), 0);
+    assert_eq!(live.open.borrow().as_deref(), Some(LIVE));
+    assert_eq!(live.count("install"), 1);
+    live.enabled.set(Some(true));
+    h.wait_for("You're set.").await;
+    assert!(!live.calls().iter().any(|call| call.starts_with("start")), "the running app is never relaunched");
+    h.close().await;
+    kumi::daw::work_with(DawId::Ableton);
+});
 
 case!(a_first_run_signs_in_puts_the_bridge_in_and_waits_for_the_control_surface, async {
     let live = FakeLive::new(false);
@@ -1173,11 +1209,13 @@ case!(a_first_run_whose_daw_is_chosen_here_goes_on_with_its_setup, async {
 case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     // Review K1: once setup has put REAPER's extension in (its receipt is written), connecting hands the session the
     // bridge's reference and reconnects it, as Live's setup does, so the session connects without a restart.
+    // Review K13: setup captures the saved project before the DAW closes, so it can open that project again.
     use kumi_daw::{provider::DawProvider, setup::SetupSession};
-    /// The session as setup reaches it: it counts setup's reconnects.
+    /// The session as setup reaches it: its reconnects and the current saved project.
     #[derive(Default)]
     struct Reached {
         reconnects: std::cell::Cell<u32>,
+        set: RefCell<Option<String>>,
     }
     #[async_trait::async_trait(?Send)]
     impl SetupSession for Reached {
@@ -1186,7 +1224,7 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
             Ok(())
         }
         fn open_set(&self) -> Option<String> {
-            None
+            self.set.borrow().clone()
         }
     }
     let home = tempfile::tempdir().unwrap();
@@ -1197,10 +1235,21 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
         ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
     ]);
     let bridge: Rc<RefCell<Option<String>>> = Rc::default();
-    let reached = Rc::new(Reached::default());
+    let saved = home.path().join("A producer's 音 & mix.rpp");
+    std::fs::write(&saved, "saved project").unwrap();
+    let saved = saved.to_string_lossy().into_owned();
+    let reached = Rc::new(Reached { set: RefCell::new(Some(saved.clone())), ..Default::default() });
     let as_session: Rc<dyn SetupSession> = reached.clone();
     let session: Rc<RefCell<Option<std::rc::Weak<dyn SetupSession>>>> = Rc::new(RefCell::new(Some(Rc::downgrade(&as_session))));
     let setup = kumi_daw_reaper::PROVIDER.setup(&env, bridge.clone(), false, session.clone());
+    assert_eq!(setup.open_set(), Some(saved), "setup remembers the actual saved project for its restart");
+    let next = home.path().join("Another project.rpp");
+    std::fs::write(&next, "saved project").unwrap();
+    let next = next.to_string_lossy().into_owned();
+    *reached.set.borrow_mut() = Some(next.clone());
+    assert_eq!(setup.open_set(), Some(next), "the current session's path is read again before closing");
+    *reached.set.borrow_mut() = None;
+    assert_eq!(setup.open_set(), None, "an unsaved project has no file to reopen");
     // The extension in place: its receipt says where its reference is.
     let paths = daw_bridge::paths::BridgePaths::new(&kumi_home, daw_bridge::Daw::Reaper);
     std::fs::create_dir_all(paths.receipt().parent().unwrap()).unwrap();

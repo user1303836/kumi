@@ -17,6 +17,32 @@ fn device_authority(row: &DeviceRow, reference: &Value) -> Value {
 fn enable_revision(value: &Value) -> Result<String, LiveError> {
     Ok(hex::encode(Sha256::digest(canonical_mutation_identity(&json!({"enabled":value}))?)))
 }
+/// Device refs name positions. A move changes its neighbors' refs as well, so compare the frozen object order rather
+/// than the refs from before it moved. Fresh authority alone must not authorize undoing across a producer's edit.
+fn move_hierarchy_matches(row: &DeviceRow, transaction: &Value, restored: bool) -> Result<bool, LiveError> {
+    let payload = &transaction["payload"];
+    let error = || LiveError::error("device move lacks exact sibling or location authority; undo refused");
+    let siblings = payload["expectedSiblings"].as_array().ok_or_else(error)?;
+    let mut identities: Vec<_> = siblings
+        .iter()
+        .map(|sibling| sibling.get("objectIdentity").filter(|identity| is_non_empty_string(identity, 256)).cloned().ok_or_else(error))
+        .collect::<Result<_, _>>()?;
+    let prior = transaction["prior"]["index"].as_u64().and_then(|index| usize::try_from(index).ok()).ok_or_else(error)?;
+    let applied = transaction["created"]["index"].as_u64().and_then(|index| usize::try_from(index).ok()).ok_or_else(error)?;
+    if identities.get(prior) != Some(&payload["expectedObjectIdentity"]) || applied >= identities.len() {
+        return Err(error());
+    }
+    if !restored {
+        let moved = identities.remove(prior);
+        identities.insert(applied, moved);
+    }
+    Ok(row.device["objectIdentity"] == payload["expectedObjectIdentity"]
+        && json!(row.owner_ref) == payload["expectedOwnerRef"]
+        && json!(row.owner_identity) == payload["expectedOwnerIdentity"]
+        && row.track["ref"] == payload["expectedTrackRef"]
+        && row.track["objectIdentity"] == payload["expectedTrackIdentity"]
+        && row.siblings.iter().map(|sibling| sibling["objectIdentity"].clone()).collect::<Vec<_>>() == identities)
+}
 impl McpHost {
     pub async fn dispatch_device_basic_tool(&self, call: &ToolCall, signal: Option<&Signal>) -> Option<Result<Option<Value>, LiveError>> {
         let p = call.arguments.as_ref().unwrap_or(&Value::Null);
@@ -172,6 +198,9 @@ impl McpHost {
             if action == "move" && result["objectIdentity"] != t["payload"]["expectedObjectIdentity"] {
                 return Err(LiveError::error("device move returned a different object identity"));
             }
+            if action == "move" && result["index"] != t["payload"]["index"] {
+                return Err(LiveError::error("device move did not confirm the requested index"));
+            }
             record.borrow_mut()["created"] = result.clone();
             if action == "insert" {
                 let snapshot =
@@ -266,8 +295,9 @@ impl McpHost {
                         return Err(LiveError::error("device-enable undo replay did not restore prior state"));
                     }
                     if action == "move"
-                        && json!(located.siblings.iter().position(|s| s["ref"] == reference).map(|n| n as i64).unwrap_or(-1))
-                            != t["prior"]["index"]
+                        && (!move_hierarchy_matches(&located, &t, true)?
+                            || json!(located.siblings.iter().position(|s| s["ref"] == reference).map(|n| n as i64).unwrap_or(-1))
+                                != t["prior"]["index"])
                     {
                         return Err(LiveError::error("device-move undo replay did not restore prior location"));
                     }
@@ -281,11 +311,13 @@ impl McpHost {
                         args["expectedStateRevision"] = json!(enable_revision(&located.device["enabled"])?);
                     } else if action == "move" {
                         let index = located.siblings.iter().position(|s| s["ref"] == reference).map(|n| n as i64).unwrap_or(-1);
-                        if located.device["objectIdentity"] != t["payload"]["expectedObjectIdentity"]
+                        if !move_hierarchy_matches(&located, &t, false)?
                             || json!(index) != t["created"]["index"]
                             || !is_integer_in_range(&t["prior"]["index"], 0., 100_000.)
                         {
-                            return Err(LiveError::error("moved device identity or location changed after apply"));
+                            return Err(LiveError::error(
+                                "moved device owner, siblings, identity or location changed after apply; undo refused",
+                            ));
                         }
                         args["index"] = t["prior"]["index"].clone();
                     } else {
@@ -307,6 +339,9 @@ impl McpHost {
                         return Err(LiveError::error("device restoration was not confirmed"));
                     }
                     if action == "move" {
+                        if result["objectIdentity"] != t["payload"]["expectedObjectIdentity"] || result["index"] != t["prior"]["index"] {
+                            return Err(LiveError::error("device move-back identity or prior index was not confirmed"));
+                        }
                         record.borrow_mut()["created"] = result;
                     }
                 }

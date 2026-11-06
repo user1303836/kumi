@@ -28,6 +28,11 @@ impl BridgePaths {
         Self { daw, root: kumi_home.join("bridges").join(daw.id()) }
     }
 
+    /// Programs kept in Kumi's own folder, rather than loaded from a DAW's folder.
+    pub fn bridge(&self) -> PathBuf {
+        self.root.join("bridge")
+    }
+
     /// The secret both ends prove they know.
     pub fn secret(&self) -> PathBuf {
         self.root.join("bridge.secret")
@@ -82,5 +87,6 @@ mod tests {
         let paths = BridgePaths::new(Path::new("/k"), Daw::Renoise);
         assert_eq!(paths.secret(), Path::new("/k/bridges/renoise/bridge.secret"));
         assert_eq!(paths.discovery(), Path::new("/k/bridges/renoise/discovery"));
+        assert_eq!(BridgePaths::new(Path::new("/k"), Daw::Logic).bridge(), Path::new("/k/bridges/logic/bridge"));
     }
 }

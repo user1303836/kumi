@@ -374,7 +374,7 @@ impl Host {
                             Ok(status) => {
                                 row["project"] = status["project"].clone();
                                 row["busy"] = status["busy"].clone();
-                                for key in ["demo", "listening", "keep_identity"] {
+                                for key in ["demo", "listening", "permission", "keep_identity"] {
                                     if let Some(value) = status.get(key) {
                                         row[key] = value.clone();
                                     }
@@ -516,9 +516,9 @@ impl Host {
             Ok(status) => {
                 result["project"] = status["project"].clone();
                 result["busy"] = status.get("busy").cloned().unwrap_or(Value::Bool(false));
-                // (Renoise's demo; what listening each bridge can do now, M5; whether it keeps the project's id only while a
-                // connection asks, which a bridge from before doesn't say)
-                for key in ["demo", "listening", "keep_identity"] {
+                // Renoise's demo, current listening support, Logic's missing Accessibility permission, and whether
+                // the bridge keeps the project's id only while a connection asks (an older bridge doesn't say).
+                for key in ["demo", "listening", "permission", "keep_identity"] {
                     if let Some(value) = status.get(key) {
                         result[key] = value.clone();
                     }

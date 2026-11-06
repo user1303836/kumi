@@ -242,6 +242,13 @@ impl TakeState {
     }
 }
 
+/// Material Kumi wrote before a take's current version: an undo can put it back without making it a producer edit.
+#[derive(Debug, Clone)]
+pub struct TakeVersion<M> {
+    pub digest: String,
+    pub material: M,
+}
+
 /// One take: its number (V3 is 3), where it stands, how the DAW finds it again (`place`), its latest change in HISTORY,
 /// the direction it went, what it held when Kumi last wrote it (`digest`), and its line for the answer.
 #[derive(Debug, Clone)]
@@ -253,6 +260,8 @@ pub struct Take<P, M> {
     pub direction: String,
     pub digest: String,
     pub material: M,
+    /// Recent earlier writes, oldest first; an exact match after undo restores the corresponding kept material.
+    pub previous: Vec<TakeVersion<M>>,
     pub line: String,
 }
 
@@ -437,6 +446,7 @@ mod tests {
                 direction: String::new(),
                 digest: String::new(),
                 material: Dots(vec![number as u32]),
+                previous: vec![],
                 line: format!("V{number}"),
             });
         }

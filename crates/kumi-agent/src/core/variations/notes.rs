@@ -1,6 +1,7 @@
 //! Note-level moves on a DAW-neutral note form (#400 review notes, shared moves): a MIDI take's notes, in beats from its
 //! start, and the operators every DAW whose takes hold notes shares: notes moved by semitones (or some of them an octave),
-//! velocities and timing loosened, notes thinned out; each leaves the anchors (the notes every take keeps) as they are.
+//! velocities and timing loosened, notes thinned out; each leaves the anchors (the notes every take keeps) and notes
+//! before a trimmed start as they are. Those earlier notes can play when a REAPER item loops its source again.
 //! REAPER's MIDI items and Live's Session clips take them from here; a backend's own operators (an audio take's rate, its
 //! fades) stay its own.
 use super::Rng;
@@ -26,7 +27,7 @@ impl Note {
     pub fn of(value: &Value) -> Option<Note> {
         Some(Note {
             pitch: value.get("pitch")?.as_i64()?.clamp(0, 127),
-            start: value.get("start")?.as_f64()?.max(0.),
+            start: value.get("start")?.as_f64()?,
             length: value.get("length").or_else(|| value.get("duration"))?.as_f64()?.max(1e-3),
             velocity: value.get("velocity").and_then(Value::as_f64).map_or(100, |v| v.round() as i64).clamp(1, 127),
             channel: value.get("channel").and_then(Value::as_i64).unwrap_or(1).clamp(1, 16),
@@ -94,7 +95,7 @@ pub fn note_op(
     anchors: &[Note],
     rng: &mut Rng,
 ) -> Option<Result<String, String>> {
-    let free = |note: &Note| !anchors.iter().any(|anchor| anchor.same(note));
+    let free = |note: &Note| note.start >= 0. && !anchors.iter().any(|anchor| anchor.same(note));
     Some(Ok(match name {
         "pitch" => {
             let semitones =
@@ -460,6 +461,16 @@ mod tests {
         assert!(notes.contains(&note(36, 0.)) && notes.len() == 2);
         assert!(note_op("rate", &json!({"op": "rate"}), 1., &mut notes, &anchors, &mut rng).is_none(), "a backend's own");
         assert_eq!(Note::of(&json!({"pitch": 60, "start": 1, "duration": 0.5, "velocity": 90.4})).unwrap().velocity, 90);
+        let hidden = [note(42, -1.), Note { length: 0.75, ..note(42, -0.25) }];
+        for hidden_note in &hidden {
+            assert_eq!(Note::of(&hidden_note.json()), Some(hidden_note.clone()), "a kept negative start comes back whole");
+        }
+        for op in ["pitch", "velocity", "timing", "thin", "octave"] {
+            let mut notes = vec![hidden[0].clone(), hidden[1].clone(), note(42, 0.5), note(42, 1.5)];
+            note_op(op, &json!({"op": op, "up": true}), 1., &mut notes, &[], &mut Rng::new(3)).unwrap().unwrap();
+            assert!(hidden.iter().all(|note| notes.contains(note)), "{op} leaves the later passes' hidden notes unchanged: {notes:?}");
+        }
+        assert_eq!(notes_apart(&hidden, &hidden), 0., "negative starts need no special offset to compare them");
     }
 
     #[test]

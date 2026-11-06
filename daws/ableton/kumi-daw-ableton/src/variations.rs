@@ -400,6 +400,9 @@ impl VariationsBackend for LiveVariations {
             .iter()
             .map(|line| Note::of(line).ok_or_else(|| format!("a note needs pitch, start and duration: {line}")))
             .collect::<Result<_, _>>()?;
+        if notes.iter().any(|note| note.start < 0.) {
+            return Err("a Live take's notes need a start from 0".into());
+        }
         if let Some(late) = notes.iter().find(|note| note.start >= base.length) {
             return Err(format!(
                 "a note at {} starts past the clip's end ({} beats): it wouldn't play",
@@ -693,7 +696,8 @@ mod tests {
             {"id": 1, "pitch": 60, "start": 0, "duration": 0.5, "velocity": 100, "mute": false},
             {"id": 2, "pitch": 64, "start": 0.5, "duration": 0.5, "velocity": 90.5, "mute": true},
             {"id": 3, "pitch": 67, "start": 1, "duration": 0.25, "velocity": 80, "channel": 2},
-            {"id": 4, "pitch": 72, "start": 4, "duration": 0.25, "velocity": 80}
+            {"id": 4, "pitch": 72, "start": 4, "duration": 0.25, "velocity": 80},
+            {"id": 5, "pitch": 48, "start": -0.5, "duration": 0.25, "velocity": 80}
         ]);
         let take = take_of(&clip(notes.clone(), json!({"looping": true, "loopStart": 0, "loopEnd": 4, "length": 4}))).unwrap();
         assert_eq!(

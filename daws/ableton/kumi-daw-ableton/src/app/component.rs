@@ -18,6 +18,8 @@ use kumi_daw::{
     provider::{newer, DawProvider},
 };
 use kumi_library::sources::{dirname, join};
+use kumi_types::version::KUMI_VERSION;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -54,8 +56,8 @@ struct Look {
     /// The User Library the Remote Scripts folder is in, when it's one (a folder named Remote Scripts that's there).
     library: Option<String>,
     ears: PartState,
-    /// Where this home records the Kumi Ears it wrote (`<home>/kumi-ears.json`: its path and SHA-256), so a device that
-    /// differs from this Kumi's is replaced only when it's the one this home put there.
+    /// Where this home records the Kumi Ears it wrote (`<home>/kumi-ears.json`: its path, SHA-256s and Kumi versions),
+    /// so a device that differs is replaced only when this home wrote it with a Kumi no newer than this one.
     ears_record: String,
     /// Whether a Kumi Ears is there that can't be read: nothing says it's this home's, so it stays.
     ears_unreadable: bool,
@@ -97,8 +99,8 @@ impl Look {
         let ears_unreadable = matches!(&found, Some((_, Err(error))) if error.kind() != std::io::ErrorKind::NotFound);
         let ears = match found {
             Some((_, Ok(bytes))) if bytes == ears_file() => PartState::Same,
-            Some((path, Ok(bytes))) if matches!(script, PartState::Same | PartState::Older) && wrote(&ears_record, &path, &bytes) => {
-                PartState::Older
+            Some((path, Ok(bytes))) if matches!(script, PartState::Same | PartState::Older) => {
+                recorded_state(&ears_record, &path, &bytes, KUMI_VERSION)
             }
             Some((_, Ok(_))) => PartState::OtherOwner,
             _ if ears_unreadable => PartState::OtherOwner,
@@ -232,6 +234,11 @@ impl Look {
             });
             effects.push(format!("Note that this Kumi put it there, in {}", self.ears_record));
             paths.extend([ears, self.ears_record.clone()]);
+        } else if self.ears == PartState::Newer {
+            effects.push(format!(
+                "The Kumi Ears at {} was written by a newer Kumi, or its version can't be compared with this Kumi's: it stays as it is. Update the Kumi plugin (hermes plugins update kumi), then set Kumi up again",
+                ears.clone().unwrap_or_default()
+            ));
         } else if self.ears == PartState::OtherOwner {
             let ears = ears.clone().unwrap_or_default();
             effects.push(match self.ears_unreadable {
@@ -253,6 +260,7 @@ impl Look {
         parts.extend(ears.map(|path| Part { name: EARS, path, state: self.ears }));
         let state = match self.script {
             PartState::OtherOwner | PartState::Newer => self.script,
+            _ if self.ears == PartState::Newer => PartState::Newer,
             _ if parts.iter().any(|part| part.state == PartState::Missing) => PartState::Missing,
             _ if parts.iter().any(|part| part.state == PartState::Older) => PartState::Older,
             _ => PartState::Same,
@@ -283,11 +291,76 @@ fn ears_path(library: &str) -> String {
 /// This home's record of the Kumi Ears it wrote, in the home.
 const EARS_RECORD: &str = "kumi-ears.json";
 
-/// Whether the record at `record` says this home wrote these `bytes` at `path`.
-fn wrote(record: &str, path: &str, bytes: &[u8]) -> bool {
-    let Ok(text) = std::fs::read(record) else { return false };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&text) else { return false };
-    value["path"].as_str() == Some(path) && value["sha256"].as_str() == Some(hex::encode(sha2::Sha256::digest(bytes)).as_str())
+/// Recent device versions this home wrote at one path. The entry for the device still on disk is retained even if
+/// repeated interrupted updates have filled the history. An unversioned legacy entry keeps its ownership proof, but
+/// cannot authorize replacing different bytes: its writer may be newer than this Kumi.
+#[derive(Serialize)]
+struct EarsRecord {
+    path: String,
+    versions: Vec<EarsVersion>,
+}
+
+#[derive(Serialize)]
+struct EarsVersion {
+    sha256: String,
+    version: Option<String>,
+}
+
+fn read_ears_record(record: &str, path: &str) -> std::io::Result<Vec<EarsVersion>> {
+    let text = match std::fs::read(record) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&text) else { return Ok(vec![]) };
+    if value["path"].as_str() != Some(path) {
+        return Ok(vec![]);
+    }
+    let mut versions: Vec<EarsVersion> = value["versions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            Some(EarsVersion { sha256: entry["sha256"].as_str()?.into(), version: entry["version"].as_str().map(str::to_string) })
+        })
+        .collect();
+    if let Some(sha256) = value["sha256"].as_str() {
+        versions.push(EarsVersion { sha256: sha256.into(), version: value["version"].as_str().map(str::to_string) });
+    }
+    Ok(versions)
+}
+
+/// Release versions must be three whole numbers. A prerelease, an unknown writer or an invalid version never gives
+/// permission to downgrade a device.
+fn release_version(version: &str) -> Option<[u64; 3]> {
+    let mut parts = version.split('.');
+    let mut numbers = [0; 3];
+    for number in &mut numbers {
+        let part = parts.next()?;
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        *number = part.parse().ok()?;
+    }
+    parts.next().is_none().then_some(numbers)
+}
+
+fn recorded_state(record: &str, path: &str, bytes: &[u8], version: &str) -> PartState {
+    let sha256 = hex::encode(Sha256::digest(bytes));
+    let entries = read_ears_record(record, path).unwrap_or_default();
+    let mut ours = false;
+    for entry in entries.iter().filter(|entry| entry.sha256 == sha256) {
+        ours = true;
+        match (entry.version.as_deref().and_then(release_version), release_version(version)) {
+            (Some(written), Some(current)) if written <= current => {}
+            _ => return PartState::Newer,
+        }
+    }
+    if ours {
+        PartState::Older
+    } else {
+        PartState::OtherOwner
+    }
 }
 
 /// Live's part for the Kumi home `home`: see [`DawProvider::component_plan`].
@@ -311,8 +384,10 @@ pub async fn apply(io: &DawIo, home: &Path, plan: &ComponentPlan) -> Result<(), 
         let library = look.library.as_deref().unwrap_or_default();
         let written = async {
             // The legacy copy (`Kumi/Kumi Ears.amxd`) stays: nothing says it's this home's.
-            install_ears_with(library, false).await?;
-            record_ears(&look.ears_record, &ears_path(library))
+            // Write ahead: a failed record leaves the device untouched; a failed device leaves both its old entry and
+            // the intended one, so either side of an interrupted rename remains owned on retry.
+            record_ears(&look.ears_record, &ears_path(library), &ears_file(), KUMI_VERSION)?;
+            install_ears_with(library, false).await.map(|_| ())
         };
         written.await.map_err(|error| {
             ApplyError::Failed(match look.script_writes() {
@@ -327,16 +402,25 @@ pub async fn apply(io: &DawIo, home: &Path, plan: &ComponentPlan) -> Result<(), 
     Ok(())
 }
 
-/// Notes that this home wrote the Kumi Ears at `file` (its path, as plans name it, and its SHA-256): written beside the
-/// record and renamed into place, or not at all.
-fn record_ears(record: &str, file: &str) -> std::io::Result<()> {
-    let bytes = std::fs::read(file)?;
-    let body = serde_json::json!({"path": file, "sha256": hex::encode(Sha256::digest(&bytes))});
+/// Notes the device this home is about to write, before replacing it. The record is written beside itself and
+/// renamed into place, or not at all; an earlier device's entry stays if the device write fails afterwards.
+fn record_ears(record: &str, file: &str, bytes: &[u8], version: &str) -> std::io::Result<()> {
+    let sha256 = hex::encode(Sha256::digest(bytes));
+    let mut versions = read_ears_record(record, file)?;
+    versions.retain(|entry| entry.sha256 != sha256);
+    versions.push(EarsVersion { sha256, version: Some(version.into()) });
+    let installed = std::fs::read(file).ok().map(|bytes| hex::encode(Sha256::digest(bytes)));
+    while versions.len() > 8 {
+        // The final entry is the write ahead; keep the current device too, even after many failed updates.
+        let remove = versions[..versions.len() - 1].iter().position(|entry| installed.as_ref() != Some(&entry.sha256)).unwrap_or(0);
+        versions.remove(remove);
+    }
+    let body = EarsRecord { path: file.into(), versions };
     if let Some(folder) = Path::new(record).parent() {
         std::fs::create_dir_all(folder)?;
     }
     let temporary = format!("{record}.{}.tmp", std::process::id());
-    let written = std::fs::write(&temporary, body.to_string()).and_then(|()| std::fs::rename(&temporary, record));
+    let written = std::fs::write(&temporary, serde_json::to_vec(&body)?).and_then(|()| std::fs::rename(&temporary, record));
     if written.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
@@ -410,4 +494,30 @@ async fn put_script(io: &DawIo, look: &Look) -> Result<(), ApplyError> {
         .map_err(|why| failed(format!("The bridge's installer stopped, and put back what was there: {why}")))?;
     unfinished.keep();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ears_versions_follow_the_device_through_an_interrupted_update_and_an_older_runtime() {
+        let root = tempfile::tempdir().unwrap();
+        let record = root.path().join(EARS_RECORD).display().to_string();
+        let file = root.path().join("Kumi Ears.amxd").display().to_string();
+        record_ears(&record, &file, b"older", "1.0.0").unwrap();
+        std::fs::write(&file, b"older").unwrap();
+        record_ears(&record, &file, b"newer", "1.1.0").unwrap();
+        assert_eq!(recorded_state(&record, &file, b"older", "1.1.0"), PartState::Older, "the device rename didn't happen");
+        std::fs::write(&file, b"newer").unwrap();
+        assert_eq!(recorded_state(&record, &file, b"newer", "1.0.0"), PartState::Newer, "the older runtime must leave it");
+        assert_eq!(recorded_state(&record, &file, b"newer", "1.1.0"), PartState::Older, "the same writer can repair different bytes");
+        assert_eq!(recorded_state(&record, &file, b"producer's edit", "1.1.0"), PartState::OtherOwner);
+        // Many failed updates cannot evict the ownership proof for the device still on disk.
+        for version in 2..12 {
+            record_ears(&record, &file, &[version], &format!("1.{version}.0")).unwrap();
+        }
+        assert!(read_ears_record(&record, &file).unwrap().len() <= 8);
+        assert_eq!(recorded_state(&record, &file, b"newer", "1.0.0"), PartState::Newer);
+    }
 }

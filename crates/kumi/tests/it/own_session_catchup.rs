@@ -140,7 +140,7 @@ async fn session_with(daw: Daw, home: &Path, steps: Vec<Step>, question: &str, l
     let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
         Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
         Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),
-        Daw::SoundCraft => unreachable!("these catch-up tests run REAPER's and Renoise's integrations"),
+        Daw::SoundCraft | Daw::Logic => unreachable!("these catch-up tests run REAPER's and Renoise's integrations"),
     };
     let events = Rc::new(RefCell::new(vec![]));
     let home_path = home.to_path_buf();
@@ -154,7 +154,7 @@ async fn session_with(daw: Daw, home: &Path, steps: Vec<Step>, question: &str, l
         let mut context = IntegrationContext::new(listener);
         let out = into.clone();
         context.on_catch_up = Some(Rc::new(move |catch_up| out.borrow_mut().push(SessionEvent::CatchUp { catch_up })));
-        create(OwnOptions { context, kumi_home: home_path.clone(), connect: Some(connect) })
+        create(OwnOptions { open_file: None, context, kumi_home: home_path.clone(), connect: Some(connect) })
     });
     let main = Rc::new(Recorded::default());
     let out = events.clone();

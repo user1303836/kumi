@@ -60,7 +60,13 @@ fn redaction_removes_keys_tokens_long_values_paths_and_account_names() {
         let secrets: Vec<String> = serde_json::from_value(case["secrets"].clone()).unwrap();
         assert_eq!(
             redactor(&secrets, case["home"].as_str().unwrap(), case["user"].as_str().unwrap())(case["input"].as_str().unwrap()),
-            case["output"],
+            // The recorded TypeScript result treated an ASCII prefix before an accented letter as an account name.
+            // Account names now need a path or possessive context; keep the recording intact and project this one row.
+            if case["user"] == "Cat" && case["input"] == "éCatz Cat Caté" {
+                case["input"].as_str().unwrap()
+            } else {
+                case["output"].as_str().unwrap()
+            },
             "{}",
             case["input"]
         );
@@ -120,6 +126,8 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
     fs::write(imports.join("import01.json"), words("SOMEONE ELSES WORDS")).unwrap();
     fs::write(conversations.join("copy0001.json"), words("A COPY OF AN IMPORT")).unwrap();
     fs::write(conversations.join("copy0001.meta"), json!({"version":1,"imported":true}).to_string()).unwrap();
+    fs::write(conversations.join("copy0002.json"), words("AN EARLIER KUMIS COPY OF AN IMPORT")).unwrap();
+    fs::write(conversations.join("copy0002.meta"), json!({"version":1,"forkedFrom":"copy0001"}).to_string()).unwrap();
     let log = dir.path().join("Log.txt");
     fs::write(
         &log,
@@ -202,6 +210,7 @@ async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_witho
         "an older one",
         "SOMEONE ELSES WORDS",
         "A COPY OF AN IMPORT",
+        "AN EARLIER KUMIS COPY OF AN IMPORT",
         "MemoryUsage",
         "unrelated",
         "MidiRemoteScript",
@@ -301,4 +310,36 @@ async fn a_reaper_only_report_never_speaks_lives_words() {
     assert!(leaks.is_empty(), "the report says Live's words:\n{}\n\nin:\n{said}", leaks.join("\n"));
     assert!(said.contains("REAPER"), "{said}");
     kumi::daw::work_with(kumi_types::daw::DawId::Ableton);
+}
+
+#[test]
+fn an_ordinary_word_account_is_private_in_paths_without_erasing_conversation_words() {
+    let redact = redactor(&[], "/Users/max", "max");
+    assert_eq!(
+        redact("max volume, maximum, émax, maxé, _max; /other/max/Music; %2FUsers%2Fmax%2FSong; max’s mix"),
+        "max volume, maximum, émax, maxé, _max; /other/<user>/Music; %2FUsers%2F<user>%2FSong; <user>’s mix"
+    );
+}
+
+#[test]
+fn credential_contexts_hide_short_and_unusual_values_without_hiding_musical_controls() {
+    let redact = redactor(&[], "/Users/producer", "producer");
+    for (text, secret) in [
+        ("Authorization: Basic cHJvZHVjZXI6c2VjcmV0", "cHJvZHVjZXI6c2VjcmV0"),
+        ("Cookie: name=cookie-example; session=another-value", "cookie-example"),
+        ("machine example.test login producer password small", "small"),
+        ("machine example.test\n  login producer\n  password tiny", "tiny"),
+        ("pass=short", "short"),
+        ("'password' => 'small'", "small"),
+        ("password: \"tiny\"", "tiny"),
+        ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"),
+        (concat!("https://hooks.slack.com/", "services/T00000000/B00000000/EXAMPLEonlyNotASecret"), "EXAMPLEonlyNotASecret"),
+        ("AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "bPxRfiCYEXAMPLEKEY"),
+    ] {
+        let out = redact(text);
+        assert!(!out.contains(secret), "{text:?} leaked {secret:?}: {out}");
+    }
+    for musical in ["bypass=enabled", "lowpass=frequency", "passband=midrange", "token: abc", "the password field is empty"] {
+        assert_eq!(redact(musical), musical);
+    }
 }

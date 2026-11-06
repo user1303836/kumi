@@ -54,6 +54,9 @@ uuid.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+tempfile.workspace = true
+
 [dev-dependencies]
 kumi-agent = { workspace = true, features = ["test-support"] }
 kumi-media = { workspace = true, features = ["test-support"] }

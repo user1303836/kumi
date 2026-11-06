@@ -530,6 +530,7 @@ fn an_import_refuses_what_isnt_a_kumi_conversation() {
 #[test]
 fn file_names_carry_the_title_and_the_id() {
     assert_eq!(file_name("Make the kick punchier!", "k3x9a1b2", Format::Markdown), "kumi-make-the-kick-punchier-k3x9a1b2.md");
+    assert_eq!(file_name("Größer café", "k3x9a1b2", Format::Markdown), "kumi-grosser-cafe-k3x9a1b2.md");
     assert_eq!(file_name("ベースを太く", "k3x9a1b2", Format::Html), "kumi-k3x9a1b2.html");
     assert_eq!(
         file_name("one two three four five six seven eight nine ten eleven", "k3x9a1b2", Format::Json),
@@ -794,6 +795,23 @@ fn a_tracker_route_keyzone_and_items_picture_say_their_words_and_pass_the_redact
         "id": "d4", "family": "clip", "title": "Moved an item", "state": "applied", "at": NOW - 60,
         "picture": {"kind": "items", "before": [{"name": format!("vox {PLANTED}"), "start": 8.0, "length": 4.0}], "after": [], "values": [value("Start")]}
     }]);
+    // A combined picture must redact both the track label and every word inside the original child picture.
+    let mut changes = changes;
+    let mut parts: Vec<Value> = changes
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(at, change)| json!({"name": format!("Track {at} {PLANTED}"), "picture": change["picture"]}))
+        .collect();
+    parts.push(json!({"name": format!("Lane {PLANTED}"), "picture": {
+        "kind": "automation", "parameter": format!("Cutoff {PLANTED}"), "min": 0, "max": 1,
+        "before": [[0, 0.2]], "after": [[0, 0.8]], "words": format!("Up {PLANTED}")
+    }}));
+    changes.as_array_mut().unwrap().push(json!({
+        "id": "d5", "family": "parameter", "title": "Across tracks", "state": "applied", "at": NOW - 50,
+        "picture": {"kind": "across", "parts": parts, "more": 2}
+    }));
     conversation.changes = Some(serde_json::from_value(changes).unwrap());
     let source =
         Source { id: "k3x9a1b2", conversation: &conversation, title: "Pictures", place: None, words: ("REAPER", "project"), created: NOW };
@@ -804,7 +822,7 @@ fn a_tracker_route_keyzone_and_items_picture_say_their_words_and_pass_the_redact
     let said =
         ["9: E-4 01 40 .. .. → OFF [secret]", "and 1 more line", "Drums [secret] → Reverb (new)", "Keys [secret]: bar 5 → bar 6 [secret]"];
     for out in [&page, &words] {
-        for words in said {
+        for words in said.into_iter().chain(["Track 0 [secret] · 9:", "and 2 more track pictures"]) {
             assert!(out.contains(words), "{words:?} is missing:\n{out}");
         }
     }
@@ -836,4 +854,102 @@ fn an_import_cuts_its_words_between_characters() {
         {"role": "user", "content": [{"type": "text", "text": format!("{}🎹 Keys", a(59))}]}
     ]});
     assert_eq!(import(&untitled.to_string(), NOW, "kumi").unwrap().title, a(59));
+}
+
+#[test]
+fn turns_keep_their_headings_below_the_speaker_and_the_page_doesnt_guess_their_language() {
+    let mut conversation = conversation();
+    conversation.checkpoint.messages = vec![
+        json!({"role": "user", "content": [{"type": "text", "text": "見出しを残して"}]}),
+        json!({"role": "assistant", "content": [{"type": "text", "text": "## 音色\n\n# Structure\n\n```md\n## This is code\n```"}]}),
+    ];
+    let source =
+        Source { id: "k3x9a1b2", conversation: &conversation, title: "見出し", place: None, words: ("Live", "Set"), created: NOW };
+    let markdown = markdown(&source, &options(false));
+    assert!(markdown.contains("#### 音色") && markdown.contains("### Structure"), "{markdown}");
+    assert!(markdown.contains("```md\n## This is code\n```"), "code keeps its words");
+    assert!(html(&source, &options(false)).contains("<html lang=\"\">"), "a conversation can use any language, or several");
+}
+
+#[test]
+fn loop_and_goal_requests_keep_blank_lines_but_round_notes_never_become_producer_words() {
+    let request = "Make the kick louder.\n\nKeep the bass as it is.";
+    let mut conversation = conversation();
+    conversation.checkpoint.messages = vec![
+        json!({"role": "user", "content": [{"type": "text", "text": loop_setup(request)}]}),
+        json!({"role": "assistant", "content": [{"type": "text", "text": "Working."}]}),
+        json!({"role": "user", "content": [{"type": "text", "text": format!("[Kumi loop] Round 3. Kept: a better kick.\n\nThe judge still wants more. Request: {request}")}]}),
+        json!({"role": "user", "content": [{"type": "text", "text": goal_setup(request)}]}),
+        json!({"role": "user", "content": [{"type": "text", "text": format!("[Kumi goal] Next idea.\n\nThe original request: {request}")}]}),
+    ];
+    let source = Source { id: "k3x9a1b2", conversation: &conversation, title: "Loop", place: None, words: ("Live", "Set"), created: NOW };
+    let exported: Value = serde_json::from_str(&json(&source, &options(false))).unwrap();
+    let words: Vec<_> = exported["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["role"] == "user")
+        .map(|message| message["content"][0]["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(words, [format!("Loop: {request}"), format!("Goal: {request}")]);
+}
+
+#[test]
+fn imports_bound_clip_notes_clean_every_change_word_and_reserve_place_ids() {
+    let title = "[Kumi] name\u{202e}\u{e0041}";
+    for id in ["unsaved", "imported"] {
+        let file = json!({"format": "kumi-conversation", "version": 1, "id": id, "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "Keep the changes"}]}
+        ], "changes": [{"id": "c1", "family": "clip", "title": title, "state": "applied", "at": 1,
+            "track": {"name": title}, "clip": {"length": 4, "notes": vec![json!({"pitch": 60, "start": 0, "duration": 0.25, "velocity": 90}); 600]},
+            "picture": {"kind": "values", "values": [{"name": title}]}
+        }]});
+        let imported = import(&file.to_string(), NOW, "kumi").unwrap();
+        assert_eq!(imported.id, None, "{id} names a place, never a conversation");
+        assert_eq!(imported.warnings, ["A change's clip picture keeps only its first 512 notes."]);
+        let change = &imported.conversation.changes.as_ref().unwrap()[0];
+        assert_eq!(change.clip.as_ref().unwrap().notes.len(), 512);
+        let mut strings = Vec::new();
+        strings_in(&serde_json::to_value(change).unwrap(), &mut strings);
+        assert!(strings.iter().all(|text| !text.contains('\u{202e}') && !text.contains('\u{e0041}') && !read_as(text).contains("[kumi")));
+    }
+}
+
+#[test]
+fn a_mix_export_names_mute_and_solo_changes() {
+    let mut conversation = conversation();
+    conversation.changes = Some(
+        serde_json::from_value(json!([{"id":"c1", "family":"mixer", "title":"Mute and solo", "state":"applied", "at":1,
+        "picture":{"kind":"mix", "before":{"mute":false,"solo":true},"after":{"mute":true,"solo":false}}}]))
+        .unwrap(),
+    );
+    let source = Source { id: "k3x9a1b2", conversation: &conversation, title: "Mix", place: None, words: ("Live", "Set"), created: NOW };
+    for out in [markdown(&source, &options(false)), html(&source, &options(false))] {
+        assert!(out.contains("Mute: off → on") && out.contains("Solo: on → off"), "{out}");
+    }
+}
+
+#[test]
+fn many_reversed_results_stay_paired_and_an_unanswered_call_gets_its_own_placeholder() {
+    let count = 4096;
+    let calls: Vec<_> =
+        (0..count).map(|at| json!({"type":"tool-call", "toolCallId":format!("id_{at}"), "toolName":"look", "input":{}})).collect();
+    let results: Vec<_> = (1..count).rev().map(|at| json!({"type":"tool-result", "toolCallId":format!("id_{at}"), "toolName":"look", "output":{"type":"text","value":format!("result {at}")}})).collect();
+    let file = json!({"format":"kumi-conversation", "version":1, "messages":[
+        {"role":"user","content":[{"type":"text","text":"Look at these"}]},
+        {"role":"assistant","content":calls}, {"role":"tool","content":results}
+    ]});
+    let imported = import(&file.to_string(), NOW, "kumi").unwrap();
+    assert_paired(&imported.conversation.checkpoint.messages);
+    let results: Vec<_> = imported
+        .conversation
+        .checkpoint
+        .messages
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .flat_map(|message| message["content"].as_array().unwrap())
+        .collect();
+    assert_eq!(results.len(), count);
+    assert_eq!(results.last().unwrap()["toolCallId"], "call_1");
+    assert_eq!(results.last().unwrap()["output"]["value"], LEFT_OUT);
 }

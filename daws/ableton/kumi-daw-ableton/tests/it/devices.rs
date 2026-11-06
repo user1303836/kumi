@@ -107,12 +107,11 @@ fn use_own_kumi_folder() {
 
 /// The tool, making devices in `library` for a conversation of its own.
 fn tool_in(library: &std::path::Path, made: Rc<RefCell<Made>>) -> Rc<dyn kumi_types::contracts::KernelTool> {
-    use futures::FutureExt;
     use_own_kumi_folder();
     device_tool(DeviceToolOptions {
         user_library: library.to_string_lossy().into(),
-        wait_ms: Some(0),
-        browser_sees: Rc::new(|_, _| async { Ok(true) }.boxed_local()),
+        wait_ms: None,
+        browser_sees: Rc::new(|_, _| panic!("opening or making a device must never read Live's Browser")),
         made,
     })
 }
@@ -917,29 +916,19 @@ async fn a_midi_effect_that_runs_free_an_lfo_a_clock_passes_with_runs_free_witho
 // ported with devices/tool.rs: "make_device makes an audio effect and an instrument, with Kumi's own knobs, and says to hear them"
 
 #[tokio::test(flavor = "current_thread")]
-async fn make_device_reads_guide_makes_a_device_and_waits_for_live_browser() {
-    use futures::FutureExt;
+async fn make_device_reads_guide_and_makes_a_device_without_reading_live_browser() {
     use kumi_common::abort::Signal;
-    use std::cell::Cell;
     use_built_harness();
     use_own_kumi_folder();
     let folder = tempfile::tempdir().unwrap();
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let calls = Rc::new(Cell::new(0));
+    let made_cache = Rc::new(RefCell::new(Made::default()));
     let tool = device_tool(DeviceToolOptions {
         user_library: folder.path().to_string_lossy().into(),
-        wait_ms: Some(5_000),
-        browser_sees: Rc::new({
-            let seen = seen.clone();
-            move |item, _| {
-                seen.borrow_mut().push(item);
-                calls.set(calls.get() + 1);
-                let listed = calls.get() > 1;
-                async move { Ok(listed) }.boxed_local()
-            }
-        }),
-        made: Default::default(),
+        wait_ms: None,
+        browser_sees: Rc::new(|_, _| panic!("making a device must never read Live's Browser")),
+        made: made_cache.clone(),
     });
+    assert_eq!(tool.reach(), kumi_types::contracts::Reach::AwayFromDaw, "the foreground call can move to a background job");
     let guide = tool.execute(json!({"guide":true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
     assert!(guide.text.starts_with("Making a MIDI effect"));
     assert!(guide.text.contains("Every note-on the device sends gets a note-off"));
@@ -950,8 +939,8 @@ async fn make_device_reads_guide_makes_a_device_and_waits_for_live_browser() {
     assert_eq!(result["file"], folder.path().join("Kumi").join("MIDI Effects").join("Lowest Note.amxd").to_string_lossy().as_ref());
     assert_eq!(result["controls"], json!(["Window (1–50 ms; 15)"]));
     assert!(result["checks"].as_str().unwrap().contains("4 of 4"));
-    assert!(result.get("browser").is_none());
-    assert_eq!(*seen.borrow(), ["user_library/Kumi/MIDI Effects/Lowest Note", "user_library/Kumi/MIDI Effects/Lowest Note"]);
+    assert!(result["browser"].is_string());
+    assert!(made_cache.borrow().unlisted(result["itemId"].as_str().unwrap()), "the load will wait for the Browser");
     let decoded = decode_amxd(&std::fs::read(folder.path().join("Kumi/MIDI Effects/Lowest Note.amxd")).unwrap()).unwrap();
     assert_eq!(decoded.kind, DeviceType::MidiEffect);
     assert_eq!(decoded.patcher["patcher"]["title"], "Lowest Note");
@@ -1192,6 +1181,29 @@ async fn make_device_makes_audio_effect_and_instrument_with_kumis_knobs() {
         decode_amxd(&std::fs::read(folder.path().join("Kumi/Instruments/Pluck.amxd")).unwrap()).unwrap().kind,
         DeviceType::Instrument
     );
+    // A patched voice receives allocated MIDI, with independent Gen state;
+    // every voice still ends at the one guarded output stage.
+    let voice = json!({ "type": "instrument", "name": "Patched voice", "about": "A simple voice.", "voices": 2,
+        "patch": "in -> [midiparse] -> pair = [unpack 0 0]\npair -> (note $1) -> sound = [gen~] { Param note(60); Param velocity(0); out1 = cycle(mtof(note)) * velocity / 127; out2 = out1; }\npair.1 -> (velocity $1) -> sound\nsound -> out\nsound.1 -> out.1\n" });
+    let patched = call(&tool, voice.clone()).await;
+    assert_eq!(patched["voices"], 2, "{patched}");
+    let bytes = std::fs::read(patched["file"].as_str().unwrap()).unwrap();
+    let voiced = decode_amxd(&bytes).unwrap();
+    assert_eq!(voiced.kind, DeviceType::Instrument);
+    assert_eq!(voiced.patcher.to_string().matches("Param note(60)").count(), 2, "two independent voice code boxes");
+    assert_eq!(voiced.patcher.to_string().matches("\"id\":\"obj-out\"").count(), 1, "one output stage");
+    let refused = tool
+        .execute(
+            with(
+                voice.as_object().unwrap().clone(),
+                json!({ "name": "Shared voice", "patch": "in -> [s ---shared]\n[r ---shared] -> out" }),
+            ),
+            Signal::new(),
+        )
+        .await
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(!folder.path().join("Kumi/Instruments/Shared voice.amxd").exists());
 }
 
 // Each test runs in a process of its own: the KUMI_MAX this one sets is its own.
@@ -1243,9 +1255,36 @@ async fn make_device_makes_a_device_from_a_patch_of_max_objects_and_says_whats_w
     let made = tool.execute(unwired.as_object().unwrap().clone(), Signal::new()).await.unwrap();
     assert!(!made.is_error, "{}", made.text);
     let made: Value = serde_json::from_str(&made.text).unwrap();
-    assert!(made["changed"][0].as_str().unwrap().contains("tests: they run a MIDI effect's code"), "{made}");
-    assert!(made["wrong"][0].as_str().unwrap().contains("\"Gain\" isn't wired"), "{made}");
+    assert_eq!(made["tests"]["passed"], 0, "audio expectations are retained but not claimed to run");
+    assert_eq!(made["tests"]["of"], 1);
+    assert!(made["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("\"Gain\" isn't wired")), "{made}");
+    assert!(made["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("wasn't run")), "{made}");
     assert_eq!(made["itemId"], "user_library/Kumi/Audio Effects/Gain", "made again under its name, in place of the first");
+
+    let patch = "in -> parse = [midiparse]\nparse -> pair = [unpack 0 0]\npair.1 -> both.1\npair -> shift = [+ 0] -> both = [pack 0 0] -> format = [midiformat] -> out\nparse.6 -> format.6\n\"Transpose\" -> shift.1\n";
+    let midi = json!({ "type": "midi_effect", "name": "Patched transpose", "about": "An octave up.", "patch": patch,
+        "controls": [{ "name": "Transpose", "type": "number", "min": -24, "max": 24, "default": 12 }],
+        "tests": [{ "name": "moves the note and release", "input": [{ "type": "noteon", "pitch": 60, "at": 0 }, { "type": "noteoff", "pitch": 60, "at": 100 }], "expect": [{ "type": "noteon", "pitch": 72, "at": 0 }, { "type": "noteoff", "pitch": 72, "at": 100 }] }] });
+    let made = call(&tool, midi.clone()).await;
+    assert_eq!(made["tests"], json!({ "passed": 1, "of": 1, "simulation": "offline-message" }), "{made}");
+    let mut wrong = midi.clone();
+    wrong["tests"][0]["expect"][1]["pitch"] = json!(60);
+    let wrong = call(&tool, wrong).await;
+    assert_eq!(wrong["tests"]["passed"], 0, "{wrong}");
+    assert!(wrong["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("moves the note and release")));
+    let mut unsupported = midi;
+    unsupported["patch"] = json!("in -> [v8 identity] { function msg_int(value) { outlet(0, value); } } -> out");
+    unsupported["tests"][0]["expect"] = json!([]);
+    let unsupported = call(&tool, unsupported).await;
+    assert_eq!(unsupported["tests"]["passed"], 0);
+    assert_eq!(unsupported["tests"]["of"], 1);
+    assert!(unsupported["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("wasn't run")));
+    let exhausted = json!({ "type": "midi_effect", "name": "Bounded feedback", "about": "Must not be written.",
+        "patch": "in -> loop = [t i]\nloop -> loop\n",
+        "tests": [{ "name": "does not finish", "input": [{ "type": "noteon", "pitch": 60 }], "expect": [] }] });
+    let refused = tool.execute(exhausted.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    assert!(refused.is_error && refused.text.contains("resource limit"), "{}", refused.text);
+    assert!(!folder.path().join("Kumi/MIDI Effects/Bounded feedback.amxd").exists());
 }
 
 #[test]
@@ -1635,6 +1674,37 @@ async fn a_live_parameter_given_in_a_patch_is_left_out_and_controls_is_named_as_
     )
     .await;
     assert!(refused(&fresh), "a new device is told the same: {fresh}");
+
+    // A parameter typed into an older device stays as a kept box, rather than notation which would be refused if sent
+    // again. Re-sending the open answer's patch preserves it; replacing it explicitly removes the old parameter first.
+    let mut legacy = downloaded_echo();
+    let legacy_dial = json!({ "box": { "id": "obj-legacy", "maxclass": "newobj", "varname": "mix_dial",
+        "text": "live.dial @parameter_longname Mix", "numinlets": 1, "numoutlets": 2, "patching_rect": [500, 300, 100, 22] } });
+    legacy["patcher"]["boxes"].as_array_mut().unwrap().push(legacy_dial.clone());
+    let legacy_file = downloads.path().join("Legacy.amxd");
+    std::fs::write(&legacy_file, encode_amxd(DeviceType::MidiEffect, &legacy)).unwrap();
+    let opened = call(&tool, json!({ "from": legacy_file.to_string_lossy() })).await;
+    assert!(
+        opened["kept"].as_array().unwrap().iter().any(|kept| kept.as_str().is_some_and(|kept| {
+            kept.starts_with("mix_dial: a Live parameter") && kept.contains("remove this box by name") && kept.contains("controls")
+        })),
+        "{opened}"
+    );
+    assert!(!opened["patch"].as_str().unwrap().contains("live.dial"), "the legacy parameter isn't offered as notation: {opened}");
+    let repeated = call(&tool, json!({ "from": legacy_file.to_string_lossy(), "name": "Legacy Again", "patch": opened["patch"] })).await;
+    assert!(repeated.get("wrong").is_none(), "re-sending the patch is valid: {repeated}");
+    let again = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Legacy Again.amxd"));
+    assert_eq!(again["obj-legacy"], legacy_dial["box"], "the old parameter stays exactly as it was");
+    let replaced = call(
+        &tool,
+        json!({ "from": legacy_file.to_string_lossy(), "name": "Legacy Fixed", "remove": ["mix_dial"],
+        "controls": [{ "name": "Mix", "type": "number", "min": 0, "max": 100, "default": 50 }], "patch": "\"Mix\" -> [print mix]" }),
+    )
+    .await;
+    assert!(replaced.get("wrong").is_none(), "{replaced}");
+    let fixed = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Legacy Fixed.amxd"));
+    assert!(!fixed.contains_key("obj-legacy"));
+    assert_eq!(fixed.values().filter(|item| item["saved_attribute_attributes"]["valueof"]["parameter_longname"] == "Mix").count(), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]

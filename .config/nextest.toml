@@ -5,23 +5,15 @@
 # The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
 # within 2 s and 3 s of writing it, as another Kumi would. SoundCraft's control client's tests count connections around
 # deadlines and answers a few hundred milliseconds apart, its launch's tests start a copy of the test program as the app
-# and wait for it within bounds, and its bridge's tests look at a fake app every 100 ms.
+# and wait for it within bounds, and its bridge's tests look at a fake app every 100 ms. The inspecting-network test
+# asks macOS's trust service within 3 s; competing tests must not consume that native check's deadline (#729).
 filter = '''
 (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
   | (binary_id(kumi-agent::it) & test(/^conversations::(where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_it|two_changes_in_the_second_the_file_system_keeps_are_both_seen)$/))
   | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
+  | (binary_id(kumi-net::it) & test(/^network::an_inspecting_network_is_trusted_once_its_certificate_is_and_only_then$/))
 '''
 threads-required = "num-cpus"
-
-[[profile.default.overrides]]
-# Stopgap for #979: two kumi-ai tests against 127.0.0.1 listeners sometimes fail at once (0.00 s) on CI's Linux runner,
-# and a red main blocks a release. Each gets two retries until #979's real fix; nothing else here retries.
-filter = '''
-binary_id(kumi-ai)
-  & (test(=http::cause_tests::kumis_own_http_keeps_what_went_wrong_for_each_cause)
-     | test(=http::transport_tests::a_list_and_a_model_call_through_one_fetch_share_one_connection))
-'''
-retries = 2
 
 # CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request runs `ci` on Linux; main, after a merge, runs
 # `ci` on Linux and `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, each week and by
@@ -115,6 +107,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))
   | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
+  | (binary_id(logic-kumi::it) & test(/^(status|vectors|lifecycle)::/))
   | (binary_id(kumi-ai::it) & test(/^ai_transport::/))
   | (binary_id(kumi-net::it) & test(/^network::/))
   | (binary_id(kumi-store::it) & test(/^store::/))

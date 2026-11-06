@@ -304,10 +304,9 @@ pub struct Scratch {
     kumi_count: Option<(Project, i32)>,
 }
 
-/// The tag in a make's names: the scratch id's last four characters.
+/// The complete validated scratch id: a shortened tag can give distinct sets the same copy names.
 fn tag(id: &str) -> String {
-    let tail: String = id.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
-    tail.to_lowercase()
+    id.to_owned()
 }
 
 /// A track of a project by GUID, by looking (the registry knows only the tab in front).
@@ -874,7 +873,7 @@ mod tests {
         assert!(guid_at(text, 0));
         assert!(!guid_at(text, 39));
         assert!(!guid_at(text, 77));
-        assert_eq!(tag("s1x9ab"), "x9ab");
+        assert_eq!(tag("s1x9ab"), "s1x9ab");
         assert_eq!(tag("s7"), "s7");
         assert!(guid_at(random_guid().as_bytes(), 0));
     }

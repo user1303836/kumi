@@ -72,8 +72,7 @@ end
 -- 5.1.5: 36 ms a megabyte, then 20).
 local byte = string.byte
 local M32 = 4294967296
-function M.sums(text)
-  local a, b = 5381, 0
+function M.sums_from(text, a, b)
   local n, i = #text, 1
   while i + 15 <= n do
     local c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16 = byte(text, i, i + 15)
@@ -106,6 +105,9 @@ function M.sums(text)
   end
   return a, b
 end
+
+-- Continue the same sums across fragments without concatenating them; ordinary callers retain the fixed initial state.
+function M.sums(text) return M.sums_from(text, 5381, 0) end
 
 -- A text's short print: its two sums as 16 hex digits (the fingerprints the changes keep).
 function M.hash(text)
@@ -856,11 +858,22 @@ end
 
 -- (#361 N-S16) The entries of one device, checked as `check_read` checks each, with one read of the device: each through its
 -- own spec, but for `read`, which gives them all the first entry's read.
-local function read_device(journal, song, entries)
-  local read = entries[1].spec.read
+-- A raw body can change every poll while its normalized state stays the same (automation or a changing view). An exact
+-- text cache alone could then miss for ever, even if every background job finished between polls. After two deferred
+-- checks, use the ordinary fresh synchronous read once. The small counters belong only to these in-memory entries;
+-- they are neither part of their prior/applied material nor sent in journal events, and disappear with the entry.
+local MAX_POLL_MISSES = 2
+local function read_device(journal, song, entries, schedule)
+  local first = entries[1].spec
+  local read = first.poll_read or first.read
+  if first.poll_read then
+    for _, entry in ipairs(entries) do
+      if (entry._poll_misses or 0) >= MAX_POLL_MISSES then read = first.read break end
+    end
+  end
   local done, value = false, nil
   local function once(object, applied)
-    if not done then done, value = true, read(object, applied) end
+    if not done then done, value = true, read(object, applied, schedule) end
     return value
   end
   for _, entry in ipairs(entries) do
@@ -870,6 +883,12 @@ local function read_device(journal, song, entries)
     entry.spec = spec
     if not ok then error(err, 0) end
   end
+  if first.poll_read and done then
+    for _, entry in ipairs(entries) do
+      if value == nil then entry._poll_misses = math.min(MAX_POLL_MISSES, (entry._poll_misses or 0) + 1)
+      else entry._poll_misses = nil end
+    end
+  end
 end
 
 -- (accept round 2) What Renoise tells no notifier of when its undo or redo changes it (what a Doofer, Splitter or Notepad holds:
@@ -877,7 +896,7 @@ end
 -- (#361 N-S16) A device is read once for all its entries, and a call reads at most `each` devices, going on from where the
 -- last call stopped, so a round of reads is spread over the tool's ticks. True when the round is done. (Entries that come
 -- or go between calls are taken as the list is then: a device a round misses, the next one reads.)
-function M.journal_poll(journal, most, each)
+function M.journal_poll(journal, most, each, schedule)
   local song = renoise.song()
   if not song then
     journal.poll_next = nil
@@ -905,7 +924,7 @@ function M.journal_poll(journal, most, each)
   end
   local first = journal.poll_next or 1
   local last = math.min(#devices, first + (each or 2) - 1)
-  for k = first, last do read_device(journal, song, devices[k]) end
+  for k = first, last do read_device(journal, song, devices[k], schedule) end
   journal.poll_next = last < #devices and last + 1 or nil
   return journal.poll_next == nil
 end

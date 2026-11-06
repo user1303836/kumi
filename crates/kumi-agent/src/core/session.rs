@@ -1572,7 +1572,8 @@ impl Session {
             ConversationMatch::One(row) if row.id == id => row.name,
             _ => None,
         };
-        let copy = SavedConversation { saved_at: now(), checkpoint: kept.checkpoint, changes: None, first: kept.first, turns: kept.turns };
+        let copy =
+            SavedConversation { saved_at: kept.saved_at, checkpoint: kept.checkpoint, changes: None, first: kept.first, turns: kept.turns };
         Ok(Some(Chosen { place: place.to_owned(), id: store.new_id().await, conversation: copy, copy_of: Some((id.to_owned(), name)) }))
     }
     /// A conversation from a file asked for as Kumi starts (kumi -r, kumi -c) carries on in a copy, never in the file's

@@ -1,0 +1,30 @@
+[package]
+name = "kumi-daw-logic"
+version = "0.1.0"
+description = "Kumi's Logic Pro integration and provider: the M2 read adapter, FOCUS bodies, and the bridge beside Logic."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-common.workspace = true
+kumi-daw.workspace = true
+kumi-daw-own.workspace = true
+kumi-library.workspace = true
+kumi-net.workspace = true
+kumi-web.workspace = true
+url.workspace = true
+async-trait.workspace = true
+kumi-agent.workspace = true
+kumi-types.workspace = true
+daw-bridge.workspace = true
+futures.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+kumi-testkit.workspace = true
+tempfile.workspace = true

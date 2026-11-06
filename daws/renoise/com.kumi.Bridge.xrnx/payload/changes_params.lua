@@ -306,8 +306,19 @@ local function apply(song, env, input, fence, desc)
       if not dest.same_numbers(dest.numbers_of(touched[prefix].destination), touched[prefix].wanted) then kept[#kept + 1] = prefix .. "Track" end
     end
     if #kept > 0 then
-      for _, ask in ipairs(todo) do pcall(function() ask.parameter.value = journal_params[key_of(ask.k)] end) end
-      for _, prefix in ipairs(dests_todo) do pcall(dest.write_numbers, touched[prefix].destination, touched[prefix].now) end
+      -- A refused setter may have written nothing. Don't write its unchanged value back: that write can make a
+      -- native undo step of its own. A partial write still goes back inside this callback's one undo group: its
+      -- native step stays, rather than taking back or ungrouping the producer's native undo/redo history to hide it.
+      for _, ask in ipairs(todo) do
+        local was = journal_params[key_of(ask.k)]
+        if not base.close(ask.parameter.value, was) then pcall(function() ask.parameter.value = was end) end
+      end
+      for _, prefix in ipairs(dests_todo) do
+        local entry = touched[prefix]
+        if not dest.same_numbers(dest.numbers_of(entry.destination), entry.now) then
+          pcall(dest.write_numbers, entry.destination, entry.now)
+        end
+      end
       fail("failed", string.format("Renoise kept %s of %s as they were; nothing is changed", table.concat(kept, ", "), q(label)))
     end
   end

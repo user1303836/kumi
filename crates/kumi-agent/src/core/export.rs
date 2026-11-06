@@ -3,7 +3,7 @@
 //! observations, the producer's notes, Kumi's notes to the model or the model's reasoning. Every word passes the
 //! redactor on its way out, and an import takes its file as untrusted.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 
 use chrono::{DateTime, FixedOffset};
@@ -177,11 +177,11 @@ pub fn markdown(source: &Source, options: &Options) -> String {
     }
     for said in &doc.said {
         match said {
-            Said::Producer(words) => out.push_str(&format!("## You\n\n{}\n\n", markdown_safe(words))),
+            Said::Producer(words) => out.push_str(&format!("## You\n\n{}\n\n", markdown_turn(words))),
             Said::Kumi { words, steps } => {
                 out.push_str("## Kumi\n\n");
                 if !words.is_empty() {
-                    out.push_str(&format!("{}\n\n", markdown_safe(words)));
+                    out.push_str(&format!("{}\n\n", markdown_turn(words)));
                 }
                 if steps.is_empty() {
                     continue;
@@ -362,7 +362,7 @@ pub fn html(source: &Source, options: &Options) -> String {
         body.push_str("</ul>\n</section>\n");
     }
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta http-equiv=\"Content-Security-Policy\" content=\"{POLICY}\">\n<meta name=\"referrer\" content=\"no-referrer\">\n<meta name=\"generator\" content=\"Kumi {}\">\n<title>{}</title>\n<style>\n{STYLE}</style>\n</head>\n<body>\n<main>\n{body}</main>\n<footer>{}</footer>\n</body>\n</html>\n",
+        "<!doctype html>\n<html lang=\"\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta http-equiv=\"Content-Security-Policy\" content=\"{POLICY}\">\n<meta name=\"referrer\" content=\"no-referrer\">\n<meta name=\"generator\" content=\"Kumi {}\">\n<title>{}</title>\n<style>\n{STYLE}</style>\n</head>\n<body>\n<main>\n{body}</main>\n<footer>{}</footer>\n</body>\n</html>\n",
         escape(options.version),
         title,
         escape(&footer(options)),
@@ -405,6 +405,8 @@ pub fn json(source: &Source, options: &Options) -> String {
 /// A name for an export's file: `kumi-<the title's words>-<id>.<ext>`, the title as lowercase ASCII words (none for one
 /// written in other letters), at most 40 characters of them.
 pub fn file_name(title: &str, id: &str, format: Format) -> String {
+    let title: String = title.nfkd().filter(|c| !unicode_normalization::char::is_combining_mark(*c)).collect();
+    let title = title.replace(['ß', 'ẞ'], "ss");
     let mut words = String::new();
     for word in title.split(|c: char| !c.is_ascii_alphanumeric()).filter(|word| !word.is_empty()) {
         if words.len() + word.len() + 1 > 40 {
@@ -651,8 +653,11 @@ fn framed<'a>(text: &'a str, setup: &str) -> Option<&'a str> {
     if let Some(request) = request.strip_suffix(ending) {
         return Some(trim(request));
     }
-    let (request, _) = request.split_once("\n\n")?;
-    (!request.contains('\n')).then(|| trim(request))
+    // Older instruction wording, including another DAW's, may differ after the first sentence. Require that
+    // instruction marker: a round note with a blank line in its judged reason is never the producer's request.
+    let marker = &ending[..ending.find('.')? + 1];
+    let (request, _) = request.split_once(marker)?;
+    Some(trim(request))
 }
 
 /// A call as the export keeps it: under its tool's own name with nothing of its input, or as it was (redacted) in a full
@@ -892,41 +897,44 @@ fn names_a_secret(name: &str) -> bool {
 
 /// A value with every string under a field named for a secret taken out, however short or plain it is.
 fn named_secrets_out(value: &Value) -> Value {
-    fn hide(value: &Value, under: bool) -> Value {
+    fn hide(value: &Value, under: bool, depth: usize) -> Value {
         match value {
-            Value::String(text) if under && !text.is_empty() => Value::String("[secret]".into()),
-            Value::Array(items) => Value::Array(items.iter().map(|item| hide(item, under)).collect()),
-            Value::Object(fields) => {
-                Value::Object(fields.iter().map(|(name, item)| (name.clone(), hide(item, under || names_a_secret(name)))).collect())
+            Value::String(_) if under => Value::String("[secret]".into()),
+            Value::String(text) if depth < 8 => {
+                // Tools also return JSON embedded in a string. Its field names have the same meaning as the outer
+                // object's, and a bounded recursion keeps repeated string encodings from hiding a credential.
+                let nested = serde_json::from_str::<Value>(text).ok().filter(|value| value.is_object() || value.is_array());
+                match nested {
+                    Some(nested) => {
+                        let cleaned = hide(&nested, false, depth + 1);
+                        if cleaned == nested {
+                            value.clone()
+                        } else {
+                            Value::String(cleaned.to_string())
+                        }
+                    }
+                    None => value.clone(),
+                }
             }
+            Value::Array(items) => Value::Array(items.iter().map(|item| hide(item, under, depth + 1)).collect()),
+            Value::Object(fields) => Value::Object(
+                fields.iter().map(|(name, item)| (name.clone(), hide(item, under || names_a_secret(name), depth + 1))).collect(),
+            ),
             other => other.clone(),
         }
     }
-    hide(value, false)
+    hide(value, false, 0)
 }
 
-/// A result's words with what the JSON they hold keeps under a field named for a secret taken out where it stands, the
-/// words otherwise as they were. Words that aren't JSON stay as they are.
+/// A result's JSON words, including JSON embedded inside a string, with named credentials taken out.
 fn named_secrets_out_of_words(text: &str) -> String {
-    fn named(value: &Value, under: bool, out: &mut Vec<String>) {
-        match value {
-            Value::String(text) if under && !text.is_empty() => out.push(text.clone()),
-            Value::Array(items) => items.iter().for_each(|item| named(item, under, out)),
-            Value::Object(fields) => fields.iter().for_each(|(name, item)| named(item, under || names_a_secret(name), out)),
-            _ => {}
-        }
-    }
     let Ok(value) = serde_json::from_str::<Value>(text) else { return text.to_string() };
-    let mut secrets = Vec::new();
-    named(&value, false, &mut secrets);
-    // The longest first, so one inside another goes whole.
-    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
-    secrets.dedup();
-    let mut out = text.to_string();
-    for secret in secrets {
-        out = out.replace(&Value::String(secret).to_string(), "\"[secret]\"");
+    let cleaned = named_secrets_out(&value);
+    if cleaned == value {
+        text.to_string()
+    } else {
+        stringify_pretty(&cleaned, 2)
     }
-    out
 }
 
 /// A value with each of its strings, and its keys, through the redactor.
@@ -962,73 +970,87 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
         }
     }
     if let Some(picture) = &mut change.picture {
-        let values = |values: &mut Vec<PictureValue>| {
-            for value in values {
-                value.name = redact(&value.name);
-                for text in [&mut value.from_text, &mut value.to_text, &mut value.asked] {
-                    *text = text.as_deref().map(|text| redact(text));
-                }
-            }
-        };
-        let levels = |levels: &mut MixLevels| {
-            for text in [&mut levels.volume_text, &mut levels.pan_text] {
-                *text = text.as_deref().map(|text| redact(text));
-            }
-            for send in &mut levels.sends {
-                send.name = redact(&send.name);
-                send.text = send.text.as_deref().map(|text| redact(text));
-            }
-        };
-        match picture {
-            ChangePicture::Values { values: list }
-            | ChangePicture::Eq { values: list, .. }
-            | ChangePicture::Dynamics { values: list, .. } => values(list),
-            ChangePicture::Automation { parameter, .. } => *parameter = redact(parameter),
-            ChangePicture::Mix { before, after } => {
-                levels(before);
-                levels(after);
-            }
-            ChangePicture::Notes { .. } => {}
-            ChangePicture::Lines { lines, .. } => {
-                for line in lines {
-                    line.before = redact(&line.before);
-                    line.after = redact(&line.after);
-                }
-            }
-            ChangePicture::Routes { routes, .. } => {
-                for route in routes {
-                    route.from = redact(&route.from);
-                    route.to = redact(&route.to);
-                    values(&mut route.values);
-                }
-            }
-            ChangePicture::Zones { before, after, values: list } => {
-                for zone in before.iter_mut().chain(after.iter_mut()) {
-                    zone.name = redact(&zone.name);
-                }
-                values(list);
-            }
-            ChangePicture::Items { before, after, values: list } => {
-                for item in before.iter_mut().chain(after.iter_mut()) {
-                    item.name = redact(&item.name);
-                }
-                values(list);
-            }
-            ChangePicture::Tracks { tracks, .. } => {
-                for track in tracks {
-                    track.name = redact(&track.name);
-                }
-            }
-            ChangePicture::Marks { before, after, values: list } => {
-                for mark in before.iter_mut().chain(after.iter_mut()) {
-                    mark.name = redact(&mark.name);
-                }
-                values(list);
-            }
-            ChangePicture::Warp { values: list, .. } | ChangePicture::Wave { values: list, .. } => values(list),
-        }
+        redact_picture(picture, redact);
     }
     change
+}
+
+/// Each track label and every word inside its picture passes through the same redactor.
+fn redact_picture(picture: &mut ChangePicture, redact: &dyn Fn(&str) -> String) {
+    let values = |values: &mut Vec<PictureValue>| {
+        for value in values {
+            value.name = redact(&value.name);
+            for text in [&mut value.from_text, &mut value.to_text, &mut value.asked] {
+                *text = text.as_deref().map(|text| redact(text));
+            }
+        }
+    };
+    let levels = |levels: &mut MixLevels| {
+        for text in [&mut levels.volume_text, &mut levels.pan_text] {
+            *text = text.as_deref().map(|text| redact(text));
+        }
+        for send in &mut levels.sends {
+            send.name = redact(&send.name);
+            send.text = send.text.as_deref().map(|text| redact(text));
+        }
+    };
+    match picture {
+        ChangePicture::Across { parts, .. } => {
+            for part in parts {
+                part.name = redact(&part.name);
+                redact_picture(&mut part.picture, redact);
+            }
+        }
+        ChangePicture::Values { values: list } | ChangePicture::Eq { values: list, .. } | ChangePicture::Dynamics { values: list, .. } => {
+            values(list)
+        }
+        ChangePicture::Automation { parameter, words, .. } => {
+            *parameter = redact(parameter);
+            *words = words.as_deref().map(redact);
+        }
+        ChangePicture::Mix { before, after } => {
+            levels(before);
+            levels(after);
+        }
+        ChangePicture::Notes { .. } => {}
+        ChangePicture::Lines { lines, .. } => {
+            for line in lines {
+                line.before = redact(&line.before);
+                line.after = redact(&line.after);
+            }
+        }
+        ChangePicture::Routes { routes, .. } => {
+            for route in routes {
+                route.from = redact(&route.from);
+                route.to = redact(&route.to);
+                values(&mut route.values);
+            }
+        }
+        ChangePicture::Zones { before, after, values: list } => {
+            for zone in before.iter_mut().chain(after.iter_mut()) {
+                zone.name = redact(&zone.name);
+            }
+            values(list);
+        }
+        ChangePicture::Items { before, after, values: list } => {
+            for item in before.iter_mut().chain(after.iter_mut()) {
+                item.name = redact(&item.name);
+            }
+            values(list);
+        }
+        ChangePicture::Tracks { tracks, .. } => {
+            for track in tracks {
+                track.name = redact(&track.name);
+            }
+        }
+        ChangePicture::Marks { before, after, values: list } => {
+            for mark in before.iter_mut().chain(after.iter_mut()) {
+                mark.name = redact(&mark.name);
+            }
+            values(list);
+        }
+        ChangePicture::Warp { values: list, .. } | ChangePicture::Wave { values: list, .. } => values(list),
+    }
 }
 
 /// What's known of a conversation, as labels and values: its id, its Set, when it began and was last saved (when it was),
@@ -1123,6 +1145,23 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
         _ => None,
     };
     match picture {
+        ChangePicture::Across { parts, more } => {
+            let mut lines: Vec<String> = parts
+                .iter()
+                .flat_map(|part| {
+                    let words = values_of(&part.picture);
+                    if words.is_empty() {
+                        vec![one_line(&part.name)]
+                    } else {
+                        words.into_iter().map(|words| one_line(&format!("{} · {words}", part.name))).collect()
+                    }
+                })
+                .collect();
+            if *more > 0 {
+                lines.push(format!("and {more} more track pictures"));
+            }
+            lines
+        }
         ChangePicture::Values { values }
         | ChangePicture::Eq { values, .. }
         | ChangePicture::Dynamics { values, .. }
@@ -1174,6 +1213,15 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
                 let was = before.sends.iter().find(|old| old.name == send.name).and_then(|old| old.text.as_ref());
                 lines.extend(level(&format!("Send {}", send.name), was, send.text.as_ref()));
             }
+            for (name, from, to) in [("Mute", before.mute, after.mute), ("Solo", before.solo, after.solo)] {
+                let words = |on| if on { "on" } else { "off" };
+                if let Some(to) = to.filter(|to| from != Some(*to)) {
+                    lines.push(match from {
+                        Some(from) => format!("{name}: {} → {}", words(from), words(to)),
+                        None => format!("{name}: {}", words(to)),
+                    });
+                }
+            }
             lines.into_iter().map(|line| one_line(&line)).collect()
         }
         ChangePicture::Automation { parameter, .. } if !parameter.is_empty() => vec![one_line(parameter)],
@@ -1207,6 +1255,15 @@ fn fenced(text: &str, language: &str) -> String {
 /// is `!\[` (no picture is fetched). A block left open is closed, so it can't take in what follows. Each single line
 /// break stays one.
 fn markdown_safe(text: &str) -> String {
+    markdown_at(text, false)
+}
+
+/// A turn's headings stay below its speaker, including Setext headings; code fences keep their original words.
+fn markdown_turn(text: &str) -> String {
+    markdown_at(text, true)
+}
+
+fn markdown_at(text: &str, turn: bool) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
     let mut out = String::with_capacity(text.len());
     let mut fence: Option<String> = None;
@@ -1226,7 +1283,20 @@ fn markdown_safe(text: &str) -> String {
             out.push_str(line);
             continue;
         }
-        out.push_str(&line.replace('<', "&lt;").replace("![", "!\\["));
+        let heading = turn.then(|| HEADING.captures(line)).flatten();
+        let shown = match heading {
+            Some(heading) => format!("{} {}", "#".repeat((heading[1].len() + 2).min(6)), &heading[2]),
+            None if turn
+                && index > 0
+                && !trim(lines[index - 1]).is_empty()
+                && !trim(line).is_empty()
+                && trim(line).chars().all(|c| c == '=' || c == '-') =>
+            {
+                format!("\\{}", line)
+            }
+            None => line.to_string(),
+        };
+        out.push_str(&shown.replace('<', "&lt;").replace("![", "!\\["));
         let next = lines.get(index + 1).copied().unwrap_or("");
         if !trim(line).is_empty() && !trim(next).is_empty() && fence_of(next).is_none() {
             out.push_str("  ");
@@ -1500,6 +1570,8 @@ pub struct Imported {
     /// The Set it was about, when the file says.
     pub place: Option<String>,
     pub conversation: SavedConversation,
+    /// Bounds applied while importing, for the caller to report after it keeps the conversation.
+    pub warnings: Vec<String>,
 }
 
 /// What a file for `<command> import` is, said with the command the producer runs Kumi with.
@@ -1558,10 +1630,23 @@ pub fn import(text: &str, now: i64, command: &str) -> Result<Imported, String> {
             listed[start..].iter().filter_map(kept_change).collect()
         })
         .unwrap_or_default();
+    let clip_notes_cut = value
+        .get("changes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .rev()
+        .take(MAX_CHANGES)
+        .any(|change| change.pointer("/clip/notes").and_then(Value::as_array).is_some_and(|notes| notes.len() > 512));
+    let warnings = if clip_notes_cut { vec!["A change's clip picture keeps only its first 512 notes.".to_string()] } else { vec![] };
     let id = value
         .get("id")
         .and_then(Value::as_str)
-        .filter(|id| (6..=24).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()))
+        .filter(|id| {
+            !matches!(*id, "unsaved" | "imported")
+                && (6..=24).contains(&id.len())
+                && id.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+        })
         .map(str::to_string);
     let title = value
         .get("title")
@@ -1580,6 +1665,7 @@ pub fn import(text: &str, now: i64, command: &str) -> Result<Imported, String> {
         id,
         title,
         place,
+        warnings,
         conversation: SavedConversation {
             saved_at,
             checkpoint: KernelCheckpoint { version: 1, messages, origin: None, tools: None },
@@ -1657,6 +1743,9 @@ fn kept_message(message: Message) -> Option<Value> {
 fn kept_change(change: &Value) -> Option<ChangeRecord> {
     let mut change: ChangeRecord = serde_json::from_value(one_line_strings(change)).ok()?;
     change.picture = change.picture.and_then(ChangePicture::bounded);
+    if let Some(clip) = &mut change.clip {
+        clip.notes.truncate(512);
+    }
     Some(change)
 }
 
@@ -1665,7 +1754,7 @@ fn one_line_strings(value: &Value) -> Value {
     match value {
         Value::String(text) => {
             let shown: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-            Value::String(cut(&one_line(&shown), MAX_WORDS).to_owned())
+            Value::String(cut(&one_line(&neutralized(&drawn(&shown))), MAX_WORDS).to_owned())
         }
         Value::Array(items) => Value::Array(items.iter().map(one_line_strings).collect()),
         Value::Object(fields) => Value::Object(fields.iter().map(|(key, item)| (key.clone(), one_line_strings(item))).collect()),
@@ -1772,18 +1861,20 @@ fn renumbered(mut messages: Vec<Value>) -> Vec<Value> {
 /// Every call followed by its result, as models want them: a call whose result is missing gets one saying it was left
 /// out, right after it, and a result without its call goes.
 fn pair(messages: Vec<Value>) -> Vec<Value> {
-    fn close(out: &mut Vec<Value>, open: &mut Vec<(String, String)>) {
-        if open.is_empty() {
-            return;
-        }
+    fn close(out: &mut Vec<Value>, open: &mut Vec<Option<(String, String)>>, positions: &mut HashMap<String, VecDeque<usize>>) {
         let results: Vec<Value> = open
             .drain(..)
+            .flatten()
             .map(|(id, name)| json!({"type": "tool-result", "toolCallId": id, "toolName": name, "output": {"type": "text", "value": LEFT_OUT}}))
             .collect();
-        add(out, "tool", results, true);
+        positions.clear();
+        if !results.is_empty() {
+            add(out, "tool", results, true);
+        }
     }
     let mut out: Vec<Value> = Vec::with_capacity(messages.len());
-    let mut open: Vec<(String, String)> = Vec::new();
+    let mut open: Vec<Option<(String, String)>> = Vec::new();
+    let mut positions: HashMap<String, VecDeque<usize>> = HashMap::new();
     for message in messages {
         let role = message.get("role").and_then(Value::as_str).unwrap_or("").to_string();
         if role == "tool" {
@@ -1791,9 +1882,9 @@ fn pair(messages: Vec<Value>) -> Vec<Value> {
                 .into_iter()
                 .filter(|part| {
                     let id = part.get("toolCallId").and_then(Value::as_str).unwrap_or("");
-                    match open.iter().position(|(call, _)| call == id) {
+                    match positions.get_mut(id).and_then(VecDeque::pop_front) {
                         Some(at) => {
-                            open.remove(at);
+                            open[at] = None;
                             true
                         }
                         None => false,
@@ -1805,16 +1896,17 @@ fn pair(messages: Vec<Value>) -> Vec<Value> {
             }
             continue;
         }
-        close(&mut out, &mut open);
+        close(&mut out, &mut open, &mut positions);
         if role == "assistant" {
             for part in parts_of(&message).iter().filter(|part| kind(part) == "tool-call") {
                 let id = part.get("toolCallId").and_then(Value::as_str).unwrap_or("").to_string();
                 let name = part.get("toolName").and_then(Value::as_str).unwrap_or("").to_string();
-                open.push((id, name));
+                positions.entry(id.clone()).or_default().push_back(open.len());
+                open.push(Some((id, name)));
             }
         }
         out.push(message);
     }
-    close(&mut out, &mut open);
+    close(&mut out, &mut open, &mut positions);
     out
 }

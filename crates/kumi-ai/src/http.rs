@@ -443,14 +443,6 @@ mod cause_tests {
         address
     }
 
-    /// An address nothing listens on.
-    async fn closed_port() -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap().to_string();
-        drop(listener);
-        address
-    }
-
     async fn failed(fetch: &HttpFetch, url: &str) -> LanguageModelError {
         match fetch.fetch(url, FetchInit::default()).await {
             Ok(response) => response.text().await.expect_err("a broken body"),
@@ -464,12 +456,14 @@ mod cause_tests {
         let direct =
             |read| HttpFetch::through(std::sync::Arc::new(|| std::sync::Arc::new(proxy::Settings::none())), Duration::from_secs(5), read);
         let fetch = direct(Duration::from_millis(300));
-        // The read timeout counts from the request on, connecting and looking the name up included, and Windows tries a
-        // closed port again for a second or two before it says refused: these two wait as long as they need.
+        // The read timeout counts from the request on, connecting and looking the name up included: give the failure
+        // to connect and the missing name enough time to report their own causes.
         let patient = direct(Duration::from_secs(5));
-        // Refused.
-        let refused = failed(&patient, &format!("http://{}/", closed_port().await)).await;
-        assert_eq!(NetCause::of_call(&refused), Some(NetCause::Offline), "{refused:?}");
+        // The peer goes away before answering. Keep a server on the port: dropping a listener to get a refused port
+        // lets another test take it, and this test then calls that test's server.
+        let gone = server(b"", true).await;
+        let offline = failed(&patient, &format!("http://{gone}/")).await;
+        assert_eq!(NetCause::of_call(&offline), Some(NetCause::Offline), "{offline:?}");
         // A name that never resolves (RFC 6761).
         let unknown = failed(&patient, "http://kumi-net-cause.invalid/").await;
         assert_eq!(NetCause::of_call(&unknown), Some(NetCause::Dns), "{unknown:?}");

@@ -782,6 +782,13 @@ async fn a_conversation_from_a_file_and_every_copy_of_it_say_so() {
     let imported = |id: &str| rows.iter().find(|row| row.id == id).unwrap().imported;
     assert!(imported("imported0001") && imported("copied000001") && imported("copied000002"));
     assert!(!imported("mine00000001") && !imported("mine00000002"));
+    // A fork written by 1.17 kept its parent but knew no imported mark. The current Kumi recovers it through ancestry.
+    for (place, id) in [(A, "copied000001"), (B, "copied000002")] {
+        let path = dir.path().join(place).join("conversations").join(format!("{id}.meta"));
+        let mut meta: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        meta.as_object_mut().unwrap().remove("imported");
+        std::fs::write(path, meta.to_string()).unwrap();
+    }
     // A fresh look at the folders finds the same.
     std::fs::remove_file(dir.path().join("conversation-index.json")).ok();
     let again = create_conversation_store(dir.path()).all().await.unwrap();

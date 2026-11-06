@@ -126,6 +126,10 @@ struct FakeChanges<const P: bool> {
     calls: RefCell<Vec<String>>,
     /// Transactions whose undo the DAW won't confirm.
     unsure: RefCell<Vec<String>>,
+    /// Transactions whose fenced guard refuses before any write.
+    refused: RefCell<Vec<String>>,
+    /// Transactions asked to undo, including a guard's refusal.
+    undos: RefCell<Vec<String>>,
     /// Whether each undo was told to discard, in order.
     discards: RefCell<Vec<bool>>,
 }
@@ -199,6 +203,10 @@ impl<const P: bool> ChangeHost for FakeChanges<P> {
         _undo_key: &str,
         discard: bool,
     ) -> Result<Option<UndoResult>, RuntimeError> {
+        self.undos.borrow_mut().push(snapshot.transaction_id.clone());
+        if self.refused.borrow().contains(&snapshot.transaction_id) {
+            return Ok(Some(UndoResult::refused("The device content changed; undo refused before any write.")));
+        }
         self.discards.borrow_mut().push(discard);
         if !self.unsure.borrow().contains(&snapshot.transaction_id) {
             return Ok(None);
@@ -252,6 +260,8 @@ impl<const P: bool> FakeDaw<P> {
             book: RefCell::default(),
             calls: RefCell::default(),
             unsure: RefCell::default(),
+            refused: RefCell::default(),
+            undos: RefCell::default(),
             discards: RefCell::default(),
         };
         let told = move |record: ChangeRecord| {
@@ -554,6 +564,129 @@ async fn session<const P: bool>(answers: Answers) -> Vec<String> {
 
 fn leaks(texts: &[String]) -> Vec<String> {
     texts.iter().filter(|text| LIVE_WORDS.is_match(text)).cloned().collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_groups_fenced_refusal_stops_its_remaining_undos_and_preserves_any_completed_ones() {
+    for (count, refused_index) in [(1, 0), (3, 2), (3, 1)] {
+        let daw = FakeDaw::<true>::new(Answers { reachable: true, plan_steps: false, stops: true, batches: true, copies: false });
+        let members: Vec<_> =
+            (0..count).map(|index| daw.record("device", &format!("Device {index}"), &format!("tx-{index}"), None)).collect();
+        let group = daw.history.grouped("Load devices", &members, &[]).unwrap();
+        daw.history.host.refused.borrow_mut().push(format!("tx-{refused_index}"));
+        let before_events = daw.said.borrow().len();
+        let result = daw.history.undo(&group, Signal::new(), false).await.unwrap();
+        assert!(result.is_error);
+        assert_eq!(*daw.history.host.undos.borrow(), (refused_index..count).rev().map(|index| format!("tx-{index}")).collect::<Vec<_>>());
+        for (index, member) in members.iter().enumerate() {
+            assert_eq!(
+                daw.history.entries.borrow()[member].borrow().record.state,
+                if index > refused_index { ChangeState::Undone } else { ChangeState::Applied }
+            );
+        }
+        if refused_index == count - 1 {
+            assert!(result.refused && result.stopped && result.record.is_none(), "a no-write refusal propagates through a group");
+            assert_eq!(daw.history.entries.borrow()[&group].borrow().record.state, ChangeState::Applied);
+            assert_eq!(daw.said.borrow().len(), before_events, "no group or child state was published");
+        } else {
+            assert!(result.stopped && !result.refused, "a partially completed undo stops ancestors without claiming no writes");
+            let record = result.record.unwrap();
+            assert_eq!(record.state, ChangeState::Kept);
+            assert!(record.note.as_deref().unwrap().contains("took back 1 of its 3 changes"));
+            assert!(record.note.as_deref().unwrap().contains("device content changed"));
+            assert!(!result.text.contains("Nothing changed"));
+        }
+    }
+    // A generic earlier failure carries no no-write proof. A later fenced refusal must not erase that uncertainty.
+    let daw = FakeDaw::<true>::new(Answers { reachable: true, plan_steps: false, stops: true, batches: true, copies: false });
+    let members: Vec<_> = (0..3).map(|index| daw.record("device", &format!("Device {index}"), &format!("tx-{index}"), None)).collect();
+    let group = daw.history.grouped("Load devices", &members, &[]).unwrap();
+    daw.history.host.unsure.borrow_mut().push("tx-2".into());
+    daw.history.host.refused.borrow_mut().push("tx-1".into());
+    let result = daw.history.undo(&group, Signal::new(), false).await.unwrap();
+    assert_eq!(*daw.history.host.undos.borrow(), ["tx-2", "tx-1"]);
+    assert!(!result.refused);
+    let record = result.record.unwrap();
+    assert_eq!(record.state, ChangeState::Unsure);
+    assert!(record.note.as_deref().unwrap().contains("an earlier undo wasn't confirmed"));
+    assert_eq!(daw.history.entries.borrow()[&members[0]].borrow().record.state, ChangeState::Applied);
+    // A partial refusal inside the newest nested group must also stop the outer group's older children.
+    let daw = FakeDaw::<true>::new(Answers { reachable: true, plan_steps: false, stops: true, batches: true, copies: false });
+    let older = daw.record("device", "Older outside device", "tx-outside", None);
+    let refused = daw.record("device", "Refused inside device", "tx-refused", None);
+    let newest = daw.record("device", "Newest inside device", "tx-newest", None);
+    let inner = daw.history.grouped("Inside devices", &[refused.clone(), newest.clone()], &[]).unwrap();
+    let outer = daw.history.grouped("All devices", &[older.clone(), inner.clone()], &[]).unwrap();
+    daw.history.host.refused.borrow_mut().push("tx-refused".into());
+    let result = daw.history.undo(&outer, Signal::new(), false).await.unwrap();
+    assert_eq!(*daw.history.host.undos.borrow(), ["tx-newest", "tx-refused"]);
+    assert!(result.stopped && !result.refused);
+    assert_eq!(result.record.unwrap().id, outer);
+    for (id, expected) in [
+        (older, ChangeState::Applied),
+        (refused, ChangeState::Applied),
+        (newest, ChangeState::Undone),
+        (inner, ChangeState::Kept),
+        (outer, ChangeState::Kept),
+    ] {
+        assert_eq!(daw.history.entries.borrow()[&id].borrow().record.state, expected);
+    }
+    // A stopgap refusal proves only that this request wrote nothing. It cannot resolve uncertainty that already
+    // existed on the refused child, an older child never reached, or a descendant of an older nested group.
+    for uncertain_place in ["refused", "older", "nested"] {
+        let daw = FakeDaw::<true>::new(Answers { reachable: true, plan_steps: false, stops: true, batches: true, copies: false });
+        let older_leaf = daw.record("device", "Older device", "tx-older", None);
+        let older = if uncertain_place == "nested" {
+            daw.history.grouped("Older nested devices", std::slice::from_ref(&older_leaf), &[]).unwrap()
+        } else {
+            older_leaf.clone()
+        };
+        let refused = daw.record("device", "Refused device", "tx-refused", None);
+        let newest = daw.record("device", "Newest device", "tx-newest", None);
+        let group = daw.history.grouped("All devices", &[older.clone(), refused.clone(), newest.clone()], &[]).unwrap();
+        let uncertain = if uncertain_place == "refused" { &refused } else { &older_leaf };
+        {
+            let entries = daw.history.entries.borrow();
+            let mut entry = entries[uncertain].borrow_mut();
+            entry.record.state = ChangeState::Unsure;
+            entry.record.note = Some("A previous undo wasn't confirmed.".into());
+            entry.undo_key = Some("original-uncertain-undo-key".into());
+        }
+        let before = serde_json::to_value(&*daw.history.entries.borrow()[uncertain].borrow()).unwrap();
+        daw.history.host.refused.borrow_mut().push("tx-refused".into());
+        let result = daw.history.undo(&group, Signal::new(), false).await.unwrap();
+        assert_eq!(*daw.history.host.undos.borrow(), ["tx-newest", "tx-refused"], "{uncertain_place}");
+        assert!(result.stopped && !result.refused);
+        let record = result.record.unwrap();
+        assert_eq!((record.id, record.state), (group, ChangeState::Unsure), "{uncertain_place}");
+        assert!(record.note.unwrap().contains("an earlier undo wasn't confirmed"));
+        assert_eq!(serde_json::to_value(&*daw.history.entries.borrow()[uncertain].borrow()).unwrap(), before);
+        assert_eq!(daw.history.entries.borrow()[&newest].borrow().record.state, ChangeState::Undone);
+        if uncertain_place == "nested" {
+            assert_eq!(daw.history.entries.borrow()[&older].borrow().record.state, ChangeState::Applied, "the older group wasn't reached");
+        }
+    }
+    // With no child undo before a refusal, preserve the exact existing records even when the group or child was
+    // already unsure. The no-write refusal must publish no update that would cause another unsure audit.
+    for group_state in [ChangeState::Applied, ChangeState::Unsure] {
+        let daw = FakeDaw::<true>::new(Answers { reachable: true, plan_steps: false, stops: true, batches: true, copies: false });
+        let member = daw.record("device", "Uncertain device", "tx-refused", None);
+        let group = daw.history.grouped("One uncertain device", std::slice::from_ref(&member), &[]).unwrap();
+        for (id, state) in [(&member, ChangeState::Unsure), (&group, group_state)] {
+            let entries = daw.history.entries.borrow();
+            let mut entry = entries[id].borrow_mut();
+            entry.record.state = state;
+            entry.record.note = Some("Existing uncertainty is not resolved.".into());
+        }
+        let records = || [&member, &group].map(|id| serde_json::to_value(&daw.history.entries.borrow()[id].borrow().record).unwrap());
+        let before = records();
+        let events = daw.said.borrow().len();
+        daw.history.host.refused.borrow_mut().push("tx-refused".into());
+        let result = daw.history.undo(&group, Signal::new(), false).await.unwrap();
+        assert!(result.refused && result.stopped && result.record.is_none());
+        assert_eq!(records(), before);
+        assert_eq!(daw.said.borrow().len(), events);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

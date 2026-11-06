@@ -442,7 +442,10 @@ local function device(data)
   for i, p in ipairs(data.params or {}) do
     local function write(value)
       local old = p.value
-      if old == value then return end
+      -- A host setter may refuse without writing, and needn't promise that writing an unchanged value leaves no
+      -- native undo entry. Refusal tests opt into these separately; the ordinary mock keeps its no-op behavior.
+      if p.refuse_value == value then return end
+      if old == value and not p.record_unchanged then return end
       p.value = value
       M.fire(p.value_observable)
       M.record(function() p.value = old; M.fire(p.value_observable) end, function() p.value = value; M.fire(p.value_observable) end)

@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use super::amxd::{encrypted, with_patcher_chunk, DeviceType};
 use super::findings::Findings;
 use super::look;
-use super::patch::check::{check_with, UNKNOWN_OBJECT};
+use super::patch::check::{check_with, is_parameter, UNKNOWN_OBJECT};
 use super::patch::frozen::{read_device, Frozen, Unread, MOST_PATCHER_BYTES};
 use super::patch::geometry::Rect;
 use super::patch::layout::{arrange, text_width};
@@ -197,7 +197,7 @@ pub struct Original {
 }
 
 /// A file's bytes, read once through one handle that's checked to be a file's, up to [`MOST_BYTES`].
-fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
+pub(super) fn read_limited(path: &Path, most: u64) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let shown = path.to_string_lossy();
     let mut options = std::fs::OpenOptions::new();
@@ -214,9 +214,9 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
         return Err(format!("{shown} isn't a file."));
     }
     let mut bytes = Vec::new();
-    file.take(MOST_BYTES + 1).read_to_end(&mut bytes).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
-    if bytes.len() as u64 > MOST_BYTES {
-        return Err(format!("{shown} is past the {} MB Kumi opens.", MOST_BYTES / 1_048_576));
+    file.take(most + 1).read_to_end(&mut bytes).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
+    if bytes.len() as u64 > most {
+        return Err(format!("{shown} is past the {} MB Kumi opens.", most / 1_048_576));
     }
     Ok(bytes)
 }
@@ -224,7 +224,7 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
 /// The device file at `path`, opened, or why it can't be. `user_library` is where it's known from, when it's in it.
 pub fn open(path: &Path, user_library: &Path) -> Result<Original, String> {
     let shown = path.to_string_lossy();
-    let bytes = read_limited(path)?;
+    let bytes = read_limited(path, MOST_BYTES)?;
     if encrypted(&bytes) {
         return Err(format!(
             "{shown} is one of Live's own Max for Live devices, whose patch is encrypted: only Live can read it, so Kumi can't make a device from it. Make a new one that does what's wanted instead."
@@ -437,6 +437,9 @@ fn written(item: &MaxBox) -> Result<String, String> {
     };
     match item.maxclass() {
         "message" if !item.text().contains('\n') => Ok(format!("({})", item.text())),
+        "newobj" if is_parameter(item) => {
+            Err("a Live parameter: to replace it, remove this box by name and give its replacement in controls".into())
+        }
         "newobj" => {
             let text = item.text();
             if text.trim().is_empty() || text.contains([']', '\n']) {

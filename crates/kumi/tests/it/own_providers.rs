@@ -264,6 +264,7 @@ async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
     assert_eq!(chosen_with(None, &env, &none).0.id(), DawId::Reaper, "none running, none used: the first installed");
     remember_used(DawId::Renoise, &env);
     assert_eq!(chosen_with(None, &env, &none).0.id(), DawId::Renoise, "none running: the one used last");
+    // Experimental bridges may also run, but only supported automatic choices are named or selected.
     let both = |provider: &dyn DawProvider| provider.id() != DawId::Ableton;
     assert_eq!(chosen_with(None, &env, &both).0.id(), DawId::Renoise, "both running: the one used last");
     assert_eq!(chosen_with(Some(DawId::Reaper), &env, &none).0.id(), DawId::Reaper, "asked for, always");
@@ -300,6 +301,11 @@ fn daw_says_which_daw_kumi_works_with_and_switches_by_name() {
         assert_eq!(daw_command(typed), DawCommand::Switch(DawId::Ableton, "Kumi closes and opens again with Live.".into()), "{typed}");
     }
     assert_eq!(daw_command("reaper"), DawCommand::Say("Kumi works with REAPER already.".into()));
+    assert_eq!(
+        daw_command("logic"),
+        DawCommand::Switch(DawId::Logic, "Kumi closes and opens again with Logic Pro.".into()),
+        "experimental DAWs remain reachable by name"
+    );
     assert_eq!(daw_command("bitwig"), DawCommand::Say("Kumi doesn't know bitwig: /daw live, /daw reaper, /daw renoise.".into()));
     work_with(DawId::Ableton);
 }
@@ -596,6 +602,10 @@ fn receipt_of(env: &Env, daw: daw_bridge::daw::Daw) -> daw_bridge::lifecycle::Re
 #[tokio::test(flavor = "current_thread")]
 async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_copy_its_kumi_carries() {
     use daw_bridge::daw::Daw;
+    // Setup and the release fixture must read the same checkout's payload, even after a dependency built in another
+    // worktree was reused from the target folder. A stale source here looks like an upgrade despite equal versions.
+    let workspace = kumi_testkit::workspace_path("");
+    assert_eq!(kumi_common::dev::checkout().as_deref(), Some(workspace.as_path()), "setup and the carried tool use this checkout");
     let (dir, mut env) = renoise_home();
     let resource = dir.path().join("REAPER");
     std::fs::create_dir_all(resource.join("UserPlugins")).unwrap();
@@ -830,6 +840,165 @@ async fn the_report_reads_the_bridge_logs_oldest_first() {
     let (heading, lines) = kumi_daw_renoise::PROVIDER.report_log(&DawIo::new(env.clone()), "").await;
     assert_eq!(heading, "Renoise's bridge log");
     assert_eq!(lines, "b.log line\nc.log line\na.log line");
+}
+
+/// The shared lifecycle facts can describe an app that loads nothing, without depending on the Logic adapter.
+fn attached_fixture() -> kumi_daw_own::provider::Own {
+    use std::path::{Path, PathBuf};
+    kumi_daw_own::provider::Own {
+        lifecycle: kumi_daw_own::provider::OwnLifecycle::Attached,
+        reads_only: true,
+        enable_step: Some(kumi_daw::provider::EnableStep {
+            label: "Grant permission",
+            say: "Allow the fixture helper to read the app.",
+            waiting: "Waiting for its grant.",
+            later: "The app can be connected later.",
+            put_off: "Its bridge is in place; its grant is still needed.",
+        }),
+        enabled: Some(|_, env| {
+            let status = env
+                .get("KUMI_TEST_APP_STATUS")
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+            async move {
+                Some(status.is_some_and(|status| status["connected"] == true && status.get("permission") == Some(&serde_json::Value::Null)))
+            }
+            .boxed_local()
+        }),
+        source: Some(|_, env| env.get("KUMI_TEST_BRIDGE_SOURCE").map(PathBuf::from)),
+        checkout_build: None,
+        carried: || "fixture-extension",
+        built: |_| None,
+        version_file: |source| source.with_extension("version"),
+        identity_file: Path::to_path_buf,
+        // Unlike a loaded extension's target, this owned place exists independently of the app.
+        placed: |own, env| {
+            let dir = PathBuf::from(&env["KUMI_HOME"]).join("owned-program");
+            Ok(daw_bridge::lifecycle::Target {
+                daw: own.daw,
+                name: "fixture-extension".into(),
+                folder: false,
+                reference: dir.join("bridge-reference.json"),
+                dir,
+            })
+        },
+        elsewhere: |_| vec![],
+        unloadable: |_, _, _| None,
+        here: |_, env| env.get("KUMI_TEST_APP_HERE").is_some_and(|here| here == "yes"),
+        app: |_, env| env.get("KUMI_TEST_APP").filter(|app| !app.is_empty()).map(PathBuf::from),
+        app_version: |own, env, is| {
+            let app = (own.app)(own, env)?;
+            is(&app).then(|| env.get("KUMI_TEST_APP_VERSION").cloned()).flatten()
+        },
+        ..kumi_daw_reaper::PROVIDER
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn attached_setup_uses_fresh_enablement_and_app_facts_instead_of_its_unconditional_target() {
+    use kumi_daw::provider::Installed;
+    let dir = tempfile::tempdir().unwrap();
+    let status = dir.path().join("status.json");
+    let provider = attached_fixture();
+    let mut env = Env::from([
+        ("KUMI_HOME".into(), dir.path().join("kumi").to_string_lossy().into_owned()),
+        ("KUMI_TEST_APP_STATUS".into(), status.to_string_lossy().into_owned()),
+    ]);
+    let setup = |env: &Env| provider.setup(env, Rc::default(), false, Rc::default());
+    assert_eq!(setup(&env).installed().await, Installed::Missing, "an owned target doesn't mean the app exists");
+    env.insert("KUMI_TEST_APP_HERE".into(), "yes".into());
+    assert_eq!(setup(&env).installed().await, Installed::Missing, "the app to open must also be known");
+    env.insert("KUMI_TEST_APP".into(), dir.path().join("REAPER").to_string_lossy().into_owned());
+    env.insert("KUMI_TEST_APP_VERSION".into(), "6.83".into());
+    assert_eq!(setup(&env).installed().await, Installed::Older("6.83".into()));
+    env.insert("KUMI_TEST_APP_VERSION".into(), "7.22".into());
+    let attached = setup(&env);
+    assert_eq!(attached.installed().await, Installed::Ready);
+    assert!(!attached.needs_restart());
+    assert!(provider.reads_only() && provider.enable_step().is_some());
+    assert_eq!(attached.enabled().await, Some(false), "no answered status yet");
+    for (connected, permission, enabled) in [
+        (false, serde_json::Value::Null, false),
+        (true, serde_json::json!("accessibility"), false),
+        (true, serde_json::Value::Null, true),
+        (true, serde_json::json!("accessibility"), false),
+    ] {
+        std::fs::write(&status, serde_json::json!({"connected":connected,"permission":permission}).to_string()).unwrap();
+        assert_eq!(attached.enabled().await, Some(enabled), "a grant is checked anew even when a socket connects");
+    }
+    // The existing loaded DAWs retain their setup and enablement defaults.
+    let (_renoise_dir, renoise_env) = renoise_home();
+    for loaded in [&kumi_daw_reaper::PROVIDER, &kumi_daw_renoise::PROVIDER] {
+        let setup = loaded.setup(&renoise_env, Rc::default(), false, Rc::default());
+        assert!(setup.needs_restart());
+        assert_eq!(setup.enabled().await, None);
+        assert!(!loaded.reads_only() && loaded.enable_step().is_none());
+    }
+}
+
+/// Component setup, install, update and rollback all follow the lifecycle fact, regardless of the DAW's name.
+#[tokio::test(flavor = "current_thread")]
+async fn attached_bridge_plans_and_lifecycle_words_keep_the_app_open_while_loaded_defaults_keep_their_restart() {
+    use kumi_daw::component::{After, PartState};
+    use kumi_daw_own::provider::{CarriedBy, Own, OwnLifecycle};
+    use std::path::Path;
+    for lifecycle in [OwnLifecycle::Loaded, OwnLifecycle::Attached] {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("kumi");
+        let provider = Own { lifecycle, ..attached_fixture() };
+        let carry = |name: &str, version: &str| {
+            let app = dir.path().join(name);
+            let source = app.join("daws/reaper/fixture-extension");
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(&source, format!("fixture program {version}")).unwrap();
+            std::fs::write(source.with_extension("version"), version).unwrap();
+            (app, source)
+        };
+        let (now, source) = carry("runtime", "0.1.0");
+        let (later, _) = carry("runtime.next", "0.2.0");
+        let env = Env::from([
+            ("KUMI_HOME".into(), home.to_string_lossy().into_owned()),
+            ("KUMI_TEST_BRIDGE_SOURCE".into(), source.to_string_lossy().into_owned()),
+        ]);
+        let out = Rc::new(Out::default());
+        let mut io = daw_io(out.clone(), &env);
+        io.answers = io.answers.clone().with(CarriedBy(now.clone()));
+        io.run = Rc::new(|_, _, _| panic!("the lifecycle's file operations never open or quit an app"));
+        let plan = provider.component_plan(&io, &home).unwrap();
+        assert_eq!(plan.state, PartState::Missing);
+        assert_eq!(plan.after, if lifecycle == OwnLifecycle::Attached { After::None } else { After::RestartDaw });
+        assert_eq!(provider.setup_bridge(io.clone(), yes()).await.unwrap(), 0);
+        let setup_said = out.0.borrow().clone();
+        out.0.borrow_mut().clear();
+        assert_eq!(provider.after_update(&io, &home.to_string_lossy(), &later.to_string_lossy(), None).await, 0);
+        let update_said = out.0.borrow().clone();
+        assert_eq!(receipt_of(&env, provider.daw).version.as_deref(), Some("0.2.0"));
+        out.0.borrow_mut().clear();
+        let step = provider.prepare_rollback(&io, &home.to_string_lossy(), &now.to_string_lossy(), "1.20.0", false).await.unwrap();
+        assert_eq!(step.after_swap(&io, &home.to_string_lossy(), &now.to_string_lossy(), "1.20.0", true).await, 0);
+        let rollback_said = out.0.borrow().clone();
+        assert_eq!(receipt_of(&env, provider.daw).version.as_deref(), Some("0.1.0"));
+        for said in [&setup_said, &update_said, &rollback_said] {
+            assert!(!said.is_empty(), "the lifecycle did work");
+            if lifecycle == OwnLifecycle::Attached {
+                assert!(said.contains("Kumi attaches to the running app; it stays open."), "{said}");
+                assert!(!said.contains("restart REAPER") && !said.contains("quit REAPER"), "{said}");
+            } else {
+                assert!(said.contains("restart REAPER if it's open."), "{said}");
+            }
+        }
+        let place = if lifecycle == OwnLifecycle::Attached { "Kumi's own folder" } else { "REAPER" };
+        assert!(setup_said.contains(&format!("Kumi's extension 0.1.0 is in {place}.")), "{setup_said}");
+        assert!(update_said.contains(&format!("Kumi's extension 0.2.0 is in {place} now")), "{update_said}");
+        assert!(rollback_said.contains(&format!("Kumi's extension 0.1.0 is back in {place}, as Kumi 1.20.0 had it")), "{rollback_said}");
+        // A copy whose version is no longer established stays put. Only a loaded bridge needs the app quit first.
+        let receipt = receipt_of(&env, provider.daw);
+        std::fs::write(Path::new(&receipt.target), "a producer's unknown program").unwrap();
+        let plan = provider.component_plan(&io, &home).unwrap();
+        assert_eq!(plan.state, PartState::Newer);
+        let effects = plan.effects.join("\n");
+        assert_eq!(effects.contains("quit REAPER"), lifecycle == OwnLifecycle::Loaded, "{effects}");
+    }
 }
 
 /// SoundCraft's bridge is a program beside Kumi: setup finds the app a variable names, its version (its bundle's, on

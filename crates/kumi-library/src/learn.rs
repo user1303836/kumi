@@ -1,4 +1,5 @@
 //! Learn changed sounds, presets and Sets, persisting progress as each batch finishes.
+mod packages;
 use super::{
     classify::{ClassFrom, SoundClass, SoundKind},
     presets::PresetCategory,
@@ -21,6 +22,9 @@ pub struct PresetEntry {
     pub file: Entry,
     pub name: String,
     pub format: String,
+    /// Atomic directory presets include their children's content in cache identity. Older logs simply relearn once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_fingerprint: Option<String>,
     /// What the DAW loads it by, where that isn't its path (a JSFX: "JS: midi/midi_choke").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load: Option<String>,
@@ -114,6 +118,9 @@ pub struct LearnProgress {
 #[serde(rename_all = "camelCase")]
 pub struct LearnPlan {
     pub dir: String,
+    /// The requested profile's additional formats for ordinary/approved folders; None keeps Live's defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daw: Option<kumi_types::daw::DawId>,
     pub sources: Vec<Source>,
     /// Canonical roots captured by restricted planning. `Some([])` denies every source, including auxiliary walks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -259,6 +266,7 @@ struct Found {
     file: Entry,
     source: Source,
     relative: String,
+    package_fingerprint: Option<String>,
 }
 #[derive(Default)]
 struct Finds {
@@ -328,6 +336,7 @@ async fn walk(
     source: &Source,
     layout: &Layout,
     daws: Daws,
+    profile: Option<kumi_types::daw::DawId>,
     kinds: Kinds,
     found: &mut Finds,
     signal: &Signal,
@@ -336,6 +345,33 @@ async fn walk(
     approved_folders: Option<&Arc<Vec<String>>>,
     progress: &Progress,
 ) -> Result<bool, RuntimeError> {
+    // A producer may approve a package itself, not only its containing folder. Recognize the source root before
+    // opening it as an ordinary directory, or its settings/audio children would be indexed independently.
+    let root_extension = extension(&source.path.to_lowercase());
+    if daws.preset_reader(source, &root_extension).is_some_and(|reader| reader.preset_packages().contains(&root_extension.as_str())) {
+        signal.check()?;
+        if !approved(&source.path, approved_folders).await? {
+            return Ok(false);
+        }
+        if !kinds.presets || found.seen.contains(&source.path) {
+            return Ok(true);
+        }
+        let signature = match packages::signature(&source.path, signal).await {
+            Ok(signature) => signature,
+            Err(_) => {
+                signal.check()?;
+                return Ok(false);
+            }
+        };
+        found.seen.insert(source.path.clone());
+        found.presets.push(Found {
+            file: Entry { path: source.path.clone(), size: signature.size, mtime: mtime(signature.modified), gone: None },
+            source: source.clone(),
+            relative: basename(&source.path),
+            package_fingerprint: Some(signature.fingerprint),
+        });
+        return Ok(true);
+    }
     let mut queue = vec![(source.path.clone(), 0)];
     let mut complete = true;
     let daw_library = source.is_daw_library();
@@ -377,6 +413,32 @@ async fn walk(
                 continue;
             };
             if kind.is_dir() {
+                let ext = extension(&lower);
+                if daws.preset_reader(source, &ext).is_some_and(|reader| reader.preset_packages().contains(&ext.as_str())) {
+                    let relative =
+                        Path::new(&full).strip_prefix(&source.path).map(|path| path.to_string_lossy().into_owned()).unwrap_or_default();
+                    let top = relative.split(['\\', '/']).next().unwrap_or_default();
+                    let admitted = !daw_library || daw_sources::role_of(layout, top, &ext) == Some(daw_sources::Role::Preset);
+                    if !kinds.presets || !admitted || !approved(&full, approved_folders).await? || found.seen.contains(&full) {
+                        continue;
+                    }
+                    let signature = match packages::signature(&full, signal).await {
+                        Ok(signature) => signature,
+                        Err(_) => {
+                            signal.check()?;
+                            complete = false;
+                            continue;
+                        }
+                    };
+                    found.seen.insert(full.clone());
+                    found.presets.push(Found {
+                        file: Entry { path: full, size: signature.size, mtime: mtime(signature.modified), gone: None },
+                        source: source.clone(),
+                        relative,
+                        package_fingerprint: Some(signature.fingerprint),
+                    });
+                    continue;
+                }
                 if SKIP.contains(&lower.as_str())
                     || lower == "backup"
                     || lower.ends_with(".app")
@@ -409,15 +471,23 @@ async fn walk(
                     .and_then(|relative| relative.components().next())
                     .map(|first| first.as_os_str().to_string_lossy().into_owned())
                     .unwrap_or_default();
-                match daw_sources::role_of(layout, &top, &ext) {
+                let role = daw_sources::role_of(layout, &top, &ext).or_else(|| {
+                    (layout.sounds.iter().any(|folder| top.eq_ignore_ascii_case(folder))
+                        && daws.source(source).is_some_and(|reader| reader.sample_extensions().contains(&ext.as_str())))
+                    .then_some(daw_sources::Role::Sound)
+                });
+                match role {
                     Some(daw_sources::Role::Sound) if kinds.sounds => &mut found.sounds,
                     Some(daw_sources::Role::Preset) if kinds.presets => &mut found.presets,
                     _ => continue,
                 }
             // Formats Live accepts as samples, intentionally narrower than the general audio decoder.
-            } else if kinds.sounds && crate::samples::SAMPLE_EXTENSIONS.contains(&ext.as_str()) {
+            } else if kinds.sounds && daws.accepts_sample(profile, &ext) {
                 &mut found.sounds
-            } else if kinds.presets && PRESET_EXTENSIONS.contains(&ext.as_str()) {
+            } else if kinds.presets
+                && (PRESET_EXTENSIONS.contains(&ext.as_str())
+                    || daws.preset_reader(source, &ext).is_some_and(|reader| reader.preset_extensions().contains(&ext.as_str())))
+            {
                 &mut found.presets
             } else if kinds.sets && set_extension(daws, &ext) {
                 &mut found.sets
@@ -448,6 +518,7 @@ async fn walk(
                 file: Entry { path: full, size: info.len(), mtime: mtime(modified), gone: None },
                 source: source.clone(),
                 relative,
+                package_fingerprint: None,
             });
             if approved_folders.is_some() {
                 // During Looking these are discovered candidates, not a total estimate. The measurement phases
@@ -664,6 +735,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             source,
             layout,
             options.daws,
+            plan.daw,
             Kinds { sets: kinds.sets && own, ..kinds },
             &mut found,
             &options.signal,
@@ -693,6 +765,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &source,
             &Layout::NONE,
             options.daws,
+            plan.daw,
             Kinds { sounds: false, presets: false, sets: true },
             &mut found,
             &options.signal,
@@ -720,6 +793,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             file: Entry { path: path.clone(), size: info.len(), mtime: mtime(modified), gone: None },
             source: Source { path: dirname(path), label: basename(&dirname(path)), kind: SourceKind::Folder },
             relative: basename(path),
+            package_fingerprint: None,
         });
     }
     for path in plan.plugin_presets.iter().filter(|_| kinds.presets) {
@@ -728,6 +802,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &source,
             &Layout::NONE,
             options.daws,
+            plan.daw,
             Kinds { sounds: false, presets: true, sets: false },
             &mut found,
             &options.signal,
@@ -756,7 +831,14 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             changed(known.map(|k| &k.file), file) || known.is_some_and(|k| k.vector.is_some() && k.features != Some(FEATURES_VERSION))
         })
         .collect();
-    let todo_presets: Vec<_> = found.presets.into_iter().filter(|f| changed(presets.get(&f.file.path).map(|k| &k.file), f)).collect();
+    let todo_presets: Vec<_> = found
+        .presets
+        .into_iter()
+        .filter(|f| {
+            let known = presets.get(&f.file.path);
+            changed(known.map(|k| &k.file), f) || known.is_some_and(|known| known.package_fingerprint != f.package_fingerprint)
+        })
+        .collect();
     let todo_sets: Vec<_> = found.sets.into_iter().filter(|f| changed(sets.get(&f.file.path).map(|k| &k.file), f)).collect();
     {
         let mut p = progress.value.borrow_mut();
@@ -782,7 +864,11 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             ext.to_lowercase().trim_start_matches('.').to_owned()
         };
         let plugin = file.source.label == "Plug-in presets";
+        let supplied =
+            options.daws.preset_reader(&file.source, &ext.to_lowercase()).and_then(|reader| reader.preset_facts(&format, &file.relative));
+        let named_by_daw = supplied.is_some();
         let facts = match format.as_str() {
+            _ if supplied.is_some() => Ok(supplied.unwrap()),
             _ if daw_library => read_daw_preset(&format, &file.file.path, &file.relative).await,
             "adv" | "adg" => read_live_preset(&file.file.path).await,
             "amxd" => read_max_device(&file.file.path).await,
@@ -802,6 +888,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             file: file.file.clone(),
             name,
             format,
+            package_fingerprint: file.package_fingerprint.clone(),
             load: facts.load,
             device: facts.device,
             category: if plugin { Some(PresetCategory::Plugin) } else { facts.category },
@@ -809,7 +896,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             about: facts.about,
             source: file.source.label.clone(),
             folder: if folder == "." { String::new() } else { folder },
-            browser: if plugin { None } else { browser_path(&file.source, &file.relative).filter(|s| !s.is_empty()) },
+            browser: if plugin || named_by_daw { None } else { browser_path(&file.source, &file.relative).filter(|s| !s.is_empty()) },
             error,
         };
         presets.insert(entry.clone());
@@ -1028,6 +1115,7 @@ mod tests {
             &source,
             &Layout::NONE,
             Daws::default(),
+            None,
             Kinds { sounds: true, presets: true, sets: true },
             &mut found,
             &Signal::new(),
@@ -1052,6 +1140,7 @@ mod tests {
             &source,
             &Layout::NONE,
             Daws::default(),
+            None,
             Kinds { sounds: true, presets: true, sets: true },
             &mut found,
             &Signal::new(),

@@ -35,7 +35,7 @@ impl Kumi {
         let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
             Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
             Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),
-            Daw::SoundCraft => unreachable!("these take-back tests run REAPER's and Renoise's integrations"),
+            Daw::SoundCraft | Daw::Logic => unreachable!("these take-back tests run REAPER's and Renoise's integrations"),
         };
         let places = kumi::daw::registry::places();
         let log = SessionLog::new(home, places, Rc::new(|text: &str| text.to_owned()));
@@ -57,7 +57,7 @@ impl Kumi {
                 }
                 told(SessionEvent::Change { change });
             }));
-            create(OwnOptions { context, kumi_home: home_path.clone(), connect: Some(connect) })
+            create(OwnOptions { open_file: None, context, kumi_home: home_path.clone(), connect: Some(connect) })
         });
         let model = Rc::new(Recorded::default());
         let mut options = SessionOptions::new(recording(model.clone()), integration, emit);

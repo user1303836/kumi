@@ -418,3 +418,123 @@ test("patterns: a length's undo from an older tool says it can't tell whether it
   eq(pattern(2).lines, 12)
   H.no_dialogs()
 end)
+
+test("patterns: freshly read region and alias fingerprints reuse only an unchanged prefix's byte hashing", function()
+  K.setup()
+  local patterns = T.load_payload_module("changes_patterns")
+  local base = T.load_payload_module("changes_base")
+  local material = T.load_payload_module("changes_material")
+  local env = { epoch = function() return "1" end }
+  local alias = { ref = "1:ptrack:2.2", alias = "1:pattern:1" }
+  local function own() return base.KINDS["pattern-alias"].preview(mock.song, env, alias).fence.own end
+  mock.ops.set_note(2, 2, 4, 12, { note = 61, instrument = 0, volume = 48 })
+  local effect = mock.song:pattern(2):track(2):line(8):effect_column(8)
+  effect.number_value, effect.amount_value = 12, 77
+  mock.ops.set_note(2, 3, 35, 1, { note = 44 })
+  mock.ops.automate(2, 2, 1, 1, { { time = 3.5, value = 0.25, scaling = 0 }, { time = 12, value = 0.75, scaling = 0.3 } }, 2)
+  local sums, bound, kept = base.sums_from, material.PRINTS_BYTES, material.PRINTS_KEPT
+  local entries, bytes_bound, fragments = patterns.HASHES_KEPT, patterns.HASH_BYTES, patterns.HASH_FRAGMENTS
+  -- No earlier cache or the full-text fallback's cache may hide the work counted here.
+  material.PRINTS_KEPT = 1
+  material.prints_of("patterns: start the prefix continuation test")
+  material.PRINTS_KEPT = kept
+  material.PRINTS_BYTES, patterns.HASHES_KEPT = 0, 0
+  patterns.region_print(mock.song, 2, 1, 8)
+  patterns.HASHES_KEPT = entries
+  local hashed, bytes = 0, 0
+  base.sums_from = function(text, a, b) hashed, bytes = hashed + 1, bytes + #text return sums(text, a, b) end
+  local succeeded, why = xpcall(function()
+    local function check(read, expected, misses)
+      local before, size = hashed, bytes
+      eq(read(), expected, "the fingerprint made by the uncached implementation")
+      eq(hashed > before, misses > 0, "only a changed suffix is hashed")
+      eq(bytes > size, misses > 0, "only a changed suffix hashes bytes")
+      local work = bytes - size
+      before, size = hashed, bytes
+      eq(read(), expected)
+      eq(hashed, before, "unchanged text is not hashed again")
+      eq(bytes, size, "unchanged text hashes no bytes")
+      return work
+    end
+    local function region(from, to) return function() return patterns.region_print(mock.song, 2, from, to) end end
+    -- Captured before hash reuse: fractional automation, hidden note/effect columns, lines beyond the end, and empty ranges.
+    local ranges = {
+      { 1, 8, "t566b68ebb1535544" }, { 2, 7, "tcac650aca0a760a3" }, { 8, 8, "tdfadd104a286ab21" },
+      { 9, 16, "tfe74fc3cf7fb57e3" }, { 1, 32, "t6d3358e2f014639f" }, { 33, 40, "tca2e09f40094cef5" }, { 41, 40, "none" },
+    }
+    local costs = {}
+    for i, range in ipairs(ranges) do costs[i] = check(region(range[1], range[2]), range[3], range[3] == "none" and 0 or 1) end
+    local own_cost = check(own, "b60e6d4839e057d9", 1)
+    -- No notifier or edit counter authorizes reuse: fresh line and automation bytes still change both fences.
+    mock.ops.set_note(2, 2, 4, 12, { note = 62, instrument = 0, volume = 48 })
+    eq(check(region(1, 8), "t251ba7961695d68d", 1), costs[1], "a first-fragment edit rehashes the complete suffix")
+    eq(check(own, "bf532829fe269598", 1), own_cost - 1, "a first-row edit keeps only the one-byte count, rehashing every later row")
+    pattern(2).tracks[2].automation[1].points[1].value = 0.5
+    ok(check(region(1, 8), "t9c47f5e4dd42a5d1", 1) < costs[1], "a late edit reuses its exact line prefix")
+    ok(check(own, "179017b79b663b88", 1) < own_cost, "a late edit reuses earlier rows, then hashes all later automation")
+    -- Inserting and removing a middle row never reuses later rows with a different seed.
+    mock.ops.set_note(2, 2, 6, 1, { note = 45 })
+    ok(region(1, 8)() ~= "t9c47f5e4dd42a5d1")
+    ok(own() ~= "179017b79b663b88")
+    mock.song:pattern(2):track(2):line(6):note_column(1):clear()
+    check(region(1, 8), "t9c47f5e4dd42a5d1", 1)
+    check(own, "179017b79b663b88", 1)
+    -- Removing a trailing fragment needs no byte work, but must return the shorter prefix's full-hash result.
+    local points = pattern(2).tracks[2].automation[1].points
+    local last = table.remove(points)
+    patterns.HASHES_KEPT = 0
+    local shorter = own()
+    patterns.HASHES_KEPT = entries
+    points[#points + 1] = last
+    check(own, "179017b79b663b88", 1)
+    table.remove(points)
+    check(own, shorter, 0)
+    points[#points + 1] = last
+    ok(check(own, "179017b79b663b88", 1) < own_cost, "only the restored trailing fragment is hashed")
+    check(region(1, 8), "t9c47f5e4dd42a5d1", 1)
+    check(region(33, 40), "tca2e09f40094cef5", 1)
+    pattern(2).lines = 16
+    check(region(1, 8), "t9c47f5e4dd42a5d1", 0)
+    check(region(33, 40), "tca2e09f40094cef5", 0)
+    check(own, "179017b79b663b88", 0)
+    mock.ops.alias(2, 2, 1)
+    check(region(1, 8), "none", 0)
+    check(own, "alias:1", 0)
+    mock.song:pattern(2):track(2).alias_pattern_index = 0
+    check(region(1, 8), "tc82a3f577e7d8d32", 1)
+    local unalias_cost = check(own, "c3577c64d0f83933", 1)
+    -- Entry eviction and both retention bounds fall back without changing a fence.
+    patterns.HASHES_KEPT = 1
+    region(33, 40)()
+    check(region(1, 8), "tc82a3f577e7d8d32", 1)
+    check(own, "c3577c64d0f83933", 1)
+    check(region(1, 8), "tc82a3f577e7d8d32", 1)
+    patterns.HASHES_KEPT = entries
+    for _, budget in ipairs({ { "HASH_BYTES", math.max(costs[6], unalias_cost) + 16 }, { "HASH_FRAGMENTS", 3 } }) do
+      -- Each range fits by itself (its second read hashes nothing), but their combined retained data does not.
+      patterns.HASHES_KEPT = 0
+      own()
+      patterns.HASHES_KEPT = entries
+      local limit, saved = budget[1], patterns[budget[1]]
+      patterns[limit] = budget[2]
+      check(own, "c3577c64d0f83933", 1)
+      check(region(33, 40), "tca2e09f40094cef5", 1)
+      check(own, "c3577c64d0f83933", 1)
+      patterns[limit] = saved
+    end
+    for _, limit in ipairs({ "HASH_BYTES", "HASH_FRAGMENTS", "HASHES_KEPT" }) do
+      local saved = patterns[limit]
+      patterns[limit] = 0
+      local before, size = hashed, bytes
+      eq(own(), "c3577c64d0f83933")
+      eq(own(), "c3577c64d0f83933")
+      eq(hashed - before, 2, limit .. ": the full-text fallback hashes twice instead of retaining prefix states")
+      ok(bytes > size)
+      patterns[limit] = saved
+    end
+  end, debug.traceback)
+  base.sums_from, material.PRINTS_BYTES, material.PRINTS_KEPT = sums, bound, kept
+  patterns.HASHES_KEPT, patterns.HASH_BYTES, patterns.HASH_FRAGMENTS = entries, bytes_bound, fragments
+  ok(succeeded, why)
+  H.no_dialogs()
+end)

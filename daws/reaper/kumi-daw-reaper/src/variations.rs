@@ -155,11 +155,16 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
     }
 
     /// What an item holds now: its row, its take's, and a MIDI take's notes that play, with each one's index as REAPER reads it.
-    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<(ItemTake, Vec<usize>, bool), String> {
+    async fn material_now(
+        &self,
+        item: &Value,
+        anchors: &[Note],
+        keep_hidden: bool,
+        signal: &Signal,
+    ) -> Result<(ItemTake, Vec<usize>), String> {
         let take_ref = item.get("takeRef").and_then(Value::as_str).ok_or("the item has no take")?;
         let take = self.one(take_ref, signal).await?;
         let midi = item.get("source").and_then(Value::as_str) == Some(daw_bridge::contract::MIDI_SOURCE);
-        let mut hidden = false;
         let (indexes, notes) = if midi {
             let count = take.get("noteCount").and_then(Value::as_u64).unwrap_or(0);
             if count > MOST_NOTES {
@@ -171,11 +176,7 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             if (rows.len() as u64) < count {
                 return Err(format!("Kumi read {} of that take's {count} notes: try again", rows.len()));
             }
-            hidden = plays_again(item, &take)
-                && rows.iter().any(|row| {
-                    row.get("muted") != Some(&Value::Bool(true)) && row.get("start").and_then(Value::as_f64).is_some_and(|start| start < 0.)
-                });
-            played(&rows).into_iter().unzip()
+            played(&rows, keep_hidden || plays_again(item, &take)).into_iter().unzip()
         } else {
             Default::default()
         };
@@ -194,7 +195,7 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             anchors: anchors.to_vec(),
             ticks: if midi { Ticks::of(&take) } else { Ticks::Unsaid },
         };
-        Ok((material, indexes, hidden))
+        Ok((material, indexes))
     }
 
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
@@ -230,16 +231,18 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
     }
 }
 
-/// A MIDI take's notes that play, of its note rows, each with its index as read: not its muted ones, nor those a trimmed start
-/// hides (written, one would sound at the item's start); one held across the start plays from it.
-fn played(rows: &[Value]) -> Vec<(usize, Note)> {
+/// A MIDI take's notes that play, of its note rows, each with its index as read: not its muted ones. When the item
+/// plays its source again, notes before its trimmed start stay at their negative starts for the later passes. Without
+/// a wrap, those notes are left out, except for the part of a held note that sounds across the item's start.
+fn played(rows: &[Value], wraps: bool) -> Vec<(usize, Note)> {
     rows.iter()
         .enumerate()
         .filter(|(_, row)| row.get("muted") != Some(&Value::Bool(true)))
         .filter_map(|(at, row)| {
             let mut note = Note::of(row)?;
             let start = row.get("start").and_then(Value::as_f64).unwrap_or(0.);
-            if start < 0. {
+            if start < 0. && !wraps {
+                note.start = 0.;
                 note.length = round(start + note.length);
                 if note.length <= 0. {
                     return None;
@@ -281,16 +284,12 @@ fn plays_again(item: &Value, take: &Value) -> bool {
     }
 }
 
-/// Why an item can't be a source, in words: one that plays its source again, with notes its trimmed start hides. Those play from its second pass on,
-/// and a take can only write notes from its start, so it'd lose them there. Or a pooled one, by an extension that still says
-/// "midipool": it can't read that item's notes.
-fn refused_source(item: &Value, hidden: bool) -> Option<String> {
+/// Why an item can't be a source: a pooled one, by an extension that still says "midipool", can't have its notes read.
+fn refused_source(item: &Value) -> Option<String> {
     if item.get("source").and_then(Value::as_str) == Some("midipool") {
         return Some("that MIDI item is pooled, and the extension REAPER has loaded can't read a pooled item's notes: restart REAPER to load the new one".into());
     }
-    hidden.then(|| {
-        "that item loops, and its trimmed start hides notes that play from its second pass on, which a take can't hold yet: drag its start back over them, or vary it without the loop".to_string()
-    })
+    None
 }
 
 /// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
@@ -505,8 +504,8 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .ok()
             .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
-        let (mut material, indexes, hidden) = self.material_now(&item, &[], signal).await?;
-        if let Some(why) = refused_source(&item, hidden) {
+        let (mut material, indexes) = self.material_now(&item, &[], false, signal).await?;
+        if let Some(why) = refused_source(&item) {
             return Err(why);
         }
         // (the anchors: a MIDI take's notes by their index as read, which counts the ones that don't play)
@@ -581,7 +580,8 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .iter()
             .map(|line| Note::of(line).ok_or_else(|| format!("a note needs pitch, start and length: {line}")))
             .collect::<Result<_, _>>()?;
-        Ok(ItemTake { notes: with_anchors(notes, &base.anchors), ..base.clone() })
+        let fixed = with_anchors(base.notes.iter().filter(|note| note.start < 0.).cloned().collect(), &base.anchors);
+        Ok(ItemTake { notes: with_anchors(notes, &fixed), ..base.clone() })
     }
 
     fn empty(&self, set: &ReaperSet) -> ItemTake {
@@ -598,7 +598,9 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         if !source.midi && take.offset - source.offset > ATTACK + 5e-5 {
             return Err(format!("its start moved {:.0} ms into the sound: past its attack", (take.offset - source.offset) * 1000.));
         }
-        anchors_in(&source.anchors, &take.notes)
+        anchors_in(&source.anchors, &take.notes)?;
+        let hidden: Vec<Note> = source.notes.iter().filter(|note| note.start < 0.).cloned().collect();
+        anchors_in(&hidden, &take.notes)
     }
 
     fn judge(&self, source: Option<&ItemTake>, take: &ItemTake, ops: &[Value], _factor: f64) -> Vec<String> {
@@ -696,7 +698,10 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             Some(take) => take.material.anchors.clone(),
             None => set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default(),
         };
-        let (now, ..) = self.material_now(row, &anchors, signal).await?;
+        // A length change can stop a made take from wrapping; its hidden notes still belong to the whole source it
+        // holds, and must read back for comparison with what Kumi kept, even while that shorter item doesn't play them.
+        let keep_hidden = kept.is_some_and(|take| take.material.notes.iter().any(|note| note.start < 0.));
+        let (now, ..) = self.material_now(row, &anchors, keep_hidden, signal).await?;
         Ok(match kept {
             Some(take) => as_kept(now, &take.material),
             None => now,
@@ -890,7 +895,7 @@ mod tests {
     fn every_change_a_take_makes_fits_its_reaper_kind() {
         use crate::changes::CHANGES;
         use kumi_agent::kernel::schema::problem;
-        let note = Note { pitch: 38, start: 0.5, length: 0.25, velocity: 90, channel: 10 };
+        let note = Note { pitch: 38, start: -0.5, length: 0.25, velocity: 90, channel: 10 };
         let midi = ItemTake { midi: true, notes: vec![note], ..audio() };
         let mut made = settings(&midi, Some("V1 \u{b7} snare"));
         made["ref"] = json!("item:1");
@@ -989,8 +994,10 @@ mod tests {
     fn the_notes_of_a_take_are_those_that_play_with_their_indexes_as_read() {
         let row = |index: u64, start: f64, length: f64, muted: bool| json!({"index": index, "pitch": 60, "start": start, "length": length, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
         let rows = [row(0, -0.5, 0.25, false), row(1, -0.25, 0.75, false), row(2, 0.5, 0.25, true), row(3, 1., 0.25, false)];
-        let notes: Vec<(usize, f64, f64)> = played(&rows).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
+        let notes: Vec<(usize, f64, f64)> = played(&rows, false).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
         assert_eq!(notes, [(1, 0., 0.5), (3, 1., 0.25)]);
+        let looped: Vec<(usize, f64, f64)> = played(&rows, true).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
+        assert_eq!(looped, [(0, -0.5, 0.25), (1, -0.25, 0.75), (3, 1., 0.25)], "a wrap keeps the hidden notes whole for later passes");
     }
 
     /// Anchors go by REAPER's own index, which counts the notes that don't play: past a muted note, the old count named the next.
@@ -998,7 +1005,7 @@ mod tests {
     fn anchors_are_by_the_index_reaper_reads_past_a_muted_note() {
         let row = |index: u64, pitch: i64, muted: bool| json!({"index": index, "pitch": pitch, "start": index as f64, "length": 0.25, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
         let (indexes, notes): (Vec<usize>, Vec<Note>) =
-            played(&[row(0, 60, false), row(1, 61, true), row(2, 62, false), row(3, 63, false)]).into_iter().unzip();
+            played(&[row(0, 60, false), row(1, 61, true), row(2, 62, false), row(3, 63, false)], false).into_iter().unzip();
         let pitches =
             |wanted: &[usize]| anchors_of(&indexes, &notes, wanted).map(|kept| kept.iter().map(|note| note.pitch).collect::<Vec<_>>());
         assert_eq!(pitches(&[0, 3]).unwrap(), [60, 63], "index 3 is the note at 3, not the fourth that plays");
@@ -1006,13 +1013,12 @@ mod tests {
         assert!(pitches(&[9]).unwrap_err().contains("anchor 9"));
     }
 
-    /// A looped item with notes behind its trim says why it can't be varied (they play from its second pass); hidden notes of an item
-    /// that doesn't loop never play, and a looped item with none hidden loses nothing.
+    /// Only an item that actually plays its source again needs the notes behind its trim: the loop flag alone doesn't
+    /// make a short item wrap. A source that wraps can be varied, keeping those notes at their negative starts.
     #[test]
-    fn a_looped_item_with_hidden_notes_is_refused_in_words() {
+    fn a_looped_item_keeps_its_hidden_notes_only_when_it_reaches_its_source_again() {
         let looped = json!({"source": "mid", "loop": true});
-        assert!(refused_source(&looped, true).unwrap().contains("second pass"));
-        assert_eq!(refused_source(&looped, false), None);
+        assert_eq!(refused_source(&looped), None);
         // Loop is on by default for a new MIDI item, so only an item that runs past its source's end plays it again.
         let item = |beats: f64, on: bool| json!({"loop": on, "lengthBeats": beats});
         let take = json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.0});
@@ -1029,7 +1035,7 @@ mod tests {
         assert!(plays_again(&item(1., true), &json!({"ticksPerQuarter": null})), "bent ticks can't say");
         assert!(!plays_again(&item(8., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0})), "an extension that doesn't say");
         // (an extension not reloaded yet still says "midipool", and can't read its notes)
-        assert!(refused_source(&json!({"source": "midipool"}), false).unwrap().contains("restart REAPER"));
+        assert!(refused_source(&json!({"source": "midipool"})).unwrap().contains("restart REAPER"));
     }
 
     /// A MIDI take's operators are those that move something: REAPER writes notes at the project's beats whatever its playrate
@@ -1122,6 +1128,12 @@ mod tests {
     #[test]
     fn a_take_with_a_start_offset_reads_back_as_kept_on_its_ticks() {
         reads_back_as_kept(a_riff(), note_direction_ops("looser"), 960., 23.616);
+        let mut hidden = a_riff();
+        hidden.insert(0, a_note(36, -0.0123, 0.01));
+        reads_back_as_kept(hidden, note_direction_ops("looser"), 960., 23.616);
+        let mut hidden_at_source_start = a_riff();
+        hidden_at_source_start.insert(0, a_note(36, -1., 0.25));
+        reads_back_as_kept(hidden_at_source_start, note_direction_ops("looser"), 960., 960.);
     }
 
     /// A MIDI file's own resolution stays with its take (`HASDATA 1 480 QN`, lab).

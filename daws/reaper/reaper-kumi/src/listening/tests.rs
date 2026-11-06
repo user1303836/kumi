@@ -1800,7 +1800,7 @@ fn a_scratch_copy_has_every_id_new_and_reaches_nothing_of_the_producers() {
     let copies = made["copies"].as_array().unwrap();
     assert_eq!(
         copies.iter().map(|c| c["name"].as_str().unwrap()).collect::<Vec<_>>(),
-        ["Kumi · try 1k9z 1", "Kumi · try 1k9z 2", "Kumi · try 1k9z 3"]
+        ["Kumi · try s1k9z 1", "Kumi · try s1k9z 2", "Kumi · try s1k9z 3"]
     );
     assert!(daw_bridge::contract::misplaced_refs(&made).is_empty());
     fake::with(|s| {
@@ -1837,6 +1837,14 @@ fn a_scratch_copy_has_every_id_new_and_reaches_nothing_of_the_producers() {
     assert_eq!(journal.len(), 1);
     assert_eq!(journal[0].copies.len(), 3);
     assert_eq!(format!("r:track:{}", journal[0].source), kick);
+    // A different set with the same four-character tail keeps its own names, GUIDs and cleanup ownership.
+    let second = make(&rig, "s21k9z", &kick, 1);
+    assert_eq!(second["copies"][0]["name"], "Kumi · try s21k9z 1");
+    assert_ne!(second["copies"][0]["name"], made["copies"][0]["name"]);
+    assert_ne!(second["copies"][0]["ref"], made["copies"][0]["ref"]);
+    let dropped = rig.ask("scratch", json!({"action":"drop", "scratchId":"s21k9z"})).unwrap();
+    assert_eq!(dropped["dropped"], 1);
+    fake::with(|s| assert_eq!(s.tracks.len(), 7, "dropping the later set keeps the first three copies"));
 }
 
 #[test]

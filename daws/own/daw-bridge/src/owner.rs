@@ -1,5 +1,5 @@
 //! Files and folders only their owner can read: mode 0600/0700 on unix; on Windows a protected DACL whose one rule
-//! gives the current user full control, then checked. The PowerShell scripts are the twins of kumi-runtime's
+//! gives the current user full control, then checked. The PowerShell scripts are the twins of kumi-ai's
 //! auth/store.rs and ableton-mcp-server's lifecycle/delivery/acl.rs: keep them in step.
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ const SECURE_FILE: &str = "$a=New-Object System.Security.AccessControl.FileSecur
 #[cfg(windows)]
 const SECURE_DIRECTORY: &str = "$a=New-Object System.Security.AccessControl.DirectorySecurity;$a.SetAccessRuleProtection($true,$false);$inherit=[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit';$rule=New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @($sid,[System.Security.AccessControl.FileSystemRights]::FullControl,$inherit,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow);[void]$a.AddAccessRule($rule);[System.IO.Directory]::SetAccessControl($p,$a);if ([System.IO.Directory]::GetAccessControl($p).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { $o=New-Object System.Security.AccessControl.DirectorySecurity;$o.SetOwner($sid);[System.IO.Directory]::SetAccessControl($p,$o) };";
 #[cfg(windows)]
-const DIRECTORY_CHECKS: &str = "$c=[System.IO.Directory]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }exit 0";
+const DIRECTORY_CHECKS: &str = "$c=[System.IO.Directory]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }$rule=$rules[0];if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }if ($rule.IsInherited) { exit 6 }if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }exit 0";
 
 /// What a failed Windows check found, by its exit code.
 #[cfg(windows)]

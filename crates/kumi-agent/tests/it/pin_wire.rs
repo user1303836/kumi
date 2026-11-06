@@ -1569,6 +1569,7 @@ fn daw_pictures() -> Vec<ChangeRecord> {
 
 fn picture_kind(picture: &ChangePicture) -> &'static str {
     match picture {
+        ChangePicture::Across { .. } => "across",
         ChangePicture::Values { .. } => "values",
         ChangePicture::Eq { .. } => "eq",
         ChangePicture::Dynamics { .. } => "dynamics",

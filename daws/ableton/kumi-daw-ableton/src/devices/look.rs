@@ -276,12 +276,13 @@ pub fn lay_out(controls: &[Control], extras: &Extras) -> Face {
                 }
             }
             playhead = true;
-            x += blocks as f64 * (block_width + GAP) - GAP;
+            x += (blocks as f64 * (block_width + GAP) - GAP).max(text_width(&heading).max(40.0));
             continue;
         }
         divide(&mut x, &mut marks, &mut first);
         let top = if name.is_empty() { MARGIN } else { MARGIN + HEADING };
         let tall = HEIGHT - MARGIN - top;
+        let heading_right = x + if name.is_empty() { 0.0 } else { text_width(name).max(40.0) };
         if !name.is_empty() {
             marks.push(Mark::Heading { text: name.clone(), rect: [x, MARGIN, text_width(name).max(40.0), HEADING - 2.0] });
         }
@@ -310,7 +311,7 @@ pub fn lay_out(controls: &[Control], extras: &Extras) -> Face {
             }
             column_x += widest + 6.0;
         }
-        x = column_x - 6.0;
+        x = (column_x - 6.0).max(heading_right);
     }
     let mut pictures = Vec::new();
     for (w, h) in &extras.pictures {
@@ -647,6 +648,13 @@ mod tests {
         assert!(face.spots[2].rect[1] > face.spots[0].rect[1]);
         assert!(face.spots[1].rect[0] > face.spots[6].rect[0], "Output is right of everything");
         assert!(face.spots[5].label.is_some() && face.spots[0].label.is_none(), "a menu has a label; a dial shows its own name");
+        // A MIDI effect has no Output group to make the face wider: its last group's heading must fit too. The same
+        // space is reserved before another group, so a long heading can't run across the next section.
+        for controls in
+            [vec![number("Rate", "A long final heading")], vec![number("Rate", "A long first heading"), number("Amount", "Next")]]
+        {
+            tidy(&lay_out(&controls, &Extras::default()));
+        }
     }
 
     #[test]

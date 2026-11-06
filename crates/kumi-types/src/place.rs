@@ -64,6 +64,7 @@ fn prefix(daw: DawId) -> Option<&'static str> {
         DawId::Ableton => None,
         DawId::Reaper => Some("reaper"),
         DawId::Renoise => Some("renoise"),
+        DawId::Logic => Some("logic"),
         DawId::SoundCraft => Some("soundcraft"),
     }
 }
@@ -124,6 +125,7 @@ pub fn unsaved(daw: DawId) -> &'static str {
         DawId::Ableton => UNSAVED,
         DawId::Reaper => "reaper-unsaved",
         DawId::Renoise => "renoise-unsaved",
+        DawId::Logic => "logic-unsaved",
         DawId::SoundCraft => "soundcraft-unsaved",
     }
 }
@@ -144,17 +146,30 @@ mod tests {
             "reaper-unsaved",
             &format!("renoise-{ID}"),
             "renoise-unsaved",
+            &format!("logic-{ID}"),
+            "logic-unsaved",
             &format!("soundcraft-{ID}"),
             "soundcraft-unsaved",
         ] {
             assert_eq!(Place::parse(text).map(|place| place.text()).as_deref(), Some(text), "{text}");
         }
-        for text in ["A2DFD5F2CF329C593C5FDC7448524087", "unsaved:x", "../unsaved", "reaper-", "reaper-x", "ableton-unsaved", "", &ID[..31]]
-        {
+        for text in [
+            "A2DFD5F2CF329C593C5FDC7448524087",
+            "unsaved:x",
+            "../unsaved",
+            "reaper-",
+            "reaper-x",
+            "ableton-unsaved",
+            "logic-",
+            "logic-x",
+            "",
+            &ID[..31],
+        ] {
             assert_eq!(Place::parse(text), None, "{text}");
         }
         assert_eq!(unsaved(DawId::Ableton), "unsaved");
         assert_eq!(unsaved(DawId::Renoise), "renoise-unsaved");
+        assert_eq!(unsaved(DawId::Logic), "logic-unsaved");
         for daw in DawId::ALL {
             assert_eq!(Place::parse(unsaved(daw)), Some(Place::Unsaved(daw)));
         }
@@ -165,12 +180,18 @@ mod tests {
         assert!(kept_for(ID, DawId::Ableton) && kept_for("unsaved", DawId::Ableton) && kept_for("imported", DawId::Reaper));
         assert!(kept_for(&format!("reaper-{ID}"), DawId::Reaper) && kept_for("renoise-unsaved", DawId::Renoise));
         assert!(!kept_for(&format!("reaper-{ID}"), DawId::Ableton) && !kept_for(ID, DawId::Renoise));
+        assert!(kept_for(&format!("logic-{ID}"), DawId::Logic) && kept_for("logic-unsaved", DawId::Logic));
+        assert!(!kept_for(&format!("logic-{ID}"), DawId::Ableton) && !kept_for(ID, DawId::Logic));
     }
 
     #[test]
     fn a_store_takes_only_the_places_of_the_daws_it_knows() {
         assert!(Places::LIVE.parse(ID).is_some() && Places::LIVE.parse("unsaved").is_some() && Places::LIVE.parse("imported").is_some());
         assert_eq!(Places::LIVE.parse(&format!("reaper-{ID}")), None);
+        assert_eq!(Places::LIVE.parse("logic-unsaved"), None);
+        let logic = Places(&[DawId::Logic]);
+        assert!(logic.is_project(&format!("logic-{ID}")) && logic.parse("logic-unsaved").is_some());
+        assert!(logic.parse("reaper-unsaved").is_none() && logic.parse(ID).is_none());
         let both = Places(&[DawId::Ableton, DawId::Reaper]);
         assert!(both.is_project(&format!("reaper-{ID}")) && !both.is_project("reaper-unsaved") && both.parse("renoise-unsaved").is_none());
     }

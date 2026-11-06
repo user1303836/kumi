@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import io
+import inspect
 import json
 import secrets
 import select as _select
@@ -351,9 +352,9 @@ _LEGACY_NOTE_CALLS = ("remove_notes", "replace_selected_notes")
 # set to "Main", the main output (#195); Live 11 called it "Master". Recording the mix goes through
 # "Resampling", as Kumi's own capture does.
 _CRASHING_INPUTS = frozenset({"Main", "Master"})
-INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing ran. "
-                   "To record the mix, set the input to \"Resampling\", which is what Main plays. A script that sets an output to Main "
-                   "and an input to something else can do them in two scripts; a track named Main or Master needs another name to be an input.")
+_INPUT_ROUTING_WRITES = frozenset({"input_routing_type", "input_routing_channel", "current_input_routing", "current_input_sub_routing"})
+INPUT_FROM_MAIN = ("Live crashes when a track's input is set to Main (Live 12.4: unsaved work is lost), so nothing changed. "
+                   "To record the mix, set the input to \"Resampling\", which is what Main plays. Use the typed routing preview/apply tools to check the input's identity.")
 # python.run's error type for a failure after the code ran (its result, the deadline after it, its undo step):
 # Live may have changed, which Kumi records as unconfirmed rather than "nothing changed".
 PYTHON_RAN = "RanResultUnavailable"
@@ -370,9 +371,8 @@ def _absolute_file_path(path: Any) -> bool:
     return len(path) > 2 and path[0].isascii() and path[0].isalpha() and path[1] == ":" and path[2] in "\\/"
 
 
-def _sets_input_from_main(code: Any) -> bool:
-    """Whether a compiled script assigns a track's input routing and names Main (or Master) anywhere:
-    crude by design, since the choice is usually found by its name. Its functions are included."""
+def _input_routing_script(code: Any) -> tuple[bool, set[str]]:
+    """Recognized input writes in this script and its functions; this is not a Python sandbox."""
     try:
         import dis
     except ImportError:
@@ -380,12 +380,19 @@ def _sets_input_from_main(code: Any) -> bool:
     sets_input = False; strings: set[str] = set(); pending = [code]
     while pending:
         current = pending.pop()
-        if dis is None: sets_input = sets_input or "input_routing_type" in current.co_names
-        else: sets_input = sets_input or any(instruction.opname == "STORE_ATTR" and instruction.argval == "input_routing_type" for instruction in dis.get_instructions(current))
+        if dis is None: sets_input = sets_input or bool(_INPUT_ROUTING_WRITES.intersection(current.co_names))
+        else: sets_input = sets_input or any(instruction.opname == "STORE_ATTR" and instruction.argval in _INPUT_ROUTING_WRITES for instruction in dis.get_instructions(current))
+        local_strings = {constant for constant in current.co_consts if isinstance(constant, str)}
+        sets_input = sets_input or ("setattr" in current.co_names and bool(_INPUT_ROUTING_WRITES & local_strings))
         for constant in current.co_consts:
             if isinstance(constant, str): strings.add(constant)
             elif hasattr(constant, "co_consts"): pending.append(constant)
-    return (sets_input or "input_routing_type" in strings) and bool(strings & _CRASHING_INPUTS)
+    return sets_input, strings
+
+
+def _sets_input_from_main(code: Any) -> bool:
+    writes, strings = _input_routing_script(code)
+    return writes and bool(strings & _CRASHING_INPUTS)
 
 
 def _legacy_note_calls(code: Any) -> list[str]:
@@ -661,7 +668,7 @@ MAX_OWNERSHIP_LEDGER = 1_000_000
 # ownership fingerprints ignore them so cleanup of created objects is not refused for nothing.
 _VOLATILE_TRACK_FIELDS = frozenset({"armed", "implicitArm", "isSelected", "isVisible", "foldState", "view", "playingSlotIndex", "firedSlotIndex", "backToArranger", "mutedViaSolo", "performanceImpact", "inputMeterLeft", "inputMeterRight", "inputMeterLevel", "outputMeterLeft", "outputMeterRight", "outputMeterLevel"})
 # How many routing choices a track offers depends on the other tracks (a new MIDI track is a new MIDI source), not on the track.
-_VOLATILE_ROUTING_FIELDS = frozenset({"availableInputTypes", "availableInputChannels", "availableOutputTypes", "availableOutputChannels"})
+_VOLATILE_ROUTING_FIELDS = frozenset({"availableInputTypes", "availableInputChannels", "availableOutputTypes", "availableOutputChannels", "inputTypeSafety"})
 _VOLATILE_SLOT_FIELDS = frozenset({"playingStatus", "willRecordOnStart", "fireButtonState"})
 # A clip's playback state moves while the Set plays (its position every tick): a created track's or
 # scene's clips are fingerprinted without it, so its undo works while the song plays. Mirrored in the host.
@@ -10592,6 +10599,8 @@ class LiveObjectMapper:
                 sys.settrace(trace)
                 compiled = compile(code, "<python.run>", mode)
                 if _sets_input_from_main(compiled): raise ValueError(INPUT_FROM_MAIN)
+                if _input_routing_script(compiled)[0]:
+                    raise ValueError("Python input-routing assignments cannot be checked safely before they run; nothing ran. Use the typed routing preview/apply tools so Live's actual input routing identity is checked before changing it.")
                 legacy = _legacy_note_calls(compiled)
                 if legacy:
                     raise ValueError(f"{' and '.join(legacy)} {'is' if len(legacy) == 1 else 'are'} Live's old way to remove notes: Live would stop to ask the producer before it ran, and the notes would lose their MPE, probability and velocity data. Nothing ran. "
@@ -12567,7 +12576,61 @@ class LiveObjectMapper:
             "availableInputChannels": len(self._items(self._read_attr(track, "available_input_routing_channels") or [])),
             "availableOutputTypes": len(self._items(self._read_attr(track, "available_output_routing_types") or [])),
             "availableOutputChannels": len(self._items(self._read_attr(track, "available_output_routing_channels") or [])),
+            "inputTypeSafety": self._input_type_safety(track),
         }
+
+    def _input_from_main(self, choice: Any) -> bool | None:
+        """The native source, independent of its translated display name; None means unreadable.
+
+        Use Live.Routing.RoutingTypeCategory (also declared by Live's shipped Push model)
+        or the actual category's enum type, never a guessed integer. Attachment establishes identity even on
+        Live versions that do not expose that enum to Python.
+        """
+        missing = object()
+        def read(owner: Any, name: str) -> Any:
+            if isinstance(owner, dict): return owner.get(name, missing)
+            try: return getattr(owner, name)
+            except AttributeError:
+                # A declared property that throws is not an older API without the property.
+                if inspect.getattr_static(owner, name, missing) is not missing: raise
+                return missing
+        attached_same = None
+        try:
+            attached = read(choice, "attached_object")
+            if attached is not missing and attached is not None:
+                main = getattr(self.song, "master_track")
+                if main is None: return None
+                attached_same = self._capture_same_object(attached, main, self._capture_object_identity(main))
+                if attached_same: return True
+        except Exception:
+            return None
+        try:
+            category = read(choice, "category")
+            if category is missing:
+                if attached_same is False: return False
+                return self._capture_route_label(choice).strip() in _CRASHING_INPUTS
+            if category is None: return None
+            enum = getattr(getattr(_live_module(), "Routing", None), "RoutingTypeCategory", type(category))
+            master = getattr(enum, "master", missing)
+            if master is missing: return False if attached_same is False else None
+            if isinstance(category, bool): return None
+            return bool(enum(category) == master)
+        except Exception:
+            return None
+
+    def _input_type_safety(self, track: Any) -> list[dict[str, Any]] | None:
+        """JSON facts for the host's same input guard; unknown never becomes safe."""
+        try:
+            choices = list(getattr(track, "available_input_routing_types"))
+            if len(choices) > MAX_DISCOVERY_COLLECTION_LENGTH: return None
+            return [{"name": self._capture_route_label(choice), "isMain": self._input_from_main(choice)} for choice in choices]
+        except Exception:
+            return None
+
+    def _require_safe_input(self, choice: Any) -> None:
+        main = self._input_from_main(choice)
+        if main is True: raise ValueError(INPUT_FROM_MAIN)
+        if main is None: raise ValueError("Live's input routing identity is unreadable; nothing changed")
 
     def _routing_choice(self, track: Any, available_name: str, label: str) -> Any:
         if label is None:
@@ -12625,6 +12688,17 @@ class LiveObjectMapper:
         monitoring = args.get("monitoring")
         if monitoring is not None and monitoring not in {"in", "auto", "off"}:
             raise ValueError("monitoring is invalid")
+        if args.get("inputType") is not None or args.get("inputSubRouting") is not None:
+            deferred_input = False
+            try:
+                proposed_input = self._routing_choice(track, "available_input_routing_types", args["inputType"]) if args.get("inputType") is not None else getattr(track, "input_routing_type")
+            except ValueError as error:
+                if args.get("outputType") is None:
+                    raise ValueError(f"Live doesn't offer {args['inputType'][:80]} for this track now; nothing changed") from error
+                # An output switch can make a previously unavailable input appear. The
+                # actual object is still checked before its setter; failure rolls back.
+                deferred_input = True
+            if not deferred_input: self._require_safe_input(proposed_input)
         # Refuse any direct or transitive track routing cycle before the first
         # Live mutation; label ambiguity is treated conservatively as every
         # matching track edge rather than guessed away.
@@ -12655,9 +12729,13 @@ class LiveObjectMapper:
             for group in route_groups:
                 applied_groups.append(group)
                 if group["typeLabel"] is not None:
-                    route_type = self._routing_choice(track, group["availableTypes"], group["typeLabel"]); setattr(track, group["typeAttribute"], route_type)
+                    route_type = self._routing_choice(track, group["availableTypes"], group["typeLabel"])
+                    if group["direction"] == "input": self._require_safe_input(route_type)
+                    setattr(track, group["typeAttribute"], route_type)
                 if group["channelLabel"] is not None:
-                    channel = self._routing_choice(track, group["availableChannels"], group["channelLabel"]); setattr(track, group["channelAttribute"], channel)
+                    channel = self._routing_choice(track, group["availableChannels"], group["channelLabel"])
+                    if group["direction"] == "input": self._require_safe_input(getattr(track, "input_routing_type"))
+                    setattr(track, group["channelAttribute"], channel)
             for owner, name, value, _ in extra_assignments: setattr(owner, name, value)
             row = self._routing_row(track); checks = []
             if args.get("inputType") is not None: checks.append(row["inputType"] == args["inputType"])
@@ -12679,7 +12757,10 @@ class LiveObjectMapper:
                 except BaseException: rollback_failed = True
             for group in reversed(applied_groups):
                 try:
-                    if group["typeLabel"] is not None: setattr(track, group["typeAttribute"], group["priorType"])
+                    if group["typeLabel"] is not None:
+                        if group["direction"] == "input": self._require_safe_input(group["priorType"])
+                        setattr(track, group["typeAttribute"], group["priorType"])
+                    if group["direction"] == "input": self._require_safe_input(getattr(track, "input_routing_type"))
                     setattr(track, group["channelAttribute"], group["priorChannel"])
                 except BaseException: rollback_failed = True
             restored_routing = self._routing_row(track); restored_state = {"inputType": restored_routing.get("inputType"), "inputSubRouting": restored_routing.get("inputSubRouting"), "outputType": restored_routing.get("outputType"), "outputSubRouting": restored_routing.get("outputSubRouting"), "arm": self._armed(track), "monitoring": self._monitoring_state(self._read_attr(track, "current_monitoring_state"))}

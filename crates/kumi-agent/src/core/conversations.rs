@@ -1219,6 +1219,23 @@ impl FileConversationStore {
                 imported,
             });
         }
+        // Kumi 1.17 kept forkedFrom but did not know imported. Recover the mark along that chain, including forks
+        // of forks, without trusting the words of a conversation or depending on row order.
+        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut imported: Vec<String> = rows.iter().filter(|row| row.imported).map(|row| row.id.clone()).collect();
+        for (at, row) in rows.iter().enumerate() {
+            if let Some(from) = &row.forked_from {
+                children.entry(from.clone()).or_default().push(at);
+            }
+        }
+        while let Some(id) = imported.pop() {
+            for at in children.remove(&id).unwrap_or_default() {
+                if !rows[at].imported {
+                    rows[at].imported = true;
+                    imported.push(rows[at].id.clone());
+                }
+            }
+        }
         rows.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
         rows
     }

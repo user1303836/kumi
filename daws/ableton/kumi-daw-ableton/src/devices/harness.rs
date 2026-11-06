@@ -56,7 +56,7 @@ fn to_int32(value: f64) -> i32 {
     }
 }
 
-fn bytes_of(event: &MidiEvent) -> Vec<f64> {
+pub(crate) fn bytes_of(event: &MidiEvent) -> Vec<f64> {
     let channel = round(event.channel.unwrap_or(1.0)).clamp(1.0, 16.0) - 1.0;
     let channel = to_int32(channel);
     let b7 = |value: Option<f64>, fallback: f64| round(value.unwrap_or(fallback)).clamp(0.0, 127.0);
@@ -77,7 +77,7 @@ fn bytes_of(event: &MidiEvent) -> Vec<f64> {
 }
 
 /// Bytes the device sent, as events (each at the time its last byte went).
-fn events_of(bytes: &[(f64, f64)]) -> Vec<MidiEvent> {
+pub(crate) fn events_of(bytes: &[(f64, f64)]) -> Vec<MidiEvent> {
     let mut events: Vec<MidiEvent> = Vec::new();
     let mut status: f64 = 0.0;
     let mut data: Vec<f64> = Vec::new();
@@ -470,7 +470,7 @@ fn run_in<'js>(
     Ok(Run { output: events_of(&state.sent), errors: std::mem::take(&mut state.errors), pending, full: full.get(), timed_out: false })
 }
 
-fn describe(event: &MidiEvent) -> String {
+pub(crate) fn describe(event: &MidiEvent) -> String {
     let parts: [String; 7] = [
         event.kind.as_str().to_string(),
         event.pitch.map(|pitch| format!("pitch {}", num(pitch))).unwrap_or_default(),
@@ -488,7 +488,7 @@ fn describe(event: &MidiEvent) -> String {
 }
 
 /// Whether `actual` is what `expected` says: the fields it names, and its time within 3 ms.
-fn matches(expected: &MidiEvent, actual: &MidiEvent) -> bool {
+pub(crate) fn matches(expected: &MidiEvent, actual: &MidiEvent) -> bool {
     if expected.kind != actual.kind {
         return false;
     }
@@ -515,7 +515,7 @@ fn matches(expected: &MidiEvent, actual: &MidiEvent) -> bool {
 }
 
 /// Notes the device turned on and never off.
-fn hanging(output: &[MidiEvent]) -> Vec<String> {
+pub(crate) fn hanging(output: &[MidiEvent]) -> Vec<String> {
     let mut on: Vec<(String, i64)> = Vec::new();
     for event in output {
         let key = format!("{}:{}", num(event.channel.unwrap_or(1.0)), event.pitch.map(num).unwrap_or_else(|| "undefined".to_string()));
@@ -535,7 +535,7 @@ fn hanging(output: &[MidiEvent]) -> Vec<String> {
 }
 
 /// Kumi's own check: a chord, a single note, a controller, a bend and aftertouch, each released.
-static PROBE: LazyLock<Vec<MidiEvent>> = LazyLock::new(|| {
+pub(crate) static PROBE: LazyLock<Vec<MidiEvent>> = LazyLock::new(|| {
     let note = |kind: MidiEventType, pitch: f64, velocity: Option<f64>, at: f64| MidiEvent {
         kind,
         pitch: Some(pitch),

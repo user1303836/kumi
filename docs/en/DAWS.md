@@ -8,6 +8,61 @@ page says what works where. Connecting is in the
 [how Kumi changes your Set](KUMI_CHANGES.md), and the Live bridge's detail in
 the [capability matrix](CAPABILITY_MATRIX.md).
 
+## Logic Pro (experimental reader)
+
+On macOS with Logic Pro 12 or later, explicitly choose `kumi --daw logic` or
+`/daw logic`. Logic is experimental and is not selected automatically. Set up
+its bridge with `kumi --daw logic bridge`; it installs into Kumi's folder and
+keeps an open Logic session running. Allow Accessibility for Kumi's helper in
+System Settings when setup asks; a bridge connection alone does not finish
+that step.
+
+Kumi reads the project, tracks, regions, the selected region's notes, plug-ins,
+sends, markers and tempo. FOCUS shows the channel strip, notes, timeline and
+routing. It reports recording state and can reopen a previously observed saved
+project.
+
+Kumi can change track volume, pan, mute, solo, arm and names; add or delete tracks;
+add, move or delete markers; set whole-number tempo; add, change or delete MIDI
+notes; and bypass plug-ins. It can play, stop and move the playhead. Every change
+is read back and listed in HISTORY with Kumi's undo. Logic has no undo block:
+renames, structural changes, markers and notes make native undo steps, while
+volume, pan, mute, solo, arm, tempo and bypass do not. Kumi restores values as
+new writes and refuses a restore if someone changed the same value afterwards.
+Added tracks, deleted tracks and deleted markers require the producer to review the appropriate step in Logic's Undo History and undo manually;
+Kumi cannot prove ownership from an Undo title and does not press it. Confirmed changes of these kinds remain in HISTORY with a permanent manual-undo note. Marker additions and moves also need manual undo if any required captured identity field was unavailable, including an unexposed Text column. Showing that field later cannot recover its earlier value. Complete visible identity permits fenced marker value restores; discard never bypasses missing identity. A manual-only latest change blocks default Undo instead of undoing an earlier change. Native
+marker, note and structural undo attribution is not inferred from titles alone. An uncertain write is kept uncertain and never resent
+blindly. Listening, goals, scripts and catch-up remain disabled. Offline library lookup and `logic_manual` are available; preset loading remains manual.
+Note reads still require only the requested region selected; normal launch
+creates no MIDI ports. The change methods may activate Logic and operate its
+controls.
+
+The first M4 preview adds only `loop_range` to the 16 M3 kinds. Pass `startBeats`
+and `endBeats` in quarter notes to set and enable Cycle; `0, 0` disables it while
+keeping its locators. Values must align to 960 ticks per quarter note; other fractions are refused. Kumi requires a fresh,
+complete N/4 timebase (N from 1 through 16, /16 division), Custom LCD and the complete Signature List already visible, and stopped nonrecording transport. It fences the cycle's on/off state, both locators
+and meter identity. Unknown or multiple meters, producer cycle edits and changed
+timebase refuse writes or restores; `discard` does not override these checks.
+Cycle changes create no native Undo step. Kumi can restore confirmed values;
+missing original evidence stays in HISTORY with manual guidance. Apart from the two Region value previews below, the remaining M4 kinds and project saving are not enabled, and current native acceptance is pending.
+
+Two further M4 value previews add `region_rename {ref,name}` and
+`region_loop {ref,loop}` (19 kinds total). The requested region must already be
+selected alone, with Inspector and Mixer visible and complete readable project,
+track, region and Inspector facts. Kumi changes only the name or Loop checkbox;
+it does not select a target, post keys, press native Undo or change panes. Unknown,
+duplicate, replaced or producer-changed facts refuse writes/restores even with
+`discard`. Rename invalidates old refs; read again afterwards. A general region
+read does not establish the Inspector Loop value. Missing original evidence is
+manual-only; uncertain writes are never resent. These are limited source previews,
+not general M4 coverage or fresh real-Logic acceptance.
+
+The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
+limits. Replay tests do not establish native acceptance on the current Logic
+version. Developers can build and explicitly run the `accept_logic` example on
+a scratch project to collect a current acceptance report. Automatic change checks
+require `--changes --scratch-confirmed`; the added test track deliberately remains for manual Logic Undo History, and failed restores can leave other edits behind.
+
 ## At a glance
 
 ✓ works. "Live only", "REAPER only" or "Renoise only" is something only that

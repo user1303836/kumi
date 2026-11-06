@@ -44,6 +44,9 @@ const DESCRIPTOR: BridgeDescriptor = BridgeDescriptor {
 
 /// What Kumi reads in SoundCraft, and how.
 pub const DAW: OwnDaw = OwnDaw {
+    busy_words: |code| kumi_daw_own::bridge::busy_words(code, &DawProfile::SOUNDCRAFT),
+    permission_words: str::to_owned,
+    open_project: None,
     profile: &DawProfile::SOUNDCRAFT,
     descriptor: DESCRIPTOR,
     host_flag: "soundcraft",

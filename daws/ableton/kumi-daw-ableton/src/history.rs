@@ -386,11 +386,33 @@ impl LiveHistory for History {
             }
         };
         if result.is_error == Some(true) {
-            let message = head(&result_text(&result), 2048);
+            // The pad bridge can prove that its content guard refused before any write. Keep the applied row and
+            // surface the typed refusal through guarded_undo, so the plugin host records no unsure audit for it.
+            if snapshot.tool.as_deref().is_some_and(|tool| matches!(tool, "load_sample_to_pad" | "load_samples_to_pads")) {
+                let body = result
+                    .structured_content
+                    .as_ref()
+                    .map(|body| json!(body))
+                    .or_else(|| serde_json::from_str::<Value>(&result_text(&result)).ok());
+                if let Some(body) = body.filter(|body| body["code"] == "changed_since") {
+                    let reason = body["reason"].as_str().map(str::to_owned).unwrap_or_else(|| result_text(&result));
+                    self.host.guard.refuse(reason.clone());
+                    return Ok(Some(UndoResult::refused(reason)));
+                }
+            }
+            let text = result_text(&result);
+            let text = if text.trim().is_empty() {
+                result.structured_content.as_ref().map(|body| stringify(&json!(body))).unwrap_or(text)
+            } else {
+                text
+            };
+            let message = head(&text, 2048);
             let lower = message.to_ascii_lowercase();
             let refused = ["modified after apply", "changed before deletion", "undo refused"].iter().any(|s| lower.contains(s));
             let record = if uncertain(&result) && !refused {
-                self.update(entry, ChangeState::Unsure, Some("Live didn't confirm the undo; try again.".into()))
+                // Extract the semantic reason from the complete reply. Cutting serialized JSON first can remove its
+                // closing delimiter and turn a useful reason into a fragment of escaped wire text.
+                self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&text, result.structured_content.as_ref())))
             } else {
                 self.update(entry, ChangeState::Kept, Some(undo_note(&message)))
             };
@@ -398,9 +420,10 @@ impl LiveHistory for History {
         }
         let body = context::payload(&result)?;
         if body.get("state").and_then(Value::as_str) != Some("undone") {
+            let message = stringify(&json!(body));
             return Ok(Some(UndoResult::with(
-                self.update(entry, ChangeState::Unsure, Some("Live didn't confirm the undo; try again.".into())),
-                stringify(&json!(body)),
+                self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&message, Some(&body)))),
+                message,
                 true,
             )));
         }
@@ -650,6 +673,44 @@ impl LiveChanges {
             }
         }
         Ok(false)
+    }
+}
+/// The integration returns the record to `kumi serve`, not UndoResult's text. Keep the bridge's reason with that
+/// record so an unsure undo's audit can explain what failed, without terminal or hidden text controls.
+fn bridge_undo_note(message: &str, structured: Option<&JsonObject>) -> String {
+    let body = serde_json::from_str::<Value>(message).ok();
+    let cause = structured
+        .and_then(|body| body.get("reason"))
+        .and_then(Value::as_str)
+        .or_else(|| body.as_ref().and_then(|body| body.get("reason")).and_then(Value::as_str))
+        .unwrap_or(message);
+    // CSI/OSC escape sequences can contain ordinary characters after the initial escape. Remove the whole sequence
+    // before flattening the remaining controls and formatting characters.
+    static ESCAPES: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])").unwrap());
+    let cause = ESCAPES.replace_all(cause, "");
+    let shown: String = cause
+        .chars()
+        .filter(|c| {
+            !matches!(
+                *c,
+                '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+                    | '\u{E0000}'..='\u{E007F}'
+            )
+        })
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = shown.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cause = match line.char_indices().nth(399) {
+        Some((at, _)) if line.chars().count() > 400 => format!("{}…", &line[..at]),
+        _ => line,
+    };
+    let summary = "Live didn't confirm the undo; inspect the Set before another change.";
+    if cause.is_empty() {
+        summary.into()
+    } else {
+        format!("{summary} Bridge: {cause}")
     }
 }
 pub fn result_text(result: &CallToolResult) -> String {

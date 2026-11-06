@@ -1346,12 +1346,12 @@ impl TuiApp {
                     keys: keys.clone(),
                     ..Default::default()
                 };
-                match self.change_drawn(change, cols, self.picture_height(change)) {
+                match self.change_drawn(change, cols, self.picture_height(change, cols)) {
                     Some((drawn, key)) => {
                         image = key;
                         rows.extend(drawn.rows.into_iter().chain(drawn.lines).map(extra));
                     }
-                    // A run whose changes draw as more than values: each of them, in words.
+                    // A run whose changes have no picture: each of them, in words.
                     None if members.is_some() => {
                         let titles = members.as_ref().map(|(_, titles, _)| titles.clone()).unwrap_or_default();
                         rows.extend(titles.into_iter().map(|title| extra(vec![sp(title, st::DIM)])));

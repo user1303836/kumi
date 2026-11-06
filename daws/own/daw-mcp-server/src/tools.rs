@@ -26,6 +26,12 @@ pub struct Kinds {
 
 pub fn kinds(daw: Daw) -> Kinds {
     match daw {
+        // Logic's native reads and M3 changes; listening is not implemented.
+        Daw::Logic => Kinds {
+            read: &["project", "track", "region", "note", "plugin", "send", "marker", "tempo"],
+            bodies: &["tree", "notes", "timeline", "routing"],
+            outside_undo: crate::logic::OUTSIDE_UNDO,
+        },
         Daw::Reaper => Kinds {
             read: &[
                 "project",
@@ -345,6 +351,11 @@ impl Host {
         };
         match read_params(arguments) {
             Ok(params) => {
+                if self.daw() == Daw::Logic
+                    && params.get("kind").and_then(Value::as_str).is_some_and(|kind| !kinds(Daw::Logic).read.contains(&kind))
+                {
+                    return (json!({"error": "Logic Pro has no such kind to read"}), true);
+                }
                 let by_ref = params.get("ref").is_some();
                 let (mut answer, is_error) = self.paged("read", params, &pick, READ_TIMEOUT).await;
                 // (M4 n-devices) A Renoise device read by ref: what a Doofer, Splitter or Notepad holds, from its preset data.
@@ -381,6 +392,9 @@ impl Host {
         };
         match body_params(arguments, self.daw()) {
             Ok(params) => {
+                if self.daw() == Daw::Logic && !kinds(Daw::Logic).bodies.contains(&params["kind"].as_str().unwrap_or_default()) {
+                    return (json!({"error": "Logic Pro has no such body to read"}), true);
+                }
                 let dsp = params.get("kind").and_then(Value::as_str) == Some("dsp");
                 let (mut answer, is_error) = self.paged("focus_body", params, &pick, READ_TIMEOUT).await;
                 // (M4 n-devices) Renoise's DSP chain: each Doofer's and Splitter's devices as its branches.

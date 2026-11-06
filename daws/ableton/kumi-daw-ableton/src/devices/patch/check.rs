@@ -90,8 +90,37 @@ static REVERSED_DOMAIN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
 /// Max's Live objects that are parameters unless turned off: on a device's face, Kumi makes them only from controls.
-pub(super) const LIVE_PARAMETERS: [&str; 9] =
-    ["live.button", "live.dial", "live.gain~", "live.menu", "live.numbox", "live.slider", "live.tab", "live.text", "live.toggle"];
+const LIVE_PARAMETERS: [&str; 11] = [
+    "live.button",
+    "live.dial",
+    "live.drop",
+    "live.gain~",
+    "mc.live.gain~",
+    "live.menu",
+    "live.numbox",
+    "live.slider",
+    "live.tab",
+    "live.text",
+    "live.toggle",
+];
+
+/// A Live parameter typed as an object, including a Max UI object whose parameter mode is explicitly enabled.
+/// An explicit zero leaves a Live UI object as a display, including one inside a subpatcher.
+pub(crate) fn parameter_in_text(text: &str) -> bool {
+    let words = atoms(text);
+    let enabled = words.windows(2).rev().find(|pair| pair[0] == "@parameter_enable").and_then(|pair| pair[1].parse::<f64>().ok());
+    enabled.map_or_else(|| words.first().is_some_and(|class| LIVE_PARAMETERS.contains(&class.as_str())), |enabled| enabled != 0.0)
+}
+
+/// Whether a saved box is a Live parameter. Max saves a UI object's parameter mode in its fields; older devices Kumi
+/// made can instead hold the object and its attributes as newobj text.
+pub(crate) fn is_parameter(item: &MaxBox) -> bool {
+    match item.fields.get("parameter_enable").and_then(Value::as_f64) {
+        Some(enabled) => enabled != 0.0,
+        None if item.maxclass() == "newobj" => parameter_in_text(item.text()),
+        None => LIVE_PARAMETERS.contains(&item.maxclass()),
+    }
+}
 
 /// A broken rule.
 #[derive(Debug, Clone, PartialEq)]
@@ -414,38 +443,25 @@ impl Checker<'_> {
             .collect();
         let label = labels(patcher);
         self.looked(BOXES_OVERLAP, placed.len());
-        for (index, (item, rect)) in placed.iter().enumerate() {
-            // Boxes a few pixels into each other only touch: Max's rounding, a box grown a little since it was placed, a
-            // comment's empty margin.
-            let shrunk = Rect::new(rect.x + TOUCH, rect.y + TOUCH, (rect.w - 2.0 * TOUCH).max(0.0), (rect.h - 2.0 * TOUCH).max(0.0));
-            for (other, other_rect) in &placed[index + 1..] {
-                if shrunk.overlaps(other_rect) {
-                    self.found(
-                        BOXES_OVERLAP,
-                        at,
-                        format!("{} and {} overlap: move one so both can be read.", label[item.id()], label[other.id()]),
-                    );
-                }
+        let rectangles: Vec<Rect> = placed.iter().map(|(_, rect)| *rect).collect();
+        for (index, others) in overlapping_boxes(&rectangles).into_iter().enumerate() {
+            for other in others {
+                self.found(
+                    BOXES_OVERLAP,
+                    at,
+                    format!("{} and {} overlap: move one so both can be read.", label[placed[index].0.id()], label[placed[other].0.id()]),
+                );
             }
         }
-        let by_id: HashMap<&str, &MaxBox> = patcher.boxes.iter().map(|item| (item.id(), item)).collect();
+        let cords = DrawnCord::all(patcher);
+        let under = boxes_under_cords(&placed, &cords);
         let next = downstream(patcher);
         self.looked(CORD_OVER_BOX, patcher.cords.len());
         self.looked(CORD_UPWARD, patcher.cords.len());
-        for cord in &patcher.cords {
-            let (Some(from), Some(to)) = (by_id.get(cord.from.as_str()), by_id.get(cord.to.as_str())) else { continue };
-            let (Some(source), Some(target)) = (from.rect(), to.rect()) else { continue };
-            let start = outlet_point(&source, from.outlets().max(cord.outlet + 1), cord.outlet);
-            let end = inlet_point(&target, to.inlets().max(cord.inlet + 1), cord.inlet);
-            let points: Vec<[f64; 2]> = std::iter::once(start).chain(cord.midpoints.iter().copied()).chain(std::iter::once(end)).collect();
-            let under: Vec<&MaxBox> = placed
-                .iter()
-                .filter(|(item, _)| item.id() != cord.from && item.id() != cord.to)
-                .filter(|(_, rect)| points.windows(2).any(|pair| rect.crossed_by(pair[0], pair[1], 1.0)))
-                .map(|(item, _)| *item)
-                .collect();
-            if let Some(first) = under.first() {
-                let more = if under.len() > 1 { format!(" and {} more", under.len() - 1) } else { String::new() };
+        for (path, under) in cords.iter().zip(under) {
+            let (from, to, source, end, cord) = (path.from, path.to, path.source, path.end, path.cord);
+            if let Some(first) = under.first {
+                let more = if under.count > 1 { format!(" and {} more", under.count - 1) } else { String::new() };
                 self.found(
                     CORD_OVER_BOX,
                     at,
@@ -453,7 +469,7 @@ impl Checker<'_> {
                         "the cord from {} to {} runs over {}{more}: move the box out of its way, or route the cord around it.",
                         label[from.id()],
                         label[to.id()],
-                        label[first.id()]
+                        label[placed[first].0.id()]
                     ),
                 );
             }
@@ -894,6 +910,230 @@ fn clock_time(item: &MaxBox) -> (bool, bool) {
     (relative, quantized)
 }
 
+/// Closed bounds only discard impossible pairs; the original geometry predicates still decide every finding.
+#[derive(Clone, Copy)]
+struct Bounds {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+impl Bounds {
+    fn new(left: f64, top: f64, right: f64, bottom: f64) -> Option<Self> {
+        if ![left, top, right, bottom].iter().all(|value| value.is_finite()) || left > right || top > bottom {
+            return None;
+        }
+        // Numeric comparisons treat the two zeroes alike; the sweep's total ordering must too.
+        let zero = |value| if value == 0.0 { 0.0 } else { value };
+        Some(Self { left: zero(left), top: zero(top), right: zero(right), bottom: zero(bottom) })
+    }
+
+    fn of(rect: &Rect) -> Option<Self> {
+        Self::new(rect.x, rect.y, rect.right(), rect.bottom())
+    }
+}
+
+/// The active intervals of one side of a sweep, ordered by their tops. A subtree keeps the greatest active bottom:
+/// a query skips it if everything ends above the query, or everything starts below it.
+struct ActiveIntervals {
+    order: Vec<usize>,
+    tops: Vec<f64>,
+    slots: Vec<usize>,
+    leaves: usize,
+    bottoms: Vec<f64>,
+    #[cfg(test)]
+    visits: std::cell::Cell<usize>,
+}
+
+impl ActiveIntervals {
+    fn new(bounds: &[Option<Bounds>]) -> Self {
+        let mut order: Vec<usize> = (0..bounds.len()).filter(|&at| bounds[at].is_some()).collect();
+        order.sort_by(|&a, &b| bounds[a].unwrap().top.total_cmp(&bounds[b].unwrap().top).then(a.cmp(&b)));
+        let tops = order.iter().map(|&at| bounds[at].unwrap().top).collect();
+        let mut slots = vec![0; bounds.len()];
+        for (slot, &at) in order.iter().enumerate() {
+            slots[at] = slot;
+        }
+        let leaves = order.len().max(1).next_power_of_two();
+        Self {
+            order,
+            tops,
+            slots,
+            leaves,
+            bottoms: vec![f64::NEG_INFINITY; 2 * leaves],
+            #[cfg(test)]
+            visits: std::cell::Cell::new(0),
+        }
+    }
+
+    fn set(&mut self, at: usize, bottom: f64) {
+        let mut node = self.leaves + self.slots[at];
+        self.bottoms[node] = bottom;
+        while node > 1 {
+            node /= 2;
+            self.bottoms[node] = self.bottoms[node * 2].max(self.bottoms[node * 2 + 1]);
+        }
+    }
+
+    fn query(&self, top: f64, bottom: f64, mut visit: impl FnMut(usize)) {
+        let until = self.tops.partition_point(|&start| start <= bottom);
+        self.within(1, 0, self.leaves, until, top, &mut visit);
+    }
+
+    fn within(&self, node: usize, left: usize, right: usize, until: usize, top: f64, visit: &mut impl FnMut(usize)) {
+        #[cfg(test)]
+        self.visits.set(self.visits.get() + 1);
+        if left >= until || self.bottoms[node] < top {
+            return;
+        }
+        if right - left == 1 {
+            visit(self.order[left]);
+        } else {
+            let middle = (left + right) / 2;
+            self.within(node * 2, left, middle, until, top, visit);
+            self.within(node * 2 + 1, middle, right, until, top, visit);
+        }
+    }
+}
+
+/// Visits each intersecting area/query pair once. Opening edges precede closing edges, including zero-width bounds,
+/// because touching bounds can still contain a zero-size overlap query or a cord on an inset edge.
+fn sweep(areas: &[Option<Bounds>], queries: &[Option<Bounds>], mut visit: impl FnMut(usize, usize)) {
+    // Overflowed or nonfinite derived geometry uses the exact old predicates, without a bounding assumption.
+    for (area, _) in areas.iter().enumerate().filter(|(_, bounds)| bounds.is_none()) {
+        for query in 0..queries.len() {
+            visit(query, area);
+        }
+    }
+    for (query, _) in queries.iter().enumerate().filter(|(_, bounds)| bounds.is_none()) {
+        for (area, _) in areas.iter().enumerate().filter(|(_, bounds)| bounds.is_some()) {
+            visit(query, area);
+        }
+    }
+    let mut edges = Vec::with_capacity(2 * (areas.len() + queries.len()));
+    for (query, bounds) in [(false, areas), (true, queries)] {
+        for (at, bounds) in bounds.iter().enumerate().filter_map(|(at, bounds)| Some((at, bounds.as_ref()?))) {
+            edges.push((bounds.left, true, query, at));
+            edges.push((bounds.right, false, query, at));
+        }
+    }
+    edges.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)).then(a.3.cmp(&b.3)));
+    let (mut active_areas, mut active_queries) = (ActiveIntervals::new(areas), ActiveIntervals::new(queries));
+    for (_, start, query, at) in edges {
+        if query {
+            let bounds = queries[at].unwrap();
+            if start {
+                active_areas.query(bounds.top, bounds.bottom, |area| visit(at, area));
+            }
+            active_queries.set(at, if start { bounds.bottom } else { f64::NEG_INFINITY });
+        } else {
+            let bounds = areas[at].unwrap();
+            if start {
+                active_queries.query(bounds.top, bounds.bottom, |query| visit(query, at));
+            }
+            active_areas.set(at, if start { bounds.bottom } else { f64::NEG_INFINITY });
+        }
+    }
+}
+
+fn overlapping_boxes(rectangles: &[Rect]) -> Vec<Vec<usize>> {
+    // Only the earlier box is shrunk, just as before: a thin box's zero-width query can still lie inside another.
+    let shrunk: Vec<Rect> = rectangles
+        .iter()
+        .map(|rect| Rect::new(rect.x + TOUCH, rect.y + TOUCH, (rect.w - 2.0 * TOUCH).max(0.0), (rect.h - 2.0 * TOUCH).max(0.0)))
+        .collect();
+    let areas: Vec<_> = rectangles.iter().map(Bounds::of).collect();
+    let queries: Vec<_> = shrunk.iter().map(Bounds::of).collect();
+    let mut overlaps = vec![Vec::new(); rectangles.len()];
+    sweep(&areas, &queries, |earlier, other| {
+        if other > earlier && shrunk[earlier].overlaps(&rectangles[other]) {
+            overlaps[earlier].push(other);
+        }
+    });
+    for others in &mut overlaps {
+        others.sort_unstable();
+    }
+    overlaps
+}
+
+struct DrawnCord<'a> {
+    cord: &'a super::Cord,
+    from: &'a MaxBox,
+    to: &'a MaxBox,
+    source: Rect,
+    start: [f64; 2],
+    end: [f64; 2],
+}
+
+impl<'a> DrawnCord<'a> {
+    fn all(patcher: &'a Patcher) -> Vec<Self> {
+        let by_id: HashMap<&str, &MaxBox> = patcher.boxes.iter().map(|item| (item.id(), item)).collect();
+        patcher
+            .cords
+            .iter()
+            .filter_map(|cord| {
+                let (from, to) = (*by_id.get(cord.from.as_str())?, *by_id.get(cord.to.as_str())?);
+                let (source, target) = (from.rect()?, to.rect()?);
+                Some(Self {
+                    cord,
+                    from,
+                    to,
+                    source,
+                    start: outlet_point(&source, from.outlets().max(cord.outlet + 1), cord.outlet),
+                    end: inlet_point(&target, to.inlets().max(cord.inlet + 1), cord.inlet),
+                })
+            })
+            .collect()
+    }
+
+    fn points(&self) -> impl Iterator<Item = [f64; 2]> + '_ {
+        std::iter::once(self.start).chain(self.cord.midpoints.iter().copied()).chain(std::iter::once(self.end))
+    }
+
+    fn bounds(&self) -> Option<Bounds> {
+        let (mut left, mut right, mut top, mut bottom) = (self.start[0], self.start[0], self.start[1], self.start[1]);
+        let mut last = self.start;
+        for point in self.points() {
+            if ![point[0], point[1], point[0] - last[0], point[1] - last[1]].iter().all(|value| value.is_finite()) {
+                return None;
+            }
+            left = left.min(point[0]);
+            right = right.max(point[0]);
+            top = top.min(point[1]);
+            bottom = bottom.max(point[1]);
+            last = point;
+        }
+        Bounds::new(left, top, right, bottom)
+    }
+
+    fn crosses(&self, rect: &Rect) -> bool {
+        self.points().zip(self.points().skip(1)).any(|(a, b)| rect.crossed_by(a, b, 1.0))
+    }
+}
+
+#[derive(Clone, Default)]
+struct UnderCord {
+    first: Option<usize>,
+    count: usize,
+}
+
+fn boxes_under_cords(placed: &[(&MaxBox, Rect)], cords: &[DrawnCord<'_>]) -> Vec<UnderCord> {
+    let areas: Vec<_> = placed.iter().map(|(_, rect)| Bounds::of(rect)).collect();
+    let queries: Vec<_> = cords.iter().map(DrawnCord::bounds).collect();
+    let mut under = vec![UnderCord::default(); cords.len()];
+    sweep(&areas, &queries, |cord, area| {
+        let path = &cords[cord];
+        let (item, rect) = &placed[area];
+        if item.id() != path.cord.from && item.id() != path.cord.to && path.crosses(rect) {
+            let entry = &mut under[cord];
+            entry.first = Some(entry.first.map_or(area, |first| first.min(area)));
+            entry.count += 1;
+        }
+    });
+    under
+}
+
 /// Each box's cords: the outlet, the box and inlet it goes to.
 fn downstream(patcher: &Patcher) -> HashMap<&str, Vec<(usize, &str, usize)>> {
     let mut next: HashMap<&str, Vec<(usize, &str, usize)>> = HashMap::new();
@@ -956,11 +1196,7 @@ struct Parameter {
 fn parameters(device: &Patcher, patcher: &Patcher, path: &str, at: &str, found: &mut Vec<Parameter>) {
     for item in &patcher.boxes {
         let id_path = if path.is_empty() { item.id().to_string() } else { format!("{path}::{}", item.id()) };
-        let enabled = match item.fields.get("parameter_enable").and_then(Value::as_f64) {
-            Some(enable) => enable == 1.0,
-            None => LIVE_PARAMETERS.contains(&item.maxclass()),
-        };
-        if enabled {
+        if is_parameter(item) {
             let valueof = item.valueof();
             let text = |key: &str| valueof.and_then(|valueof| valueof.get(key)).and_then(Value::as_str).filter(|text| !text.is_empty());
             // The device's own list holds each parameter's name as Max last saved it. An override renames a parameter
@@ -1002,7 +1238,7 @@ fn default_name(name: &str, maxclass: &str) -> bool {
         Some((stem, number)) if number.ends_with(']') && number[..number.len() - 1].chars().all(|c| c.is_ascii_digit()) => stem,
         _ => name,
     };
-    bare == maxclass || (bare.starts_with("live.") && LIVE_PARAMETERS.contains(&bare))
+    bare == maxclass || LIVE_PARAMETERS.contains(&bare)
 }
 
 /// A Push bank: its name and its eight slots ("-" for an empty one).
@@ -1133,6 +1369,155 @@ mod tests {
 
     fn rules(report: &Report) -> Vec<&str> {
         report.findings.iter().map(|finding| finding.rule).collect()
+    }
+
+    #[test]
+    fn the_geometry_sweep_preserves_closed_edges_zeroes_and_fallback_pairs() {
+        let mut areas = vec![Bounds::new(-0.0, 0.0, 0.0, 0.0), Bounds::new(0.0, -3.0, 10.0, 3.0), Bounds::new(10.0, 3.0, 10.0, 3.0), None];
+        let mut queries = vec![Bounds::new(0.0, 0.0, 0.0, 0.0), Bounds::new(10.0, 3.0, 20.0, 5.0), None];
+        for at in 0..80 {
+            let (x, y) = (((at * 17) % 41) as f64 - 20.0, ((at * 11) % 37) as f64 - 18.0);
+            areas.push(Bounds::new(x, y, x + (at % 9) as f64, y + (at % 7) as f64));
+            queries.push(Bounds::new(y, x, y + (at % 5) as f64, x + (at % 11) as f64));
+        }
+        let mut actual = Vec::new();
+        sweep(&areas, &queries, |query, area| actual.push((query, area)));
+        actual.sort_unstable();
+        let expected: Vec<_> = queries
+            .iter()
+            .enumerate()
+            .flat_map(|(q, query)| {
+                areas.iter().enumerate().filter_map(move |(a, area)| {
+                    let intersects = match (area, query) {
+                        (Some(a), Some(q)) => a.left <= q.right && q.left <= a.right && a.top <= q.bottom && q.top <= a.bottom,
+                        _ => true,
+                    };
+                    intersects.then_some((q, a))
+                })
+            })
+            .collect();
+        assert_eq!(actual, expected, "each plausible pair once, including boundary-only pairs and exact-scan fallbacks");
+        let mut empty = Vec::new();
+        sweep(&areas, &[], |query, area| empty.push((query, area)));
+        sweep(&[], &queries, |query, area| empty.push((query, area)));
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn active_intervals_skip_separated_boxes_even_when_all_their_x_spans_meet() {
+        let count = 2_000;
+        let bounds: Vec<_> = (0..count).map(|at| Bounds::new(0.0, at as f64 * 10.0, 100.0, at as f64 * 10.0 + 1.0)).collect();
+        let mut active = ActiveIntervals::new(&bounds);
+        for (at, bounds) in bounds.iter().enumerate() {
+            active.set(at, bounds.unwrap().bottom);
+        }
+        let mut hits = Vec::new();
+        for at in 0..count {
+            active.query(at as f64 * 10.0 + 2.0, at as f64 * 10.0 + 3.0, |hit| hits.push(hit));
+        }
+        assert!(hits.is_empty());
+        assert!(active.visits.get() < count * 32, "whole subtrees are skipped, rather than visiting every active box per query");
+        active.query(0.0, 0.0, |hit| hits.push(hit));
+        assert_eq!(hits, [0], "closed boundaries still find the first interval");
+        active.set(0, f64::NEG_INFINITY);
+        hits.clear();
+        active.query(0.0, 0.0, |hit| hits.push(hit));
+        assert!(hits.is_empty(), "closing an edge removes its interval");
+    }
+
+    #[test]
+    fn swept_overlaps_keep_the_original_asymmetric_touch_margin_and_pair_order() {
+        let mut rectangles = vec![
+            Rect::new(5.0, 5.0, 2.0, 2.0),
+            Rect::new(7.0, 7.0, 4.0, 4.0),
+            Rect::new(-0.0, 0.0, 0.0, 0.0),
+            Rect::new(1.0, 1.0, 6.0, 6.0),
+            Rect::new(10.0, 10.0, 0.0, 30.0),
+            Rect::new(f64::MAX / 2.0, 0.0, f64::MAX, 30.0),
+            Rect::new(f64::MAX * 0.75, 1.0, 0.0, 20.0),
+        ];
+        for at in 0..120 {
+            rectangles.push(Rect::new(
+                ((at * 17) % 71) as f64 - 35.5,
+                ((at * 13) % 67) as f64 - 33.5,
+                (at % 21) as f64,
+                ((at * 7) % 25) as f64,
+            ));
+        }
+        let expected: Vec<Vec<usize>> = rectangles
+            .iter()
+            .enumerate()
+            .map(|(index, rect)| {
+                let shrunk = Rect::new(rect.x + TOUCH, rect.y + TOUCH, (rect.w - 2.0 * TOUCH).max(0.0), (rect.h - 2.0 * TOUCH).max(0.0));
+                (index + 1..rectangles.len()).filter(|&other| shrunk.overlaps(&rectangles[other])).collect()
+            })
+            .collect();
+        assert_eq!(overlapping_boxes(&rectangles), expected);
+        assert!(expected[0].contains(&1), "the old thin-box query is a point beyond the box's own right edge");
+        assert!(expected[2].contains(&3), "zero-size shrunken queries still count when strictly inside another box");
+    }
+
+    #[test]
+    fn swept_cords_keep_the_first_box_and_count_each_box_once_across_all_segments() {
+        let mut boxes: Vec<Value> = (0..80)
+            .map(|at| {
+                newobj(
+                    &format!("box-{at}"),
+                    "print",
+                    [((at * 17) % 31) as f64 * 8.0, ((at * 11) % 37) as f64 * 6.0, (at % 9 + 1) as f64 * 5.0, (at % 7) as f64 * 4.0],
+                    3,
+                    3,
+                )
+            })
+            .collect();
+        boxes.push(newobj("overflow", "print", [f64::MAX / 2.0, 0.0, f64::MAX, 40.0], 1, 1));
+        boxes.push(json!({"box": {"id": "behind", "maxclass": "panel", "patching_rect": [0.0, 0.0, 400.0, 400.0]}}));
+        let lines: Vec<Value> =
+            (0..60).map(|at| cord(&format!("box-{}", at % 80), at % 3, &format!("box-{}", (at * 7 + 13) % 80), (at + 1) % 3)).collect();
+        let mut patcher = read(json!({"boxes": boxes, "lines": lines}));
+        for (at, cord) in patcher.cords.iter_mut().enumerate() {
+            let (x, y) = (((at * 7) % 37) as f64 * 9.0, ((at * 13) % 43) as f64 * 7.0);
+            cord.midpoints = vec![[x, y], [x, y], [-20.0, y], [-20.0, -20.0], [x, -20.0], [x, y]];
+        }
+        patcher.cords[0].midpoints = vec![[-f64::MAX, 10.0], [f64::MAX, 10.0]];
+        patcher.cords[1].midpoints = vec![[f64::NAN, 5.0]];
+        patcher.cords.push(super::super::Cord::new("absent", 0, "box-1", 0));
+        let placed: Vec<_> = patcher
+            .boxes
+            .iter()
+            .filter(|item| !BACKDROPS.contains(&item.maxclass()))
+            .filter_map(|item| Some((item, item.rect()?)))
+            .collect();
+        let by_id: HashMap<_, _> = patcher.boxes.iter().map(|item| (item.id(), item)).collect();
+        let expected: Vec<Vec<usize>> = patcher
+            .cords
+            .iter()
+            .filter_map(|cord| {
+                let (from, to) = (by_id.get(cord.from.as_str())?, by_id.get(cord.to.as_str())?);
+                let (source, target) = (from.rect()?, to.rect()?);
+                let points: Vec<_> = std::iter::once(outlet_point(&source, from.outlets().max(cord.outlet + 1), cord.outlet))
+                    .chain(cord.midpoints.iter().copied())
+                    .chain(std::iter::once(inlet_point(&target, to.inlets().max(cord.inlet + 1), cord.inlet)))
+                    .collect();
+                Some(
+                    placed
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (item, _))| item.id() != cord.from && item.id() != cord.to)
+                        .filter(|(_, (_, rect))| points.windows(2).any(|pair| rect.crossed_by(pair[0], pair[1], 1.0)))
+                        .map(|(at, _)| at)
+                        .collect(),
+                )
+            })
+            .collect();
+        let paths = DrawnCord::all(&patcher);
+        assert!(paths[0].bounds().is_none(), "overflowed segment deltas use the exact scan");
+        assert!(paths[1].bounds().is_none(), "nonfinite points use the exact scan");
+        let actual = boxes_under_cords(&placed, &paths);
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(&expected) {
+            assert_eq!((actual.first, actual.count), (expected.first().copied(), expected.len()));
+        }
     }
 
     #[test]

@@ -346,22 +346,27 @@ async fn ctrl_b_twice_before_its_answer_moves_once() {
 }
 
 /// A session that, as it takes a request, first says how an operation before it ended (Running, then Idle), then
-/// answers. On a thread of its own, an earlier operation's end can reach the screen after the request went.
+/// waits until the screen has drawn that end before answering. The two notices mark what has reached the screen;
+/// `go` keeps the new answer off the wire until the earlier end is there, whatever the two threads' scheduling.
 struct Late {
     emit: Rc<dyn Fn(SessionEvent)>,
     status: RefCell<SessionStatus>,
+    go: Arc<tokio::sync::Notify>,
 }
 
 impl Late {
-    fn answer(&self) {
+    async fn answer(&self) {
         (self.emit)(SessionEvent::State { state: TurnState::Running });
         (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        (self.emit)(SessionEvent::Notice { message: "The earlier operation ended.".into() });
+        self.go.notified().await;
         self.status.borrow_mut().state = TurnState::Running;
         (self.emit)(SessionEvent::State { state: TurnState::Running });
         (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "Lowered the bass by 3 dB.".into() }));
         (self.emit)(SessionEvent::TurnComplete { result: TurnResult { stop_reason: StopReason::Completed, usage: None }, elapsed_ms: 1 });
         self.status.borrow_mut().state = TurnState::Idle;
         (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        (self.emit)(SessionEvent::Notice { message: "The new answer ended.".into() });
     }
 }
 
@@ -371,11 +376,11 @@ impl Late {
         Ok(())
     }
     async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
-        self.answer();
+        self.answer().await;
         Ok(())
     }
     async fn goal(&self, _: Option<&str>) -> Result<(), RuntimeError> {
-        self.answer();
+        self.answer().await;
         Ok(())
     }
     async fn refresh(&self) -> Result<(), RuntimeError> {
@@ -424,12 +429,21 @@ async fn an_answer_shows_whole_when_an_earlier_operations_end_reaches_the_screen
     tokio::task::LocalSet::new()
         .run_until(async {
             for asked in ["make the bass darker\r", "/goal make the bass darker\r"] {
-                let build: Build =
-                    Box::new(|emit| async move { Ok(Built::new(Rc::new(Late { emit, status: RefCell::new(idle()) }))) }.boxed_local());
+                let go = Arc::new(tokio::sync::Notify::new());
+                let going = go.clone();
+                let build: Build = Box::new(move |emit| {
+                    async move { Ok(Built::new(Rc::new(Late { emit, status: RefCell::new(idle()), go: going }))) }.boxed_local()
+                });
                 let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |_| {});
                 h.start().await;
                 h.input.write(asked);
-                until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
+                // This notice follows the earlier Idle on the same channel: it has been handled and drawn while the
+                // request is pending. Only now may the new answer begin.
+                h.wait_for("The earlier operation ended.").await;
+                go.notify_one();
+                // Seeing the words alone isn't completion: the pump can yield before TurnComplete and the final Idle.
+                h.wait_for("The new answer ended.").await;
+                h.has("Lowered the bass by 3 dB.");
                 assert!(!has(&h.screen(), "stopped"), "{asked}:\n{}", h.screen().join("\n"));
                 h.close().await;
             }

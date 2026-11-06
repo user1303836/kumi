@@ -346,9 +346,25 @@ pub struct PatchSpec {
     pub about: String,
     pub controls: Vec<Control>,
     pub patch: String,
+    /// Existing patches are whole instruments. More than one explicitly asks
+    /// Kumi to allocate notes to independent copies of this voice patch.
+    #[serde(default = "one_voice", skip_serializing_if = "is_one_voice")]
+    pub voices: u32,
+    /// Kept even when the simulator cannot execute the patch: expectations are
+    /// never silently discarded or reported as passing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<MidiTest>,
     /// The Map page's slots and its sources' names, for a patch that sends modulation to mod.
     #[serde(default, skip_serializing_if = "MapSpec::is_default")]
     pub map: MapSpec,
+}
+
+fn one_voice() -> u32 {
+    1
+}
+
+fn is_one_voice(voices: &u32) -> bool {
+    *voices == 1
 }
 
 /// A device's Map page: how many slots, and what each source the patch sends to mod (mod.0, mod.1…) is called.
@@ -1183,12 +1199,9 @@ pub fn check_spec(input: &Map<String, Value>) -> (DeviceSpec, Findings) {
             runs = false;
         }
     }
-    // Only a MIDI effect's code runs outside Live; an audio effect or instrument is heard with audition once loaded.
+    // MIDI code and message patches can run outside Live. Patch expectations
+    // remain in the spec even when an unsupported object prevents execution.
     let tests: Vec<Value> = match input.get("tests") {
-        Some(Value::Array(items)) if patched && !items.is_empty() => {
-            found.changed.push("tests: they run a MIDI effect's code, and a patch is heard in Live, so they weren't run.".to_string());
-            Vec::new()
-        }
         Some(Value::Array(items)) if gen && !items.is_empty() => {
             found.changed.push(
                 "tests: they run a MIDI effect's code, and an audio effect or instrument is heard with audition once it's loaded, so they weren't run."
@@ -1204,7 +1217,11 @@ pub fn check_spec(input: &Map<String, Value>) -> (DeviceSpec, Findings) {
         _ => Vec::new(),
     };
     if tests.len() > MAX_TESTS {
-        found.changed.push(format!("tests: the first {MAX_TESTS} were run, and {} more weren't.", tests.len() - MAX_TESTS));
+        found.changed.push(if patched {
+            format!("tests: the first {MAX_TESTS} were kept for checking, and {} more weren't run.", tests.len() - MAX_TESTS)
+        } else {
+            format!("tests: the first {MAX_TESTS} were run, and {} more weren't.", tests.len() - MAX_TESTS)
+        });
     }
     let mut checked_tests: Vec<MidiTest> = Vec::new();
     for (index, raw) in tests.iter().take(MAX_TESTS).enumerate() {
@@ -1236,8 +1253,8 @@ pub fn check_spec(input: &Map<String, Value>) -> (DeviceSpec, Findings) {
         };
         checked_tests.push(MidiTest { name: head(name, 80), set, input: input_events, expect: expected });
     }
-    let mut voices: u32 = 8;
-    if kind == DeviceType::Instrument && !patched {
+    let mut voices: u32 = if patched { 1 } else { 8 };
+    if kind == DeviceType::Instrument {
         if let Some(given) = input.get("voices") {
             match given.as_f64().filter(|value| value.is_finite()) {
                 Some(value) if value.fract() == 0.0 && (1.0..=MAX_VOICES as f64).contains(&value) => voices = value as u32,
@@ -1245,7 +1262,7 @@ pub fn check_spec(input: &Map<String, Value>) -> (DeviceSpec, Findings) {
                     voices = value.round().clamp(1.0, MAX_VOICES as f64) as u32;
                     found.changed.push(format!("voices {}: made {voices} (1, mono, to {MAX_VOICES}).", stringify(given)));
                 }
-                None => found.changed.push(format!("voices {}: made 8 (1, mono, to {MAX_VOICES}).", stringify(given))),
+                None => found.changed.push(format!("voices {}: made {voices} (1, mono, to {MAX_VOICES}).", stringify(given))),
             }
         }
     }
@@ -1262,7 +1279,7 @@ pub fn check_spec(input: &Map<String, Value>) -> (DeviceSpec, Findings) {
     }
     let map = map_of(input.get("map"), patched, &mut found);
     let spec = if patched {
-        DeviceSpec::Patch(PatchSpec { kind, name, about, controls: checked, patch, map })
+        DeviceSpec::Patch(PatchSpec { kind, name, about, controls: checked, patch, voices, tests: checked_tests, map })
     } else {
         match kind {
             DeviceType::AudioEffect => DeviceSpec::AudioEffect(AudioEffectSpec { name, about, controls: checked, code }),

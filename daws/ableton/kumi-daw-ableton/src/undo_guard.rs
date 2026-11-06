@@ -489,7 +489,7 @@ pub async fn before_undo(history: &History, entry: &Applied) -> Option<UndoResul
     let signal = abort::any(asked.into_iter().chain([connection.lifetime.clone(), abort::timeout(10_000)]));
     let why = refusal(history, entry, &signal).await?;
     history.host.guard.refuse(why.clone());
-    Some(UndoResult::error(why))
+    Some(UndoResult::refused(why))
 }
 
 /// Why a guarded change whose values weren't kept isn't undone.

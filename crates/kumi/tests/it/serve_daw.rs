@@ -209,6 +209,9 @@ macro_rules! case {
     };
 }
 
+#[path = "serve_undo_groups.rs"]
+mod undo_groups;
+
 case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let script = ReaperScript::new(3, 0);
     let tab = script.clone();
@@ -374,7 +377,12 @@ case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_wr
     });
     let context = kumi_agent::core::context::IntegrationContext::new(Rc::new(|_, _| {}));
     assert!(context.policy.persist_identity, "standalone Kumi's policy");
-    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions {
+        context,
+        kumi_home: home.path().into(),
+        connect: Some(connect),
+        open_file: None,
+    });
     reaper.start(Signal::new()).await.unwrap();
     reaper.observe(Signal::new(), None).await.unwrap();
     let asks = identity_asks(&simulator);
@@ -1748,6 +1756,7 @@ struct Guarded {
 
 struct GuardedState {
     refuse: Cell<bool>,
+    unsure: std::cell::RefCell<Option<String>>,
     undos: Cell<usize>,
     lease: std::cell::RefCell<std::rc::Weak<Ctx>>,
     held: Cell<Option<bool>>,
@@ -1797,7 +1806,8 @@ impl kumi_agent::core::contracts::Integration for Guarded {
             return Ok(Err(kumi_agent::core::contracts::UndoRefusal { code: "changed_since", reason }));
         }
         state.undos.set(state.undos.get() + 1);
-        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": "undone", "at": 2})).unwrap()))
+        let note = state.unsure.borrow().clone();
+        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": if note.is_some() { "unsure" } else { "undone" }, "note": note, "at": 2})).unwrap()))
     }
     async fn undo_preview(&self, _: &str, _: Signal) -> Result<Option<kumi_agent::core::contracts::UndoPreview>, RuntimeError> {
         let refusal = self.state.refuse.get().then(|| kumi_agent::core::contracts::UndoRefusal {
@@ -1823,7 +1833,13 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
         ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
         ("KUMI_PROCESSES".into(), "none".into()),
     ]);
-    let live = Rc::new(GuardedState { refuse: Cell::new(true), undos: Cell::new(0), lease: Default::default(), held: Cell::new(None) });
+    let live = Rc::new(GuardedState {
+        refuse: Cell::new(true),
+        unsure: Default::default(),
+        undos: Cell::new(0),
+        lease: Default::default(),
+        held: Cell::new(None),
+    });
     let factory = {
         let live = live.clone();
         AbletonFactory(Rc::new(move |options| {
@@ -1870,6 +1886,48 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
     live.refuse.set(false);
     let (undone, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-2")).await;
     assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
+    // Live's integration returns its ChangeRecord to serve. Its bounded bridge cause must survive into both the
+    // response and the single unsure audit row; UndoResult's separate text is not available on this path.
+    let diagnostic = "Live didn't confirm the undo; inspect the Set before another change. Bridge: device move was not confirmed";
+    *live.unsure.borrow_mut() = Some(diagnostic.into());
+    for (id, whole_change, call_id) in [("c2", false, "tc-undo-3"), ("c3", true, "tc-undo-whole")] {
+        let older = whole_change.then(|| {
+            let made = json!({"id": "c3-older", "family": "mixer", "title": "Drums volume", "state": "applied", "at": 2});
+            ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots())
+        });
+        let made = json!({"id": id, "family": "device", "title": "Move SoftClip", "state": "applied", "at": 3});
+        let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
+        let mut args = json!({"history_id": row.id});
+        if let Some(older) = &older {
+            ctx.history().one_change(&[older.id.clone(), row.id.clone()], ctx.snapshots());
+            let (preview, error) = wire.call("undo", json!({"history_id": row.id, "whole_change": true, "preview": true}), None).await;
+            assert!(!error, "{preview}");
+            assert_eq!(preview["rows"].as_array().unwrap().len(), 2, "{preview}");
+            args["whole_change"] = json!(true);
+            args["expect_rows"] = preview["rows_digest"].clone();
+        }
+        let (before_rows, before_undos, before_epoch) = (ctx.history().rows(100).len(), live.undos.get(), ctx.link().epoch());
+        let older_before = older.as_ref().map(|older| serde_json::to_value(ctx.history().row(&older.id).unwrap()).unwrap());
+        let (unsure, error) = wire.call("undo", args, Some(call_id)).await;
+        assert!(!error, "{unsure}");
+        assert_eq!((unsure["state"].clone(), live.undos.get()), (json!("unsure"), before_undos + 1), "{unsure}");
+        assert_eq!(unsure["reason"], diagnostic);
+        assert_eq!(ctx.history().rows(100).len(), before_rows + 1);
+        assert_eq!(ctx.link().epoch(), before_epoch + 1, "an unconfirmed undo may have written");
+        assert_eq!(ctx.history().row(&row.id).unwrap().note.as_deref(), Some(diagnostic));
+        assert_eq!(unsure["history_ids"].as_array().unwrap().len(), 1, "one audit: {unsure}");
+        let audit = ctx.history().row(unsure["history_ids"][0].as_str().unwrap()).unwrap();
+        assert_eq!(audit.note.as_deref(), Some(diagnostic));
+        assert_eq!(audit.tool_call_id.as_deref(), Some(call_id));
+        assert!(!audit.undo_available);
+        if let Some(older) = &older {
+            assert_eq!(unsure["rows"][0]["history_id"], row.id);
+            assert_eq!(unsure["rows"][0]["state"], "unsure");
+            assert_eq!(unsure["rows"][0]["reason"], diagnostic);
+            assert_eq!(unsure["rows"][1], json!({"history_id": older.id, "state": "not_tried"}));
+            assert_eq!(Some(serde_json::to_value(ctx.history().row(&older.id).unwrap()).unwrap()), older_before);
+        }
+    }
     wire.end().await;
 });
 

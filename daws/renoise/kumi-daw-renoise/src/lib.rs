@@ -53,6 +53,9 @@ const INSTRUCTIONS: &str = concat!(
 pub use provider::PROVIDER;
 
 pub const DAW: OwnDaw = OwnDaw {
+    busy_words: |code| kumi_daw_own::bridge::busy_words(code, &DawProfile::RENOISE),
+    permission_words: str::to_owned,
+    open_project: None,
     profile: &DawProfile::RENOISE,
     descriptor: BridgeDescriptor::RENOISE,
     host_flag: "renoise",

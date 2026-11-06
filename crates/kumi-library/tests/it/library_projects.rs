@@ -97,6 +97,7 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
                 logs.sets.append(&[SetEntry { file, set: Some(SetSummary::default()), error: None }]).await.unwrap();
             }
             let plan = LearnPlan {
+                daw: None,
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
                 approved_folders: None,
@@ -124,6 +125,7 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             assert_eq!(taste["sets"], 2);
             // Without the DAW registered, its files aren't projects, and those learned go as the walk no longer finds them.
             let plan = LearnPlan {
+                daw: None,
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
                 approved_folders: None,
@@ -330,6 +332,7 @@ async fn a_project_learning_couldnt_read_is_told_with_why() {
             let song = music.join("Broken.song");
             put(&song, &format!("not a tempo\n{}", self::song("1")));
             let plan = LearnPlan {
+                daw: None,
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
                 approved_folders: None,

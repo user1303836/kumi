@@ -147,15 +147,16 @@ class NativeRelease(unittest.TestCase):
         self.assertEqual(read_json("package.json")["version"], version)
         # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it), as
         # does SoundCraft's program, which that host starts.
+        programs = [daw["program"] for daw in release.DAW_BRIDGES.values() if "program" in daw]
         for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-types/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
-                     "daws/soundcraft/soundcraft-kumi/Cargo.toml"):
+                     *(f"{program['crate']}/Cargo.toml" for program in programs)):
             self.assertEqual(cargo_version(name), version, name)
         declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-types/src/version.rs").read_text())
         self.assertIsNotNone(declared)
         self.assertEqual(declared[1], version)
         cargo_lock = tomllib.loads((root / "Cargo.lock").read_text())["package"]
         for package in cargo_lock:
-            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server", "soundcraft-kumi"):
+            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server", *(program["binary"] for program in programs)):
                 self.assertEqual(package["version"], version, package["name"])
         bridge = cargo_version("daws/ableton/ableton-mcp-server/Cargo.toml")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)
@@ -210,10 +211,67 @@ class NativeRelease(unittest.TestCase):
         for target in ("x86_64-unknown-linux-gnu", "aarch64-pc-windows-msvc"):
             release.stage_hands(self.root, self.root / "bundle", target)
         self.assertFalse((self.root / "bundle").exists())
-        with patch.object(release, "stage_hands", side_effect=AssertionError("bridge-only called hands staging")):
+        with patch.object(release, "stage_hands", side_effect=AssertionError("bridge-only called hands staging")), \
+             patch.object(release, "stage_programs", side_effect=AssertionError("bridge-only called program staging")):
             result = release.build_release(release.ROOT, self.binaries, self.root / "bridge", "aarch64-apple-darwin",
                                            self.source, self.builder, "fixture", bridge_only=True)
         self.assertEqual(result["manifest"]["build"]["target"], "aarch64-apple-darwin")
+
+    def logic_payload(self):
+        daw = release.DAW_BRIDGES["logic"]
+        source = self.root / daw["helper"]["source"]
+        source.parent.mkdir(parents=True)
+        source.write_text("Logic helper source fixture")
+        name = daw["helper"]["prefix"] + release.digest(source)[:12]
+        manifest = self.root / daw["program"]["crate"] / "Cargo.toml"
+        manifest.write_text('[package]\nname = "logic-kumi"\nversion = "1.2.3"\n')
+        (self.binaries / "logic-kumi").write_bytes(b"Logic program fixture")
+        return daw, name
+
+    def test_logic_payload_is_owned_source_bound_and_mac_only(self):
+        daw, name = self.logic_payload()
+        # Other systems need neither a Swift build nor a carried Logic payload.
+        for target in ("x86_64-unknown-linux-gnu", "aarch64-pc-windows-msvc"):
+            release.stage_programs(self.root, self.root / "other", self.binaries, target)
+        self.assertFalse((self.root / "other").exists())
+        helper = self.root / daw["helper"]["folder"] / name
+        helper.parent.mkdir(parents=True)
+        helper.write_bytes(b"Logic universal helper fixture")
+        bundle = self.root / "bundle"
+        release.stage_programs(self.root, bundle, self.binaries, "aarch64-apple-darwin")
+        # This is exactly the folder the provider copies to its owned installation target.
+        carried = bundle / "daws/logic/logic-kumi"
+        self.assertEqual(set(release.inventory(bundle)), {"daws/logic/logic-kumi/logic-kumi", "daws/logic/logic-kumi/version",
+                                                       f"daws/logic/logic-kumi/{name}"})
+        self.assertEqual((carried / "logic-kumi").read_bytes(), (self.binaries / "logic-kumi").read_bytes())
+        self.assertEqual((carried / name).read_bytes(), helper.read_bytes())
+        self.assertEqual((carried / "version").read_text(), "1.2.3\n")
+        if EXEC_BITS:
+            self.assertEqual((carried / "logic-kumi").stat().st_mode & 0o777, 0o755)
+            self.assertEqual((carried / name).stat().st_mode & 0o777, 0o755)
+        self.assertNotIn("logic-kumi", release.BUNDLE_BINARIES)
+        self.assertNotIn("logic", release.VERSIONED_BRIDGES)
+
+    def test_logic_release_refuses_missing_stale_or_linked_helpers(self):
+        daw, name = self.logic_payload()
+        bundle = self.root / "bundle"
+        with self.assertRaisesRegex(ValueError, "run python3 scripts/build-logic-hands.py first"):
+            release.stage_programs(self.root, bundle, self.binaries, "aarch64-apple-darwin")
+        helpers = self.root / daw["helper"]["folder"]
+        helpers.mkdir(parents=True)
+        stale = helpers / (daw["helper"]["prefix"] + "000000000000")
+        stale.write_bytes(b"old Logic helper")
+        with self.assertRaisesRegex(ValueError, "current source"):
+            release.stage_programs(self.root, bundle, self.binaries, "x86_64-apple-darwin")
+        stale.unlink()
+        target = self.root / "linked-helper"
+        target.write_bytes(b"linked helper")
+        try:
+            (helpers / name).symlink_to(target)
+        except OSError:
+            return  # Windows runners may not grant symlink creation.
+        with self.assertRaisesRegex(ValueError, "link or special file"):
+            release.stage_programs(self.root, bundle, self.binaries, "aarch64-apple-darwin")
 
     def test_native_bundle_has_exact_manifest_bound_bridge_and_no_node_runtime(self):
         out = self.root / "release"

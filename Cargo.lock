@@ -1375,6 +1375,7 @@ dependencies = [
  "kumi-common",
  "kumi-daw",
  "kumi-daw-ableton",
+ "kumi-daw-logic",
  "kumi-daw-own",
  "kumi-daw-reaper",
  "kumi-daw-renoise",
@@ -1548,6 +1549,29 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "kumi-daw-logic"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "daw-bridge",
+ "futures",
+ "kumi-agent",
+ "kumi-common",
+ "kumi-daw",
+ "kumi-daw-own",
+ "kumi-library",
+ "kumi-net",
+ "kumi-testkit",
+ "kumi-types",
+ "kumi-web",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -1943,6 +1967,19 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "logic-kumi"
+version = "1.24.69"
+dependencies = [
+ "daw-bridge",
+ "flate2",
+ "hex",
+ "libc",
+ "percent-encoding",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "lru-slab"

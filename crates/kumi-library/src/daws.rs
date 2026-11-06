@@ -11,6 +11,7 @@ use kumi_types::contracts::KernelTool;
 use kumi_types::daw::{DawId, DawProfile};
 use kumi_types::errors::RuntimeError;
 
+use crate::presets::PresetFacts;
 use crate::sets::SetSummary;
 use crate::sources::{Source, SourceKind, SourceOptions};
 use crate::tools::OnEvent;
@@ -86,6 +87,22 @@ pub trait LibrarySources: Sync {
     fn layout(&self) -> &'static Layout {
         &Layout::NONE
     }
+    /// Additional audio formats this DAW loads, read in its own library without widening Live's sample formats.
+    fn sample_extensions(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// Additional preset files a producer may put in an ordinary or explicitly approved folder.
+    fn preset_extensions(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// Directory presets counted atomically, never as the individual files inside them.
+    fn preset_packages(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// Facts a DAW can establish from a preset's format and place alone, without native applications or file parsing.
+    fn preset_facts(&self, _format: &str, _relative: &str) -> Option<PresetFacts> {
+        None
+    }
     /// Its project files, for a DAW whose projects Kumi reads (Live's Sets are the library's own).
     fn projects(&self) -> Option<&'static ProjectFormat> {
         None
@@ -101,10 +118,32 @@ impl Daws {
         self.0.iter().copied()
     }
 
+    /// Shared folders keep the formats the selected DAW can load; learning an extra format for another profile
+    /// must not make it appear later in Live's shared-folder index.
+    pub fn accepts_sample(self, profile: Option<DawId>, extension: &str) -> bool {
+        crate::samples::SAMPLE_EXTENSIONS.contains(&extension)
+            || self
+                .iter()
+                .find(|daw| daw.profile().id == Some(profile.unwrap_or(DawId::Ableton)))
+                .is_some_and(|daw| daw.sample_extensions().contains(&extension))
+    }
+
     /// How a source is laid out: its DAW's layout for a DAW's own library, else none.
     pub fn layout(self, source: &Source) -> &'static Layout {
         let SourceKind::Daw(id) = source.kind else { return &Layout::NONE };
         self.iter().find(|daw| daw.profile().id == Some(id)).map_or(&Layout::NONE, |daw| daw.layout())
+    }
+
+    pub fn source(self, source: &Source) -> Option<&'static dyn LibrarySources> {
+        let SourceKind::Daw(id) = source.kind else { return None };
+        self.iter().find(|daw| daw.profile().id == Some(id))
+    }
+
+    /// An ordinary folder can contain any registered DAW's extra preset formats. A DAW-owned library keeps its
+    /// own reader, so another integration cannot reinterpret the files its layout admits.
+    pub fn preset_reader(self, source: &Source, extension: &str) -> Option<&'static dyn LibrarySources> {
+        self.source(source)
+            .or_else(|| self.iter().find(|daw| daw.preset_extensions().contains(&extension) || daw.preset_packages().contains(&extension)))
     }
 
     /// The project files of `daw`, when Kumi reads them.

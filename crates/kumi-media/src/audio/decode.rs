@@ -1,5 +1,8 @@
 //! Reading audio files as blocks of samples, without loading a whole song into memory.
 
+mod peaks;
+pub use peaks::local_peaks;
+
 use crate::programs::{find_ffmpeg, run, FfmpegOptions, RunOptions, VideoFailure};
 use kumi_common::{
     abort::{Signal, SignalExt},

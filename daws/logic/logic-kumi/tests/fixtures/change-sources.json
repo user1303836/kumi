@@ -1,0 +1,105 @@
+{
+  "commit": "8d609d6a051e4a6f040431bf64c4b9712214094e",
+  "files": [
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-carry/scene.json.gz",
+      "path": "change-carry/scene.json.gz",
+      "sha256": "27a47ffc0755a3ceaba7ba1fa2ab644570b82ed3ae662ba5f58c16d6f1a036b1"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-cursor/scene.json.gz",
+      "path": "change-cursor/scene.json.gz",
+      "sha256": "dbcf63a28ea4674a5aa10a0ae497a598a3426ba76d3270a117fffcb771f06824"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-fx-bypass/scene.json.gz",
+      "path": "change-fx-bypass/scene.json.gz",
+      "sha256": "f4bfd1aa25996174e2cfdeaa941f3968e2e94ce1281e014ec23980df28dc198b"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-marker-add/scene.json.gz",
+      "path": "change-marker-add/scene.json.gz",
+      "sha256": "d2e2c8bc4b96612348d6f80e6bceb3efbe7c9647d642223c92a0dfbedcada27d"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-marker-delete/scene.json.gz",
+      "path": "change-marker-delete/scene.json.gz",
+      "sha256": "73c92f3cd4e508e2960fec225fd2ab5729873eff6c281bea7372c3d6f970844e"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-marker-move/scene.json.gz",
+      "path": "change-marker-move/scene.json.gz",
+      "sha256": "8f094d21de8bf64c18a45ed553222f9ef03d6e557104482a0ae53d479b19df30"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-notes-add/scene.json.gz",
+      "path": "change-notes-add/scene.json.gz",
+      "sha256": "9720cb7c0b72e1e51bb8e9a05fcf681b32fb36e23dba5f826cf0e4178346d953"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-notes-change/scene.json.gz",
+      "path": "change-notes-change/scene.json.gz",
+      "sha256": "1854ecccfc78d188e402d39439ab5feb1290fc9f396f65ac03634b0a48446a3e"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-notes-delete/scene.json.gz",
+      "path": "change-notes-delete/scene.json.gz",
+      "sha256": "e6923d6ce9192e3a3875d441d38202484514f6df81d9ddb3769e028b875f36c7"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-plan/scene.json.gz",
+      "path": "change-plan/scene.json.gz",
+      "sha256": "f823b230761e3bb651834f15c924d315fa36cd5862a940157bb01b0f76faf4a0"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-tempo-set/scene.json.gz",
+      "path": "change-tempo-set/scene.json.gz",
+      "sha256": "de242481e4aea1818d77b2a233a84b7b56d9c50fd3f94726623e51e99f5ac33e"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-add/scene.json.gz",
+      "path": "change-track-add/scene.json.gz",
+      "sha256": "9b1e98cd69c533d924041c6abb78a3bbb4b70ad139b224e12ea8c99532f97b7d"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-arm/scene.json.gz",
+      "path": "change-track-arm/scene.json.gz",
+      "sha256": "c023a5efbc88a4b4f79c64e14f44a0f6e6d7dcc228d90293d9bf0cec518724a7"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-delete/scene.json.gz",
+      "path": "change-track-delete/scene.json.gz",
+      "sha256": "d1f3618fe59c12b98343d94a6e9d1e370423846164dadf424d007e2040c61149"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-mute/scene.json.gz",
+      "path": "change-track-mute/scene.json.gz",
+      "sha256": "e10406e4fd036a656e578dd76b00aa0077ffe44b15876d18faabdca407ee1e08"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-pan/scene.json.gz",
+      "path": "change-track-pan/scene.json.gz",
+      "sha256": "5322a13dd4c63296ab0d5ee10d0e5882a10c375af561fc280152de28300d4eee"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-rename/scene.json.gz",
+      "path": "change-track-rename/scene.json.gz",
+      "sha256": "d38c03b09d635877db0b01d6d4011391f15000202ac972df88b5c7e1afa7a601"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-solo/scene.json.gz",
+      "path": "change-track-solo/scene.json.gz",
+      "sha256": "46059d73fa85773e78a72a367d02553e98b37fe216ea97c1f5e7bcdb935b1c59"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-track-volume/scene.json.gz",
+      "path": "change-track-volume/scene.json.gz",
+      "sha256": "7ca9ccbf849e0c58f7eb8929d05f4729e73c013cbc1007d5d8da0b4ab103cf60"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-transport/scene.json.gz",
+      "path": "change-transport/scene.json.gz",
+      "sha256": "baa72266672871457c07fae23ccfe78fe736133d057563f2d04cf7023251694a"
+    }
+  ]
+}

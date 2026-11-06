@@ -1,0 +1,25 @@
+{
+  "commit": "6f8f6e9bbc3666159ce68be1ce7466aa30e82670",
+  "files": [
+    {
+      "source": "crates/logic-kumi/src/keys/names.json",
+      "path": "src/key_bindings/names.json",
+      "sha256": "68f60c657d2c46b58fc83e12d2ef43ad6a04e8728e9dac81399a5c1cf563d6b0"
+    },
+    {
+      "source": "crates/logic-kumi/src/keys/us-bindings.json",
+      "path": "src/key_bindings/us-bindings.json",
+      "sha256": "6a9870c666d0fa86cb95532391fb475953ed403515808e756676834f990ee259"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/key-commands/prefs.json",
+      "path": "tests/fixtures/key-bindings/prefs.json",
+      "sha256": "1d7657e78f7e5d61c628ec9a08a0525275cb3ee69904dcb1ce7b0c661d7c35cd"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/key-commands/us.logikcs.json",
+      "path": "tests/fixtures/key-bindings/us.logikcs.json",
+      "sha256": "898be3d93524f1a3649929b41cf8b83e42764751485fb4b020bf238a90b07305"
+    }
+  ]
+}

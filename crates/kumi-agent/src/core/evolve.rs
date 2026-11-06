@@ -179,6 +179,7 @@ impl Evolution {
         }
     }
     pub fn remove(&mut self, name: &str) {
+        self.suggested.remove(name);
         if let Some(at) = self.slots.iter().position(|s| s.name == name) {
             self.slots.remove(at);
         }

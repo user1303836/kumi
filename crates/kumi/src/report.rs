@@ -25,7 +25,11 @@ use kumi_types::{
     version::KUMI_VERSION,
 };
 use serde_json::Value;
-use std::{path::Path, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    rc::Rc,
+};
 pub struct ReportIo {
     pub doctor: DoctorIo,
     pub folder: Option<String>,
@@ -54,8 +58,11 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
             homes.push(path)
         }
     }
-    let name = (utf16_len(user) >= 3).then(|| {
-        fancy_regex::Regex::new(&format!(r"(?i)(?:(?<=%2F)|(?<=%5C)|(?<![A-Za-z0-9])){}(?![A-Za-z0-9])", regex::escape(user))).unwrap()
+    let name = (!user.is_empty()).then(|| {
+        let user = regex::escape(user);
+        // A common account name (max, bass, …) is also ordinary conversation. Remove complete path segments and
+        // possessive account references, with Unicode word boundaries, rather than every occurrence of that word.
+        fancy_regex::Regex::new(&format!(r"(?i)(?:(?<=[/\\]){user}(?=[/\\]|$)|(?<=%2F){user}(?=%2F|%5C|$)|(?<=%5C){user}(?=%2F|%5C|$)|(?<![\p{{L}}\p{{N}}_]){user}(?=['’]s(?:[^\p{{L}}\p{{N}}_]|$)))")).unwrap()
     });
     let whitespace = r"\x09-\x0d \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
     let bearer = regex::Regex::new(&format!(r#"(?i)(?-u:\b)Bearer[{whitespace}]+[^{whitespace}"']+"#)).unwrap();
@@ -69,19 +76,30 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
     // A URL's password (scheme://user:password@host), and the secrets its query carries.
     let login = regex::Regex::new(r#"(?i)((?-u:\b)[a-z][a-z0-9+.-]*://[^\s/:@'"]+:)[^\s/@'"]+@"#).unwrap();
     let query = regex::Regex::new(
-        r#"(?i)([?&;](?:access_token|refresh_token|id_token|token|api_?key|key|secret|client_secret|password|passwd|pwd|auth|sig|signature|code)=)[^&#\s'"]+"#,
+        r#"(?i)([?&;](?:access_token|refresh_token|id_token|token|api_?key|key|secret|client_secret|password|passwd|pwd|pass|auth|sig|signature|code)=)[^&#\s'"]+"#,
     )
     .unwrap();
     // A field named for a secret (api_key, AWS_SECRET_ACCESS_KEY, db_password, x-auth-token…): a value in double quotes,
     // escaped ones too (JSON inside a string), or for the plainest names in single quotes or bare.
-    let named = r"[A-Za-z0-9_-]*(?:api[_-]?key|apikey|token|secret|password|passwd|pwd|pw|passphrase|private[_-]?key)[A-Za-z0-9_-]*";
+    let named =
+        r"(?:[A-Za-z0-9_-]*(?:api[_-]?key|apikey|token|secret|password|passwd|pwd|pw|passphrase|private[_-]?key)[A-Za-z0-9_-]*|pass)";
     let quoted = regex::Regex::new(&format!(
-        r#"(?i)((?:\\?")?(?:{named}|access|refresh)(?:\\?")?[{whitespace}]*[:=][{whitespace}]*)(\\?")((?:[^"\\]|\\.)*?)(\\?")"#
+        r#"(?i)((?:\\?")?(?-u:\b)(?:{named}|access|refresh)(?:\\?")?[{whitespace}]*[:=][{whitespace}]*)(\\?")((?:[^"\\]|\\.)*?)(\\?")"#
     ))
     .unwrap();
-    let bare =
-        regex::Regex::new(&format!(r#"(?i)((?-u:\b){named}[{whitespace}]*[:=][{whitespace}]*)('[^'\n]*'|[^{whitespace}"'&,;)\]}}<>]+)"#))
-            .unwrap();
+    let bare = regex::Regex::new(&format!(
+        r#"(?i)((?-u:\b){named}[{whitespace}]*[:=][{whitespace}]*)(\[secret\]|'[^'\n]*'|[^{whitespace}"'&,;)\]}}<>]+)"#
+    ))
+    .unwrap();
+    let password_field = regex::Regex::new(r"(?i)password|passwd|pwd|passphrase|(?:^|[^a-z])pass(?:[^a-z]|$)").unwrap();
+    let basic = regex::Regex::new(r"(?i)((?-u:\b)Authorization[ \t]*:[ \t]*Basic[ \t]+)[A-Za-z0-9+/]+=*").unwrap();
+    let cookie = regex::Regex::new(r#"(?i)((?-u:\b)Cookie[ \t]*:[ \t]*)[^ \t=;\r\n"']+=[^\r\n"']+"#).unwrap();
+    let netrc =
+        regex::Regex::new(r"(?im)(^[ \t]*password[ \t]+|^[ \t]*(?:machine|default)\b[^\r\n]*?\bpassword[ \t]+)[^ \t\r\n]+").unwrap();
+    let php = regex::Regex::new(&format!(r#"(?i)((?:['"]){named}(?:['"])[ \t]*=>[ \t]*)(['"])[^'"\r\n]+(['"])"#)).unwrap();
+    let aws_pair =
+        fancy_regex::Regex::new(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}[ \t:;,]+[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])").unwrap();
+    let webhook = regex::Regex::new(r"(?i)(https?://hooks\.slack\.com/services/)[A-Za-z0-9/_-]+").unwrap();
     let long = fancy_regex::Regex::new(r"(?<![A-Za-z0-9+_-])[A-Za-z0-9+_-]{32,}={0,2}(?![A-Za-z0-9+_-])").unwrap();
     move |text| {
         let mut out = text.to_string();
@@ -92,13 +110,19 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
             out = out.replace(path, "~")
         }
         out = bearer.replace_all(&out, "Bearer [secret]").into_owned();
+        out = aws_pair.replace_all(&out, "[secret] [secret]").into_owned();
         out = key.replace_all(&out, "[secret]").into_owned();
+        out = basic.replace_all(&out, "${1}[secret]").into_owned();
+        out = cookie.replace_all(&out, "${1}[secret]").into_owned();
+        out = netrc.replace_all(&out, "${1}[secret]").into_owned();
+        out = php.replace_all(&out, "${1}${2}[secret]${3}").into_owned();
+        out = webhook.replace_all(&out, "${1}[secret]").into_owned();
         out = jwt.replace_all(&out, "[secret]").into_owned();
         out = login.replace_all(&out, "${1}[secret]@").into_owned();
         out = query.replace_all(&out, "${1}[secret]").into_owned();
         out = quoted
             .replace_all(&out, |caps: &regex::Captures| {
-                if utf16_len(&caps[3]) >= 8 {
+                if utf16_len(&caps[3]) >= 8 || (!caps[3].is_empty() && password_field.is_match(&caps[1])) {
                     format!("{}{}[secret]{}", &caps[1], &caps[2], &caps[4])
                 } else {
                     caps[0].to_string()
@@ -108,7 +132,7 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
         out = bare
             .replace_all(&out, |caps: &regex::Captures| {
                 let value = caps[2].trim_matches('\'');
-                if value == "[secret]" || utf16_len(value) < 8 {
+                if value == "[secret]" || (utf16_len(value) < 8 && !password_field.is_match(&caps[1])) {
                     caps[0].to_string()
                 } else if caps[2].starts_with('\'') {
                     format!("{}'[secret]'", &caps[1])
@@ -117,18 +141,8 @@ pub fn redactor(secrets: &[String], home: &str, user: &str) -> impl Fn(&str) -> 
                 }
             })
             .into_owned();
-        // A long token: 32 characters with letters and digits in them (as titles hide them), or any 48.
-        out = long
-            .replace_all(&out, |caps: &fancy_regex::Captures| {
-                let run = &caps[0];
-                let mixed = run.chars().any(|c| c.is_ascii_digit()) && run.chars().any(|c| c.is_ascii_alphabetic());
-                if mixed || run.len() >= 48 {
-                    "[long value]".to_string()
-                } else {
-                    run.to_string()
-                }
-            })
-            .into_owned();
+        // A long token has no dependable alphabet: letters-only credentials are private too.
+        out = long.replace_all(&out, "[long value]").into_owned();
         if let Some(name) = &name {
             out = name.replace_all(&out, "<user>").into_owned()
         }
@@ -169,8 +183,10 @@ fn string(value: Option<&Value>) -> String {
 /// files are conversations (a name or pin beside one isn't). One imported from a file, or a copy of one, holds someone
 /// else's words, so it's never the one.
 async fn last_conversation(projects: &str) -> Option<(f64, String, Value)> {
-    let mut best: Option<(String, String, f64)> = None;
-    for place in names(projects).await.into_iter().filter(|place| place != IMPORTED) {
+    let mut candidates = Vec::new();
+    let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    let mut imported = HashSet::new();
+    for place in names(projects).await {
         let folder = join(projects, &format!("{place}/conversations"));
         for name in names(&folder).await {
             let Some(id) = name
@@ -179,21 +195,45 @@ async fn last_conversation(projects: &str) -> Option<(f64, String, Value)> {
             else {
                 continue;
             };
-            let file = join(&folder, &name);
-            if let Some(at) = modified(&file).await {
-                if best.as_ref().is_none_or(|best| at > best.2) && !imported(&join(&folder, &format!("{id}.meta"))).await {
-                    best = Some((file, id.to_string(), at))
+            let meta = read(&join(&folder, &format!("{id}.meta")))
+                .await
+                .filter(|text| text.len() <= 16 * 1024)
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .unwrap_or(Value::Null);
+            if place == IMPORTED || meta.get("imported").and_then(Value::as_bool) == Some(true) {
+                imported.insert(id.to_string());
+            }
+            if let Some(from) = meta.get("forkedFrom").and_then(Value::as_str) {
+                children.entry(from.into()).or_default().push(id.into());
+            }
+            if place != IMPORTED {
+                let file = join(&folder, &name);
+                if let Some(at) = modified(&file).await {
+                    candidates.push((file, id.to_string(), at));
                 }
             }
         }
     }
+    // An older Kumi can omit the imported mark on a fork, but keeps its parent id. Such descendants are still
+    // someone else's words and must not be chosen for a report.
+    let mut pending: Vec<String> = imported.iter().cloned().collect();
+    while let Some(id) = pending.pop() {
+        for child in children.remove(&id).unwrap_or_default() {
+            if imported.insert(child.clone()) {
+                pending.push(child);
+            }
+        }
+    }
+    let best =
+        candidates.into_iter().filter(|(_, id, _)| !imported.contains(id)).fold(None, |best: Option<(String, String, f64)>, candidate| {
+            if best.as_ref().is_none_or(|best| candidate.2 > best.2) {
+                Some(candidate)
+            } else {
+                best
+            }
+        });
     let (file, id, at) = best?;
     Some((at, id, serde_json::from_str(&read(&file).await?).ok()?))
-}
-/// Whether a conversation's sidecar says it came from a file (or was copied from one that did).
-async fn imported(meta: &str) -> bool {
-    let Some(text) = read(meta).await.filter(|text| text.len() <= 16 * 1024) else { return false };
-    serde_json::from_str::<Value>(&text).ok().and_then(|meta| meta.get("imported").and_then(Value::as_bool)).unwrap_or(false)
 }
 fn describe_conversation(value: &Value) -> Vec<String> {
     let mut lines = vec![];

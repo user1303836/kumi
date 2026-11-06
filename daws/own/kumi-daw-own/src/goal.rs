@@ -9,21 +9,18 @@ use kumi_agent::core::{
     contracts::*,
     evolve::Knob,
     goal_rig::{
-        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_stays,
-        limiter_stays, moved, moved_or_went, near, not_in_the_search, tell_generation, you_turned, GoalDaw,
+        best_plays_beside, best_waits_muted, device_label, device_of, given_values, knob_key as key, last_best_stays, limiter_stays,
+        moved_or_went, near, not_in_the_search, you_turned, GoalBackend, GoalCore, GoalDaw, GoalPass, GoalScreen as Screen, HearOrder,
+        SetOrder,
     },
     refs::RefScheme,
 };
-use kumi_common::{
-    abort::{self, Signal, SignalExt},
-    time::now_ms,
-};
+use kumi_common::abort::{self, Signal, SignalExt};
 use kumi_listening::{
     engine::Listening,
-    goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
+    goal::{screen_pick, trial_key, Told},
     renderer::{Renderer, Window},
 };
-use kumi_media::audio::{analyze::Analysis, matching::Focus};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
@@ -72,18 +69,11 @@ struct Limiter {
     device: String,
 }
 
-/// A short stretch characteristic of the reference, heard while a search screens: as far into each slot's stretch.
-struct Screen {
-    offset: f64,
-    beats: f64,
-    reference: Analysis,
-}
-
 pub struct OwnGoalRig<S: RefScheme + 'static> {
     renderer: Rc<OwnRenderer<S>>,
     slots: RefCell<Vec<Slot>>,
     /// Each slot's values as last set on its copy, by knob key.
-    current: RefCell<IndexMap<String, IndexMap<String, f64>>>,
+    core: GoalCore<OwnGoal>,
     /// The first candidate's stretch (every slot's is this long).
     window: Window,
     /// The request's from_beat: where a candidate added later is heard when it names no part.
@@ -92,10 +82,6 @@ pub struct OwnGoalRig<S: RefScheme + 'static> {
     /// is heard over its window at this tempo. (A look meanwhile may read another: Renoise's render leaves the transport
     /// where the song's tempo commands took it, until the goal puts it back.)
     tempo: f64,
-    reference: Analysis,
-    focus: Option<Focus>,
-    screen: Option<Screen>,
-    heard: RefCell<HeardCache<Cached>>,
     /// The finished goal's candidates were tidied (the top ones muted for an A/B): its best plays on its own.
     tidied: Cell<bool>,
     /// What the best last kept leaves out: it holds only a part of its track.
@@ -103,6 +89,98 @@ pub struct OwnGoalRig<S: RefScheme + 'static> {
     /// The safety limiters this rig put on candidates: taken back if the goal never opens (or a candidate never joins), and
     /// only these are put back at unity when a slot settles.
     limiters: RefCell<Vec<Limiter>>,
+}
+
+struct OwnGoal;
+impl GoalBackend for OwnGoal {
+    type Cached = Cached;
+    const SET_ORDER: SetOrder = SetOrder::OneAtATime;
+    const HEAR_ORDER: HearOrder = HearOrder::AfterBatch;
+    fn cached_told(cached: Cached) -> Told {
+        cached.told
+    }
+    fn cache(told: Told, render: &Render) -> Cached {
+        Cached { told, render: render.clone() }
+    }
+}
+
+/// Scratch ownership and grouped native renders belong to the backend, and its listening guard lasts through hearing.
+struct OwnPass<'a, S: RefScheme + 'static> {
+    goal: &'a OwnGoalRig<S>,
+    rendering: Option<kumi_listening::renderer::ListenNow<'a>>,
+}
+
+#[async_trait(?Send)]
+impl<S: RefScheme + 'static> GoalPass<OwnGoal> for OwnPass<'_, S> {
+    type Plan = ();
+    fn signal(&self, given: Signal) -> Signal {
+        abort::any([given, self.goal.renderer.lifetime()])
+    }
+    fn begin(&mut self) -> Result<(), RuntimeError> {
+        if self.goal.renderer.flag().is_on() {
+            return Err(RuntimeError::Observation("Another render is running.".into()));
+        }
+        self.rendering = Some(self.goal.renderer.flag().begin());
+        Ok(())
+    }
+    async fn plan(&mut self, _: &str, _: &[(Knob, f64)], _: Signal) -> Result<Option<()>, RuntimeError> {
+        Ok(Some(()))
+    }
+    async fn set(&mut self, slot: &str, moved: &[(Knob, f64)], _: (), signal: Signal) -> Result<HashSet<String>, RuntimeError> {
+        match self.goal.set_copy(slot, moved, &signal).await? {
+            Ok(refused) => Ok(refused),
+            // A gone slot/copy freezes all its moved knobs, just as a native read refusal did before sharing the engine.
+            Err(_) => Ok(moved.iter().map(|(knob, _)| key(knob)).collect()),
+        }
+    }
+    async fn render(
+        &mut self,
+        fresh: &[&GenerationTrial],
+        screen: Option<&Screen>,
+        signal: Signal,
+    ) -> Result<IndexMap<String, Render>, RuntimeError> {
+        let r = &self.goal.renderer;
+        let window_of = |slot: &Slot| match screen {
+            Some(screen) => Window { from: slot.window.from + screen.offset, beats: screen.beats },
+            None => slot.window,
+        };
+        let mut files = IndexMap::new();
+        // IDs and slot names are made together; native renders stay grouped by each source's own window.
+        let mut groups: Vec<(Window, Vec<Value>, Vec<String>)> = vec![];
+        {
+            let slots = self.goal.slots.borrow();
+            let heard = fresh.iter().filter_map(|trial| slots.iter().find(|slot| slot.info.name == trial.slot));
+            for (at, slot) in heard.enumerate() {
+                let window = window_of(slot);
+                let source = json!({"id": format!("g{at}"), "what": "track", "ref": r.copy_ref(&slot.copy_name), "stage": "pre-fader"});
+                match groups.iter_mut().find(|(over, _, _)| (over.from - window.from).abs() < 1e-9) {
+                    Some((_, sources, ids)) => {
+                        sources.push(source);
+                        ids.push(slot.info.name.clone());
+                    }
+                    None => groups.push((window, vec![source], vec![slot.info.name.clone()])),
+                }
+            }
+        }
+        for (window, sources, ids) in groups {
+            let names: Vec<String> = sources.iter().filter_map(|source| source["id"].as_str().map(str::to_owned)).collect();
+            match r.render_sources(sources, window, &signal).await? {
+                Ok((rendered, _)) => {
+                    for (id, slot) in names.iter().zip(&ids) {
+                        if let Some((render, _)) = rendered.get(id) {
+                            files.insert(slot.clone(), render.clone());
+                        }
+                    }
+                }
+                Err(why) => return Err(RuntimeError::Observation(why)),
+            }
+        }
+        Ok(files)
+    }
+    fn rendered(&mut self) {}
+    fn hearing_window(&mut self, screen: Option<&Screen>) -> (f64, f64) {
+        (screen.map_or(self.goal.window.beats, |screen| screen.beats), self.goal.tempo)
+    }
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -144,14 +222,10 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let mut rig = OwnGoalRig {
             renderer: renderer.clone(),
             slots: RefCell::new(vec![]),
-            current: RefCell::new(IndexMap::new()),
+            core: GoalCore::new(reference, request.focus),
             window,
             from_given: request.from_beat,
             tempo,
-            reference,
-            focus: request.focus,
-            screen: None,
-            heard: RefCell::new(HeardCache::default()),
             tidied: Cell::new(false),
             kept_only: RefCell::new(None),
             limiters: RefCell::new(vec![]),
@@ -174,9 +248,9 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             }
         }
         // A long part is screened on its most characteristic three seconds while the search is young.
-        if let Some(pick) = screen_pick(&rig.reference.over_time.lufs, rig.reference.seconds, tempo, window.beats) {
+        if let Some(pick) = screen_pick(&rig.core.reference.over_time.lufs, rig.core.reference.seconds, tempo, window.beats) {
             match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
-                Ok(reference) => rig.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference }),
+                Ok(reference) => rig.core.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference }),
                 Err(error) => {
                     rig.abandon().await;
                     return Err(error);
@@ -252,7 +326,10 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let (Some(copy_ref), Some(copy_name)) = (text(&copy, "ref"), text(&copy, "name")) else {
             return Ok(Err(format!("{} made no copy of “{name}”", r.app())));
         };
-        r.keep_copy(copy_name.clone(), &copy_ref);
+        if let Err(why) = r.keep_copy(copy_name.clone(), &copy_ref) {
+            r.drop_make(&scratch, made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0)).await;
+            return Ok(Err(why));
+        }
         r.tell_scratch_steps(made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0));
         for note in crate::listening::notes_of(&made) {
             r.tell_app(&note);
@@ -267,7 +344,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             knobs,
             devices: identities,
         };
-        self.current.borrow_mut().insert(name.clone(), info.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
+        self.core.current.borrow_mut().insert(name.clone(), info.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
         let short = r.link.book.borrow_mut().short_ref(&track);
         self.slots.borrow_mut().push(Slot { info: info.clone(), track, short, scratch, copy_name, window, places, steps: 0 });
         Ok(Ok(info))
@@ -586,7 +663,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
         self.slots.borrow().iter().map(|slot| slot.info.clone()).collect()
     }
     fn screens(&self) -> bool {
-        self.screen.is_some()
+        self.core.screen.is_some()
     }
     async fn add(&self, candidate: &AuditionCandidate, given: Signal) -> Result<Result<GoalSlotInfo, String>, RuntimeError> {
         let signal = abort::any([given, self.renderer.lifetime()]);
@@ -616,120 +693,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
         given: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
-        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
-        let r = &self.renderer;
-        let signal = abort::any([given, r.lifetime()]);
-        let screened = options.and_then(|options| options.screen) == Some(true) && self.screen.is_some();
-        let cache_key = |trial: &GenerationTrial| trial_key(&trial.slot, screened, &trial.values);
-        if r.flag().is_on() {
-            return Err(RuntimeError::Observation("Another render is running.".into()));
-        }
-        let _rendering = r.flag().begin();
-        let set_from = now_ms();
-        let mut generation = Generation { screened, ..Default::default() };
-        // Each trial's values on its slot's copy (only what moved).
-        for trial in trials {
-            let moved = moved(trial, self.current.borrow().get(&trial.slot));
-            if moved.is_empty() {
-                continue;
-            }
-            match self.set_copy(&trial.slot, &moved, &signal).await? {
-                // (what the DAW took is the copy's now; the knobs it refused, the search leaves be)
-                Ok(refused) => {
-                    let mut current = self.current.borrow_mut();
-                    let last = current.entry(trial.slot.clone()).or_default();
-                    for (knob, value) in moved.iter().filter(|(knob, _)| !refused.contains(&key(knob))) {
-                        last.insert(key(knob), *value);
-                    }
-                    if !refused.is_empty() {
-                        generation.frozen.insert(trial.slot.clone(), refused);
-                    }
-                }
-                // (the slot or its copy is gone: none of its knobs can move)
-                Err(_) => {
-                    generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect::<HashSet<_>>());
-                }
-            }
-        }
-        let render_from = now_ms();
-        // Rendered unless every trial was heard before at these values.
-        let fresh: Vec<&GenerationTrial> =
-            trials.iter().filter(|trial| trial.fresh == Some(true) || !self.heard.borrow().contains(&cache_key(trial))).collect();
-        // Each slot's copy heard over its own stretch (or the screen's slice of it): one render for each stretch.
-        let window_of = |slot: &Slot| match self.screen.as_ref().filter(|_| screened) {
-            Some(screen) => Window { from: slot.window.from + screen.offset, beats: screen.beats },
-            None => slot.window,
-        };
-        let beats = self.screen.as_ref().filter(|_| screened).map_or(self.window.beats, |screen| screen.beats);
-        let mut files: IndexMap<String, Render> = IndexMap::new();
-        if !fresh.is_empty() {
-            // Each source's id with its slot, made together so an id always names its own slot's copy; by stretch.
-            let mut groups: Vec<(Window, Vec<Value>, Vec<String>)> = vec![];
-            {
-                let slots = self.slots.borrow();
-                let heard = fresh.iter().filter_map(|trial| slots.iter().find(|slot| slot.info.name == trial.slot));
-                for (at, slot) in heard.enumerate() {
-                    let window = window_of(slot);
-                    let source = json!({"id": format!("g{at}"), "what": "track", "ref": r.copy_ref(&slot.copy_name), "stage": "pre-fader"});
-                    match groups.iter_mut().find(|(over, _, _)| (over.from - window.from).abs() < 1e-9) {
-                        Some((_, sources, ids)) => {
-                            sources.push(source);
-                            ids.push(slot.info.name.clone());
-                        }
-                        None => groups.push((window, vec![source], vec![slot.info.name.clone()])),
-                    }
-                }
-            }
-            for (window, sources, ids) in groups {
-                let names: Vec<String> = sources.iter().filter_map(|source| source["id"].as_str().map(str::to_owned)).collect();
-                match r.render_sources(sources, window, &signal).await? {
-                    Ok((rendered, _)) => {
-                        for (id, slot) in names.iter().zip(&ids) {
-                            if let Some((render, _)) = rendered.get(id) {
-                                files.insert(slot.clone(), render.clone());
-                            }
-                        }
-                    }
-                    Err(why) => return Err(RuntimeError::Observation(why)),
-                }
-            }
-        }
-        let heard_from = now_ms();
-        let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
-        // Each trial heard before is told from what was heard; the rest are heard together, as Live's goal hears them.
-        let told: Vec<(&GenerationTrial, String, Option<Cached>)> = trials
-            .iter()
-            .map(|trial| {
-                let cache_key = cache_key(trial);
-                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key) } else { None };
-                (trial, cache_key, known)
-            })
-            .collect();
-        let hearing = told
-            .iter()
-            .filter(|(_, _, known)| known.is_none())
-            .filter_map(|(trial, _, _)| files.get(&trial.slot))
-            .map(|rendered| hear(rendered, beats, self.tempo, self.focus, signal.clone()));
-        let mut heard = futures::future::try_join_all(hearing).await.map_err(|error| RuntimeError::plain(error.to_string()))?.into_iter();
-        for (trial, cache_key, known) in told {
-            if let Some(known) = known {
-                tell_generation(&mut generation, &trial.slot, known.told, true);
-                continue;
-            }
-            let Some(rendered) = files.get(&trial.slot) else {
-                generation.silent.push(trial.slot.clone());
-                continue;
-            };
-            let Some(heard) = heard.next() else { break };
-            let Some(told) = tell(&heard, against, self.focus) else {
-                generation.silent.push(trial.slot.clone());
-                continue;
-            };
-            tell_generation(&mut generation, &trial.slot, told.clone(), false);
-            self.heard.borrow_mut().insert(cache_key, Cached { told, render: rendered.clone() });
-        }
-        tell_timing(trials.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
-        Ok(generation)
+        self.core.generation(OwnPass { goal: self, rendering: None }, trials, given, options).await
     }
     async fn keep_best(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<String, RuntimeError> {
         let r = &self.renderer;
@@ -861,7 +825,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             *r.goal_best_track.borrow_mut() = Some(r.link.book.borrow_mut().short_ref(&copy));
             // The winner is heard: the render it scored from at these very values, out loud.
             let heard = {
-                let cache = self.heard.borrow();
+                let cache = self.core.heard.borrow();
                 [false, true].into_iter().find_map(|screened| cache.get(&trial_key(slot, screened, values))).map(|found| found.render)
             };
             let (played, said) = match heard {

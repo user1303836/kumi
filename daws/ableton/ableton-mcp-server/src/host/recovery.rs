@@ -176,6 +176,22 @@ helpers::js_string(reference)?)))
         let result = execute.await;
         drop(guard);
         let result = result?;
+        // The pad-content stopgap refuses before any read, mutation or recovery replay.
+        // Preserve its original state, undo key and pending plan, especially when a prior
+        // undo is uncertain; this request cannot resolve what that earlier request did.
+        let unavailable = result["result"]["content"][0]["text"].as_str().and_then(|text| serde_json::from_str::<Value>(text).ok());
+        if watch.get() == 0
+            && result["result"]["isError"] == true
+            && unavailable.as_ref().is_some_and(|body| body["code"] == "changed_since" && body["undoUnavailable"] == true)
+            && undoing.as_ref().is_some_and(|record| {
+                let record = record.borrow();
+                record["kind"] == "drum-pad"
+                    && ["load-sample", "sample-chain", "load-samples"].iter().any(|action| record["payload"]["action"] == *action)
+                    && record.get("state") == before.as_ref()
+            })
+        {
+            return Ok(result);
+        }
         let refusal = transaction_id.and_then(|id| self.undo_refusals.borrow_mut().remove(id));
         if let Some(refusal) = refusal {
             if refusal.record.borrow()["state"] == "uncertain" {
@@ -623,3 +639,73 @@ impl McpHost {
 #[cfg(test)]
 #[path = "recovery_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+    use crate::live::DeterministicLiveSimulator;
+    use sha2::{Digest, Sha256};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sample_pad_undos_refuse_before_legacy_recovery_even_with_a_fingerprint() {
+        for action in ["load-sample", "sample-chain", "load-samples"] {
+            for state in ["applied", "uncertain"] {
+                for fingerprint in [Value::Null, json!("a".repeat(64))] {
+                    let live = Rc::new(DeterministicLiveSimulator::new());
+                    let pads: Vec<_> = (0..3).map(|index| {
+                        let pad_ref = format!("drum-pad:safety-{index}");
+                        let chain_ref = format!("chain:safety-{index}");
+                        json!({"ref":pad_ref,"parentRef":"device:safety-rack","objectIdentity":format!("pad:{index}"),"index":index,"name":format!("Pad {index}"),"note":36+index,"mute":false,"solo":false,
+                            "chains":[{"ref":chain_ref,"parentRef":pad_ref,"objectIdentity":format!("chain:{index}"),"name":format!("Chain {index}"),"mixer":{"volume":0.8,"pan":0.0,"sends":[0.1]},"devices":[{
+                                "ref":format!("device:safety-{index}"),"parentRef":chain_ref,"objectIdentity":format!("device:{index}"),"name":"Simpler","kind":"instrument","className":"OriginalSimpler","parameters":[],"samplePath":"/samples/producer.wav"}]}]})
+                    }).collect();
+                    live.state.borrow_mut()["tracks"][0]["devices"] = json!([{"ref":"device:safety-rack","parentRef":"track:track-1","objectIdentity":"rack:safety","name":"Drum Rack","kind":"rack","className":"DrumGroupDevice","parameters":[],"canHaveChains":true,"canHaveDrumPads":true,"chains":[],"drumPads":pads}]);
+                    let host = McpHost::new(live.clone(), McpHostOptions::default()).unwrap();
+                    let targets = if action == "load-samples" { 2 } else { 1 };
+                    let batch: Vec<_> = pads
+                        .iter()
+                        .take(targets)
+                        .map(|pad| json!({"ref":pad["ref"],"expectedObjectIdentity":pad["objectIdentity"]}))
+                        .collect();
+                    let mut made: Vec<_> = pads.iter().take(targets).map(|pad| json!({"chainIdentity":pad["chains"][0]["objectIdentity"],"deviceIdentity":pad["chains"][0]["devices"][0]["objectIdentity"],"contentFingerprint":fingerprint})).collect();
+                    if fingerprint.is_null() {
+                        for row in &mut made {
+                            row.as_object_mut().unwrap().remove("contentFingerprint");
+                        }
+                    }
+                    let payload = if action == "load-samples" {
+                        json!({"action":action,"deviceRef":"device:safety-rack","pads":batch})
+                    } else {
+                        let mut payload = batch[0].clone();
+                        payload["action"] = json!(action);
+                        payload
+                    };
+                    let record = host.clip_lifecycle_transactions.insert("pad-safety", json!({"id":"pad-safety","kind":"drum-pad","epoch":1,"state":"applied","payload":payload,"prior":{"chainCount":0},"created":if targets==1{made[0].clone()}else{json!({"pads":made})},"undoKey":"legacy-undo"})).unwrap();
+                    host.begin_undo_recovery(&record, "legacy-undo").unwrap();
+                    let step = host.push_undo_recovery_step(&record, json!({"operation":"drum-pad.delete-all-chains","args":{"ref":pads[0]["ref"],"expectedObjectIdentity":pads[0]["objectIdentity"],"expectedStateRevision":hex::encode(Sha256::digest(canonical_mutation_identity(&json!([pads[0]["chains"][0]["objectIdentity"]])).unwrap()))},"completed":false})).unwrap();
+                    record.borrow_mut()["state"] = json!(state);
+                    let before_record = record.borrow().clone();
+                    let before_live = live.state.borrow().clone();
+                    // An exact-key legacy recovery plan already exists. The mitigation must
+                    // not begin it, replay it, accept a forged future receipt, or clear a pad.
+                    let undo = json!({"transactionId":"pad-safety","confirmation":"undo","idempotencyKey":"legacy-undo"});
+                    let result = host
+                        .with_undo_watch(&json!(2), &undo, async { Ok(host.undo_drum_pad_async(&json!(2), &undo, None).await) })
+                        .await
+                        .unwrap();
+                    let body: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+                    assert_eq!(result["result"]["isError"], true, "{action} {state}: {result}");
+                    assert_eq!(body["code"], "changed_since");
+                    assert_eq!(body["undoUnavailable"], true);
+                    assert!(body["reason"].as_str().unwrap().contains("Live's own Undo"));
+                    assert_eq!(*record.borrow(), before_record, "the exact original state and undo key must survive");
+                    assert_eq!(*live.state.borrow(), before_live, "target and unrelated pads must survive");
+                    assert_eq!(step.borrow()["completed"], false, "the legacy clear must not replay");
+                    let plans = host.undo_recovery_plans.borrow();
+                    assert_eq!(plans.len(), 1, "the unavailable undo cannot delete its unresolved plan");
+                    assert!(!plans[0].retried, "the refusal must precede begin_undo_recovery");
+                }
+            }
+        }
+    }
+}

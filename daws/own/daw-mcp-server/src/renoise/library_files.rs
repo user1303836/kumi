@@ -99,9 +99,14 @@ fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|home| !home.is_empty()).map(PathBuf::from)
 }
 
-/// The User Library most likely Renoise's, for the tool, which can't ask Windows where Documents is.
+/// The first existing User Library, or the platform default when none exists. Linux keeps
+/// an existing legacy Documents library usable until the documented ~/Renoise library exists.
 pub fn user_library() -> Option<String> {
-    daw_bridge::detect::renoise_user_libraries(&home()?).first()?.to_str().map(str::to_owned)
+    preferred_user_library(&daw_bridge::detect::renoise_user_libraries(&home()?))
+}
+
+fn preferred_user_library(candidates: &[PathBuf]) -> Option<String> {
+    candidates.iter().find(|path| path.is_dir()).or_else(|| candidates.first())?.to_str().map(str::to_owned)
 }
 
 pub fn library_roots() -> Libraries {
@@ -478,8 +483,38 @@ mod tests {
     }
 
     #[test]
+    fn linux_library_saves_prefer_the_documented_root_and_both_roots_remain_loadable() {
+        for (native_exists, legacy_exists) in [(false, false), (false, true), (true, false), (true, true)] {
+            let home = tempfile::tempdir().unwrap();
+            let candidates = daw_bridge::detect::user_libraries_in(daw_bridge::detect::Os::Linux, None, home.path());
+            let (native, legacy) = (&candidates[0], &candidates[1]);
+            for (exists, root) in [(native_exists, native), (legacy_exists, legacy)] {
+                if exists {
+                    let folder = root.join("Effect Presets/Compressor");
+                    std::fs::create_dir_all(&folder).unwrap();
+                    std::fs::write(folder.join("Kept.xrdp"), PRESET).unwrap();
+                }
+            }
+            let expected = if native_exists || !legacy_exists { native } else { legacy };
+            assert_eq!(preferred_user_library(&candidates).as_deref(), expected.to_str());
+            let libraries = Libraries { own: vec![], user: candidates.clone() };
+            for (exists, root) in [(native_exists, native), (legacy_exists, legacy)] {
+                if exists {
+                    let file = root.join("Effect Presets/Compressor/Kept.xrdp");
+                    assert_eq!(preset(&file, &libraries).unwrap().text, PRESET);
+                    assert_eq!(std::fs::read_to_string(file).unwrap(), PRESET, "choosing a destination cannot move or change presets");
+                }
+            }
+            let outside = home.path().join("Outside.xrdp");
+            std::fs::write(&outside, PRESET).unwrap();
+            assert!(matches!(preset(&outside, &libraries), Err(Refusal::Bad(why)) if why.contains("isn't in Renoise's library")));
+        }
+    }
+
+    #[test]
     fn the_libraries_are_the_user_library_and_renoises_own() {
         let libraries = library_roots();
-        assert!(libraries.user.iter().any(|root| root.ends_with(Path::new("Documents/Renoise/User Library"))), "{libraries:?}");
+        let expected = if cfg!(target_os = "linux") { "Renoise/User Library" } else { "Documents/Renoise/User Library" };
+        assert!(libraries.user.iter().any(|root| root.ends_with(Path::new(expected))), "{libraries:?}");
     }
 }

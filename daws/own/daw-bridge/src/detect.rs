@@ -521,22 +521,28 @@ pub fn renoise_config(prefs: &Path, tool_id: &str) -> Option<RenoiseConfig> {
     })
 }
 
-/// Where Renoise's user library may be, likeliest first: in the Documents folder Windows says it keeps (OneDrive, or the
-/// producer, can move it out of the home folder), and in the home folder's, where it's guessed when Windows doesn't say or
-/// on any other system.
+/// Renoise's User Library candidates, in preference order. Linux uses ~/Renoise/User Library;
+/// the old ~/Documents guess remains readable for presets Kumi already saved there. macOS uses
+/// Documents, and Windows first asks where the system keeps Documents (which OneDrive can move).
+/// The platform locations are documented at https://tutorials.renoise.com/wiki/Libraries.
 pub fn renoise_user_libraries(home: &Path) -> Vec<PathBuf> {
     #[cfg(windows)]
     let documents = windows_documents();
     #[cfg(not(windows))]
     let documents = None;
-    user_libraries_in(documents, home)
+    user_libraries_in(Os::current(), documents, home)
 }
 
-/// [`renoise_user_libraries`] with the system's Documents folder given: None to look only in `home`.
-pub fn user_libraries_in(documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
-    let library = |documents: &Path| documents.join("Renoise").join("User Library");
+/// [`renoise_user_libraries`] with an explicit platform and optional Windows Documents folder.
+/// Keeping the platform explicit also lets library discovery honor an injected home/platform.
+pub fn user_libraries_in(os: Os, documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
+    let library = |parent: &Path| parent.join("Renoise").join("User Library");
     let guess = library(&home.join("Documents"));
-    let mut libraries: Vec<PathBuf> = documents.map(|documents| library(&documents)).into_iter().collect();
+    let mut libraries: Vec<PathBuf> = match os {
+        Os::Linux => vec![library(home)],
+        Os::Windows => documents.map(|documents| library(&documents)).into_iter().collect(),
+        Os::Mac => vec![],
+    };
     if !libraries.contains(&guess) {
         libraries.push(guess);
     }
@@ -1058,6 +1064,7 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
     match daw {
         Daw::Reaper => matches!(base, "REAPER" | "REAPER64" | "reaper"),
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
+        Daw::Logic => base == "Logic Pro",
         // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
         Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
     }
@@ -1120,14 +1127,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn renoises_user_library_is_looked_for_in_the_documents_folder_the_system_says_then_the_homes() {
+    fn renoises_user_libraries_follow_the_platform_and_keep_linux_legacy_access() {
         let home = Path::new("home");
         let in_home = home.join("Documents").join("Renoise").join("User Library");
         let moved = Path::new("OneDrive").join("Documents");
-        assert_eq!(user_libraries_in(Some(moved.clone()), home), [moved.join("Renoise").join("User Library"), in_home.clone()]);
+        assert_eq!(
+            user_libraries_in(Os::Windows, Some(moved.clone()), home),
+            [moved.join("Renoise").join("User Library"), in_home.clone()]
+        );
         // Not moved, or the system doesn't say: the home folder's, once.
-        assert_eq!(user_libraries_in(Some(home.join("Documents")), home), [in_home.clone()]);
-        assert_eq!(user_libraries_in(None, home), [in_home]);
+        assert_eq!(user_libraries_in(Os::Windows, Some(home.join("Documents")), home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Windows, None, home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Mac, None, home), [in_home.clone()]);
+        assert_eq!(user_libraries_in(Os::Mac, Some(moved.clone()), home), [in_home.clone()]);
+        let linux = [home.join("Renoise").join("User Library"), in_home];
+        assert_eq!(user_libraries_in(Os::Linux, None, home), linux);
+        assert_eq!(user_libraries_in(Os::Linux, Some(moved), home), linux);
     }
 
     /// The call itself, which only Windows has.
@@ -1405,9 +1420,10 @@ mod tests {
     /// process in both is in the kernel's list, another account's too, in the same order. Where both name it alike, this
     /// account's are named as `ps` names them: on Linux every one (an AppImage's entry, `AppRun` to `ps`, by its program's
     /// path, as Kumi lists it), and on macOS those it names by a path, as a DAW started from the Finder or the Dock is (and
-    /// a child known only by its argv[0] by it). Other names aren't
-    /// compared: on macOS `ps`, setuid root, reads any process's argv[0], which can be a title ("Core Audio Driver
-    /// (NullAudio.driver)" on a runner), where Kumi, not root, names another account's by its program's path.
+    /// a child known only by its argv[0] by it). Another account's path names on macOS agree by base name: the program's
+    /// path can take a different form through framework links. Names without a path aren't compared: `ps`, setuid root,
+    /// reads any process's argv[0], which can be a title ("Core Audio Driver (NullAudio.driver)" on a runner), where Kumi,
+    /// not root, names another account's by its program's path.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_kernels_listing_is_what_ps_lists() {
@@ -1460,9 +1476,8 @@ mod tests {
         assert!(steady.iter().any(|(_, uid, _)| *uid != me), "another account's processes are among them");
         // Named so here too: this account's processes, the producer's own, among which Kumi looks for a DAW. On Linux
         // every one (`comm`, which `ps` reads from the same place); on macOS those named by their path, as DAWs started
-        // from the Finder or the Dock are, since a name without one can be a title only `ps`, as root, reads. Another
-        // account's aren't compared: `ps` reads their argv[0], where Kumi, not root, names them by their program's
-        // path. The named child above holds argv[0] being read.
+        // from the Finder or the Dock are, since a name without one can be a title only `ps`, as root, reads.
+        // The named child above holds argv[0] being read.
         let compared: Vec<_> =
             steady.iter().filter(|(_, uid, name)| *uid == me && (cfg!(target_os = "linux") || name.starts_with('/'))).collect();
         assert!(!compared.is_empty(), "this account's processes are compared");
@@ -1473,6 +1488,16 @@ mod tests {
                 name.clone()
             };
             assert_eq!(kernel[pid], &name, "pid {pid}");
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // For another account, Kumi falls back to proc_pidpath: compare it where ps also gives a path, rather than
+            // a title. Framework symlinks can name the same program by different paths, so compare their base names.
+            let others: Vec<_> = steady.iter().filter(|(_, uid, name)| *uid != me && name.starts_with('/')).collect();
+            assert!(!others.is_empty(), "another account's processes named by their paths are compared");
+            for (pid, _, name) in others {
+                assert_eq!(Path::new(kernel[pid]).file_name(), Path::new(name).file_name(), "another account's pid {pid}");
+            }
         }
         let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
         let ps_order: Vec<u32> = before.iter().map(|(pid, _, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
@@ -1591,6 +1616,16 @@ mod tests {
             ["soundcraft-cli", "/usr/local/bin/soundcraft-cli", "SoundCraftHelper", "/Applications/REAPER.app/Contents/MacOS/REAPER"]
         {
             assert!(!process_is(Daw::SoundCraft, name), "{name}");
+        }
+    }
+
+    #[test]
+    fn logics_main_process_is_told_from_the_bridge_and_helpers() {
+        for name in ["Logic Pro", "/Applications/Logic Pro.app/Contents/MacOS/Logic Pro", "/lab/Logic Beta.app/Contents/MacOS/Logic Pro"] {
+            assert!(process_is(Daw::Logic, name), "{name}");
+        }
+        for name in ["Logic", "Logic Pro X", "logic-kumi", "kumi-logic-hands-arm64", "AUHostingService", "Logic Pro Helper"] {
+            assert!(!process_is(Daw::Logic, name), "{name}");
         }
     }
 

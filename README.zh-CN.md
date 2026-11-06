@@ -21,6 +21,10 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
+macOS 上的 Logic Pro 12 可通过 `kumi --daw logic` 显式选择实验性集成。可读取工程和 FOCUS 正文，提供 M3 的16种修改及Loop Range、Region Rename 和 Region Loop 限定预览；新增和已删除轨道、已删除标记，以及原始信息不完整的标记修改需在 Logic 撤销历史中手动撤销。本次移植的真实 Logic 验收尚未完成；聆听仍未启用。详见 [Logic Pro](docs/zh-CN/DAWS.md#logic-pro实验性读取)。
+
+`logic_manual` 无需启动 Logic 即可查询 Apple 指南，已获取页面会缓存以供后续使用。 还可查找本地 CAF 音频、预设／设置文件和 `.patch` 包；向 Logic 加载仍需手动完成。
+
 ## 快速开始
 
 在 Mac 的终端或 Windows 的 PowerShell 中，一条命令即可开始。
@@ -51,7 +55,8 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 - **匹配参考曲。** 给它一首你喜欢的曲子：Kumi 会尝试几个版本，逐一与它对比打分，再精修最好的那个。
 - **生成声音并把音频转成 MIDI。** 在 `/audio` 确认接入 [Mirelo](docs/zh-CN/KUMI_GUIDE.md#mirelo-与自托管音频模型)，使用文字/视频音效、延长、区域替换和扒谱。各任务独立授权，**Off** 也拒绝明确指定 Mirelo 的请求。支持自托管替代服务；MuScriptor 支持 MIDI。
 - **创建插件预设并进行母带处理。** Kumi 使用内置 VST3 格式，包括 FabFilter 的现售和旧版产品，并在原生设备之前检查合适的已安装插件。Kumi 可以在后台创建预设，让你继续手头的工作。[支持的格式与限制](plugin-formats/README.md)。
-- **制作设备。** 描述一个 Max for Live 效果器或乐器，Kumi 就会把它做出来并放到你的轨道上。
+- **制作设备。** 描述一个 Max for Live 效果器或乐器，Kumi 就会把它做出来并放到你的轨道上。 可离线测试受支持的消息对象，补丁乐器支持独立声部。
+- **构思 Live 的不同 MIDI。** 在后台保存候选板，查看音符素材后在本地 keep/drop。Live 候选板应用和音频录制尚不可用；退出 Kumi 会停止任务。
 - **找到你的声音。** “像这个一样带点颗粒感的军鼓”“我常用的人声效果链”：Kumi 了解你的采样、预设和工程。
 - **把声音画成地图。** `/map` 把你的采样和歌曲排列出来，相似的彼此相邻；指向一个点就能试听。把喜欢的声音收进调色板，当你说“从我的调色板里找一个更暗的底鼓”时，Kumi 就从中挑选，也可以把整个调色板作为一套鼓组载入。
 - **处理杂活。** 重命名、上色、路由、侧链、编组、冻结、并轨和导出。

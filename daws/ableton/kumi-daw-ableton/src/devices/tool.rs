@@ -1,4 +1,4 @@
-//! Build a checked Max for Live device in Live's User Library, then wait for its Browser.
+//! Build a checked Max for Live device in Live's User Library; loading it waits for its Browser.
 
 use super::{
     amxd::{encode_amxd, DeviceType},
@@ -7,9 +7,10 @@ use super::{
     gen::{audio_effect_patcher, instrument_patcher, GenSpec, MIX, OUTPUT},
     harness::{check_midi_device_isolated, IsolatedOptions},
     midi::midi_device_patcher,
-    patch::{page, reference},
+    patch::{message, page, reference},
     patched::patched_device,
     spec::{check_spec, kept_unrun, Control, DeviceSpec},
+    voices,
 };
 use crate::ears::device::EARS_NAME;
 use async_trait::async_trait;
@@ -35,6 +36,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 pub const MAKE_DEVICE_TOOL: &str = "make_device";
+const BROWSER_LOADS: &str = "load_device waits for Live's Browser to list this file; it can be called now.";
 /// How many objects one call can ask about.
 const MOST_OBJECTS: usize = 16;
 /// How many replaced devices' files are kept, the newest.
@@ -44,7 +46,9 @@ pub type BrowserSees = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Resu
 #[derive(Clone)]
 pub struct DeviceToolOptions {
     pub user_library: String,
+    /// Typed builds check the Browser; standalone make_device leaves that wait to load_device.
     pub browser_sees: BrowserSees,
+    /// The typed build's Browser wait; standalone make_device ignores it.
     pub wait_ms: Option<u64>,
     /// The devices this conversation made: the tool is made anew each turn, and these are kept for the conversation.
     pub made: Rc<RefCell<Made>>,
@@ -65,8 +69,7 @@ pub struct Made {
     devices: Vec<MadeDevice>,
     /// Where a replaced device's file is kept, if anywhere.
     kept: Option<PathBuf>,
-    /// Devices written that Live's Browser hadn't listed yet (made by a background job, which doesn't wait for it), by
-    /// item id: loading one waits for the Browser first.
+    /// Devices written without asking Live's Browser, by item id: loading one waits for the Browser first.
     unlisted: Vec<String>,
 }
 
@@ -115,7 +118,7 @@ impl Made {
         self.unlisted.retain(|item| item != item_id);
     }
 
-    /// A device written that Live's Browser hasn't listed yet.
+    /// A device written whose presence in Live's Browser hasn't been checked yet.
     pub fn written_unlisted(&mut self, item_id: &str) {
         if !self.unlisted(item_id) {
             self.unlisted.push(item_id.to_string());
@@ -288,8 +291,6 @@ struct Saved {
     ours: Option<MadeDevice>,
     /// Where the replaced device's file is kept.
     kept: Option<PathBuf>,
-    /// Whether Live's Browser listed it before the wait was over.
-    seen: bool,
 }
 
 /// A new file put in place from `temporary` without replacing a file at `file`: a hard link, which fails when one's there
@@ -375,8 +376,8 @@ pub(crate) async fn wait_listed(options: &DeviceToolOptions, item_id: &str, sign
 
 impl DeviceTool {
     /// Writes a device of `kind` to Kumi's folder in the User Library under its name (`make` makes its file for the name
-    /// it's given, and says what it found, or why it can't), records it for this conversation, and waits for Live's
-    /// Browser to list it. Err is the answer when it can't be made or written: nothing is written then. A device that
+    /// it's given, and says what it found, or why it can't), and records it for this conversation. Loading it waits for
+    /// Live's Browser to list it. Err is the answer when it can't be made or written: nothing is written then. A device that
     /// isn't this conversation's to replace is put in place without replacing any file there.
     async fn save<Making: Future<Output = Result<(Vec<u8>, Findings), String>>>(
         &self,
@@ -462,8 +463,8 @@ impl DeviceTool {
         let written = tokio::task::spawn_blocking(move || hashed(&bytes)).await.unwrap_or_default();
         self.options.made.borrow_mut().made(MadeDevice { asked: naming.asked, file: name.clone(), kind, written });
         let item_id = format!("user_library/Kumi/{}/{name}", kind_folder(kind));
-        let seen = wait_listed(&self.options, &item_id, signal).await?;
-        Ok(Ok(Saved { name, file, item_id, ours, kept, seen }))
+        self.options.made.borrow_mut().written_unlisted(&item_id);
+        Ok(Ok(Saved { name, file, item_id, ours, kept }))
     }
 
     /// A device that's already there (`from`): opened and said in the notation when nothing's asked of it; else a new
@@ -587,7 +588,7 @@ impl DeviceTool {
                 }
             }
         };
-        let Saved { name, file, item_id, ours, kept, seen } = match self.save(kind, naming, make, &mut found, &signal).await? {
+        let Saved { name, file, item_id, ours, kept } = match self.save(kind, naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
             Err(refused) => return Ok(refused),
         };
@@ -622,9 +623,7 @@ impl DeviceTool {
                 fields.insert(key.into(), json!(said));
             }
         }
-        if !seen {
-            fields.insert("browser".into(), json!("Live's Browser hasn't listed it yet; load it in a moment."));
-        }
+        fields.insert("browser".into(), json!(BROWSER_LOADS));
         let load = match kind {
             DeviceType::MidiEffect => "load_device with this itemId on the MIDI track",
             DeviceType::AudioEffect => "load_device with this itemId on the track, then hear it with audition",
@@ -656,12 +655,8 @@ impl DeviceTool {
 #[async_trait(?Send)]
 impl KernelTool for DeviceTool {
     fn reach(&self) -> Reach {
-        // Writing the file is away from the DAW; waiting for its Browser to list the device reads it.
-        if self.options.wait_ms == Some(0) {
-            Reach::AwayFromDaw
-        } else {
-            Reach::DawRead
-        }
+        // Making and opening a device use files on disk; load_device owns every read of Live's Browser.
+        Reach::AwayFromDaw
     }
     fn name(&self) -> &str {
         MAKE_DEVICE_TOOL
@@ -726,7 +721,7 @@ impl KernelTool for DeviceTool {
         }
         // Code Kumi's check found never stops would hold Max (and Live) up: it's kept in the device without running.
         let mut runaway = false;
-        let checked = match &spec {
+        let mut checked = match &spec {
             DeviceSpec::Patch(_) if reference.is_some() => {
                 "Kumi checked every object against this machine's Max, every cord against the ports it meets, and the order its messages go in, and laid it out top to bottom".to_string()
             }
@@ -771,32 +766,52 @@ impl KernelTool for DeviceTool {
             reserved: Vec::new(),
             never: None,
         };
+        let patch_verified = Rc::new(RefCell::new(None::<super::harness::Checked>));
         let make = |name: &str| {
-            std::future::ready(match &spec {
-                DeviceSpec::MidiEffect(s) => {
-                    let mut s = s.clone();
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(&s)), Findings::default()))
+            let mut spec = spec.clone();
+            let name = name.to_string();
+            let signal = signal.clone();
+            let patch_verified = Rc::clone(&patch_verified);
+            async move {
+                match &mut spec {
+                    DeviceSpec::MidiEffect(s) => {
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(s)), Findings::default()))
+                    }
+                    DeviceSpec::AudioEffect(s) => {
+                        let mut s = GenSpec::from(&*s);
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
+                    }
+                    DeviceSpec::Instrument(s) => {
+                        let mut s = GenSpec::from(&*s);
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
+                    }
+                    DeviceSpec::Patch(s) => {
+                        s.name = name;
+                        let s = s.clone();
+                        let made = beside(&signal, move || {
+                            let (patcher, mut findings) = patched_device(&s, reference);
+                            let patcher = if s.kind == DeviceType::Instrument {
+                                voices::instrument_from_patch(patcher, s.voices, &s)?
+                            } else { patcher };
+                            let verified = (!s.tests.is_empty()).then(|| message::check(&s, &patcher));
+                            if let Some(verified) = &verified {
+                                if verified.runaway {
+                                    return Err("Kumi didn't write the device: its message check reached a work or resource limit; fix the patch before loading it.".to_string());
+                                }
+                                findings.wrong.extend(verified.problems.iter().cloned());
+                            }
+                            Ok((encode_amxd(s.kind, &patcher), findings, verified))
+                        }).await.map_err(|error| error.to_string())?.ok_or_else(|| "Kumi couldn't finish checking the patch, so nothing was written.".to_string())??;
+                        *patch_verified.borrow_mut() = made.2;
+                        Ok((made.0, made.1))
+                    }
                 }
-                DeviceSpec::AudioEffect(s) => {
-                    let mut s = GenSpec::from(s);
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
-                }
-                DeviceSpec::Instrument(s) => {
-                    let mut s = GenSpec::from(s);
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
-                }
-                DeviceSpec::Patch(s) => {
-                    let mut s = s.clone();
-                    s.name = name.to_string();
-                    let (patcher, patched) = patched_device(&s, reference);
-                    Ok((encode_amxd(s.kind, &patcher), patched))
-                }
-            })
+            }
         };
-        let Saved { name, file, item_id, ours, kept, seen } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
+        let Saved { name, file, item_id, ours, kept } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
             Err(refused) => return Ok(refused),
         };
@@ -822,15 +837,22 @@ impl KernelTool for DeviceTool {
         if let DeviceSpec::Instrument(s) = &spec {
             fields.insert("voices".into(), json!(s.voices));
         }
+        if let DeviceSpec::Patch(s) = &spec {
+            if s.kind == DeviceType::Instrument && given("voices") {
+                fields.insert("voices".into(), json!(s.voices));
+            }
+            if let Some(verified) = patch_verified.borrow().as_ref().filter(|_| !s.tests.is_empty()) {
+                checked.push_str(&format!("; {} of {} supplied message tests passed", verified.passed, verified.of));
+                fields.insert("tests".into(), json!({ "passed": verified.passed, "of": verified.of, "simulation": "offline-message" }));
+            }
+        }
         fields.insert("checks".into(), json!(checked));
         for (key, said) in [("wrong", &found.wrong), ("changed", &found.changed), ("notes", &found.notes)] {
             if !said.is_empty() {
                 fields.insert(key.into(), json!(said));
             }
         }
-        if !seen {
-            fields.insert("browser".into(), json!("Live's Browser hasn't listed it yet; load it in a moment."));
-        }
+        fields.insert("browser".into(), json!(BROWSER_LOADS));
         let again = format!("call make_device again in this conversation with the name \"{name}\", which replaces this device");
         let next = if found.wrong.is_empty() {
             format!("{next} To change it, {again}.")

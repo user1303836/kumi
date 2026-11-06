@@ -12,10 +12,72 @@ local json = import("json")
 local refs = import("refs")
 local rows = import("rows")
 local base = import("changes_base")
+local material_ = import("changes_material")
 
 local bad, fail, the_song = base.bad, base.fail, base.the_song
 local q = base.q
 local M = {}
+
+-- These keys only choose a previous sequence to compare: every fragment is freshly read, and only an exactly equal
+-- prefix can reuse its sums. Notifications, object identity and the logical edit count authorize no cached bytes.
+-- Bound strings, state pairs and entries separately; bigger ranges retain the existing full-text hash path.
+M.HASHES_KEPT, M.HASH_BYTES, M.HASH_FRAGMENTS = 8, 8 * 1048576, 8192
+local hashes, hashes_count, hashes_bytes, hashes_fragments, hashes_used = {}, 0, 0, 0, 0
+local function forget_hash(key)
+  local kept = hashes[key]
+  if not kept then return end
+  hashes[key] = nil
+  hashes_count, hashes_bytes, hashes_fragments = hashes_count - 1, hashes_bytes - kept.bytes, hashes_fragments - #kept.parts
+end
+
+local function hash_room(bytes, fragments, count)
+  local all = {}
+  for key, kept in pairs(hashes) do all[#all + 1] = { key = key, used = kept.used } end
+  table.sort(all, function(a, b) return a.used < b.used end)
+  for _, entry in ipairs(all) do
+    if hashes_count + count <= M.HASHES_KEPT and hashes_bytes + bytes <= M.HASH_BYTES
+      and hashes_fragments + fragments <= M.HASH_FRAGMENTS then break end
+    forget_hash(entry.key)
+  end
+end
+
+local function hash_fragments(key, parts)
+  local bytes = #key
+  for _, part in ipairs(parts) do bytes = bytes + #part end
+  local previous = hashes[key]
+  if previous and (previous.version ~= 1 or type(previous.parts) ~= "table" or type(previous.a) ~= "table"
+    or type(previous.b) ~= "table" or type(previous.bytes) ~= "number" or #previous.parts ~= #previous.a
+    or #previous.parts ~= #previous.b) then
+    hashes, hashes_count, hashes_bytes, hashes_fragments = {}, 0, 0, 0
+    return material_.hash_of(table.concat(parts))
+  end
+  forget_hash(key)
+  if M.HASHES_KEPT < 1 or bytes > M.HASH_BYTES or #parts > M.HASH_FRAGMENTS then
+    hash_room(0, 0, 0)
+    return material_.hash_of(table.concat(parts))
+  end
+  hash_room(bytes, #parts, 1)
+  local same, a, b = 0, 5381, 0
+  if previous then
+    while same < #parts and same < #previous.parts and parts[same + 1] == previous.parts[same + 1] do same = same + 1 end
+    if same > 0 then
+      a, b = previous.a[same], previous.b[same]
+      if type(a) ~= "number" or type(b) ~= "number" or a < 0 or a >= 4294967296 or a ~= math.floor(a)
+        or b < 0 or b >= 4294967296 or b ~= math.floor(b) then return material_.hash_of(table.concat(parts)) end
+    end
+  end
+  local aa, bb = {}, {}
+  for i = 1, same do aa[i], bb[i] = previous.a[i], previous.b[i] end
+  -- After a difference even an unchanged later line has another seed: hash the whole suffix, never splice its old sums.
+  for i = same + 1, #parts do
+    a, b = base.sums_from(parts[i], a, b)
+    aa[i], bb[i] = a, b
+  end
+  hashes_used = hashes_used + 1
+  hashes[key] = { version = 1, parts = parts, a = aa, b = bb, bytes = bytes, used = hashes_used }
+  hashes_count, hashes_bytes, hashes_fragments = hashes_count + 1, hashes_bytes + bytes, hashes_fragments + #parts
+  return string.format("%08x%08x", a, b)
+end
 
 function M.pattern_label(song, p)
   local name = song:pattern(p).name
@@ -161,7 +223,9 @@ local function region_print(song, p, from, to)
     end
   end
   if #parts == 0 then return "none" end
-  return REGION_MARK .. base.hash((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
+  -- A fragment ends in ';', so the empty-column pattern cannot span two fragments: this is the exact former encoding.
+  for i, part in ipairs(parts) do parts[i] = (part:gsub(EMPTY_NOTE_COLUMN, "_")) end
+  return REGION_MARK .. hash_fragments("region:" .. p .. ":" .. from .. ":" .. to, parts)
 end
 M.region_print = region_print
 
@@ -281,7 +345,6 @@ base.register({
 -- alias is refused by Renoise: the source it shows is taken. A change of lines, so Kumi's undo goes through only while nothing
 -- in the pattern changed since (the plain rule, changes_notes.lua), and while the alias is as Kumi left it.
 
-local material_ = import("changes_material")
 local notes_ = import("changes_notes")
 
 -- The automation of one pattern's track, by the device's place on the track (followed through its devices' log: places.lua)
@@ -303,15 +366,17 @@ local function own_print(song, p, t)
   local lines = material_.read_lines(pattern_track, MAX_LINES)
   local parts = { tostring(#lines) }
   for _, row in ipairs(lines) do
+    local cells = {}
     for _, cell in ipairs(row.notes) do
-      parts[#parts + 1] = string.format("%d:n%d:%d:%d:%d:%d:%d:%d:%d", row.line, cell.col, cell.note, cell.instrument, cell.volume, cell.panning, cell.delay, cell.fxn, cell.fxa)
+      cells[#cells + 1] = string.format("%d:n%d:%d:%d:%d:%d:%d:%d:%d", row.line, cell.col, cell.note, cell.instrument, cell.volume, cell.panning, cell.delay, cell.fxn, cell.fxa)
     end
-    for _, cell in ipairs(row.effects) do parts[#parts + 1] = string.format("%d:e%d:%d:%d", row.line, cell.col, cell.number, cell.amount) end
+    for _, cell in ipairs(row.effects) do cells[#cells + 1] = string.format("%d:e%d:%d:%d", row.line, cell.col, cell.number, cell.amount) end
+    if #cells > 0 then parts[#parts + 1] = "|" .. table.concat(cells, "|") end
   end
   for k, automation in ipairs(pattern_track.automation) do
-    for _, point in ipairs(automation.points) do parts[#parts + 1] = string.format("a%d:%.9g:%.9g:%.9g", k, point.time, point.value, point.scaling) end
+    for _, point in ipairs(automation.points) do parts[#parts + 1] = string.format("|a%d:%.9g:%.9g:%.9g", k, point.time, point.value, point.scaling) end
   end
-  return base.hash(table.concat(parts, "|"))
+  return hash_fragments("own:" .. p .. ":" .. t, parts)
 end
 
 local function alias_input(song, env, input)

@@ -2,8 +2,8 @@
 //! has been told: the change isn't kept waiting, and a long sample takes a moment to read. Put on the change's record,
 //! which is told again, as a device's curve is (`parameters::curve_later`).
 //!
-//! Only for a picture the producer didn't ask for, so it costs little: a WAV or AIFF file on this computer, read in place
-//! (never converted, never from a share or a device), one at a time, and read once while it's unchanged.
+//! Only for a picture the producer didn't ask for, so it costs little: a local audio file, read in place or through
+//! an already installed decoder's pipe (no disk copy, download, share or device), one at a time and once unchanged.
 use super::changes::{pictures, ChangeKind};
 use super::history::History;
 use indexmap::IndexMap;
@@ -18,8 +18,6 @@ use std::rc::Rc;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 
-/// The longest a sample's read may take: past it, the change keeps the picture it has.
-const WAVE_WAIT_MS: u64 = 20_000;
 /// How many samples' waveforms are kept, so a run of changes to one clip reads its sample once.
 const KEPT: usize = 16;
 
@@ -33,10 +31,12 @@ static WAVES: LazyLock<Mutex<IndexMap<Read, (f64, Vec<f32>)>>> = LazyLock::new(M
 /// One sample read at a time: a plan changing twenty clips reads their samples one after another.
 static READING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Whether a sample's waveform is read: a WAV or AIFF file on this computer (others would be converted whole first).
+/// Live's local sample formats: FLAC and Ogg Vorbis are native too; MP3/M4A may name an original or Live's decode cache.
 fn readable(path: &str) -> bool {
     let extension = Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    ["wav", "wave", "aif", "aiff", "aifc"].contains(&extension.as_str()) && !network_or_device(path) && !reserved_device(path)
+    ["wav", "wave", "aif", "aiff", "aifc", "flac", "ogg", "oga", "mp3", "m4a", "aac", "mp4"].contains(&extension.as_str())
+        && !network_or_device(path)
+        && !reserved_device(path)
 }
 
 /// Reads the waveform of the clip an import made (`input`'s file) or an audio clip change changed (the preview's
@@ -63,12 +63,12 @@ pub fn wave_later(history: &Rc<History>, kind: &ChangeKind, preview: &JsonObject
     let (history, id) = (history.clone(), id.to_owned());
     tokio::task::spawn_local(timing::background(async move {
         let lifetime = history.connection.lifetime.clone();
-        let read = tokio::select! {
-            biased;
-            () = lifetime.cancelled() => return,
-            read = waveform(&path, &lifetime) => read,
-        };
+        // Let the reader observe cancellation and reap its decoder before the background task returns.
+        let read = waveform(&path, &lifetime).await;
         let Some((seconds, peaks)) = read else { return };
+        if lifetime.is_cancelled() {
+            return;
+        }
         let peaks = peaks.into_iter().map(f64::from).collect();
         if let Some(wave) = pictures::audio_wave(seconds, peaks, &sample, &proposed, values).bounded() {
             history.set_picture(&id, wave);
@@ -79,21 +79,28 @@ pub fn wave_later(history: &Rc<History>, kind: &ChangeKind, preview: &JsonObject
 /// A sample's length and peaks, read once while the file is unchanged, one sample at a time; one kept already doesn't
 /// wait its turn. A read has its time limit once its turn comes, not while it waits for it.
 async fn waveform(path: &str, lifetime: &abort::Signal) -> Option<(f64, Vec<f32>)> {
-    let read = read_as(path).await?;
+    let read = tokio::select! {
+        biased;
+        () = lifetime.cancelled() => return None,
+        read = read_as(path) => read?,
+    };
     let kept = || WAVES.lock().ok().and_then(|waves| waves.get(&read).cloned());
     if let Some(wave) = kept() {
         return Some(wave);
     }
-    let _turn = READING.lock().await;
+    let _turn = tokio::select! {
+        biased;
+        () = lifetime.cancelled() => return None,
+        turn = READING.lock() => turn,
+    };
     if let Some(wave) = kept() {
         return Some(wave);
     }
-    let signal = abort::any([lifetime.clone(), abort::timeout(WAVE_WAIT_MS)]);
-    let wave = tokio::select! {
-        biased;
-        () = signal.cancelled() => return None,
-        wave = kumi_media::audio::decode::peaks(path, MAX_PEAKS, &signal) => wave.ok()?,
-    };
+    // The reader starts its shared 20 s discovery/decode deadline now, after this sample's turn begins.
+    let wave = kumi_media::audio::decode::local_peaks(path, MAX_PEAKS, lifetime).await.ok()?;
+    if lifetime.is_cancelled() {
+        return None;
+    }
     let mut waves = WAVES.lock().ok()?;
     waves.insert(read, wave.clone());
     if waves.len() > KEPT {
@@ -107,6 +114,9 @@ async fn read_as(path: &str) -> Option<Read> {
     use std::hash::{Hash, Hasher};
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let meta = tokio::fs::metadata(path).await.ok()?;
+    if !meta.is_file() {
+        return None;
+    }
     let mut file = tokio::fs::File::open(path).await.ok()?;
     let mut digest = std::collections::hash_map::DefaultHasher::new();
     let mut head = vec![0; DIGESTED.min(meta.len()) as usize];
@@ -115,7 +125,7 @@ async fn read_as(path: &str) -> Option<Read> {
     if meta.len() > DIGESTED {
         file.seek(std::io::SeekFrom::Start(meta.len().saturating_sub(DIGESTED).max(DIGESTED))).await.ok()?;
         let mut tail = Vec::new();
-        file.read_to_end(&mut tail).await.ok()?;
+        file.take(DIGESTED).read_to_end(&mut tail).await.ok()?;
         tail.hash(&mut digest);
     }
     Some((path.to_owned(), meta.len(), meta.modified().ok(), digest.finish()))
@@ -166,12 +176,14 @@ mod tests {
     }
 
     #[test]
-    fn only_a_wav_or_aiff_on_this_computer_is_read() {
+    fn only_lives_audio_formats_on_this_computer_are_read() {
         assert!(readable("/Users/me/Samples/Kick.wav") && readable(r"C:\Samples\Pad.AIF"));
-        // Converted whole first: not for a picture.
-        assert!(!readable("/Users/me/Music/song.mp3") && !readable("/x/loop.flac"));
+        assert!(readable("/Users/me/Music/song.mp3") && readable("/x/loop.flac") && readable("/x/loop.OGG"));
+        assert!(readable("/x/song.m4a"));
+        assert!(!readable("/x/list.m3u") && !readable("/x/page.html") && !readable("/x/sample.opus"));
         // A share or a device is never opened.
         assert!(!readable(r"\\nas\samples\kick.wav") && !readable("//nas/samples/kick.wav"));
+        assert!(!readable(r"\\nas\samples\loop.flac") && !readable("//nas/samples/song.mp3"));
     }
 
     #[tokio::test(flavor = "current_thread")]

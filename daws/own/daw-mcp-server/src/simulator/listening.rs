@@ -186,9 +186,9 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
 }
 
 impl SimListening {
-    /// REAPER's or Renoise's listening, as their bridges answer. (SoundCraft's bridge listens in no way simulated here yet.)
+    /// REAPER's or Renoise's listening, as their bridges answer. Neither SoundCraft nor Logic has simulated listening.
     pub fn new(daw: Daw) -> Self {
-        assert!(daw != Daw::SoundCraft, "no simulator answers for SoundCraft's listening yet");
+        assert!(matches!(daw, Daw::Reaper | Daw::Renoise), "no simulator answers for {daw}'s listening yet");
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let folder = std::env::temp_dir().join(format!("kumi-sim-listening-{}-{n}", std::process::id()));
@@ -690,7 +690,7 @@ impl SimListening {
                 match state.daw {
                     Daw::Reaper => "The audition playing was stopped: REAPER closes its audio device to render".into(),
                     Daw::Renoise => "Renoise stopped playback to render.".into(),
-                    Daw::SoundCraft => unreachable!("SimListening::new refuses SoundCraft"),
+                    Daw::SoundCraft | Daw::Logic => unreachable!("SimListening::new only admits REAPER and Renoise"),
                 },
             );
         }
@@ -845,7 +845,7 @@ impl SimListening {
                 answer["via"] = "song".into();
                 answer["note"] = "Renoise plays the song over that part".into();
             }
-            Daw::SoundCraft => unreachable!("SimListening::new refuses SoundCraft"),
+            Daw::SoundCraft | Daw::Logic => unreachable!("SimListening::new only admits REAPER and Renoise"),
         }
         Ok(answer)
     }
@@ -859,7 +859,7 @@ impl SimListening {
                     "That's a MIDI item, which has no sound of its own: listen to its track instead (Kumi renders it)".into(),
                 ),
                 Daw::Renoise => ("failed".into(), "That sample has no audio".into()),
-                Daw::SoundCraft => unreachable!("SimListening::new refuses SoundCraft"),
+                Daw::SoundCraft | Daw::Logic => unreachable!("SimListening::new only admits REAPER and Renoise"),
             });
         }
         let kind = reference.split(':').nth(1).unwrap_or_default();
@@ -922,14 +922,14 @@ impl SimListening {
                     return Err(("failed".into(), why.clone()));
                 }
                 let count = params["count"].as_u64().unwrap_or(1);
-                let tag: String = id.chars().rev().take(4).collect();
+                let tag = &id;
                 let mut copies = vec![];
                 for n in 1..=count {
                     state.next_copy += 1;
                     let reference = match state.daw {
                         Daw::Reaper => format!("r:track:{{C{:04}}}", state.next_copy),
                         Daw::Renoise => format!("{epoch}:track:{}", 900 + state.next_copy),
-                        Daw::SoundCraft => unreachable!("SimListening::new refuses SoundCraft"),
+                        Daw::SoundCraft | Daw::Logic => unreachable!("SimListening::new only admits REAPER and Renoise"),
                     };
                     copies.push((reference, format!("Kumi · try {tag} {n}"), source.clone(), vec![]));
                 }

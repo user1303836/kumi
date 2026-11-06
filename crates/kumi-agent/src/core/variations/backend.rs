@@ -117,6 +117,33 @@ pub trait VariationsBackend: Sized {
     /// The source a make names, read: its material and where its takes go.
     async fn source(&self, input: &JsonObject, signal: &Signal) -> Result<Source<Self::Material, Self::Data>, String>;
 
+    /// Read-only preparation for pure background generation. A backend can additionally capture native source authority.
+    async fn prepare_source(&self, input: &JsonObject, signal: &Signal) -> Result<Source<Self::Material, Self::Data>, String> {
+        self.source(input, signal).await
+    }
+
+    /// True only when the native write atomically fences both captured source authority and the destination.
+    /// A fresh host read followed by a separately fenced destination write is insufficient.
+    fn can_apply_candidates(&self) -> bool {
+        false
+    }
+
+    /// A foreground board apply must prove the captured source is still the same object and content. No fallback to names.
+    async fn verify_source(&self, _source: &Source<Self::Material, Self::Data>, _signal: &Signal) -> Result<(), String> {
+        Err("This DAW cannot verify a candidate board's source for apply.".into())
+    }
+
+    /// Explicit foreground apply only. Default refusal prevents a pure planner from granting DAW write authority.
+    async fn write_candidate(
+        &self,
+        _set: &Set<Self>,
+        _number: usize,
+        _material: &Self::Material,
+        _signal: &Signal,
+    ) -> Result<(String, Value, String), (String, bool)> {
+        Err(("This DAW cannot apply candidate boards.".into(), true))
+    }
+
     /// A kept set's key as its source's places give it now, where its key holds a position the producer may have moved since
     /// (Renoise's pattern, track and instrument numbers): a make on that source goes on with the set. None: its key as kept.
     async fn key_now(&self, _source: &Source<Self::Material, Self::Data>, _signal: &Signal) -> Option<String> {

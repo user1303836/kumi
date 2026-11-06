@@ -32,6 +32,14 @@ pub enum Reopens {
 /// keep Live's names (the app's Live side and setup's tests implement them).
 #[async_trait(?Send)]
 pub trait DawSetup {
+    /// A loaded bridge needs the DAW restarted; a bridge attached beside the running app does not.
+    fn needs_restart(&self) -> bool {
+        true
+    }
+    /// Whether an explicit enable step is ready. None keeps the existing connection-based check.
+    async fn enabled(&self) -> Option<bool> {
+        None
+    }
     /// The open Live's app (a `.app` on macOS, an `.exe` on Windows), if Live is open.
     async fn open_live(&self) -> Option<String>;
     /// Ask Live to quit as its own menu does, so unsaved work makes it ask to save first. Returns once asked; false

@@ -2,7 +2,7 @@ import hashlib
 
 # Moves while the Set plays or Live thinks, with nobody editing anything.
 VOLATILE = {
-    "is_playing", "is_triggered", "is_recording", "is_overdubbing", "playing_position", "will_record_on_start",
+    "is_playing", "is_triggered", "is_recording", "is_overdubbing", "playing_position", "playing_position_enabled", "will_record_on_start",
     "latency_in_ms", "latency_in_samples", "is_active", "is_showing_chains", "selected_variation_index",
 }
 
@@ -12,6 +12,9 @@ def plain(item):
     row = {}
     for name in dir(item):
         if name.startswith("_") or name in VOLATILE:
+            continue
+        # Looper's state follows playback; another object's state may be an edit worth keeping.
+        if name == "state" and getattr(item, "class_name", None) == "Looper":
             continue
         try:
             value = getattr(item, name)

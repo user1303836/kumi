@@ -332,6 +332,8 @@ async fn drum_pad_workflows_preserve_source_loading_file_authority_and_recovery(
                     if step["abort"] == true {
                         signal.cancel()
                     }
+                    let before_undo = (action == "undo")
+                        .then(|| (host.transaction_record(tx.as_ref().unwrap()).unwrap().borrow().clone(), staged_files(&stage)));
                     let result = match action {
                         "preview" => host.live_drum_pad_preview_async(&json!(1), &params).await,
                         "project" => host.live_project_import_async(&json!(1), &params).await,
@@ -345,6 +347,43 @@ async fn drum_pad_workflows_preserve_source_loading_file_authority_and_recovery(
                         "finalize" => host.live_recovery_finalize_async(&json!(1), &params).await.unwrap(),
                         _ => panic!("unknown action"),
                     };
+                    let unavailable = (action == "undo")
+                        .then(|| result["result"]["content"][0]["text"].as_str().and_then(|text| serde_json::from_str::<Value>(text).ok()))
+                        .flatten()
+                        .filter(|body| body["code"] == "changed_since" && body["undoUnavailable"] == true);
+                    if let Some(unavailable) = unavailable {
+                        let (before, files) = before_undo.unwrap();
+                        assert!(
+                            matches!(before["state"].as_str(), Some("applied" | "uncertain")),
+                            "{at}: an active historical sample-pad undo is refused"
+                        );
+                        assert!(matches!(before["payload"]["action"].as_str(), Some("load-sample" | "sample-chain" | "load-samples")));
+                        assert_eq!(
+                            result["result"]["isError"], true,
+                            "{at}: the original undo answer is historical evidence, not new success"
+                        );
+                        assert!(unavailable["reason"].as_str().unwrap().contains("Live cannot verify"));
+                        let pending: Vec<_> = adapter.calls.borrow().iter().cloned().collect();
+                        assert_eq!(
+                            pending,
+                            step["calls"].as_array().unwrap().clone(),
+                            "{at}: no recorded read or deletion may run without a native content guard"
+                        );
+                        assert_eq!(
+                            case["steps"].as_array().unwrap()[index + 1..].len(),
+                            2,
+                            "{at}: two dependent recorded steps remain explicitly unconsumed"
+                        );
+                        same(
+                            &host.transaction_record(tx.as_ref().unwrap()).unwrap().borrow(),
+                            &before,
+                            &format!("{at}: exact original state and recovery key survive"),
+                        );
+                        same(&staged_files(&stage), &files, &format!("{at}: refused undo retains managed samples"));
+                        // Preserve the immutable recorded suffix. A no-write refusal prefix
+                        // does not replay or establish safe coverage of its old deletion.
+                        break;
+                    }
                     if action == "preview" {
                         tx = result["result"]["content"][0]["text"]
                             .as_str()

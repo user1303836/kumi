@@ -353,7 +353,16 @@ mod tests {
     }
 
     fn spec(kind: DeviceType, controls: Vec<Control>, patch: &str) -> PatchSpec {
-        PatchSpec { kind, name: "Patched".into(), about: "A patch.".into(), controls, patch: patch.into(), map: Default::default() }
+        PatchSpec {
+            kind,
+            name: "Patched".into(),
+            about: "A patch.".into(),
+            controls,
+            patch: patch.into(),
+            voices: 1,
+            tests: vec![],
+            map: Default::default(),
+        }
     }
 
     /// Every rule the checker finds broken in a device, at any level but advice.
