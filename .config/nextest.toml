@@ -5,11 +5,13 @@
 # The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
 # within 2 s and 3 s of writing it, as another Kumi would. SoundCraft's control client's tests count connections around
 # deadlines and answers a few hundred milliseconds apart, its launch's tests start a copy of the test program as the app
-# and wait for it within bounds, and its bridge's tests look at a fake app every 100 ms.
+# and wait for it within bounds, and its bridge's tests look at a fake app every 100 ms. The inspecting-network test
+# asks macOS's trust service within 3 s; competing tests must not consume that native check's deadline (#729).
 filter = '''
 (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
   | (binary_id(kumi-agent::it) & test(/^conversations::(where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_it|two_changes_in_the_second_the_file_system_keeps_are_both_seen)$/))
   | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
+  | (binary_id(kumi-net::it) & test(/^network::an_inspecting_network_is_trusted_once_its_certificate_is_and_only_then$/))
 '''
 threads-required = "num-cpus"
 
