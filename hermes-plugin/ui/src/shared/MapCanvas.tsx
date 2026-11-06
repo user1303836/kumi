@@ -10,7 +10,7 @@ import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, frame, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, FOCUSABLE, S, useT } from './ui.tsx'
@@ -123,6 +123,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const ids = searched ?? foundIds
     return ids ? [...ids].filter(id => indexOf.has(id) && visible(indexOf.get(id) as number)) : []
   }, [searched, foundIds, indexOf, visible])
+  // CC-23: a near search names its seed (the top-level `near`) from this map; one the map doesn't list heads nothing.
+  const nearName = !searched && foundIds && found?.near && model.sounds[found.near] ? clean(model.sounds[found.near].name ?? '', 60) : ''
 
   // The canvas paints the theme's colours itself, and neither host tells a plugin its theme changed (Desktop's
   // useTheme is newer than some Desktops; the dashboard has none): it looks at them once a second, and a light or dark
@@ -351,9 +353,14 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         })}
       </div>
       {matches.length > 0 && (
-        <div aria-label={searched ? t('map.matches') : t('map.found')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
+        <div aria-label={searched ? t('map.matches') : nearName ? t('map.near', nearName) : t('map.found')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
+          {/* CC-23: a near search's neighbours, under the seed's name from this map (the seed itself isn't listed). */}
+          {nearName && <span style={{ ...S.muted, padding: '0 6px' }}>{t('map.near', nearName)}</span>}
           {matches.slice(0, MATCHES_LISTED).map(id => {
             const sound = model.sounds[id]
+            const indexed = indexedValues(sound, t)
+            // A typed search lists names; the agent's find also says why each matched, as Kumi bounds it (CC-23).
+            const said = searched ? '' : foundLine(found?.matches?.[id], nearName !== '', t)
             return (
               <button
                 aria-pressed={selected === id}
@@ -361,10 +368,22 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                 key={id}
                 onClick={() => onPick(id)}
                 type="button"
-                style={{ ...S.row, gap: 6, font: 'inherit', fontSize: 11.5, padding: '1px 6px', borderRadius: 3, border: 'none', textAlign: 'left', cursor: 'pointer', color: T.text, background: selected === id ? T.card : 'transparent' }}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0, font: 'inherit', fontSize: 11.5, padding: '1px 6px', borderRadius: 3, border: 'none', textAlign: 'left', cursor: 'pointer', color: T.text, background: selected === id ? T.card : 'transparent' }}
               >
-                <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
-                {sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
+                <span style={{ ...S.row, gap: 6 }}>
+                  <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
+                  {indexed && (
+                    <span style={{ color: T.faint, whiteSpace: 'nowrap' }} title={t('map.indexedTitle')}>
+                      {t('map.indexed', indexed)}
+                    </span>
+                  )}
+                  {sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
+                </span>
+                {said && (
+                  <span style={{ ...S.ellipsis, color: T.faint, fontSize: 10.5 }} title={nearName ? t('map.closenessTitle') : undefined}>
+                    {said}
+                  </span>
+                )}
               </button>
             )
           })}

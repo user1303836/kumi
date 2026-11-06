@@ -1,7 +1,7 @@
 // One store per UI half over Kumi's read-only routes (contract C4), shared by every view in it. It never writes: it
 // reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
-import { plainId } from './format.ts'
+import { clean, plainId } from './format.ts'
 import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
 import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
@@ -20,7 +20,7 @@ export interface KumiState {
   map: SoundMap | null
   setup: SetupStatus | null
   /** Sounds the agent just found (`kumi_sounds`), to light up on the map. */
-  found: { revision: string | null; ids: string[]; at: number } | null
+  found: Found | null
   /** Background jobs this window was told of (a library scan), by id: read while they run, kept a minute after. */
   jobs: Record<string, TrackedJob>
   /** The latest `kumi_listen` result a `listen.done` event brought when the transcript showed none (CC-9); `result`
@@ -39,6 +39,44 @@ export interface TrackedJob extends Job {
   ended_at: number | null
   /** A generation's latest `generate.updated` card (CC-13): its reconciled ledger, which the raw `/job` snapshot lacks. */
   card?: unknown
+}
+
+/** CC-23: what a find said of one hit: why it matched (at most four short reasons, path-free as Kumi bounds them), and
+ *  on a near search how close it is, 0 to 100, relative to the sounds on this map (never a percentage or a confidence). */
+export interface FoundMatch {
+  why: string[]
+  closeness?: number
+}
+
+/** A find, in the order Kumi ranked it. `near` is a near search's seed (CC-23): the hits are its neighbours, and the
+ *  seed itself isn't among them. `matches` holds only hits that are in `ids`. */
+export interface Found {
+  revision: string | null
+  ids: string[]
+  at: number
+  near: string | null
+  matches: Record<string, FoundMatch>
+}
+
+const MOST_REASONS = 4
+const REASON_CHARACTERS = 60
+
+/** CC-23's per-hit reasons and closeness, from a `sounds.found` event's `matches` or a `kumi_sounds` result's `items`
+ *  (the same fields): only for the found ids, each reason cleaned and bounded, closeness only as an integer 0–100. */
+export function foundMatches(entries: unknown, ids: ReadonlySet<string>): Record<string, FoundMatch> {
+  // No prototype: a sound id is the runtime's text, and `__proto__` or `constructor` must be a key like any other.
+  const out: Record<string, FoundMatch> = Object.create(null)
+  if (!Array.isArray(entries)) return out
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue
+    const value = entry as Record<string, unknown>
+    const id = typeof value.sound_id === 'string' ? value.sound_id : ''
+    if (!ids.has(id) || Object.hasOwn(out, id)) continue
+    const why = (Array.isArray(value.why) ? value.why : []).map(line => clean(line, REASON_CHARACTERS)).filter(Boolean).slice(0, MOST_REASONS)
+    const closeness = value.closeness
+    out[id] = { why, ...(typeof closeness === 'number' && Number.isInteger(closeness) && closeness >= 0 && closeness <= 100 ? { closeness } : {}) }
+  }
+  return out
 }
 
 /** How long a finished job stays in view, and how many jobs are followed at once (ids come from events). */
@@ -211,9 +249,12 @@ export class KumiStore {
     })
   }
 
-  /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision. */
-  found(revision: string | null, ids: string[]): void {
-    this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } })
+  /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
+   *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
+  found(revision: string | null, ids: string[], said: { near?: unknown; matches?: unknown } = {}): void {
+    const kept = ids.slice(0, 200)
+    const near = typeof said.near === 'string' && said.near ? said.near : null
+    this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } })
   }
 
   /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
@@ -370,8 +411,9 @@ export function jobOf(result: unknown): string | null {
   return value && typeof value === 'object' && 'job_id' in value ? plainId(value.job_id) : null
 }
 
-/** Sound ids out of a `kumi_sounds` result (`{map_revision, items: [{sound_id}]}`), however the event carried it. */
-export function foundSounds(result: unknown): { revision: string | null; ids: string[] } | null {
+/** Sound ids out of a `kumi_sounds` result (`{map_revision, items: [{sound_id}]}`), however the event carried it, with
+ *  the items themselves (their CC-23 `why` and `closeness`) and a near search's seed. */
+export function foundSounds(result: unknown): { revision: string | null; ids: string[]; near: unknown; matches: unknown[] } | null {
   let value = result
   if (typeof value === 'string') {
     try {
@@ -385,5 +427,5 @@ export function foundSounds(result: unknown): { revision: string | null; ids: st
   const ids = value.items.flatMap((item: unknown) =>
     item && typeof item === 'object' && 'sound_id' in item && typeof item.sound_id === 'string' ? [item.sound_id] : []
   )
-  return { revision, ids }
+  return { revision, ids, near: 'near' in value ? value.near : null, matches: value.items }
 }

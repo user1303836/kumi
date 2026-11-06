@@ -469,8 +469,37 @@ test('a backend that is not mounted reads as "off", never as an error, and a res
   assert.deepEqual([flaky.get().available, flaky.get().error], [null, 'timed out'])
   flaky.reset()
   assert.equal(flaky.get().error, null)
-  assert.deepEqual(store.foundSounds('{"map_revision":"r7","items":[{"sound_id":"s-1"},{"name":"x"}]}'), { revision: 'r7', ids: ['s-1'] })
+})
+
+test("a find keeps what Kumi said of each found hit, bounded, and a near search's seed, from an event or a result", () => {
+  const kumi = new store.KumiStore(async () => ({}))
+  kumi.found('r7', ['s-1', 's-2', '__proto__'], {
+    near: 's-0',
+    matches: [
+      { sound_id: 's-1', why: ['measured: darker than most', 'name matches “kick”', 'a', 'b', 'c'], closeness: 87 },
+      { sound_id: 's-2', why: ['x'.repeat(80), 7, '\u202Ehidden'], closeness: 87.5 },
+      { sound_id: 's-9', why: ['not one of the found ids'], closeness: 3 },
+      { sound_id: '__proto__', why: ['a sound id like any other'], closeness: 101 }
+    ]
+  })
+  const found = kumi.get().found
+  assert.equal(found.near, 's-0')
+  assert.deepEqual(Object.keys(found.matches).sort(), ['__proto__', 's-1', 's-2'])
+  assert.deepEqual(found.matches['s-1'], { why: ['measured: darker than most', 'name matches “kick”', 'a', 'b'], closeness: 87 })
+  assert.deepEqual([found.matches['s-2'].why.map(line => line.length), found.matches['s-2'].why[1], found.matches['s-2'].closeness], [[60, 6], 'hidden', undefined])
+  assert.deepEqual(found.matches['__proto__'], { why: ['a sound id like any other'] })
+  // A kumi_sounds result carries the same fields on its items (the call's tool.complete).
+  const result = store.foundSounds('{"map_revision":"r7","near":"s-0","items":[{"sound_id":"s-1","why":["w"],"closeness":5},{"name":"x"}]}')
+  assert.deepEqual([result.revision, result.ids, result.near], ['r7', ['s-1'], 's-0'])
+  kumi.found(result.revision, result.ids, result)
+  assert.deepEqual(kumi.get().found.matches['s-1'], { why: ['w'], closeness: 5 })
   assert.equal(store.foundSounds('nope'), null)
+  // The list's words: the map's indexed values, and closeness only for a near search.
+  assert.equal(map.indexedValues({ bpm: 124, key: 'A minor' }), '124 BPM · A minor')
+  assert.equal(map.indexedValues({ bpm: 0, note: 'C3' }), 'note C3')
+  assert.equal(map.indexedValues({ bpm: null, key: null, note: null }), '')
+  assert.equal(map.foundLine(found.matches['s-1'], true), 'closeness 87, relative to this map · measured: darker than most · name matches “kick” · a · b')
+  assert.equal(map.foundLine(found.matches['s-1'], false), 'measured: darker than most · name matches “kick” · a · b')
 })
 
 test('auditions share a load, keep recent sounds within a size, and forget them all on a profile switch', async () => {

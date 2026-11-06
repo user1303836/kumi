@@ -170,13 +170,13 @@ const plugin: HermesPlugin = {
     // Hermes's tool progress is off, or in focus view) and as a plugin event (CC-9). Each call is acted on once.
     const calls = new Calls()
     const waiting = new Map<string, () => void>()
-    const showFound = (id: string | null, revision: string | null, ids: string[]) => {
+    const showFound = (id: string | null, revision: string | null, ids: string[], said: { near?: unknown; matches?: unknown } = {}) => {
       if (id) {
         if (calls.has(id)) return
         calls.add(id)
       }
       if (!ids.length) return
-      store.found(revision, ids)
+      store.found(revision, ids, said)
       if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap()
     }
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, event => {
@@ -184,7 +184,8 @@ const plugin: HermesPlugin = {
       const id = callId(payload.tool_call_id)
       if (!id || !forChatInFront(payload)) return
       const ids = Array.isArray(payload.sound_ids) ? payload.sound_ids.filter((value): value is string => typeof value === 'string') : []
-      showFound(id, typeof payload.map_revision === 'string' ? payload.map_revision : null, ids.slice(0, 200))
+      // CC-23: per hit `{sound_id, why, closeness?}` under `matches`, and a near search's seed; never names or paths.
+      showFound(id, typeof payload.map_revision === 'string' ? payload.map_revision : null, ids.slice(0, 200), { near: payload.near, matches: payload.matches })
     })
     ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, event => {
       const payload = payloadOf(event)
@@ -239,7 +240,7 @@ const plugin: HermesPlugin = {
       }
       if (name !== 'kumi_sounds') return
       const found = foundSounds(payload.result)
-      if (found) showFound(id, found.revision, found.ids)
+      if (found) showFound(id, found.revision, found.ids, found)
     })
     // Another profile or connection: another backend, another Kumi. What waited on the old one is dropped with it.
     for (const atom of [host.state.profile, host.state.connectionId]) {
