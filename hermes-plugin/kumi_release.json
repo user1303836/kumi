@@ -1,63 +1,63 @@
 {
   "schema": 1,
-  "kumi": "1.24.70",
+  "kumi": "1.24.71",
   "repository": "user1303836/kumi",
-  "tag": "v1.24.70",
-  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.70",
+  "tag": "v1.24.71",
+  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.71",
   "targets": {
     "aarch64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-apple-darwin.tar.xz",
-      "sha256": "d8bd3b2d9499a1cc41a56fad9a38ed73a5b0aadca96cd9505cda3788446c59cf",
-      "size": 28403992,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-aarch64-apple-darwin.tar.xz",
+      "sha256": "385303630a1ef45617dbf6b612ee874d4f9dc80fcb401aea166d1039afc1b2bb",
+      "size": 28515248,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 89380878
+      "unpacked_bytes": 89761606
     },
     "x86_64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-apple-darwin.tar.xz",
-      "sha256": "aa0b902a9e44124a48515eb613c09355291d36ea89758016b1a39db03eeb9394",
-      "size": 31929276,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-x86_64-apple-darwin.tar.xz",
+      "sha256": "14fb5866bad4e69c396f7391fa024217c90152f32c4e79726153b5c12276aa50",
+      "size": 32065640,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 96727344
+      "unpacked_bytes": 97190170
     },
     "aarch64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-pc-windows-msvc.tar.xz",
-      "sha256": "588162cfc79b4f9c652c9091fbd9ce947554025edacf610aeb61ee8300cd3401",
-      "size": 29193332,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-aarch64-pc-windows-msvc.tar.xz",
+      "sha256": "436a207848082fe21dd75f3afb9a6433f77f55e41c72adf98d875ed035e4dc0f",
+      "size": 29385796,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 104928648
+      "unpacked_bytes": 105518358
     },
     "x86_64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-pc-windows-msvc.tar.xz",
-      "sha256": "44b185ba44820df1cd40775bf42a3edb21b909ac1ba12192b4a35737d242fd1f",
-      "size": 34180800,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-x86_64-pc-windows-msvc.tar.xz",
+      "sha256": "bfc34d99c981e511c8632808070f186d866ab2fd7360234e76d942fb783a6407",
+      "size": 34341720,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 124531322
+      "unpacked_bytes": 125208116
     },
     "aarch64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-unknown-linux-gnu.tar.xz",
-      "sha256": "339624ca37bce71069529743f4899582ef0a1390d60b04380d24cf023aaa9f20",
-      "size": 26709472,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "0d9dabd5ee3b5d610d076b511f66f328962ca919b471a0ccb72f87925832e70e",
+      "size": 26839652,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 84298410
+      "unpacked_bytes": 84679266
     },
     "x86_64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-unknown-linux-gnu.tar.xz",
-      "sha256": "f14a3d0ee7ed60d7986f84fdd67c28dde8b768b2e892be83090933f1d7535c75",
-      "size": 30678080,
-      "bridge": "1.0.106",
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.71/kumi-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "fd2797c0b1a5c376c4b5b05722e159f7694b6b629649b5ffc584bf0b850335ae",
+      "size": 30845092,
+      "bridge": "1.0.107",
       "reaper": "0.1.13",
       "renoise": "1.0.20",
-      "unpacked_bytes": 97734308
+      "unpacked_bytes": 98212207
     }
   },
   "serve_options": [
@@ -103,7 +103,8 @@
     "ableton": [
       "artifact",
       "file",
-      "sound"
+      "sound",
+      "track"
     ],
     "reaper": [
       "artifact",
