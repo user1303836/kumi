@@ -116,11 +116,15 @@ KUMI_CHANGE = _tool(
 
 KUMI_UNDO = _tool(
     "kumi_undo",
-    "Undo one change Kumi made, by its HISTORY id from kumi_history or kumi_change. The producer approves it first. "
-    "Returns undone, kept (the producer changed it since, so it was left), unsure, expired or refused. A change made "
-    "before Kumi's runtime restarted is expired, and its reason says what the producer can do instead. Undo only from "
-    "HISTORY, never from memory of what the project was.",
-    {"history_id": {"type": "string"}}, ("history_id",))
+    "Undo a change Kumi made; the producer approves it first. With no history_id: this chat's newest change, whole "
+    "(every step it made, newest first, under one approval): what \"undo that\" means. With a history_id from "
+    "kumi_history or a kumi_change result: that one row, or with whole_change: true the whole change it belongs to. "
+    "Returns undone, partly_undone, kept (the producer changed it since, so it was left), unsure, expired or refused, "
+    "with each row's state for a whole change; it stops at the first step it can't undo. A change made before Kumi's "
+    "runtime restarted is expired, and its reason says what the producer can do instead. Undo only from HISTORY, "
+    "never from memory of what the project was.",
+    {"history_id": {"type": "string"},
+     "whole_change": {"type": "boolean", "description": "With history_id: undo every step of that row's change."}})
 
 KUMI_HISTORY = _tool(
     "kumi_history",
