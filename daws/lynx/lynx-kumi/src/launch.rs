@@ -154,12 +154,7 @@ fn start_apart(
         if let Some(session) = session {
             command.arg(session);
         }
-        command
-            .env_remove("LYNX_CONTROL_ENABLED")
-            .env("LYNX_CONTROL_DISCOVERY", discovery)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        command.env("LYNX_CONTROL_DISCOVERY", discovery).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         let status = command.status().map_err(|_| Error::new(code::FAILED, "LaunchServices could not start LYNX"))?;
         if !status.success() {
             return Err(Error::new(code::FAILED, "LaunchServices refused the selected LYNX application"));
@@ -169,12 +164,7 @@ fn start_apart(
     #[cfg(not(target_os = "macos"))]
     let _ = (app, background);
     let mut command = Command::new(executable);
-    command
-        .env_remove("LYNX_CONTROL_ENABLED")
-        .env("LYNX_CONTROL_DISCOVERY", discovery)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    command.env("LYNX_CONTROL_DISCOVERY", discovery).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     if let Some(session) = session {
         command.arg(session);
     }
