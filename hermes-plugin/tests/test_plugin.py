@@ -255,6 +255,7 @@ class Tools(unittest.TestCase):
         found = support.call(self.host, "kumi_sounds", {"query": "snare"})
         self.assertEqual([item["sound_id"] for item in found["items"]], ["s-r1-1", "s-r1-2"])
         self.assertFalse([item for item in found["items"] if "path" in item], found)
+        self.assertEqual(found["items"][0]["why"], ["name matches 'snare'"], "a reason naming a path never passes")
         measured = support.call(self.host, "kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}})
         self.assertTrue(measured["media_tag"].startswith("MEDIA:"))
 
