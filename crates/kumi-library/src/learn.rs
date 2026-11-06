@@ -342,6 +342,33 @@ async fn walk(
     approved_folders: Option<&Arc<Vec<String>>>,
     progress: &Progress,
 ) -> Result<bool, RuntimeError> {
+    // A producer may approve a package itself, not only its containing folder. Recognize the source root before
+    // opening it as an ordinary directory, or its settings/audio children would be indexed independently.
+    let root_extension = extension(&source.path.to_lowercase());
+    if daws.preset_reader(source, &root_extension).is_some_and(|reader| reader.preset_packages().contains(&root_extension.as_str())) {
+        signal.check()?;
+        if !approved(&source.path, approved_folders).await? {
+            return Ok(false);
+        }
+        if !kinds.presets || found.seen.contains(&source.path) {
+            return Ok(true);
+        }
+        let signature = match packages::signature(&source.path, signal).await {
+            Ok(signature) => signature,
+            Err(_) => {
+                signal.check()?;
+                return Ok(false);
+            }
+        };
+        found.seen.insert(source.path.clone());
+        found.presets.push(Found {
+            file: Entry { path: source.path.clone(), size: signature.size, mtime: mtime(signature.modified), gone: None },
+            source: source.clone(),
+            relative: basename(&source.path),
+            package_fingerprint: Some(signature.fingerprint),
+        });
+        return Ok(true);
+    }
     let mut queue = vec![(source.path.clone(), 0)];
     let mut complete = true;
     let daw_library = source.is_daw_library();

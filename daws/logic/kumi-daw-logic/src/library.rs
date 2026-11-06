@@ -325,6 +325,37 @@ mod tests {
         assert_eq!(serde_json::from_value::<LearnPlan>(old).unwrap().daw, None);
     }
 
+    #[tokio::test]
+    async fn an_approved_source_that_is_itself_a_package_is_counted_once_without_entering_its_children() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let package = root.join("Approved.patch");
+        put(&package.join("Internal.cst"), &[1; 128]);
+        put(&package.join("Audio/Kick.wav"), &[2; 128]);
+        let mut sources = options(&root);
+        sources.approved_folders = Some(vec![package.to_string_lossy().into_owned()]);
+        let plan = plan_learning(PlanOptions {
+            dir: root.join("index").to_string_lossy().into_owned(),
+            sources: Some(sources),
+            daws: Daws(&DAWS),
+            workers: Some(0),
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].path, package.to_string_lossy());
+        let run = || LearnOptions { daws: Daws(&DAWS), ..LearnOptions::new(plan.clone(), Signal::new()) };
+        let learned = learn(run()).await.unwrap();
+        assert_eq!((learned.presets.done, learned.sounds.known, learned.sets.known), (1, 0, 0));
+        let presets = library_logs(&plan.dir).presets.load().await;
+        assert_eq!(presets.len(), 1);
+        let preset = presets.values().next().unwrap();
+        assert_eq!(preset.file.path, package.to_string_lossy());
+        assert_eq!((preset.name.as_str(), preset.format.as_str(), preset.size), ("Approved", "patch", 256));
+        assert!(preset.package_fingerprint.is_some());
+        assert_eq!(learn(run()).await.unwrap().presets.done, 0);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn registered_library_tools_find_logic_paths_and_keep_extra_audio_out_of_lives_index() {
         tokio::task::LocalSet::new()
