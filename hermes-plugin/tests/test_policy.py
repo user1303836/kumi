@@ -168,6 +168,25 @@ class Approvals(unittest.TestCase):
         self.assertNotIn("\x1b", decision["message"])
         self.assertEqual(lines[1:], ['• Set track volume: volume_db 6 — on "Drums"', policy.FOOTER, policy.CHAT_ONLY])
 
+    def test_a_plan_that_kept_a_copy_of_the_set_says_so_by_the_files_name_and_its_history_rows_carry_it(self):
+        """kumi-adv's 1.24.72 fix: a Live plan reaching its third step keeps a copy of the Set beside it, as standalone
+        Kumi does; the change's result now tells the model, by the file's name, and its HISTORY rows carry the copy."""
+        three = change(volume("t1", -4), volume("t2", -6), volume("t1", -5))
+        kept = support.call(self.host, "kumi_change", three, session_id="s1")
+        self.assertEqual(kept["copy_note"], "Before this, Kumi kept a copy of the producer's Set as last saved, next to "
+                                            "it: Night Drive.backup-2026-11-06.als (before the plan's third step). Tell "
+                                            "the producer in a few words, with the file's name.")
+        rows = {row["id"]: row for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual({rows[ident]["copy"]["file"] for ident in kept["history_ids"]},
+                         {"Night Drive.backup-2026-11-06.als"})
+        self.assertNotIn("copy_note", support.call(self.host, "kumi_change", change(), session_id="s1"),
+                         "a short plan keeps no copy and says nothing of one")
+        self.host, self.ctx, self.data = support.host(self, None, "--copy-fails")
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        failed = support.call(self.host, "kumi_change", three, session_id="s1")
+        self.assertEqual(failed["copy_note"], "Kumi couldn't keep a copy of the producer's Set before this (Live "
+                                              "couldn't save the copy). Tell the producer.")
+
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
         # Twenty steps of one kind fit the terminal's panel grouped: the step name and setting once, every value and
