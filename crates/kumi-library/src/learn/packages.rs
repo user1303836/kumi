@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kumi_common::abort::Signal;
+use kumi_common::abort::{Signal, SignalExt};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
