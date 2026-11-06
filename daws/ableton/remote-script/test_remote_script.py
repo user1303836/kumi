@@ -1262,7 +1262,7 @@ class ControlSurfaceTests(unittest.TestCase):
         self.assertEqual(registry["protocol"], "ableton-live/v1")
         canonical = json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.assertEqual(digest, hashlib.sha256(canonical).hexdigest())
-        self.assertEqual(digest, "dde0289832e75a26b909933099c9adcae4815a157e1b9835f8feb32de9ed50b5")
+        self.assertEqual(digest, "416cc37990e449c115244c0df32bf1a6b3bb11a08d54852bf9de5f75ee648104")
         self.assertIn("audio.capture.start", [item["id"] for item in registry["operations"]])
         self.assertIn("device.parameter.set", [item["id"] for item in registry["operations"]])
         ids = [item["id"] for item in registry["operations"]]
@@ -5973,6 +5973,197 @@ class OwnershipAcrossTransactionsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lacks exact transaction-owned authority"): mapper._require_cleanup_ownership("track.delete-return", {"ref": later["ref"], "expectedObjectIdentity": later["objectIdentity"]}, "transaction-later", later["ownershipToken"])
 
 
+class DeletePreservingSelectionTests(unittest.TestCase):
+    """Listening's Kumi Ears, loaded with browser.load and removed with device.delete keeping the selection. Live selects
+    a loaded device, and a deleted device's neighbour with its track, slot and clip. The load reads what was selected
+    (previous) and what it left (left) in its own step, each part by its ref and its object: what was selected comes
+    back while the selection is still exactly what the load left; a selection the producer made since stays theirs."""
+
+    def load_ears(self, track_refused=False, kit=True, on_drums=False, before_load=None):
+        song = FakeSong(); drums = song.tracks[0]; keys = FakeTrack(); keys.name = "Synth Keys"; song.tracks.append(keys)
+        kit_device, tape = FakeDevice(), FakeDevice(); kit_device.name, tape.name = "Kit", "Tape Keys"
+        drums.devices = [kit_device] if kit else []; keys.devices = [tape]
+        beat, chords = FakeClip(4.0), FakeClip(8.0); drums.clip_slots[0].clip = beat; keys.clip_slots[0].clip = chords
+        for track in (drums, keys): track.view = type("TrackView", (), {"selected_device": None})()
+        class SongView:
+            selected_scene = None; highlighted_clip_slot = None; detail_clip = None; selected_parameter = None; selected_chain = None; refuses = False
+            selected_track = property(lambda self: self.__dict__.get("_track"), lambda self, value: self._select(value))
+            def _select(self, value):
+                if self.refuses: raise RuntimeError("Live refused")
+                self.__dict__["_track"] = value
+            def select_device(self, chosen):
+                next(track for track in song.tracks if chosen in track.devices).view.selected_device = chosen
+        song.view = SongView(); here = drums if on_drums else keys
+        song.view.selected_track = here; song.view.selected_scene = song.scenes[0]; song.view.highlighted_clip_slot = here.clip_slots[0]
+        song.view.detail_clip = here.clip_slots[0].clip if on_drums else None; here.view.selected_device = here.devices[0] if here.devices else None
+        class Item:
+            def __init__(self, name, loadable=False, children=None): self.name = name; self.is_loadable = loadable; self.children = children or []
+        class Browser:
+            audio_effects = Item("audio_effects", children=[Item("Kumi Ears", True)])
+            def load_item(self, _item):
+                # As Live: the device goes onto the selected track, selected there.
+                ears = FakeDevice(); ears.name = "Kumi Ears"; song.view.selected_track.devices.append(ears); song.view.selected_track.view.selected_device = ears
+        song.live_tick = []
+        def delete_device(index):
+            # As Live: the device goes now, and on Live's next tick, after the delete's step, its neighbour (none on a
+            # track left empty), its track, slot and clip become the selection. Live's own move is never refused.
+            drums.devices.pop(index); song.view.refuses = track_refused
+            def move():
+                song.view.__dict__["_track"] = drums; song.view.highlighted_clip_slot = drums.clip_slots[0]; song.view.detail_clip = beat
+                drums.view.selected_device = drums.devices[-1] if drums.devices else None
+            song.live_tick.append(move)
+        drums.delete_device = delete_device
+        mapper = LiveObjectMapper(song); browser = Browser(); mapper._browser = lambda: browser
+        item = mapper.invoke("browser.search", {"category": "audio_effects", "limit": 10})["items"][0]
+        row = mapper.snapshot()["tracks"][0]
+        load = {"itemId": item["id"], "trackRef": row["ref"], "expectedName": item["name"], "expectedItemIdentity": item["objectIdentity"], "expectedTrackIdentity": row["objectIdentity"],
+                "expectedSiblings": [{"ref": device["ref"], "objectIdentity": device["objectIdentity"]} for device in row["devices"]], "reportSelection": True}
+        validate_operation_payload("browser.load", "request", load)
+        if before_load: before_load(song, drums, keys)
+        loaded = mapper.invoke("browser.load", load); validate_operation_payload("browser.load", "result", loaded)
+        row = mapper.snapshot()["tracks"][0]; ears_row = row["devices"][-1]
+        self.assertEqual(ears_row["ref"], loaded["deviceRef"])
+        request = {"ref": ears_row["ref"], "expectedObjectIdentity": ears_row["objectIdentity"], "expectedOwnerRef": row["ref"], "expectedOwnerIdentity": row["objectIdentity"],
+                   "expectedSiblings": [{"ref": device["ref"], "objectIdentity": device["objectIdentity"]} for device in row["devices"]], "expectedTrackRef": row["ref"], "expectedTrackIdentity": row["objectIdentity"],
+                   "keepSelection": loaded["selection"]}
+        validate_operation_payload("device.delete", "request", request)
+        return song, mapper, request, (drums, keys, kit_device, drums.devices[-1], tape, chords)
+
+    def delete(self, mapper, request):
+        result = mapper.invoke("device.delete", request); validate_operation_payload("device.delete", "result", result)
+        return result
+
+    def settle(self, song, mapper):
+        """The delete's own display tick (Live hasn't moved the selection yet), Live's next tick (it moves it, as after a
+        delete), then the bridge's display tick after that."""
+        mapper.selection_tick()
+        for move in song.live_tick: move()
+        song.live_tick.clear()
+        mapper.selection_tick()
+
+    def test_what_was_selected_before_comes_back_after_live_moves_it(self):
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears()
+        previous, left = request["keepSelection"]["previous"], request["keepSelection"]["left"]
+        self.assertEqual(left, previous, "the load put the selection back itself")
+        result = self.delete(mapper, request)
+        self.assertNotIn(ears, drums.devices)
+        self.assertEqual((result["selection"]["before"], result["selection"]["previous"]), (previous["row"], True))
+        # Nothing is selected in the delete's step or on its display tick: Live moves the selection after them.
+        mapper.selection_tick()
+        for move in song.live_tick: move()
+        self.assertIs(song.view.selected_track, drums, "Live moved it to the deleted device's track")
+        mapper.selection_tick()
+        self.assertIs(song.view.selected_track, keys); self.assertIs(song.view.highlighted_clip_slot, keys.clip_slots[0]); self.assertIsNone(song.view.detail_clip)
+        self.assertIs(keys.view.selected_device, tape)
+        self.assertEqual(mapper.snapshot()["selection"], previous["row"])
+
+    def test_a_choice_the_producer_makes_after_live_moves_the_selection_is_not_taken_back(self):
+        # Between Live's move and the bridge's next display tick, the producer chooses the keys and their chords: the
+        # selection is neither as the delete left it nor on the deleted device's track, so nothing is selected again.
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears()
+        self.delete(mapper, request)
+        mapper.selection_tick()
+        for move in song.live_tick: move()
+        self.assertIs(song.view.selected_track, drums, "Live moved it")
+        song.view.selected_track = keys; song.view.highlighted_clip_slot = keys.clip_slots[0]; song.view.detail_clip = chords
+        mapper.selection_tick()
+        self.assertIs(song.view.detail_clip, chords, "the producer's clip stays")
+        self.assertIsNone(mapper._put_back, "and the put-back is dropped")
+
+    def test_ears_left_selected_on_a_track_it_had_to_itself_goes_and_the_selection_before_it_comes_back(self):
+        # The producer is on a track with no devices: Live selects the device a load adds, and a script can't select
+        # none, so the load leaves Ears selected. That selection is the load's own, so what was before it comes back.
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(kit=False, on_drums=True)
+        previous, left = request["keepSelection"]["previous"], request["keepSelection"]["left"]
+        self.assertIsNone(previous["row"]["deviceRef"]); self.assertEqual(left["row"]["deviceRef"], request["ref"])
+        result = self.delete(mapper, request)
+        self.assertEqual(drums.devices, [])
+        self.assertEqual((result["selection"]["before"], result["selection"]["previous"]), (previous["row"], True))
+        self.settle(song, mapper)
+        self.assertEqual(mapper.snapshot()["selection"], previous["row"])
+
+    def test_what_the_producer_selects_between_preview_and_load_is_what_comes_back(self):
+        # The preview read the keys; before the load ran, the producer chose the drums and their beat. The load reads
+        # what's selected in its own step, so the drums come back, never the preview's older reading.
+        def choose_drums(song, drums, keys):
+            song.view.selected_track = drums; song.view.highlighted_clip_slot = drums.clip_slots[0]; song.view.detail_clip = drums.clip_slots[0].clip; drums.view.selected_device = drums.devices[0]
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(before_load=choose_drums)
+        self.assertEqual(request["keepSelection"]["previous"]["row"]["trackRef"], mapper.snapshot()["tracks"][0]["ref"])
+        result = self.delete(mapper, request)
+        self.assertTrue(result["selection"]["previous"])
+        self.settle(song, mapper)
+        self.assertIs(song.view.selected_track, drums); self.assertIs(drums.view.selected_device, kit); self.assertIsNot(song.view.selected_track, keys)
+
+    def test_a_track_and_clip_the_producer_chooses_during_the_capture_stay_chosen(self):
+        # They were on the drums' beat; during the capture they choose the keys and their chords. Live's delete would
+        # move them back to the drums, which is also what was selected before the load: neither may win.
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(on_drums=True)
+        song.view.selected_track = keys; song.view.highlighted_clip_slot = keys.clip_slots[0]; song.view.detail_clip = chords; keys.view.selected_device = tape
+        chosen = mapper.snapshot()["selection"]
+        self.assertNotEqual(chosen, request["keepSelection"]["previous"]["row"])
+        result = self.delete(mapper, request)
+        self.assertNotIn(ears, drums.devices)
+        self.assertEqual(result["selection"], {"before": chosen, "after": chosen, "restored": True, "previous": False})
+        self.settle(song, mapper)
+        self.assertIs(song.view.selected_track, keys); self.assertIs(song.view.detail_clip, chords); self.assertIs(keys.view.selected_device, tape)
+
+    def test_a_selection_chosen_away_and_back_again_reads_as_the_loads_own(self):
+        # A producer who selects something else and comes back to exactly what the load left can't be told from no
+        # change at all (the ABA case), so what was selected before the load comes back.
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears()
+        song.view.selected_track = drums; drums.view.selected_device = kit
+        song.view.selected_track = keys; keys.view.selected_device = tape
+        result = self.delete(mapper, request)
+        self.assertEqual((result["selection"]["restored"], result["selection"]["previous"]), (True, True))
+
+    def test_an_arrangement_clip_in_detail_view_is_kept_by_its_object(self):
+        # An Arrangement clip in Detail View has no ref in the selection's row (Session clips only), so it's kept by its
+        # object: put back after Live's delete shows the drums' beat, and a move to another one is the producer's.
+        verse, chorus = FakeClip(16.0), FakeClip(16.0)
+        def show_verse(song, drums, keys): song.view.detail_clip = verse
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(before_load=show_verse)
+        self.assertIsNone(request["keepSelection"]["previous"]["row"]["detailClipRef"]); self.assertIsNotNone(request["keepSelection"]["previous"]["identities"]["detailClipRef"])
+        result = self.delete(mapper, request)
+        self.settle(song, mapper)
+        self.assertIs(song.view.detail_clip, verse)
+        self.assertEqual((result["selection"]["restored"], result["selection"]["previous"]), (True, True))
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(before_load=show_verse)
+        song.view.detail_clip = chorus
+        result = self.delete(mapper, request)
+        self.settle(song, mapper)
+        self.assertIs(song.view.detail_clip, chorus)
+        self.assertEqual((result["selection"]["restored"], result["selection"]["previous"]), (True, False))
+
+    def test_a_selection_that_cant_survive_the_delete_refuses_with_nothing_deleted(self):
+        def gone(song, mapper, request, devices):
+            # A part the load changed comes back by its ref, checked against its object.
+            request["keepSelection"]["previous"]["row"]["deviceRef"] = f"{mapper.refs.epoch}:device:0:9"; request["keepSelection"]["previous"]["identities"]["deviceRef"] = "live:gone"
+        def parameter(song, mapper, request, devices):
+            song.view.selected_parameter = devices[4].parameters[0]
+        def ears_itself(song, mapper, request, devices):
+            song.view.selected_track = devices[0]; devices[0].view.selected_device = devices[3]
+        for change, reason in ((gone, r"\(deviceRef\) is gone"), (parameter, "a parameter is selected"), (ears_itself, r"\(deviceRef\) is in the device being removed")):
+            with self.subTest(change=change.__name__):
+                song, mapper, request, devices = self.load_ears()
+                change(song, mapper, request, devices)
+                with self.assertRaisesRegex(ValueError, f"{reason}.*; nothing changed$"): mapper.invoke("device.delete", request)
+                self.assertIn(devices[3], devices[0].devices)
+
+    def test_a_load_with_a_parameter_selected_is_refused_with_nothing_loaded(self):
+        def select_a_parameter(song, drums, keys): song.view.selected_parameter = keys.devices[0].parameters[0]
+        with self.assertRaisesRegex(ValueError, "a parameter is selected.*; nothing changed$"): self.load_ears(before_load=select_a_parameter)
+
+    def test_a_selection_live_wont_take_back_stays_where_live_moved_it_and_the_delete_still_counts(self):
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears(track_refused=True)
+        result = self.delete(mapper, request)
+        self.assertNotIn(ears, drums.devices)
+        self.assertEqual((result["deleted"], result["selection"]["previous"]), (request["ref"], True))
+        self.settle(song, mapper)
+        # Live refuses the track back: the selection stays where its move left it, which the host reads and says.
+        self.assertIs(song.view.selected_track, drums)
+        self.assertNotEqual(mapper.snapshot()["selection"]["trackRef"], result["selection"]["before"]["trackRef"])
+
+
 class SelectionViewExpansionTests(unittest.TestCase):
     def test_selection_set_assigns_song_view_selections(self):
         song = FakeSong()
@@ -7720,6 +7911,62 @@ class DeferredLiveWriteTests(unittest.TestCase):
         song.tick()
         transport = mapper.snapshot()["playback"]["transport"]
         self.assertEqual((transport["loop"], transport["metronome"]), ({"enabled": True, "start": 16.0, "length": 16.0}, True))
+
+    def start_song(self, position, start):
+        """Live 12.4's transport as the real Set showed it: start_time is written at once; the playhead on the next tick,
+        and applying the playhead moves start_time to it unless start_time was written after it."""
+        class StartSong(FakeSong):
+            current_song_time = property(lambda self: self.__dict__["_time"], lambda self, value: self.__dict__.update(_moving_to=float(value), _explicit=False))
+            start_time = property(lambda self: self.__dict__["_start"], lambda self, value: self.__dict__.update(_start=float(value), _explicit=True))
+            def tick(self):
+                if "_moving_to" in self.__dict__:
+                    self.__dict__["_time"] = self.__dict__.pop("_moving_to")
+                    if not self.__dict__.get("_explicit"): self.__dict__["_start"] = self.__dict__["_time"]
+        song = self.transport_song(); song.__class__ = StartSong; song.__dict__.update(_time=float(position), _start=float(start))
+        return song
+
+    def test_where_play_starts_is_set_after_the_playhead_and_the_set_comes_back_exactly(self):
+        song = self.start_song(28.1456, 0.0); mapper = LiveObjectMapper(song)
+        transport = mapper.snapshot()["playback"]["transport"]
+        self.assertEqual((transport["position"], transport["startTime"]), (28.1456, 0.0))
+        # Play from beat 8: the playhead, then where play starts, both as asked once Live has applied them.
+        request = self.transport_request(mapper, position=8.0, startTime=8.0)
+        validate_operation_payload("transport.set", "request", request)
+        validate_operation_payload("transport.set", "result", mapper.invoke("transport.set", request)); song.tick()
+        self.assertEqual((song.current_song_time, song.start_time), (8.0, 8.0))
+        # Put back as it was, the start time apart from the playhead (a playhead write alone would move it).
+        mapper.invoke("transport.set", self.transport_request(mapper, position=28.1456, startTime=0.0)); song.tick()
+        self.assertEqual((song.current_song_time, song.start_time), (28.1456, 0.0))
+        validate_operation_payload("snapshot", "result", mapper.snapshot())
+
+    def test_a_start_time_moved_since_the_preview_is_stale(self):
+        song = self.start_song(28.0, 0.0); mapper = LiveObjectMapper(song)
+        request = self.transport_request(mapper, position=8.0, startTime=8.0)
+        song.start_time = 4.0
+        with self.assertRaisesRegex(ValueError, "transport state changed since preview"): mapper.invoke("transport.set", request)
+        song.tick(); self.assertEqual((song.current_song_time, song.start_time), (28.0, 4.0))
+
+    def refusing_loop_start(self, song):
+        """song whose loop_start write Live refuses, as past the arrangement's end."""
+        def refuse(_song, _value): raise RuntimeError("Live refused the loop start")
+        song.__class__ = type("RefusingLoopStart", (song.__class__,), {"loop_start": property(lambda _song: 0.0, refuse), "song_length": 64.0})
+        return song
+
+    def test_a_refused_change_puts_the_playhead_back_before_where_play_starts(self):
+        # The playhead's write moves where play starts on Live's next tick: rolled back first, where play starts last,
+        # so both are as they were, which is what "nothing changed" claims.
+        for asked in ({"position": 8.0, "startTime": 8.0, "loopStart": 500.0}, {"position": 8.0, "loopStart": 500.0}):
+            with self.subTest(asked=sorted(asked)):
+                song = self.refusing_loop_start(self.start_song(28.1456, 0.0)); mapper = LiveObjectMapper(song)
+                with self.assertRaisesRegex(ValueError, "; nothing changed"): mapper.invoke("transport.set", self.transport_request(mapper, **asked))
+                song.tick()
+                self.assertEqual((song.current_song_time, song.start_time), (28.1456, 0.0))
+
+    def test_where_play_starts_is_refused_while_live_plays(self):
+        song = self.start_song(28.0, 0.0); song.is_playing = True; mapper = LiveObjectMapper(song)
+        with self.assertRaisesRegex(ValueError, "^Live is playing: stop playback first.*; nothing changed$"):
+            mapper.invoke("transport.set", self.transport_request(mapper, startTime=8.0))
+        song.tick(); self.assertEqual((song.current_song_time, song.start_time), (28.0, 0.0))
 
     def test_a_transport_value_live_changed_to_something_else_still_refuses_and_rolls_back(self):
         class ClampingSong(FakeSong):

@@ -57,6 +57,26 @@ pub(super) fn unique_ref(rows: &Value, wanted: String) -> String {
 fn device_fingerprint(device: &Value) -> Result<String, LiveError> {
     Ok(simulator_revision(&owned_device_fingerprint_row(device)))
 }
+/// What Live has selected, field by field.
+const SELECTION_FIELDS: &[&str] = &["trackRef", "sceneRef", "slotRef", "detailClipRef", "deviceRef", "parameterRef", "chainRef"];
+fn selection_row(selection: &Value) -> Value {
+    Value::Object(SELECTION_FIELDS.iter().map(|key| ((*key).into(), selection.get(*key).cloned().unwrap_or(Value::Null))).collect())
+}
+/// The selection by ref and by object, as the Remote Script reads it: the simulator's objects are its refs.
+fn selection_capture(selection: &Value) -> Value {
+    let row = selection_row(selection);
+    json!({"row":row,"identities":row})
+}
+fn selection_capture_valid(capture: &Value) -> bool {
+    let part = |row: &Value| {
+        row.as_object().is_some_and(|row| {
+            row.len() == SELECTION_FIELDS.len()
+                && SELECTION_FIELDS.iter().all(|key| row.get(*key).is_some_and(|v| v.is_null() || v.is_string()))
+        })
+    };
+    capture.as_object().is_some_and(|capture| capture.len() == 2) && part(&capture["row"]) && part(&capture["identities"])
+}
+
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_devices(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         match operation {
@@ -128,6 +148,41 @@ impl DeterministicLiveSimulator {
                 let identity = string_arg(args, "expectedObjectIdentity")?;
                 let owner_ref = string_arg(args, "expectedOwnerRef")?;
                 let owner_identity = string_arg(args, "expectedOwnerIdentity")?;
+                // The simulator's selection doesn't move with a delete. keepSelection keeps, part by part, what was
+                // selected before Kumi's load while the selection is still exactly what the load left, else what's
+                // selected now: checked first, as the Remote Script checks it.
+                let keep = args.get("keepSelection").filter(|v| !v.is_null()).cloned();
+                let (mut target, mut previous) = (Value::Null, false);
+                if let Some(keep) = &keep {
+                    if !keep.as_object().is_some_and(|keep| keep.len() == 2)
+                        || !selection_capture_valid(&keep["previous"])
+                        || !selection_capture_valid(&keep["left"])
+                    {
+                        return Err(LiveError::error("keepSelection is invalid; nothing changed"));
+                    }
+                    let held = selection_capture(&self.state.borrow()["selection"]);
+                    previous = held["identities"] == keep["left"]["identities"];
+                    target = Value::Object(
+                        SELECTION_FIELDS
+                            .iter()
+                            .map(|key| {
+                                let unchanged = keep["previous"]["identities"][*key] == keep["left"]["identities"][*key];
+                                let from = if !previous || unchanged { &held["row"] } else { &keep["previous"]["row"] };
+                                ((*key).into(), from[*key].clone())
+                            })
+                            .collect(),
+                    );
+                    if !target["parameterRef"].is_null() {
+                        return Err(LiveError::error(
+                            "a parameter is selected, and Live doesn't let a script select one again; nothing changed",
+                        ));
+                    }
+                    if target["deviceRef"] == reference {
+                        return Err(LiveError::error(
+                            "what's selected (deviceRef) is in the device being removed, so it can't be selected again; nothing changed",
+                        ));
+                    }
+                }
                 let mut state = self.state.borrow_mut();
                 for ti in 0..array(&state["tracks"]).len() {
                     let tp = format!("/tracks/{ti}");
@@ -161,7 +216,34 @@ impl DeterministicLiveSimulator {
                             owner["devices"].as_array_mut().unwrap().remove(index);
                             let owner_ref = owner["ref"].as_str().unwrap().to_string();
                             drop(state);
-                            self.emit(LiveEventType::Object, Some(owner_ref.into()), json!({"operation":operation,"ref":reference}));
+                            self.emit(
+                                LiveEventType::Object,
+                                Some(owner_ref.clone().into()),
+                                json!({"operation":operation,"ref":reference}),
+                            );
+                            if keep.is_some() {
+                                let mut state = self.state.borrow_mut();
+                                // As Live when a test says so (`liveMovesTheSelection`): the selection goes to the deleted
+                                // device's track, and what the delete kept holds only `reads` selection reads later (on the
+                                // bridge's display tick after Live's), or never when there are none (Live refuses it).
+                                if let Some(moves) = state.get("liveMovesTheSelection").filter(|moves| moves.is_object()).cloned() {
+                                    state["selection"]["trackRef"] = json!(owner_ref);
+                                    state["selection"]["deviceRef"] = Value::Null;
+                                    let after = selection_row(&state["selection"]);
+                                    if let Some(reads) = moves["reads"].as_u64() {
+                                        state["pendingPutBack"] = json!({"target": target, "reads": reads});
+                                    }
+                                    return Ok(
+                                        json!({"deleted":reference,"selection":{"before":target,"after":after,"restored":false,"previous":previous}}),
+                                    );
+                                }
+                                for key in SELECTION_FIELDS {
+                                    state["selection"][*key] = target[*key].clone();
+                                }
+                                return Ok(
+                                    json!({"deleted":reference,"selection":{"before":target,"after":target,"restored":true,"previous":previous}}),
+                                );
+                            }
                             return Ok(json!({"deleted":reference}));
                         }
                     }
@@ -268,6 +350,14 @@ impl DeterministicLiveSimulator {
                 Err(LiveError::error("unknown device reference"))
             }
             "browser.load" => {
+                // What's selected, read first in the load's own step, as the Remote Script reads it.
+                let selection_before =
+                    (args.get("reportSelection") == Some(&json!(true))).then(|| selection_capture(&self.state.borrow()["selection"]));
+                if selection_before.as_ref().is_some_and(|before| !before["identities"]["parameterRef"].is_null()) {
+                    return Err(LiveError::error(
+                        "a parameter is selected, and Live doesn't let a script select one again, so this load's undo couldn't keep the selection; nothing changed",
+                    ));
+                }
                 let item_id = string_arg(args, "itemId")?;
                 let catalog = Self::browser_catalog();
                 let item = catalog.iter().find(|item| item["id"] == item_id);
@@ -313,11 +403,31 @@ impl DeterministicLiveSimulator {
                 };
                 drop(state);
                 let inserted = self.invoke_operation("device.insert", insert.as_object().unwrap())?;
-                Ok(
-                    json!({"loaded":true,"deviceRef":inserted["ref"],"deviceObjectIdentity":inserted["objectIdentity"],"createdFingerprint":inserted["createdFingerprint"]}),
-                )
+                let mut loaded = json!({"loaded":true,"deviceRef":inserted["ref"],"deviceObjectIdentity":inserted["objectIdentity"],"createdFingerprint":inserted["createdFingerprint"]});
+                // What was selected as the load ran and what it left (the simulator's load leaves it as it was).
+                if let Some(previous) = selection_before {
+                    loaded["selection"] = json!({"previous":previous,"left":selection_capture(&self.state.borrow()["selection"])});
+                }
+                Ok(loaded)
             }
             _ => unreachable!("device dispatcher routes only implemented operations"),
+        }
+    }
+
+    /// A selection read, as the bridge's display ticks come: what a keepSelection delete kept holds once its reads have
+    /// passed (`liveMovesTheSelection`).
+    pub(super) fn put_back_tick(&self) {
+        let mut state = self.state.borrow_mut();
+        let Some(reads) = state.get("pendingPutBack").and_then(|pending| pending["reads"].as_u64()) else { return };
+        if reads > 1 {
+            state["pendingPutBack"]["reads"] = json!(reads - 1);
+            return;
+        }
+        let target = state["pendingPutBack"]["target"].clone();
+        // shift_remove keeps the state's other keys in order.
+        state.as_object_mut().unwrap().shift_remove("pendingPutBack");
+        for key in SELECTION_FIELDS {
+            state["selection"][*key] = target[*key].clone();
         }
     }
 }

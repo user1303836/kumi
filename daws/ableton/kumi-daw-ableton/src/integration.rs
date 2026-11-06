@@ -56,6 +56,21 @@ use std::{
     time::Duration,
 };
 
+/// What a bridge's preview takes from its host only, never from a step: a Browser load whose undo keeps Live's
+/// selection is listening's own cleanup, and a step's undo never asks for it.
+const HOST_ONLY: &[&str] = &["preserveSelection"];
+fn without_host_only(mut schema: JsonObject) -> JsonObject {
+    if let Some(Value::Object(properties)) = schema.get_mut("properties") {
+        for name in HOST_ONLY {
+            properties.shift_remove(*name);
+        }
+    }
+    if let Some(Value::Array(required)) = schema.get_mut("required") {
+        required.retain(|name| !HOST_ONLY.iter().any(|host| name == host));
+    }
+    schema
+}
+
 static DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_str(include_str!("assets/public-tools.json")).unwrap());
 type Closing = Shared<LocalBoxFuture<'static, Result<(), RuntimeError>>>;
 pub struct Ableton {
@@ -669,7 +684,7 @@ impl ObservationHost for Ableton {
                 && self.mutations.supported(k.since.as_deref())
                 && ((k.always == Some(true) && k.input_schema.is_some() && tools.has("live_undo")) || k.available(|tool| tools.has(tool)))
         }) {
-            let preview = tools.tool(&kind.preview).map(|t| object(&json!(t.input_schema)).unwrap());
+            let preview = tools.tool(&kind.preview).map(|t| without_host_only(object(&json!(t.input_schema)).unwrap()));
             let schema = if kind.fallback_schema == Some(true) {
                 preview.or_else(|| kind.input_schema.clone()).unwrap_or_default()
             } else {
@@ -685,8 +700,10 @@ impl ObservationHost for Ableton {
         for kind in ACTIONS.iter().filter(|k| self.mutations.supported(k.since.as_deref()) && tools.has(&k.preview) && tools.has(&k.apply))
         {
             actions.push(kind.tool.clone());
-            let schema =
-                kind.input_schema.clone().unwrap_or_else(|| object(&json!(tools.tool(&kind.preview).unwrap().input_schema)).unwrap());
+            let schema = kind
+                .input_schema
+                .clone()
+                .unwrap_or_else(|| without_host_only(object(&json!(tools.tool(&kind.preview).unwrap().input_schema)).unwrap()));
             if !kind.core {
                 steps.push(catalog::step_line(&kind.tool, &kind.description, &schema));
             }

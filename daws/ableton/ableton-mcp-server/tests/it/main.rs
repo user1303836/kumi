@@ -25,6 +25,7 @@ mod host_audio;
 mod host_audio_clip;
 mod host_audio_import;
 mod host_automation;
+mod host_browser_load;
 mod host_browser_render;
 mod host_clip_duplicate;
 mod host_clip_move;
@@ -69,6 +70,9 @@ mod midi_transforms;
 mod native_connected;
 mod observed_evidence;
 mod observed_notes;
+/// The tool descriptors from before where play starts and a load's undo keeping the selection, put back for the oracles' replays.
+#[path = "../support/play_start_and_selection.rs"]
+mod play_start_and_selection;
 mod project;
 mod project_semantic;
 mod project_semantic_diff;

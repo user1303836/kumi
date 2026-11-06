@@ -951,13 +951,18 @@
     },
     {
       "name": "live_transport_preview",
-      "description": "Read-only preflight for one bounded transport change (position, loop, punch, metronome, count-in) with a playback-revision fence.",
+      "description": "Read-only preflight for one bounded transport change (position, start time, loop, punch, metronome, count-in) with a playback-revision fence.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "position": {
             "type": "number",
             "minimum": 0
+          },
+          "startTime": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Where play starts (Live's start time), in beats; set after the playhead, which moves it"
           },
           "loopEnabled": {
             "type": "boolean"
@@ -2588,6 +2593,10 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "preserveSelection": {
+            "type": "boolean",
+            "description": "Read what's selected now, so this load's undo can bring it back (refused while a parameter is selected: no script can select one)"
           }
         },
         "required": [
@@ -4628,6 +4637,10 @@
           "discard": {
             "type": "boolean",
             "description": "For a track the client made as scratch (a render it recorded): delete it though it changed since"
+          },
+          "preserveSelection": {
+            "type": "boolean",
+            "description": "For a Browser load previewed with preserveSelection: remove its device keeping the selection. What was selected before the load comes back while the selection is still what the load left; a selection the producer made since stays as it is (refused, nothing removed, if it can't). The answer's selection says which (previous) and whether it held (restored)"
           }
         },
         "required": [

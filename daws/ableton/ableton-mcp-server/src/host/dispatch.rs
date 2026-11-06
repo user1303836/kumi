@@ -319,6 +319,9 @@ impl McpHost {
             return Ok(error(id, -32602, "transactionId, confirmation=undo, and idempotencyKey are required", None));
         }
         let tx = params["transactionId"].as_str().unwrap();
+        if params.get("preserveSelection") == Some(&json!(true)) && !tx.starts_with("browserload_") {
+            return Ok(error(id, -32602, "preserveSelection is only for a Browser load's undo", None));
+        }
         let record = self.transaction_record(tx);
         let kind = record.as_ref().and_then(|r| r.borrow()["kind"].as_str().map(str::to_owned));
         if !self.policy_allows_tool(Self::transaction_owner_tool(tx, kind.as_deref()))? {

@@ -140,7 +140,7 @@ impl McpHost {
                 return Ok(transaction_error(id,"the copy moved or changed after it was made; undo refused"));
             }
             let row=row.unwrap();record.borrow_mut()["state"]=json!("undoing");
-            if arrangement::truthy(&created["fingerprint"]){self.delete_owned_device_async(adapter.as_ref(),created["ref"].as_str().unwrap(),created["objectIdentity"].as_str().unwrap(),&context,created["fingerprint"].as_str(),Some(&record),false).await?;}else{
+            if arrangement::truthy(&created["fingerprint"]){self.delete_owned_device_async(adapter.as_ref(),created["ref"].as_str().unwrap(),created["objectIdentity"].as_str().unwrap(),&context,created["fingerprint"].as_str(),Some(&record),false,None).await?;}else{
                 self.invoke_undo_recovery(&record,adapter.as_ref(),"device.delete",&json!({"ref":created["ref"],"expectedObjectIdentity":row.device["objectIdentity"],"expectedOwnerRef":row.owner_ref,"expectedOwnerIdentity":row.owner_identity,"expectedSiblings":row.siblings,"expectedTrackRef":row.track["ref"],"expectedTrackIdentity":row.track["objectIdentity"],"explicitDeletion":true}),&context).await?;
             }
             let remains=async{let snapshot=self.views.view_for(Some(&context),&[row.track["ref"].clone()],None,&[]).await?;Ok::<_,LiveError>(self.device_row(&snapshot,created["ref"].as_str().unwrap())?.device["objectIdentity"]==created["objectIdentity"])}.await.unwrap_or(false);

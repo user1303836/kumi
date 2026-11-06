@@ -244,6 +244,7 @@ impl McpHost {
                     t["created"]["createdFingerprint"].as_str(),
                     Some(&record),
                     reconciliation,
+                    None,
                 )
                 .await?;
                 self.release_staged_import_for(&t);

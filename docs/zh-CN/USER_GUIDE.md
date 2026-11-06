@@ -372,7 +372,7 @@ Live 连接期间，桥接每 10 秒寻找一次扩展。扩展一旦应答，�
 
 | 工具 | 类别 | 作用 |
 | --- | --- | --- |
-| `live_transport_preview/apply` | performance | 歌曲位置、循环、穿插录音（punch）和节拍器（可撤销）。 |
+| `live_transport_preview/apply` | performance | 歌曲位置、播放起点、循环、穿插录音（punch）和节拍器（可撤销；播放起点仅在停止时设置）。 |
 | `live_transport_action_preview/apply` | performance | 开始、继续、停止、播放选区、停止所有片段、回到编曲视图、搓擦、敲击速度、微调（nudge）、跳转、触发 Session 录音。 |
 | `live_clip_launch_preview/apply/stop` | performance | 触发一个片段（无论工程是否正在播放），并可再次停止这个片段。 |
 | `live_scene_fire_preview/apply` | performance | 触发一个场景。 |

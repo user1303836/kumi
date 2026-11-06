@@ -2586,6 +2586,9 @@
        ],
        "additionalProperties": false
       }
+     },
+     "reportSelection": {
+      "type": "boolean"
      }
     },
     "required": [
@@ -2626,6 +2629,320 @@
       "minLength": 32,
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9_-]{32,128}$"
+     },
+     "selection": {
+      "type": "object",
+      "properties": {
+       "previous": {
+        "type": "object",
+        "properties": {
+         "row": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         },
+         "identities": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "required": [
+         "row",
+         "identities"
+        ],
+        "additionalProperties": false
+       },
+       "left": {
+        "type": "object",
+        "properties": {
+         "row": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         },
+         "identities": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "required": [
+         "row",
+         "identities"
+        ],
+        "additionalProperties": false
+       }
+      },
+      "required": [
+       "previous",
+       "left"
+      ],
+      "additionalProperties": false
      }
     },
     "required": [
@@ -4873,6 +5190,320 @@
      "explicitDeletion": {
       "type": "boolean",
       "const": true
+     },
+     "keepSelection": {
+      "type": "object",
+      "properties": {
+       "previous": {
+        "type": "object",
+        "properties": {
+         "row": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         },
+         "identities": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "required": [
+         "row",
+         "identities"
+        ],
+        "additionalProperties": false
+       },
+       "left": {
+        "type": "object",
+        "properties": {
+         "row": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         },
+         "identities": {
+          "type": "object",
+          "properties": {
+           "trackRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "sceneRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "slotRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "detailClipRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "deviceRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "parameterRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           },
+           "chainRef": {
+            "type": [
+             "string",
+             "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+           }
+          },
+          "required": [
+           "trackRef",
+           "sceneRef",
+           "slotRef",
+           "detailClipRef",
+           "deviceRef",
+           "parameterRef",
+           "chainRef"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "required": [
+         "row",
+         "identities"
+        ],
+        "additionalProperties": false
+       }
+      },
+      "required": [
+       "previous",
+       "left"
+      ],
+      "additionalProperties": false
      }
     },
     "required": [
@@ -4893,6 +5524,166 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256
+     },
+     "selection": {
+      "type": "object",
+      "properties": {
+       "before": {
+        "type": "object",
+        "properties": {
+         "trackRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "sceneRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "slotRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "detailClipRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "deviceRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "parameterRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "chainRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         }
+        },
+        "required": [
+         "trackRef",
+         "sceneRef",
+         "slotRef",
+         "detailClipRef",
+         "deviceRef",
+         "parameterRef",
+         "chainRef"
+        ],
+        "additionalProperties": false
+       },
+       "after": {
+        "type": "object",
+        "properties": {
+         "trackRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "sceneRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "slotRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "detailClipRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "deviceRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "parameterRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         },
+         "chainRef": {
+          "type": [
+           "string",
+           "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+         }
+        },
+        "required": [
+         "trackRef",
+         "sceneRef",
+         "slotRef",
+         "detailClipRef",
+         "deviceRef",
+         "parameterRef",
+         "chainRef"
+        ],
+        "additionalProperties": false
+       },
+       "restored": {
+        "type": "boolean"
+       },
+       "previous": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "before",
+       "after",
+       "restored",
+       "previous"
+      ],
+      "additionalProperties": false
      }
     },
     "required": [
@@ -12523,6 +13314,14 @@
         "minimum": 0,
         "maximum": 1000000000
        },
+       "startTime": {
+        "type": [
+         "number",
+         "null"
+        ],
+        "minimum": 0,
+        "maximum": 1000000000
+       },
        "launchQuantization": {
         "type": "object",
         "properties": {
@@ -12929,6 +13728,14 @@
           ]
          },
          "position": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000
+         },
+         "startTime": {
           "type": [
            "number",
            "null"
@@ -15112,6 +15919,14 @@
     "type": "object",
     "properties": {
      "position": {
+      "type": [
+       "number",
+       "null"
+      ],
+      "minimum": 0,
+      "maximum": 1000000000
+     },
+     "startTime": {
       "type": [
        "number",
        "null"

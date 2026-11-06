@@ -7,9 +7,12 @@ use super::{
 };
 use kumi_common::{abort::Signal, js::json as js_json, time::now_ms_f64};
 const FIELDS: &[&str] = &["trackRef", "sceneRef", "slotRef", "detailClipRef", "deviceRef", "parameterRef", "chainRef"];
+/// What a snapshot says is selected, field by field (null where nothing is).
+pub(super) fn selected(snapshot: &Value) -> Value {
+    Value::Object(FIELDS.iter().map(|f| ((*f).into(), snapshot["selection"][*f].clone())).collect())
+}
 fn revision(snapshot: &Value) -> Result<String, LiveError> {
-    let state = Value::Object(FIELDS.iter().map(|f| ((*f).into(), snapshot["selection"][*f].clone())).collect());
-    digest(&state)
+    digest(&selected(snapshot))
 }
 fn selection_fields(value: &Value) -> Value {
     Value::Object(
@@ -34,7 +37,7 @@ fn fence(proposed: &Value, snapshot: &Value) -> Result<String, LiveError> {
     Ok(js_json::stringify(&json!({"proposed":proposed,"selectionRevision":revision(snapshot)?,"drawMode":draw_mode(snapshot)})))
 }
 impl McpHost {
-    async fn selection_view(&self, context: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
+    pub(super) async fn selection_view(&self, context: Option<&LiveOperationContext>) -> Result<Value, LiveError> {
         Ok(serde_json::to_value(
             self.views.view(context, LiveViewScope::Indices(vec![]), Some(&[LiveSnapshotPart::Set, LiveSnapshotPart::Selection])).await?,
         )

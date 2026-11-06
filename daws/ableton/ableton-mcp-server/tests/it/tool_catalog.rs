@@ -39,7 +39,9 @@ fn check_visibility_cases(chunk: usize, chunks: usize) {
             .iter()
             .map(|r| json!({"name":r.entry.name,"executable":r.executable,"policyAllowed":r.policy_allowed,"visible":r.visible}))
             .collect();
-        let result = json!({"rows":rows,"descriptors":visible_tool_descriptors(status, policy).unwrap()});
+        let mut descriptors = serde_json::to_value(visible_tool_descriptors(status, policy).unwrap()).unwrap();
+        crate::play_start_and_selection::as_recorded(&mut descriptors);
+        let result = json!({"rows":rows,"descriptors":descriptors});
         let digest = hex::encode(Sha256::digest(stringify(&result)));
         assert_eq!(digest, case["sha256"].as_str().unwrap(), "status={}, policy={policy:?}", case["status"]);
     }

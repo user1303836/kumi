@@ -2,7 +2,7 @@
 use super::*;
 use kumi_common::abort::{Signal, SignalExt};
 use retention::TransactionRecord;
-const FIELDS: &[&str] = &["position", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut"];
+const FIELDS: &[&str] = &["position", "startTime", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut"];
 const PARTS: &[LiveSnapshotPart] = &[LiveSnapshotPart::Set, LiveSnapshotPart::Playback];
 fn field_is(transport: &Value, field: &str, value: &Value) -> bool {
     if field == "position" {
@@ -66,7 +66,10 @@ impl McpHost {
             let snapshot=serde_json::to_value(self.views.view(None,LiveViewScope::Indices(vec![]),Some(PARTS)).await?).unwrap();
             let transport=&snapshot["playback"]["transport"];
             if transport.is_null()||transport["loop"].is_null()||!is_non_empty_string(&snapshot["set"]["objectIdentity"],256){return Ok(transaction_error(id,"authoritative transport Set identity is unavailable"));}
-            let prior=project_fields(transport,&["position","loop","punchIn","punchOut","metronome"]);
+            // Where play starts is only set where Live says where it is: it's put back by that reading.
+            if proposed.get("startTime").is_some()&&!transport["startTime"].is_number(){return Ok(transaction_error(id,"this Live doesn't say where play starts (startTime), so it can't be set"));}
+            if proposed.get("startTime").is_some()&&transport["playing"]==true{return Ok(transaction_error(id,"Live is playing: stop playback first to set where play starts"));}
+            let prior=project_fields(transport,&["position","startTime","loop","punchIn","punchOut","metronome"]);
             let t=json!({
 "id":tempo::transaction_id("transport"),
 "epoch":status.epoch,
@@ -150,6 +153,11 @@ impl McpHost {
             {
                 let mut row = record.borrow_mut();
                 row["appliedRevision"] = confirmed["revision"].clone();
+                // Where play starts as the apply left it (a playhead write moves it too): what the undo owns. A Live that
+                // doesn't say where play starts leaves nothing to own.
+                if confirmed["transport"]["startTime"].is_number() {
+                    row["appliedStartTime"] = confirmed["transport"]["startTime"].clone();
+                }
                 row["applyKey"] = params["idempotencyKey"].clone();
                 row["state"] = json!("applied");
             }
@@ -217,8 +225,25 @@ impl McpHost {
                 return Ok(refuse("transport Set identity changed after apply; undo refused"));
             }
             let current = &snapshot["playback"]["transport"];
+            // Live moves where play starts with a playhead write, so undoing one puts it back too, last: as it was
+            // while it's still what the apply left, else as the producer set it since (the playhead's write would
+            // move it).
+            if t["proposed"].get("position").is_some() && t["proposed"].get("startTime").is_none() && prior["startTime"].is_number() {
+                if let Some(now) = current["startTime"].as_f64() {
+                    let ours = t["appliedStartTime"].as_f64().is_some_and(|left| (left - now).abs() <= 1e-6);
+                    restore["startTime"] = if ours { prior["startTime"].clone() } else { json!(now) };
+                }
+            }
+            // While Live plays, the playhead and the start its write moved are left as playback has them; only a start
+            // the change set itself refuses the undo.
+            if !reconciliation && current["playing"] == true && t["proposed"].get("startTime").is_some() {
+                return Ok(refuse(
+                    "transport undo refused while playing: where play starts is put back only on a stopped transport; stop playback first",
+                ));
+            }
             if !reconciliation && current["playing"] == true {
                 restore.as_object_mut().unwrap().remove("position");
+                restore.as_object_mut().unwrap().remove("startTime");
             }
             if !reconciliation && restore.as_object().unwrap().is_empty() {
                 return Ok(refuse("transport undo refused while playing: only the playhead changed; stop playback first"));

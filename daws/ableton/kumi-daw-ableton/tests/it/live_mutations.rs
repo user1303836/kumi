@@ -464,7 +464,15 @@ impl McpEndpoint for LoadFixture {
         Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        Ok(serde_json::from_value(json!({"tools":(["live_status","live_browser_load_preview","live_browser_load_apply"].iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>())})).unwrap())
+        // The preview offers what a bridge's preview takes from its host only (preserveSelection), as Live's does.
+        let schema = |name: &str| {
+            if name == "live_browser_load_preview" {
+                json!({"type":"object","properties":{"itemId":{"type":"string"},"trackRef":{"type":"string"},"preserveSelection":{"type":"boolean"}}})
+            } else {
+                json!({"type":"object"})
+            }
+        };
+        Ok(serde_json::from_value(json!({"tools":(["live_status","live_browser_load_preview","live_browser_load_apply"].iter().map(|name|json!({"name":name,"inputSchema":schema(name)})).collect::<Vec<_>>())})).unwrap())
     }
     async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
         let body = match name {
@@ -509,6 +517,9 @@ async fn a_loads_identity_and_its_tool_reach_history() {
             connection.available.set(true);
             connection.epoch.set(Some(7.));
             connection.references.borrow_mut().refs.insert("7:track:0".into(), "track".into());
+            // Keeping Live's selection is listening's own cleanup: the model's load_device never offers it.
+            let load = integration.definitions().into_iter().find(|tool| tool.name() == "load_device").unwrap().input_schema();
+            assert!(load["properties"].get("itemId").is_some() && load["properties"].get("preserveSelection").is_none(), "{load:?}");
             let result = integration
                 .mutations
                 .make_changes(

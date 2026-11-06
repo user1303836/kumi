@@ -469,7 +469,7 @@ These can be heard. Most can't be undone; stopping is the way back.
 
 | Tool | Class | What it does |
 | --- | --- | --- |
-| `live_transport_preview/apply` | performance | Song position, loop, punch and metronome (undoable). |
+| `live_transport_preview/apply` | performance | Song position, where play starts, loop, punch and metronome (undoable; where play starts only while stopped). |
 | `live_transport_action_preview/apply` | performance | Start, continue, stop, play selection, stop all clips, back to Arrangement, scrub, tap tempo, nudge, jump, trigger Session record. |
 | `live_clip_launch_preview/apply/stop` | performance | Launches one clip, while the Set plays or not, and stops that clip again. |
 | `live_scene_fire_preview/apply` | performance | Fires a scene. |
