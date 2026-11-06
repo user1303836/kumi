@@ -21,6 +21,7 @@ pub mod musical;
 pub mod notation;
 pub mod notes;
 pub mod probes;
+pub mod reference;
 pub mod references;
 pub mod renderer;
 pub mod round;

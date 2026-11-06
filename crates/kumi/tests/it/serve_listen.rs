@@ -134,6 +134,62 @@ case!(bad_reference_and_stale_epoch_do_not_spend_a_playback, async {
     wire.end().await;
 });
 
+case!(a_bad_last_reference_costs_no_daw_calls_in_preview_or_capture, async {
+    let source = tempfile::tempdir().unwrap();
+    let root = source.path().canonicalize().unwrap();
+    let reference = root.join("reference.wav");
+    daw_mcp_server::simulator::listening::write_noise(&reference, 2., 0.2, 17).unwrap();
+    let script = ReaperScript::new(3, 0);
+    let listening = script.listening().clone();
+    listening.set_render_preflight(true);
+    listening.set_tempo(120.);
+    let approved_root = root.clone();
+    let lab = Lab::configured(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))),
+        false,
+        move |args| args.media_roots.push(approved_root),
+    )
+    .await;
+    listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, _, _) = looked(&mut wire).await;
+    let approved = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
+    // The running host polls focus independently; this call must not add capture preflight or render requests.
+    let capture_requests = || {
+        requests(&lab)
+            .into_iter()
+            .filter(|request| {
+                request["method"] == "render" || (request["method"] == "read" && request["params"]["kind"] == "render_preflight")
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = capture_requests();
+    for preview in [true, false] {
+        let mut args = window(&key, epoch, json!({"mix":true}));
+        args["references"] = json!([
+            {"file":reference,"from":0.,"seconds":0.5},
+            {"file":reference,"from":1.5,"seconds":1.}
+        ]);
+        if preview {
+            args["preview"] = json!(true);
+        } else {
+            args["_listen"] = approved["_listen"].clone();
+            args["_listen"]["prepare_seconds"] = json!(120);
+        }
+        let (refused, error) = wire.call("listen", args, Some(if preview { "bad-refs-preview" } else { "bad-refs-capture" })).await;
+        assert!(error && refused["error"]["reason"].as_str().unwrap().contains("past the end"), "{refused}");
+        no_audio(&refused);
+        assert_eq!(capture_requests(), before, "reference validation precedes every DAW preflight and render");
+        assert!(listening.renders().is_empty());
+        assert!(!lab.ctx.paths().state_dir.join("artifacts.json").exists());
+        assert!(std::fs::read_dir(lab.ctx.paths().state_dir.join("artifacts")).unwrap().next().is_none());
+        assert!(lab.ctx.history().rows(10).is_empty());
+    }
+    wire.end().await;
+});
+
 case!(an_old_component_refuses_instead_of_using_an_unverified_renderer, async {
     for daw in [Daw::Reaper, Daw::Renoise] {
         let (lab, listening) = listening_lab(daw).await;

@@ -187,6 +187,23 @@ impl Spread {
     pub fn point(value: f64, half: f64) -> Self {
         Self { mid: value, low: value - half, high: value + half }
     }
+
+    /// The same per-quantity aggregation used by `Profile::combine`. Missing members are omitted by the caller,
+    /// never replaced with a floor; the minimum half-width is a tolerance, not a confidence interval.
+    pub fn combine(spreads: Vec<Spread>) -> Option<Spread> {
+        if spreads.is_empty() {
+            return None;
+        }
+        let mut mids: Vec<f64> = spreads.iter().map(|spread| spread.mid).collect();
+        mids.sort_by(f64::total_cmp);
+        let (low, high) = if mids.len() >= 5 { (percentile(&mids, 0.1), percentile(&mids, 0.9)) } else { (mids[0], mids[mids.len() - 1]) };
+        // At least as wide as a typical track's own range.
+        let mut halves: Vec<f64> = spreads.iter().map(|spread| (spread.high - spread.low) / 2.).collect();
+        halves.sort_by(f64::total_cmp);
+        let half = percentile(&halves, 0.5);
+        let mid = percentile(&mids, 0.5);
+        Some(Spread { mid: round1(mid), low: round1(low.min(mid - half)), high: round1(high.max(mid + half)) })
+    }
 }
 
 impl Profile {
@@ -263,22 +280,7 @@ impl Profile {
         if tracks.len() == 1 {
             return Some(Profile { name: name.into(), ..first.clone() });
         }
-        let spread = |spreads: Vec<Spread>| -> Option<Spread> {
-            if spreads.is_empty() {
-                return None;
-            }
-            let mut mids: Vec<f64> = spreads.iter().map(|spread| spread.mid).collect();
-            mids.sort_by(f64::total_cmp);
-            let (low, high) =
-                if mids.len() >= 5 { (percentile(&mids, 0.1), percentile(&mids, 0.9)) } else { (mids[0], mids[mids.len() - 1]) };
-            // At least as wide as a typical track's own range.
-            let mut halves: Vec<f64> = spreads.iter().map(|spread| (spread.high - spread.low) / 2.).collect();
-            halves.sort_by(f64::total_cmp);
-            let half = percentile(&halves, 0.5);
-            let mid = percentile(&mids, 0.5);
-            Some(Spread { mid: round1(mid), low: round1(low.min(mid - half)), high: round1(high.max(mid + half)) })
-        };
-        let pick = |get: &dyn Fn(&Profile) -> Option<Spread>| spread(tracks.iter().filter_map(get).collect());
+        let pick = |get: &dyn Fn(&Profile) -> Option<Spread>| Spread::combine(tracks.iter().filter_map(get).collect());
         // The tracks' vibes are averaged only when one model heard them all: one model's numbers aren't another's.
         let vibe_model = tracks.iter().find(|track| track.vibe.is_some()).and_then(|track| track.vibe_model.clone());
         let one_model = vibe_model.is_some() && tracks.iter().all(|track| track.vibe.is_none() || track.vibe_model == vibe_model);

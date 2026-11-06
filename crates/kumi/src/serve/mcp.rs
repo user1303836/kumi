@@ -69,7 +69,7 @@ pub(super) fn tool_descriptor(operation: &Operation, daw: DawId) -> Value {
         } else {
             &["artifact", "file", "sound"]
         };
-        tool["_meta"] = json!({"kumi/listen_sources": sources});
+        tool["_meta"] = json!({"kumi/listen_sources": sources, "kumi/listen_features": ["window", "references"]});
     }
     tool
 }

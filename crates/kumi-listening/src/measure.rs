@@ -376,7 +376,7 @@ impl Stream {
     }
 }
 
-struct Meter {
+pub(crate) struct Meter {
     rate: f64,
     weighting: [[Biquad; 2]; 2],
     block: usize,
@@ -444,7 +444,7 @@ struct Meter {
 }
 
 impl Meter {
-    fn new(rate: f64) -> Self {
+    pub(crate) fn new(rate: f64) -> Self {
         let size = main_size(rate);
         let main = Stream::new(size);
         let main_band: Vec<Option<usize>> = (0..=size / 2)
@@ -549,7 +549,7 @@ impl Meter {
         }
     }
 
-    fn push(&mut self, left: &[f32], right: &[f32]) {
+    pub(crate) fn push(&mut self, left: &[f32], right: &[f32]) {
         for (l, r) in left.iter().zip(right) {
             let (l, r) = (*l as f64, *r as f64);
             self.count += 1;
@@ -743,7 +743,7 @@ impl Meter {
         self.low_frames.push((mid, side));
     }
 
-    fn finish(mut self) -> Heard {
+    pub(crate) fn finish(mut self) -> Heard {
         let rate = self.rate;
         let seconds = self.count as f64 / rate;
         // Loudness, from 100 ms blocks of K-weighted power.

@@ -132,6 +132,8 @@ struct Record {
     mime: String,
     tool: String,
     at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audio_origin: Option<Value>,
 }
 type Records = BTreeMap<String, Record>;
 
@@ -146,6 +148,8 @@ pub struct StagedArtifact {
     file: StagedFile,
     id: String,
     identity: FileIdentity,
+    source_identity: FileIdentity,
+    audio_origin: Option<Value>,
 }
 
 enum StagedFile {
@@ -169,6 +173,21 @@ impl StagedArtifact {
         }
     }
 
+    pub(crate) fn source_identity(&self) -> FileIdentity {
+        self.source_identity
+    }
+
+    pub(crate) fn audio_origin(&self) -> Option<&Value> {
+        self.audio_origin.as_ref()
+    }
+
+    /// Replayed artifacts keep their original provenance, even when measured again.
+    pub(crate) fn set_audio_origin(&mut self, origin: Value) {
+        if matches!(&self.file, StagedFile::Owned(_)) {
+            self.audio_origin = Some(origin);
+        }
+    }
+
     pub(crate) fn verify(&self) -> Result<(), OpError> {
         let path = local(self.path())?;
         if path != self.path()
@@ -178,6 +197,27 @@ impl StagedArtifact {
             return Err(refused("stale", "The retained audio changed; choose the source again."));
         }
         Ok(())
+    }
+}
+
+/// An unpublished output owned by this store. DSP receives only a cloned handle, never an output pathname.
+pub(crate) struct AudioStage {
+    file: NamedTempFile,
+}
+
+impl AudioStage {
+    pub(crate) fn writer(&self) -> Result<File, OpError> {
+        self.file.as_file().try_clone().map_err(failed)
+    }
+
+    /// The DSP writer has already flushed and synced the completed WAV.
+    pub(crate) fn finish(self, source_identity: FileIdentity) -> Result<StagedArtifact, OpError> {
+        let identity = FileIdentity::of(self.file.as_file()).map_err(failed)?;
+        if identity.size > MAX_BYTES {
+            return Err(refused("too_large", "This excerpt exceeds the 50 MiB media limit; choose a shorter window."));
+        }
+        let id = self.file.path().file_stem().and_then(|name| name.to_str()).ok_or_else(|| failed("invalid artifact name"))?.to_owned();
+        Ok(StagedArtifact { file: StagedFile::Owned(self.file), id, identity, source_identity, audio_origin: None })
     }
 }
 
@@ -270,7 +310,14 @@ impl Artifacts {
         if identity.size > MAX_BYTES {
             return Err(refused("too_large", "This artifact exceeds the 50 MiB media limit."));
         }
-        Ok(StagedArtifact { file: StagedFile::Registered { path, handle }, id: id.to_owned(), identity })
+        let audio_origin = self.records.borrow().get(id).and_then(|record| record.audio_origin.clone());
+        Ok(StagedArtifact {
+            file: StagedFile::Registered { path, handle },
+            id: id.to_owned(),
+            identity,
+            source_identity: identity,
+            audio_origin,
+        })
     }
 
     /// Native-only promotion of one call's owned scratch. A model's `file` source cannot use this grant.
@@ -282,6 +329,11 @@ impl Artifacts {
             return Err(refused("outside_root", "This file does not belong to this call's native scratch."));
         }
         self.copy(source, None, signal).await
+    }
+
+    pub(crate) fn audio_stage(&self) -> Result<AudioStage, OpError> {
+        let file = tempfile::Builder::new().prefix("a-").rand_bytes(24).suffix(".wav").tempfile_in(self.checked_root()?).map_err(failed)?;
+        Ok(AudioStage { file })
     }
 
     async fn copy(&self, source: PathBuf, expected: Option<Value>, signal: &Signal) -> Result<StagedArtifact, OpError> {
@@ -321,7 +373,7 @@ impl Artifacts {
             file.as_file().sync_all().map_err(failed)?;
             let id = file.path().file_stem().and_then(|name| name.to_str()).ok_or_else(|| failed("invalid artifact name"))?.to_owned();
             let identity = FileIdentity::of(file.as_file()).map_err(failed)?;
-            Ok(StagedArtifact { file: StagedFile::Owned(file), id, identity })
+            Ok(StagedArtifact { file: StagedFile::Owned(file), id, identity, source_identity, audio_origin: None })
         })
         .await
         .map_err(failed)?
@@ -377,10 +429,37 @@ impl Artifacts {
         }
     }
 
+    /// One current and up to five references use the same transaction engine as ordinary media.
+    /// The old fixed-size paths keep their allocation and serialized-record behavior.
+    pub(crate) async fn publish_audio_group(
+        &self,
+        ctx: &Ctx,
+        files: Vec<(StagedArtifact, &str)>,
+        signal: &Signal,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Result<Vec<SavedArtifact>, OpError> {
+        macro_rules! publish {
+            ($count:literal) => {{
+                let files: [(StagedArtifact, &str); $count] = files.try_into().map_err(|_| failed("invalid audio group"))?;
+                let saved = self.publish_files(ctx, files.map(|(file, mime)| (file, "audio", mime)), "listen", signal, deadline).await?;
+                Ok(saved.into_iter().collect())
+            }};
+        }
+        match files.len() {
+            1 => publish!(1),
+            2 => publish!(2),
+            3 => publish!(3),
+            4 => publish!(4),
+            5 => publish!(5),
+            6 => publish!(6),
+            _ => Err(failed("Listening retains one current and at most five references.")),
+        }
+    }
+
     async fn publish_files<const N: usize>(
         &self,
         ctx: &Ctx,
-        files: [(StagedArtifact, &str, &str); N],
+        mut files: [(StagedArtifact, &str, &str); N],
         tool: &str,
         signal: &Signal,
         deadline: Option<tokio::time::Instant>,
@@ -394,7 +473,7 @@ impl Artifacts {
             let root = self.checked_root()?;
             let at = now_ms();
             let mut added = Vec::with_capacity(N);
-            for (file, kind, mime) in &files {
+            for (file, kind, mime) in &mut files {
                 if file.path().parent() != Some(root.as_path()) {
                     return Err(refused("outside_root", "This staged file does not belong to this artifact store."));
                 }
@@ -406,7 +485,14 @@ impl Artifacts {
                         }
                         added.push((
                             file.id.clone(),
-                            Record { path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at },
+                            Record {
+                                path: file.path().to_path_buf(),
+                                kind: (*kind).into(),
+                                mime: (*mime).into(),
+                                tool: tool.into(),
+                                at,
+                                audio_origin: file.audio_origin.take(),
+                            },
                         ));
                     }
                     StagedFile::Registered { .. } => {
@@ -645,37 +731,43 @@ mod tests {
         }
     }
 
+    async fn staged_group(fixture: &Fixture) -> (Vec<(StagedArtifact, &'static str)>, Vec<PathBuf>, Vec<PathBuf>) {
+        let mut files = Vec::with_capacity(6);
+        let mut copies = Vec::with_capacity(6);
+        let mut originals = Vec::with_capacity(6);
+        for index in 0..6 {
+            let path = fixture.root.join(format!("audio-{index}.wav"));
+            std::fs::write(&path, format!("audio {index}")).unwrap();
+            let file = fixture.ctx.artifacts().stage(&fixture.ctx, &path, None, &Signal::new()).await.unwrap();
+            copies.push(file.path().to_path_buf());
+            originals.push(path);
+            files.push((file, "audio/wav"));
+        }
+        (files, copies, originals)
+    }
+
     #[tokio::test]
-    async fn failed_manifest_commit_removes_both_copies_not_user_files() {
+    async fn failed_manifest_commit_removes_the_whole_reference_group_not_user_files() {
         let fixture = Fixture::new();
         let ctx = &fixture.ctx;
-        let source = fixture.root.join("current.wav");
-        let reference = fixture.root.join("reference.wav");
-        std::fs::write(&source, b"current audio").unwrap();
-        std::fs::write(&reference, b"reference audio").unwrap();
-        let signal = Signal::new();
-        let current = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
-        let other = ctx.artifacts().stage(ctx, &reference, None, &signal).await.unwrap();
-        let paths = [current.path().to_path_buf(), other.path().to_path_buf()];
+        let (files, copies, originals) = staged_group(&fixture).await;
         // A directory cannot be replaced by the manifest's regular file, on any supported platform.
         std::fs::create_dir(ctx.paths().state_dir.join("artifacts.json")).unwrap();
-        let result = ctx.artifacts().publish_pair(ctx, current, "audio/wav", Some((other, "audio/wav")), &signal, None).await;
+        let result = ctx.artifacts().publish_audio_group(ctx, files, &Signal::new(), None).await;
         assert!(matches!(result, Err(OpError::Failed { .. })));
-        assert!(paths.iter().all(|path| !path.exists()));
+        assert!(copies.iter().all(|path| !path.exists()));
         assert!(ctx.artifacts().records.borrow().is_empty());
-        assert_eq!(std::fs::read(source).unwrap(), b"current audio");
-        assert_eq!(std::fs::read(reference).unwrap(), b"reference audio");
+        for (index, original) in originals.iter().enumerate() {
+            assert_eq!(std::fs::read(original).unwrap(), format!("audio {index}").as_bytes());
+        }
     }
 
     #[tokio::test]
     async fn expiry_at_the_commit_boundary_removes_every_unpublished_copy() {
         let fixture = Fixture::new();
         let ctx = &fixture.ctx;
-        let source = fixture.root.join("capture.wav");
-        std::fs::write(&source, b"captured audio").unwrap();
+        let (files, copies, originals) = staged_group(&fixture).await;
         let signal = Signal::new();
-        let staged = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
-        let copy = staged.path().to_path_buf();
         let (entered, at_boundary) = tokio::sync::oneshot::channel();
         let (release, proceed) = tokio::sync::oneshot::channel();
         *ctx.artifacts().before_enqueue.borrow_mut() = Some(Box::pin(async move {
@@ -683,7 +775,7 @@ mod tests {
             proceed.await.unwrap();
         }));
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
-        let (result, ()) = tokio::join!(ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)), async {
+        let (result, ()) = tokio::join!(ctx.artifacts().publish_audio_group(ctx, files, &signal, Some(deadline)), async {
             at_boundary.await.unwrap();
             tokio::time::pause();
             tokio::time::advance(std::time::Duration::from_secs(61)).await;
@@ -692,10 +784,12 @@ mod tests {
         tokio::time::resume();
         assert!(matches!(result, Err(OpError::Refused { code: "retention_timeout", .. })));
         ctx.snapshots().flush();
-        assert!(!copy.exists());
+        assert!(copies.iter().all(|path| !path.exists()));
         assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
         assert!(ctx.artifacts().records.borrow().is_empty());
-        assert_eq!(std::fs::read(source).unwrap(), b"captured audio");
+        for (index, original) in originals.iter().enumerate() {
+            assert_eq!(std::fs::read(original).unwrap(), format!("audio {index}").as_bytes());
+        }
     }
 
     #[tokio::test]

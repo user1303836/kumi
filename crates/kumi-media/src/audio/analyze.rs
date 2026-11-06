@@ -198,6 +198,48 @@ pub async fn analyze_source(source: &mut AudioSource, name: &str, options: Analy
     }
     Ok(analysis)
 }
+
+/// The unchanged canonical meter for a caller-owned stream. This is explicitly a
+/// mix analysis: it does not retain mono PCM for sound analysis or transcription.
+/// Ordinary `analyze_source` keeps its existing focus selection and output.
+pub struct StreamingAnalysis {
+    meter: Meter,
+    frames: usize,
+}
+
+impl StreamingAnalysis {
+    pub fn new(rate: f64, channels: usize, expected_frames: usize) -> Result<Self, AudioError> {
+        if !(8000.0..=384000.0).contains(&rate) || channels == 0 {
+            return Err(AudioError("That sample rate or channel count isn't one Kumi can analyze.".into()));
+        }
+        Ok(Self { meter: Meter::new(rate, channels, expected_frames), frames: 0 })
+    }
+
+    /// Each block has the declared number of equally long channel vectors. These
+    /// are the decoder's exact f32 samples, with no gain or channel conversion.
+    pub fn push(&mut self, block: &[Vec<f32>]) {
+        self.meter.push(block, None, self.frames);
+        self.frames += block[0].len();
+    }
+
+    /// Actual unweighted sample-square sum, already accumulated by the canonical
+    /// meter. Zero energy is distinct from absent gated integrated loudness.
+    pub fn energy(&self) -> f64 {
+        self.meter.sum_squares
+    }
+
+    /// Duration and span refer to the original source, not a replay-at-zero WAV.
+    /// If its duration is unknown, `seconds` is the known decoded extent; the
+    /// caller's structured provenance must disclose that it is not a whole song.
+    pub fn finish(mut self, name: &str, format: &str, source_seconds: f64, start: f64) -> Analysis {
+        let mut analysis = self.meter.finish(self.frames);
+        analysis.file = name.rsplit(['\\', '/']).next().unwrap_or(name).into();
+        analysis.format = format.into();
+        analysis.seconds = round(source_seconds, 2);
+        analysis.analyzed = Analyzed { from: clock(start), to: clock(start + self.frames as f64 / self.meter.rate), focus: "mix".into() };
+        analysis
+    }
+}
 const FRAME: usize = 4096;
 const COLUMNS: usize = 24;
 struct Meter {
