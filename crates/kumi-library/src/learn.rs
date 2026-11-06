@@ -611,8 +611,20 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     }
     let (mut sounds, mut presets, mut sets) = tokio::join!(
         logs.sounds.load(),
-        async { if kinds.presets { logs.presets.load().await } else { Entries::default() } },
-        async { if kinds.sets { logs.sets.load().await } else { Entries::default() } }
+        async {
+            if kinds.presets {
+                logs.presets.load().await
+            } else {
+                Entries::default()
+            }
+        },
+        async {
+            if kinds.sets {
+                logs.sets.load().await
+            } else {
+                Entries::default()
+            }
+        }
     );
     let progress = Progress {
         value: RefCell::new(LearnProgress {
