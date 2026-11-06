@@ -114,6 +114,12 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         let catch_up = if scope == "focus" { connection.catch_up() } else { connection.take_catch_up() };
         let (focus, transport) = (connection.focus(), connection.transport());
         let most = call.args.get("max_chars").and_then(Value::as_u64).unwrap_or(MAX_CHARS.0) as usize;
+        // The context as JSON, read once: what the look says, and the names it gives the refs a plan's steps take.
+        let fields = match serde_json::from_str::<Value>(&observation.context) {
+            Ok(Value::Object(fields)) => Some(fields),
+            _ => None,
+        };
+        let names = fields.as_ref().map(connection::look_names).unwrap_or_default();
         let text = match scope {
             "focus" => focus_text(&project, focus.as_ref(), transport.as_ref()),
             "catch_up" if catch_up.is_empty() => format!("Nothing has changed in {} since the last look.", project.name),
@@ -122,18 +128,17 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                 .flat_map(|seen| seen.lines.iter().cloned().chain((seen.more > 0).then(|| format!("…and {} more", seen.more))))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            _ => {
-                let tools = ctx.link().tools();
-                super::turn::whole_turn(
-                    &observation.context,
-                    &super::read::turn_steps(ctx, &tools),
-                    &super::read::reader_names(&tools),
-                    most,
-                )
-            }
+            _ => match fields {
+                Some(fields) => {
+                    let tools = ctx.link().tools();
+                    super::turn::whole_turn(fields, &super::read::turn_steps(ctx, &tools), &super::read::reader_names(&tools), most)
+                }
+                // A context that isn't a JSON object is said as it is.
+                None => observation.context.clone(),
+            },
         };
         let refs = connection::refs(&connection, call.signal.clone()).await;
-        ctx.link().keep_refs(&refs);
+        ctx.link().keep_refs(&refs, names);
         connection::publish_focus(&ctx.handle());
         publish_status(ctx, false).await;
         Ok(json!({

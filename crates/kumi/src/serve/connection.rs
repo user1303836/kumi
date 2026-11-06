@@ -13,7 +13,7 @@ use kumi_agent::core::contracts::{CatchUp, ConnectionState, Integration, Observa
 use kumi_agent::core::view::{DawFocus, Transport};
 use kumi_daw::component::same_folder;
 use kumi_daw::provider::DawSession;
-use kumi_types::contracts::{KernelTool, ToolRole};
+use kumi_types::contracts::{JsonObject, KernelTool, ToolRole};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
@@ -26,6 +26,32 @@ use std::time::Duration;
 const MOST_REFS: usize = 200;
 /// How long the integration gets to close when the runtime stops.
 const CLOSING: Duration = Duration::from_secs(5);
+
+/// Each `{ref, name}` a look's context shows, by its ref: a track by its name, and what's inside one (a device, a chain,
+/// a clip) as "<name> (on <track>)", as a look's `refs` say it. A name with its track wins over one without it (a
+/// selection shows a device alone).
+pub(super) fn look_names(context: &JsonObject) -> HashMap<String, String> {
+    fn walk(value: &Value, on: Option<&str>, names: &mut HashMap<String, (String, bool)>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| walk(item, on, names)),
+            Value::Object(fields) => {
+                let here = fields.get("ref").and_then(Value::as_str).zip(fields.get("name").and_then(Value::as_str));
+                if let Some((reference, name)) = here {
+                    if names.get(reference).is_none_or(|(_, placed)| on.is_some() && !placed) {
+                        let named = on.map_or_else(|| name.to_string(), |track| format!("{name} (on {track})"));
+                        names.insert(reference.to_string(), (named, on.is_some()));
+                    }
+                }
+                let inside = on.or(here.map(|(_, name)| name));
+                fields.values().for_each(|item| walk(item, inside, names));
+            }
+            _ => {}
+        }
+    }
+    let mut names = HashMap::new();
+    context.values().for_each(|value| walk(value, None, &mut names));
+    names.into_iter().map(|(reference, (named, _))| (reference, named)).collect()
+}
 
 /// The project as the runtime last saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,25 +212,24 @@ impl Link {
         self.tools.borrow().clone()
     }
 
-    /// The names the last look gave its refs (`refs`' label, with its detail).
+    /// The names the last look gave its refs, for saying what a plan's steps are on ([`Link::keep_refs`]).
     pub fn ref_names(&self) -> HashMap<String, String> {
         self.ref_names.borrow().clone()
     }
 
-    /// The refs a look gave (`observe`'s `refs`), kept for naming what a plan is on.
-    pub fn keep_refs(&self, refs: &[Value]) {
-        let names = refs
-            .iter()
-            .filter_map(|candidate| {
-                let reference = candidate["reference"]["node"]["ref"].as_str()?;
-                let label = candidate["label"].as_str()?;
-                let named = match candidate["detail"].as_str() {
-                    Some(detail) => format!("{label} ({detail})"),
-                    None => label.to_string(),
-                };
-                Some((reference.to_string(), named))
-            })
-            .collect();
+    /// The names a look gave its refs, kept for naming what a plan is on: `names`, what its context shows by the refs a
+    /// plan's steps take ([`look_names`]), then its `refs`' labels with their detail. A DAW whose `refs` are in another
+    /// form than its steps take (Live's long refs) is still named by what the look showed.
+    pub fn keep_refs(&self, refs: &[Value], mut names: HashMap<String, String>) {
+        names.extend(refs.iter().filter_map(|candidate| {
+            let reference = candidate["reference"]["node"]["ref"].as_str()?;
+            let label = candidate["label"].as_str()?;
+            let named = match candidate["detail"].as_str() {
+                Some(detail) => format!("{label} ({detail})"),
+                None => label.to_string(),
+            };
+            Some((reference.to_string(), named))
+        }));
         *self.ref_names.borrow_mut() = names;
     }
 
