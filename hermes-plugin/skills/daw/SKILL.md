@@ -167,7 +167,8 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   | Trap | 130–150 (felt at half) | 1, sparse syncopation (e.g. 11, 12) | 9 only (half-time backbeat) | 8ths or 16ths with rolls: ratchets `3`/`4` or a `/32` run before the snare |
   | Drum and bass | 170–176 | 1 and 11 (two-step) | 5 and 13 | 8ths; ghost snares between |
 
-  - Live writes them as lanes; REAPER as `notes_add` objects in quarter notes (step n starts at `(n-1)/4`; a roll is notes 0.125 or less apart); Renoise as `notes_write` lines (at 4 lines per beat, step n is line n-1; set 8 with `song_lpb` for rolls between).
+  - Live writes them as lanes; REAPER as `notes_add` objects in quarter notes (step n starts at `(n-1)/4`; a roll is notes 0.125 or less apart); Renoise as `notes_write` lines.
+  - Renoise: read the song's LPB first (the look's transport gives it): a 16th is LPB/4 lines, so at LPB 4 step n is line n-1. A roll goes inside a line: a note's `delay` (0–255, 128 is half a line), or an effect cell `{"col": 1, "number": "0R", "amount": …}` (retrigger, every y ticks for `0y`). Never change the LPB (`song_lpb`) for a roll: it's song-wide, so going from 4 to 8 doubles the speed of every pattern already written.
   - Swing: Live's `transform_midi`; REAPER's `notes_quantize` (`swing` 0–100); Renoise's `song_groove`.
 - **Chords:** Live writes `[C3 E3 G3]`, `{Cm7}` or `{IV}` (above). REAPER stacks a chord's notes at the same `start` with the same `length` in one `notes_add`. Renoise puts each chord tone in its own note column on the same line (`col` 1, 2, 3…), with an `OFF` in each column to end it.
   - Stay in the producer's key. Voice each chord close to the one before (an inversion rather than a jump), roughly within an octave around middle C, and leave the lowest note to the bass.
