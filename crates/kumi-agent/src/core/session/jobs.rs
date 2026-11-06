@@ -629,6 +629,9 @@ impl KernelTool for BackgroundTakesTool {
     fn reach(&self) -> Reach {
         Reach::DawWrite
     }
+    fn deferred(&self) -> bool {
+        true
+    }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
         let Some(inner) = self.session.upgrade() else { return Ok(ToolResult::error("Kumi is closing.")) };
         let session = Session(inner);

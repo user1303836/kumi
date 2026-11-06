@@ -468,6 +468,123 @@ local_test!(a_worker_gets_only_tools_away_from_the_daw_and_never_starts_a_job, {
     gate.notify_one();
 });
 
+local_test!(candidate_jobs_are_discovered_through_fallback_and_duplicate_requests_keep_the_original_board, {
+    #[derive(Default)]
+    struct Candidates {
+        source: RefCell<String>,
+        prepared: Cell<usize>,
+        ran: Cell<usize>,
+        started: Notify,
+        finish: Notify,
+    }
+    struct CandidateDaw {
+        plain: Plain,
+        state: Rc<Candidates>,
+        unavailable: bool,
+    }
+    struct Prepared {
+        state: Rc<Candidates>,
+        material: String,
+        board: String,
+    }
+    #[async_trait(?Send)]
+    impl BackgroundTakes for Prepared {
+        fn board_id(&self) -> &str {
+            &self.board
+        }
+        fn request_key(&self) -> &str {
+            &self.material
+        }
+        async fn run(&self, signal: Signal, progress: CandidateProgress) -> Result<ToolResult, RuntimeError> {
+            self.state.ran.set(self.state.ran.get() + 1);
+            progress("Planning the captured notes");
+            self.state.started.notify_one();
+            tokio::select! {
+                _ = self.state.finish.notified() => {},
+                _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+            }
+            Ok(ToolResult::text(format!("Candidate board {}: {}", self.board, self.material)))
+        }
+    }
+    #[async_trait(?Send)]
+    impl Integration for CandidateDaw {
+        async fn start(&self, signal: Signal) -> Result<(), RuntimeError> {
+            if self.unavailable {
+                return Err(kumi_types::errors::KumiError::new(kumi_types::errors::FailureKind::Daw, "fixture DAW closed").into());
+            }
+            self.plain.start(signal).await
+        }
+        async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+            self.plain.observe(signal, hints).await
+        }
+        async fn close(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+        fn background_takes_schema(&self) -> Option<JsonObject> {
+            Some(object(json!({"type":"object","properties":{"action":{"enum":["make"]}},"required":["action"]})))
+        }
+        async fn prepare_background_takes(&self, _: JsonObject, _: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+            let number = self.state.prepared.get() + 1;
+            self.state.prepared.set(number);
+            Ok(Rc::new(Prepared {
+                state: self.state.clone(),
+                material: self.state.source.borrow().clone(),
+                board: format!("00000000-0000-0000-0000-{number:012}"),
+            }))
+        }
+    }
+    for unavailable in [false, true] {
+        let state = Rc::new(Candidates::default());
+        *state.source.borrow_mut() = "captured C3 notes".into();
+        let fixture = state.clone();
+        let h = harness(Rc::new(|_| async { Ok(done()) }.boxed_local()), Rc::new(|_| panic!("candidate jobs have no worker")), |options| {
+            options.integration_factory = Box::new(move |listener| {
+                let primary = Rc::new(CandidateDaw {
+                    plain: Plain { world: Rc::new(World { observation_tools: vec![] }), listener: listener.clone() },
+                    state: fixture.clone(),
+                    unavailable,
+                });
+                kumi_agent::with_fallback(
+                    primary,
+                    Rc::new(move || Rc::new(Plain { world: Rc::new(World { observation_tools: vec![] }), listener: listener.clone() })),
+                    Rc::new(|_| {}),
+                )
+            });
+        });
+        h.session.start().await.unwrap();
+        h.session.submit("plan alternate notes", None).await.unwrap();
+        let offered = h.main_tools.borrow().clone();
+        if unavailable {
+            assert!(!offered.iter().any(|tool| tool.name() == "background_takes"));
+            assert_eq!((state.prepared.get(), state.ran.get()), (0, 0));
+            h.session.close().await.unwrap();
+            continue;
+        }
+        let candidate = tool(&offered, "background_takes");
+        assert!(candidate.deferred());
+        let shelf = kumi_agent::kernel::deferred::Shelf::new(offered.into_iter().filter(|tool| tool.deferred()).collect()).unwrap();
+        let found = tool(&shelf.tools(), "find_tools").execute(object(json!({"names":["background_takes"]})), Signal::new()).await.unwrap();
+        assert!(!found.is_error && found.text.contains("Live board apply is unavailable"), "{}", found.text);
+        let input = object(json!({"name":"background_takes","input":{"action":"make"}}));
+        let (tool, args) = shelf.resolve("call_tool", Some(&input)).unwrap().unwrap();
+        let first = tool.execute(args.clone(), Signal::new()).await.unwrap();
+        state.started.notified().await;
+        let duplicate = tool.execute(args, Signal::new()).await.unwrap();
+        let original = "00000000-0000-0000-0000-000000000001";
+        assert!(!first.is_error && !duplicate.is_error && first.text.contains(original) && duplicate.text.contains(original));
+        assert!(!duplicate.text.contains("00000000-0000-0000-0000-000000000002"));
+        assert_eq!((h.session.jobs().len(), state.prepared.get(), state.ran.get()), (1, 2, 1));
+        *state.source.borrow_mut() = "edited D3 notes".into();
+        state.finish.notify_one();
+        h.until("the captured candidate report", |h| h.last(1).is_some_and(|job| job.state.ended())).await;
+        assert_eq!(h.last(1).unwrap().state, JobState::Done);
+        assert_eq!(h.session.job(1).unwrap().report.as_deref(), Some(format!("Candidate board {original}: captured C3 notes").as_str()));
+        assert!(h.session.run_job_again(1).unwrap_err().contains("aren't replayed"));
+        assert!(h.worker_tools.borrow().is_empty());
+        h.session.close().await.unwrap();
+    }
+});
+
 local_test!(workers_can_call_the_builtin_vst3_catalog_for_every_daw, {
     for profile in [kumi_types::daw::DawProfile::ABLETON, kumi_types::daw::DawProfile::REAPER, kumi_types::daw::DawProfile::RENOISE] {
         let worker: Script = Rc::new(|turn: Turn| {

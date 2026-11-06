@@ -84,6 +84,12 @@ impl Integration for FallbackIntegration {
     fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {
         self.current().worker_tools()
     }
+    fn background_takes_schema(&self) -> Option<JsonObject> {
+        self.current().background_takes_schema()
+    }
+    async fn prepare_background_takes(&self, input: JsonObject, signal: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+        self.current().prepare_background_takes(input, signal).await
+    }
     fn has_undo(&self) -> bool {
         true
     }
