@@ -8,6 +8,7 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, Callable
@@ -363,11 +364,11 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         return
     base = {"profile": host.profile(), "session_id": session_id, "tool_call_id": tool_call_id}
     if tool == "kumi_sounds":
-        ids = [item["sound_id"] for item in data.get("items") or []
-               if isinstance(item, dict) and isinstance(item.get("sound_id"), str)][:SOUNDS_FOUND]
-        if not ids:
+        hits = [item for item in data.get("items") or []
+                if isinstance(item, dict) and isinstance(item.get("sound_id"), str)][:SOUNDS_FOUND]
+        if not hits:
             return
-        event, payload = "sounds.found", {**base, "map_revision": data.get("map_revision"), "sound_ids": ids}
+        event, payload = "sounds.found", found(base, data, hits)
     elif tool in ("kumi_generate", "kumi_job"):
         if tool == "kumi_job" and not generation_job:
             return
@@ -383,6 +384,23 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         broadcast(event, payload)
     except Exception:
         log.exception("Kumi couldn't tell Desktop about %s", tool)
+
+
+def found(base: dict, data: dict, hits: list[dict]) -> dict:
+    """CC-23's `sounds.found`: CC-9's ids for the map, and per hit `{sound_id, why, closeness?}` under `matches`, with
+    `indexed` and the `near` seed. Never a name or a path. Past 256 KiB the reasons go first; the ids always stay."""
+    payload = {**base, "map_revision": data.get("map_revision"), "sound_ids": [hit["sound_id"] for hit in hits]}
+    for key in ("indexed", "near"):
+        if key in data:
+            payload[key] = data[key]
+    for with_why in (True, False):
+        matches = [{"sound_id": hit["sound_id"],
+                    **({"why": hit["why"]} if with_why and isinstance(hit.get("why"), list) else {}),
+                    **({"closeness": hit["closeness"]} if isinstance(hit.get("closeness"), int) else {})}
+                   for hit in hits]
+        if len(json.dumps({**payload, "matches": matches}, ensure_ascii=False).encode("utf-8")) <= LISTEN_EVENT_BYTES:
+            return {**payload, "matches": matches}
+    return payload
 
 
 # What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
@@ -852,14 +870,26 @@ def interpreted(host: Host, result: dict) -> dict:
 
 
 def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
-    """The runtime's sound search, as the model may see it: sound ids and what the map says of each, never a file's
-    path (CC-4: a path is the media route's alone)."""
+    """The runtime's sound search, as the model may see it: sound ids, what the map says of each and why each matched
+    (CC-23), never a file's path (CC-4: a path is the media route's alone)."""
     result = host.live().call("sounds", args, host.identity(kwargs), timeout=READ_TIMEOUT)
     items = result.get("items")
     if isinstance(items, list):
-        result["items"] = [{key: value for key, value in item.items() if key != "path"} if isinstance(item, dict)
-                           else item for item in items]
+        result["items"] = [_sound(item) if isinstance(item, dict) else item for item in items]
     return result
+
+
+# A reason that names a file or folder: an absolute or home path, a backslash, a drive, or two slashes in a word. Serve
+# keeps paths out of its reasons (CC-23's 23b and 23-r1); this is the plugin's second guard.
+_PATHLIKE = re.compile(r"(?:^|\s)~?/|\\|\b[A-Za-z]:/|\S/\S*/")
+
+
+def _sound(item: dict) -> dict:
+    sound = {key: value for key, value in item.items() if key != "path"}
+    if "why" in sound:
+        why = sound["why"] if isinstance(sound["why"], list) else []
+        sound["why"] = [reason for reason in why if isinstance(reason, str) and not _PATHLIKE.search(reason)]
+    return sound
 
 
 LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")

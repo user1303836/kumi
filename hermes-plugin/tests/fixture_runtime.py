@@ -501,9 +501,22 @@ def library(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
+    """CC-23's search: the index's values and why each hit matched (the query's words, never a name's other text), and
+    on a near search the seed apart and each hit's closeness. One reason here names a path, as a runtime must never:
+    the plugin's second guard drops it."""
     words = str(args.get("query") or "").lower().split()
-    found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)]
-    return {"map_revision": "r1", "items": found[:int(args.get("limit") or 20)]}
+    found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)
+             and float(args.get("min_seconds") or 0) <= sound["duration"] <= float(args.get("max_seconds") or 1e9)
+             and sound["sound_id"] != args.get("near")]
+    hits = []
+    for sound in found[:int(args.get("limit") or 20)]:
+        why = [f"name matches '{word}'" for word in words][:3]
+        if sound["sound_id"] == "s-r1-1":
+            why.append("found in /Samples/Drums")
+        hits.append({**sound, "bpm": None, "key": None, "note": "D2", "why": why,
+                     **({"closeness": 87} if args.get("near") else {})})
+    return {"map_revision": "r1", "indexed": True, **({"near": args["near"]} if args.get("near") else {}),
+            "items": hits}
 
 
 def listen(fixture: Fixture, args: dict, host: dict) -> dict:
