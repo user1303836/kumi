@@ -331,3 +331,42 @@ KUMI_VARIATIONS = _tool(
      "expected_project_key": {"type": "string"},
      "expected_epoch": {"type": "string"}},
     ("action",))
+
+
+# CC-22: a Max for Live audio effect from GenExpr (22b's spec: the standalone's types, without group, show, from,
+# objects, map or tests). The code's cap is CC-19's.
+_DEVICE_CONTROL = {
+    "type": "object",
+    "description": ("A knob, menu or switch on the device, a Live parameter the code reads as a Param of the same name. "
+                    "number and integer: min, max, default and an optional unit; choice: options and a default option; "
+                    "switch: a default of true or false."),
+    "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 32},
+                   "type": {"type": "string", "enum": ["number", "integer", "choice", "switch"]},
+                   "min": {"type": "number"}, "max": {"type": "number"},
+                   "default": {"type": ["number", "string", "boolean"]},
+                   "unit": {"type": "string", "enum": ["ms", "s", "Hz", "dB", "%", "st", "note", "pan", "beats", "bpm",
+                                                       "x"]},
+                   "options": {"type": "array", "items": {"type": "string"}, "maxItems": 128}},
+    "required": ["name", "type"],
+    "additionalProperties": False,
+}
+
+KUMI_DEVICE = _tool(
+    "kumi_device",
+    "Build a Max for Live audio effect in Live from GenExpr, for processing no stock device does (skill kumi:daw, "
+    "Devices). Prefer kumi_change's typed steps and Live's own devices whenever one fits. Kumi writes it as a new file "
+    "in the producer's User Library (Kumi folder), after a fixed output stage of its own, which holds what the device "
+    "adds under −0.3 dBFS and adds Mix and Output controls. The producer approves it first, reading its purpose, "
+    "controls and code; in a chat that has read outside content, none is built while Hermes's approvals are off. The "
+    "code is GenExpr for one gen~ (in1/in2 to out1/out2), at most 400 lines and 32 KB: no while or do, a for only "
+    "with literal bounds (at most 64, nested 2 deep), Delay and Data sizes literal, no Buffer. A spec Kumi refuses "
+    "comes back with its findings: fix them and ask again. Returns the built device's item, file and artifact_id; "
+    "loading and placing it is a kumi_change of its own (load_device, then move_device).",
+    {"spec": {"type": "object", "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 32, "description": "The device's name in Live."},
+        "about": {"type": "string", "minLength": 1, "maxLength": 400,
+                  "description": "What it does, in a sentence or two the producer reads in the approval."},
+        "controls": {"type": "array", "maxItems": 16, "items": _DEVICE_CONTROL},
+        "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS, "description": "GenExpr."}},
+        "required": ["name", "about", "controls", "code"], "additionalProperties": False}},
+    ("spec",))
