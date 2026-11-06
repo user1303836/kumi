@@ -4,6 +4,9 @@
 
 use kumi_daw::plugin::PluginStep;
 
+/// Why a device's move is left to Live's own Undo, said after CC-20's words of such a change.
+const MOVE_BECAUSE: &str = "Kumi can't yet put a moved device back itself.";
+
 /// The steps a plugin's plan may use in Live, each with its HISTORY family as changes.json gives it.
 pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_tempo", "tempo"),
@@ -53,8 +56,10 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("change_structure", "structure").refusing(&[("action", &["delete-return"])]),
     PluginStep::new("set_scene", "structure"),
     PluginStep::new("switch_device", "device"),
-    PluginStep::new("move_device", "device"),
-    PluginStep::new("move_device_to", "device"),
+    // Kumi's own undo of a device move can come back unsure and leave the device where it went (#1139), so a move is a
+    // change only Live's own Undo takes back: one step of the plan's own, which Cmd+Z takes back whole.
+    PluginStep::new("move_device", "device").daw_undo_always().daw_undo_because(MOVE_BECAUSE),
+    PluginStep::new("move_device_to", "device").daw_undo_always().daw_undo_because(MOVE_BECAUSE),
     PluginStep::new("set_chain", "device"),
     PluginStep::new("set_song", "tempo"),
     PluginStep::new("set_scale", "tempo"),
@@ -227,11 +232,20 @@ mod tests {
                 }
             }
         }
-        // A rack's new chain is the only such change. The refusal its mark waives is that one, which Live's own Undo
-        // takes back: the mark waives nothing else.
+        // A rack's new chain and a device's move are the only such changes. The refusal the chain's mark waives is that
+        // one, which Live's own Undo takes back: the mark waives nothing else; a move is refused by nothing to waive.
         let marked: Vec<_> =
             PLUGIN_STEPS.iter().filter(|step| step.daw_undo != DawUndo::Never).map(|step| (step.tool, step.daw_undo)).collect();
-        assert_eq!(marked, [("edit_rack", DawUndo::When(&[("action", "add-chain")]))]);
+        assert_eq!(
+            marked,
+            [
+                ("edit_rack", DawUndo::When(&[("action", "add-chain")])),
+                ("move_device", DawUndo::Always),
+                ("move_device_to", DawUndo::Always)
+            ]
+        );
+        let move_input = json!({"deviceRef": "d1", "index": 0});
+        assert!(live.plugin_refuses("move_device", &move_input).is_none(), "nothing waived");
         let chain = json!({"rackRef": "d1", "action": "add-chain"});
         assert!(live.plugin_refuses("edit_rack", &chain).is_some_and(|why| why.contains("take a chain away")), "the waived reason");
         assert!(check(PLUGIN_STEPS, "edit_rack", &chain).is_ok_and(|allowed| allowed.daw_undo_only(&chain)));
