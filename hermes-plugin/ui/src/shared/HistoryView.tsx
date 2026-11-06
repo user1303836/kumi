@@ -179,6 +179,9 @@ export function HistoryView({
                   restartedSince(item, live) && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.restartedSince', dawName(daw, t))}</span>
                 )
               )}
+              {item.copy?.file ? (
+                <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.copyKept', clean(item.copy.file.split(/[/\\]/).pop() ?? '', 120))}</span>
+              ) : null}
               {dawUndo && <DawUndo daw={daw} how={dawUndo} keys={undoKeys(target)} />}
               {detail?.(item)}
             </span>

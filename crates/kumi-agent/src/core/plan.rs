@@ -280,6 +280,8 @@ struct State {
     quieted: Option<String>,
     parameters_on: IndexMap<String, Value>,
     copy: Option<String>,
+    /// Why the copy was kept: `deletes` (a step that can lose material) or `third_step` (a plan's third step).
+    copy_why: Option<&'static str>,
     copy_checked: bool,
     playing: bool,
     recording: Option<String>,
@@ -597,9 +599,11 @@ impl<H: PlanHost> Plan<H> {
             let tool = js_string(item.get("tool"));
             // Before a step that can lose the producer's material: a delete, a cleared range, or a move,
             // which replaces what's in its new place.
-            if !state.copy_checked && ((index >= 2 && self.host.copies_long_plans()) || self.host.may_lose_material(&tool)) {
+            let loses = self.host.may_lose_material(&tool);
+            if !state.copy_checked && ((index >= 2 && self.host.copies_long_plans()) || loses) {
                 state.copy_checked = true;
                 state.copy = self.host.safety_copy(self.signal.clone()).await?;
+                state.copy_why = Some(if loses { "deletes" } else { "third_step" });
             }
             self.open_undo_step(state).await;
             if let Some(batch) = batch.filter(|_| run > 1) {
@@ -826,6 +830,7 @@ impl<H: PlanHost> Plan<H> {
         }
         if let Some(copy) = state.copy.as_ref().filter(|s| !s.is_empty()) {
             reply.insert("copy".into(), json!(copy));
+            reply.insert("copyWhy".into(), json!(state.copy_why));
             reply.insert("copyNote".into(),json!(format!("Before this, Kumi kept a copy of the {} as last saved, next to it. Tell the producer in a few words, with the file's name.", profile.words.place)));
         }
         let text = stringify(&json!(reply));

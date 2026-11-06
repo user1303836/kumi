@@ -53,6 +53,28 @@ pub(super) fn look_names(context: &JsonObject) -> HashMap<String, String> {
     names.into_iter().map(|(reference, (named, _))| (reference, named)).collect()
 }
 
+/// Each track's fader as a look's context shows it, by its ref: Live's track rows carry `volume`, a display string such
+/// as "-6.0 dB", while the Set has few enough tracks for the mixer fields. What a fader change's approval says it
+/// changes from, never read from the DAW for the preview.
+pub(super) fn look_volumes(context: &JsonObject) -> HashMap<String, String> {
+    fn walk(value: &Value, volumes: &mut HashMap<String, String>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| walk(item, volumes)),
+            Value::Object(fields) => {
+                let here = fields.get("ref").and_then(Value::as_str).zip(fields.get("volume").and_then(Value::as_str));
+                if let Some((reference, volume)) = here {
+                    volumes.entry(reference.to_string()).or_insert_with(|| volume.to_string());
+                }
+                fields.values().for_each(|item| walk(item, volumes));
+            }
+            _ => {}
+        }
+    }
+    let mut volumes = HashMap::new();
+    context.values().for_each(|value| walk(value, &mut volumes));
+    volumes
+}
+
 /// The project as the runtime last saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
@@ -94,8 +116,10 @@ impl Connection {
         self.reported.connected.get()
     }
 
+    /// The focus as the model is shown it ([`Integration::model_focus`]): its refs in the form the look and a plan's
+    /// steps take, so FOCUS and the look number a track alike (Main is `track:7` in both).
     pub fn focus(&self) -> Option<DawFocus> {
-        self.reported.focus.borrow().clone()
+        self.reported.focus.borrow().as_ref().map(|focus| self.integration.model_focus(focus))
     }
 
     pub fn transport(&self) -> Option<Transport> {
@@ -145,6 +169,8 @@ pub struct Link {
     tools: RefCell<Vec<Rc<dyn KernelTool>>>,
     /// The names the last look gave its refs, for saying what a plan's steps are on.
     ref_names: RefCell<HashMap<String, String>>,
+    /// Each track's fader as the last look showed it ([`look_volumes`]), for saying what a fader change changes from.
+    ref_volumes: RefCell<HashMap<String, String>>,
     /// A write whose outcome is unsure, until the next look (CC-2's R6): `{at, op, reason, cleanup}`.
     unsure: RefCell<Option<Value>>,
     /// The DAW's own epoch the last look read, taken with that look: an own bridge's page of another epoch (a tab
@@ -179,6 +205,7 @@ impl Link {
             epoch: Cell::new(base),
             tools: RefCell::new(Vec::new()),
             ref_names: RefCell::new(HashMap::new()),
+            ref_volumes: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
             native_epoch: RefCell::new(None),
             pinned: RefCell::new(std::collections::VecDeque::new()),
@@ -224,6 +251,16 @@ impl Link {
     /// The names the last look gave its refs, for saying what a plan's steps are on ([`Link::keep_refs`]).
     pub fn ref_names(&self) -> HashMap<String, String> {
         self.ref_names.borrow().clone()
+    }
+
+    /// Each track's fader as the last look showed it, by its ref ([`look_volumes`]).
+    pub fn ref_volumes(&self) -> HashMap<String, String> {
+        self.ref_volumes.borrow().clone()
+    }
+
+    /// Keeps each track's fader as a look showed it, replacing the last look's.
+    pub fn keep_volumes(&self, volumes: HashMap<String, String>) {
+        *self.ref_volumes.borrow_mut() = volumes;
     }
 
     /// The names a look gave its refs, kept for naming what a plan is on: `names`, what its context shows by the refs a
@@ -316,12 +353,14 @@ impl Link {
         self.epoch.get()
     }
 
-    /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
+    /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold, and neither do the faders
+    /// the last look showed, which a fader change's preview would otherwise say it changes from.
     pub fn advance(&self) {
         self.epoch.set(self.epoch.get() + 1);
         if let Some(project) = self.project.borrow_mut().as_mut() {
             project.epoch = self.epoch.get();
         }
+        self.ref_volumes.borrow_mut().clear();
     }
 
     /// The write's plan was made on `key` at `epoch`: refused unless that's the project and epoch now, the DAW answers,
@@ -560,7 +599,7 @@ pub fn publish_focus(ctx: &Weak<Ctx>) {
 
 /// The focus as `focus.json` and `observe` give it (CC-7): Kumi's `DawFocus`, its own fields only, with any name that
 /// is a whole path (a take or sample named by its file) cut to the file's name, so no folder of the producer's leaves
-/// the runtime. Refs (`…Ref`) are the DAW's own and stay as they are.
+/// the runtime. Refs (`…Ref`) are as [`Connection::focus`] gives them: the form a plan's steps take.
 pub fn focus_value(focus: &DawFocus) -> Value {
     let mut value = serde_json::to_value(focus).unwrap_or(Value::Null);
     names_only(&mut value);
@@ -747,7 +786,7 @@ mod tests {
         assert_eq!(
             (value["trackRef"].clone(), value["item"]["itemRef"].clone()),
             (json!("track:3"), json!("item:7/take:1")),
-            "refs are the DAW's"
+            "refs are as the integration gives them (this one, as the DAW's)"
         );
         let text = value.to_string();
         assert!(!text.contains("/Users/") && !text.contains("\\Users\\"), "{text}");

@@ -168,6 +168,31 @@ class Approvals(unittest.TestCase):
         self.assertNotIn("\x1b", decision["message"])
         self.assertEqual(lines[1:], ['• Set track volume: volume_db 6 — on "Drums"', policy.FOOTER, policy.CHAT_ONLY])
 
+    def test_a_plan_that_kept_a_copy_of_the_set_says_so_by_the_files_name_and_its_history_rows_carry_it(self):
+        """kumi-adv's 1.24.72 fix: a Live plan reaching its third step keeps a copy of the Set beside it, as standalone
+        Kumi does; the change's result now tells the model, by the file's name, and its HISTORY rows carry the copy."""
+        three = change(volume("t1", -4), volume("t2", -6), volume("t1", -5))
+        kept = support.call(self.host, "kumi_change", three, session_id="s1")
+        self.assertEqual(kept["copy_note"], "Before this, Kumi kept a copy of the producer's Set as last saved, next to "
+                                            "it: Night Drive.backup-2026-11-06.als (before the plan's third step). Tell "
+                                            "the producer in a few words, with the file's name.")
+        rows = {row["id"]: row for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual({rows[ident]["copy"]["file"] for ident in kept["history_ids"]},
+                         {"Night Drive.backup-2026-11-06.als"})
+        self.assertNotIn("copy_note", support.call(self.host, "kumi_change", change(), session_id="s1"),
+                         "a short plan keeps no copy and says nothing of one")
+        # A path never shows, even if serve ever sent one (rgzm): only the file's name, in the note and in a row.
+        for path in ("/Users/someone/Music/Night Drive.backup.als", "C:\\Users\\someone\\Night Drive.backup.als"):
+            with self.subTest(path=path):
+                self.assertIn("next to it: Night Drive.backup.als (before a step",
+                              tools.copy_note({"file": path, "why": "deletes"}, "ableton"))
+                self.assertEqual(tools._row_copy({"file": path, "why": "deletes"}),
+                                 {"file": "Night Drive.backup.als", "why": "deletes"})
+        # Renoise keeps a copy of the song before a sample load (research-1): the note says the producer's song.
+        song = "Night Drive (Kumi copy 2026-11-06).xrns"
+        self.assertIn(f"a copy of the producer's song as last saved, next to it: {song}",
+                      tools.copy_note({"file": song, "why": "deletes"}, "renoise"))
+
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
         # Twenty steps of one kind fit the terminal's panel grouped: the step name and setting once, every value and

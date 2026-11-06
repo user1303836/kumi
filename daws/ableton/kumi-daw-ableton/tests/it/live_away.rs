@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use kumi_agent::core::contracts::{Integration, PlayFrom};
+use kumi_agent::core::contracts::{DawFocus, Integration, PlayFrom};
 use kumi_agent::mcp::{
     client::{McpEndpoint, StderrStatus},
     types::{CallToolResult, Implementation, ListToolsResult},
@@ -183,12 +183,25 @@ fn kumi_stops_live_only_while_it_plays_and_launches_a_session_clip_by_its_slot()
             PlayFrom::Beat(8.0),
             PlayFrom::Slot { slot: Some(1), line: None },
             PlayFrom::Clip("1:arrangement_clip:2:0".into()),
+            PlayFrom::Clip("1:track:2".into()),
         ] {
             assert!(integration.plays_from(&refused).is_err(), "{refused:?}");
         }
-        for allowed in [PlayFrom::Here, PlayFrom::Scene(0), PlayFrom::Clip("1:clip:2:0".into())] {
+        assert!(integration.plays_from(&PlayFrom::Clip("1:arrangement_clip:2:0".into())).unwrap_err().contains("Arrangement clip"));
+        assert!(integration.plays_from(&PlayFrom::Clip("1:track:2".into())).unwrap_err().contains("clip_slot:N"), "says what it takes");
+        for allowed in [PlayFrom::Here, PlayFrom::Scene(0), PlayFrom::Clip("1:clip:2:0".into()), PlayFrom::Clip("1:clip_slot:2:0".into())] {
             assert!(integration.plays_from(&allowed).is_ok(), "{allowed:?}");
         }
+        // FOCUS as the model is shown it: the look's short refs (one number for a track everywhere), and its highlighted
+        // slot launchable as given, though no read listed it: Live's preview still refuses an empty slot.
+        let focus: DawFocus = serde_json::from_value(json!({"trackRef": "1:track:3", "slotRef": "1:clip_slot:3:1"})).unwrap();
+        let shown = integration.model_focus(&focus);
+        let track = integration.connection.references.borrow_mut().short_ref("1:track:3");
+        assert_eq!(shown.track_ref.as_deref(), Some(track.as_str()), "the look's name for the track");
+        let slot = shown.slot_ref.clone().unwrap();
+        assert!(slot.starts_with("clip_slot:"), "{slot}");
+        assert!(integration.play(&PlayFrom::Clip(slot), signal()).await.unwrap().playing);
+        assert_eq!(asked(&playing, "live_clip_launch_preview").last().unwrap()["slotRef"], "1:clip_slot:3:1");
         // A scene fires only while no track is armed: with Live's Start Recording on Scene Launch, it would record into an
         // armed track's empty slots.
         let armed = Rc::new(Bridge { armed: true, ..Bridge::new("1.0.92", json!({"playing":true})) });

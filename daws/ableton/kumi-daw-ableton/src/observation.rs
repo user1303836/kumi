@@ -369,6 +369,14 @@ impl Observer {
             let track_args = context::discovery_args(&object(
                 json!({"kind":"track","fields":fields,"limit":connection.page_limit(),"budget":connection.whole_budget()}),
             ))?;
+            // The returns and Main, after the tracks, in Kumi for Hermes's look (`every_track`): Main is named there (an
+            // approval's "on Main", FOCUS's Main) and its devices show. Kumi's own look reads as it always has. A read
+            // either can't make shows none of that kind; the look goes on.
+            let every_track = hints.as_ref().is_some_and(|hints| hints.every_track);
+            let others: Vec<&str> = ["name", "kind", "mediaKind"].into_iter().chain(fields.iter().copied().filter(|field| *field == "mixer")).collect();
+            let return_args =
+                context::discovery_args(&object(json!({"kind":"return-track","fields":others,"limit":connection.page_limit()})))?;
+            let main_args = context::discovery_args(&object(json!({"kind":"main-track","fields":others,"limit":1})))?;
 
             let device_args = context::discovery_args(&object(
                 json!({"kind":"device","fields":DEVICE_FIELDS,"limit":connection.page_limit(),"budget":connection.whole_budget()}),
@@ -434,8 +442,8 @@ impl Observer {
                 }
             };
 
-            // All six reads start before a result is interpreted. Failures remain in their own result slots.
-            let (song_read, status_read, set_read, tracks_read, devices_read, selection_read) = futures::join!(
+            // All the reads start before a result is interpreted. Failures remain in their own result slots.
+            let (song_read, status_read, set_read, tracks_read, devices_read, selection_read, returns_read, main_read) = futures::join!(
                 async {
                     match song_ready {
                         Some(value) => value,
@@ -452,7 +460,9 @@ impl Observer {
                         Some(read(device_args.clone()).await)
                     }
                 },
-                read(selection_args)
+                read(selection_args),
+                async { if every_track { Some(read(return_args.clone()).await) } else { None } },
+                async { if every_track { Some(read(main_args.clone()).await) } else { None } }
             );
 
             connection.assert_lease(lease, &signal)?;
@@ -542,6 +552,15 @@ impl Observer {
                 connection.register_rows("track", &rows, &track_args, cursor(&page))?;
 
                 let mut shown = rows.iter().map(|row| track_row(connection, row)).collect::<Result<Vec<_>, _>>()?;
+                let mut every = rows.clone();
+                for (kind, read, args) in [("return-track", &returns_read, &return_args), ("main-track", &main_read, &main_args)] {
+                    let Some(others) = read.as_ref().and_then(|read| other_tracks(read, kind, epoch)) else { continue };
+                    connection.register_rows(kind, &others, args, None)?;
+                    for row in &others {
+                        shown.push(track_row(connection, row)?);
+                    }
+                    every.extend(others);
+                }
 
                 self.last_track_count.set(rows.len() + if cursor(&page).is_some() { MIXER_TRACKS } else { 0 });
                 more_tracks = cursor(&page).is_some() || page.get("truncated") == Some(&Value::Bool(true));
@@ -553,7 +572,7 @@ impl Observer {
                         *read = Some(devices.clone());
                     }
 
-                    add_devices(connection, &rows, &mut shown, &devices)?;
+                    add_devices(connection, &every, &mut shown, &devices)?;
                     more_devices = more;
                     Ok(())
                 })();
@@ -1206,11 +1225,17 @@ fn js_string(value: Option<&Value>) -> String {
         Some(v) => stringify(v),
     }
 }
+/// The returns' or Main's rows a look read (`kind` "return-track" or "main-track"), or None when it read none: a bridge
+/// without the kind, or a read that failed, shows none of them.
+fn other_tracks(read: &Result<CallToolResult, ReadError>, kind: &str, epoch: f64) -> Option<Vec<JsonObject>> {
+    let read = read.as_ref().ok().filter(|read| read.is_error != Some(true))?;
+    objects(&context::discovery_payload(read, kind, epoch).ok()?).ok()
+}
 fn track_row(connection: &LiveConnection, row: &JsonObject) -> Result<JsonObject, ObservationError> {
     let empty = json!({});
     let mixer = context::object(row.get("mixer").filter(|v| !v.is_null()).unwrap_or(&empty))?;
     let mut shown = object(
-        json!({"ref":row.get("ref").and_then(Value::as_str).map(|r|connection.references.borrow_mut().short_ref(r)),"name":row.get("name").and_then(Value::as_str).map(|s|head(s,120)),"type":if row.get("kind").and_then(Value::as_str)==Some("group"){json!("group")}else{row.get("mediaKind").filter(|v|!v.is_null()).or_else(||row.get("kind")).cloned().unwrap_or(Value::Null)}}),
+        json!({"ref":row.get("ref").and_then(Value::as_str).map(|r|connection.references.borrow_mut().short_ref(r)),"name":row.get("name").and_then(Value::as_str).map(|s|head(s,120)),"type":match row.get("kind").and_then(Value::as_str){Some(kind @ ("group" | "return" | "main"))=>json!(kind),_=>row.get("mediaKind").filter(|v|!v.is_null()).or_else(||row.get("kind")).cloned().unwrap_or(Value::Null)}}),
     );
     if let Some(group) = row.get("groupTrackRef").and_then(Value::as_str) {
         shown.insert("group".into(), json!(connection.references.borrow_mut().short_ref(group)));

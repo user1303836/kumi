@@ -383,7 +383,8 @@ KUMI_VARIATIONS = _tool(
 # objects, map or tests). The code's cap is CC-19's.
 _DEVICE_CONTROL = {
     "type": "object",
-    "description": ("A knob, menu or switch on the device, a Live parameter the code reads as a Param of the same name. "
+    "description": ("A knob, menu or switch on the device, a Live parameter the code reads as a Param named like it, "
+                    "lowercase with words joined by underscores (\"Decay Time\" is decay_time): Kumi declares it. "
                     "number and integer: min, max, default and an optional unit; choice: options and a default option; "
                     "switch: a default of true or false."),
     "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 32},

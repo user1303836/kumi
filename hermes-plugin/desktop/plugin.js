@@ -88,7 +88,8 @@ var en = {
     dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
     byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
     byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
-    scriptUndo: (daw) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
+    scriptUndo: (daw) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`,
+    copyKept: (file) => `Before this, Kumi kept a copy of the project as last saved, next to it: ${file}`
   },
   job: {
     scanning: "Scanning",
@@ -421,7 +422,8 @@ var ja = {
     dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
     byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
     byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
-    scriptUndo: (daw) => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
+    scriptUndo: (daw) => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`,
+    copyKept: (file) => `この前に、Kumi は最後に保存されたプロジェクトのコピーを隣に残しました: ${file}`
   },
   job: {
     scanning: "スキャン中",
@@ -753,7 +755,8 @@ var zh = {
     dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
     byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
     byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
-    scriptUndo: (daw) => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
+    scriptUndo: (daw) => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`,
+    copyKept: (file) => `在此之前，Kumi 在它旁边保留了一份最后保存的项目副本：${file}`
   },
   job: {
     scanning: "正在扫描",
@@ -2616,6 +2619,7 @@ function HistoryView({
           // never undoes one, CC-19), or why a restart's can't.
           item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : item.family === "script" ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.scriptUndo", dawName(daw, t)) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
         ),
+        item.copy?.file ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.copyKept", clean(item.copy.file.split(/[/\\]/).pop() ?? "", 120)) }) : null,
         dawUndo && /* @__PURE__ */ jsx3(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
         detail?.(item)
       ] }),

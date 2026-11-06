@@ -802,9 +802,21 @@ fn same_param(a: &Value, b: &Value) -> bool {
     near(a["normalized"].as_f64().unwrap_or(f64::NAN), b["normalized"].as_f64().unwrap_or(f64::NAN))
 }
 
-/// The first number in what a plug-in prints for a value: `-3.0 dB`, `250 Hz`, `100 %`.
+/// The first number in what a plug-in prints for a value: `-3.0 dB`, `250 Hz`, `100 %`. A printed infinity is one: ReaComp
+/// prints its Threshold's bottom as `-inf` and its Ratio's top as `inf :1` (whose "1" isn't the ratio), so the range a
+/// value is looked for in runs to it. Only the word: `inf`, `infinite` or `infinity` (or `∞`) not run into more letters,
+/// so "Inflate 50 %" reads 50.
 pub(super) fn reading(text: &str) -> Option<f64> {
     let text = text.replace('\u{2212}', "-");
+    let lead = text.trim_start();
+    let (sign, rest) = match lead.strip_prefix('-') {
+        Some(rest) => (-1.0, rest),
+        None => (1.0, lead.strip_prefix('+').unwrap_or(lead)),
+    };
+    let word: String = rest.chars().take_while(char::is_ascii_alphabetic).collect::<String>().to_ascii_lowercase();
+    if matches!(word.as_str(), "inf" | "infinite" | "infinity") || rest.starts_with('\u{221E}') {
+        return Some(sign * f64::INFINITY);
+    }
     let chars: Vec<char> = text.chars().collect();
     let start = (0..chars.len()).find(|&i| {
         chars[i].is_ascii_digit()
@@ -1104,7 +1116,32 @@ mod tests {
         assert_eq!(reading("+12.00 st"), Some(12.0));
         assert_eq!(reading("Mid"), None);
         assert_eq!(reading("1.5 s"), Some(1.5));
+        assert_eq!(reading("-inf"), Some(f64::NEG_INFINITY), "ReaComp's Threshold at its bottom");
+        assert_eq!(reading("inf :1"), Some(f64::INFINITY), "ReaComp's Ratio at its top, not its \":1\"");
+        assert_eq!(reading("1.000 :1"), Some(1.0));
+        assert_eq!(reading("Infinite hold"), Some(f64::INFINITY));
+        assert_eq!(reading("Infinity"), Some(f64::INFINITY));
+        assert_eq!(reading("\u{221E}"), Some(f64::INFINITY));
+        assert_eq!(reading("Inflate 50 %"), Some(50.0), "a word that only starts with inf isn't infinity");
+        assert_eq!(reading("Info 3"), Some(3.0));
+        assert_eq!(reading("Infrared"), None);
         assert_eq!((decimals("-3.25 dB"), decimals("250 Hz"), decimals("1.5")), (2, 0, 1));
+    }
+
+    /// research-1's row 19 on 1.24.71: ReaComp's Threshold ("-inf" at its bottom) and Ratio ("inf :1" at its top) were
+    /// refused by their text, so REAPER's glue compression stayed at its defaults.
+    #[test]
+    fn a_value_is_found_in_a_range_that_runs_to_a_printed_infinity() {
+        // ReaComp's Threshold: a gain from 0 to 2, printed in dB with a sign; 0 prints "-inf".
+        let threshold = |n: f64| Some(if n <= 0.0 { "-inf".to_string() } else { format!("{:+.1}", 20.0 * (2.0 * n).log10()) });
+        let at = find_printed(&threshold, "-12.0").unwrap();
+        assert_eq!(threshold(at).as_deref(), Some("-12.0"), "{at}");
+        assert_eq!(threshold(find_printed(&threshold, "-12").unwrap()).as_deref().and_then(reading).map(f64::round), Some(-12.0));
+        // ReaComp's Ratio: 1:1 at the bottom, "inf :1" at the top.
+        let ratio = |n: f64| Some(if n >= 1.0 { "inf :1".to_string() } else { format!("{:.3} :1", 1.0 / (1.0 - n)) });
+        let two = find_printed(&ratio, "2.00").unwrap();
+        assert_eq!(ratio(two).as_deref().and_then(reading).map(|r| (r * 100.0).round() / 100.0), Some(2.0), "{two}");
+        assert!(find_printed(&ratio, "0.5").unwrap_err().1.contains("outside it"), "below 1:1 is outside it");
     }
 
     #[test]

@@ -230,10 +230,12 @@ run without asking there, and Kumi can't tell it from a chat.
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
-- **A copy of your Live Set:** when a change in Live reaches its third step, or has a step that can lose material (a
-  delete, clearing a range, or moving a clip onto what's there), Kumi copies your Set as last saved beside it
-  (`<Set>.backup-<date>.als`), once for each saved version. An unsaved Set gets no copy, and Kumi never saves the Set
-  itself. The copy stays until you delete it.
+- **A copy of your project:** before some changes, Kumi copies your project as last saved beside it, once for each
+  saved version. An unsaved project gets no copy, and Kumi never saves the project itself.
+  - Live: when a change reaches its third step (`<Set>.backup-<date>.als`). The copy stays until you delete it.
+  - Renoise: before a change that loads a sample, such as a sound from your library put in an instrument
+    (`<Song> (Kumi copy <date>).xrns`). Kumi keeps a song's five newest copies and deletes older ones. A song over
+    512 MB isn't copied.
 - **Mirelo,** only if you set it up: see [Integrations](#integrations-optional).
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
   track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by

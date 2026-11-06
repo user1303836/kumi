@@ -63,6 +63,10 @@ pub struct Row {
     /// row's step (`{"route": "hotswap"}`, a pad's), when a step's count goes by that (CC-20).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daw_undo_by: Option<Value>,
+    /// The copy of the project the plan kept beside it before changing it, on every row of that change:
+    /// `{"file": "<name>.backup-<date>.als", "why": "third_step" | "deletes"}`, the file's name only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<Value>,
     /// The files the call placed (CC-11): each source as it named the file, the file's name and the identity of the
     /// file the DAW got.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,6 +208,7 @@ impl History {
             call_outcome: None,
             change_id: None,
             daw_undo_by: None,
+            copy: None,
             sources: None,
             script: None,
         };
@@ -392,6 +397,7 @@ impl History {
                         call_outcome: None,
                         change_id: None,
                         daw_undo_by: None,
+                        copy: None,
                         sources: None,
                         script: Some(script),
                     };
@@ -464,6 +470,18 @@ impl History {
         }
     }
 
+    /// The copy of the project a change's plan kept, on each of the change's rows `ids`.
+    pub fn copy(&self, ids: &[String], copy: &Value, snapshots: &Snapshots) {
+        let mut marked = false;
+        for row in self.rows.borrow_mut().iter_mut().filter(|row| ids.contains(&row.id)) {
+            row.copy = Some(copy.clone());
+            marked = true;
+        }
+        if marked {
+            self.publish(snapshots);
+        }
+    }
+
     /// An audit row for a call that ended unsure (CC-2's W1-b): what was asked, by which host call, that it may have
     /// changed the DAW, and that it can't be undone from here.
     pub fn audit(&self, title: &str, project_key: &str, reason: &str, identity: CallIdentity, snapshots: &Snapshots) -> Row {
@@ -503,6 +521,7 @@ impl History {
             call_outcome: None,
             change_id: None,
             daw_undo_by: None,
+            copy: None,
             sources: None,
             script: None,
         };
