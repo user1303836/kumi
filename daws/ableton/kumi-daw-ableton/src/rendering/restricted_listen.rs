@@ -18,6 +18,13 @@ const MAX_WAV_BYTES: u64 = 50 * 1024 * 1024;
 const CALL_DEADLINE_SECONDS: u64 = 300;
 const SELECTION_FIELDS: [&str; 7] = ["trackRef", "sceneRef", "slotRef", "detailClipRef", "deviceRef", "parameterRef", "chainRef"];
 
+#[cfg(windows)]
+async fn same_capture_file(requested: &Path, reported: &Path) -> bool {
+    let Ok(requested) = tokio::fs::canonicalize(requested).await else { return false };
+    let Ok(reported) = tokio::fs::canonicalize(reported).await else { return false };
+    requested.components().eq(reported.components())
+}
+
 fn selection_row(value: &Value) -> bool {
     value.as_object().is_some_and(|row| {
         row.len() == SELECTION_FIELDS.len()
@@ -908,7 +915,12 @@ impl LiveRenderer {
             .write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal.clone()))
             .await
             .map_err(|_| refused("capture_failed", "Kumi Ears could not write the capture."))?;
-        if Path::new(&written.file) != raw.0 {
+        let same_file = Path::new(&written.file) == raw.0;
+        // Max echoes the forward-slash wire path, not Windows' canonical \\?\ spelling.
+        // Resolve both existing files there; a different file (even in this directory) still refuses.
+        #[cfg(windows)]
+        let same_file = same_file || same_capture_file(&raw.0, Path::new(&written.file)).await;
+        if !same_file {
             return Err(refused("capture_failed", "Kumi Ears returned a file outside this call's requested capture."));
         }
         if written.channels != 4

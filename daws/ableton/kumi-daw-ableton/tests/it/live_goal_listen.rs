@@ -61,6 +61,7 @@ pub(super) struct State {
     tap_available: Cell<bool>,
     prepend_ears: Cell<bool>,
     raw_frames: Cell<usize>,
+    reported_file: RefCell<Option<Box<dyn Fn(&str) -> String>>>,
 }
 impl State {
     fn new() -> Rc<Self> {
@@ -123,6 +124,7 @@ impl State {
             tap_available: Cell::new(true),
             prepend_ears: Cell::new(false),
             raw_frames: Cell::new(usize::MAX),
+            reported_file: RefCell::new(None),
         })
     }
     pub(super) fn epoch(&self) -> f64 {
@@ -428,7 +430,8 @@ impl EarsLink for Ears {
                 raw.write_all(&value.to_le_bytes()).unwrap();
             }
         }
-        Ok(Written { file: file.into(), sample_rate: 8000., channels: 4, beats: self.state.armed_from.get(), running: false })
+        let file = self.state.reported_file.borrow().as_ref().map_or_else(|| file.to_owned(), |report| report(file));
+        Ok(Written { file, sample_rate: 8000., channels: 4, beats: self.state.armed_from.get(), running: false })
     }
     fn stop(&self, _: &Tap) {
         self.state.disarmed.set(self.state.disarmed.get() + 1);
@@ -572,6 +575,55 @@ fn capture_trims_the_approved_window_and_verifies_restoration() {
                     "no loop range, punch, tempo or recording-mode mutation: {call}"
                 );
             }
+        }
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_ears_receipts_resolve_to_the_requested_capture_file() {
+    on_a_paused_clock(async {
+        for spelling in 0..4 {
+            let (live, state, request) = bounded(true).await;
+            let original_directory = request.scratch_dir.clone().unwrap();
+            *state.reported_file.borrow_mut() = Some(Box::new(move |wire| {
+                let canonical = Path::new(wire).canonicalize().unwrap();
+                let native = canonical.to_string_lossy();
+                match spelling {
+                    0 => wire.to_owned(), // Ears' actual echoed //?/C:/... wire spelling.
+                    1 => native.into_owned(),
+                    2 => native.strip_prefix(r"\\?\").unwrap().replace('\\', "/").to_uppercase(),
+                    _ => original_directory.join(canonical.file_name().unwrap()).to_string_lossy().into_owned(),
+                }
+            }));
+            let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(takes.len(), 1);
+            assert_eq!(std::fs::metadata(&takes[0].file).unwrap().len(), 44 + 16000 * 2 * 4);
+            assert_eq!(takes[0].seconds, Some(2.));
+            assert_eq!(state.starts.get(), 1);
+            restored(&live, &state);
+        }
+    });
+}
+
+#[test]
+fn a_receipt_for_another_file_never_publishes_audio_or_removes_that_file() {
+    on_a_paused_clock(async {
+        for inside_call in [true, false] {
+            let (live, state, request) = bounded(true).await;
+            let call = request.scratch_dir.as_ref().unwrap();
+            let other = if inside_call { call.join("another.raw") } else { live._folder.path().join("another.raw") };
+            std::fs::write(&other, b"not this call's capture").unwrap();
+            let reported = other.to_string_lossy().into_owned();
+            *state.reported_file.borrow_mut() = Some(Box::new(move |_| reported.clone()));
+            assert!(matches!(
+                live.rendering.hear_in_set(&request, Signal::new()).await,
+                Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_failed", .. }))
+            ));
+            assert_eq!(std::fs::read(&other).unwrap(), b"not this call's capture");
+            assert!(std::fs::read_dir(call).unwrap().all(|entry| entry.unwrap().path() == other));
+            assert_eq!(state.written.get(), 1);
+            restored(&live, &state);
         }
     });
 }
