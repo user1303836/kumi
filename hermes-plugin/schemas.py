@@ -417,3 +417,15 @@ KUMI_DEVICE = _tool(
         "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS, "description": "GenExpr."}},
         "required": ["name", "about", "controls", "code"], "additionalProperties": False}},
     ("spec",))
+
+
+# CC-26: a verified preset from kumi_preset_build into Live's User Library (serve's preset op, preview then place).
+KUMI_PRESET = _tool(
+    "kumi_preset",
+    "Put a plug-in preset that kumi_preset_build made into Live's User Library (Kumi folder) as a new .vstpreset file. "
+    "The producer approves it first, reading the plug-in, its verified version, every setting as the file stores it, "
+    "and the file. The file stays after an undo: Kumi never removes it. Returns the file and its Browser item; loading "
+    "it is a kumi_change of its own (observe first, then load_device with that item), asked again. When the answer says "
+    "Live hasn't listed the file yet, wait and ask again: never load it by path. Live only.",
+    {"artifact_id": {"type": "string", "minLength": 1, "description": "kumi_preset_build's artifact_id."}},
+    ("artifact_id",))

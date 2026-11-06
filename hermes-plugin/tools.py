@@ -819,6 +819,32 @@ def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
     return built
 
 
+# A place whose answer never came: a preset file may be in the User Library, and placing again would write another.
+PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Don't place it again: ask the producer to look in "
+                      "User Library/Kumi in Live's Browser.")
+
+
+def kumi_preset(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-26: the preset the producer approved, placed as serve's preview named it: the approval's digest and file go
+    with it, so serve writes exactly that file of exactly those bytes, or refuses `changed` and writes nothing (26-r1).
+    A written file is this chat's newest write, which "undo that" never undoes (26-w5)."""
+    call = kwargs.get("kumi_call")
+    approved = call.extra if isinstance(call, calls.Entry) else {}
+    artifact = args.get("artifact_id")
+    if (approved.get("artifact_id") != artifact or not isinstance(approved.get("digest"), str)
+            or not isinstance(approved.get("file"), str)):
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't put the preset in your User Library: it isn't "
+                                                            "the one the producer approved."}}
+    placed = _write(host, "preset", {"action": "place", "artifact_id": artifact, "digest": approved["digest"],
+                                     "file": approved["file"]}, kwargs)
+    if placed.get("state") == "unsure":
+        return {**placed, "hint": PRESET_UNSURE_HINT}
+    if isinstance(placed.get("file"), str) and "error" not in placed:
+        host.remember_library_write(kwargs, placed["file"])
+    return placed
+
+
+
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
@@ -1408,6 +1434,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
     ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
     ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
+    ("kumi_preset", schemas.KUMI_PRESET, kumi_preset, "🎛️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1416,7 +1443,7 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset")
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
