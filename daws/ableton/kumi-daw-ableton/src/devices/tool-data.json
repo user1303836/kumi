@@ -143,7 +143,7 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 32,
-        "description": "An instrument's voices, 1 to 32. Code defaults to 8. For a patch, omit this or use 1 to keep its existing whole-instrument graph; more than 1 allocates notes to copies of one voice patch (raw channel MIDI at in, stereo at out). Pitch-owned allocation like code instruments, not MPE."
+        "description": "An instrument's voices: how many notes play at once, 1 for mono (8 when left out)"
       },
       "remove": {
         "type": "array",
@@ -159,7 +159,7 @@
       "tests": {
         "type": "array",
         "maxItems": 32,
-        "description": "A MIDI effect's tests, for its JavaScript or a supported message patch. Unsupported patch tests are retained and explicitly reported as unrun.",
+        "description": "A MIDI effect's tests",
         "items": {
           "type": "object",
           "properties": {
