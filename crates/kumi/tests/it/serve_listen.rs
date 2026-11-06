@@ -156,7 +156,16 @@ case!(a_bad_last_reference_costs_no_daw_calls_in_preview_or_capture, async {
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;
     let approved = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
-    let before = requests(&lab);
+    // The running host polls focus independently; this call must not add capture preflight or render requests.
+    let capture_requests = || {
+        requests(&lab)
+            .into_iter()
+            .filter(|request| {
+                request["method"] == "render" || (request["method"] == "read" && request["params"]["kind"] == "render_preflight")
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = capture_requests();
     for preview in [true, false] {
         let mut args = window(&key, epoch, json!({"mix":true}));
         args["references"] = json!([
@@ -172,7 +181,7 @@ case!(a_bad_last_reference_costs_no_daw_calls_in_preview_or_capture, async {
         let (refused, error) = wire.call("listen", args, Some(if preview { "bad-refs-preview" } else { "bad-refs-capture" })).await;
         assert!(error && refused["error"]["reason"].as_str().unwrap().contains("past the end"), "{refused}");
         no_audio(&refused);
-        assert_eq!(requests(&lab), before, "reference validation precedes every DAW preflight and render");
+        assert_eq!(capture_requests(), before, "reference validation precedes every DAW preflight and render");
         assert!(listening.renders().is_empty());
         assert!(!lab.ctx.paths().state_dir.join("artifacts.json").exists());
         assert!(std::fs::read_dir(lab.ctx.paths().state_dir.join("artifacts")).unwrap().next().is_none());
