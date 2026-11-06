@@ -3,7 +3,7 @@
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
 import { plainId } from './format.ts'
 import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
-import type { Focus, History, Job, SetupStatus, SoundMap, Status } from './types.ts'
+import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
 export type Fetch = <T>(path: string) => Promise<T>
 
@@ -29,6 +29,9 @@ export interface KumiState {
   /** Comparisons against each reference this window saw arrive (a mastering pass's rounds), oldest first, by
    *  `roundKey`. Only what arrived while the window was open, so a round is never numbered from a partial past. */
   rounds: Record<string, Round[]>
+  /** The script whose approval waits in the chat in front (CC-19), and its saved code once read: null while it's being
+   *  read, `false` when it couldn't be (missing, or no longer what the approval named). One at a time: approvals are. */
+  script: { pending: PendingScript; code: ScriptCode | null | false } | null
 }
 
 export interface TrackedJob extends Job {
@@ -45,7 +48,21 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null }
+
+const SHA256 = /^[0-9a-f]{64}$/
+
+/** A `script.pending` payload as the pane can use it, or null: a plain call id, an exact SHA-256 and a known language. */
+export function pendingScriptOf(payload: unknown): PendingScript | null {
+  if (!payload || typeof payload !== 'object') return null
+  const value = payload as Record<string, unknown>
+  const id = plainId(value.tool_call_id)
+  const language = value.language === 'python' || value.language === 'lua' ? value.language : null
+  if (!id || !language || typeof value.sha256 !== 'string' || !SHA256.test(value.sha256)) return null
+  const text = (key: string) => (typeof value[key] === 'string' ? (value[key] as string) : undefined)
+  const lines = typeof value.lines === 'number' && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : undefined
+  return { tool_call_id: id, language, sha256: value.sha256, purpose: text('purpose'), daw: text('daw'), lines, warning: text('warning') }
+}
 
 function finished(job: Job): boolean {
   return typeof job.state === 'string' && job.state !== 'running'
@@ -217,6 +234,38 @@ export class KumiStore {
     const keys = Object.keys(rounds)
     if (keys.length > MOST_REFERENCES) delete rounds[keys[0]]
     this.set({ rounds })
+  }
+
+  /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
+   *  no plain call id, exact SHA-256 or known language shows nothing. */
+  scriptPending(payload: unknown): void {
+    const pending = pendingScriptOf(payload)
+    if (!pending) return
+    this.set({ script: { pending, code: null } })
+    const generation = this.generation
+    void this.readScript(pending.sha256, pending.language).then(code => {
+      // Only for the same pending script: it may have settled, or another taken its place, meanwhile.
+      if (generation !== this.generation || this.state.script?.pending !== pending) return
+      this.set({ script: { pending, code: code ?? false } })
+    })
+  }
+
+  /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
+  scriptSettled(toolCallId: unknown): void {
+    const id = plainId(toolCallId)
+    if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null })
+  }
+
+  /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
+   *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
+  async readScript(sha256: string, language: ScriptLanguage): Promise<ScriptCode | null> {
+    if (!SHA256.test(sha256)) return null
+    try {
+      const read = await this.fetch<ScriptCode>(`/script?sha=${sha256}&language=${language}`)
+      return read && read.sha256 === sha256 && typeof read.code === 'string' ? read : null
+    } catch {
+      return null
+    }
   }
 
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
