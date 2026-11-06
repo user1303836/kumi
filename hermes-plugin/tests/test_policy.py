@@ -90,6 +90,11 @@ class Approvals(unittest.TestCase):
         policy.turn_started(self.host, session_id="s1", turn_id="u2")  # the producer's next turn
         self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id="s1",
                                               tool_call_id="c3", turn_id="u2")["action"], "approve")
+        for unnamed in ({"turn_id": ""}, {}):  # a Hermes that stopped naming turns must not reopen the bypass (rgzm)
+            with self.subTest(turn=unnamed):
+                self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(),
+                                                      session_id="s1", tool_call_id="c4", **unnamed),
+                                 {"action": "block", "message": policy.FORKED})
 
     def test_an_api_call_or_a_webhook_never_runs_what_needs_an_approval_and_desktop_still_asks(self):
         for surface in ("api_server", "webhook", "msgraph_webhook"):  # Hermes's ctx.session_surface()

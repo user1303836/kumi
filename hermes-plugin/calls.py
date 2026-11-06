@@ -131,7 +131,8 @@ class Turns:
     id and a turn id of its own, and it never goes through `pre_llm_call` (`_persist_disabled`, Hermes v0.22.7). Its
     tool whitelist is thread-local and doesn't reach the thread a tool runs on, so its calls reach Kumi's hook, where a
     "this session" approval would let them run unasked. A turn of a chat whose turns Kumi has seen, and that isn't one
-    of them, is such a fork. A chat Kumi has seen no turn of (it was enabled mid-turn) can't be told apart."""
+    of them, is such a fork, and so is a call there that names no turn (rgzm: a Hermes that stopped passing turn ids
+    must not reopen it). A chat Kumi has seen no turn of (it was enabled mid-turn) can't be told apart."""
 
     def __init__(self) -> None:
         self._turns: dict[str, list[str]] = {}
@@ -148,8 +149,8 @@ class Turns:
 
     def forked(self, session: Any, turn: Any) -> bool:
         """Whether a call of `turn` in `session` comes from a turn Hermes forked, not one of the producer's own."""
-        if not (isinstance(session, str) and session and isinstance(turn, str) and turn):
+        if not (isinstance(session, str) and session):
             return False
         with self._lock:
             seen = self._turns.get(session)
-            return seen is not None and turn not in seen
+            return seen is not None and not (isinstance(turn, str) and turn in seen)
