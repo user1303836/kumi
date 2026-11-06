@@ -5,13 +5,14 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{device, generate, library, listen, map, read, script, setup, transport, variations};
+use super::{device, generate, library, listen, map, plugin_knowledge, read, script, setup, transport, variations};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
     &core::CONNECT,
     &core::OBSERVE,
     &read::READ,
+    &plugin_knowledge::PLUGIN_KNOWLEDGE,
     &change::CHANGE,
     &change::UNDO,
     &change::HISTORY,
