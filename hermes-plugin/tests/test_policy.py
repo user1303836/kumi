@@ -38,7 +38,7 @@ class Approvals(unittest.TestCase):
 
     def test_reads_connect_and_other_plugins_tools_need_no_approval(self):
         for tool in ("kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds",
-                     "kumi_job", "terminal", "elevenlabs_sound_effect"):
+                     "kumi_job", "kumi_plugin_knowledge", "terminal", "elevenlabs_sound_effect"):
             self.assertIsNone(self.hook(tool, {"scope": "focus"}), tool)
         self.assertIsNone(self.hook("kumi_library", {"action": "status"}))
         self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"},
@@ -49,7 +49,7 @@ class Approvals(unittest.TestCase):
         calls = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
                  "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS},
                  "kumi_observe": {"scope": "focus"}, "kumi_read": {"action": "data"}, "kumi_sounds": {"query": "a"},
-                 "kumi_job": {"job_id": "j-1"}}
+                 "kumi_job": {"job_id": "j-1"}, "kumi_plugin_knowledge": {"action": "catalog", "plugin": "vital"}}
         before = support.requests(self.data / "state")
         self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
         for tool, args in calls.items():  # with the producer's chat's runtime running, whatever Hermes would allow
@@ -87,6 +87,8 @@ class Approvals(unittest.TestCase):
                 self.assertEqual(policy.pre_tool_call(self.host, tool_name=tool, args=args, **forked),
                                  {"action": "block", "message": policy.FORKED})
         self.assertIsNone(policy.pre_tool_call(self.host, tool_name="kumi_observe", args={"scope": "focus"}, **forked))
+        self.assertIsNone(policy.pre_tool_call(self.host, tool_name="kumi_plugin_knowledge",
+                                              args={"action": "guide", "device_ref": "d1"}, **forked))
         policy.turn_started(self.host, session_id="s1", turn_id="u2")  # the producer's next turn
         self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id="s1",
                                               tool_call_id="c3", turn_id="u2")["action"], "approve")
@@ -114,8 +116,11 @@ class Approvals(unittest.TestCase):
     def test_a_scheduled_job_is_refused_by_the_handler_too_when_the_hook_didnt_run(self):
         before = support.requests(self.data / "state")
         self.ctx.cron_execution = object()
-        answer = support.handle(self.host, "kumi_observe", {"scope": "focus"}, session_id="cron-1")
-        self.assertEqual(answer["error"]["code"], "scheduled")
+        for tool, args in (("kumi_observe", {"scope": "focus"}),
+                           ("kumi_plugin_knowledge", {"action": "catalog"}),
+                           ("kumi_plugin_knowledge", {"action": "guide", "device_ref": "d1"})):
+            answer = support.handle(self.host, tool, args, session_id="cron-1")
+            self.assertEqual(answer["error"]["code"], "scheduled")
         self.assertEqual(support.requests(self.data / "state"), before)
 
     def test_hermess_own_session_variables_tell_a_scheduled_job_and_a_webhook(self):
