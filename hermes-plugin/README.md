@@ -181,7 +181,7 @@ project as…** with **Copy all media into project directory**), or they'll miss
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest
-  copies and deletes older ones).
+  copies and deletes older ones). The change that kept a copy says so, with the copy's name.
 - **Processes:** Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on
   loopback only. They stop when the chat ends, when the plugin unloads or Hermes exits, or after 15 minutes idle (2
   hours while connected to your DAW for a chat); a job still running, such as a scan or a Mirelo generation, keeps
