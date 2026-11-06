@@ -114,6 +114,12 @@ pub trait VariationsBackend: Sized {
         self.source(input, signal).await
     }
 
+    /// True only when the native write atomically fences both captured source authority and the destination.
+    /// A fresh host read followed by a separately fenced destination write is insufficient.
+    fn can_apply_candidates(&self) -> bool {
+        false
+    }
+
     /// A foreground board apply must prove the captured source is still the same object and content. No fallback to names.
     async fn verify_source(&self, _source: &Source<Self::Material, Self::Data>, _signal: &Signal) -> Result<(), String> {
         Err("This DAW cannot verify a candidate board's source for apply.".into())

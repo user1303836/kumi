@@ -1,10 +1,11 @@
 //! Pure background candidates, persisted before any separately requested foreground apply.
 use super::*;
+use kumi_common::abort::SignalExt;
 use kumi_store::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const BOARD_BYTES: u64 = 8 * 1024 * 1024;
+const BOARD_BYTES: i64 = 8 * 1024 * 1024;
 
 pub struct PreparedMake<B: VariationsBackend> {
     project: String,
@@ -32,7 +33,7 @@ struct Board<B: VariationsBackend> {
     set: Set<B>,
     states: BTreeMap<usize, State>,
     stopped: Option<String>,
-    revision: u64,
+    revision: i64,
 }
 
 impl<B: VariationsBackend + 'static> Variations<B> {
@@ -145,24 +146,26 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     fn save_board(&self, board: &mut Board<B>) -> Result<(), String> {
         let path = self.board_file(&board.project, &board.id)?;
         let text = serde_json::to_string(&self.board_json(board)).map_err(|error| error.to_string())?;
-        if text.len() as u64 > BOARD_BYTES {
+        if i64::try_from(text.len()).map_err(|_| "The board size cannot be represented.")? > BOARD_BYTES {
             return Err("The candidate board exceeds its 8 MiB storage bound.".into());
         }
         std::fs::create_dir_all(path.parent().ok_or("The board folder is unavailable.")?).map_err(|error| error.to_string())?;
         let db = Connection::open(path).map_err(|error| error.to_string())?;
-        db.execute_batch("PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS board (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, payload TEXT NOT NULL);")
+        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA; CREATE TABLE IF NOT EXISTS board (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL CHECK(revision>0), payload TEXT NOT NULL);")
             .map_err(|error|error.to_string())?;
-        // FULL commits the pending marker before native work. CAS also refuses a stale writer in another Kumi process.
+        // EXTRA in rollback-journal mode syncs the directory after journal deletion. CAS refuses a stale writer.
+        let next_revision =
+            board.revision.checked_add(1).filter(|revision| *revision > 0).ok_or("The board revision is invalid or exhausted.")?;
         let changed = if board.revision == 0 {
             db.execute("INSERT OR IGNORE INTO board (id,revision,payload) VALUES (1,1,?1)", params![text])
         } else {
-            db.execute("UPDATE board SET revision=revision+1,payload=?1 WHERE id=1 AND revision=?2", params![text, board.revision])
+            db.execute("UPDATE board SET revision=?2,payload=?1 WHERE id=1 AND revision=?3", params![text, next_revision, board.revision])
         }
         .map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("The board changed in another request; inspect it before doing more. No further candidate was applied.".into());
         }
-        board.revision += 1;
+        board.revision = next_revision;
         Ok(())
     }
 
@@ -172,13 +175,16 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             return Err("That board isn't in this project.".into());
         }
         let db = Connection::open(path).map_err(|error| error.to_string())?;
-        let (revision, text): (u64, String) = db
+        let (revision, text): (i64, String) = db
             .query_row("SELECT revision,payload FROM board WHERE id=1 AND length(CAST(payload AS BLOB))<=?1", params![BOARD_BYTES], |row| {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .optional()
             .map_err(|error| error.to_string())?
             .ok_or("The board is absent or exceeds its storage bound.")?;
+        if revision < 1 || revision.checked_add(1).is_none() {
+            return Err("The board revision is invalid or exhausted.".into());
+        }
         let value: Value = serde_json::from_str(&text).map_err(|_| "The board file is unreadable.".to_string())?;
         if value["version"] != 1 || value["id"] != id || value["project"] != project {
             return Err("The board identity doesn't match this project.".into());
@@ -209,8 +215,13 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             "id":format!("{}:V{}",board.id,take.number),"name":format!("V{}",take.number),"state":board.states[&take.number],
             "digest":take.digest,"material":self.backend.material_json(&take.material),"line":take.line,"place":take.place,"change":take.change
         })).collect::<Vec<_>>();
+        let actions = if self.backend.can_apply_candidates() {
+            "list; keep/drop unwritten candidates locally; explicitly apply named candidates with atomic source and destination guards. Applied or unsure candidates are never replayed or automatically deleted."
+        } else {
+            "list; keep/drop candidates locally; review note material manually. Applying candidate boards in this DAW is unavailable."
+        };
         json!({"board":board.id,"source":board.set.source.label,"takes":takes,"stopped":board.stopped,
-            "audio":null,"actions":"list; keep/drop unwritten candidates locally; apply explicit names in the foreground after fresh source validation. Applied or unsure candidates are never replayed or automatically deleted."})
+            "audio":null,"actions":actions})
     }
 
     pub(super) async fn board_action(&self, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
@@ -218,6 +229,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let id = input.get("board").and_then(Value::as_str).ok_or("board must be its immutable UUID.")?;
         let mut board = self.read_board(&project, id)?;
         let action = input.get("action").and_then(Value::as_str).unwrap_or("");
+        if action == "apply" && !self.backend.can_apply_candidates() {
+            return Err("Applying candidate boards in this DAW is unavailable: it has no atomic native source and destination guard. Review the candidate note material manually; nothing was applied.".into());
+        }
         if action == "list" {
             return Ok(self.board_view(&board));
         }

@@ -772,7 +772,6 @@ impl Integration for Ableton {
         })]
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
-        let _held = self.rendering.hold(&signal).await?;
         self.observer.observe(self, signal, hints).await
     }
     fn background_takes_schema(&self) -> Option<JsonObject> {

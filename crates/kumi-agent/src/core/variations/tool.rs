@@ -54,9 +54,17 @@ pub struct Variations<B: VariationsBackend> {
 impl<B: VariationsBackend + 'static> Variations<B> {
     pub fn new(backend: B, home: PathBuf) -> Rc<Self> {
         let words = backend.words();
+        let mut schema = schema(words);
+        let mut description = description(words);
+        if backend.can_apply_candidates() {
+            schema["properties"]["action"]["enum"].as_array_mut().expect("actions are an array").push(json!("apply"));
+            description.push_str(" This backend additionally supports explicit foreground apply of named planned/kept candidates with atomic source and destination guards.");
+        } else {
+            description.push_str(" Applying candidate boards in this DAW is unavailable. Review their note material manually.");
+        }
         Rc::new(Variations {
-            description: description(words),
-            schema: schema(words),
+            description,
+            schema,
             backend,
             home,
             sets: RefCell::default(),
@@ -923,7 +931,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
 }
 
 fn actions(words: &Words) -> Vec<&'static str> {
-    let mut actions = vec!["make", "change", "keep", "drop", "list", "apply"];
+    let mut actions = vec!["make", "change", "keep", "drop", "list"];
     if words.extract.is_some() {
         actions.push("extract");
     }
@@ -964,7 +972,7 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
         text.push_str(" extract: ");
         text.push_str(extract);
     }
-    text.push_str(" Background candidate boards are separate: board names an immutable id. list inspects candidates; keep/drop select or discard unwritten candidates locally. apply writes only explicitly named planned/kept candidates in the foreground after fresh source validation. Applied/uncertain candidates are never replayed or automatically deleted; no board audio is implied. ");
+    text.push_str(" Background candidate boards are separate: board names an immutable id. list inspects candidates; keep/drop select or discard unwritten candidates locally. No board audio is implied. Applied/uncertain entries, where supported, are never replayed or automatically deleted. ");
     text.push_str(words.idioms);
     text
 }
@@ -975,7 +983,7 @@ pub fn schema(words: &Words) -> JsonObject {
     let value = json!({"type": "object", "additionalProperties": false, "required": ["action"], "properties": {
         "action": {"type": "string", "enum": actions(words)},
         "set": {"type": ["integer", "string"], "description": "Which set of takes: its number, or its source's name (the latest by default)"},
-        "board": {"type":"string","description":"Immutable background candidate board id; list, keep/drop locally, or explicitly apply named candidates in the foreground"},
+        "board": {"type":"string","description":"Immutable background candidate board id; list or keep/drop candidates locally. Native apply requires explicit backend support."},
         "source": part(words.source_schema),
         "anchors": {"type": "array", "maxItems": 512, "items": {"type": "integer", "minimum": 0}, "description": words.anchors},
         "place": {"type": "string", "enum": words.place_names},

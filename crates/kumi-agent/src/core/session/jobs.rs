@@ -8,6 +8,7 @@ use crate::{
     },
     kernel::budget::job_report_block,
 };
+use kumi_common::abort::SignalExt;
 use kumi_common::js::number::to_string;
 use kumi_types::daw::DawProfile;
 use kumi_web::video::tool::{video_tools_for, VideoToolOptions};
@@ -608,7 +609,7 @@ impl Session {
 }
 
 /// Only the owning integration can prepare this typed job. It never appears in worker_tools and does not grant a
-/// generic worker DAW access. Preparing under the endpoint's tool call captures authority before the queue wait.
+/// generic worker DAW access. Preparing under the endpoint's tool call captures source data before the queue wait.
 struct BackgroundTakesTool {
     session: std::rc::Weak<Inner>,
     schema: JsonObject,
@@ -620,7 +621,7 @@ impl KernelTool for BackgroundTakesTool {
         "background_takes"
     }
     fn description(&self) -> &str {
-        "Generate a durable candidate board in the background from a read-only source snapshot: action make and the same source/recipes as variations. No DAW reads, writes, playback or audio capture occur after preparation. Use proactively when the producer asks for alternate takes; identical running requests share one job. Keep/drop selects or discards unwritten candidates locally. After review, variations action apply with the board id and explicit names writes those candidates in the foreground only if the source still matches. Jobs stop when Kumi quits; boards survive, and no native write is replayed on restart."
+        "Generate a durable candidate board in the background from a read-only source snapshot: action make and the same source/recipes as variations. No DAW reads, writes, playback or audio capture occur after preparation. Use proactively when the producer asks for alternate MIDI ideas; identical running requests share one job and the original board id. Keep/drop selects or discards candidates locally; review the generated note material manually. Live board apply is unavailable. Jobs stop when Kumi quits; completed candidates survive, and no native write is replayed on restart."
     }
     fn input_schema(&self) -> JsonObject {
         self.schema.clone()
@@ -647,9 +648,16 @@ impl KernelTool for BackgroundTakesTool {
                             == Some(request_key)
                 })
         }) {
+            let original_board = jobs
+                .spec(job.id)
+                .and_then(|spec| spec.args)
+                .and_then(|args| args.get("_candidateBoardId").and_then(serde_json::Value::as_str).map(str::to_owned))
+                .ok_or_else(|| {
+                    RuntimeError::plain("The running candidate job has no board identity; inspect that job before another request.")
+                })?;
             return Ok(ToolResult::text(format!(
-                "Job {} is already generating those candidates from the same captured source; inspect that job instead of duplicating it.",
-                job.id
+                "Job {} is already generating candidate board {} from the same captured source; inspect that board instead of duplicating it.",
+                job.id,original_board
             )));
         }
         if jobs.running() >= jobs.max() {
@@ -658,6 +666,7 @@ impl KernelTool for BackgroundTakesTool {
         let board = prepared.board_id().to_owned();
         let mut args = input;
         args.insert("_candidateRequestKey".into(), serde_json::Value::String(request_key.into()));
+        args.insert("_candidateBoardId".into(), serde_json::Value::String(board.clone()));
         let spec = JobSpec {
             title: format!("Take board {}", board.chars().take(8).collect::<String>()),
             task: None,
@@ -687,7 +696,7 @@ impl KernelTool for BackgroundTakesTool {
                 .boxed_local()
             })
             .map_err(RuntimeError::plain)?;
-        Ok(ToolResult::text(format!("Job {id} is generating candidate board {board}, without changing or playing the DAW. Inspect its report, then explicitly apply named candidates in the foreground. Completed candidates stay on the board if the job stops.")))
+        Ok(ToolResult::text(format!("Job {id} is generating candidate board {board}, without changing or playing the DAW. Inspect its report and review the note material manually; Live board apply is unavailable. Completed candidates stay on the board if the job stops.")))
     }
 }
 

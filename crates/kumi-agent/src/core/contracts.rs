@@ -573,7 +573,7 @@ pub struct UndoPreview {
 }
 
 /// One pure candidate request, captured read-only before queueing. Running generates and persists material only:
-/// it must never read, write, play or capture the DAW. Applying a board is a separate, explicit foreground tool call.
+/// it must never read, write, play or capture the DAW. Any later apply requires a separately supported atomic native guard.
 #[async_trait(?Send)]
 pub trait BackgroundTakes {
     fn board_id(&self) -> &str;

@@ -6,7 +6,7 @@ use super::heard::Heard;
 use super::tool::{names, Variations};
 use super::{Material, Rng};
 use async_trait::async_trait;
-use kumi_common::abort::Signal;
+use kumi_common::abort::{Signal, SignalExt};
 use kumi_types::contracts::{JsonObject, KernelTool};
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
@@ -65,6 +65,7 @@ struct Daw {
     edit_after_write: Cell<bool>,
     uncertain_write: Cell<bool>,
     stale_board: RefCell<Option<std::path::PathBuf>>,
+    refuses_apply: Cell<bool>,
 }
 
 impl Daw {
@@ -113,6 +114,10 @@ impl VariationsBackend for Fake {
 
     fn words(&self) -> &'static Words {
         &WORDS
+    }
+
+    fn can_apply_candidates(&self) -> bool {
+        !self.0.refuses_apply.get()
     }
 
     async fn project_key(&self, _: &Signal) -> Option<String> {
@@ -985,8 +990,50 @@ async fn a_stale_board_writer_cannot_replace_the_durable_pending_marker() {
         .join("variations/boards/fake")
         .join(hex::encode(Sha256::digest(b"song 1")))
         .join(format!("{}.sqlite3", prepared.board_id));
-    *daw.stale_board.borrow_mut() = Some(path);
+    *daw.stale_board.borrow_mut() = Some(path.clone());
     let error = run(&owner.tool(), json!({"action":"apply","board":prepared.board_id,"names":["V1"]})).await.unwrap_err();
     assert!(error.contains("board changed"), "{error}");
     assert_eq!(daw.changes.get(), 0, "the pending CAS must commit before a native write");
+    kumi_store::Connection::open(path).unwrap().execute("UPDATE board SET revision=?1 WHERE id=1", kumi_store::params![i64::MAX]).unwrap();
+    assert!(run(&owner.tool(), json!({"action":"list","board":prepared.board_id}))
+        .await
+        .unwrap_err()
+        .contains("revision is invalid or exhausted"));
+    assert_eq!(daw.changes.get(), 0, "an exhausted persisted revision cannot wrap into an apply");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_backend_without_atomic_source_guard_refuses_apply_before_any_pending_marker_or_native_work() {
+    use sha2::{Digest, Sha256};
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    daw.refuses_apply.set(true);
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    let tool = owner.tool();
+    assert!(!tool.input_schema()["properties"]["action"]["enum"].as_array().unwrap().contains(&json!("apply")));
+    assert!(tool.description().contains("Applying candidate boards in this DAW is unavailable"));
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":37}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap();
+    let path = home
+        .path()
+        .join("variations/boards/fake")
+        .join(hex::encode(Sha256::digest(b"song 1")))
+        .join(format!("{}.sqlite3", prepared.board_id));
+    let read = || {
+        kumi_store::Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT revision,payload FROM board WHERE id=1", [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .unwrap()
+    };
+    let before = read();
+    let source_reads = daw.source_reads.get();
+    let error = run(&tool, json!({"action":"apply","board":prepared.board_id,"names":["V1"]})).await.unwrap_err();
+    assert!(error.contains("no atomic native source and destination guard"));
+    assert_eq!(read(), before, "refusal must not persist an Applying marker");
+    assert_eq!(daw.source_reads.get(), source_reads);
+    assert_eq!((daw.changes.get(), daw.renders.get()), (0, 0));
+    assert_eq!(run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap()["takes"][0]["state"], "planned");
 }
