@@ -64,11 +64,9 @@ fn failed(error: impl std::fmt::Display) -> OpError {
     OpError::Failed { reason: format!("Kumi couldn't place the preset: {error}") }
 }
 
-/// The owner's decision for the hackathon: plug-in presets are Live's only, the same words as `preset_build`'s.
-const LIVE_ONLY: &str = "Plug-in presets are Live-only for now: Kumi builds and places them only in Ableton Live.";
-
+/// The owner's decision for the hackathon: plug-in presets are Live's only, in `preset_build`'s own words.
 fn live_only() -> OpError {
-    OpError::Refused { code: "unsupported", reason: LIVE_ONLY.into(), owner: None }
+    OpError::Refused { code: "unsupported", reason: super::preset_build::LIVE_ONLY.into(), owner: None }
 }
 
 async fn preset(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpError> {
@@ -369,7 +367,7 @@ mod tests {
                     progress: Progress::none(),
                 };
                 let refused = preset(&ctx, call, vec![dir.path().join("VST3")]).await.unwrap_err();
-                assert_eq!((refused.code(), refused.reason()), ("unsupported", LIVE_ONLY), "{daw:?} {action}");
+                assert_eq!((refused.code(), refused.reason()), ("unsupported", super::super::preset_build::LIVE_ONLY), "{daw:?} {action}");
             }
             ctx.snapshots().flush();
         }
