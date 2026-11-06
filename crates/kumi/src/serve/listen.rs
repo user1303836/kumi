@@ -374,6 +374,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reference_metrics_artifact_against_file_preserves_stereo_and_dynamics() {
+        fn stereo_pcm(invert_right: bool) -> Vec<u8> {
+            let mono = pcm(750.0, 0.2);
+            let size = ((mono.len() - 44) * 2) as u32;
+            let mut bytes = mono[..44].to_vec();
+            bytes[4..8].copy_from_slice(&(36 + size).to_le_bytes());
+            bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
+            bytes[28..32].copy_from_slice(&(48_000u32 * 4).to_le_bytes());
+            bytes[32..34].copy_from_slice(&4u16.to_le_bytes());
+            bytes[40..44].copy_from_slice(&size.to_le_bytes());
+            for sample in mono[44..].chunks_exact(2) {
+                let left = i16::from_le_bytes([sample[0], sample[1]]);
+                bytes.extend_from_slice(&left.to_le_bytes());
+                bytes.extend_from_slice(&(if invert_right { -left } else { left }).to_le_bytes());
+            }
+            bytes
+        }
+        let fixture = Fixture::new();
+        let source = fixture.root.join("side.wav");
+        let reference = fixture.root.join("mid.wav");
+        std::fs::write(&source, stereo_pcm(true)).unwrap();
+        std::fs::write(&reference, stereo_pcm(false)).unwrap();
+        let captured = fixture.listen(json!({"source": {"file": source}})).await.unwrap();
+        std::fs::remove_file(source).unwrap();
+        let result =
+            fixture.listen(json!({"source": {"artifact_id": captured["artifact_id"]}, "compare_to": {"file": reference}})).await.unwrap();
+        assert_eq!(result["artifact_id"], captured["artifact_id"]);
+        let current = &result["metrics"];
+        let reference = &result["compare"]["metrics"];
+        assert_eq!(current["stereo"]["correlation"], -1.0);
+        assert_eq!(reference["stereo"]["correlation"], 1.0);
+        assert_eq!(current["stereo"]["width"], 1.0);
+        assert_eq!(reference["stereo"]["width"], 0.0);
+        assert_eq!(current["loudness"], reference["loudness"]);
+        assert!(current["loudness"]["integratedLufs"].is_number());
+        assert!(current["loudness"]["truePeakDbtp"].is_number());
+        assert!(current["loudness"]["rangeLu"].is_null());
+        assert_eq!(current["dynamics"]["crestDb"], reference["dynamics"]["crestDb"]);
+        assert!((current["dynamics"]["crestDb"].as_f64().unwrap() - 3.0).abs() < 0.15);
+        assert!(current["dynamics"]["peakToLoudnessDb"].is_number());
+        let differences = &result["compare"]["differences"];
+        assert_eq!(differences["stereo"]["correlation"], json!([-1.0, 1.0]));
+        assert!(differences["balance"].as_array().unwrap().iter().all(|band| band["difference"] == 0.0));
+        assert_eq!(differences["dynamics"]["crestDb"], json!([3.0, 3.0]));
+    }
+
+    #[tokio::test]
     async fn spectral_differences_describe_the_audio_not_the_argument_order_or_names() {
         let fixture = Fixture::new();
         let (low, _) = fixture.tone("bright-name.wav", 93.75, 0.2);

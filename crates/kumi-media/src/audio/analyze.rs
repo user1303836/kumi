@@ -76,6 +76,15 @@ object!(Spectrogram{rows:Vec<SpectrogramRow>,columns:String,scale:String});
 object!(Timeline{step:f64,onset:Vec<f64>,level:Vec<f64>});
 object!(HeardNote{time:f64,duration:f64,midi:Option<f64>,confidence:f64,velocity:f64});
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Measurements describe `analyzed.from..to`, not necessarily the whole file (`seconds`).
+/// Integrated loudness needs 400 ms; short-term needs 3 s; range needs at least two
+/// gated 3 s windows, spaced 1 s apart. A short capture's range is not whole-song LRA.
+/// `stereo` is present only for two channels with nonzero energy in both. Short
+/// windows still measure stereo, but may be too short for gated loudness or range.
+/// Band width is side/(mid+side); overall width is energy-weighted over those bands.
+/// Empty bands retain numeric floor/convention values, not measured correlation.
+/// Silence retains the -200 dB peak/band floor and zero crest/onsets; these are not
+/// evidence of loudness or dynamics. Gated loudness and peak-to-loudness remain absent.
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
     pub kumi_audio: u32,
@@ -298,6 +307,13 @@ impl Meter {
                 let [shelf, high] = &mut self.filters[channel];
                 let weighted = high.process(shelf.process(sample));
                 self.partial[channel] += weighted * weighted;
+                let square = sample * sample;
+                self.sum_squares += square;
+                match channel {
+                    0 => self.sum_ll += square,
+                    1 => self.sum_rr += square,
+                    _ => {}
+                }
                 let magnitude = sample.abs();
                 if magnitude > self.sample_peak {
                     self.sample_peak = magnitude;
@@ -322,10 +338,7 @@ impl Meter {
                 self.filled = 0;
             }
             let mono = (l + r) / 2.0;
-            self.sum_squares += mono * mono;
             self.sum_lr += l * r;
-            self.sum_ll += l * l;
-            self.sum_rr += r * r;
             if let Some(keep) = keep_mono.as_deref_mut() {
                 if let Some(sample) = keep.get_mut(offset + index) {
                     *sample = mono as f32;
@@ -372,7 +385,7 @@ impl Meter {
             let (mr, mi, sr, si) = ((lr + rr) / 2.0, (li + ri) / 2.0, (lr - rr) / 2.0, (li - ri) / 2.0);
             let mid = mr * mr + mi * mi;
             let side = sr * sr + si * si;
-            let total = if self.channels > 1 { mid } else { lp };
+            let total = (lp + rp) / 2.0;
             if let Some(band) = self.band_of[bin] {
                 self.slices[slice][band] += total;
                 self.mid[band] += mid;
@@ -405,7 +418,7 @@ impl Meter {
         }
         let seconds = frames as f64 / self.rate;
         let (integrated, short, range) = gated_loudness(&self.squares);
-        let rms = (self.sum_squares / frames.max(1) as f64).sqrt();
+        let rms = (self.sum_squares / (frames.max(1) * self.channels) as f64).sqrt();
         let total_power = (0..10).map(|b| self.slice_sum(b)).sum::<f64>();
         let bands: Vec<_> = BANDS
             .iter()
@@ -437,10 +450,12 @@ impl Meter {
         let correlation = self.sum_lr / (self.sum_ll * self.sum_rr).max(1e-30).sqrt();
         let low_width = (self.side[0] + self.side[1]) / (self.mid[0] + self.mid[1] + self.side[0] + self.side[1]).max(1e-30);
         let onsets = onset_strength(&self.onset_frames);
-        let stereo = if self.channels > 1 {
+        let stereo = if self.channels == 2 && self.sum_ll > 0.0 && self.sum_rr > 0.0 {
+            let mid = self.mid.iter().sum::<f64>();
+            let side = self.side.iter().sum::<f64>();
             Some(Stereo {
-                correlation: round(correlation, 2),
-                width: round(bands.iter().map(|b| b.width).sum::<f64>() / bands.len() as f64, 2),
+                correlation: round(correlation.clamp(-1.0, 1.0), 2),
+                width: round(side / (mid + side).max(1e-30), 2),
                 low_end_mono: low_width < 0.05,
             })
         } else {
@@ -1146,4 +1161,84 @@ pub fn transcribe(mono: &[f32], rate: f64) -> Vec<HeardNote> {
             note
         })
         .collect()
+}
+
+#[cfg(test)]
+mod reference_metrics_tests {
+    use super::*;
+
+    fn measured(channels: usize, frames: usize, gain: f32, polarity: f32) -> Analysis {
+        let left: Vec<_> = (0..frames).map(|i| gain * (std::f64::consts::TAU * 750.0 * i as f64 / 48_000.0).sin() as f32).collect();
+        let mut block = vec![left];
+        if channels == 2 {
+            block.push(block[0].iter().map(|v| v * polarity).collect());
+        }
+        let mut meter = Meter::new(48_000.0, channels, frames);
+        meter.push(&block, None, 0);
+        meter.finish(frames)
+    }
+
+    #[test]
+    fn reference_metrics_phase_does_not_erase_balance_or_inflate_crest() {
+        let mid = measured(2, 192_000, 0.2, 1.0);
+        let side = measured(2, 192_000, 0.2, -1.0);
+        assert_eq!(mid.loudness, side.loudness);
+        assert!((mid.dynamics.crest_db - 3.0).abs() < 0.15);
+        assert_eq!(mid.dynamics.crest_db, side.dynamics.crest_db);
+        assert_eq!(mid.dynamics.peak_to_loudness_db, side.dynamics.peak_to_loudness_db);
+        assert_eq!(mid.balance.centroid_hz, side.balance.centroid_hz);
+        for (m, s) in mid.balance.bands.iter().zip(&side.balance.bands) {
+            assert_eq!(m.db, s.db);
+        }
+        assert_eq!(mid.stereo.as_ref().unwrap().correlation, 1.0);
+        assert_eq!(mid.stereo.as_ref().unwrap().width, 0.0);
+        assert_eq!(side.stereo.as_ref().unwrap().correlation, -1.0);
+        assert_eq!(side.stereo.as_ref().unwrap().width, 1.0);
+        assert!(mid.loudness.range_lu.is_some());
+    }
+
+    #[test]
+    fn reference_metrics_width_follows_signal_energy() {
+        let frames = 192_000;
+        let (left, right): (Vec<_>, Vec<_>) = (0..frames)
+            .map(|i| {
+                let at = std::f64::consts::TAU * i as f64 / 48_000.0;
+                let mid = 0.2 * (750.0 * at).sin();
+                let side = 0.02 * (6000.0 * at).sin();
+                ((mid + side) as f32, (mid - side) as f32)
+            })
+            .unzip();
+        let mut meter = Meter::new(48_000.0, 2, frames);
+        meter.push(&[left, right], None, 0);
+        let stereo = meter.finish(frames).stereo.unwrap();
+        // The side has one hundredth the mid's energy, regardless of how many bands it occupies.
+        assert_eq!(stereo.width, 0.01);
+        assert_eq!(stereo.correlation, 0.98);
+    }
+
+    #[test]
+    fn reference_metrics_distinguish_mono_silence_and_short_windows() {
+        let mono = measured(1, 192_000, 0.2, 1.0);
+        assert!(mono.stereo.is_none());
+        assert!(mono.loudness.integrated_lufs.is_some());
+        let silence = measured(2, 192_000, 0.0, 1.0);
+        assert!(silence.stereo.is_none());
+        assert!(silence.loudness.integrated_lufs.is_none());
+        assert!(silence.loudness.short_term_max_lufs.is_none());
+        assert!(silence.loudness.range_lu.is_none());
+        assert!(silence.dynamics.peak_to_loudness_db.is_none());
+        assert!(measured(2, 192_000, 0.2, 0.0).stereo.is_none());
+        let brief = measured(2, 2048, 0.2, 1.0);
+        assert_eq!(brief.stereo.as_ref().unwrap().correlation, 1.0);
+        assert_eq!(brief.stereo.as_ref().unwrap().width, 0.0);
+        assert!(brief.loudness.integrated_lufs.is_none());
+        let two_seconds = measured(2, 96_000, 0.2, 1.0);
+        assert!(two_seconds.stereo.is_some());
+        assert!(two_seconds.loudness.integrated_lufs.is_some());
+        assert!(two_seconds.loudness.short_term_max_lufs.is_none());
+        assert!(two_seconds.loudness.range_lu.is_none());
+        let three_seconds = measured(2, 144_000, 0.2, 1.0);
+        assert!(three_seconds.loudness.short_term_max_lufs.is_some());
+        assert!(three_seconds.loudness.range_lu.is_none());
+    }
 }
