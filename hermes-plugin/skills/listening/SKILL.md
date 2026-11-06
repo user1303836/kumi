@@ -53,6 +53,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - A refused, cancelled or unsure listen isn't a baseline, and neither is one without an artifact.
   - Every candidate uses the same source, the same window, and that `artifact_id` as `compare_to`.
   - For a fader or level change, measure the mix: some DAWs capture a track before its fader, where the capture can't show the change.
+  - In Live, where `kumi_listen` captures the mix, it hears the end of Main's chain: after Main's devices (its Limiter too), before Main's fader. A change to Main's fader isn't in that capture: never report one as measured there.
 - **One candidate at a time.** Apply it with `kumi_change`, approved like any change, and keep every `history_id` it returns: together they are this candidate. Never batch candidates, or ask for several at once.
 - **Your own change moves the epoch.** A done change returns the new epoch: adopt that one only, then observe again and check that it's the same project and source. Every capture and every undo is approved as usual.
 - **Measure each candidate the same way.**
@@ -100,6 +101,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
     - Renoise `Maximizer`: raise `Boost` for gain, with `Ceiling` under the target. Renoise's master fader tops out at +3 dB.
   - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. When you can't be sure of a device's parameter names in this version, load the devices in one change, read them, and set them in the next. Later rounds read the devices again and change only their settings.
   - **REAPER:** the master track's own FX chain, enabled, never its monitoring FX (monitoring FX aren't rendered).
+  - **Live:** where `kumi_listen` captures the mix, a round works on Main's devices and never moves Main's fader to reach a target: the capture is taken before that fader, so it wouldn't show the move.
 - **−1 dBTP is a measured target, not a knob value.** Set the limiter's ceiling with a margin under it, then let the next measurement show the true peak. Never report a ceiling setting as the result.
 - **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), with `compare_to` the reference's kept copy (`compare.artifact_id`), and report what moved.
   - **Rounds add up.** A round that made things better stays applied, and the next one builds on it. Keep the HISTORY ids of every round still applied.
