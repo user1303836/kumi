@@ -2,7 +2,7 @@
 // there is one, and the differences Kumi computed. Only measurements: the card never says anything was heard.
 import { clean, hz, num, signed } from './format.ts'
 import { english, type Translate } from './i18n.ts'
-import type { Analysis, ListenResult } from './types.ts'
+import type { Analysis, ListenReference, ListenResult, SampleWindow } from './types.ts'
 
 export interface MetricRow {
   label: string
@@ -153,7 +153,7 @@ export function listenView(result: ListenResult, t: Translate = english, referen
     captureNote: typeof result.capture?.note === 'string' && result.capture.note.trim() ? clean(result.capture.note, 200) : undefined
   }
   if (compare) {
-    view.referenceTitle = referenceName ? clean(referenceName, 60) : fileName(reference, t('listen.reference'))
+    view.referenceTitle = compare.name ? displayReferenceName(compare) : referenceName ? clean(referenceName, 60) : fileName(reference, t('listen.reference'))
     view.referenceId = typeof compare.artifact_id === 'string' ? compare.artifact_id : undefined
   }
   const interpretation = result.interpretation
@@ -188,9 +188,52 @@ function lowEnd(t: Translate, mine: unknown, reference: unknown): MetricRow | nu
   return { label: t('listen.lowEnd'), mine: words(mine), ...(reference === undefined ? {} : { reference: words(reference) }), direction: 0 }
 }
 
+/** Native names are untrusted text. Never expose a producer path as a display name. */
+export function displayReferenceName(reference: ListenReference): string {
+  return clean((reference.origin?.name ?? reference.name ?? '').split(/[\\/]/).pop() || 'Reference', 160)
+}
+
+/** Exact measured seconds, not the original file's Analysis.seconds or a source capture's beats. */
+export function windowWords(window: SampleWindow | null | undefined): string | undefined {
+  if (!window || !finite(window.sample_rate) || window.sample_rate <= 0 || !finite(window.frame_count) || !finite(window.start_frame)) return undefined
+  const start = window.start_frame / window.sample_rate
+  const duration = window.frame_count / window.sample_rate
+  const requested = window.requested ? ` · requested ${num(window.requested.from, 6)} + ${num(window.requested.seconds, 6)} s` : ''
+  return `Reference file seconds ${num(start, 6)}–${num(start + duration, 6)} · ${num(duration, 6)} s measured (${window.frame_count} frames at ${window.sample_rate} Hz)${requested}`
+}
+
+// Sort object keys as well as the equal-weight member set; native object insertion order is not identity.
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(',')}}`
+  return JSON.stringify(value) ?? 'null'
+}
+
+function memberKey(reference: ListenReference): string {
+  const window = reference.window
+  const origin = reference.origin
+  // Only a full offset-zero replay represents the persisted excerpt. A new sub-window must not inherit its key.
+  const replay = origin?.window && window && window.start_frame === 0 &&
+    window.frame_count === origin.window.frame_count && window.sample_rate === origin.window.sample_rate &&
+    window.channels === origin.window.channels
+  const selected = replay ? origin : reference
+  return stable({
+    identity: selected.identity ?? { artifact_id: reference.artifact_id },
+    window: selected.window ? {
+      start_frame: selected.window.start_frame, frame_count: selected.window.frame_count,
+      sample_rate: selected.window.sample_rate, channels: selected.window.channels
+    } : null
+  })
+}
+
+function hasReferenceFacts(result: ListenResult): boolean {
+  return Array.isArray(result.references) || !!(result.compare?.identity || result.compare?.window || result.compare?.origin)
+}
 /** What makes two comparisons ones against the same reference: its file's name and what Kumi measured of it, which
  *  are the same each time the same file is measured (its retained copy gets a new id each time). Null without one. */
 export function referenceKey(result: ListenResult): string | null {
+  if (Array.isArray(result.references)) return `profile:${stable(result.references.map(memberKey).sort())}`
+  if (hasReferenceFacts(result) && result.compare) return `excerpt:${memberKey(result.compare)}`
   const reference = result.compare?.metrics
   if (!reference) return null
   const lufs = reference.loudness?.integratedLufs
@@ -222,7 +265,7 @@ function keptBy(result: ListenResult, rounds: Record<string, Round[]>): [string,
 /** The key a comparison's rounds go under: that of the round which kept its reference's copy, when this window saw
  *  it, else `referenceKey`. Null without a reference. */
 export function roundKey(result: ListenResult, rounds: Record<string, Round[]>): string | null {
-  return keptBy(result, rounds)?.[0] ?? referenceKey(result)
+  return hasReferenceFacts(result) ? referenceKey(result) : keptBy(result, rounds)?.[0] ?? referenceKey(result)
 }
 
 /** The name a comparison's reference shows under when it was compared by its kept copy: the name the round that kept
@@ -234,7 +277,7 @@ export function referenceName(result: ListenResult, rounds: Record<string, Round
 /** A comparison as a round, `rounds` being those this window saw before it. */
 export function roundOf(result: ListenResult, id: string, rounds: Record<string, Round[]>): Round {
   const kept = result.compare?.artifact_id
-  return { id, gaps: gapsOf(result), kept: typeof kept === 'string' && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, '') }
+  return { id, gaps: gapsOf(result), kept: typeof kept === 'string' && kept ? kept : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, '') }
 }
 
 /** A comparison's gaps to its reference. */

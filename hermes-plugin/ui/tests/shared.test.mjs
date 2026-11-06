@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { load } from './load.mjs'
+import { profileResult, reference, replay, window as referenceWindow } from './reference.fixtures.mjs'
 
 const format = await load('src/shared/format.ts')
 const listen = await load('src/shared/listen.ts')
@@ -821,4 +822,33 @@ test('a quote, an upload preview, a scan and a refusal before any job are not ge
   for (const value of [fixtures.QUOTE, fixtures.PREVIEW, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
     assert.equal(generate.parseGeneration(value), null, JSON.stringify(value))
   }
+})
+
+test('profile round identity is an unordered real member set, with exact windows and persisted excerpt origins', () => {
+  const result = profileResult()
+  const key = listen.referenceKey(result)
+  assert.equal(listen.referenceKey({ ...result, references: [...result.references].reverse() }), key)
+  assert.equal(listen.referenceKey({ ...result, references: result.references.map(replay) }), key)
+  assert.notEqual(listen.referenceKey({ ...result, references: result.references.slice(0, 2) }), key)
+  const changed = result.references.map(ref => ({ ...ref, window: { ...ref.window, start_frame: ref.window.start_frame + 1 } }))
+  assert.notEqual(listen.referenceKey({ ...result, references: changed }), key)
+  assert.notEqual(listen.referenceKey({ ...result, references: [reference('changed'), ...result.references.slice(1)] }), key)
+  const excerpt = { compare: reference() }
+  assert.equal(listen.referenceKey({ compare: replay(excerpt.compare) }), listen.referenceKey(excerpt))
+  const trimmed = replay(excerpt.compare)
+  trimmed.window = { ...trimmed.window, frame_count: 48000 }
+  assert.notEqual(listen.referenceKey({ compare: trimmed }), listen.referenceKey(excerpt))
+  // A retained artifact id alone must not override the new window's actual identity.
+  const rounds = { stale: [{ id: 'old', kept: trimmed.artifact_id, name: 'Old reference' }] }
+  assert.equal(listen.roundKey({ compare: trimmed }, rounds), listen.referenceKey({ compare: trimmed }))
+  assert.match(listen.windowWords(referenceWindow), /2 s measured \(96000 frames at 48000 Hz\)/)
+  assert.equal(listen.displayReferenceName({ name: '/private/music/Reference.wav' }), 'Reference.wav')
+  const kumi = new store.KumiStore(async () => ({}))
+  const first = { ...excerpt, metrics: { file: 'Mix.wav' }, artifact_id: 'first-pass' }
+  kumi.noteListen(first)
+  // Ordinary single-artifact reuse intentionally has no additive provenance fields.
+  const legacyReplay = { metrics: { file: 'Mix.wav' }, artifact_id: 'second-pass', compare: { artifact_id: excerpt.compare.artifact_id, metrics: { file: 'ref-one.wav', seconds: 2 }, differences: {} } }
+  kumi.noteListen(legacyReplay)
+  assert.equal(listen.roundKey(legacyReplay, kumi.get().rounds), listen.referenceKey(first))
+  assert.equal(listen.referenceName(legacyReplay, kumi.get().rounds), 'one.wav')
 })

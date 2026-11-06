@@ -251,12 +251,72 @@ export interface Comparison {
   dynamics?: { crestDb?: [number, number] }
 }
 
+/** Exact decoded-frame provenance; Analysis.seconds can still describe the original whole file. */
+export interface SampleWindow {
+  original_total_frames: number | null
+  original_seconds: number | null
+  original_duration_exact: boolean
+  requested: { from: number; seconds: number } | null
+  start_frame: number
+  frame_count: number
+  sample_rate: number
+  channels: number
+  replay_from: number
+}
+
+export interface ReferenceProvenance {
+  name?: string
+  identity?: { kind?: string; file_identity?: unknown; sound_id?: string; map_revision?: string; artifact_id?: string }
+  window?: SampleWindow | null
+}
+
+export interface ListenReference extends ReferenceProvenance {
+  artifact_id?: string
+  metrics?: Analysis
+  origin?: ReferenceProvenance
+  /** Real Heard/Profile member values; null includes a reason, including incomplete Nyquist coverage. */
+  profile_quantities?: { quantity: string; unit: string; basis: string; value: number | null; reason: string | null; reason_code?: string | null; nyquist_hz?: number | null }[]
+  availability?: {
+    energy_zero: boolean
+    profile_reason: string | null
+    loud_frame_count: number
+    fixed_region_tolerance: boolean
+    unavailable: { quantity: string; reason: string }[]
+  } | null
+}
+
+export interface ProfileQuantity {
+  quantity: string
+  unit: string
+  basis: string
+  source: number | null
+  source_reason: string | null
+  source_reason_detail?: string | null
+  source_nyquist_hz?: number | null
+  target: { mid: number; low: number; high: number } | null
+  target_reason: string | null
+  contributors: number
+  references: number
+  deviation: number | null
+  inside_spread: boolean | null
+}
+
 export interface ListenResult {
   metrics?: Analysis
   artifact_id?: string
   verdict_text?: string
   media_tag?: string
-  compare?: { artifact_id?: string; metrics?: Analysis; differences?: Comparison }
+  compare?: ListenReference & { differences?: Comparison }
+  references?: ListenReference[]
+  reference_profile?: {
+    basis: string
+    references: number
+    usable_references: number
+    source_window: SampleWindow | null
+    quantities: ProfileQuantity[]
+    range_note: string
+    peak_note: string
+  }
   /** A model's reading of the measurements (CC-1). Its text opens with the runtime's own line saying what it was given. */
   interpretation?: { text?: string; model?: string }
   interpretation_error?: string

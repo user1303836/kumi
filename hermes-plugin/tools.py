@@ -66,6 +66,55 @@ class Host:
         self._changes_lock = threading.Lock()
         self._trusts: dict[Path, scripts.Trust] = {}  # each profile's record of which chats read outside content
         self._trusts_lock = threading.Lock()
+        self._listen_lock = threading.Lock()
+        self._listen_registration: dict | None = None
+        self._listen_handles: list[Any] = []
+        self._listen_features = frozenset()
+        self._unloaded = False
+
+    def register_listen(self, handler: Callable, check_fn: Callable | None, emoji: str) -> None:
+        """Register once without I/O; keep these exact SDK callables on every later schema refresh."""
+        with self._listen_lock:
+            if self._unloaded:
+                return
+            self.runtimes.on_change = self.refresh_listen_schema
+            self._listen_registration = {"name": "kumi_listen", "toolset": TOOLSET, "handler": handler,
+                                         "check_fn": check_fn, "emoji": emoji}
+            self._keep_listen_handle(self._ctx.register_tool(**self._listen_registration, schema=schemas.listen_schema()))
+
+    def refresh_listen_schema(self, data_dir: Path) -> None:
+        # Compute and register under one lock: a late start/retire callback must not restore stale feature bytes.
+        with self._listen_lock:
+            if self._unloaded or self._listen_registration is None:
+                return
+            live = self.runtimes.get(data_dir)
+            features = live.listen_features if live is not None else frozenset()
+            if features == self._listen_features:
+                return
+            try:
+                self._keep_listen_handle(self._ctx.register_tool(**self._listen_registration,
+                                                                 schema=schemas.listen_schema(features)))
+            except Exception:
+                log.exception("Kumi couldn't refresh its listening schema; per-call feature checks still apply")
+                return
+            self._listen_features = features
+
+    def _keep_listen_handle(self, handle: Any) -> None:
+        if handle is not None:
+            self._listen_handles.append(handle)
+
+    def unload(self) -> None:
+        with self._listen_lock:
+            self._unloaded = True
+            handles, self._listen_handles = self._listen_handles, []
+        # Hermes snapshots its ledger before callbacks. A refresh already inside register_tool at that instant
+        # may not be in that snapshot; dispose our supported handles as well (SDK disposal is idempotent).
+        for handle in reversed(handles):
+            try:
+                handle.dispose()
+            except Exception:
+                log.exception("Kumi couldn't dispose its listening registration")
+        self.runtimes.stop_all()
 
     def remember_change(self, kwargs: dict, answer: Any) -> None:
         """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
@@ -891,11 +940,11 @@ def published_history(state: Path, limit: object, *, scheduled: bool) -> dict:
             "stale": stale, "note": note}
 
 
-SOURCE_KEYS = {"file", "sound_id", "map_revision", "artifact_id"}
 TRACK_KEYS = {"track", "from_beat", "beats"}
 MAX_BEATS = 256
 # What a listen that didn't succeed never carries (CC-2's R5): no measurements, no artifact, no MEDIA: line.
-MEASURED = ("metrics", "artifact_id", "media_tag", "verdict_text", "capture")
+MEASURED = ("metrics", "artifact_id", "media_tag", "verdict_text", "capture", "compare", "references",
+            "reference_profile", "interpretation", "interpretation_error")
 
 
 def is_track_listen(args: dict) -> bool:
@@ -921,7 +970,7 @@ def track_bounds(answer: Any, args: dict) -> dict | None:
     if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds)
             or not 0 < seconds <= runtime.TRACK_SECONDS_MAX):
         return None
-    if not whole(prepare, runtime.TRACK_PREPARE_MAX if args.get("compare_to") is not None else 0):
+    if not whole(prepare, runtime.TRACK_PREPARE_MAX if listen_references(args) else 0):
         return None
     if not whole(deadline, runtime.TRACK_DEADLINE_MAX) or deadline < 1:
         return None
@@ -939,8 +988,55 @@ def listen_refusal(args: dict) -> str | None:
             return refusal
     elif not _file_source(source):
         return "source is a file, a sound, an artifact, or a track of the open project."
-    if args.get("compare_to") is not None and not _file_source(args["compare_to"]):
-        return "compare_to is a file, a sound or an artifact."
+    if "compare_to" in args and "references" in args:
+        return "choose compare_to or references, not both."
+    # Runtime.call drops model-supplied private keys; only the host can inject the approved _listen bounds.
+    public = {key for key in args if not (isinstance(key, str) and key.startswith("_"))}
+    if not public <= {"source", "compare_to", "references", "expected_project_key", "expected_epoch", "preview"}:
+        return "listen accepts source and either compare_to or references; capture also needs its project identity."
+    if "references" in args and (not isinstance(args["references"], list) or not 1 <= len(args["references"]) <= 5):
+        return "references requires 1 to 5 file, sound or artifact references."
+    seen = set()
+    for reference in listen_references(args):
+        if not isinstance(reference, dict) or not _file_source({key: value for key, value in reference.items()
+                                                              if key not in ("from", "seconds")}):
+            return "a reference is one file, sound with map_revision, or artifact; never a track or mix."
+        if set(reference) & {"from", "seconds"}:
+            start, seconds = reference.get("from"), reference.get("seconds")
+            if (type(start) not in (int, float) or type(seconds) not in (int, float)
+                    or not _finite(start) or not _finite(seconds) or start < 0 or not 0 < seconds <= 60
+                    or not _finite(start + seconds) or start + seconds <= start):
+                return "a reference excerpt needs both finite from >= 0 and 0 < seconds <= 60 with a finite end."
+        identity = tuple(sorted(reference.items()))
+        if identity in seen:
+            return "a reference repeats the same source and window; choose each source/window once."
+        seen.add(identity)
+    return None
+
+
+def listen_references(args: dict) -> list:
+    return args["references"] if isinstance(args.get("references"), list) else (
+        [args["compare_to"]] if "compare_to" in args else [])
+
+
+def _finite(value: int | float) -> bool:
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def listen_feature_refusal(host: Host, args: dict, live: runtime.Runtime | None = None) -> str | None:
+    """The live handshake alone grants fields. No runtime leaves the existing not_connected path intact."""
+    live = live if live is not None else host.runtimes.get(host.data_dir())
+    if live is None:
+        return None
+    features = live.listen_features
+    if "references" in args and "references" not in features:
+        return "the connected Kumi runtime doesn't support references; use one whole-file compare_to instead."
+    if ("window" not in features and any(isinstance(reference, dict) and
+            ("from" in reference or "seconds" in reference) for reference in listen_references(args))):
+        return "the connected Kumi runtime doesn't support reference excerpts; use a whole-file reference instead."
     return None
 
 
@@ -961,8 +1057,8 @@ def listen_unsupported(host: Host, args: dict) -> str | None:
     daw = host.daw()
     kinds = setup.listen_sources(daw, host.plugin_dir)
     name = schemas.DAW_NAMES.get(daw, daw)
-    for field in ("source", "compare_to"):
-        kind = source_kind(args.get(field))
+    for source in [args.get("source"), *listen_references(args)]:
+        kind = source_kind(source)
         if kind is None or kind in kinds:
             continue
         if kind == "track":
@@ -973,7 +1069,11 @@ def listen_unsupported(host: Host, args: dict) -> str | None:
 
 
 def _file_source(source: Any) -> bool:
-    return isinstance(source, dict) and bool(source) and set(source) <= SOURCE_KEYS
+    if not isinstance(source, dict):
+        return False
+    if set(source) not in ({"file"}, {"artifact_id"}, {"sound_id", "map_revision"}):
+        return False
+    return all(isinstance(value, str) and value.strip() for value in source.values())
 
 
 def _track_refusal(source: dict, args: dict) -> str | None:
@@ -1030,9 +1130,13 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     unsupported = listen_unsupported(host, args)
     if unsupported:
         return {"error": {"code": "unsupported", "reason": f"Kumi didn't listen: {unsupported}"}}
+    live = host.live()
+    unsupported = listen_feature_refusal(host, args, live)
+    if unsupported:
+        return {"error": {"code": "unsupported", "reason": f"Kumi didn't listen: {unsupported}"}}
     if not is_track_listen(args):
-        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
-        return interpreted(host, kept_media(host, result))
+        result = live.call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
+        return interpreted(host, kept_media(host, measured_result(result)))
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
     bounds = track_bounds(call.extra.get("listen"), args) if isinstance(call, calls.Entry) else None
@@ -1041,19 +1145,24 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
                                                             "its runtime's deadline."}}
     timeout = bounds["prepare_seconds"] + bounds["deadline_seconds"] + runtime.TRACK_MARGIN
     try:
-        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
+        result = live.call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
                                   interrupted=host.stop_watch(), private={"_listen": bounds})
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "cleanup": "unsure",
                 "hint": UNSURE_HINT}
-    if result.get("state") in ("refused", "cancelled", "unsure"):
-        result = {key: value for key, value in result.items() if key not in MEASURED}
-        if result["state"] == "unsure":
-            result.setdefault("hint", UNSURE_HINT)
-        return result
+    result = measured_result(result)
     return interpreted(host, kept_media(host, result))
+
+
+def measured_result(result: dict) -> dict:
+    """A failed measurement cannot carry reference/profile facts or media, even from a malformed runtime reply."""
+    if "error" in result or result.get("state") in ("refused", "cancelled", "unsure"):
+        result = {key: value for key, value in result.items() if key not in MEASURED}
+        if result.get("state") == "unsure":
+            result.setdefault("hint", UNSURE_HINT)
+    return result
 
 
 def kept_media(host: Host, result: dict) -> dict:
@@ -1061,6 +1170,12 @@ def kept_media(host: Host, result: dict) -> dict:
     profile's artifacts (`snapshots.artifact_file`), and then names that file by its real path. Hermes delivers a
     MEDIA: path through links, with only a denylist, so a crafted one could hand a chat a file from elsewhere
     (research-1's review, item 16; rgzm). The measurements stay either way."""
+    # Native currently supplies playback only for the source. A nested tag needs the same retained-file proof.
+    if isinstance(result.get("compare"), dict):
+        result = {**result, "compare": kept_media(host, result["compare"])}
+    if isinstance(result.get("references"), list):
+        result = {**result, "references": [kept_media(host, item) if isinstance(item, dict) else item
+                                           for item in result["references"]]}
     tag = result.get("media_tag")
     if tag is None:
         return result

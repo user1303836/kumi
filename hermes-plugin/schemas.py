@@ -1,6 +1,7 @@
 """The tools' schemas as Hermes registers them (RESEARCH.md C1): what the model reads to choose and call a tool."""
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -156,7 +157,7 @@ KUMI_HISTORY = _tool(
 def _track_listen_daws() -> tuple[str, ...]:
     """The DAWs whose pinned runtime listens to a track or the mix: kumi_release.json's `listen_sources` (CC-16),
     which scripts/hermes_pin.py reads from that runtime. None on a pin from before them: files only. Read here, beside
-    the plugin, since Hermes registers a tool's schema once (and the dashboard loads this file on its own)."""
+    the plugin, since the dashboard also loads this file on its own."""
     try:
         pin = json.loads((Path(__file__).resolve().parent / "kumi_release.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -189,7 +190,7 @@ _LISTEN_SOURCE = {
     "additionalProperties": False,
 }
 
-KUMI_LISTEN = _tool(
+_BASE_LISTEN = _tool(
     "kumi_listen",
     "Measure audio: a file on this computer"
     + (f", or, in {_TRACK_WHERE}, a track or the mix of the open project over a beat window" if TRACK_LISTEN_DAWS
@@ -207,6 +208,32 @@ KUMI_LISTEN = _tool(
          "expected_epoch": {"type": "string", "description": "For a track or the mix: kumi_observe's epoch."}}
         if TRACK_LISTEN_DAWS else {})},
     ("source",))
+
+
+def listen_schema(features: frozenset[str] = frozenset()) -> dict:
+    """A fresh schema from this runtime's advertised fields; no runtime, pin or version inference."""
+    schema = deepcopy(_BASE_LISTEN)
+    properties = schema["parameters"]["properties"]
+    reference = properties["compare_to"]
+    if "window" in features:
+        reference["properties"].update({
+            "from": {"type": "number", "minimum": 0,
+                     "description": "Reference-file offset in seconds, not capture beats. Requires seconds."},
+            "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60,
+                        "description": "Reference excerpt duration; requires from and must fit within EOF."},
+        })
+        reference["dependentRequired"] = {"from": ["seconds"], "seconds": ["from"]}
+    if "references" in features:
+        properties["references"] = {
+            "type": "array", "minItems": 1, "maxItems": 5, "items": deepcopy(reference),
+            "description": "Approved file/sound/artifact references, equally weighted into one measured profile. "
+                           "Exclusive with compare_to; duplicate source/window pairs are refused.",
+        }
+        schema["parameters"]["not"] = {"required": ["compare_to", "references"]}
+    return schema
+
+
+KUMI_LISTEN = listen_schema()
 
 SOUND_CLASSES = ("kick", "snare", "clap", "hat", "cymbal", "tom", "perc", "drums", "bass", "lead", "pad", "keys",
                  "pluck", "stab", "synth", "guitar", "strings", "brass", "vocal", "fx", "noise", "texture")

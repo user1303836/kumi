@@ -8,7 +8,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import stat
+import subprocess
 import sys
 import time
 import types
@@ -86,6 +88,7 @@ class Context:
 
     def __init__(self, settings: dict | None = None, profile_name: str = "default"):
         self.tools: dict[str, dict] = {}
+        self.tool_registrations: list[dict] = []
         self.hooks: dict[str, list] = {}
         self.unloads: list = []
         self.commands: dict[str, Any] = {}
@@ -112,7 +115,9 @@ class Context:
 
     def register_tool(self, name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False,
                       description="", emoji="", override=False):
-        self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler, "check_fn": check_fn}
+        registration = {"toolset": toolset, "schema": schema, "handler": handler, "check_fn": check_fn, "emoji": emoji}
+        self.tools[name] = registration
+        self.tool_registrations.append({"name": name, **registration})
 
     def register_hook(self, hook_name, callback, *, hold_stream=False):
         self.hooks.setdefault(hook_name, []).append(callback)
@@ -165,7 +170,8 @@ def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: 
     host_target = module("setup").host_target()
     folder = data_dir / "runtime" / version
     folder.mkdir(parents=True, exist_ok=True)
-    extra = " ".join(f'"{arg}"' for arg in fixture_args)
+    # Keep JSON metadata and quoted paths as one unchanged argv item, as the real native launcher does.
+    extra = subprocess.list2cmdline(fixture_args) if os.name == "nt" else shlex.join(fixture_args)
     if os.name == "nt":
         kumi = folder / "kumi.bat"
         kumi.write_text(f'@"{sys.executable}" "{FIXTURE}" %* {extra}\r\n', encoding="utf-8")
