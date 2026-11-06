@@ -55,7 +55,7 @@ pub fn doctor(daw: Daw, inputs: &Inputs) -> Vec<Check> {
         Daw::Reaper => reaper_target(inputs, &mut checks),
         Daw::Renoise => renoise_target(inputs, &mut checks),
         // (its bridge goes in no folder of the DAW's: Kumi's SoundCraft provider checks it)
-        Daw::SoundCraft => None,
+        Daw::SoundCraft | Daw::Lynx => None,
     };
     let Some((target, app_archs)) = target else { return checks };
     bridge_checks(daw, &target, &app_archs, inputs, &mut checks);

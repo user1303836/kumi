@@ -20,6 +20,7 @@ pub static PROVIDER: Beside = Beside {
     experimental: true,
     // (as its change set says: `tests::kumi_reads_soundcraft_and_has_the_producer_make_a_fix`)
     reads_only: true,
+    attach_existing: false,
     program: "soundcraft-kumi",
     app_variable: detect::SOUNDCRAFT_APP,
     bridge_folder: "bridges/soundcraft",

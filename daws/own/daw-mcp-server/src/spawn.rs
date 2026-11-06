@@ -17,10 +17,7 @@ use std::time::{Duration, Instant};
 /// The program a DAW's bridge is, when the host starts it (it ships beside the host's own); None for a DAW that loads its
 /// bridge itself (REAPER's extension, Renoise's tool).
 pub fn bridge_program(daw: Daw) -> Option<&'static str> {
-    match daw {
-        Daw::Reaper | Daw::Renoise => None,
-        Daw::SoundCraft => Some("soundcraft-kumi"),
-    }
+    daw.companion_program()
 }
 
 /// How long the host waits on a bridge it starts.

@@ -586,6 +586,36 @@ pub struct SoundCraftApp {
 /// Names SoundCraft's app in place of looking for it (Kumi's bridge beside SoundCraft takes it too).
 pub const SOUNDCRAFT_APP: &str = "KUMI_SOUNDCRAFT_APP";
 
+/// Names the custom LYNX app that supplies the experimental native endpoint.
+pub const LYNX_APP: &str = "KUMI_LYNX_APP";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LynxApp {
+    pub path: PathBuf,
+    pub version: Option<String>,
+}
+
+/// Finding the app does not establish endpoint support: the companion verifies
+/// its native protocol and actual runtime version before serving a bridge.
+pub fn detect_lynx(env: &Env) -> Option<LynxApp> {
+    if env.os == Os::Windows {
+        return None;
+    }
+    let path = match env.var_path(LYNX_APP) {
+        Some(named) => Some(named).filter(|path| path.exists())?,
+        None => match env.os {
+            Os::Mac => [env.system("/Applications"), env.home.join("Applications")]
+                .into_iter()
+                .map(|folder| folder.join("LYNX.app"))
+                .find(|app| app.exists())?,
+            Os::Linux => std::env::split_paths(&env.var("PATH")?).map(|folder| folder.join("lynx")).find(|app| app.is_file())?,
+            Os::Windows => return None,
+        },
+    };
+    let version = (env.os == Os::Mac).then(|| plist_value(&path, "CFBundleShortVersionString")).flatten();
+    Some(LynxApp { path, version })
+}
+
 /// Where SoundCraft is: the app [`SOUNDCRAFT_APP`] names (only it, and only once it's there), else SoundCraft.app in
 /// /Applications or ~/Applications on macOS; on Windows the folder its installer recorded (for this user, else for
 /// everyone), else its default folders; elsewhere `soundcraft` on PATH.
@@ -1060,6 +1090,7 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
         // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
         Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
+        Daw::Lynx => base.eq_ignore_ascii_case("lynx"),
     }
 }
 

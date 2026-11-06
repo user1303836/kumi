@@ -1,5 +1,6 @@
-//! A DAW whose bridge is a program Kumi ships beside its own executable (SoundCraft's `soundcraft-kumi`): nothing goes
-//! into the DAW. Kumi's host starts the program, and the program reaches a copy of the DAW that Kumi opened with its way
+//! A DAW whose bridge is a companion Kumi ships beside its executable: nothing goes into the DAW.
+//! Native opt-in endpoints can be attached without opening or restarting the DAW. SoundCraft instead needs its app
+//! opened by the companion with its control channel enabled. Kumi's host starts the program, and the program reaches a copy of the DAW that Kumi opened with its way
 //! in on, through the program's own `launch`. The DAW counts as set up for Kumi once Kumi has opened it that way, as the
 //! program's launch record says; a copy open another way (from the Dock, say) can't be reached, so whenever the DAW isn't
 //! open through Kumi, setup opens it (having the producer quit one open another way first), and so does
@@ -62,6 +63,9 @@ pub struct Beside {
     pub experimental: bool,
     /// Whether Kumi only reads the DAW: its integration has no change kinds yet.
     pub reads_only: bool,
+    /// The DAW exposes its own opt-in endpoint, so the companion attaches without
+    /// opening or restarting it. Its settings remain the producer's choice.
+    pub attach_existing: bool,
     /// The program, by its name beside Kumi's executable: "soundcraft-kumi".
     pub program: &'static str,
     /// The variable the program takes for the app to open ("KUMI_SOUNDCRAFT_APP"): Kumi sets it to the app it found, so
@@ -77,7 +81,7 @@ pub struct Beside {
     pub instructions: &'static str,
     /// Why the DAW isn't found.
     pub not_found: &'static str,
-    /// Why a DAW the producer opened has to be opened again by Kumi, as setup says it.
+    /// How the producer enables the DAW's endpoint, or why its companion needs to reopen it.
     pub restart_why: &'static str,
     pub watch_words: WatchWords,
     /// Whether this user has used the DAW.
@@ -248,7 +252,7 @@ impl Beside {
 
     /// The bridge, once the DAW is set up for Kumi: the program beside this Kumi, once Kumi has opened the DAW through it.
     fn set_up(&self, env: &Env) -> Option<PathBuf> {
-        self.program().filter(|_| self.opened(env))
+        self.program().filter(|_| self.attach_existing || self.opened(env))
     }
 
     /// Whether the copy Kumi opened through the program runs now, from a listing made now (KUMI_PROCESSES in the
@@ -292,6 +296,12 @@ impl Beside {
             return BridgeState::default();
         }
         let (app, open) = (self.name(), self.open_command(command));
+        if self.attach_existing {
+            return BridgeState {
+                notice: Some(format!("{app} is not connected; enable its remote control and run {open}.")),
+                why: Some(self.restart_why.to_owned()),
+            };
+        }
         let (notice, why) = if missing {
             (format!("Kumi hasn't opened {app} yet"), format!("Kumi opens {app} for you, so that it can reach it."))
         } else {
@@ -370,7 +380,7 @@ impl DawProvider for Beside {
     /// the app's setup opens it.
     fn bridge_state(&self, env: &Env, _found: bool, missing: bool, _bundled: Option<&str>, command: &str) -> BridgeState {
         let program = self.program().is_some();
-        let through_kumi = program && !missing && self.open_through_kumi(env);
+        let through_kumi = program && !missing && (self.attach_existing || self.open_through_kumi(env));
         self.state(program, missing, through_kumi, command)
     }
     fn setup(
@@ -469,6 +479,21 @@ impl DawProvider for Beside {
                 io.out.write(&format!("{}: run {} to repair it.\n", beside.not_carried(), *KUMI_REPAIR));
                 return Ok(1);
             };
+            if beside.attach_existing {
+                let home = kumi_home(&io.env);
+                let app_path = (beside.app)(&io.env).filter(|app| app.exists());
+                let attached = tokio::task::spawn_blocking(move || {
+                    launch(&program, &home, app_path.as_deref().map(|app| (beside.app_variable, app)), None)
+                }).await.unwrap_or_else(|_| Launched { opened: false, said: vec![] });
+                keep_said(&kumi_home(&io.env).join(beside.bridge_folder), &attached);
+                if attached.opened {
+                    io.out.write(&format!("Kumi connected to the current {app}; {} --daw {} works in it.\n", *KUMI, beside.id.as_str()));
+                    return Ok(0);
+                }
+                let why = attached.said.last().map_or(beside.restart_why.to_owned(), |why| sentence(why));
+                io.out.write(&format!("Kumi couldn't connect to {app}: {why}\n"));
+                return Ok(1);
+            }
             let env = io.env.clone();
             let (through_kumi, open) = tokio::task::spawn_blocking(move || (beside.open_through_kumi(&env), open_now(beside.daw, &env)))
                 .await
@@ -594,6 +619,9 @@ struct BesideSetup {
 impl DawSetup for BesideSetup {
     /// The DAW's app when it's open: the one running, else the one Kumi would open.
     async fn open_live(&self) -> Option<String> {
+        if self.beside.attach_existing {
+            return None;
+        }
         let running = running_app(self.beside.daw, &self.env).await?;
         running.or_else(|| (self.beside.app)(&self.env)).map(|app| app.to_string_lossy().into_owned())
     }
@@ -620,7 +648,7 @@ impl DawSetup for BesideSetup {
     async fn start(&self, app: Option<String>, set: Option<String>) -> bool {
         let Some(program) = self.beside.program() else { return false };
         let home = kumi_home(&self.env);
-        let set = set.map(|set| (self.beside.last_session)(&self.env).unwrap_or(set));
+        let set = if self.beside.attach_existing { None } else { set.map(|set| (self.beside.last_session)(&self.env).unwrap_or(set)) };
         // The app that was open, else the one Kumi finds; one gone since (moved by its own update, an AppImage's mount)
         // is left to the program's own search.
         let app = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| (self.beside.app)(&self.env)).filter(|app| app.exists());
@@ -660,6 +688,9 @@ impl DawSetup for BesideSetup {
     }
     /// The app Kumi opens, unless it's older than Kumi works with.
     async fn installed(&self) -> Installed {
+        if self.beside.attach_existing {
+            return Installed::Ready;
+        }
         let Some(app) = (self.beside.app)(&self.env) else { return Installed::Missing };
         match self.beside.older(&self.env, &app) {
             Some(version) => Installed::Older(version),
@@ -682,20 +713,25 @@ impl DawSetup for BesideSetup {
     }
     /// Kumi only opens the DAW to reach it: never unasked.
     fn asks_to_open(&self) -> bool {
-        true
+        !self.beside.attach_existing
     }
     /// A DAW that wasn't open opens with the session the producer had open last.
     fn closed_set(&self) -> Option<String> {
-        (self.beside.last_session)(&self.env)
+        if self.beside.attach_existing {
+            None
+        } else {
+            (self.beside.last_session)(&self.env)
+        }
     }
     /// Why the program couldn't open the DAW, as it said, and how to try again.
     fn open_failed(&self) -> Option<String> {
         let launched = self.launched.borrow();
         let launched = launched.as_ref().filter(|launched| !launched.opened)?;
         let (app, again) = (self.beside.name(), self.beside.open_command(&KUMI));
+        let action = if self.beside.attach_existing { "connect to" } else { "open" };
         Some(match launched.said.last() {
-            Some(why) => format!("Kumi couldn't open {app}: {} {again} tries again.", sentence(why)),
-            None => format!("Kumi couldn't open {app}. {again} tries again."),
+            Some(why) => format!("Kumi couldn't {action} {app}: {} {again} tries again.", sentence(why)),
+            None => format!("Kumi couldn't {action} {app}. {again} tries again."),
         })
     }
     /// What the program said as the DAW opened (a recovery it will offer).
@@ -736,6 +772,7 @@ mod tests {
         site: "renoise.com",
         experimental: false,
         reads_only: false,
+        attach_existing: false,
         program: "program",
         app_variable: "TEST_APP",
         bridge_folder: "bridges/renoise",
@@ -809,6 +846,20 @@ mod tests {
         assert!(through.why.is_none() && through.notice.is_none(), "open through Kumi: it connects");
         let carried = TESTED.state(false, true, false, "kumi");
         assert!(carried.why.as_deref().is_some_and(|why| why.starts_with("This Kumi doesn't carry program")), "{carried:?}");
+    }
+
+    #[tokio::test]
+    async fn an_attachable_endpoint_needs_no_restart_or_implicit_project_open() {
+        let provider = Beside { attach_existing: true, ..TESTED };
+        let setup = provider.setup(&env(&[("TEST_SESSION", "/songs/Groove.xrns")]), Rc::default(), false, Rc::default());
+        assert_eq!(setup.open_live().await, None, "an existing app is never offered for restart");
+        assert_eq!(setup.installed().await, Installed::Ready, "attaching needs the companion, not a launchable app");
+        assert!(!setup.asks_to_open());
+        assert_eq!(setup.closed_set(), None, "an attachment must not open the last project");
+        assert!(
+            TESTED.setup(&env(&[]), Rc::default(), false, Rc::default()).asks_to_open(),
+            "the launch-only provider keeps its existing behavior"
+        );
     }
 
     #[cfg(unix)]

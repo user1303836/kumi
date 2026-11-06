@@ -36,6 +36,9 @@ pub fn min_version(daw: Daw) -> &'static str {
         Daw::Reaper => "7",
         Daw::Renoise => "3.5",
         Daw::SoundCraft => "0.17.0",
+        // No released LYNX version has this endpoint. Keep experimental and
+        // blocked from merging until upstream ships it, then pin that release.
+        Daw::Lynx => "unreleased native control",
     }
 }
 

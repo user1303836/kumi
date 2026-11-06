@@ -65,6 +65,7 @@ fn prefix(daw: DawId) -> Option<&'static str> {
         DawId::Reaper => Some("reaper"),
         DawId::Renoise => Some("renoise"),
         DawId::SoundCraft => Some("soundcraft"),
+        DawId::Lynx => Some("lynx"),
     }
 }
 
@@ -125,6 +126,7 @@ pub fn unsaved(daw: DawId) -> &'static str {
         DawId::Reaper => "reaper-unsaved",
         DawId::Renoise => "renoise-unsaved",
         DawId::SoundCraft => "soundcraft-unsaved",
+        DawId::Lynx => "lynx-unsaved",
     }
 }
 
