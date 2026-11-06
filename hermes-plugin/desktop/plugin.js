@@ -125,6 +125,12 @@ var en = {
     hide: (group) => `Hide ${group}`,
     matches: "Sounds that match",
     found: "Sounds Kumi found",
+    indexed: (values) => `indexed ${values}`,
+    indexedTitle: "Tempo, key and root note as Kumi indexed them at the folder's last scan: from the audio, or from the file's or folder's name. A rescan updates them.",
+    note: (note) => `note ${note}`,
+    closeness: (value) => `closeness ${value}, relative to this map`,
+    closenessTitle: "How close this sound is to the one you asked about, 0 to 100, against the other sounds on this map: not a percentage, and not a confidence.",
+    near: (name) => `Near “${name}”`,
     more: (n) => `and ${n} more on the map`,
     play: "▶ Play",
     stop: "■ Stop",
@@ -452,6 +458,12 @@ var ja = {
     hide: (group) => `${group} を隠す`,
     matches: "一致するサウンド",
     found: "Kumi が見つけたサウンド",
+    indexed: (values) => `インデックス値 ${values}`,
+    indexedTitle: "フォルダを最後にスキャンしたときに Kumi がインデックスしたテンポ、キー、ルート音です。オーディオそのもの、またはファイル名やフォルダ名から得ています。再スキャンで更新されます。",
+    note: (note) => `ルート ${note}`,
+    closeness: (value) => `近さ ${value}（このマップ内での相対値）`,
+    closenessTitle: "尋ねたサウンドにどれだけ近いかを、このマップ上のほかのサウンドと比べて 0〜100 で表します。パーセントでも確信度でもありません。",
+    near: (name) => `「${name}」に近いサウンド`,
     more: (n) => `ほか ${n} 個はマップ上に`,
     play: "▶ 再生",
     stop: "■ 停止",
@@ -778,6 +790,12 @@ var zh = {
     hide: (group) => `隐藏 ${group}`,
     matches: "匹配的声音",
     found: "Kumi 找到的声音",
+    indexed: (values) => `索引值 ${values}`,
+    indexedTitle: "Kumi 在上次扫描该文件夹时建立索引的速度、调性和根音：来自音频本身，或来自文件名或文件夹名。重新扫描会更新它们。",
+    note: (note) => `根音 ${note}`,
+    closeness: (value) => `接近度 ${value}（相对于这张地图）`,
+    closenessTitle: "与你所问的声音有多接近，0 到 100，相对于这张地图上的其他声音：不是百分比，也不是置信度。",
+    near: (name) => `与“${name}”相近的声音`,
     more: (n) => `地图上还有 ${n} 个`,
     play: "▶ 播放",
     stop: "■ 停止",
@@ -1496,6 +1514,22 @@ function roundWords(number, rounds, t = english) {
 }
 
 // src/shared/store.ts
+var MOST_REASONS = 4;
+var REASON_CHARACTERS = 60;
+function foundMatches(entries, ids) {
+  const out = /* @__PURE__ */ Object.create(null);
+  if (!Array.isArray(entries)) return out;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry;
+    const id = typeof value.sound_id === "string" ? value.sound_id : "";
+    if (!ids.has(id) || Object.hasOwn(out, id)) continue;
+    const why = (Array.isArray(value.why) ? value.why : []).map((line) => clean(line, REASON_CHARACTERS)).filter(Boolean).slice(0, MOST_REASONS);
+    const closeness = value.closeness;
+    out[id] = { why, ...typeof closeness === "number" && Number.isInteger(closeness) && closeness >= 0 && closeness <= 100 ? { closeness } : {} };
+  }
+  return out;
+}
 var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
 var MOST_ROUNDS = 6;
@@ -1642,9 +1676,12 @@ var KumiStore = class {
       }
     });
   }
-  /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision. */
-  found(revision, ids) {
-    this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } });
+  /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
+   *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
+  found(revision, ids, said = {}) {
+    const kept = ids.slice(0, 200);
+    const near = typeof said.near === "string" && said.near ? said.near : null;
+    this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } });
   }
   /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
   measure(toolCallId, result) {
@@ -1787,7 +1824,7 @@ function foundSounds(result) {
   const ids = value.items.flatMap(
     (item) => item && typeof item === "object" && "sound_id" in item && typeof item.sound_id === "string" ? [item.sound_id] : []
   );
-  return { revision, ids };
+  return { revision, ids, near: "near" in value ? value.near : null, matches: value.items };
 }
 
 // src/desktop/theme.ts
@@ -3043,6 +3080,21 @@ function haystackOf(model) {
   }
   return text;
 }
+function indexedValues(sound, t = english) {
+  if (!sound) return "";
+  const parts = [];
+  if (typeof sound.bpm === "number" && Number.isFinite(sound.bpm) && sound.bpm > 0) parts.push(`${num(sound.bpm, 1)} BPM`);
+  const key = clean(sound.key, 24);
+  if (key) parts.push(key);
+  const note = clean(sound.note, 8);
+  if (note) parts.push(t("map.note", note));
+  return parts.join(" · ");
+}
+function foundLine(match, near, t = english) {
+  if (!match) return "";
+  const closeness = near && typeof match.closeness === "number" ? [t("map.closeness", String(match.closeness))] : [];
+  return [...closeness, ...match.why].join(" · ");
+}
 function searchSounds(model, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
@@ -3139,6 +3191,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const ids = searched ?? foundIds;
     return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
   }, [searched, foundIds, indexOf, visible]);
+  const nearName = !searched && foundIds && found?.near && model.sounds[found.near] ? clean(model.sounds[found.near].name ?? "", 60) : "";
   const [painted, setPainted] = useState4("");
   useEffect5(() => {
     const canvas = canvasRef.current;
@@ -3336,9 +3389,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         group.key
       );
     }) }),
-    matches.length > 0 && /* @__PURE__ */ jsxs11("div", { "aria-label": searched ? t("map.matches") : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+    matches.length > 0 && /* @__PURE__ */ jsxs11("div", { "aria-label": searched ? t("map.matches") : nearName ? t("map.near", nearName) : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+      nearName && /* @__PURE__ */ jsx11("span", { style: { ...S.muted, padding: "0 6px" }, children: t("map.near", nearName) }),
       matches.slice(0, MATCHES_LISTED).map((id) => {
         const sound = model.sounds[id];
+        const indexed = indexedValues(sound, t);
+        const said2 = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
         return /* @__PURE__ */ jsxs11(
           "button",
           {
@@ -3346,10 +3402,14 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             className: FOCUSABLE,
             onClick: () => onPick(id),
             type: "button",
-            style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+            style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
             children: [
-              /* @__PURE__ */ jsx11("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-              sound?.class && /* @__PURE__ */ jsx11("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+              /* @__PURE__ */ jsxs11("span", { style: { ...S.row, gap: 6 }, children: [
+                /* @__PURE__ */ jsx11("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                indexed && /* @__PURE__ */ jsx11("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
+                sound?.class && /* @__PURE__ */ jsx11("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+              ] }),
+              said2 && /* @__PURE__ */ jsx11("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: said2 })
             ]
           },
           id
@@ -3819,13 +3879,13 @@ var plugin = {
     );
     const calls = new Calls();
     const waiting = /* @__PURE__ */ new Map();
-    const showFound = (id, revision, ids) => {
+    const showFound = (id, revision, ids, said = {}) => {
       if (id) {
         if (calls.has(id)) return;
         calls.add(id);
       }
       if (!ids.length) return;
-      store.found(revision, ids);
+      store.found(revision, ids, said);
       if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap();
     };
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, (event) => {
@@ -3833,7 +3893,7 @@ var plugin = {
       const id = callId(payload.tool_call_id);
       if (!id || !forChatInFront(payload)) return;
       const ids = Array.isArray(payload.sound_ids) ? payload.sound_ids.filter((value) => typeof value === "string") : [];
-      showFound(id, typeof payload.map_revision === "string" ? payload.map_revision : null, ids.slice(0, 200));
+      showFound(id, typeof payload.map_revision === "string" ? payload.map_revision : null, ids.slice(0, 200), { near: payload.near, matches: payload.matches });
     });
     ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, (event) => {
       const payload = payloadOf(event);
@@ -3879,7 +3939,7 @@ var plugin = {
       }
       if (name !== "kumi_sounds") return;
       const found = foundSounds(payload.result);
-      if (found) showFound(id, found.revision, found.ids);
+      if (found) showFound(id, found.revision, found.ids, found);
     });
     for (const atom of [host6.state.profile, host6.state.connectionId]) {
       const stop = atom?.listen?.(() => {

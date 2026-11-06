@@ -1,6 +1,8 @@
 // The sound map as plain data the canvas draws: points with their group colours, a grid for finding the point under
 // the pointer, the view (zoom and pan) and the search. No DOM here: tested in ui/tests.
-import { clean } from './format.ts'
+import { clean, num } from './format.ts'
+import { english, type Translate } from './i18n.ts'
+import type { FoundMatch } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 
 export interface MapPointView {
@@ -231,6 +233,27 @@ function haystackOf(model: MapModel): string[] {
     haystacks.set(model, text)
   }
   return text
+}
+
+/** CC-23c: a sound's indexed tempo, key and root note as one line (`124 BPM · A minor`), from the map's own metadata;
+ *  '' when the index has none. */
+export function indexedValues(sound: MapSound | undefined, t: Translate = english): string {
+  if (!sound) return ''
+  const parts: string[] = []
+  if (typeof sound.bpm === 'number' && Number.isFinite(sound.bpm) && sound.bpm > 0) parts.push(`${num(sound.bpm, 1)} BPM`)
+  const key = clean(sound.key, 24)
+  if (key) parts.push(key)
+  const note = clean(sound.note, 8)
+  if (note) parts.push(t('map.note', note))
+  return parts.join(' · ')
+}
+
+/** CC-23: what a find said of one hit, as one line: on a near search its closeness (relative to this map, never a
+ *  percentage), then its reasons, in Kumi's order. '' when it said nothing. */
+export function foundLine(match: FoundMatch | undefined, near: boolean, t: Translate = english): string {
+  if (!match) return ''
+  const closeness = near && typeof match.closeness === 'number' ? [t('map.closeness', String(match.closeness))] : []
+  return [...closeness, ...match.why].join(' · ')
 }
 
 /** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */

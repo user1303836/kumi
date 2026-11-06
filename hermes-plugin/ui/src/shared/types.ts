@@ -172,6 +172,11 @@ export interface MapSound {
   class?: string
   folder?: string
   duration?: number
+  /** CC-23c: the tempo, key and root note Kumi indexed at the folder's last scan (from the audio, or a file's or
+   *  folder's name); null where the index has none. */
+  bpm?: number | null
+  key?: string | null
+  note?: string | null
 }
 
 /** `[sound_id, x, y, group]`, x and y in [0, 1]. */
