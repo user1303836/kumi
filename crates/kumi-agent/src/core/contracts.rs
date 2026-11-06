@@ -574,11 +574,13 @@ pub struct UndoPreview {
 
 /// One pure candidate request, captured read-only before queueing. Running generates and persists material only:
 /// it must never read, write, play or capture the DAW. Any later apply requires a separately supported atomic native guard.
+pub type CandidateProgress = Rc<dyn for<'line> Fn(&'line str)>;
+
 #[async_trait(?Send)]
 pub trait BackgroundTakes {
     fn board_id(&self) -> &str;
     fn request_key(&self) -> &str;
-    async fn run(&self, signal: Signal, progress: Rc<dyn Fn(&str)>) -> Result<ToolResult, RuntimeError>;
+    async fn run(&self, signal: Signal, progress: CandidateProgress) -> Result<ToolResult, RuntimeError>;
 }
 
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.

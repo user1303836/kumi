@@ -89,7 +89,7 @@ impl BackgroundTakes for PreparedLiveCandidates {
     fn request_key(&self) -> &str {
         &self.prepared.request_key
     }
-    async fn run(&self, signal: Signal, progress: Rc<dyn Fn(&str)>) -> Result<ToolResult, RuntimeError> {
+    async fn run(&self, signal: Signal, progress: CandidateProgress) -> Result<ToolResult, RuntimeError> {
         // The integration is not consulted after preparation: this path only draws and persists candidates.
         Ok(match self.variations.run_prepared(&self.prepared, &signal, progress.as_ref()).await {
             Ok(board) => ToolResult {

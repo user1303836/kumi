@@ -680,7 +680,7 @@ impl KernelTool for BackgroundTakesTool {
                 async move {
                     let progress = {
                         let handle = handle.clone();
-                        Rc::new(move |text: &str| handle.doing(text)) as Rc<dyn Fn(&str)>
+                        Rc::new(move |text: &str| handle.doing(text)) as crate::core::contracts::CandidateProgress
                     };
                     handle.step_started("background_takes");
                     let result = prepared.run(handle.signal(), progress).await;
