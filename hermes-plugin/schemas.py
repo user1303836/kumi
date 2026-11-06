@@ -294,7 +294,9 @@ KUMI_TRANSPORT = _tool(
                    "description": "play, Renoise: the sequence slot (1 is the first)."},
      "from_line": {"type": "integer", "minimum": 0, "maximum": 512,
                    "description": "play, Renoise: the line in that slot's pattern (0 is the first)."},
-     "clip_ref": {"type": "string", "maxLength": 256, "description": "play, Live: a Session clip to launch, by its ref."},
+     "clip_ref": {"type": "string", "maxLength": 256,
+                  "description": "play, Live: a Session clip to launch, by its clip slot's ref as FOCUS and a look "
+                                 "give it (clip_slot:…), or the clip's own ref (clip:…)."},
      "scene_index": {"type": "integer", "minimum": 0, "maximum": 1000,
                      "description": "play, Live: a scene to launch (0 is the first)."},
      "expected_project_key": {"type": "string", "maxLength": 64, "description": "play: kumi_observe's project_key."}},

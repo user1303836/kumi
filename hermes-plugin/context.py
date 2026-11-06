@@ -137,7 +137,8 @@ def _on(place: dict) -> list[str]:
 
 
 def _ref(value: Any) -> str:
-    """A selection's ref as the runtime gives it, for a change's input."""
+    """A selection's ref as the runtime gives it. In Live a clip's is its slot's (clip_slot:…), which kumi_transport
+    launches; a change step's clipRef takes the clip's own ref (clip:…), from a look."""
     return f" (ref {ref})" if (ref := quoted(value, 80)) else ""
 
 
