@@ -274,7 +274,7 @@ class Approvals(unittest.TestCase):
         self.assertEqual(support.call(self.host, "kumi_undo", undo, session_id="s1")["state"], "undone")
         decision = self.hook("kumi_undo", undo)
         self.assertEqual((decision["action"], decision["message"]),
-                         ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
+                         ("block", "Kumi didn't undo anything. It can't be undone any more."), "words, never a code")
 
     def test_a_change_only_lives_undo_takes_back_says_so_first_whole_and_asks_under_its_own_key(self):
         add_chain = {"tool": "edit_rack", "input": {"deviceRef": "t1/d1", "action": "add-chain"}}
@@ -303,7 +303,7 @@ class Approvals(unittest.TestCase):
         applied = support.call(self.host, "kumi_change", change(
             {"tool": "edit_rack", "input": {"deviceRef": "t1/d1", "action": "add-chain"}}), session_id="s1")
         refused = {"action": "block", "message": (
-            "Kumi didn't undo anything: Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back "
+            "Kumi didn't undo anything. Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back "
             "while it's still Live's latest step.")}
         self.assertEqual(self.hook("kumi_undo", {"history_id": applied["history_ids"][0]}), refused)
         self.assertEqual(self.hook("kumi_undo", {}), refused, "'undo that' (whole) meets the same refusal first")
@@ -334,7 +334,8 @@ class Approvals(unittest.TestCase):
         support.call(self.host, "kumi_change", change(volume("t1", -8), title="Long " * 40), session_id="s1")
         long = self.hook("kumi_undo", {})
         self.assertEqual(long["action"], "approve", "a step too long for a line is cut to fit, never blocking the undo")
-        step = long["message"].split("\n")[1]
+        title, step = long["message"].split("\n")[:2]
+        self.assertEqual(title, "Kumi: undo a whole change, 1 step", "one step has no order to name")
         self.assertTrue(step.startswith("• Undo Long Long") and step.endswith("…") and len(step) <= policy.STEP_LINE,
                         step)
 
@@ -390,7 +391,7 @@ class Approvals(unittest.TestCase):
         restarted = ("Kumi restarted since this change, so it can't undo it safely: undo it in Live if it's still the "
                      "latest step there, or ask Hermes to set it back.")
         self.assertEqual(self.hook("kumi_undo", undo), {"action": "block",
-                                                        "message": f"Kumi didn't undo anything: {restarted}"})
+                                                        "message": f"Kumi didn't undo anything. {restarted}"})
 
     def test_a_folder_is_approved_as_kumi_will_keep_it_and_never_a_whole_disk_or_home(self):
         written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep
@@ -511,7 +512,7 @@ class Blocked(unittest.TestCase):
         host, _, data = support.host(self, None, "--slow", "change=1.5", hook_timeout=1)
         support.call(host, "kumi_connect", {}, session_id="s1")
         decision = self.hook(host, "kumi_change", change())
-        self.assertEqual(decision, policy.block("Kumi didn't change anything: Kumi didn't answer in time; nothing ran."))
+        self.assertEqual(decision, policy.block("Kumi didn't change anything. Kumi didn't answer in time; nothing ran."))
 
     def test_a_runtime_that_dies_on_the_preview_blocks(self):
         host, _, _ = support.host(self, None, "--exit-on", "change")

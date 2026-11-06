@@ -200,7 +200,7 @@ class Scripts(unittest.TestCase):
         undo = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={"history_id": ran["history_id"]},
                                     session_id="s1", tool_call_id="c2", task_id="t1", turn_id="u1",
                                     api_request_id="r1", middleware_trace=[])
-        self.assertEqual(undo["message"], "Kumi didn't undo anything: Kumi can't undo a script: Live's own Undo may, "
+        self.assertEqual(undo["message"], "Kumi didn't undo anything. Kumi can't undo a script: Live's own Undo may, "
                                           "if its step is still the latest there.")
         self.assertEqual(support.handle(self.host, "kumi_script", script(), session_id="s1")["error"]["code"],
                          "not_approved", "a call no approval saw never runs")

@@ -236,16 +236,16 @@ def _transport(host: Any, args: dict, kwargs: dict) -> dict | None:
     Kumi listens or captures, while the DAW records or record is armed, or on a project that changed."""
     refusal = tools.transport_refusal(host, args)
     if refusal is not None:
-        return block(f"Kumi didn't play anything: {refusal}")
+        return block(refused("Kumi didn't play anything", refusal))
     if args["action"] == "stop":
         return None
     try:
         answer = _ask(host, "transport", {**args, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't play anything: {_reason(failure)}")
+        return block(refused("Kumi didn't play anything", _reason(failure)))
     text = answer.get("text")
     if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
-        return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused to play.'}")
+        return block(refused("Kumi didn't play anything", answer.get('reason') or 'its runtime refused to play.'))
     return approve([f"Kumi: {one_line(text, LINE)}"], "kumi:playback:transport")
 
 
@@ -271,9 +271,9 @@ def _variations(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]
     try:
         answer = _ask(host, "variations", {**asked, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't make any takes: {_reason(failure)}"), {}
+        return block(refused("Kumi didn't make any takes", _reason(failure))), {}
     if answer.get("state") != "preview":
-        return block(f"Kumi didn't make any takes: {answer.get('reason') or 'its runtime refused them.'}"), {}
+        return block(refused("Kumi didn't make any takes", answer.get('reason') or 'its runtime refused them.')), {}
     takes = [take for take in answer.get("takes") or [] if isinstance(take, dict) and isinstance(take.get("take"), str)]
     if not takes:
         return block("Kumi didn't make any takes: its runtime drew none."), {}
@@ -340,6 +340,14 @@ def block(message: str) -> dict:
     return {"action": "block", "message": message}
 
 
+def refused(head: str, why: Any) -> str:
+    """What Kumi didn't do (`head`), then why, as one message. Kumi's own words go on after a colon ("Kumi didn't run
+    the script: its runtime refused it."); a sentence of its own (the runtime's words start with a capital) follows a
+    full stop, so a message never stacks a second colon ("Kumi didn't undo anything. Kumi can't undo a script: …")."""
+    words = str(why).strip()
+    return f"{head}. {words}" if words[:1].isupper() else f"{head}: {words}"
+
+
 def _live(host: Any) -> runtime.Runtime:
     """This profile's running runtime, without waiting for one that's starting (C6: the hook never waits), else
     Unavailable: `busy` while one is still stopping, `not_connected` otherwise."""
@@ -365,19 +373,20 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     with the approval (CC-5's record); a preview without valid ones is blocked."""
     refusal = tools.listen_refusal(args)
     if refusal:
-        return block(f"Kumi didn't listen: {refusal}"), {}
+        return block(refused("Kumi didn't listen", refusal)), {}
     unsupported = tools.listen_unsupported(host, args)
     if unsupported:
-        return block(f"Kumi didn't listen: {unsupported}"), {}
+        return block(refused("Kumi didn't listen", unsupported)), {}
     if not tools.is_track_listen(args):
         return None, {}
     try:
         answer = _ask(host, "listen", {**tools.listen_args(args), "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't play anything: {_reason(failure)}"), {}
+        return block(refused("Kumi didn't play anything", _reason(failure))), {}
     text = answer.get("text")
     if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
-        return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused this listen.'}"), {}
+        return block(refused("Kumi didn't play anything",
+                             answer.get("reason") or "its runtime refused this listen.")), {}
     bounds = tools.track_bounds(answer, args)
     if bounds is None:  # its own bounds for the real call (CC-2); nothing is guessed in their place
         return block("Kumi didn't play anything: its runtime didn't say how long this listen may take."), {}
@@ -394,9 +403,9 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
     try:
         answer = _ask(host, "change", {**preview, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't change anything: {_reason(failure)}")
+        return block(refused("Kumi didn't change anything", _reason(failure)))
     if answer.get("state") != "preview":
-        return block(f"Kumi didn't change anything: {answer.get('reason') or 'its runtime refused the plan.'}")
+        return block(refused("Kumi didn't change anything", answer.get('reason') or 'its runtime refused the plan.'))
     steps = [step for step in answer.get("steps") or [] if isinstance(step, dict)]
     asked = args.get("steps") if isinstance(args.get("steps"), list) else []
     if (not steps or len(steps) != len(asked)
@@ -522,7 +531,7 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     try:
         answer = _ask(host, "undo", {**asked, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't undo anything: {_reason(failure)}"), {}
+        return block(refused("Kumi didn't undo anything", _reason(failure))), {}
     if answer.get("state") != "preview" or not answer.get("undo_available"):
         reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
         note = answer.get("note") if isinstance(answer.get("note"), str) and answer["note"].strip() else None
@@ -530,7 +539,7 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
         # runtime's own, which the DAW and the producer's system decide.
         words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
                  else one_line(note, 400) if note else reason or "that change can no longer be undone.")
-        return block(f"Kumi didn't undo anything: {words}"), {}
+        return block(refused("Kumi didn't undo anything", words)), {}
     if asked.get("whole_change") is not True:
         return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo"), {}
     rows = [row for row in answer.get("rows") or [] if isinstance(row, dict)]
@@ -544,7 +553,8 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     # A step's own words, cut to fit its line: HISTORY has them whole, and an undo is never blocked by a long one.
     shown = [f"• {one_line(row.get('text') or row.get('title'), STEP_LINE - 2)}" for row in pending[:UNDO_ROWS]]
     more = len(pending) - len(shown)
-    lines = [f"Kumi: undo a whole change, {len(pending)} step{'s' if len(pending) != 1 else ''}, newest first",
+    count = "1 step" if len(pending) == 1 else f"{len(pending)} steps, newest first"
+    lines = [f"Kumi: undo a whole change, {count}",
              *shown, *([f"• …and {more} more step{'s' if more != 1 else ''}"] if more > 0 else [])]
     bound = {"history_id": asked["history_id"], "rows_digest": digest}
     return approve(lines, f"kumi:write:undo:{'+'.join(families)}"), bound
@@ -553,24 +563,24 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
 def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     refusal = tools.library_refusal(args)
     if refusal is not None:
-        return block(f"Kumi didn't run: {refusal}")
+        return block(refused("Kumi didn't run", refusal))
     action = args["action"]
     if action in ("status", "cancel"):  # reads: a cancel only stops this runtime's own scan (CC-14)
         return None
     try:
         _live(host)
     except runtime.Unavailable as failure:
-        return block(f"Kumi didn't read any folder: {_reason(failure)}")
+        return block(refused("Kumi didn't read any folder", _reason(failure)))
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
-            return block(f"Kumi didn't add the folder: {refusal}")
+            return block(refused("Kumi didn't add the folder", refusal))
         return approve(["Kumi: read the audio files in this folder and its subfolders, to build your sound map:",
                         *_path_lines(folder), AUDIO_ONLY], f"kumi:folder_read:{folder}")
     try:
         status = _ask(host, "library", {"action": "status"}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't scan anything: {_reason(failure)}")
+        return block(refused("Kumi didn't scan anything", _reason(failure)))
     folders = [folder for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
     if not folders:
         return block("Kumi didn't scan anything: it has no approved sample folders yet. Add one first.")
@@ -610,7 +620,7 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     asked = setup.approval(daw, action=action, data_dir=host.data_dir())
     if asked is None:
         why = setup.dead_end(daw, data_dir=host.data_dir()) or "run kumi_setup plan first."
-        return block(f"Kumi didn't set anything up: {why}"), {}
+        return block(refused("Kumi didn't set anything up", why)), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     message = "\n".join(lines)
     surface = host.session_surface()
@@ -636,7 +646,7 @@ def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     (10 s): 14 s."""
     refusal = generate.refusal(args)
     if refusal is not None:
-        return block(f"Kumi didn't run: {refusal}"), {}
+        return block(refused("Kumi didn't run", refusal)), {}
     if args["action"] == "quote":
         return (None, {}) if args["kind"] == "sfx" else _upload(host, args, kwargs)
     return _paid(host, args)
@@ -651,15 +661,15 @@ def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
         return block(UNATTENDED), {}
     not_ready = generate.ready(host, "audio_to_midi", host.mirelo_key())
     if not_ready is not None:
-        return block(f"Kumi didn't send anything: {not_ready['error']['reason']}"), {}
+        return block(refused("Kumi didn't send anything", not_ready['error']['reason'])), {}
     try:
         host.ledger()
     except generate.LedgerUnavailable as failure:
-        return block(f"Kumi didn't send anything: {failure.reason}"), {}
+        return block(refused("Kumi didn't send anything", failure.reason)), {}
     try:
         preview = _ask(host, "generate", {**args, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't send anything: {_reason(failure)}"), {}
+        return block(refused("Kumi didn't send anything", _reason(failure))), {}
     upload = preview.get("upload") if isinstance(preview.get("upload"), dict) else {}
     name, size, identity = upload.get("file"), upload.get("bytes"), upload.get("identity_sha256")
     if (preview.get("state") != "preview" or not isinstance(name, str) or not name.strip() or isinstance(size, bool)
@@ -699,14 +709,14 @@ def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
     except Exception as failure:
         said = getattr(failure, "message", None) or getattr(failure, "reason", None)
         why = said if isinstance(said, str) and said else "its credit ledger refused this quote."
-        return block(f"Kumi didn't create anything: {why}"), {}
+        return block(refused("Kumi didn't create anything", why)), {}
     if record.get("consumed"):
         return block("Kumi didn't create anything: that quote was already used. Quote again."), {}
     if generate.expired(record):
         return block("Kumi didn't create anything: that quote expired. Quote again."), {}
     not_ready = generate.ready(host, record.get("kind"), host.mirelo_key())
     if not_ready is not None:
-        return block(f"Kumi didn't create anything: {not_ready['error']['reason']}"), {}
+        return block(refused("Kumi didn't create anything", not_ready['error']['reason'])), {}
     estimate = record.get("estimate") if isinstance(record.get("estimate"), dict) else {}
     most, left, cap = estimate.get("max_credits"), totals.get("left"), totals.get("cap")
     if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in (most, left, cap)):
@@ -801,9 +811,9 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     try:
         answer = _ask(host, "script", {**asked, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't run the script: {_reason(failure)}"), {}
+        return block(refused("Kumi didn't run the script", _reason(failure))), {}
     if answer.get("state") != "preview":
-        return block(f"Kumi didn't run the script: {answer.get('reason') or 'its runtime refused it.'}"), {}
+        return block(refused("Kumi didn't run the script", answer.get('reason') or 'its runtime refused it.')), {}
     digest = scripts.sha256(code)
     if answer.get("sha256") != digest:
         return block("Kumi didn't run the script: its runtime read different code than this."), {}
