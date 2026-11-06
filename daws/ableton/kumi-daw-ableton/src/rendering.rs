@@ -9,6 +9,7 @@ mod listen;
 pub mod main_chain;
 mod pass;
 mod probe;
+mod restricted_listen;
 mod rig;
 mod roles;
 mod tune;
@@ -41,7 +42,7 @@ use kumi_listening::{
 };
 use kumi_media::audio::{matching::Focus, tools::ResolveAudio};
 use kumi_types::contracts::*;
-use kumi_types::errors::{HearFailure, RuntimeError};
+use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -50,15 +51,6 @@ use std::{
     rc::Rc,
     time::Duration,
 };
-
-fn restricted_track_unsupported() -> RuntimeError {
-    HearFailure::Refused {
-        code: "unsupported",
-        reason: "Kumi for Hermes does not capture Live tracks or the mix yet. Nothing was played; measure an audio file instead.".into(),
-        marked_modified: false,
-    }
-    .into()
-}
 
 pub type RenderStep = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<JsonObject, RuntimeError>>>;
 type OpeningEars = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Rc<dyn EarsLink>, RuntimeError>>>;
@@ -360,8 +352,8 @@ impl Rendering {
     pub fn round_count(&self) -> usize {
         self.listening.round_count()
     }
-    pub async fn preview_hear(&self, _request: &HearRequest, _signal: Signal) -> Result<HearPreview, RuntimeError> {
-        Err(restricted_track_unsupported())
+    pub async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.live.preview_restricted_hear(request, signal).await
     }
     pub async fn hear_in_set(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.live.hear_in_set(request, original).await
