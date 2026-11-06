@@ -258,6 +258,8 @@ run without asking there, and Kumi can't tell it from a chat.
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand
   since.
+- In REAPER and Renoise, an edit you make by hand while Kumi is connected isn't listed when you ask what changed;
+  Kumi's next look still shows the project as it is.
 - Kumi for Hermes doesn't drive Live's menus, record, or save or open projects. In Live it doesn't group tracks: select
   them and press Cmd+G (Ctrl+G on Windows).
 
