@@ -21,6 +21,7 @@ use super::connection::names_only_text;
 use super::ctx::{Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use kumi_agent::core::contracts::Integration;
 use kumi_library::plugins::{inventory, preset::review};
+use kumi_types::daw::DawId;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -63,17 +64,24 @@ fn failed(error: impl std::fmt::Display) -> OpError {
     OpError::Failed { reason: format!("Kumi couldn't place the preset: {error}") }
 }
 
+/// The owner's decision for the hackathon: plug-in presets are Live's only, the same words as `preset_build`'s.
+const LIVE_ONLY: &str = "Plug-in presets are Live-only for now: Kumi builds and places them only in Ableton Live.";
+
+fn live_only() -> OpError {
+    OpError::Refused { code: "unsupported", reason: LIVE_ONLY.into(), owner: None }
+}
+
 async fn preset(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpError> {
+    // Before the connection, the receipt, the disk or Live's Browser: another DAW's session reads nothing.
+    if ctx.daw() != DawId::Ableton {
+        return Err(live_only());
+    }
     let place = call.args.get("action").and_then(Value::as_str) == Some("place");
     let id = call.args.get("artifact_id").and_then(Value::as_str).unwrap_or_default();
     let connection = ctx.connection()?;
     let integration: &dyn Integration = connection.integration.as_ref();
     if !integration.has_preset_place() {
-        return Err(OpError::Refused {
-            code: "unsupported",
-            reason: format!("Kumi places plug-in presets only in Live, not in {}.", ctx.daw().profile().words.app),
-            owner: None,
-        });
+        return Err(live_only());
     }
     let super::artifacts::VerifiedPreset { metadata, bytes } = ctx.artifacts().verified_preset(ctx, id, &call.signal).await?;
     let record = &metadata;
@@ -335,6 +343,36 @@ mod tests {
         assert_eq!(placed["item"], format!("user_library/Kumi/Instruments/{}.vstpreset", preview["name"].as_str().unwrap()));
         assert_eq!(fixture.written().len(), 1);
         assert_eq!(std::fs::read(&fixture.written()[0]).unwrap(), verified.bytes, "the artifact's verified bytes, unchanged");
+    }
+
+    #[tokio::test]
+    async fn another_daw_is_refused_live_only_before_anything_is_read() {
+        // Not connected, and the artifact doesn't exist: the answer is still Live-only, so nothing was looked at first.
+        let dir = tempfile::tempdir().unwrap();
+        for daw in [DawId::Reaper, DawId::Renoise] {
+            let args = Args {
+                state_dir: dir.path().join(format!("state-{daw:?}")),
+                kumi_home: dir.path().join("home"),
+                hermes_home: None,
+                hermes_root: None,
+                daw,
+                library_roots: Vec::new(),
+                media_roots: Vec::new(),
+                tools: BTreeMap::new(),
+            };
+            let ctx = Ctx::new(args, Env::new(), Default::default()).unwrap();
+            for action in ["preview", "place"] {
+                let call = Call {
+                    args: json!({"action": action, "artifact_id": "a-none"}).as_object().unwrap().clone(),
+                    host: Host::default(),
+                    signal: Signal::new(),
+                    progress: Progress::none(),
+                };
+                let refused = preset(&ctx, call, vec![dir.path().join("VST3")]).await.unwrap_err();
+                assert_eq!((refused.code(), refused.reason()), ("unsupported", LIVE_ONLY), "{daw:?} {action}");
+            }
+            ctx.snapshots().flush();
+        }
     }
 
     #[tokio::test]
