@@ -72,6 +72,7 @@ class Fixture:
         self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
         self.seq = 0
         self.connected = False
+        self.playing = False  # whether transport's play started it (CC-17)
         self.daw = options.daw
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
@@ -874,9 +875,46 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
                        "credit_unit": "mirelo_credits"}}
 
 
+def transport(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Playback as serve's `transport` (CC-17, #1143): a pure preview in serve's words; play refused while the DAW
+    records (the fixture's --recording) or the project changed; stop always. No HISTORY row either way."""
+    project = fixture.set["name"]
+    if args.get("action") == "stop":
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Stop {project}"}
+        fixture.playing = False
+        return {"state": "stopped", "position_beats": 0}
+    if args.get("from_slot", 1) < 1:
+        return error("invalid", "from_slot counts from 1.")
+    if fixture.options.recording:
+        return error("recording", f"{DAW_NAMES[fixture.daw]} is recording, or record is armed: Kumi never starts "
+                                  "playback that would record.")
+    if args.get("expected_project_key") != fixture.set["key"]:
+        return error("stale", "That isn't the project open now: observe it again.")
+    if "from_bar" in args:
+        text = f"Play {project} from bar {args['from_bar']}"
+    elif "from_beat" in args:
+        text = f"Play {project} from beat {args['from_beat']:g}"
+    elif "from_slot" in args:
+        line = f", line {args['from_line']}" if "from_line" in args else ""
+        text = f"Play {project} from sequence slot {args['from_slot']}{line}"
+    elif "from_line" in args:
+        text = f"Play {project} from line {args['from_line']} of the pattern being edited"
+    elif "clip_ref" in args:
+        text = f"Launch a Session clip in {project}"
+    elif "scene_index" in args:
+        text = f"Fire scene {args['scene_index'] + 1} in {project}"
+    else:
+        text = f"Play {project}"
+    if args.get("preview"):
+        return {"state": "preview", "text": text}
+    fixture.playing = True
+    return {"state": "playing", "position_beats": 0}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate}
+         "setup_daw": setup_daw, "generate": generate, "transport": transport}
 
 
 def main() -> None:
@@ -891,6 +929,7 @@ def main() -> None:
     parser.add_argument("--exit-on")
     parser.add_argument("--slow", action="append", default=[])
     parser.add_argument("--leased-by", help="refuse changes as another chat's lease would")
+    parser.add_argument("--recording", action="store_true", help="the DAW records, so transport refuses play")
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
