@@ -183,6 +183,16 @@ These are the steps for everyday changes. The project look lists each with its f
   - REAPER: `take_props` `playrate` (song BPM ÷ the break's BPM) with `preservePitch`. The item keeps its length, so then `item_trim` it to the bars. Or `stretch_markers_add` to pin hits.
   - Renoise: `sample_set` with `beatSync` on and `beatSyncLines` the break's length in beats × the song's current LPB (a whole number, 1–512), and `beatSyncMode` "percussion" for drums.
 
+## Variations
+For "make some variations of this clip" (a Live clip, a REAPER MIDI item, a Renoise pattern), use `kumi_variations`. Each take is a new clip, item or pattern, never written over the source.
+- **`make`:** the source by its ref (from `kumi_observe` or `kumi_read`), and either `count` or `takes`, each with a `direction` in the producer's words ("busier hats", "sadder chords 2 and 3").
+  - Keep it to 2 to 4 takes unless asked for more (8 at most). Name the notes that must stay with `anchors`.
+  - The producer approves the exact takes the preview drew, by V number and direction.
+  - Where there's no empty place for every take, Kumi refuses rather than make fewer: say so, and offer fewer.
+- **"Make the second and third chords jazzier, but keep it resolving":** `make` with one take per idea, whose direction names those chords and the resolution. It is never a rewrite of the source.
+- **`change`** rewrites named takes, never a kept take or the source. A take the producer has edited since can't be rewritten (`changed_since`): make a new take instead. **`keep`** marks the takes the producer likes. **`list`** shows the set.
+- **A take they don't want:** `kumi_undo` with its HISTORY id. "Undo that" right after a make takes the whole make back. Kumi for Hermes never drops takes another way.
+
 ## Tutorials
 When the producer names a video tutorial ("make the bass from this video"):
 - **Words first:** get the transcript with Hermes's `youtube-content` skill. From it, list the steps and every value the tutor says aloud, with the time they say it.
