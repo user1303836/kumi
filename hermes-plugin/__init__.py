@@ -29,8 +29,13 @@ def register(ctx) -> None:
     host = tools.Host(ctx, runtimes)
     shown = tools.installed_check(host)
     for name, schema, function, emoji in tools.TOOLS:
-        ctx.register_tool(name=name, toolset=tools.TOOLSET, schema=schema, handler=tools.handler(name, function, host),
-                          check_fn=None if name in tools.ALWAYS_SHOWN else shown, emoji=emoji)
+        callback = tools.handler(name, function, host)
+        check = None if name in tools.ALWAYS_SHOWN else shown
+        if name == "kumi_listen":
+            host.register_listen(callback, check, emoji)
+        else:
+            ctx.register_tool(name=name, toolset=tools.TOOLSET, schema=schema, handler=callback,
+                              check_fn=check, emoji=emoji)
 
     def approval(**kwargs):
         return policy.pre_tool_call(host, **kwargs)
@@ -68,4 +73,4 @@ def register(ctx) -> None:
         ctx.register_skill(skill, SKILLS / skill / "SKILL.md")
     ctx.register_system_prompt_section("kumi", PROMPT)
     blueprints.register(ctx)
-    ctx.on_unload(runtimes.stop_all)
+    ctx.on_unload(host.unload)

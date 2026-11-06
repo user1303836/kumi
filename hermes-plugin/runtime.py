@@ -605,6 +605,7 @@ class Runtime:
     state_lock: StateLock
     profile: str = ""
     info: dict = field(default_factory=dict)
+    listen_features: frozenset[str] = frozenset()
     last_used: float = field(default_factory=time.monotonic)
     in_flight: int = 0
     closing: bool = False
@@ -701,6 +702,8 @@ class Runtimes:
         self._pending: dict[Path, str | None] = {}
         self._cancelled: set[Path] = set()
         self._watching = False
+        # Outside registry/runtime locks, in the profile's context, on start, closing and retirement.
+        self.on_change: Callable[[Path], None] | None = None
 
     def get(self, data_dir: Path) -> Runtime | None:
         with self._lock:
@@ -786,6 +789,7 @@ class Runtimes:
         if watch:
             _thread(self._watch_idle, "kumi-runtime-idle").start()
         _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime, baseline).start()
+        self._changed(runtime.data_dir)
         self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         return runtime
 
@@ -807,6 +811,7 @@ class Runtimes:
             settling = runtime.in_flight > 0 or runtime.client.unsettled
         if stopping:  # another stop, or the idle watch, is already ending it
             return
+        self._changed(runtime.data_dir)
         if settling:
             runtime.client.end_input()
             self._emit("status.changed", {"seq": None, "profile": runtime.profile, "settling": True})
@@ -860,6 +865,7 @@ class Runtimes:
 
     def _stop_idle(self, runtime: Runtime, limit: float) -> None:
         log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, limit)
+        self._changed(runtime.data_dir)
         runtime.client.close(timeout=self._stop_wait)
         self._retire(runtime)
 
@@ -888,6 +894,13 @@ class Runtimes:
         if protocol != RUNTIME_PROTOCOL:
             raise Unavailable("wrong_runtime", f"Kumi's runtime speaks {protocol}, not {RUNTIME_PROTOCOL}: set Kumi up "
                                                "again.")
+        try:
+            listed = client.request("tools/list", {}, timeout=left())
+        except Unavailable as failure:
+            if failure.code != "protocol":  # older servers may not implement tools/list; transport failures still fail
+                raise
+            listed = None
+        runtime.listen_features = listen_features(listed)
         capabilities = result.get("capabilities") if isinstance(result.get("capabilities"), dict) else {}
         offered = capabilities.get("resources")
         if isinstance(offered, dict) and offered.get("subscribe") is True:
@@ -972,10 +985,18 @@ class Runtimes:
             return
         try:
             runtime.state_lock.release()
+            self._changed(runtime.data_dir)
             self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         finally:
             runtime.gone.set()
             runtime.wake.set()  # its watcher ends now
+
+    def _changed(self, data_dir: Path) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change(data_dir)
+            except Exception:
+                log.exception("Kumi couldn't refresh its listening schema")
 
     def _emit(self, event: str, payload: dict) -> None:
         if self._events is not None:
@@ -983,6 +1004,20 @@ class Runtimes:
                 self._events(event, payload)
             except Exception:
                 log.exception("Kumi's %s event couldn't be sent", event)
+
+
+def listen_features(listed: Any) -> frozenset[str]:
+    """Only a single valid listen advertisement in this handshake can enable known fields (CC-27)."""
+    entries = listed.get("tools") if isinstance(listed, dict) else None
+    if not isinstance(entries, list):
+        return frozenset()
+    listen = [entry for entry in entries if isinstance(entry, dict) and entry.get("name") == "listen"]
+    if len(listen) != 1 or not isinstance(listen[0].get("_meta"), dict):
+        return frozenset()
+    features = listen[0]["_meta"].get("kumi/listen_features")
+    if not isinstance(features, list) or any(not isinstance(value, str) for value in features):
+        return frozenset()
+    return frozenset(features) & {"window", "references"}
 
 
 def _notified(started: dict[str, Runtime], method: str, params: Any) -> None:

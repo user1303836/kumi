@@ -147,7 +147,12 @@ class Fixture:
             return {"protocolVersion": MCP, "serverInfo": {"name": "kumi-serve", "version": self.options.server_version},
                     "capabilities": {"tools": {}, **offered}}
         if method == "tools/list":
-            return {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in TOOLS]}
+            if self.options.no_tools_list:
+                raise LookupError("no method tools/list")
+            metadata = json.loads(self.options.listen_meta) if self.options.listen_meta is not None else None
+            return {"tools": [{"name": name, "inputSchema": {"type": "object"},
+                               **({"_meta": metadata} if name == "listen" and metadata is not None else {})}
+                              for name in TOOLS]}
         if method == "tools/call":
             return self.call(params["name"], dict(params.get("arguments") or {}))
         if method in ("resources/subscribe", "resources/unsubscribe") and not self.options.no_resources:
@@ -1134,6 +1139,8 @@ def main() -> None:
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
     parser.add_argument("--generation", default="g1", help="this runtime's generation, as HISTORY's ids carry it")
     parser.add_argument("--no-resources", action="store_true", help="offer no resources, as kumi serve before #1047")
+    parser.add_argument("--listen-meta", help="JSON listen tool metadata advertised by this runtime")
+    parser.add_argument("--no-tools-list", action="store_true", help="an older runtime without tools/list")
     parser.add_argument("--refuse-subscribe", action="append", default=[], help="refuse a subscription to this URI")
     parser.add_argument("--quiet", action="append", default=[], help="never tell a subscriber this URI changed")
     parser.add_argument("--publish-at-start", action="store_true", help="write HISTORY and FOCUS as it starts")
