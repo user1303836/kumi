@@ -185,9 +185,13 @@ class Approvals(unittest.TestCase):
         for path in ("/Users/someone/Music/Night Drive.backup.als", "C:\\Users\\someone\\Night Drive.backup.als"):
             with self.subTest(path=path):
                 self.assertIn("next to it: Night Drive.backup.als (before a step",
-                              tools.copy_note({"file": path, "why": "deletes"}))
+                              tools.copy_note({"file": path, "why": "deletes"}, "ableton"))
                 self.assertEqual(tools._row_copy({"file": path, "why": "deletes"}),
                                  {"file": "Night Drive.backup.als", "why": "deletes"})
+        # Renoise keeps a copy of the song before a sample load (research-1): the note says the producer's song.
+        song = "Night Drive (Kumi copy 2026-11-06).xrns"
+        self.assertIn(f"a copy of the producer's song as last saved, next to it: {song}",
+                      tools.copy_note({"file": song, "why": "deletes"}, "renoise"))
 
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
