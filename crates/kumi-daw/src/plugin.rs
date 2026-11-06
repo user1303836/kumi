@@ -29,9 +29,10 @@ pub struct PluginStep {
     /// number, by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field whatever it holds
     /// (`("remove", &["*"])`).
     pub refused: &'static [(&'static str, &'static [&'static str])],
-    /// Why it refuses a field, by the field's name, said when it does: `("arm", "…is for recording…")`. A refused field
-    /// without one is refused as deleting or not undoable.
-    pub because: &'static [(&'static str, &'static str)],
+    /// Why it refuses a field, by the field's name and the value it holds (`"*"` whatever it holds, as in `refused`),
+    /// said when it does: `("arm", "*", "…is for recording…")`, `("action", "insert-chain", "…use add-chain…")`. A value's
+    /// own reason comes before its field's; a refused field without either is refused as deleting or not undoable.
+    pub because: &'static [(&'static str, &'static str, &'static str)],
     /// What the DAW's instructions teach about its input (Live's notation), which a plugin's host reads with the step
     /// since it doesn't have Kumi's instructions.
     pub noting: Option<&'static str>,
@@ -205,8 +206,8 @@ impl PluginStep {
         PluginStep { refused, ..self }
     }
 
-    /// Why it refuses these fields, said when it does.
-    pub const fn because(self, because: &'static [(&'static str, &'static str)]) -> PluginStep {
+    /// Why it refuses these values of these fields, said when it does.
+    pub const fn because(self, because: &'static [(&'static str, &'static str, &'static str)]) -> PluginStep {
         PluginStep { because, ..self }
     }
 
@@ -354,7 +355,11 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
         step.refused.iter().any(|(name, values)| *name == field && values.iter().any(|value| value.eq_ignore_ascii_case(text)))
     };
     if refused("*") {
-        return Err(refusal(step, field, None));
+        return Err(match value {
+            Value::String(text) => refusal(step, field, Some(text)),
+            Value::Bool(_) | Value::Number(_) => refusal(step, field, Some(&value.to_string())),
+            _ => refusal(step, field, None),
+        });
     }
     match value {
         Value::String(text) => {
@@ -388,14 +393,15 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
 }
 
 /// Why `step` refuses its `field` (holding `value`, when it's one of the values it refuses): the step's own reason for
-/// that field, else as deleting or not undoable.
+/// that value, else for the field whatever it holds, else as deleting or not undoable.
 fn refusal(step: &PluginStep, field: &str, value: Option<&str>) -> String {
     let what = match value {
         Some(value) => format!("{}'s {field} {value}", step.tool),
         None => format!("{}'s {field}", step.tool),
     };
-    match step.because.iter().find(|(name, _)| *name == field) {
-        Some((_, why)) => format!("{what}: {why}"),
+    let reason = |held: &str| step.because.iter().find(|(name, said, _)| *name == field && said.eq_ignore_ascii_case(held));
+    match value.and_then(|value| reason(value.trim())).or_else(|| reason("*")) {
+        Some((.., why)) => format!("{what}: {why}"),
         None => format!("{what} deletes, or can't be undone, which Kumi for Hermes doesn't do."),
     }
 }
@@ -481,15 +487,23 @@ mod tests {
         assert!(check(&STEPS, "change_structure", &json!({"edits": [{"action": "delete-return"}]})).is_err(), "inside a list");
         assert!(check(&STEPS, "change_structure", &json!({"op": "clear-envelope"})).is_err(), "an action that destroys");
         assert!(check(&STEPS, "change_structure", &json!({"name": "Clear vocals"})).is_ok(), "only what a step does is read so");
-        // A refusal gives the step's own reason for that field when it has one; otherwise it's refused as deleting.
+        // A refusal gives the step's own reason for that value, or for that field whatever it holds, when it has one;
+        // otherwise it's refused as deleting.
         const ROUTING: [PluginStep; 1] = [PluginStep::new("set_routing", "mixer")
-            .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["Main"])])
-            .because(&[("arm", "it's for recording."), ("inputType", "it crashes.")])];
+            .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["Main", "Resampling"])])
+            .because(&[
+                ("arm", "*", "it's for recording."),
+                ("monitoring", "*", "it's for recording."),
+                ("monitoring", "in", "it passes live input."),
+                ("inputType", "Main", "it crashes."),
+            ])];
         let why = |input: Value| check(&ROUTING, "set_routing", &input).unwrap_err();
-        assert!(why(json!({"arm": false})).ends_with("arm: it's for recording."), "whatever it holds");
-        assert!(why(json!({"inputType": "Main"})).ends_with("inputType Main: it crashes."), "that value");
-        assert!(why(json!({"monitoring": "in"})).contains("deletes, or can't be undone"), "a field without a reason");
-        assert!(check(&ROUTING, "set_routing", &json!({"inputType": " main "})).is_err(), "whatever its case and spaces");
+        assert!(why(json!({"arm": false})).contains("it's for recording."), "whatever it holds");
+        assert!(why(json!({"inputType": "Main"})).contains("it crashes."), "that value");
+        assert!(why(json!({"inputType": " main "})).contains("it crashes."), "whatever its case and spaces");
+        assert!(!why(json!({"inputType": "Resampling"})).contains("it crashes."), "a value's reason is its own");
+        assert!(why(json!({"monitoring": "in"})).contains("it passes live input."), "a value's reason comes before its field's");
+        assert!(why(json!({"monitoring": "auto"})).contains("it's for recording."), "the field's fallback");
         assert!(check(&ROUTING, "set_routing", &json!({"inputType": "Bass"})).is_ok());
     }
 
