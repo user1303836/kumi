@@ -22,6 +22,7 @@ rules keep its changes exact, approved and reversible.
 - **Refs and the epoch identify things; names don't.**
   - Two tracks can share a name, and an index moves when a track is added.
   - Use the refs, project key and epoch from your latest `kumi_observe` or `kumi_read`.
+  - In Live, FOCUS gives a clip by its slot (`clip_slot:…`): `kumi_transport` launches it. A change step's `clipRef` takes the clip's own ref (`clip:…`), from a look or `kumi_read` of the track's clips.
   - **A done `kumi_change` returns the project's `project_key` and new `epoch`.** The next change in the same turn uses those, with refs that change didn't remove or replace, and needs no new look.
   - When a change is refused as stale, observe or read again. Never guess a ref or reuse one from earlier in the chat.
 - **Read narrowly.** `kumi_read` with `action: data` runs one of the DAW's readers, named in `tool` (REAPER's `reaper_read`, Renoise's `renoise_read`; Live's `read_notes` and its bridge's reads; `action: schema` with no `tool` lists them), with `query` its input, and pages with its cursor. Read what the task needs, not the whole project.
