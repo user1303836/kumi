@@ -75,8 +75,8 @@ async fn preset(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpE
             owner: None,
         });
     }
-    let verified = ctx.artifacts().verified_preset(ctx, id, &call.signal).await?;
-    let record = &verified.metadata;
+    let super::artifacts::VerifiedPreset { metadata, bytes } = ctx.artifacts().verified_preset(ctx, id, &call.signal).await?;
+    let record = &metadata;
     let (plugin, class) = (record.plugin.clone(), record.class.clone());
     let installed = tokio::task::spawn_blocking(move || inventory::installed_vst3(&roots, &plugin, &class)).await.map_err(failed)?;
     let installed = match installed {
@@ -101,7 +101,7 @@ async fn preset(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpE
         }
     }
     let name = one_line(&names_only_text(&record.name), 64);
-    let preview = integration.preset_preview(&verified.bytes, &name).await.map_err(failed)?.map_err(|findings| OpError::Findings {
+    let preview = integration.preset_preview(&bytes, &name).await.map_err(failed)?.map_err(|findings| OpError::Findings {
         code: "refused",
         reason: "Kumi won't place this preset: see findings.".into(),
         findings,
@@ -125,7 +125,7 @@ async fn preset(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpE
     if digest != record.digest || ctx.preset_previews().file(digest).as_deref() != Some(file) || preview.file != file {
         return Err(changed("This isn't the preset or the file that was approved: preview it again."));
     }
-    let placed = match integration.preset_place(&verified.bytes, &name, file, call.signal.clone()).await.map_err(failed)? {
+    let placed = match integration.preset_place(bytes, &name, file, call.signal.clone()).await.map_err(failed)? {
         Ok(placed) => placed,
         Err(refusal) => return Err(OpError::Refused { code: refusal.code, reason: refusal.reason, owner: None }),
     };
@@ -199,7 +199,7 @@ mod tests {
         }
         async fn preset_place(
             &self,
-            bytes: &[u8],
+            bytes: Vec<u8>,
             name: &str,
             file: &str,
             signal: Signal,

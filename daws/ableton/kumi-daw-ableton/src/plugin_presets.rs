@@ -138,6 +138,7 @@ pub struct Browser {
 /// What placing `bytes` as the preset `name` would write in `library`: nothing is written. The findings refuse it.
 pub fn preview(library: &Path, bytes: &[u8], name: &str) -> Result<PresetPreview, Vec<String>> {
     let plan = plan(bytes, name).map_err(|why| vec![why])?;
+    plain_folders(library, plan.folder).map_err(|why| vec![why])?;
     if taken(&plan, bytes, library) {
         return Err(vec![format!("{} is already in your User Library with other contents: name the preset differently.", plan.file())]);
     }
@@ -152,10 +153,11 @@ pub fn preview(library: &Path, bytes: &[u8], name: &str) -> Result<PresetPreview
 
 /// Places `bytes` as the preview named them (`file`), once Live's Browser lists the plug-in by its exact name, then
 /// waits for the Browser to list the file. Nothing is written when it's refused. Live's Browser doesn't say a plug-in's
-/// format; a `.vstpreset` loads only the VST3, so the device read back after the load is the last check (26d).
+/// format; a `.vstpreset` loads only the VST3, so the device read back after the load is the last check (26d). Once the
+/// file is written the answer says so: a cancelled or failed wait for the Browser is `indexed: false`, never an error.
 pub async fn place_approved(
     browser: &Browser,
-    bytes: &[u8],
+    bytes: Vec<u8>,
     name: &str,
     file: &str,
     signal: &Signal,
@@ -163,35 +165,43 @@ pub async fn place_approved(
     let refusal = |code, reason: String| Ok(Err(PresetRefusal { code, reason }));
     let library = PathBuf::from(&browser.options.user_library);
     check_library(&library).map_err(RuntimeError::plain)?;
-    let plan = match plan(bytes, name) {
+    let plan = match plan(&bytes, name) {
         Ok(plan) => plan,
         Err(why) => return refusal("refused", why),
     };
     let changed = || format!("{file} isn't the file this preset would be written as now: preview it again.");
-    if plan.file() != file || taken(&plan, bytes, &library) {
+    if plan.file() != file || taken(&plan, &bytes, &library) {
         return refusal("changed", changed());
+    }
+    if let Err(why) = plain_folders(&library, plan.folder) {
+        return refusal("refused", why);
     }
     let names = (browser.plugins)(plan.plugin.clone(), signal.clone()).await?;
     if !names.iter().any(|listed| listed.trim().eq_ignore_ascii_case(&plan.plugin)) {
         return refusal("not_installed", format!("{} isn't in Live's plug-ins. Install or enable its VST3, then ask again.", plan.plugin));
     }
     signal.check()?;
-    let (owned, planned) = (bytes.to_vec(), plan.clone());
-    let written = tokio::task::spawn_blocking(move || write(&planned, &owned, &library))
-        .await
-        .map_err(|e| RuntimeError::plain(format!("Placing the preset failed: {e}")))?;
+    let planned = plan.clone();
+    let written = tokio::task::spawn_blocking(move || match contained_folder(&library, planned.folder) {
+        Ok(directory) => write_in(&planned, &bytes, &directory).map_err(|why| (false, why)),
+        Err(why) => Err((true, why)),
+    })
+    .await
+    .map_err(|e| RuntimeError::plain(format!("Placing the preset failed: {e}")))?;
     let made = match written {
         Ok(made) => made,
+        Err((true, why)) => return refusal("refused", why),
         // Another writer took the name between the check above and the write: nothing of ours was written.
-        Err(why) if why == DIFFERENT_BYTES => return refusal("changed", changed()),
-        Err(why) => return Err(RuntimeError::plain(why)),
+        Err((_, why)) if why == DIFFERENT_BYTES => return refusal("changed", changed()),
+        Err((_, why)) => return Err(RuntimeError::plain(why)),
     };
-    // Live releases differ on whether a VST3 preset's Browser name keeps its extension: either is the file.
+    // Written: its first load waits for the Browser (`load_device`) until Live lists it, so it never loads by path
+    // (26-r5). Live releases differ on whether a VST3 preset's Browser name keeps its extension: either is the file.
     let candidates = [made.item.clone(), made.item.trim_end_matches(".vstpreset").to_string()];
+    candidates.iter().for_each(|candidate| browser.options.made.borrow_mut().written_unlisted(candidate));
     let deadline = std::time::Instant::now() + Duration::from_millis(browser.options.wait_ms.unwrap_or(20_000));
     let mut item = None;
-    loop {
-        signal.check()?;
+    while !signal.is_cancelled() {
         for candidate in &candidates {
             if (browser.options.browser_sees)(candidate.clone(), signal.clone()).await.unwrap_or(false) {
                 item = Some(candidate.clone());
@@ -201,13 +211,10 @@ pub async fn place_approved(
         if item.is_some() || std::time::Instant::now() >= deadline {
             break;
         }
-        tokio::select! { _ = signal.cancelled() => signal.check()?, _ = tokio::time::sleep(Duration::from_millis(400)) => {} }
+        tokio::select! { _ = signal.cancelled() => {}, _ = tokio::time::sleep(Duration::from_millis(400)) => {} }
     }
-    let mut listed = browser.options.made.borrow_mut();
-    match &item {
-        Some(item) => listed.listed(item),
-        // The first load of it waits for the Browser (`load_device`), so it never loads by path (26-r5).
-        None => candidates.iter().for_each(|candidate| listed.written_unlisted(candidate)),
+    if item.is_some() {
+        candidates.iter().for_each(|candidate| browser.options.made.borrow_mut().listed(candidate));
     }
     Ok(Ok(PlacedPreset {
         name: made.name,
@@ -217,6 +224,65 @@ pub async fn place_approved(
         plugin: made.plugin,
         class_id: made.class_id,
     }))
+}
+
+/// Whether a folder entry is a link Kumi won't write through: a symlink, or on Windows any reparse point (a junction).
+fn linked(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    metadata.file_type().is_symlink()
+}
+
+fn not_plain(part: &Path) -> String {
+    format!(
+        "User Library/{} isn't a plain folder in your User Library (a link or junction leads elsewhere): Kumi writes presets only into the Kumi folder itself. Make it a plain folder, then ask again.",
+        part.display()
+    )
+}
+
+/// Whether the parts of `Kumi/<folder>` that exist under `library` are plain folders inside it, reading only.
+fn plain_folders(library: &Path, folder: &str) -> Result<(), String> {
+    let root = library.canonicalize().map_err(|e| e.to_string())?;
+    let (mut path, mut relative) = (library.to_path_buf(), PathBuf::new());
+    for part in ["Kumi", folder] {
+        path.push(part);
+        relative.push(part);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if linked(&metadata) || !metadata.is_dir() => return Err(not_plain(&relative)),
+            Ok(_) if path.canonicalize().map_err(|e| e.to_string())? != root.join(&relative) => return Err(not_plain(&relative)),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// `library/Kumi/<folder>`, made one level at a time where missing, each part checked as a plain folder inside the
+/// library once it's there (made just now or by someone else meanwhile): where an approved preset is written.
+fn contained_folder(library: &Path, folder: &str) -> Result<PathBuf, String> {
+    let root = library.canonicalize().map_err(|e| e.to_string())?;
+    let (mut path, mut relative) = (library.to_path_buf(), PathBuf::new());
+    for part in ["Kumi", folder] {
+        path.push(part);
+        relative.push(part);
+        match std::fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Kumi couldn't write Live's User Library; check its location and folder permissions: {e}")),
+        }
+        let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if linked(&metadata) || !metadata.is_dir() || path.canonicalize().map_err(|e| e.to_string())? != root.join(&relative) {
+            return Err(not_plain(&relative));
+        }
+    }
+    Ok(path)
 }
 
 pub fn prepare(input: &Path, library: &Path, name: &str) -> Result<PreparedPreset, String> {
@@ -267,10 +333,16 @@ fn reading() -> std::fs::OpenOptions {
     options
 }
 
+/// Standalone's `prepare-preset`: makes the folder as it always has, then writes the file.
 fn write(plan: &PresetPlan, bytes: &[u8], library: &Path) -> Result<PreparedPreset, String> {
     let directory = library.join("Kumi").join(plan.folder);
     std::fs::create_dir_all(&directory)
         .map_err(|e| format!("Kumi couldn't write Live's User Library; check its location and folder permissions: {e}"))?;
+    write_in(plan, bytes, &directory)
+}
+
+/// Writes `bytes` as `plan`'s file in `directory`: a new file, or one already there with exactly these bytes.
+fn write_in(plan: &PresetPlan, bytes: &[u8], directory: &Path) -> Result<PreparedPreset, String> {
     let file = directory.join(format!("{}.vstpreset", plan.label));
     match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
         Ok(mut out) => {
@@ -417,7 +489,7 @@ mod tests {
 
         // Live's search is fuzzy: "Serum 2 FX" for "Serum 2" isn't Serum 2, so nothing is written.
         let (near, _) = browser(temp.path(), &["Serum 2 FX"], true);
-        let refused = place_approved(&near, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err();
+        let refused = place_approved(&near, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err();
         assert_eq!(
             (refused.code, refused.reason.as_str()),
             ("not_installed", "Serum 2 isn't in Live's plug-ins. Install or enable its VST3, then ask again.")
@@ -426,16 +498,19 @@ mod tests {
 
         // Another name than the one approved is another file: refused before Live is asked.
         let (vst3, searched) = browser(temp.path(), &["Serum 2"], true);
-        assert_eq!(place_approved(&vst3, SERUM, "Night Bass 2", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code, "changed");
+        assert_eq!(
+            place_approved(&vst3, SERUM.to_vec(), "Night Bass 2", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code,
+            "changed"
+        );
         assert!(searched.borrow().is_empty() && !kumi.exists());
 
-        let placed = place_approved(&vst3, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap();
+        let placed = place_approved(&vst3, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap();
         assert_eq!((placed.file.as_str(), placed.name.as_str(), placed.indexed), (preview.file.as_str(), preview.name.as_str(), true));
         assert_eq!(placed.item, format!("user_library/Kumi/Instruments/{}.vstpreset", preview.name));
         assert_eq!(std::fs::read(kumi.join("Instruments").join(format!("{}.vstpreset", preview.name))).unwrap(), SERUM);
         assert!(!vst3.options.made.borrow().unlisted(&placed.item));
         // The same bytes again are the same file, never a second one.
-        assert!(place_approved(&vst3, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().is_ok());
+        assert!(place_approved(&vst3, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().is_ok());
         assert_eq!(std::fs::read_dir(kumi.join("Instruments")).unwrap().count(), 1);
     }
 
@@ -447,7 +522,7 @@ mod tests {
 
         // Live hasn't listed the file by the deadline: it's placed, and its first load waits for the Browser.
         let (slow, _) = browser(temp.path(), &rows, false);
-        let placed = place_approved(&slow, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap();
+        let placed = place_approved(&slow, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap();
         assert!(!placed.indexed);
         assert!(slow.options.made.borrow().unlisted(&placed.item));
 
@@ -456,14 +531,72 @@ mod tests {
         std::fs::write(&file, b"someone else's preset").unwrap();
         assert!(super::preview(temp.path(), SERUM, "Night Bass").unwrap_err()[0].contains("already in your User Library"));
         let (vst3, _) = browser(temp.path(), &rows, true);
-        assert_eq!(place_approved(&vst3, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code, "changed");
+        assert_eq!(
+            place_approved(&vst3, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code,
+            "changed"
+        );
         assert_eq!(std::fs::read(&file).unwrap(), b"someone else's preset");
 
         // Bytes that aren't a catalogued plug-in's preset are refused by the preview and by the place.
         assert!(super::preview(temp.path(), b"not a preset", "Night Bass").is_err());
         assert_eq!(
-            place_approved(&vst3, b"not a preset", "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code,
+            place_approved(&vst3, b"not a preset".to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code,
             "refused"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_kumi_folder_that_links_elsewhere_is_refused_and_nothing_is_written_outside() {
+        // agent-m's review of #1180: the approval names only User Library/Kumi, so a link there never takes a write.
+        for linked in ["Kumi", "Kumi/Instruments"] {
+            let (temp, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let library = temp.path().join("User Library");
+            std::fs::create_dir_all(library.join("Kumi")).unwrap();
+            if linked == "Kumi" {
+                std::fs::remove_dir(library.join("Kumi")).unwrap();
+            }
+            std::os::unix::fs::symlink(outside.path(), library.join(linked)).unwrap();
+            let refused = preview(&library, SERUM, "Night Bass").unwrap_err();
+            assert!(refused[0].contains(&format!("User Library/{linked} isn't a plain folder")), "{linked}: {refused:?}");
+            let file = format!("User Library/Kumi/Instruments/Night Bass {}.vstpreset", &hex::encode(Sha256::digest(SERUM))[..12]);
+            let (vst3, _) = browser(&library, &["Serum 2"], true);
+            let placed = place_approved(&vst3, SERUM.to_vec(), "Night Bass", &file, &Signal::new()).await.unwrap().unwrap_err();
+            assert_eq!(placed.code, "refused", "{linked}");
+            let mut written = Vec::new();
+            for entry in walkdir(outside.path()) {
+                written.push(entry);
+            }
+            assert!(written.is_empty(), "{linked}: wrote outside the User Library: {written:?}");
+        }
+    }
+
+    /// Every file under `folder`.
+    fn walkdir(folder: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            if entry.path().is_dir() {
+                found.extend(walkdir(&entry.path()));
+            } else {
+                found.push(entry.path());
+            }
+        }
+        found
+    }
+
+    #[tokio::test]
+    async fn a_wait_cancelled_after_the_write_says_the_file_is_there_and_not_yet_listed() {
+        let temp = tempfile::tempdir().unwrap();
+        let preview = preview(temp.path(), SERUM, "Night Bass").unwrap();
+        let (mut cancelled, _) = browser(temp.path(), &["Serum 2"], true);
+        // The conversation is cancelled while Kumi waits for Live's Browser, after the file is written.
+        cancelled.options.browser_sees = Rc::new(|_, signal: Signal| {
+            signal.cancel();
+            futures::FutureExt::boxed_local(async { Ok(false) })
+        });
+        let placed = place_approved(&cancelled, SERUM.to_vec(), "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap();
+        assert!(!placed.indexed);
+        assert!(cancelled.options.made.borrow().unlisted(&placed.item), "its first load waits for Live's Browser");
+        assert_eq!(std::fs::read(temp.path().join("Kumi/Instruments").join(format!("{}.vstpreset", preview.name))).unwrap(), SERUM);
     }
 }

@@ -304,7 +304,7 @@ impl Integration for FallbackIntegration {
     }
     async fn preset_place(
         &self,
-        bytes: &[u8],
+        bytes: Vec<u8>,
         name: &str,
         file: &str,
         signal: Signal,
