@@ -255,6 +255,9 @@ struct ManualTool {
 impl ManualTool {
     /// Each topic's sections: those kept, else read now (several at once), kept with the copy for the next time.
     async fn read(&self, kept: &Kept, topics: &[&ManualSection], signal: Signal) -> Vec<Result<Vec<ManualSection>, WebFailure>> {
+        if signal.is_cancelled() {
+            return topics.iter().map(|_| Err(WebFailure::Aborted)).collect();
+        }
         let client = self.keeper.options().client();
         let held: Vec<Option<Vec<ManualSection>>> = topics.iter().map(|topic| kept.pages.borrow().get(&topic.number).cloned()).collect();
         let read: Vec<(usize, Result<Vec<ManualSection>, WebFailure>)> =
@@ -265,6 +268,9 @@ impl ManualTool {
             .buffer_unordered(TOPICS)
             .collect()
             .await;
+        if signal.is_cancelled() {
+            return topics.iter().map(|_| Err(WebFailure::Aborted)).collect();
+        }
         let mut answers: Vec<Result<Vec<ManualSection>, WebFailure>> = held.into_iter().map(|held| Ok(held.unwrap_or_default())).collect();
         let mut kept_more = false;
         for (at, result) in read {
@@ -282,6 +288,7 @@ impl ManualTool {
 
     /// A topic read whole: its sections one after another, each under its heading.
     async fn whole(&self, kept: &Kept, asked: &str, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        signal.check()?;
         let topic = match find_topic(&kept.sections, asked) {
             Ok(topic) => topic,
             Err(why) => return Ok(ToolResult::error(why)),
@@ -301,6 +308,7 @@ impl ManualTool {
                 )));
             }
         };
+        signal.check()?;
         let text = sections
             .iter()
             .map(|section| {
@@ -340,6 +348,7 @@ impl KernelTool for ManualTool {
         true
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        signal.check()?;
         let question = trim(input.get("question").and_then(serde_json::Value::as_str).unwrap_or(""));
         let asked = trim(input.get("topic").and_then(serde_json::Value::as_str).unwrap_or(""));
         if question.is_empty() && asked.is_empty() {
@@ -358,6 +367,7 @@ impl KernelTool for ManualTool {
                 )));
             }
         };
+        signal.check()?;
         if !asked.is_empty() {
             return self.whole(&kept, asked, signal).await;
         }
@@ -368,6 +378,7 @@ impl KernelTool for ManualTool {
         }
         let topics: Vec<&ManualSection> = candidates.iter().map(|hit| &hit.section).collect();
         let read = self.read(&kept, &topics, signal.clone()).await;
+        signal.check()?;
         let mut sections = vec![];
         let (mut unread, mut why) = (vec![], None);
         for (topic, result) in topics.iter().zip(read) {

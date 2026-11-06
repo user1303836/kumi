@@ -218,7 +218,14 @@ pub fn search(sections: &[ManualSection], prepared: &Prepared, question: &str, l
 /// One of a manual's pages, 4 MiB at most; `site` and `manual` say whose, when it answers with an error ("Ableton's
 /// site answered 404 Not Found for the manual.").
 pub async fn page(client: &dyn WebClient, signal: Signal, url: &str, site: &str, manual: &str) -> Result<String, WebFailure> {
-    let response = client.fetch(url, WebRequest { signal: Some(signal), max_bytes: Some(4 * 1024 * 1024), ..Default::default() }).await?;
+    if signal.is_cancelled() {
+        return Err(WebFailure::Aborted);
+    }
+    let response =
+        client.fetch(url, WebRequest { signal: Some(signal.clone()), max_bytes: Some(4 * 1024 * 1024), ..Default::default() }).await?;
+    if signal.is_cancelled() {
+        return Err(WebFailure::Aborted);
+    }
     if response.truncated || response.skipped || response.body.len() > 4 * 1024 * 1024 {
         return Err(WebError::new(format!("{site} returned an incomplete or oversized page for {manual}.")).into());
     }
@@ -259,6 +266,7 @@ pub struct Keeper {
     first: &'static str,
     fetch: Fetch,
     state: Rc<RefCell<KeeperState>>,
+    publication: Rc<tokio::sync::Mutex<()>>,
 }
 
 impl Keeper {
@@ -272,6 +280,7 @@ impl Keeper {
             first,
             fetch,
             state: Rc::new(RefCell::new(KeeperState::default())),
+            publication: Rc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -291,9 +300,13 @@ impl Keeper {
         let file = self.file.clone();
         let (version, fetch) = (self.version, self.fetch.clone());
         let state = Rc::downgrade(&self.state);
+        let publication = self.publication.clone();
         let reading = async move {
             let result = async {
-                let sections = fetch(options.client(), signal, options.base.clone()).await?;
+                let sections = fetch(options.client(), signal.clone(), options.base.clone()).await?;
+                if signal.is_cancelled() {
+                    return Err(WebFailure::Aborted);
+                }
                 let kept = Rc::new(Kept {
                     version,
                     fetched_at: options.now.map(|now| now()).unwrap_or_else(now_ms),
@@ -301,6 +314,15 @@ impl Keeper {
                     pages: RefCell::default(),
                     prepared: OnceCell::new(),
                 });
+                // A refreshed contents copy and an answer's added pages publish under
+                // the same fence. An old answer cannot replace a newer generation.
+                let _publish = publication.lock().await;
+                if signal.is_cancelled() {
+                    return Err(WebFailure::Aborted);
+                }
+                if let Some(state) = state.upgrade() {
+                    state.borrow_mut().held = Some(kept.clone());
+                }
                 let _ = write_json(&file, kept.as_ref()).await;
                 Ok::<_, WebFailure>(kept)
             }
@@ -308,9 +330,6 @@ impl Keeper {
             if let Some(state) = state.upgrade() {
                 let mut state = state.borrow_mut();
                 state.reading = None;
-                if let Ok(kept) = &result {
-                    state.held = Some(kept.clone());
-                }
             }
             result
         }
@@ -323,10 +342,19 @@ impl Keeper {
     /// The manual: the copy held, else the one kept in its file, else read now (the first time, the producer is told);
     /// a copy older than 45 days answers while a new one is read in the background.
     pub async fn manual(&self, signal: Signal) -> Result<Rc<Kept>, WebFailure> {
+        if signal.is_cancelled() {
+            return Err(WebFailure::Aborted);
+        }
         if self.state.borrow().held.is_none() {
-            let version = self.version;
-            let kept = read_json::<Kept>(&self.file).await.filter(|k| k.version == version && !k.sections.is_empty()).map(Rc::new);
-            self.state.borrow_mut().held = kept;
+            let _publish = self.publication.lock().await;
+            if self.state.borrow().held.is_none() {
+                let version = self.version;
+                let kept = read_json::<Kept>(&self.file).await.filter(|k| k.version == version && !k.sections.is_empty()).map(Rc::new);
+                if signal.is_cancelled() {
+                    return Err(WebFailure::Aborted);
+                }
+                self.state.borrow_mut().held = kept;
+            }
         }
         let held = self.state.borrow().held.clone();
         if let Some(held) = held {
@@ -345,6 +373,7 @@ impl Keeper {
     /// Writes `kept` to the file again, with the pages read since: what a later session finds. A copy read again
     /// meanwhile is the file's already, and stays.
     pub async fn keep(&self, kept: &Kept) {
+        let _publish = self.publication.lock().await;
         if self.state.borrow().held.as_ref().is_some_and(|held| std::ptr::eq(held.as_ref(), kept)) {
             let _ = write_json(&self.file, kept).await;
         }

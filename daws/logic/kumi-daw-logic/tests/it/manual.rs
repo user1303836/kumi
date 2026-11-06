@@ -26,7 +26,7 @@ impl WebClient for Client {
     async fn fetch(&self, url: &str, request: WebRequest) -> Result<WebResponse, WebFailure> {
         self.reads.borrow_mut().push(url.into());
         if self.delay {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::task::yield_now().await;
         }
         if request.signal.is_some_and(|s| s.is_cancelled()) {
             return Err(WebFailure::Aborted);
@@ -424,6 +424,14 @@ async fn a_topic_that_fails_is_named_beside_the_answer_and_a_stop_stops_it() {
     let signal = Signal::new();
     signal.cancel();
     assert!(m.tool.execute(input(json!({"question": "undo history"})), signal).await.unwrap_err().is_aborted());
+    // A warm contents/page cache must honor a stop too, without another fetch.
+    let reads = m.client.reads.borrow().len();
+    for query in [json!({"question": "extended parameters"}), json!({"topic": "lgce0b2501de"})] {
+        let signal = Signal::new();
+        signal.cancel();
+        assert!(m.tool.execute(input(query), signal).await.unwrap_err().is_aborted());
+    }
+    assert_eq!(m.client.reads.borrow().len(), reads);
     // Offline the first time: said, in Logic's words.
     let offline = made(&f);
     offline.client.failed.set(true);
@@ -460,7 +468,14 @@ async fn reads_at_once_share_one_read_of_the_contents_and_a_stale_copy_answers_w
             let answer = tool.execute(asked, Signal::new()).await.unwrap();
             assert!(!answer.is_error);
             assert_eq!(c.reads.borrow().len(), reads, "the old copy answers at once");
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            loop {
+                let value: Value =
+                    serde_json::from_str(&std::fs::read_to_string(dir.path().join("logic-pro-guide.json")).unwrap()).unwrap();
+                if value["fetchedAt"] == clock.get() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
             assert_eq!(c.reads.borrow()[reads..], [base(&f)], "and the contents are read again behind it");
         })
         .await;
@@ -503,11 +518,8 @@ async fn an_answers_pages_are_written_only_while_their_copy_is_the_one_held() {
             let old = keeper.manual(Signal::new()).await.unwrap();
             assert!(Rc::ptr_eq(&old, &first));
             // (until the new copy is the one held, and so in the file)
-            for _ in 0..400 {
-                if !Rc::ptr_eq(&keeper.manual(Signal::new()).await.unwrap(), &first) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            while Rc::ptr_eq(&keeper.manual(Signal::new()).await.unwrap(), &first) {
+                tokio::task::yield_now().await;
             }
             assert_eq!(reads.get(), 2, "read again, once");
             // An answer that read from the old copy keeps its page there, and leaves the newer file as it is.
@@ -538,14 +550,39 @@ async fn a_contents_page_that_changed_and_an_error_are_said() {
 
 /// The library offers Logic's guide for Logic Pro, as Live's manual for Live, and neither for REAPER or Renoise; the
 /// app shows it as a read, away from the project.
-#[test]
-fn the_library_exposes_the_deferred_guide_without_a_running_logic_app() {
-    use kumi_library::daws::LibrarySources;
-    let tool = kumi_daw_logic::library::LIBRARY.manual_tool(ManualOptions::default()).unwrap();
-    assert_eq!(tool.name(), MANUAL_TOOL);
-    assert_eq!(tool.reach(), Reach::AwayFromDaw);
-    assert!(tool.deferred());
-    assert!(tool.input_schema().get("properties").unwrap().get("topic").is_some());
+#[tokio::test(flavor = "current_thread")]
+async fn the_library_exposes_the_deferred_guide_without_a_running_logic_app() {
+    use kumi_library::{create_library, daws::Daws, LibraryOptions, LibraryToolsOptions, LibraryWebOptions};
+    use kumi_types::daw::DawProfile;
+    static DAWS: &[&dyn kumi_library::daws::LibrarySources] = &[&kumi_daw_logic::library::LIBRARY];
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let fixture = fixture();
+            let client = client(&fixture);
+            let library = create_library(LibraryOptions {
+                dir: dir.path().to_string_lossy().into_owned(),
+                daws: Daws(DAWS),
+                web: Some(LibraryWebOptions { client: client.clone(), base: Some(base(&fixture)) }),
+                ..Default::default()
+            });
+            let tools = library.tools_for(&DawProfile::LOGIC, LibraryToolsOptions::default());
+            let manual = tools.iter().filter(|tool| tool.name() == MANUAL_TOOL).collect::<Vec<_>>();
+            assert_eq!(manual.len(), 1);
+            let tool = manual[0];
+            assert_eq!(tool.reach(), Reach::AwayFromDaw);
+            assert!(tool.deferred());
+            assert!(tool.input_schema().get("properties").unwrap().get("topic").is_some());
+            assert!(client.reads.borrow().is_empty(), "Registration must not fetch the guide");
+            let answer = tool.execute(input(json!({"question": "quantize regions"})), Signal::new()).await.unwrap();
+            assert!(answer.text.contains("Quantize regions"));
+            assert!(!answer.is_error);
+            for profile in [&DawProfile::ABLETON, &DawProfile::REAPER, &DawProfile::RENOISE, &DawProfile::SOUNDCRAFT] {
+                assert!(!library.tools_for(profile, LibraryToolsOptions::default()).iter().any(|tool| tool.name() == MANUAL_TOOL));
+            }
+            library.close().await;
+        })
+        .await;
 }
 
 #[tokio::test(flavor = "current_thread")]

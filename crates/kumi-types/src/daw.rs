@@ -1091,6 +1091,7 @@ impl DawProfile {
         words: DawWords { app: "Logic Pro", place: "project", places: "projects", master: "Stereo Out", timeline: "Tracks area" },
         // M3 changes have Kumi's by-value undo; listening, scripts, goals and general UI tools remain disabled.
         caps: Capabilities {
+            manual: true,
             undo: true,
             device_tree: true,
             note_view: true,
