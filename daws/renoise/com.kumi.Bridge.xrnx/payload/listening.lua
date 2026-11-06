@@ -802,6 +802,81 @@ local function note_tempo(job, env, song)
     beat_text(transport.bpm), transport.lpb, beat_text(before.bpm), before.lpb)
 end
 
+local EDIT_SELECTION = {
+  "selected_track_index", "selected_instrument_index", "selected_sample_index", "selected_phrase_index",
+  "selected_track_device_index", "selected_note_column_index", "selected_effect_column_index",
+}
+local BLOCK_SELECTION = { "start_line", "end_line", "start_track", "end_track", "start_column", "end_column" }
+
+local function edit_snapshot(song, range)
+  local position = song.transport.edit_pos
+  local saved = {
+    edit = { position.sequence, position.line },
+    selected = { song.selected_sequence_index, song.selected_line_index },
+    pattern = song.selected_pattern_index, follow = song.transport.follow_player,
+    render_pattern = song.sequencer.pattern_sequence[range.start[1]],
+  }
+  for _, key in ipairs(EDIT_SELECTION) do saved[key] = song[key] end
+  local block = song.selection_in_pattern
+  if block then
+    saved.block = {}
+    for _, key in ipairs(BLOCK_SELECTION) do saved.block[key] = block[key] end
+  end
+  return saved
+end
+
+local function same_edit_selection(song, saved)
+  if song.transport.follow_player ~= saved.follow then return false end
+  for _, key in ipairs(EDIT_SELECTION) do
+    if song[key] ~= saved[key] then return false end
+  end
+  local block = song.selection_in_pattern
+  if (block == nil) ~= (saved.block == nil) then return false end
+  if block then
+    for _, key in ipairs(BLOCK_SELECTION) do
+      if block[key] ~= saved.block[key] then return false end
+    end
+  end
+  return true
+end
+
+local function edit_at(song, edit, selected, pattern)
+  local position = song.transport.edit_pos
+  return position.sequence == edit[1] and position.line == edit[2]
+    and song.selected_sequence_index == selected[1] and song.selected_line_index == selected[2]
+    and song.selected_pattern_index == pattern
+end
+
+local function guarded_edit_problem(job, env, song)
+  local saved = job.edit_before
+  if not saved then return end
+  if env.layout() ~= job.layout or not same_edit_selection(song, saved) then
+    return "cursor_restore_state_changed",
+      "Renoise's selection, follow-player setting, or track layout changed; guarded restoration was not attempted. Observe again."
+  end
+  -- Row 13: native follow-player left the cursor at the render start. No nearby-line tolerance:
+  -- a different producer position is theirs, just as a different BPM/LPB pair is theirs.
+  if not edit_at(song, saved.edit, saved.selected, saved.pattern)
+    and not edit_at(song, job.range.start, job.range.start, saved.render_pattern) then
+    return "cursor_restore_ownership_uncertain",
+      "Renoise's edit position is neither the launch position nor the render start; it was left unchanged. Observe again."
+  end
+end
+
+local function restore_guarded_edit(job, env, song)
+  local saved = job.edit_before
+  if not saved or edit_at(song, saved.edit, saved.selected, saved.pattern) then return true end
+  -- Restore after BPM/LPB, in the same synchronous guarded step. Never write follow-player,
+  -- the selected track/instrument/device/column, or the producer's block selection.
+  local restored = pcall(env.quiet, function()
+    song.transport.edit_pos = renoise.SongPos(saved.edit[1], saved.edit[2])
+  end)
+  if not restored or not edit_at(song, saved.edit, saved.selected, saved.pattern) or not same_edit_selection(song, saved) then
+    return false, "cursor_restore_failed", "Renoise's edit position and selection did not read back as the launch snapshot. Observe again."
+  end
+  return true
+end
+
 -- Guarded completion is one native compare-and-restore on every outcome, never a later adapter write.
 -- Deferred completion checks before *any* cleanup writes, including mute/solo; legacy requests retain their cleanup path.
 local function guarded_restore_problem(job, env, song)
@@ -815,6 +890,7 @@ local function guarded_restore_problem(job, env, song)
   if song.rendering or song.transport.playing or song.transport.edit_mode then
     return "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded restoration requires a stopped transport. Observe again."
   end
+  return guarded_edit_problem(job, env, song)
 end
 
 -- The approved end pair is the only known render-owned pair, even for a failed or cancelled render.
@@ -847,10 +923,11 @@ local function finish(job, env, state, code, message)
   if restored then
     if job.deadline_ms then restore(job, env, song) end
     restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+    if restored then restored, restore_code, restore_message = restore_guarded_edit(job, env, song) end
   elseif job.deadline_ms then
     job.restored = false
   end
-  if job.max_seconds then job.tempo_restored = restored end
+  if job.max_seconds then job.guarded_restored = restored end
   if not restored then
     state, code, message = "failed", restore_code, restore_message
   end
@@ -1210,6 +1287,7 @@ function M.launch(job, env)
       beat_text(state.bpm), state.lpb, beat_text(played.bpm), played.lpb)
   end
   job.tempo_before = { bpm = song.transport.bpm, lpb = song.transport.lpb }
+  if job.max_seconds then job.edit_before = edit_snapshot(song, job.range) end
   for _, source in ipairs(job.sources) do
     if source.what == "track" then job.snapshot = job.snapshot or snapshot(song) end
   end
@@ -1307,7 +1385,7 @@ function M.status(params, env)
   if job.error then answer.error, answer.code = job.error, job.code end
   if #job.notes > 0 then answer.notes = json.array(job.notes) end
   if job.tempo then answer.tempo = job.tempo end
-  if job.max_seconds and ended(job) then answer.restored = job.tempo_restored end
+  if job.max_seconds and ended(job) then answer.restored = job.guarded_restored end
   return answer
 end
 

@@ -86,6 +86,16 @@ end
 
 local LOGIC = "std::logic_error: "
 
+local function move_edit_position(d, position)
+  local fields = d.song_fields
+  local sequence, pattern = fields.selected_sequence_index, fields.selected_pattern_index
+  d.transport_fields.edit_pos = { sequence = position.sequence, line = position.line }
+  fields.selected_sequence_index, fields.selected_line_index = position.sequence, position.line
+  fields.selected_pattern_index = d.sequence[position.sequence]
+  if sequence ~= fields.selected_sequence_index then M.fire(fields.selected_sequence_index_observable) end
+  if pattern ~= fields.selected_pattern_index then M.fire(fields.selected_pattern_index_observable) end
+end
+
 local function install_render(song)
   local d = M.data
   local fields = M.impl(song)
@@ -140,6 +150,8 @@ function M.finish_render(options)
     M.fire(tf.bpm_observable)
     M.fire(tf.lpb_observable)
   end
+  -- Row 13, Renoise 3.5.4: follow-player left the edit cursor at the rendered window's start.
+  if tf.follow_player then move_edit_position(d, record.options.start_pos) end
   if not options.no_callback then
     local ok, err = M.run_callback(record.done)
     if not ok then M.errors[#M.errors + 1] = "render callback: " .. tostring(err) end
@@ -198,9 +210,10 @@ end
 
 -- The transport
 
-function M.transport_extras(tf, getters, _, d)
+function M.transport_extras(tf, getters, setters, d)
   tf.timing_model = tf.timing_model or 2
   tf.edit_pos = tf.edit_pos or { sequence = 1, line = 1 }
+  setters.edit_pos = function(position) move_edit_position(d, position) end
   local function beat_of(position)
     local lines = 0
     for s = 1, position.sequence - 1 do lines = lines + d.patterns[d.sequence[s]].lines end

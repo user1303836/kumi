@@ -1361,6 +1361,15 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     local setup_env, peer = setup()
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    mock.data.song.transport.edit_pos = renoise.SongPos(3, 7)
+    mock.data.transport_fields.follow_player = true
+    mock.data.song_fields.selected_track_index = 2
+    mock.data.song_fields.selected_note_column_index = 0
+    mock.data.song_fields.selected_effect_column_index = 1
+    mock.data.song_fields.selection_in_pattern = {
+      start_line = 2, end_line = 5, start_track = 2, end_track = 3, start_column = 1, end_column = 2,
+    }
+    local focus_before = result(call(peer, "focus"))
     local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     local before = states()
@@ -1382,6 +1391,8 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     eq(states(), during)
     eq(mock.data.transport_fields.bpm, 60)
     eq(mock.data.transport_fields.lpb, 8)
+    eq(mock.data.transport_fields.edit_pos.sequence, job.range.start[1], "pending keeps the renderer's cursor")
+    eq(mock.data.transport_fields.edit_pos.line, job.range.start[2])
     if outcome == "cancelled" then
       local cancelled = listening.cancel({ jobId = job.id }, env)
       eq(cancelled.state, "running")
@@ -1396,12 +1407,101 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     eq(mock.data.transport_fields.bpm, 120)
     eq(mock.data.transport_fields.lpb, 4)
     eq(states(), before, "mute/solo restoration waits for the same stopped pulse")
+    local focus_after = result(call(peer, "focus"))
+    T.same(focus_after.selection, focus_before.selection, "edit cursor and selection")
+    T.same(focus_after.transport, focus_before.transport, "transport and follow-player")
     if outcome == "done" then
       ok(done.files and #done.files == 1)
     else
       eq(done.files, nil)
       ok(not exists(job.sources[1].file))
     end
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded deferred cleanup leaves producer cursor, selection and follow-player changes untouched", function()
+  for _, changed in ipairs({ "position", "track", "range", "follow", "layout" }) do
+    for _, cancelled in ipairs({ false, true }) do
+      local setup_env, peer = setup()
+      local song, tf, fields = mock.data.song, mock.data.transport_fields, mock.data.song_fields
+      song.transport.edit_pos = renoise.SongPos(3, 7)
+      tf.follow_player = true
+      mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+      mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+      local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+      env.before_render = nil
+      listening.launch(job, env)
+      job.stopping = cancelled
+      local completed = mock.finish_render({ no_callback = true })
+      completed.done()
+      if changed == "position" then
+        song.transport.edit_pos = renoise.SongPos(2, 3)
+      elseif changed == "track" then
+        fields.selected_track_index = 4
+      elseif changed == "range" then
+        fields.selection_in_pattern = { start_line = 2, end_line = 5, start_track = 2, end_track = 3 }
+      elseif changed == "follow" then
+        tf.follow_player = false
+      else
+        env.layout = function() return job.layout + 1 end
+      end
+      local position = { tf.edit_pos.sequence, tf.edit_pos.line }
+      local selected, block, follow = fields.selected_track_index, fields.selection_in_pattern, tf.follow_player
+      local writes, during = mock.api_writes, states()
+      local failed = listening.status({ jobId = job.id }, env)
+      eq(failed.state, "failed", changed)
+      eq(failed.restored, false, changed)
+      eq(failed.code, changed == "position" and "cursor_restore_ownership_uncertain" or "cursor_restore_state_changed")
+      eq(mock.api_writes, writes, "the fence runs before any restoration write")
+      eq(tf.edit_pos.sequence, position[1])
+      eq(tf.edit_pos.line, position[2])
+      eq(fields.selected_track_index, selected)
+      eq(fields.selection_in_pattern, block)
+      eq(tf.follow_player, follow)
+      eq(tf.bpm, 60)
+      eq(tf.lpb, 8)
+      eq(states(), during)
+      eq(failed.files, nil)
+      eq(listening.origin(job.sources[1].file), nil)
+      ok(not exists(job.sources[1].file))
+      H.no_dialogs()
+    end
+  end
+end)
+
+test("listening: guarded cursor write and readback failures publish no audio", function()
+  for _, fault in ipairs({ "write", "readback" }) do
+    local setup_env, peer = setup()
+    local song, tf = mock.data.song, mock.data.transport_fields
+    song.transport.edit_pos = renoise.SongPos(3, 7)
+    tf.follow_player = true
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    local quiet = env.quiet
+    env.quiet = function(fn)
+      if tf.bpm == 120 and tf.lpb == 4 then
+        if fault == "write" then error("native edit position setter refused") end
+        quiet(fn)
+        song.transport.edit_pos = renoise.SongPos(job.range.start[1], job.range.start[2])
+      else
+        quiet(fn)
+      end
+    end
+    completed.done()
+    local failed = listening.status({ jobId = job.id }, env)
+    eq(failed.state, "failed", fault)
+    eq(failed.restored, false, fault)
+    eq(failed.code, "cursor_restore_failed", fault)
+    eq(tf.bpm, 120)
+    eq(tf.lpb, 4)
+    eq(tf.follow_player, true)
+    eq(failed.files, nil)
+    ok(not exists(job.sources[1].file))
     H.no_dialogs()
   end
 end)
