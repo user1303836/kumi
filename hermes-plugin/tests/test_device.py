@@ -26,6 +26,8 @@ SPEC = {"name": "Warm Fold", "about": "A soft saturator with a tone control, for
                      {"name": "Bypass", "type": "switch", "default": False}],
         "code": CODE}
 FILE = "User Library/Kumi/Audio Effects/Warm Fold.amxd"
+LOUDER = {"title": "Louder drums", "expected_project_key": "live:night-drive", "expected_epoch": "1",
+          "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": -4}}]}
 
 
 def digest(spec: dict = SPEC) -> str:
@@ -177,6 +179,20 @@ class Devices(unittest.TestCase):
         self.assertEqual(self.sent("preview")[0]["spec_json"], build["spec_json"], "one string, never re-encoded")
         self.assertEqual(support.handle(self.host, "kumi_device", {"spec": SPEC}, session_id="s1")["error"]["code"],
                          "not_approved", "a call no approval saw never builds")
+
+    def test_undo_that_right_after_a_build_undoes_nothing_and_a_later_change_is_the_newest_again(self):
+        """26-w5: Kumi never undoes a file it wrote into the User Library, so "undo that" right after a build undoes
+        nothing, never the change before it, and says the file stays; a change made after the build is undone again."""
+        self.start()
+        earlier = support.call(self.host, "kumi_change", LOUDER, session_id="s1")["history_ids"]
+        support.call(self.host, "kumi_device", {"spec": SPEC}, session_id="s1")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1"),
+                         {"blocked": tools.FILE_STAYS.format(file=FILE)})
+        later = support.call(self.host, "kumi_change", LOUDER, session_id="s1")["history_ids"]
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1")["state"], "undone")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual(([rows[ident] for ident in earlier], [rows[ident] for ident in later]),
+                         (["applied"], ["undone"]), "only the change after the build was undone")
 
     def test_a_stale_build_comes_back_as_serve_gave_it(self):
         self.use("--device-file-appears")

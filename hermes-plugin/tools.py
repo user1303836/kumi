@@ -61,7 +61,7 @@ class Host:
         # A chat's session id → the HISTORY ids of each change its kumi_change made, oldest first, in this Hermes
         # process: what kumi_undo with no id undoes, whole (CC-3 amendment A2), never another chat's. With the rows
         # this process saw undone, a second "undo that" reaches the change before (rgzm, #1088).
-        self._changes: dict[str, list[list[str]]] = {}
+        self._changes: dict[str, list[list[str] | str]] = {}  # each chat's writes: a change's HISTORY ids, or a file
         self._undone: set[str] = set()
         self._changes_lock = threading.Lock()
         self._trusts: dict[Path, scripts.Trust] = {}  # each profile's record of which chats read outside content
@@ -89,12 +89,27 @@ class Host:
         with self._changes_lock:
             self._undone |= {each for each in undone if isinstance(each, str)}
 
-    def latest_change(self, kwargs: dict) -> str | None:
-        """A HISTORY id of this chat's newest change not yet undone (its last row), or None when it has none here."""
+    def remember_library_write(self, kwargs: dict, file: Any) -> None:
+        """Keep a chat's write into the User Library (CC-22's device build) as its newest step. Kumi never undoes one:
+        the file stays, as its approval said. So "undo that" right after it undoes nothing, never the change before it
+        (CC-26's 26-w5)."""
+        session = kwargs.get("session_id")
+        if isinstance(session, str) and session and isinstance(file, str) and file:
+            with self._changes_lock:
+                self._changes[session] = [*self._changes.get(session, [])[1 - CHANGES_KEPT:], file]
+
+    def newest_write(self, kwargs: dict) -> tuple[str, str] | None:
+        """This chat's newest write Kumi remembers: ("change", the last HISTORY id of its newest change not yet
+        undone), ("file", a User Library file written after it), or None when it has neither here."""
         session = kwargs.get("session_id")
         with self._changes_lock:
-            changes = self._changes.get(session, []) if isinstance(session, str) else []
-            return next((ids[-1] for ids in reversed(changes) if not set(ids) <= self._undone), None)
+            writes = self._changes.get(session, []) if isinstance(session, str) else []
+            for write in reversed(writes):
+                if isinstance(write, str):
+                    return "file", write
+                if not set(write) <= self._undone:
+                    return "change", write[-1]
+        return None
 
     def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
         """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
@@ -750,6 +765,7 @@ def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
     if built.get("state") == "unsure":
         return {**built, "hint": DEVICE_UNSURE_HINT}
     if isinstance(built.get("item"), str):
+        host.remember_library_write(kwargs, built.get("file"))
         return {**built, "next": devices.next_step(built)}
     return built
 
@@ -761,10 +777,13 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "change", change, kwargs)
 
 
-# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), and how many of a chat's
-# changes Kumi keeps for it.
+# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), or where its newest step
+# wrote a file into the User Library, which Kumi never undoes (26-w5); and how many of a chat's writes Kumi keeps for it.
 NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started, or it "
                    "undid them all. kumi_history lists Kumi's changes; undo one by its id.")
+FILE_STAYS = ("Kumi didn't undo anything: this chat's newest step wrote {file} into your User Library, which Kumi "
+              "never undoes (the file stays, as its approval said). kumi_history lists Kumi's changes; undo one by its "
+              "id.")
 CHANGES_KEPT = 20
 
 
@@ -774,9 +793,12 @@ def undo_target(host: Host, args: dict, kwargs: dict) -> tuple[dict | None, str 
     asked = {key: value for key, value in args.items() if key in ("history_id", "whole_change")}
     if "history_id" in asked:
         return asked, None
-    target = host.latest_change(kwargs)
-    if target is None:
+    newest = host.newest_write(kwargs)
+    if newest is None:
         return None, NOTHING_TO_UNDO
+    kind, target = newest
+    if kind == "file":
+        return None, FILE_STAYS.format(file=target)
     return {"history_id": target, "whole_change": True}, None
 
 
