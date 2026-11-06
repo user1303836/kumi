@@ -14,6 +14,8 @@ pub(super) struct State {
     transactions: RefCell<std::collections::HashMap<String, f64>>,
     position: Cell<f64>,
     start_time: Cell<f64>,
+    resume_position: Cell<f64>,
+    playback_from: Cell<f64>,
     transport_writes: RefCell<Vec<&'static str>>,
     undo_open: Cell<bool>,
     undo_begins: Cell<usize>,
@@ -66,6 +68,8 @@ impl State {
             identity: RefCell::new("song".into()),
             position: Cell::new(12.),
             start_time: Cell::new(3.),
+            resume_position: Cell::new(12.),
+            playback_from: Cell::new(12.),
             transport_writes: RefCell::new(vec![]),
             undo_open: Cell::new(false),
             undo_begins: Cell::new(0),
@@ -324,13 +328,19 @@ impl State {
                 }
             }
             "live_transport_action" => match args.get("action").map(text) {
-                Some("continue") => {
+                Some(action @ ("start" | "continue")) => {
                     assert!(!self.undo_open.get(), "no native undo scope across capture");
+                    // A stopped seek does not move Live's saved resume position.
+                    let from = if action == "start" { self.start_time.get() } else { self.resume_position.get() };
+                    self.position.set(from);
+                    self.ears_position.set(from);
+                    self.playback_from.set(from);
                     set.playing.set(true);
                     self.starts.set(self.starts.get() + 1);
                 }
                 Some("stop") => {
                     if !self.ignore_stop.get() {
+                        self.resume_position.set(self.position.get());
                         set.playing.set(false);
                     }
                     self.stops.set(self.stops.get() + 1);
@@ -409,10 +419,10 @@ impl EarsLink for Ears {
     async fn write(&self, _: &Tap, file: &str, _: Option<Signal>) -> Result<Written, EarsError> {
         self.state.written.set(self.state.written.get() + 1);
         let mut raw = std::fs::File::create(file).unwrap();
-        // The captured duration comes from playback, never from a successful tool reply.
-        // raw_frames can truncate it to model a short/incomplete device capture.
+        // Both the clock's origin and duration come from playback, not the arm
+        // request or a successful tool reply. raw_frames can model a short capture.
         for frame in 0..self.state.raw_frames.get().min(self.state.captured_frames.get()) {
-            let beat = self.state.armed_from.get() + frame as f64 / 4000.;
+            let beat = self.state.playback_from.get() + frame as f64 / 4000.;
             let sample = (frame as f64 * std::f64::consts::TAU * 200. / 8000.).sin() as f32 * 0.2;
             for value in [sample, sample, 1. + beat.fract() as f32, beat as f32] {
                 raw.write_all(&value.to_le_bytes()).unwrap();
@@ -530,6 +540,8 @@ fn preview_reads_only_and_names_a_bounded_ears_capture() {
 fn capture_trims_the_approved_window_and_verifies_restoration() {
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
+        // Real Live resumed here after a verified seek to the approved start.
+        state.resume_position.set(28.1456);
         let takes = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap().unwrap();
         assert_eq!(takes.len(), 1);
         assert_eq!(takes[0].start, 0.);
@@ -808,7 +820,7 @@ fn recording_enabled_during_the_start_preview_is_never_started_by_capture() {
         let (live, state, request) = bounded(true).await;
         let s = state.clone();
         *live.set.on_call.borrow_mut() = Some(Box::new(move |name, args| {
-            if name == "live_transport_action_preview" && args["action"] == "continue" {
+            if name == "live_transport_action_preview" && args["action"] == "start" {
                 s.recording.set(true);
             }
             Ok(())

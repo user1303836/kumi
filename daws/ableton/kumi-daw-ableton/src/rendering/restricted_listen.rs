@@ -65,7 +65,7 @@ enum CaptureTransport {
     Prepare,
     Restore,
     RestoreStart,
-    Continue,
+    Start,
     Stop,
 }
 
@@ -276,12 +276,14 @@ impl LiveRenderer {
     /// through apply; never accept a preview from a newer Set or fall back to an emergency stop.
     async fn capture_transport(&self, ready: &Ready, step: CaptureTransport, signal: Signal) -> Result<(), RuntimeError> {
         let state = &ready.state;
-        let begins = matches!(step, CaptureTransport::Prepare | CaptureTransport::Continue);
+        let begins = matches!(step, CaptureTransport::Prepare | CaptureTransport::Start);
         let needs_stopped = !matches!(step, CaptureTransport::Stop);
         let (preview_name, apply_name, input) = match step {
-            CaptureTransport::Prepare => {
-                ("live_transport_preview", "live_transport_apply", json!({"position":ready.window.from,"loopEnabled":false}))
-            }
+            CaptureTransport::Prepare => (
+                "live_transport_preview",
+                "live_transport_apply",
+                json!({"position":ready.window.from,"startTime":ready.window.from,"loopEnabled":false}),
+            ),
             CaptureTransport::Restore => (
                 "live_transport_preview",
                 "live_transport_apply",
@@ -292,7 +294,8 @@ impl LiveRenderer {
             CaptureTransport::RestoreStart => {
                 ("live_transport_preview", "live_transport_apply", json!({"startTime":state.transport["startTime"]}))
             }
-            CaptureTransport::Continue => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"continue"})),
+            // Continue resumes Live's saved playback position, not the stopped seek.
+            CaptureTransport::Start => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"start"})),
             CaptureTransport::Stop => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"stop"})),
         };
         signal.check()?;
@@ -379,12 +382,15 @@ impl LiveRenderer {
                         )
                     };
                     let loop_state = transport.get("loop").and_then(Value::as_object).ok_or_else(unreadable)?;
-                    (number(transport, "position")? - position).abs() <= 1e-6 && flag(loop_state, "enabled")? == looped
+                    (number(transport, "position")? - position).abs() <= 1e-6
+                        && flag(loop_state, "enabled")? == looped
+                        && (!matches!(step, CaptureTransport::Prepare)
+                            || (number(transport, "startTime")? - ready.window.from).abs() <= 1e-6)
                 }
                 CaptureTransport::RestoreStart => {
                     (number(transport, "startTime")? - state.transport["startTime"].as_f64().ok_or_else(unreadable)?).abs() <= 1e-6
                 }
-                CaptureTransport::Continue => playing,
+                CaptureTransport::Start => playing,
                 CaptureTransport::Stop => !playing,
             };
             if settled {
@@ -869,7 +875,7 @@ impl LiveRenderer {
         let deadline = Instant::now() + Duration::from_secs_f64(cap);
         let end = ready.window.from + ready.window.beats;
         let played = tokio::time::timeout_at(deadline, async {
-            self.capture_transport(ready, CaptureTransport::Continue, signal.clone()).await?;
+            self.capture_transport(ready, CaptureTransport::Start, signal.clone()).await?;
             loop {
                 signal.check()?;
                 if let Some(now) = link.transport(tap, Some(signal.clone())).await.map_err(|_| unreadable())? {
