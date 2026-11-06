@@ -166,3 +166,14 @@ def job(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: A0
     if found is None:
         raise HTTPException(status_code=404, detail="Kumi has no job with that id here.")
     return {key: value for key, value in found.items() if key != "schema"}
+
+
+@router.get("/script")
+def script(sha: str = Query(..., min_length=64, max_length=64), language: str = Query(..., max_length=8)) -> dict:
+    """The full code of a script whose approval asked (CC-19), for the Desktop pane to show beside it: the file the
+    plugin saved then (`state/scripts/<sha256>.py|.lua`), re-hashed against its name before it's sent
+    (`snapshots.script`). Read-only: nothing here runs anything."""
+    found = snapshots.script(snapshots.state_dir(), sha, language)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Kumi has no saved script with that SHA-256 here.")
+    return found
