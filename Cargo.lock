@@ -1563,12 +1563,15 @@ dependencies = [
  "kumi-daw",
  "kumi-daw-own",
  "kumi-library",
+ "kumi-net",
  "kumi-testkit",
  "kumi-types",
+ "kumi-web",
  "regex",
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]
