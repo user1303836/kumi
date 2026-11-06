@@ -1,63 +1,63 @@
 {
   "schema": 1,
-  "kumi": "1.24.72",
+  "kumi": "1.24.73",
   "repository": "user1303836/kumi",
-  "tag": "v1.24.72",
-  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.72",
+  "tag": "v1.24.73",
+  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.73",
   "targets": {
     "aarch64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-aarch64-apple-darwin.tar.xz",
-      "sha256": "1d89e51ba0c20254c4237d3e522290af12da94d26d5e526b5eab1e6410b2c845",
-      "size": 28537808,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-aarch64-apple-darwin.tar.xz",
+      "sha256": "9a45ed9fd73d6952e5ee8d05e2aa32c878012860749ddc148853b43724ca9012",
+      "size": 28537972,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 89795252
+      "unpacked_bytes": 89795863
     },
     "x86_64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-x86_64-apple-darwin.tar.xz",
-      "sha256": "7b600917a356bc45d5eff36c1089c8326bb3e595d0bfd9d9cdb8bf1cb6a9467d",
-      "size": 32076452,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-x86_64-apple-darwin.tar.xz",
+      "sha256": "c3422f919cffef67b1775c50e96f31d37620599bb6f8bb91ce54729d07a54518",
+      "size": 32070072,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 97231859
+      "unpacked_bytes": 97206483
     },
     "aarch64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-aarch64-pc-windows-msvc.tar.xz",
-      "sha256": "f229ae889dc94dc197ff666b97a246442f38e7bcb979777aefe449567518930b",
-      "size": 29394548,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-aarch64-pc-windows-msvc.tar.xz",
+      "sha256": "ed65f082c98b89d9e5186937a71f51ae26734ca77f05ac4c0e0e057fc4823e93",
+      "size": 29398576,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 105554380
+      "unpacked_bytes": 105519545
     },
     "x86_64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-x86_64-pc-windows-msvc.tar.xz",
-      "sha256": "52f072b4bae17a43e19ab4f80aa290457b3e0a85c37855ff809795c9427f20fc",
-      "size": 34340168,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-x86_64-pc-windows-msvc.tar.xz",
+      "sha256": "4bafc331820f67a1e50bead6636d551a54074af6cf3c3307da2b3a4541c1a433",
+      "size": 34355832,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 125268449
+      "unpacked_bytes": 125257282
     },
     "aarch64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-aarch64-unknown-linux-gnu.tar.xz",
-      "sha256": "a2fb6a4df42c0f8d7dd9177c3514883f2fe0ea8e16d75053786ac18668a4c482",
-      "size": 26851000,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "4bb5b60e2d9e8028f3e97eb5f84585a3c6f9933592e3369ab4659a448f802d92",
+      "size": 26845668,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 84732934
+      "unpacked_bytes": 84705912
     },
     "x86_64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.72/kumi-x86_64-unknown-linux-gnu.tar.xz",
-      "sha256": "f74feb5aa45ea6fe6d79f158edad13cfad5970ff7947e0823c0afd3adf95d8f2",
-      "size": 30862912,
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.73/kumi-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "b0ac4c7176520223d42204d60938b18ca19f3f927b2a8f2b472075521b590c96",
+      "size": 30869584,
       "bridge": "1.0.107",
       "reaper": "0.1.14",
       "renoise": "1.0.20",
-      "unpacked_bytes": 98275796
+      "unpacked_bytes": 98265095
     }
   },
   "serve_options": [
