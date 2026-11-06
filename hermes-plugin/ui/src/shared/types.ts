@@ -119,7 +119,17 @@ export interface HistoryItem {
   script?: { sha256?: string; language?: string }
 }
 
-export type ScriptLanguage = 'python' | 'lua'
+/** A pending code-class approval's language: a script's (CC-19), or `device`, a Max for Live device's whole spec as
+ *  JSON (CC-22), its GenExpr code and controls together under one hash. */
+export type ScriptLanguage = 'python' | 'lua' | 'device'
+
+/** A device's spec as the plugin saved it (CC-22 22b): what its approval named, controls and code together. */
+export interface DeviceSpec {
+  name?: string
+  about?: string
+  controls?: { name?: string; type?: string; min?: number; max?: number; default?: number | string | boolean; unit?: string; options?: string[] }[]
+  code: string
+}
 
 /** `plugin.kumi.script.pending` (CC-19): a script whose approval waits. The code never travels in an event: the pane
  *  reads it through `/script` by its SHA-256, from the file the plugin saved when it asked. */
@@ -133,6 +143,8 @@ export interface PendingScript {
   lines?: number
   /** The approval's own warning, word for word. */
   warning?: string
+  /** A device's new file in the User Library, as the approval names it (CC-22). */
+  file?: string
 }
 
 /** `/script`'s answer: the saved code, re-hashed against its name before it was sent. */
