@@ -31,7 +31,7 @@ pub struct Discovery {
 }
 
 /// No symlink following, no shared credentials, no hostname lookup and no legacy fallback.
-pub fn discovery(path: &Path) -> Result<Discovery> {
+pub(crate) fn private_record(path: &Path) -> Result<Vec<u8>> {
     if !path.is_absolute() {
         return Err(Error::bad("LYNX discovery path must be absolute"));
     }
@@ -52,9 +52,9 @@ pub fn discovery(path: &Path) -> Result<Discovery> {
             return Err(Error::bad("LYNX discovery and its directory must have a protected current-user-only DACL"));
         }
     }
-    let file = options
-        .open(path)
-        .map_err(|_| Error::new(code::FAILED, "LYNX native discovery is unavailable; start a compatible opt-in control build"))?;
+    let file = options.open(path).map_err(|_| {
+        Error::new(code::FAILED, "LYNX discovery is unavailable; open a compatible build and enable Remote Control in General settings")
+    })?;
     let meta = file.metadata().map_err(|_| Error::bad("Cannot inspect LYNX discovery"))?;
     if !meta.is_file() || meta.len() > MAX_CONFIG {
         return Err(Error::bad("Invalid LYNX discovery file"));
@@ -79,6 +79,11 @@ pub fn discovery(path: &Path) -> Result<Discovery> {
     if bytes.len() > MAX_CONFIG as usize {
         return Err(Error::bad("LYNX discovery exceeds its bound"));
     }
+    Ok(bytes)
+}
+
+pub fn discovery(path: &Path) -> Result<Discovery> {
+    let bytes = private_record(path)?;
     let found: Discovery = serde_json::from_slice(&bytes).map_err(|_| Error::bad("Invalid LYNX discovery JSON"))?;
     let ip: IpAddr = found.host.parse().map_err(|_| Error::bad("LYNX host must be a numeric loopback address"))?;
     if found.protocol != PROTOCOL

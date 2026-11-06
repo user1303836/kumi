@@ -1,4 +1,4 @@
-//! Attach to a compatible running app, or start the explicitly selected custom build.
+//! Attach to LYNX Remote Control; opening an app requires an explicit project.
 use crate::{native, unix_ms, Error, Result};
 use daw_bridge::{detect, owner, wire::code, Daw};
 use serde_json::{json, Value};
@@ -9,7 +9,10 @@ use std::{
 };
 
 pub fn native_path() -> Option<PathBuf> {
-    std::env::var_os("KUMI_LYNX_CONFIG").or_else(|| std::env::var_os("LYNX_CONTROL_DISCOVERY")).map(PathBuf::from).or_else(|| {
+    std::env::var_os("LYNX_CONTROL_DISCOVERY").map(PathBuf::from).or_else(|| {
+        if let Some(profile) = std::env::var_os("LYNX_PROFILE_DIR") {
+            return Some(PathBuf::from(profile).join("LYNX/control/connection.json"));
+        }
         #[cfg(windows)]
         {
             return std::env::var_os("APPDATA").map(PathBuf::from).map(|folder| folder.join("LYNX/control/connection.json"));
@@ -21,11 +24,35 @@ pub fn native_path() -> Option<PathBuf> {
             } else {
                 std::env::var_os("XDG_CONFIG_HOME")
                     .map(PathBuf::from)
+                    .filter(|folder| folder.is_absolute())
                     .unwrap_or_else(|| home.join(".config"))
                     .join("LYNX/control/connection.json")
             }
         })
     })
+}
+
+/// The host has a scrubbed environment. An attach keeps the native path privately
+/// so its companion can find the same endpoint without forwarding launch variables.
+pub fn serving_path(home: &Path) -> Result<Option<PathBuf>> {
+    let record = home.join("bridges/lynx/launched.json");
+    match std::fs::symlink_metadata(&record) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(native_path()),
+        Err(_) => return Err(Error::bad("Cannot inspect the private LYNX attachment record")),
+        Ok(_) => {}
+    }
+    let bytes = native::private_record(&record)?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| Error::bad("Invalid LYNX attachment record"))?;
+    if value["schema"] != "lynx-kumi-launch/1" {
+        return Err(Error::bad("Incompatible LYNX attachment record; run kumi --daw lynx bridge"));
+    }
+    let path = value["nativeConfig"]
+        .as_str()
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| Error::bad("The LYNX attachment record must name an absolute native discovery path"))?;
+    Ok(Some(path))
 }
 
 pub async fn run(home: &Path, path: &Path, session: Option<&Path>, background: bool) -> Result<Value> {
@@ -45,6 +72,10 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>, background: b
     if detect::list_processes(&var).iter().any(|(_, name)| detect::process_is(Daw::Lynx, name)) {
         return Err(Error::new(code::FAILED,"LYNX is already open without a compatible Remote Control endpoint. Enable LYNX Remote Control in General settings; if this build has no such setting, save and reopen a compatible build. No second copy was started"));
     }
+    let session = session.ok_or_else(|| Error::new(
+        code::FAILED,
+        "Open LYNX and enable Remote Control in General settings, then run kumi --daw lynx bridge. Connecting does not open another app or enable control automatically",
+    ))?;
     let app =
         app.ok_or_else(|| Error::bad("A compatible custom LYNX build was not found; set KUMI_LYNX_APP to its absolute application path"))?;
     if !app.is_absolute() {
@@ -54,12 +85,10 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>, background: b
     if let Some(parent) = path.parent() {
         private_directory(parent)?;
     }
-    if let Some(session) = session {
-        if !session.is_absolute() || !session.is_file() {
-            return Err(Error::bad("The session must be an existing absolute local file"));
-        }
+    if !session.is_absolute() || !session.is_file() {
+        return Err(Error::bad("The session must be an existing absolute local file"));
     }
-    let mut child = start_apart(&app, &executable, path, session, background)?;
+    let mut child = start_apart(&app, &executable, path, Some(session), background)?;
     let until = Instant::now() + Duration::from_secs(30);
     while Instant::now() < until {
         if let Some(child) = child.as_mut() {
@@ -82,7 +111,7 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>, background: b
     }
     Err(Error::new(
         code::FAILED,
-        "LYNX opened but its compatible native endpoint did not become ready. The application was left open; no project was closed",
+        "LYNX opened; enable Remote Control in its General settings, then connect again. The application was left open; no project was closed",
     ))
 }
 
@@ -126,7 +155,7 @@ fn start_apart(
             command.arg(session);
         }
         command
-            .env("LYNX_CONTROL_ENABLED", "1")
+            .env_remove("LYNX_CONTROL_ENABLED")
             .env("LYNX_CONTROL_DISCOVERY", discovery)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -141,7 +170,7 @@ fn start_apart(
     let _ = (app, background);
     let mut command = Command::new(executable);
     command
-        .env("LYNX_CONTROL_ENABLED", "1")
+        .env_remove("LYNX_CONTROL_ENABLED")
         .env("LYNX_CONTROL_DISCOVERY", discovery)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

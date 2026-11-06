@@ -2,11 +2,11 @@
 
 ## 1. What Kumi is
 
-Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374), and SoundCraft is experimental (read-only, reached only with `--daw soundcraft`); LYNX SHARE is experimental (`--daw lynx`, requiring its unreleased native-control build). One Rust workspace, shipped as GitHub releases.
+Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374), and SoundCraft is experimental (read-only, reached only with `--daw soundcraft`); LYNX SHARE is experimental (`--daw lynx`, requiring its unreleased vendor-neutral Remote Control API). One Rust workspace, shipped as GitHub releases.
 
 Kumi starts a bridge and talks MCP to it over stdio; the bridge reaches the DAW over authenticated TCP on 127.0.0.1:
 - Live: `ableton-mcp-server`, to the Remote Script (`ableton-loopback/v1`) and Kumi's Live extension.
-- REAPER, Renoise and SoundCraft (and Logic): `daw-mcp-server --daw <daw>`, to Kumi's extension or tool in the DAW (`kumi-daw/1`); SoundCraft's bridge is a program beside it, which the host starts.
+- REAPER, Renoise, LYNX and SoundCraft (and Logic): `daw-mcp-server --daw <daw>`, to Kumi's extension or tool in the DAW (`kumi-daw/1`); SoundCraft's and LYNX's bridges are companion programs which the host starts; LYNX's attaches to its own opt-in API.
 
 Words: **own bridge** = Kumi's `kumi-daw/1` bridge, for every DAW but Live. **integration** = a DAW's host side in Kumi (`kumi-daw-<daw>`). **provider** = a DAW's install, update, doctor and setup steps (`DawProvider`, in `kumi-daw`). **place** = where a conversation, its notes and jobs are kept. **FOCUS** = what the producer is looking at. **catch-up** = what changed since Kumi last looked. **change family** = a kind of change with its own HISTORY row and undo. **Hands** = drives Live's menus. **Ears** = how Kumi hears a DAW. **slots** = which model does each listening job. **kit** = Max for Live building blocks. **goldens** = byte-exact expected outputs. **oracles** = recordings of the old TypeScript Kumi (tag `v1.7.6`). **Willington** = optional native Live bindings.
 
@@ -33,7 +33,8 @@ daws/                       everything DAW-specific, one folder per DAW
   ableton/                  kumi-daw-ableton/ (L5: Live's integration, its provider in src/app/, the M4L device builder),
                             ableton-mcp-server/ (bridge), remote-script/ (Python, in Live),
                             live-extension/ (TypeScript), protocol/ (the only list of Live's operations), max-standard/
-  lynx/                     kumi-daw-lynx/ (L5: shared OwnIntegration); lynx-kumi/ (companion: native LYNX control to kumi-daw/1)
+  lynx/                     lynx-kumi/ (companion: LYNX Remote Control API to kumi-daw/1),
+                            kumi-daw-lynx/ (L5: shared OwnIntegration, Beside attachment provider)
   own/                      Kumi's own bridge: daw-bridge/ (kumi-daw/1 wire), daw-mcp-server/ (host),
                             kumi-daw-own/ (L5: what the own-bridge integrations share, their provider among it)
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
@@ -59,7 +60,7 @@ Why it's shaped this way (keep it so):
 - **One DAW, one folder.** DAW-specific code lives in `daws/<daw>/` so a DAW's work doesn't spread across the repo. Nothing in `crates/` uses `daws/` but the app (it wires the DAWs in) and tests (`daws/own/` only). A DAW's crates use no other DAW's, only `daws/own/`.
 - **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
 - **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
-- **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW. The exception is a `program` in `scripts/daws.toml` (SoundCraft's `soundcraft-kumi`): it runs beside the DAW, which loads nothing of it, and takes Kumi's version (section 5).
+- **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW. The exception is a `program` in `scripts/daws.toml` (SoundCraft's `soundcraft-kumi` and LYNX's `lynx-kumi`): it runs beside the DAW, which loads nothing of it, and takes Kumi's version (section 5).
 - **The Hermes plugin is self-contained.** The Hermes catalog installs `hermes-plugin/` alone, from a pinned commit: nothing in it reaches outside the folder, and it carries no compiled code (setup downloads the Kumi release it pins, checked by SHA-256). It has no Rust and no layer.
 - **Frozen:** what an installed app is read by (`kumi` at the app's root, `package.json`, `bridge/prepared.json` and the package it names) and the wire protocols. Installed copies update, roll back and talk across versions through them.
 
@@ -117,7 +118,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - Kumi has one version, `X.Y.Z`. Live's bridge, REAPER's extension and Renoise's tool have their own, bumped when what that DAW loads changes (tests and Markdown aside):
   - Live: `daws/ableton/` (bridge, Remote Script, protocol, Live extension), `crates/kumi-common`, `vendor/willington`.
   - REAPER and Renoise: what `scripts/daws.toml` says each loads: REAPER's extension (`daws/reaper/reaper-kumi`) and the parts of `daws/own/daw-bridge` it links; Renoise's tool (`daws/renoise/com.kumi.Bridge.xrnx`).
-- SoundCraft's program (`soundcraft-kumi`, beside `kumi` in the bundle) has no version of its own: it takes Kumi's, like `daw-mcp-server`. Its lines are plain `Changelog:` lines; `release.py` refuses `Changelog (soundcraft):`.
+- SoundCraft's and LYNX's programs (`soundcraft-kumi` and `lynx-kumi`, beside `kumi` in the bundle) have no version of their own: it takes Kumi's, like `daw-mcp-server`. Its lines are plain `Changelog:` lines; `release.py` refuses `Changelog (soundcraft):`.
 - **In a PR, never bump a version or edit CHANGELOG.md.** Write `Changelog:` lines: they become the release notes and the app's What's new, so each is one thing a producer will notice, most important first. `Changelog: none` for internal work; `Changelog (bridge):`, `Changelog (reaper):` or `Changelog (renoise):` files a line under that heading.
 - Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), once main's CI on the commit to release is green on Linux, macOS and Windows (pull requests test on Linux alone):
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks, and how main's CI stands).

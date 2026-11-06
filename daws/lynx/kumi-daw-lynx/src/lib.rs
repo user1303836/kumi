@@ -37,7 +37,7 @@ const INSTRUCTIONS: &str = concat!(
 
 pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::LYNX,
-    descriptor: BridgeDescriptor { program: "daw-mcp-server", policy_variable: "KUMI_DAW_TOOL_POLICY", allow_variable: "KUMI_DAW_TOOL_ALLOW", events: "notifications/daw_event", daw: "LYNX SHARE", forward_env: &["KUMI_LYNX_CONFIG", "KUMI_LYNX_APP", "LYNX_CONTROL_DISCOVERY"] },
+    descriptor: BridgeDescriptor { program: "daw-mcp-server", policy_variable: "KUMI_DAW_TOOL_POLICY", allow_variable: "KUMI_DAW_TOOL_ALLOW", events: "notifications/daw_event", daw: "LYNX SHARE" },
     host_flag: "lynx", call_ms: 75_000, bridge: OwnBridge::Beside, instructions: INSTRUCTIONS,
     mechanical: "a muted channel or mixer insert, an effect on the wrong insert, an empty pattern, a muted Playlist clip",
     read_tool: "lynx_read",

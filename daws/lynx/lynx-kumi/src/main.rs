@@ -39,8 +39,13 @@ fn main() -> ExitCode {
     let Some(home) = kumi_home.or_else(daw_bridge::paths::kumi_home) else {
         return failed("KUMI_HOME or --kumi-home is required");
     };
-    let Some(native_path) = native_path.or_else(launch::native_path) else {
-        return failed("KUMI_LYNX_CONFIG must name the opt-in LYNX control discovery file");
+    let native_path = match native_path {
+        Some(path) => path,
+        None => match if launching { Ok(launch::native_path()) } else { launch::serving_path(&home) } {
+            Ok(Some(path)) => path,
+            Ok(None) => return failed("LYNX's native discovery path is unavailable; use --native-config or LYNX_CONTROL_DISCOVERY"),
+            Err(error) => return failed(&error.to_string()),
+        },
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
         Ok(r) => r,

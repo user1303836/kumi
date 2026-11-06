@@ -1165,10 +1165,10 @@ impl DawProfile {
         words: DawWords { app: "LYNX SHARE", place: "project", places: "projects", master: "Master", timeline: "Playlist" },
         caps: Capabilities { stop_transport: true, ..Capabilities::NONE },
         vocab: PromptVocab {
-            cant_reach: "LYNX needs the experimental native-control build and matching lynx-kumi companion; ordinary released LYNX builds do not provide this endpoint. See docs/en/DAWS.md.",
-            ref_example: "l:channel:0:1",
+            cant_reach: "Open a compatible LYNX Remote Control API build, enable Remote Control in General settings, then run kumi --daw lynx bridge. The API remains unreleased; ordinary LYNX 0.1.24 is not sufficient.",
+            ref_example: "l:track:0:0123456789abcdef:1",
             recipe_step_example: "a parameter set on an instrument that an earlier step inserted",
-            missing_example: "editing a native synth's oscillator settings",
+            missing_example: "rendering the project to an audio file",
             goal_instruments: "native generators or scanned hosted instruments",
             build_chains: "insert instruments and mixer effects from LYNX's catalog",
             goal_needs: "Goal-driven audio evaluation is not implemented for LYNX yet.",

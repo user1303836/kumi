@@ -802,7 +802,6 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     ..Default::default()
                 };
                 connect_mcp(options).await?
-
             }
         };
         *self.endpoint.borrow_mut() = Some(endpoint.clone());

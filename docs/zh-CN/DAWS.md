@@ -187,14 +187,15 @@ Kumi 每次查看时都会读取这首歌曲的设置并照着做：BPM（2 倍�
 
 ## LYNX SHARE（实验性）
 
-- 需要尚未发布的 LYNX Remote Control 版本以及配套的 Kumi 宿主和 `lynx-kumi`。认证使用 `lynx-control/1`，拒绝旧 Kumi 专用端点。原生 API 面向 Windows、macOS 和 Linux，尚未确定受支持的正式版本号。
-- 将 `KUMI_LYNX_APP` 指向自定义应用，运行 `kumi --daw lynx bridge`，再运行 `kumi --daw lynx`。配套程序会启动或连接兼容应用；原生发现凭据仅由该程序处理，请勿粘贴到聊天中。
+- 需要尚未发布的 [LYNX Remote Control API](https://github.com/guike8/LYNX-SHARE/blob/feature/kumi-control/docs/REMOTE_CONTROL.md) 以及配套 Kumi 宿主和 `lynx-kumi`。Windows、macOS、Linux 均使用 `lynx-control/1`。API 分支基于 0.1.24，但普通 0.1.24 正式版不含该 API，因此尚未确定兼容的最低正式版本。
+- 先打开兼容的 LYNX，在常规设置中启用 **Remote Control**，再运行 `kumi --daw lynx bridge` 和 `kumi --daw lynx`。Kumi 连接当前打开的项目，不会自动启用设置或重启应用。
 - `lynx_read` 分页读取项目、通道／混音器、音型／音符、设备／参数、目录及当前 Playlist。项目概览返回规划编辑所需的修订号。名称仅是数据；使用当前 ref 及对应读取返回的 epoch。
 - 可将内置或已扫描的宿主插件乐器插入新通道，或替换已有乐器并保留音符、路由和通道设置。类型化乐器工具须使用目录中可用的准确 ID，不扫描插件或导入采样。
 - 参数编辑面向宿主插件乐器或混音效果器，使用归一化值并核对每个 `expectedValue`。类型化参数工具仅针对顶层宿主插件设备；其他持久设置可通过完整项目文档读取和编辑。效果器从内置或已扫描目录加载。
 - Playlist 原子地添加、更新、复制或删除引用现有音型、音频通道或自动化源的片段。保留省略属性和路由，拒绝锁定轨道。类型化 Playlist 工具仅编辑当前编排；完整文档编辑还可处理音型、源及其他编排。
 - 持久修改使用 Kumi 共用的计划和 HISTORY，并明确提供 `expectedRevision`。每次提交修改后重新读取完整项目，再规划后续索引编辑。`undo_change` 仅针对 Kumi 拥有的修改，并在用户编辑冲突时拒绝恢复，不任意撤销共享原生历史。编辑设备、音符和 Playlist 前须停止播放；录音时拒绝持久修改。紧急停止不受项目修订变化影响。
 - 暂不支持保存、实时音频采集或渲染。在支持的 LYNX 正式版本及配套桥接可用之前，此集成保持实验性。
-- 在 LYNX 常规设置中启用 LYNX Remote Control（默认关闭）。界面显示运行状态，Windows、macOS、Linux 均使用仅当前用户可访问的本地连接。`LYNX_CONTROL_ENABLED=1` 和 `LYNX_CONTROL_DISCOVERY` 是显式启动设置，不改变自动更新行为。
+- 远程控制默认关闭，启用后会显示运行标记。标准的仅当前用户可读连接文件会自动发现。自定义配置或 Windows Store 版可在 bridge 命令前设置 `LYNX_CONTROL_DISCOVERY`；配套程序会私密保存路径供后续连接使用。`KUMI_LYNX_APP` 仅用于选择显式打开项目时使用的应用。请勿将凭据粘贴到聊天中，原生自动更新行为不变。
 - 使用 `lynx_read` 的 `kind: document` 和 `args.path`（JSON Pointer）分页查看完整项目，包括路由、自动化、原生音源参数和嵌套设备状态。将返回的 `snapshotId`、`documentHash` 和 revision 交给 `lynx_project_edit`，可把 1–128 个 JSON Patch 操作原子提交为一个原生撤销步骤。
 - 文档编辑可复用项目中已有的资源引用和插件 ID，不允许引入新的资源路径、录音输出位置或原生脚本代码。重置宿主插件应使用专用的替换或加载工具，不能通过文档补丁清空不透明状态。快照失效或设备变化使哈希失效时，请用 `args.refresh: true` 重新读取。
+- LYNX 界面中的撤销／重做保留原有行为，不会自动更新 Kumi HISTORY。原生修订号或设备状态不再匹配时，Kumi 会拒绝后续的定向撤销。

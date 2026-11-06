@@ -79,9 +79,53 @@ async fn compatible_launch_attaches_and_records_current_project_without_changing
     let content = std::fs::read_to_string(kept).unwrap();
     assert!(!content.contains(&"a".repeat(64)));
     assert!(content.ends_with('\n'));
+    assert_eq!(lynx_kumi::launch::serving_path(home.path()).unwrap(), Some(fake.path()));
     let state = fake.finish().await;
     assert_eq!(state.calls.len(), 1);
     assert_eq!(state.calls[0].0, "session.inspect");
+}
+
+#[test]
+fn connecting_without_native_control_does_not_launch_an_app_or_enable_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let app = home.path().join("LYNX");
+    let started = home.path().join("app-started");
+    std::fs::write(&app, "#!/bin/sh\n: > \"$LYNX_TEST_STARTED\"\nexit 0\n").unwrap();
+    std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_lynx-kumi"))
+        .arg("launch")
+        .arg("--kumi-home")
+        .arg(home.path())
+        .arg("--native-config")
+        .arg(home.path().join("absent.json"))
+        .env("KUMI_LYNX_APP", &app)
+        .env("LYNX_TEST_STARTED", &started)
+        .env("KUMI_PROCESSES", "none")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!started.exists(), "attaching must not start the selected app");
+    assert!(!home.path().join("bridges/lynx/launched.json").exists());
+}
+
+#[test]
+fn companion_refuses_a_shared_or_linked_attachment_record() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let home = tempfile::tempdir().unwrap();
+    let folder = home.path().join("bridges/lynx");
+    std::fs::create_dir_all(&folder).unwrap();
+    let record = folder.join("launched.json");
+    let bytes = serde_json::to_vec(&json!({"schema":"lynx-kumi-launch/1","nativeConfig":"/tmp/lynx/control/connection.json"})).unwrap();
+    daw_bridge::owner::write_owner_only(&record, &bytes).unwrap();
+    assert_eq!(lynx_kumi::launch::serving_path(home.path()).unwrap(), Some("/tmp/lynx/control/connection.json".into()));
+    std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(lynx_kumi::launch::serving_path(home.path()).is_err());
+    std::fs::remove_file(&record).unwrap();
+    let target = home.path().join("record-target.json");
+    daw_bridge::owner::write_owner_only(&target, &bytes).unwrap();
+    symlink(target, record).unwrap();
+    assert!(lynx_kumi::launch::serving_path(home.path()).is_err());
 }
 
 #[tokio::test]

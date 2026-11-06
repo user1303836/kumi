@@ -130,9 +130,6 @@ pub struct BridgeDescriptor {
     pub allow_variable: &'static str,
     pub events: &'static str,
     pub daw: &'static str,
-    /// Fixed filesystem configuration variables owned by this DAW's integration.
-    /// Other environment entries, including inference credentials, stay excluded.
-    pub forward_env: &'static [&'static str],
 }
 
 impl BridgeDescriptor {
@@ -143,7 +140,6 @@ impl BridgeDescriptor {
         allow_variable: "ABLETON_MCP_TOOL_ALLOW",
         events: "notifications/live_event",
         daw: "Live",
-        forward_env: &[],
     };
 
     /// REAPER's bridge: Kumi's host, `daw-mcp-server --daw reaper`.
@@ -153,7 +149,6 @@ impl BridgeDescriptor {
         allow_variable: "KUMI_DAW_TOOL_ALLOW",
         events: "notifications/daw_event",
         daw: "REAPER",
-        forward_env: &[],
     };
 
     /// Renoise's bridge: Kumi's host, `daw-mcp-server --daw renoise`.
@@ -163,7 +158,6 @@ impl BridgeDescriptor {
         allow_variable: "KUMI_DAW_TOOL_ALLOW",
         events: "notifications/daw_event",
         daw: "Renoise",
-        forward_env: &[],
     };
 
     /// Its program beside Kumi's own.
@@ -303,13 +297,6 @@ fn child_environment(bridge: &BridgeDescriptor, entry: &Path, allow_tools: &[Str
     for key in ["SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP", "PROGRAMDATA"] {
         if let Some(value) = std::env::var(key).ok().filter(|value| !value.is_empty()) {
             set(key, value);
-        }
-    }
-    for key in bridge.forward_env {
-        if let Ok(value) = std::env::var(key) {
-            if !value.is_empty() && !value.starts_with("()") {
-                set(key, value);
-            }
         }
     }
     environment
