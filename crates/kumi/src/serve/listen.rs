@@ -624,7 +624,8 @@ mod tests {
         let mut bytes = std::fs::read(&reference).unwrap();
         bytes[44 + 96_000..].copy_from_slice(&pcm(1800., 0.2)[44..44 + 96_000]);
         std::fs::write(&reference, &bytes).unwrap();
-        let heard = fixture.listen(json!({"source":{"file":source},"compare_to":{"file":reference,"from":1.,"seconds":0.75}})).await.unwrap();
+        let heard =
+            fixture.listen(json!({"source":{"file":source},"compare_to":{"file":reference,"from":1.,"seconds":0.75}})).await.unwrap();
         let compared = &heard["compare"];
         assert_eq!(compared["name"], "reference.wav");
         assert_eq!(compared["window"]["requested"], json!({"from":1.,"seconds":0.75}));
@@ -661,7 +662,8 @@ mod tests {
         mixed_rate[24..28].copy_from_slice(&24_000u32.to_le_bytes());
         mixed_rate[28..32].copy_from_slice(&48_000u32.to_le_bytes());
         std::fs::write(&quiet, mixed_rate).unwrap();
-        let heard = fixture.listen(json!({"source":{"file":source},"references":[{"file":quiet},{"file":middle},{"file":loud}]})).await.unwrap();
+        let heard =
+            fixture.listen(json!({"source":{"file":source},"references":[{"file":quiet},{"file":middle},{"file":loud}]})).await.unwrap();
         assert_eq!(heard["references"][0]["window"]["sample_rate"], 24_000.);
         assert_eq!(heard["references"][1]["window"]["sample_rate"], 48_000.);
         assert_eq!(heard["reference_profile"]["usable_references"], 3);
@@ -679,7 +681,8 @@ mod tests {
         assert!(!quantities.iter().any(|row| row["quantity"] == "true_peak"), "a Profile has no peak target");
         assert!(!heard["references"].to_string().contains(fixture.root.to_str().unwrap()));
         assert!(fixture.ctx.history().rows(10).is_empty());
-        let manifest: Value = serde_json::from_slice(&std::fs::read(fixture.ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
+        let manifest: Value =
+            serde_json::from_slice(&std::fs::read(fixture.ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
         assert_eq!(manifest.as_object().unwrap().keys().filter(|key| key.starts_with("a-")).count(), 4);
     }
 
@@ -750,14 +753,18 @@ mod tests {
     async fn low_rate_references_never_widen_air_targets_with_nyquist_floors() {
         let fixture = Fixture::new();
         let make = |name: &str, rate: u32, air_db: Option<f64>| {
-            let high = air_db.map(|db| {
-                let share = 10f64.powf(db / 10.);
-                0.25 * (share / (1. - share)).sqrt()
-            }).unwrap_or(0.);
-            let samples: Vec<f32> = (0..rate).map(|frame| {
-                let time = frame as f64 / rate as f64 * std::f64::consts::TAU;
-                (0.25 * (750. * time).sin() + high * (16_000. * time).sin()) as f32
-            }).collect();
+            let high = air_db
+                .map(|db| {
+                    let share = 10f64.powf(db / 10.);
+                    0.25 * (share / (1. - share)).sqrt()
+                })
+                .unwrap_or(0.);
+            let samples: Vec<f32> = (0..rate)
+                .map(|frame| {
+                    let time = frame as f64 / rate as f64 * std::f64::consts::TAU;
+                    (0.25 * (750. * time).sin() + high * (16_000. * time).sin()) as f32
+                })
+                .collect();
             let path = fixture.root.join(name);
             std::fs::write(&path, audio::decode::float_wav(&[samples], rate)).unwrap();
             path
@@ -766,8 +773,11 @@ mod tests {
         let low = make("low-rate.wav", 22_050, None);
         let first = make("first-full.wav", 48_000, Some(-22.));
         let second = make("second-full.wav", 48_000, Some(-24.));
-        let heard = fixture.listen(json!({"source":{"file":current},
-            "references":[{"file":low},{"file":first},{"file":second}]})).await.unwrap();
+        let heard = fixture
+            .listen(json!({"source":{"file":current},
+            "references":[{"file":low},{"file":first},{"file":second}]}))
+            .await
+            .unwrap();
         let quantities = heard["reference_profile"]["quantities"].as_array().unwrap();
         let air = quantities.iter().find(|row| row["quantity"] == "region/air").unwrap();
         assert_eq!((air["contributors"].as_u64(), air["references"].as_u64()), (Some(2), Some(3)));

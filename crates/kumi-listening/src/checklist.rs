@@ -196,8 +196,7 @@ impl Spread {
         }
         let mut mids: Vec<f64> = spreads.iter().map(|spread| spread.mid).collect();
         mids.sort_by(f64::total_cmp);
-        let (low, high) =
-            if mids.len() >= 5 { (percentile(&mids, 0.1), percentile(&mids, 0.9)) } else { (mids[0], mids[mids.len() - 1]) };
+        let (low, high) = if mids.len() >= 5 { (percentile(&mids, 0.1), percentile(&mids, 0.9)) } else { (mids[0], mids[mids.len() - 1]) };
         // At least as wide as a typical track's own range.
         let mut halves: Vec<f64> = spreads.iter().map(|spread| (spread.high - spread.low) / 2.).collect();
         halves.sort_by(f64::total_cmp);

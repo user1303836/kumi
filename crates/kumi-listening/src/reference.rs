@@ -1,14 +1,20 @@
 //! Approved-reference measurement: one decode, the two existing meters, no models.
 //! Original-source spans and replay-at-zero retained WAVs have separate identities.
 
-use crate::{checklist::{Profile, REGIONS}, measure::{band_span, fine_hz, percentile, Heard, Meter, FINE_BINS}};
+use crate::{
+    checklist::{Profile, REGIONS},
+    measure::{band_span, fine_hz, percentile, Heard, Meter, FINE_BINS},
+};
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_media::audio::{
     analyze::{Analysis, StreamingAnalysis, USUAL},
     decode::{open_audio_range_with_options, AudioError, AudioRange, DecodeOptions},
 };
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::{Seek, SeekFrom, Write}};
+use std::{
+    fs::File,
+    io::{Seek, SeekFrom, Write},
+};
 
 /// An explicit source window; both fields are required and neither is inferred.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -133,17 +139,25 @@ pub async fn measure_reference(
 
 fn validate_window(window: Option<ReferenceWindow>) -> Result<(), AudioError> {
     if let Some(w) = window {
-        if !w.from.is_finite() || w.from < 0. || !w.seconds.is_finite() || w.seconds <= 0. || w.seconds > 60.
+        if !w.from.is_finite()
+            || w.from < 0.
+            || !w.seconds.is_finite()
+            || w.seconds <= 0.
+            || w.seconds > 60.
             || !(w.from + w.seconds).is_finite()
         {
-            return Err(AudioError("Choose a finite start of at least zero and a duration greater than zero and at most 60 seconds.".into()));
+            return Err(AudioError(
+                "Choose a finite start of at least zero and a duration greater than zero and at most 60 seconds.".into(),
+            ));
         }
     }
     Ok(())
 }
 
 fn check(signal: &Option<Signal>) -> Result<(), AudioError> {
-    if let Some(signal) = signal { signal.check()?; }
+    if let Some(signal) = signal {
+        signal.check()?;
+    }
     Ok(())
 }
 
@@ -218,7 +232,9 @@ async fn measure_decoded(
             let left = &block[0];
             meter.push(left, block.get(1).unwrap_or(left));
         }
-        if let Some(writer) = &mut writer { writer.push(&block)?; }
+        if let Some(writer) = &mut writer {
+            writer.push(&block)?;
+        }
         done += block[0].len();
         tokio::task::yield_now().await;
     }
@@ -229,21 +245,35 @@ async fn measure_decoded(
     let analysis = canonical.finish(name, &source.format, decoded.original_seconds.unwrap_or(extent), actual_from);
     let (profile, availability) = match detailed {
         Some(meter) => profile_of(name, meter.finish(), energy_zero, channels),
-        None => (None, ReferenceAvailability {
-            energy_zero, profile_reason: Some(UnavailableReason::NotRequested), loud_frame_count: 0,
-            fixed_region_tolerance: false, unavailable: vec![],
-        }),
+        None => (
+            None,
+            ReferenceAvailability {
+                energy_zero,
+                profile_reason: Some(UnavailableReason::NotRequested),
+                loud_frame_count: 0,
+                fixed_region_tolerance: false,
+                unavailable: vec![],
+            },
+        ),
     };
     check(&options.signal)?;
-    if let Some(writer) = writer { writer.finish()?; }
+    if let Some(writer) = writer {
+        writer.finish()?;
+    }
     check(&options.signal)?;
     Ok(ReferenceMeasurement {
-        analysis, profile,
+        analysis,
+        profile,
         window: SampleWindow {
             original_total_frames: decoded.original_frames,
             original_seconds: decoded.original_seconds,
             original_duration_exact: decoded.original_frames.is_some(),
-            requested: options.window, start_frame, frame_count: done, sample_rate: rate, channels, replay_from: 0.,
+            requested: options.window,
+            start_frame,
+            frame_count: done,
+            sample_rate: rate,
+            channels,
+            replay_from: 0.,
         },
         availability,
     })
@@ -256,24 +286,54 @@ fn profile_of(name: &str, heard: Heard, energy_zero: bool, channels: usize) -> (
     let loud_frame_count = heard.frames.level.iter().filter(|level| **level as f64 >= gate).count();
     // Use the detailed meter's existing centroid energy threshold to avoid
     // treating epsilon/floor-only band shares as a usable tonal reference.
-    let usable_frame_count = heard.frames.mid.iter().zip(&heard.frames.side).zip(&heard.frames.level)
+    let usable_frame_count = heard
+        .frames
+        .mid
+        .iter()
+        .zip(&heard.frames.side)
+        .zip(&heard.frames.level)
         .filter(|((mid, side), level)| {
             **level as f64 >= gate && mid.iter().zip(side.iter()).map(|(m, s)| *m as f64 + *s as f64).sum::<f64>() > 1e-14
         })
         .count();
-    let profile_reason = if energy_zero { Some(UnavailableReason::ZeroEnergy) }
-        else if heard.frames.mid.is_empty() || heard.frames.low_fine.is_empty() { Some(UnavailableReason::TooShortForProfileFrames) }
-        else if usable_frame_count == 0 { Some(UnavailableReason::NoUsableProfileEnergy) }
-        else { None };
+    let profile_reason = if energy_zero {
+        Some(UnavailableReason::ZeroEnergy)
+    } else if heard.frames.mid.is_empty() || heard.frames.low_fine.is_empty() {
+        Some(UnavailableReason::TooShortForProfileFrames)
+    } else if usable_frame_count == 0 {
+        Some(UnavailableReason::NoUsableProfileEnergy)
+    } else {
+        None
+    };
     let mut availability = ReferenceAvailability {
-        energy_zero, profile_reason, loud_frame_count,
+        energy_zero,
+        profile_reason,
+        loud_frame_count,
         fixed_region_tolerance: profile_reason.is_none() && loud_frame_count < 5,
         unavailable: vec![],
     };
     if let Some(reason) = profile_reason {
-        availability.unavailable = ["regions", "tilt", "integrated", "plr", "range", "crest", "low_width",
-            "attack", "decay", "sustain", "centroid", "noise", "tempo", "key", "busyness", "groove"]
-            .into_iter().map(|quantity| UnavailableMetric { quantity: quantity.into(), reason }).collect();
+        availability.unavailable = [
+            "regions",
+            "tilt",
+            "integrated",
+            "plr",
+            "range",
+            "crest",
+            "low_width",
+            "attack",
+            "decay",
+            "sustain",
+            "centroid",
+            "noise",
+            "tempo",
+            "key",
+            "busyness",
+            "groove",
+        ]
+        .into_iter()
+        .map(|quantity| UnavailableMetric { quantity: quantity.into(), reason })
+        .collect();
         return (None, availability);
     }
     let mut profile = Profile::of(name, &heard);
@@ -285,30 +345,62 @@ fn profile_of(name: &str, heard: Heard, energy_zero: bool, channels: usize) -> (
     }
     let m = &heard.measures;
     let mut absent = |quantity: &str, missing: bool, reason: UnavailableReason| {
-        if missing { availability.unavailable.push(UnavailableMetric { quantity: quantity.into(), reason }); }
+        if missing {
+            availability.unavailable.push(UnavailableMetric { quantity: quantity.into(), reason });
+        }
     };
     let loudness_reason = if m.seconds < 0.4 { UnavailableReason::TooShortForLoudness } else { UnavailableReason::BelowLoudnessGate };
     absent("integrated", profile.integrated.is_none(), loudness_reason);
     absent("plr", profile.plr.is_none(), loudness_reason);
-    absent("range", profile.range.is_none(), if m.seconds < 3. { UnavailableReason::TooShortForRange } else { UnavailableReason::BelowLoudnessGate });
-    absent("crest", profile.crest.is_none(), if m.seconds < 0.4 { UnavailableReason::TooShortForLoudness } else { UnavailableReason::NotMeasured });
-    absent("low_width", profile.low_width.is_none(), if channels == 1 { UnavailableReason::Mono } else { UnavailableReason::NoLowBandEnergy });
-    absent("sound.width", profile.sound.width.is_none(), if channels == 1 { UnavailableReason::Mono } else { UnavailableReason::NotMeasured });
+    absent(
+        "range",
+        profile.range.is_none(),
+        if m.seconds < 3. { UnavailableReason::TooShortForRange } else { UnavailableReason::BelowLoudnessGate },
+    );
+    absent(
+        "crest",
+        profile.crest.is_none(),
+        if m.seconds < 0.4 { UnavailableReason::TooShortForLoudness } else { UnavailableReason::NotMeasured },
+    );
+    absent(
+        "low_width",
+        profile.low_width.is_none(),
+        if channels == 1 { UnavailableReason::Mono } else { UnavailableReason::NoLowBandEnergy },
+    );
+    absent(
+        "sound.width",
+        profile.sound.width.is_none(),
+        if channels == 1 { UnavailableReason::Mono } else { UnavailableReason::NotMeasured },
+    );
     for (quantity, missing) in [
-        ("attack", profile.attack.is_none()), ("decay", profile.decay.is_none()),
-        ("sustain", profile.sustain.is_none()), ("centroid", profile.centroid.is_none()),
-        ("noise", profile.noise.is_none()), ("tempo", profile.tempo.is_none()),
-        ("key", profile.key.is_none()), ("busyness", profile.busyness.is_none()),
+        ("attack", profile.attack.is_none()),
+        ("decay", profile.decay.is_none()),
+        ("sustain", profile.sustain.is_none()),
+        ("centroid", profile.centroid.is_none()),
+        ("noise", profile.noise.is_none()),
+        ("tempo", profile.tempo.is_none()),
+        ("key", profile.key.is_none()),
+        ("busyness", profile.busyness.is_none()),
         ("groove", profile.groove.is_none()),
-        ("sound.pitch_drop", profile.sound.pitch_drop.is_none()), ("sound.modulation", profile.sound.modulation.is_none()),
-        ("sound.bandwidth", profile.sound.bandwidth.is_none()), ("sound.noise_floor", profile.sound.noise_floor.is_none()),
-        ("sound.warmth", profile.sound.warmth.is_none()), ("sound.tail", profile.sound.tail.is_none()),
-        ("sound.crackle", profile.sound.crackle.is_none()), ("sound.decay_time", profile.sound.decay_time.is_none()),
-        ("sound.darkening", profile.sound.darkening.is_none()), ("sound.echo_time", profile.sound.echo_time.is_none()),
-        ("sound.echo_falls", profile.sound.echo_falls.is_none()), ("sound.swing", profile.sound.swing.is_none()),
-        ("sound.sweep", profile.sound.sweep.is_none()), ("sound.tail_share", profile.sound.tail_share.is_none()),
-        ("sound.pumping", profile.sound.pumping.is_none()), ("sound.hit_crest", profile.sound.hit_crest.is_none()),
-    ] { absent(quantity, missing, UnavailableReason::NotMeasured); }
+        ("sound.pitch_drop", profile.sound.pitch_drop.is_none()),
+        ("sound.modulation", profile.sound.modulation.is_none()),
+        ("sound.bandwidth", profile.sound.bandwidth.is_none()),
+        ("sound.noise_floor", profile.sound.noise_floor.is_none()),
+        ("sound.warmth", profile.sound.warmth.is_none()),
+        ("sound.tail", profile.sound.tail.is_none()),
+        ("sound.crackle", profile.sound.crackle.is_none()),
+        ("sound.decay_time", profile.sound.decay_time.is_none()),
+        ("sound.darkening", profile.sound.darkening.is_none()),
+        ("sound.echo_time", profile.sound.echo_time.is_none()),
+        ("sound.echo_falls", profile.sound.echo_falls.is_none()),
+        ("sound.swing", profile.sound.swing.is_none()),
+        ("sound.sweep", profile.sound.sweep.is_none()),
+        ("sound.tail_share", profile.sound.tail_share.is_none()),
+        ("sound.pumping", profile.sound.pumping.is_none()),
+        ("sound.hit_crest", profile.sound.hit_crest.is_none()),
+    ] {
+        absent(quantity, missing, UnavailableReason::NotMeasured);
+    }
     bandwidth_availability(&mut availability, m.sample_rate);
     (Some(profile), availability)
 }
@@ -317,8 +409,13 @@ fn profile_of(name: &str, heard: Heard, energy_zero: bool, channels: usize) -> (
 fn bandwidth_availability(availability: &mut ReferenceAvailability, rate: f64) {
     let nyquist = rate / 2.;
     let mut check = |quantity: String, low: f64, high: f64| {
-        let reason = if nyquist <= low { Some(UnavailableReason::AboveNyquist) }
-            else if nyquist < high { Some(UnavailableReason::PartialFrequencyCoverage) } else { None };
+        let reason = if nyquist <= low {
+            Some(UnavailableReason::AboveNyquist)
+        } else if nyquist < high {
+            Some(UnavailableReason::PartialFrequencyCoverage)
+        } else {
+            None
+        };
         if let Some(reason) = reason {
             if let Some(missing) = availability.unavailable.iter_mut().find(|missing| missing.quantity == quantity) {
                 missing.reason = reason;
@@ -345,15 +442,21 @@ struct WavWriter {
 
 impl WavWriter {
     fn new(retained: RetainedWav, rate: u32, channels: usize, frames: usize) -> Result<Self, AudioError> {
-        let data = frames.checked_mul(channels).and_then(|n| n.checked_mul(4))
-            .and_then(|n| u32::try_from(n).ok()).filter(|n| *n <= u32::MAX - 36)
+        let data = frames
+            .checked_mul(channels)
+            .and_then(|n| n.checked_mul(4))
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| *n <= u32::MAX - 36)
             .ok_or_else(|| AudioError("That retained excerpt is too large for float32 WAV.".into()))?;
         if u64::from(data) + 44 > retained.max_bytes {
             return Err(AudioError("That retained float32 excerpt exceeds the artifact byte limit; choose a shorter window.".into()));
         }
-        let channels_u16 = u16::try_from(channels).ok().filter(|n| *n > 0 && *n <= u16::MAX / 4)
+        let channels_u16 = u16::try_from(channels)
+            .ok()
+            .filter(|n| *n > 0 && *n <= u16::MAX / 4)
             .ok_or_else(|| AudioError("That channel count can't be retained as float32 WAV.".into()))?;
-        let byte_rate = rate.checked_mul(u32::from(channels_u16) * 4)
+        let byte_rate = rate
+            .checked_mul(u32::from(channels_u16) * 4)
             .ok_or_else(|| AudioError("That sample rate/channel count can't be retained as float32 WAV.".into()))?;
         let mut file = retained.file;
         file.set_len(0)?;
@@ -378,7 +481,9 @@ impl WavWriter {
         self.buffer.clear();
         self.buffer.reserve(frames * self.channels * 4);
         for frame in 0..frames {
-            for channel in block { self.buffer.extend_from_slice(&channel[frame].to_le_bytes()); }
+            for channel in block {
+                self.buffer.extend_from_slice(&channel[frame].to_le_bytes());
+            }
         }
         self.file.write_all(&self.buffer)?;
         self.remaining -= frames;
@@ -386,7 +491,9 @@ impl WavWriter {
     }
 
     fn finish(mut self) -> Result<(), AudioError> {
-        if self.remaining != 0 { return Err(AudioError("The retained excerpt is incomplete.".into())); }
+        if self.remaining != 0 {
+            return Err(AudioError("The retained excerpt is incomplete.".into()));
+        }
         self.file.flush()?;
         self.file.sync_all()?;
         Ok(())
@@ -396,7 +503,10 @@ impl WavWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_media::audio::{analyze::{analyze_file, AnalyzeOptions}, decode::float_wav};
+    use kumi_media::audio::{
+        analyze::{analyze_file, AnalyzeOptions},
+        decode::float_wav,
+    };
     use std::io::Read;
 
     fn options(from: f64, seconds: f64, profile: bool) -> ReferenceOptions {
@@ -425,9 +535,13 @@ mod tests {
         let input = source(&channels, rate);
         let output = tempfile::NamedTempFile::new().unwrap();
         let measured = measure_reference(
-            input.path().to_str().unwrap(), "original.wav", options(0.125, 0.5, true),
+            input.path().to_str().unwrap(),
+            "original.wav",
+            options(0.125, 0.5, true),
             Some(RetainedWav { file: output.reopen().unwrap(), max_bytes: 50 * 1024 * 1024 }),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(measured.window.start_frame, 12_000);
         assert_eq!(measured.window.frame_count, 48_000);
         assert_eq!(measured.window.original_total_frames, Some(60_000));
@@ -438,10 +552,18 @@ mod tests {
         assert_eq!(measured.window.replay_from, 0.);
         assert_eq!(measured.analysis.seconds, 0.63);
 
-        let mut canonical = analyze_file(input.path().to_str().unwrap(), AnalyzeOptions {
-            focus: Some("mix".into()), start: Some(0.125), seconds: Some(0.5),
-            decode: DecodeOptions { installed_only: true, ffmpeg: None }, ..Default::default()
-        }).await.unwrap();
+        let mut canonical = analyze_file(
+            input.path().to_str().unwrap(),
+            AnalyzeOptions {
+                focus: Some("mix".into()),
+                start: Some(0.125),
+                seconds: Some(0.5),
+                decode: DecodeOptions { installed_only: true, ffmpeg: None },
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         canonical.file = "original.wav".into();
         assert_eq!(measured.analysis, canonical);
         let heard = crate::measure::measure_samples(&channels[0][12_000..], &channels[1][12_000..], rate as f64);
@@ -466,9 +588,10 @@ mod tests {
         let measured = measure_reference(gated.path().to_str().unwrap(), "quiet.wav", options(0., 0.5, true), None).await.unwrap();
         assert!(!measured.availability.energy_zero);
         assert!(measured.profile.as_ref().unwrap().integrated.is_none());
-        assert!(measured.availability.unavailable.contains(&UnavailableMetric {
-            quantity: "integrated".into(), reason: UnavailableReason::BelowLoudnessGate,
-        }));
+        assert!(measured
+            .availability
+            .unavailable
+            .contains(&UnavailableMetric { quantity: "integrated".into(), reason: UnavailableReason::BelowLoudnessGate }));
 
         let near_zero = source(&[tone(24_000, 48_000, 1e-20)], 48_000);
         let measured = measure_reference(near_zero.path().to_str().unwrap(), "near-zero.wav", options(0., 0.5, true), None).await.unwrap();
@@ -483,12 +606,14 @@ mod tests {
         assert!(profile.integrated.is_none());
         assert!(profile.low_width.is_none());
         assert!(profile.sound.width.is_none());
-        assert!(measured.availability.unavailable.contains(&UnavailableMetric {
-            quantity: "integrated".into(), reason: UnavailableReason::TooShortForLoudness,
-        }));
-        assert!(measured.availability.unavailable.contains(&UnavailableMetric {
-            quantity: "low_width".into(), reason: UnavailableReason::Mono,
-        }));
+        assert!(measured
+            .availability
+            .unavailable
+            .contains(&UnavailableMetric { quantity: "integrated".into(), reason: UnavailableReason::TooShortForLoudness }));
+        assert!(measured
+            .availability
+            .unavailable
+            .contains(&UnavailableMetric { quantity: "low_width".into(), reason: UnavailableReason::Mono }));
         assert!(measured.analysis.stereo.is_none());
 
         let measured = measure_reference(short.path().to_str().unwrap(), "short.wav", options(0., 0.1, true), None).await.unwrap();
@@ -502,16 +627,24 @@ mod tests {
         let input = source(&[tone(24_000, 48_000, 0.25)], 48_000);
         let output = tempfile::NamedTempFile::new().unwrap();
         let error = measure_reference(
-            input.path().to_str().unwrap(), "song.wav", options(0.25, 0.5, false),
+            input.path().to_str().unwrap(),
+            "song.wav",
+            options(0.25, 0.5, false),
             Some(RetainedWav { file: output.reopen().unwrap(), max_bytes: 50 * 1024 * 1024 }),
-        ).await.unwrap_err();
+        )
+        .await
+        .unwrap_err();
         assert!(error.0.starts_with("That window runs past the end of song.wav"));
         assert_eq!(output.as_file().metadata().unwrap().len(), 0);
 
         let error = measure_reference(
-            input.path().to_str().unwrap(), "song.wav", options(0., 0.5, false),
+            input.path().to_str().unwrap(),
+            "song.wav",
+            options(0., 0.5, false),
             Some(RetainedWav { file: output.reopen().unwrap(), max_bytes: 44 + 24_000 * 4 - 1 }),
-        ).await.unwrap_err();
+        )
+        .await
+        .unwrap_err();
         assert!(error.0.contains("artifact byte limit"));
         assert_eq!(output.as_file().metadata().unwrap().len(), 0);
 
@@ -547,8 +680,13 @@ mod tests {
         let input = source(&[tone(24_000, 48_000, 0.25)], 48_000);
         for seconds in [0.005, 0.02] {
             let output = tempfile::NamedTempFile::new().unwrap();
-            let measured = measure_reference(input.path().to_str().unwrap(), "short.wav", options(0., seconds, true),
-                Some(RetainedWav { file: output.reopen().unwrap(), max_bytes: 50 * 1024 * 1024 })).await;
+            let measured = measure_reference(
+                input.path().to_str().unwrap(),
+                "short.wav",
+                options(0., seconds, true),
+                Some(RetainedWav { file: output.reopen().unwrap(), max_bytes: 50 * 1024 * 1024 }),
+            )
+            .await;
             assert!(measured.is_err());
             assert_eq!(output.as_file().metadata().unwrap().len(), 0, "refused canonical windows never reach the WAV writer");
         }

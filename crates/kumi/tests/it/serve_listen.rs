@@ -145,9 +145,13 @@ case!(a_bad_last_reference_costs_no_daw_calls_in_preview_or_capture, async {
     listening.set_tempo(120.);
     let approved_root = root.clone();
     let lab = Lab::configured(
-        DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))),
-        false, move |args| args.media_roots.push(approved_root),
-    ).await;
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))),
+        false,
+        move |args| args.media_roots.push(approved_root),
+    )
+    .await;
     listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;
@@ -159,12 +163,13 @@ case!(a_bad_last_reference_costs_no_daw_calls_in_preview_or_capture, async {
             {"file":reference,"from":0.,"seconds":0.5},
             {"file":reference,"from":1.5,"seconds":1.}
         ]);
-        if preview { args["preview"] = json!(true); }
-        else {
+        if preview {
+            args["preview"] = json!(true);
+        } else {
             args["_listen"] = approved["_listen"].clone();
             args["_listen"]["prepare_seconds"] = json!(120);
         }
-        let (refused, error) = wire.call("listen", args, None).await;
+        let (refused, error) = wire.call("listen", args, Some(if preview { "bad-refs-preview" } else { "bad-refs-capture" })).await;
         assert!(error && refused["error"]["reason"].as_str().unwrap().contains("past the end"), "{refused}");
         no_audio(&refused);
         assert_eq!(requests(&lab), before, "reference validation precedes every DAW preflight and render");

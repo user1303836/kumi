@@ -217,9 +217,7 @@ impl AudioStage {
             return Err(refused("too_large", "This excerpt exceeds the 50 MiB media limit; choose a shorter window."));
         }
         let id = self.file.path().file_stem().and_then(|name| name.to_str()).ok_or_else(|| failed("invalid artifact name"))?.to_owned();
-        Ok(StagedArtifact {
-            file: StagedFile::Owned(self.file), id, identity, source_identity, audio_origin: None,
-        })
+        Ok(StagedArtifact { file: StagedFile::Owned(self.file), id, identity, source_identity, audio_origin: None })
     }
 }
 
@@ -314,8 +312,11 @@ impl Artifacts {
         }
         let audio_origin = self.records.borrow().get(id).and_then(|record| record.audio_origin.clone());
         Ok(StagedArtifact {
-            file: StagedFile::Registered { path, handle }, id: id.to_owned(), identity,
-            source_identity: identity, audio_origin,
+            file: StagedFile::Registered { path, handle },
+            id: id.to_owned(),
+            identity,
+            source_identity: identity,
+            audio_origin,
         })
     }
 
@@ -331,8 +332,7 @@ impl Artifacts {
     }
 
     pub(crate) fn audio_stage(&self) -> Result<AudioStage, OpError> {
-        let file = tempfile::Builder::new().prefix("a-").rand_bytes(24).suffix(".wav")
-            .tempfile_in(self.checked_root()?).map_err(failed)?;
+        let file = tempfile::Builder::new().prefix("a-").rand_bytes(24).suffix(".wav").tempfile_in(self.checked_root()?).map_err(failed)?;
         Ok(AudioStage { file })
     }
 
@@ -486,7 +486,11 @@ impl Artifacts {
                         added.push((
                             file.id.clone(),
                             Record {
-                                path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at,
+                                path: file.path().to_path_buf(),
+                                kind: (*kind).into(),
+                                mime: (*mime).into(),
+                                tool: tool.into(),
+                                at,
                                 audio_origin: file.audio_origin.take(),
                             },
                         ));

@@ -280,9 +280,9 @@ pub async fn open_audio_range_with_options(
     }
     let copy_start = (from.floor() - 1.).max(0.);
     let end = from + seconds + 1.;
-    let prepared = prepare(
-        path.as_ref(), signal, Some(end), Some(copy_start), None, PreparationPolicy { decode: options, native_range: true },
-    ).await?;
+    let prepared =
+        prepare(path.as_ref(), signal, Some(end), Some(copy_start), None, PreparationPolicy { decode: options, native_range: true })
+            .await?;
     let handle = File::open(&prepared.path).await?;
     let mut source = open_pcm(handle).await?;
     let native_pcm = prepared.format.is_none();
@@ -422,12 +422,13 @@ async fn convert(
     // (so for one stopping sooner too), and the reach's conversion has the same time whatever the reading. ffmpeg then
     // says the file's length as it opens it to convert (its Duration line: the reading the probe makes), and a file
     // ending well before the reach keeps the copy's length whatever the probe would say: the probe runs only for the rest.
-    let later = native_range || match until {
-        Some(until) if from.is_none() && known.is_none() && until <= READ_LATER_UP_TO => {
-            kumi_types::disk::low_disk(&folder, until * BYTES_A_SECOND, "Kumi reads audio on").await.is_none()
-        }
-        _ => false,
-    };
+    let later = native_range
+        || match until {
+            Some(until) if from.is_none() && known.is_none() && until <= READ_LATER_UP_TO => {
+                kumi_types::disk::low_disk(&folder, until * BYTES_A_SECOND, "Kumi reads audio on").await.is_none()
+            }
+            _ => false,
+        };
     let mut length = match until {
         Some(_) if from.is_none() => match known {
             Some(known) => Some(known),

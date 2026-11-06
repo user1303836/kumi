@@ -51,7 +51,9 @@ fn invalid() -> OpError {
 }
 
 fn request(args: &JsonObject) -> Result<HearRequest, OpError> {
-    if args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to" | "references" | "expected_project_key" | "expected_epoch" | "preview"))
+    if args
+        .keys()
+        .any(|key| !matches!(key.as_str(), "source" | "compare_to" | "references" | "expected_project_key" | "expected_epoch" | "preview"))
         || args.get("preview").is_some_and(|value| !value.is_boolean())
     {
         return Err(invalid());
@@ -98,14 +100,21 @@ fn approval(call: &Call) -> Result<(HearApproval, u64), OpError> {
     let prepare = given
         .get("prepare_seconds")
         .and_then(Value::as_u64)
-        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || call.args.contains_key("references") || *prepare == 0))
+        .filter(|prepare| {
+            *prepare <= 120 && (call.args.contains_key("compare_to") || call.args.contains_key("references") || *prepare == 0)
+        })
         .ok_or_else(invalid)?;
     Ok((HearApproval { seconds, deadline_seconds: deadline as u16 }, prepare))
 }
 
 /// Preparation cannot spend any of the approved native phase. Its cancellation reaches both
 /// the converter and the DSP worker before the unpublished stage is dropped.
-async fn prepare_reference(ctx: &Ctx, source: &listen::Source<'_>, original: &Signal, seconds: u64) -> Result<listen::MeasuredAudio, OpError> {
+async fn prepare_reference(
+    ctx: &Ctx,
+    source: &listen::Source<'_>,
+    original: &Signal,
+    seconds: u64,
+) -> Result<listen::MeasuredAudio, OpError> {
     if seconds == 0 {
         return Err(OpError::Refused {
             code: "prepare_timeout",
@@ -190,8 +199,8 @@ pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut request = request(&call.args)?;
-    let requested_references = listen_reference::is_new_request(&call.args)
-        .then(|| listen_reference::ReferenceSet::parse(&call.args)).transpose()?;
+    let requested_references =
+        listen_reference::is_new_request(&call.args).then(|| listen_reference::ReferenceSet::parse(&call.args)).transpose()?;
     let profile_mode = requested_references.as_ref().is_some_and(|references| references.profile);
     if !crate::daw::registry::supports_restricted_listening(ctx.daw()) {
         return Ok(outcome(
@@ -223,13 +232,19 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     // New reference windows are measured even before preview: a bad last reference costs zero DAW calls.
     // The full set shares the existing preparation allowance, never one allowance per member.
     let prepared_references = match &requested_references {
-        Some(references) => Some(references.prepare(ctx, &call.signal,
-            if preview_only { listen_reference::PREPARE_SECONDS } else { approved.expect("actual capture requires approval").1 }).await?),
+        Some(references) => Some(
+            references
+                .prepare(
+                    ctx,
+                    &call.signal,
+                    if preview_only { listen_reference::PREPARE_SECONDS } else { approved.expect("actual capture requires approval").1 },
+                )
+                .await?,
+        ),
         None => None,
     };
-    let legacy_reference = if requested_references.is_none() {
-        call.args.get("compare_to").map(listen::Source::parse).transpose()?
-    } else { None };
+    let legacy_reference =
+        if requested_references.is_none() { call.args.get("compare_to").map(listen::Source::parse).transpose()? } else { None };
     let reference = match legacy_reference.as_ref() {
         Some(source) if preview_only => {
             listen::resolve_source(ctx, source, &call.signal).await?;

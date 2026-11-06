@@ -236,11 +236,7 @@ impl StreamingAnalysis {
         analysis.file = name.rsplit(['\\', '/']).next().unwrap_or(name).into();
         analysis.format = format.into();
         analysis.seconds = round(source_seconds, 2);
-        analysis.analyzed = Analyzed {
-            from: clock(start),
-            to: clock(start + self.frames as f64 / self.meter.rate),
-            focus: "mix".into(),
-        };
+        analysis.analyzed = Analyzed { from: clock(start), to: clock(start + self.frames as f64 / self.meter.rate), focus: "mix".into() };
         analysis
     }
 }
