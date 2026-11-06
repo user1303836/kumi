@@ -841,6 +841,10 @@ TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read,
 
 
 def main() -> None:
+    # Serve's stdio is UTF-8 everywhere; a pipe's default here is the locale's (cp1252 on Windows), which would read a
+    # script's U+202E as other characters and hash different code than the plugin sent.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["serve"])
     parser.add_argument("--stdio", action="store_true", required=True)
