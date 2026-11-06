@@ -212,3 +212,19 @@ fn kumi_stops_live_only_while_it_plays_and_launches_a_session_clip_by_its_slot()
         assert!(asked(&armed, "live_discover").iter().all(|args| args["kind"] != "scene"), "no scene was looked up to fire");
     })
 }
+
+#[test]
+fn a_long_ref_is_found_by_the_short_name_the_look_gave_it_and_asking_names_nothing_new() {
+    // A fader change by its `refs` entry (Live's long ref) finds the fader the look showed by its short name (#1220).
+    local(async {
+        let integration = connected(Rc::new(Bridge::new("1.0.92", json!({})))).await;
+        let shown = integration.connection.references.borrow_mut().short_ref("1:track:0");
+        assert!(shown.starts_with("track:"), "{shown}");
+        assert_eq!(integration.model_ref("1:track:0"), shown);
+        assert_eq!(integration.model_ref(&shown), shown, "a short ref stays as it is");
+        // A ref the look never named stays as it is, and asking gives it no name: the next look numbers as it would have.
+        assert_eq!(integration.model_ref("1:track:5"), "1:track:5");
+        let next = integration.connection.references.borrow_mut().short_ref("1:track:1");
+        assert_eq!(next, shown.replace(":1", ":2"), "the next name is the one after the look's, not after an asked one");
+    })
+}
