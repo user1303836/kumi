@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.72 — 2026-11-06
+
+Ships with bridge 1.0.107, as 1.24.71 did. Ships with REAPER extension 0.1.14, which REAPER loads when
+it restarts; `kumi update` puts it in.
+
+- Live listening warns that the Set may be modified without claiming Live confirmed its modified flag.
+- Kumi for Hermes tells you when Kumi kept a copy of your project before a change, and why.
+- Kumi in Hermes tells you when it kept a copy of your Live Set before a long or destructive plan,
+  with the copy's file name.
+- In Live, a fader change's approval says what the volume changes from as well as what it changes to.
+- In Kumi for Hermes, approvals on Live name Main ("on Main"), FOCUS numbers tracks as the look does,
+  and the clip FOCUS shows can be launched.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### REAPER extension 0.1.14
+
+- Kumi sets ReaComp's Threshold and Ratio by their text, so a mastering change's glue compression is
+  set as asked.
+
 ## 1.24.71 — 2026-11-06
 
 Ships with bridge 1.0.107, which Live loads when it restarts. After updating, Kumi offers to quit Live
