@@ -602,6 +602,10 @@ fn receipt_of(env: &Env, daw: daw_bridge::daw::Daw) -> daw_bridge::lifecycle::Re
 #[tokio::test(flavor = "current_thread")]
 async fn an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_copy_its_kumi_carries() {
     use daw_bridge::daw::Daw;
+    // Setup and the release fixture must read the same checkout's payload, even after a dependency built in another
+    // worktree was reused from the target folder. A stale source here looks like an upgrade despite equal versions.
+    let workspace = kumi_testkit::workspace_path("");
+    assert_eq!(kumi_common::dev::checkout().as_deref(), Some(workspace.as_path()), "setup and the carried tool use this checkout");
     let (dir, mut env) = renoise_home();
     let resource = dir.path().join("REAPER");
     std::fs::create_dir_all(resource.join("UserPlugins")).unwrap();
