@@ -358,6 +358,65 @@ async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn the_look_names_the_returns_and_main_after_the_tracks() {
+    // An approval says "on "Main"" only when the look named Main: its ref was never in the look before, so a load on
+    // Main read `trackRef "track:7"`. Returns and Main follow the tracks, as Live numbers them, named and typed.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
+            let case = fixture["cases"].as_array().unwrap().iter().find(|case| case["label"] == "time-signature").unwrap();
+            let mut replies: std::collections::HashMap<String, Value> = case["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["responses"].as_array().unwrap())
+                .map(|(call, id)| {
+                    let key = format!("{}:{}", call["name"].as_str().unwrap(), call["args"]["kind"].as_str().unwrap_or(""));
+                    (key, fixture["values"][id.as_u64().unwrap() as usize]["reply"].clone())
+                })
+                .collect();
+            let page = |kind: &str, items: Value| {
+                let body = json!({"epoch":7,"kind":kind,"revision":"r","truncated":false,"items":items});
+                json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})
+            };
+            replies.insert(
+                "live_discover:return-track".into(),
+                page("return-track", json!([{"ref":"7:track:3","name":"A Reverb","kind":"return","mediaKind":"audio"}])),
+            );
+            replies.insert(
+                "live_discover:main-track".into(),
+                page("main-track", json!([{"ref":"7:track:4","name":"Main","kind":"main","mediaKind":"audio"}])),
+            );
+            let endpoint = Rc::new(Replies::new(replies));
+            let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+            let out = endpoint.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint: Rc<dyn McpEndpoint> = out.clone();
+                async move { Ok(endpoint) }.boxed_local()
+            }));
+            options.reconnect_interval_ms = Some(3600000);
+            let connection = LiveConnection::new(options);
+            connection.start(Signal::new()).await.unwrap();
+            let remember = Remember::new(connection.clone(), None, None);
+            let observer = Observer::new(connection.clone(), remember.clone());
+            let seen = observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
+            let context: Value = serde_json::from_str(&seen.context).unwrap();
+            let tracks = context["tracks"].as_array().unwrap_or_else(|| panic!("no tracks in {context}"));
+            let shown: Vec<(Value, Value, Value)> =
+                tracks.iter().map(|track| (track["ref"].clone(), track["name"].clone(), track["type"].clone())).collect();
+            assert_eq!(
+                &shown[3..],
+                [(json!("track:4"), json!("A Reverb"), json!("return")), (json!("track:5"), json!("Main"), json!("main"))],
+                "{shown:?}"
+            );
+            assert_eq!(observer.model().tracks.len(), 3, "the Set model stays the tracks");
+            remember.cancel_timer();
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_turn_lists_the_bridges_tools_again_only_once_they_changed() {
     tokio::task::LocalSet::new()
         .run_until(async {
