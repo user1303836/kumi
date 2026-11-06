@@ -214,7 +214,9 @@ impl State {
                 if let Some(index) = track.devices.iter().position(|device| device.identity == identity) {
                     track.devices.remove(index);
                     self.selected_track.set(track_index);
-                    *self.selected_device.borrow_mut() = if track.devices.is_empty() { Value::Null } else {
+                    *self.selected_device.borrow_mut() = if track.devices.is_empty() {
+                        Value::Null
+                    } else {
                         json!(format!("7:device:{track_index}:d{}", index.saturating_sub(1).min(track.devices.len() - 1)))
                     };
                     deleted = true;
@@ -1233,8 +1235,10 @@ fn failure_to_open_an_undo_step_leaves_ears_disarmed_without_deleting() {
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
         state.begin_fails.set(true);
-        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_begin_failed"), .. }))));
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_begin_failed"), .. }))
+        ));
         assert_eq!(live.set.chain("Bass"), ["Synth", "Kumi Ears"]);
         assert_eq!(live.set.asked_for("live_undo"), 0);
         assert_eq!(state.undo_begins.get(), 1);
@@ -1254,14 +1258,23 @@ fn refused_or_failed_deletion_still_closes_the_native_undo_step() {
         for transport_failure in [false, true] {
             let (live, state, request) = bounded(true).await;
             if transport_failure {
-                *live.set.on_call.borrow_mut() = Some(Box::new(|name, _| {
-                    if name == "live_undo" { Err(RuntimeError::plain("delete transport failed")) } else { Ok(()) }
-                }));
+                *live.set.on_call.borrow_mut() =
+                    Some(Box::new(
+                        |name, _| {
+                            if name == "live_undo" {
+                                Err(RuntimeError::plain("delete transport failed"))
+                            } else {
+                                Ok(())
+                            }
+                        },
+                    ));
             } else {
                 state.delete_fails.set(true);
             }
-            assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
-                Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+            assert!(matches!(
+                live.rendering.hear_in_set(&request, Signal::new()).await,
+                Err(RuntimeError::Hear(HearFailure::Unsure { .. }))
+            ));
             assert_eq!(live.set.chain("Bass"), ["Synth", "Kumi Ears"]);
             assert_eq!(state.undo_begins.get(), 1);
             assert_eq!(state.undo_ends.get(), 1);
@@ -1280,8 +1293,7 @@ fn cancellation_during_deletion_cannot_drop_the_open_undo_step() {
         let (live, state, request) = bounded(true).await;
         let cancel = Signal::new();
         *state.delete_cancel.borrow_mut() = Some(cancel.clone());
-        assert!(matches!(live.rendering.hear_in_set(&request, cancel).await,
-            Err(RuntimeError::Hear(HearFailure::Cancelled { .. }))));
+        assert!(matches!(live.rendering.hear_in_set(&request, cancel).await, Err(RuntimeError::Hear(HearFailure::Cancelled { .. }))));
         assert_eq!(state.undo_begins.get(), 1);
         assert_eq!(state.undo_ends.get(), 1);
         restored(&live, &state);
@@ -1294,8 +1306,10 @@ fn unconfirmed_undo_step_end_discards_the_capture_even_after_device_deletion() {
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
         state.end_fails.set(true);
-        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_end_failed"), .. }))));
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Unsure { code: Some("undo_step_end_failed"), .. }))
+        ));
         assert_eq!(state.undo_begins.get(), 1);
         assert_eq!(state.undo_ends.get(), 1);
         assert!(state.undo_open.get(), "an unacknowledged end cannot be assumed closed");
@@ -1307,15 +1321,16 @@ fn unconfirmed_undo_step_end_discards_the_capture_even_after_device_deletion() {
     });
 }
 
-
 #[test]
 fn absent_or_expired_native_deadline_never_receives_a_fresh_capture_allowance() {
     on_a_paused_clock(async {
         for deadline in [None, Some(1)] {
             let (live, state, mut request) = bounded(true).await;
             request.native_deadline_unix_ms = deadline;
-            assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
-                Err(RuntimeError::Hear(HearFailure::Refused { .. }))));
+            assert!(matches!(
+                live.rendering.hear_in_set(&request, Signal::new()).await,
+                Err(RuntimeError::Hear(HearFailure::Refused { .. }))
+            ));
             assert_eq!(state.applies.get(), 0);
             assert_eq!(state.starts.get(), 0);
             assert_eq!(state.undo_begins.get(), 0);
@@ -1336,8 +1351,7 @@ fn a_producers_start_time_change_is_not_replaced_by_the_original_start_time() {
             }
             Ok(())
         }));
-        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert_eq!(state.start_time.get(), 91.);
         assert_eq!(live.set.chain("Bass"), ["Synth"]);
         assert!(!state.undo_open.get());

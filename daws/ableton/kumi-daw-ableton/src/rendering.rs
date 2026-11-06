@@ -52,7 +52,6 @@ use std::{
     time::Duration,
 };
 
-
 pub type RenderStep = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<JsonObject, RuntimeError>>>;
 type OpeningEars = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Rc<dyn EarsLink>, RuntimeError>>>;
 type EarsFuture = Shared<LocalBoxFuture<'static, Option<Rc<dyn EarsLink>>>>;

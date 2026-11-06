@@ -21,9 +21,9 @@ const SELECTION_FIELDS: [&str; 7] = ["trackRef", "sceneRef", "slotRef", "detailC
 fn selection_row(value: &Value) -> bool {
     value.as_object().is_some_and(|row| {
         row.len() == SELECTION_FIELDS.len()
-            && SELECTION_FIELDS.iter().all(|key| row.get(*key).is_some_and(|value| {
-                value.is_null() || value.as_str().is_some_and(|text| !text.is_empty())
-            }))
+            && SELECTION_FIELDS
+                .iter()
+                .all(|key| row.get(*key).is_some_and(|value| value.is_null() || value.as_str().is_some_and(|text| !text.is_empty())))
     })
 }
 
@@ -43,8 +43,9 @@ fn uncertainty(code: &'static str, reason: &str) -> RuntimeError {
 
 fn modified(error: RuntimeError, touched: bool) -> RuntimeError {
     match error {
-        RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) =>
-            HearFailure::Refused { code, reason, marked_modified: marked_modified || touched }.into(),
+        RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) => {
+            HearFailure::Refused { code, reason, marked_modified: marked_modified || touched }.into()
+        }
         other => other,
     }
 }
@@ -156,10 +157,21 @@ impl LiveRenderer {
             return Err(refused("busy", "Kumi is already listening; wait for that call to settle."));
         }
         if !self.supported(crate::bridge_version::EARS_BRIDGE)
-            || ["live_song_state", "live_discover", "live_browser_load_preview", "live_browser_load_apply",
-                "live_undo", "live_undo_step_begin", "live_undo_step_end", "live_transport_preview",
-                "live_transport_apply", "live_transport_action_preview", "live_transport_action_apply"]
-                .iter().any(|method| !self.connection().has(method))
+            || [
+                "live_song_state",
+                "live_discover",
+                "live_browser_load_preview",
+                "live_browser_load_apply",
+                "live_undo",
+                "live_undo_step_begin",
+                "live_undo_step_end",
+                "live_transport_preview",
+                "live_transport_apply",
+                "live_transport_action_preview",
+                "live_transport_action_apply",
+            ]
+            .iter()
+            .any(|method| !self.connection().has(method))
         {
             return Err(unreadable());
         }
@@ -215,18 +227,26 @@ impl LiveRenderer {
         // These read-only previews also reject old bridges that expose the method names but
         // not the preserved-selection/start-time contracts, before a device can be created.
         self.capture_load_preview(&state, &target, signal.clone()).await?;
-        let probe = self.connection().call("live_transport_preview",
-            object(json!({"startTime":state.transport["startTime"]})), signal).await?;
+        let probe =
+            self.connection().call("live_transport_preview", object(json!({"startTime":state.transport["startTime"]})), signal).await?;
         if probe.is_error == Some(true) {
             return Err(unreadable());
         }
         let probe = payload(&probe)?;
         if probe.get("epoch").and_then(Value::as_f64) != Some(state.epoch)
-            || probe.get("confirmation").and_then(Value::as_str) != Some("apply") {
+            || probe.get("confirmation").and_then(Value::as_str) != Some("apply")
+        {
             return Err(unreadable());
         }
-        Ok(Ready { owned_transport: RefCell::new(state.transport.clone()), state, target, label, window, seconds,
-            seconds_limit: request.approval.map_or(seconds, |approval| approval.seconds) })
+        Ok(Ready {
+            owned_transport: RefCell::new(state.transport.clone()),
+            state,
+            target,
+            label,
+            window,
+            seconds,
+            seconds_limit: request.approval.map_or(seconds, |approval| approval.seconds),
+        })
     }
 
     /// Validate the exact observed Set before any rows from this response enter the ref book.
@@ -269,9 +289,9 @@ impl LiveRenderer {
                     "position":state.transport["position"],"loopEnabled":state.transport["loop"]["enabled"],
                 }),
             ),
-            CaptureTransport::RestoreStart => (
-                "live_transport_preview", "live_transport_apply", json!({"startTime":state.transport["startTime"]}),
-            ),
+            CaptureTransport::RestoreStart => {
+                ("live_transport_preview", "live_transport_apply", json!({"startTime":state.transport["startTime"]}))
+            }
             CaptureTransport::Continue => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"continue"})),
             CaptureTransport::Stop => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"stop"})),
         };
@@ -313,7 +333,8 @@ impl LiveRenderer {
         {
             let owned = ready.owned_transport.borrow();
             let changed = ["playing", "arrangementRecord", "sessionRecord", "startTime", "loop", "punchIn", "punchOut"]
-                .iter().any(|key| transport.get(*key) != owned.get(*key))
+                .iter()
+                .any(|key| transport.get(*key) != owned.get(*key))
                 || ["firedTargets", "playingTargets"].iter().any(|key| playback.get(*key) != owned.get(*key))
                 || (owned["playing"] != true
                     && (number(transport, "position")? - owned["position"].as_f64().ok_or_else(unreadable)?).abs() > 1e-6)
@@ -360,8 +381,9 @@ impl LiveRenderer {
                     let loop_state = transport.get("loop").and_then(Value::as_object).ok_or_else(unreadable)?;
                     (number(transport, "position")? - position).abs() <= 1e-6 && flag(loop_state, "enabled")? == looped
                 }
-                CaptureTransport::RestoreStart =>
-                    (number(transport, "startTime")? - state.transport["startTime"].as_f64().ok_or_else(unreadable)?).abs() <= 1e-6,
+                CaptureTransport::RestoreStart => {
+                    (number(transport, "startTime")? - state.transport["startTime"].as_f64().ok_or_else(unreadable)?).abs() <= 1e-6
+                }
                 CaptureTransport::Continue => playing,
                 CaptureTransport::Stop => !playing,
             };
@@ -381,24 +403,37 @@ impl LiveRenderer {
     }
 
     async fn capture_load_preview(&self, state: &CaptureState, target: &str, signal: Signal) -> Result<String, RuntimeError> {
-        let answer = self.connection().call("live_browser_load_preview",
-            object(json!({"itemId":EARS_ITEM,"trackRef":target,"preserveSelection":true})), signal.clone()).await?;
+        let answer = self
+            .connection()
+            .call(
+                "live_browser_load_preview",
+                object(json!({"itemId":EARS_ITEM,"trackRef":target,"preserveSelection":true})),
+                signal.clone(),
+            )
+            .await?;
         if answer.is_error == Some(true) {
-            return Err(refused("unsupported", "Live did not confirm a selection-preserving Ears load preview. Nothing was loaded; no fallback load was attempted."));
+            return Err(refused(
+                "unsupported",
+                "Live did not confirm a selection-preserving Ears load preview. Nothing was loaded; no fallback load was attempted.",
+            ));
         }
         let preview = payload(&answer)?;
         if preview.get("epoch").and_then(Value::as_f64) != Some(state.epoch)
             || preview.get("confirmation").and_then(Value::as_str) != Some("apply")
-            || !preview.get("selection").is_some_and(selection_row) {
+            || !preview.get("selection").is_some_and(selection_row)
+        {
             return Err(unreadable());
         }
         self.capture_set_at(state.epoch, &state.identity, signal).await?;
-        preview.get("transactionId").and_then(Value::as_str).filter(|id| !id.is_empty())
-            .map(str::to_owned).ok_or_else(unreadable)
+        preview.get("transactionId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_owned).ok_or_else(unreadable)
     }
 
     async fn capture_place_tap(
-        &self, ready: &Ready, link: &Rc<dyn EarsLink>, receipt: &mut Option<CaptureDevice>, signal: Signal,
+        &self,
+        ready: &Ready,
+        link: &Rc<dyn EarsLink>,
+        receipt: &mut Option<CaptureDevice>,
+        signal: Signal,
     ) -> Result<Tap, RuntimeError> {
         let location = format!("{} devices ", self.lom_track_path(&ready.target, signal.clone()).await?);
         let before: Vec<_> = link.taps().iter().map(|tap| tap.id).collect();
@@ -407,55 +442,77 @@ impl LiveRenderer {
         // Keep the transaction even if apply's reply is lost: cleanup must account for a
         // potentially-created device rather than treating a transport error as no mutation.
         *receipt = Some(CaptureDevice { transaction: transaction.clone(), devices: None });
-        let answer = self.connection().call("live_browser_load_apply",
-            object(json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":uuid::Uuid::new_v4().to_string()})),
-            signal.clone()).await?;
+        let answer = self
+            .connection()
+            .call(
+                "live_browser_load_apply",
+                object(json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":uuid::Uuid::new_v4().to_string()})),
+                signal.clone(),
+            )
+            .await?;
         if answer.is_error == Some(true) {
             return Err(unsure());
         }
         let applied = payload(&answer)?;
         if applied.get("state").and_then(Value::as_str) != Some("applied")
             || applied.get("transactionId").and_then(Value::as_str) != Some(transaction.as_str())
-            || !applied.get("deviceRef").and_then(Value::as_str).is_some_and(|id| !id.is_empty()) {
+            || !applied.get("deviceRef").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+        {
             return Err(unsure());
         }
-        let created = applied.get("deviceObjectIdentity").and_then(Value::as_str)
-            .filter(|id| !id.is_empty()).ok_or_else(unsure)?;
+        let created = applied.get("deviceObjectIdentity").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(unsure)?;
         let placement = applied.get("placement").ok_or_else(unsure)?;
         let index = placement["index"].as_u64().ok_or_else(unsure)?;
         if placement["owner"] != "track" {
             return Err(unsure());
         }
-        let devices: Vec<_> = self.rows("device",
-            json!({"parent":ready.target,"fields":["objectIdentity"]}), signal.clone()).await?
-            .iter().map(object_identity).collect();
+        let devices: Vec<_> = self
+            .rows("device", json!({"parent":ready.target,"fields":["objectIdentity"]}), signal.clone())
+            .await?
+            .iter()
+            .map(object_identity)
+            .collect();
         if devices.iter().filter(|identity| identity.as_str() == created).count() != 1
-            || devices.iter().filter(|identity| identity.as_str() != created).ne(ready.state.devices.iter()) {
+            || devices.iter().filter(|identity| identity.as_str() != created).ne(ready.state.devices.iter())
+        {
             return Err(unsure());
         }
         receipt.as_mut().expect("load receipt").devices = Some(devices);
         let location = format!("{location}{index}");
-        link.wait_for(Rc::new(move |candidate| !before.contains(&candidate.id) && candidate.path == location),
-            6000, Some(signal)).await.ok_or_else(|| refused("ears_missing",
-                "The preinstalled Kumi Ears did not start. Max for Live is required; listening never installs it."))
+        link.wait_for(Rc::new(move |candidate| !before.contains(&candidate.id) && candidate.path == location), 6000, Some(signal))
+            .await
+            .ok_or_else(|| {
+                refused("ears_missing", "The preinstalled Kumi Ears did not start. Max for Live is required; listening never installs it.")
+            })
     }
 
     /// The only restricted-created-device removal path. Never hold a Live undo step
     /// across capture, and never abandon this future between begin and end.
     async fn capture_remove_tap(&self, ready: &Ready, receipt: &CaptureDevice, deadline: Instant) -> Result<(), RuntimeError> {
-        let begin_failed = || uncertainty("undo_step_begin_failed",
-            "Kumi could not open Live's cleanup undo step, so the Ears device was left in place. Live's own undo, or deleting it by hand, removes it. No audio was published.");
+        let begin_failed = || {
+            uncertainty("undo_step_begin_failed",
+            "Kumi could not open Live's cleanup undo step, so the Ears device was left in place. Live's own undo, or deleting it by hand, removes it. No audio was published.")
+        };
         if remaining_ms(deadline) < 10_000 {
             return Err(begin_failed());
         }
-        self.capture_set_at(ready.state.epoch, &ready.state.identity,
-            abort::any([self.connection().lifetime.clone(), abort::timeout(remaining_ms(deadline).min(5_000))])).await?;
+        self.capture_set_at(
+            ready.state.epoch,
+            &ready.state.identity,
+            abort::any([self.connection().lifetime.clone(), abort::timeout(remaining_ms(deadline).min(5_000))]),
+        )
+        .await?;
         if remaining_ms(deadline) < 10_000 {
             return Err(begin_failed());
         }
-        let opened = self.connection().call("live_undo_step_begin",
-            object(json!({"label":"Kumi: listen","timeoutMs":30000})),
-            abort::any([self.connection().lifetime.clone(), abort::timeout(remaining_ms(deadline).min(5_000))])).await
+        let opened = self
+            .connection()
+            .call(
+                "live_undo_step_begin",
+                object(json!({"label":"Kumi: listen","timeoutMs":30000})),
+                abort::any([self.connection().lifetime.clone(), abort::timeout(remaining_ms(deadline).min(5_000))]),
+            )
+            .await
             .map_err(|_| begin_failed())?;
         if opened.is_error == Some(true) {
             return Err(begin_failed());
@@ -464,23 +521,36 @@ impl LiveRenderer {
         let step = opened.get("stepId").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(begin_failed)?;
         // Even malformed success with an identifiable step is closed, but never used to delete.
         let deletion = if opened.get("open") == Some(&Value::Bool(true)) {
-            let deletion_signal = abort::any([self.connection().lifetime.clone(),
-                abort::timeout(remaining_ms(deadline).saturating_sub(5_000).min(15_000))]);
-            self.connection().call("live_undo", object(json!({"transactionId":receipt.transaction,
+            let deletion_signal =
+                abort::any([self.connection().lifetime.clone(), abort::timeout(remaining_ms(deadline).saturating_sub(5_000).min(15_000))]);
+            self.connection()
+                .call(
+                    "live_undo",
+                    object(json!({"transactionId":receipt.transaction,
                 "confirmation":"undo","idempotencyKey":uuid::Uuid::new_v4().to_string(),"preserveSelection":true})),
-                deletion_signal).await
+                    deletion_signal,
+                )
+                .await
         } else {
             Err(begin_failed())
         };
         // No `?`, timeout wrapper, or caller-cancellation select may bypass this await.
         // Its allowance is reserved from the original native deadline, not restarted.
-        let ended = self.connection().call("live_undo_step_end", object(json!({"stepId":step})),
-            abort::timeout(remaining_ms(deadline).min(5_000))).await;
-        let closed = ended.is_ok_and(|answer| answer.is_error != Some(true) && payload(&answer).is_ok_and(|body| {
-            body.get("closed") == Some(&Value::Bool(true)) && body.get("stepId").and_then(Value::as_str) == Some(step)
-        }));
+        let ended = self
+            .connection()
+            .call("live_undo_step_end", object(json!({"stepId":step})), abort::timeout(remaining_ms(deadline).min(5_000)))
+            .await;
+        let closed = ended.is_ok_and(|answer| {
+            answer.is_error != Some(true)
+                && payload(&answer).is_ok_and(|body| {
+                    body.get("closed") == Some(&Value::Bool(true)) && body.get("stepId").and_then(Value::as_str) == Some(step)
+                })
+        });
         if !closed {
-            return Err(uncertainty("undo_step_end_failed", "Live did not confirm the cleanup undo step closed. Its state is uncertain; no audio was published."));
+            return Err(uncertainty(
+                "undo_step_end_failed",
+                "Live did not confirm the cleanup undo step closed. Its state is uncertain; no audio was published.",
+            ));
         }
         let answer = deletion.map_err(|error| match error {
             RuntimeError::Hear(_) => error,
@@ -490,13 +560,18 @@ impl LiveRenderer {
         if answer.is_error == Some(true) {
             return Err(if body.get("code").and_then(Value::as_str) == Some("selection_not_kept") {
                 uncertainty("selection_not_kept", "Live could not keep the producer's selection, so Ears remains in place. Live's own undo, or deleting it by hand, removes it. No audio was published.")
-            } else { unsure() });
+            } else {
+                unsure()
+            });
         }
         let selection = body.get("selection").ok_or_else(unsure)?;
         if body.get("state").and_then(Value::as_str) != Some("undone")
             || body.get("deleted") != Some(&Value::Bool(true))
-            || selection["restored"] != true || !selection["previous"].is_boolean()
-            || !selection_row(&selection["before"]) || !selection_row(&selection["after"]) {
+            || selection["restored"] != true
+            || !selection["previous"].is_boolean()
+            || !selection_row(&selection["before"])
+            || !selection_row(&selection["after"])
+        {
             return Err(unsure());
         }
         // The bridge compares identities in the native step, then reads selection again.
@@ -607,7 +682,8 @@ impl LiveRenderer {
             return Err(refused("not_approved", "A restricted capture needs the host's approved window and native deadline."));
         };
         let approved_ms = u64::from(approval.deadline_seconds) * 1000;
-        let native_ms = request.native_deadline_unix_ms
+        let native_ms = request
+            .native_deadline_unix_ms
             .map(|deadline| deadline.saturating_sub(now_ms().max(0) as u64).min(approved_ms))
             .filter(|remaining| *remaining > 0)
             .ok_or_else(|| refused("not_approved", "The host's original native deadline is missing or expired."))?;
@@ -621,7 +697,8 @@ impl LiveRenderer {
         let link = if let Some(open) = &self.open_ears {
             open().await?
         } else {
-            open_ears_link(EarsOptions::default()).await
+            open_ears_link(EarsOptions::default())
+                .await
                 .map_err(|_| refused("ears_unavailable", "Kumi could not open its local Ears link."))?
         };
         let rendering = self.rendering_now();
@@ -633,18 +710,23 @@ impl LiveRenderer {
             let placed = self.capture_place_tap(&ready, &link, &mut receipt, signal.clone()).await?;
             tap = Some(placed.clone());
             let (now, _, _) = self.capture_state(request, signal.clone()).await?;
-            if now.identity != ready.state.identity || now.epoch != ready.state.epoch
-                || now.tracks != ready.state.tracks || now.song != ready.state.song
-                || now.transport != ready.state.transport || now.tempo != ready.state.tempo
-                || receipt.as_ref().and_then(|receipt| receipt.devices.as_ref()) != Some(&now.devices) {
+            if now.identity != ready.state.identity
+                || now.epoch != ready.state.epoch
+                || now.tracks != ready.state.tracks
+                || now.song != ready.state.song
+                || now.transport != ready.state.transport
+                || now.tempo != ready.state.tempo
+                || receipt.as_ref().and_then(|receipt| receipt.devices.as_ref()) != Some(&now.devices)
+            {
                 return Err(refused("transport_changed", "Live's producer state changed while Ears was loaded; no playback was started."));
             }
             if placed.version != EARS_VERSION as f64 {
                 return Err(refused("ears_missing", "The preinstalled Kumi Ears has the wrong version. Listening never installs it."));
             }
-            self.capture_window(&ready, &link, &placed, &directory, &mut started, &mut transport_touched,
-                signal.clone(), cleanup.clone()).await
-        }.await;
+            self.capture_window(&ready, &link, &placed, &directory, &mut started, &mut transport_touched, signal.clone(), cleanup.clone())
+                .await
+        }
+        .await;
         let marked_modified = receipt.is_some();
         // Disarm our local tap even if the Set/lifetime changed; do not mutate the new Set.
         if let Some(tap) = &tap {
@@ -663,9 +745,12 @@ impl LiveRenderer {
                 let restored = async {
                     self.capture_transport(&ready, CaptureTransport::Restore, cleanup.clone()).await?;
                     self.capture_transport(&ready, CaptureTransport::RestoreStart, cleanup.clone()).await
-                }.await;
+                }
+                .await;
                 if let Err(error) = restored {
-                    if cleanup_error.is_none() { cleanup_error = Some(error); }
+                    if cleanup_error.is_none() {
+                        cleanup_error = Some(error);
+                    }
                 }
             }
             if let Some(receipt) = &receipt {
@@ -691,12 +776,23 @@ impl LiveRenderer {
             return Err(HearFailure::Cancelled { marked_modified }.into());
         }
         if remaining_ms(cleanup_deadline) == 0 {
-            return Err(modified(refused("capture_deadline", "The original native capture deadline expired. No audio was published."), marked_modified));
+            return Err(modified(
+                refused("capture_deadline", "The original native capture deadline expired. No audio was published."),
+                marked_modified,
+            ));
         }
-        let (mut file, seconds) = result.map_err(|error| modified(match error {
-            RuntimeError::Hear(HearFailure::Refused { .. }) => error,
-            _ => refused("capture_incomplete", "The approved window was not captured completely; temporary state was restored. No audio was published."),
-        }, marked_modified))?;
+        let (mut file, seconds) = result.map_err(|error| {
+            modified(
+                match error {
+                    RuntimeError::Hear(HearFailure::Refused { .. }) => error,
+                    _ => refused(
+                        "capture_incomplete",
+                        "The approved window was not captured completely; temporary state was restored. No audio was published.",
+                    ),
+                },
+                marked_modified,
+            )
+        })?;
         Ok(Ok(vec![HeardTake {
             label: ready.label,
             file: std::mem::take(&mut file.0).to_string_lossy().into_owned(),
@@ -804,8 +900,12 @@ impl LiveRenderer {
         if Path::new(&written.file) != raw.0 {
             return Err(refused("capture_failed", "Kumi Ears returned a file outside this call's requested capture."));
         }
-        if written.channels != 4 || !written.sample_rate.is_finite() || written.sample_rate <= 0.0
-            || written.sample_rate != tap.sample_rate || !written.beats.is_finite() {
+        if written.channels != 4
+            || !written.sample_rate.is_finite()
+            || written.sample_rate <= 0.0
+            || written.sample_rate != tap.sample_rate
+            || !written.beats.is_finite()
+        {
             return Err(unreadable());
         }
         let meta = tokio::fs::symlink_metadata(&raw.0).await.map_err(|_| unreadable())?;

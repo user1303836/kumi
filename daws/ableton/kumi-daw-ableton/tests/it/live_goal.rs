@@ -34,7 +34,6 @@ use serde_json::{json, Value};
 #[path = "live_goal_listen.rs"]
 mod bounded_listening;
 
-
 /// The tools a goal can reach, as the oracle's bridge lists them.
 const TOOLS: [&str; 43] = [
     "live_run_python",
