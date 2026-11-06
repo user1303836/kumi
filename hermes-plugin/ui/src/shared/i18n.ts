@@ -99,8 +99,7 @@ const en = {
     byHandTitle: (daw: string) =>
       `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
     scriptUndo: (daw: string) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`,
-    copyKept: (file: string) => `Before this, Kumi kept a copy of the Set as last saved, next to it: ${file}`,
-    copyFailed: (why: string) => `Kumi couldn't keep a copy of the Set before this: ${why}`
+    copyKept: (file: string) => `Before this, Kumi kept a copy of the Set as last saved, next to it: ${file}`
   },
   job: {
     scanning: 'Scanning',
@@ -440,8 +439,7 @@ const ja: Shape<typeof en> = {
     byHand: daw => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
     byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
     scriptUndo: daw => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`,
-    copyKept: file => `この前に、Kumi は最後に保存されたセットのコピーを隣に残しました: ${file}`,
-    copyFailed: why => `この前に、Kumi はセットのコピーを残せませんでした: ${why}`
+    copyKept: file => `この前に、Kumi は最後に保存されたセットのコピーを隣に残しました: ${file}`
   },
   job: {
     scanning: 'スキャン中',
@@ -777,8 +775,7 @@ const zh: Shape<typeof en> = {
     byHand: daw => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
     byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
     scriptUndo: daw => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`,
-    copyKept: file => `在此之前，Kumi 在它旁边保留了一份最后保存的 Set 副本：${file}`,
-    copyFailed: why => `在此之前，Kumi 没能保留 Set 的副本：${why}`
+    copyKept: file => `在此之前，Kumi 在它旁边保留了一份最后保存的 Set 副本：${file}`
   },
   job: {
     scanning: '正在扫描',

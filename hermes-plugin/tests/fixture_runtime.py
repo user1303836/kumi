@@ -459,9 +459,8 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     # Live's own Undo takes back (CC-20), so Kumi's undo isn't offered on it.
     change_id = f"ch-{len(fixture.history) + 1}"
     # A Live plan of three steps or more keeps a copy of the Set beside it first, as serve's change answer and its rows
-    # say it (agent-s's `copy`): the file's name and why, or why it couldn't be kept (--copy-fails).
-    kept = (None if len(steps) < 3 else {"file": None, "why": "third_step", "failed": "Live couldn't save the copy"}
-            if fixture.options.copy_fails else {"file": f"{fixture.set['name']}.backup-2026-11-06.als", "why": "third_step"})
+    # say it (#1205's `copy`: the file's name and why; absent when none was kept).
+    kept = {"file": f"{fixture.set['name']}.backup-2026-11-06.als", "why": "third_step"} if len(steps) >= 3 else None
     ids = []
     for family in dict.fromkeys(STEPS[step["tool"]] for step in steps):
         before = copy.deepcopy(fixture.set)
@@ -1170,8 +1169,6 @@ def main() -> None:
     parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
     parser.add_argument("--generate-expires-ms", type=int, default=300_000,
                         help="how long a quote lasts from now, in milliseconds (negative: already expired)")
-    parser.add_argument("--copy-fails", action="store_true",
-                        help="a plan of three steps or more couldn't keep its copy of the Set (serve's copy.failed)")
     parser.add_argument("--device-wrong-sha", action="store_true",
                         help="a device preview answers another SHA-256, as a serve that re-encoded the spec would")
     parser.add_argument("--device-file-appears", action="store_true",

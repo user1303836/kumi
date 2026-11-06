@@ -829,23 +829,27 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
 
 
 # The copy of the Set a Live plan keeps beside it before its third step or a step that could lose material, as serve's
-# change answer gives it (`copy`: the file's name and why, or why it couldn't be kept). Told to the model as standalone
+# change answer gives it (`copy`: the file's name and why; absent when none was kept). Told to the model as standalone
 # Kumi tells it, by the file's name: serve keeps the producer's paths out of its answers.
 COPY_WHY = {"third_step": "before the plan's third step", "deletes": "before a step that could lose material"}
 
 
 def copy_note(copy: Any) -> str | None:
-    """What the model tells the producer about the copy of their Set this change kept, or couldn't keep."""
-    if not isinstance(copy, dict):
+    """What the model tells the producer about the copy of their Set this change kept. A copy the DAW couldn't keep
+    never reaches serve (Live's keep_copy answers nothing then), so there's no failure to tell."""
+    file = _copy_file(copy)
+    if file is None:
         return None
-    file, why = copy.get("file"), COPY_WHY.get(copy.get("why"))
-    if isinstance(file, str) and file.strip() and not {"/", "\\"} & set(file):
-        return (f"Before this, Kumi kept a copy of the producer's Set as last saved, next to it: {_words(file, 120)}"
-                f"{f' ({why})' if why else ''}. Tell the producer in a few words, with the file's name.")
-    failed = copy.get("failed")
-    if isinstance(failed, str) and failed.strip():
-        return f"Kumi couldn't keep a copy of the producer's Set before this ({_words(failed, 200)}). Tell the producer."
-    return None
+    why = COPY_WHY.get(copy.get("why"))
+    return (f"Before this, Kumi kept a copy of the producer's Set as last saved, next to it: {file}"
+            f"{f' ({why})' if why else ''}. Tell the producer in a few words, with the file's name.")
+
+
+def _copy_file(copy: Any) -> str | None:
+    """The kept copy's file name: only its last part, even if a path were ever sent, so no path shows."""
+    file = copy.get("file") if isinstance(copy, dict) else None
+    name = re.split(r"[/\\]", file)[-1].strip() if isinstance(file, str) else ""
+    return _words(name, 120) if name else None
 
 
 def _words(text: str, limit: int) -> str:
@@ -941,16 +945,13 @@ def _c1_row(row: dict) -> dict:
 
 
 def _row_copy(copy: Any) -> dict | None:
-    """The copy of the Set a change kept, as a HISTORY row may say it outside Kumi: the file's name (never a path, which
-    serve doesn't send) and why, or only that it couldn't be kept: its reason is runtime text, which can name a path
-    (12f), so it stays in the change's own result."""
+    """The copy of the Set a change kept, as a HISTORY row may say it outside Kumi: the file's name, never a path, and
+    why."""
     if not isinstance(copy, dict):
         return None
     why = copy.get("why") if copy.get("why") in COPY_WHY else None
-    file = copy.get("file")
-    if isinstance(file, str) and file.strip() and not {"/", "\\"} & set(file):
-        return {"file": _words(file, 120), "why": why}
-    return {"file": None, "why": why, "failed": True} if copy.get("failed") else None
+    file = _copy_file(copy)
+    return {"file": file, "why": why} if file else None
 
 
 def published_history(state: Path, limit: object, *, scheduled: bool) -> dict:

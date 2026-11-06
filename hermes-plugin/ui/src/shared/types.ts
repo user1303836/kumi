@@ -118,8 +118,8 @@ export interface HistoryItem {
    *  too, through `/script`. */
   script?: { sha256?: string; language?: string }
   /** The copy of the Set Kumi kept beside it before a long or destructive plan (a Live plan's third step, or a
-   *  delete): its file's name, or why it couldn't be kept (`file` null, `failed`). Never a path (serve keeps those). */
-  copy?: { file?: string | null; why?: string; failed?: string }
+   *  delete): its file's name and why. Never a path (serve keeps those). */
+  copy?: { file?: string; why?: string }
 }
 
 /** A pending code-class approval's language: a script's (CC-19), or `device`, a Max for Live device's whole spec as

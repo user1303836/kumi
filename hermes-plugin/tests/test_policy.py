@@ -181,11 +181,13 @@ class Approvals(unittest.TestCase):
                          {"Night Drive.backup-2026-11-06.als"})
         self.assertNotIn("copy_note", support.call(self.host, "kumi_change", change(), session_id="s1"),
                          "a short plan keeps no copy and says nothing of one")
-        self.host, self.ctx, self.data = support.host(self, None, "--copy-fails")
-        support.call(self.host, "kumi_connect", {}, session_id="s1")
-        failed = support.call(self.host, "kumi_change", three, session_id="s1")
-        self.assertEqual(failed["copy_note"], "Kumi couldn't keep a copy of the producer's Set before this (Live "
-                                              "couldn't save the copy). Tell the producer.")
+        # A path never shows, even if serve ever sent one (rgzm): only the file's name, in the note and in a row.
+        for path in ("/Users/someone/Music/Night Drive.backup.als", "C:\\Users\\someone\\Night Drive.backup.als"):
+            with self.subTest(path=path):
+                self.assertIn("next to it: Night Drive.backup.als (before a step",
+                              tools.copy_note({"file": path, "why": "deletes"}))
+                self.assertEqual(tools._row_copy({"file": path, "why": "deletes"}),
+                                 {"file": "Night Drive.backup.als", "why": "deletes"})
 
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])

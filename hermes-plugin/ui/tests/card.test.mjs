@@ -119,13 +119,12 @@ test('a HISTORY row Kumi is unsure of says why, what it put back, and offers no 
   assert.ok(!html.includes('Undo'))
 })
 
-test('a HISTORY row says when Kumi kept a copy of the Set before it, by its file, or that it couldn’t', async () => {
+test('a HISTORY row says when Kumi kept a copy of the Set before it, by its file’s name alone', async () => {
   const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
   const row = copy => ({ id: 'h-2', title: 'Arrange the chorus', state: 'applied', undo_available: true, copy })
   const draw = copy => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(copy)] } }))
   assert.ok(draw({ file: 'Night Drive.backup-2026-11-06.als', why: 'third_step' }).includes('Kumi kept a copy of the Set as last saved, next to it: Night Drive.backup-2026-11-06.als'))
-  // React escapes the apostrophe in Kumi's own words; the runtime's reason is shown as it came.
-  assert.ok(draw({ file: null, why: 'deletes', failed: 'Live couldn’t save the copy' }).includes('couldn&#x27;t keep a copy of the Set before this: Live couldn’t save the copy'))
+  assert.ok(draw({ file: '/Users/someone/Music/Night Drive.backup-2026-11-06.als', why: 'deletes' }).includes('next to it: Night Drive.backup-2026-11-06.als<'), 'a path never shows, only the name')
   assert.ok(!draw(undefined).includes('copy of the Set'), 'nothing when no copy was made')
 })
 
