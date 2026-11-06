@@ -1091,7 +1091,7 @@ end)
 -- Exercise the real plan/launch boundary without the bridge dispatch running launch immediately after plan.
 local function queued_plan(peer, range, cap, deadline)
   local listening = T.load_payload_module("listening")
-  local state = {}
+  local state = { pulse = 0 }
   listening.init(state)
   local epoch, layout = place(peer)
   local env = {
@@ -1099,6 +1099,7 @@ local function queued_plan(peer, range, cap, deadline)
     epoch = function() return epoch end, layout = function() return layout end,
     document = function() return bridge().document end,
     busy = function() return nil end, quiet = function(fn) return fn() end,
+    pulse = function() return state.pulse end,
     shifted = function(t) return t end,
     -- Deliberately stale: actual launch must not trust a cached pattern mark.
     pattern_mark = function() return 1 end,
@@ -1370,7 +1371,7 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
       start_line = 2, end_line = 5, start_track = 2, end_track = 3, start_column = 1, end_column = 2,
     }
     local focus_before = result(call(peer, "focus"))
-    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     local before = states()
     listening.launch(job, env)
@@ -1412,9 +1413,17 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     eq(mock.data.transport_fields.bpm, 60, "tempo restoration waits for the cursor's delayed seek")
     eq(mock.data.transport_fields.lpb, 8)
     mock.finish_edit_position(60, 8)
+    local settling = listening.status({ jobId = job.id }, env)
+    eq(settling.state, "running", "tempo restoration waits for a later native pulse")
+    eq(settling.files, nil)
+    eq(settling.restored, nil)
+    writes = mock.api_writes
+    eq(listening.status({ jobId = job.id }, env).state, "running", "another request in this callback is not a pulse")
+    state.pulse = state.pulse + 1
     local done = listening.status({ jobId = job.id }, env)
     eq(done.state, outcome == "done" and "done" or outcome == "cancelled" and "cancelled" or "failed", outcome)
     eq(done.restored, true, outcome)
+    eq(mock.api_writes, writes, "the settling pulse only reads")
     eq(mock.data.transport_fields.bpm, 120)
     eq(mock.data.transport_fields.lpb, 4)
     eq(states(), before, "mute/solo restoration waits for the same stopped pulse")
@@ -1543,7 +1552,7 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
     tf.follow_player = true
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
-    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     listening.launch(job, env)
     mock.finish_render()
@@ -1563,6 +1572,11 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
     eq(mock.api_writes, writes, "cancel and abort do not repeat the pending cursor request")
     mock.finish_edit_position(60, 8)
     local done = listening.status({ jobId = job.id }, env)
+    if not aborting then
+      eq(done.state, "running")
+      state.pulse = state.pulse + 1
+      done = listening.status({ jobId = job.id }, env)
+    end
     eq(done.state, aborting and "failed" or "cancelled")
     eq(done.restored, not aborting)
     eq(done.files, nil)
@@ -1571,6 +1585,59 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
     eq(tf.edit_pos.sequence, 3)
     eq(tf.edit_pos.line, 7)
     eq(tf.follow_player, true)
+    ok(not exists(job.sources[1].file))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: a settling pulse refuses late tempo, cursor or selection drift without repairing it", function()
+  for _, changed in ipairs({ "tempo", "producer", "cursor", "selection", "deadline", "abort" }) do
+    local setup_env, peer = setup()
+    local song, tf = mock.data.song, mock.data.transport_fields
+    song.transport.edit_pos = renoise.SongPos(3, 7)
+    tf.follow_player = true
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    mock.finish_render()
+    local pending = listening.status({ jobId = job.id }, env)
+    eq(pending.state, "running")
+    eq(pending.restored, nil)
+    eq(pending.files, nil)
+    eq(tf.bpm, 120)
+    eq(tf.lpb, 4)
+    local expected = "tempo_restore_state_changed"
+    if changed == "tempo" then
+      tf.bpm, tf.lpb = 60, 8
+      expected = "tempo_restore_failed"
+    elseif changed == "producer" then
+      tf.bpm = 137
+      expected = "tempo_restore_ownership_uncertain"
+    elseif changed == "cursor" then
+      song.transport.edit_pos = renoise.SongPos(job.range.start[1], job.range.start[2])
+      expected = "cursor_restore_failed"
+    elseif changed == "selection" then
+      mock.data.song_fields.selected_track_index = 4
+      expected = "cursor_restore_state_changed"
+    elseif changed == "deadline" then
+      mock.time = job.deadline_ms
+    end
+    local writes, bpm, lpb = mock.api_writes, tf.bpm, tf.lpb
+    if changed == "abort" then
+      listening.abort(env, "the tool stopped before the settling pulse")
+    else
+      state.pulse = state.pulse + 1
+    end
+    local failed = listening.status({ jobId = job.id }, env)
+    eq(failed.state, "failed", changed)
+    eq(failed.code, expected, changed)
+    eq(failed.restored, false)
+    eq(failed.files, nil)
+    eq(mock.api_writes, writes, "settling must never repair or repeat a write")
+    eq(tf.bpm, bpm)
+    eq(tf.lpb, lpb)
     ok(not exists(job.sources[1].file))
     H.no_dialogs()
   end

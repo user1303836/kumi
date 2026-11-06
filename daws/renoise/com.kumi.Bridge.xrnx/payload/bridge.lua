@@ -1495,6 +1495,7 @@ local function listen_env()
   env.pattern_mark = place_env.pattern_touch_mark
   env.song_id = function() return status.song_id(b.memory, rows.the_song()) end
   env.unix_ms = unix_ms
+  env.pulse = function() return b.ticks or 0 end
   -- (a render stops playback: an audition playing ends first)
   env.before_render = function() audition.halt(env, "a render") end
   listen_env_kept = env

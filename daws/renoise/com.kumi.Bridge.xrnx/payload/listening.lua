@@ -936,6 +936,12 @@ local function restore_guarded_tempo(job, env, song)
   return true
 end
 
+local function defer_finish(job, state, code, message)
+  local pending = job.finalizing or {}
+  pending.state, pending.code, pending.message = state, code, message
+  job.finalizing = pending
+end
+
 local function finish(job, env, state, code, message)
   local song = renoise.song()
   if not job.deadline_ms then restore(job, env, song) end
@@ -943,18 +949,35 @@ local function finish(job, env, state, code, message)
   if not restore_code then restore_code, restore_message = guarded_tempo_problem(job, song) end
   local restored = restore_code == nil
   if restored then
-    if job.deadline_ms then restore(job, env, song) end
-    local ready, edit_code, edit_message = restore_guarded_edit(job, env, song)
-    if ready == nil then
-      local pending = job.finalizing or {}
-      pending.state, pending.code, pending.message = state, code, message
-      job.finalizing = pending
-      return
-    end
-    restored, restore_code, restore_message = ready, edit_code, edit_message
-    if restored then restored, restore_code, restore_message = restore_guarded_tempo(job, env, song) end
-    if restored and not edit_restored(job, song) then
-      restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+    if job.settle_pulse then
+      -- Read-only: two status checks in one callback are not a native settling pulse.
+      if not song or not edit_restored(job, song) then
+        restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+      elseif song.transport.bpm ~= job.tempo_before.bpm or song.transport.lpb ~= job.tempo_before.lpb then
+        restored, restore_code, restore_message = false, "tempo_restore_failed",
+          "Renoise's BPM/LPB pair changed after restoration; no further writes were requested. Observe again."
+      elseif env.pulse() == job.settle_pulse then
+        if not job.aborting then return defer_finish(job, state, code, message) end
+        restored, restore_code, restore_message = false, "tempo_restore_state_changed",
+          "Kumi's tool stopped before the native settling pulse could verify restoration. Observe again."
+      end
+    else
+      if job.deadline_ms then restore(job, env, song) end
+      local ready, edit_code, edit_message = restore_guarded_edit(job, env, song)
+      if ready == nil then return defer_finish(job, state, code, message) end
+      restored, restore_code, restore_message = ready, edit_code, edit_message
+      if restored then restored, restore_code, restore_message = restore_guarded_tempo(job, env, song) end
+      if restored and not edit_restored(job, song) then
+        restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+      end
+      if restored and job.deadline_ms then
+        if not job.aborting then
+          job.settle_pulse = env.pulse()
+          return defer_finish(job, state, code, message)
+        end
+        restored, restore_code, restore_message = false, "tempo_restore_state_changed",
+          "Kumi's tool stopped before the native settling pulse could verify restoration. Observe again."
+      end
     end
   elseif job.deadline_ms then
     job.restored = false
