@@ -1400,7 +1400,18 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     end
     mock.impl(mock.data.song).rendering = false
     mock.data.transport_fields.playing = false
+    mock.defer_edit_position = true
     listening.check(env)
+    writes = mock.api_writes
+    pending = listening.status({ jobId = job.id }, env)
+    eq(pending.state, "running", "a delayed cursor readback is still non-terminal")
+    eq(pending.files, nil)
+    eq(pending.restored, nil)
+    eq(listening.origin(job.sources[1].file), nil)
+    eq(mock.api_writes, writes, "waiting never repeats the cursor write")
+    eq(mock.data.transport_fields.bpm, 60, "tempo restoration waits for the cursor's delayed seek")
+    eq(mock.data.transport_fields.lpb, 8)
+    mock.finish_edit_position(60, 8)
     local done = listening.status({ jobId = job.id }, env)
     eq(done.state, outcome == "done" and "done" or outcome == "cancelled" and "cancelled" or "failed", outcome)
     eq(done.restored, true, outcome)
@@ -1422,7 +1433,7 @@ end)
 
 test("listening: guarded deferred cleanup leaves producer cursor, selection and follow-player changes untouched", function()
   for _, changed in ipairs({ "position", "track", "range", "follow", "layout" }) do
-    for _, cancelled in ipairs({ false, true }) do
+    for _, phase in ipairs({ "callback", "cursor", "cancelled" }) do
       local setup_env, peer = setup()
       local song, tf, fields = mock.data.song, mock.data.transport_fields, mock.data.song_fields
       song.transport.edit_pos = renoise.SongPos(3, 7)
@@ -1432,9 +1443,16 @@ test("listening: guarded deferred cleanup leaves producer cursor, selection and 
       local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
       env.before_render = nil
       listening.launch(job, env)
-      job.stopping = cancelled
+      job.stopping = phase == "cancelled"
       local completed = mock.finish_render({ no_callback = true })
       completed.done()
+      if phase ~= "callback" then
+        mock.defer_edit_position = true
+        listening.check(env)
+        eq(job.state, "running")
+        mock.finish_edit_position(60, 8)
+        mock.defer_edit_position = false
+      end
       if changed == "position" then
         song.transport.edit_pos = renoise.SongPos(2, 3)
       elseif changed == "track" then
@@ -1482,26 +1500,77 @@ test("listening: guarded cursor write and readback failures publish no audio", f
     env.before_render = nil
     listening.launch(job, env)
     local completed = mock.finish_render({ no_callback = true })
-    local quiet = env.quiet
-    env.quiet = function(fn)
-      if tf.bpm == 120 and tf.lpb == 4 then
-        if fault == "write" then error("native edit position setter refused") end
+    mock.edit_position_error = fault == "write" and "native edit position setter refused" or nil
+    mock.defer_edit_position = fault == "readback"
+    if fault == "selection" then
+      local quiet = env.quiet
+      env.quiet = function(fn)
         quiet(fn)
-        song.transport.edit_pos = renoise.SongPos(job.range.start[1], job.range.start[2])
-      else
-        quiet(fn)
-        if fault == "selection" and tf.bpm == 120 and tf.lpb == 4 then mock.data.song_fields.selected_track_index = 4 end
+        if tf.bpm == 120 and tf.lpb == 4 then mock.data.song_fields.selected_track_index = 4 end
       end
     end
     completed.done()
+    if fault == "readback" then
+      local pending = listening.status({ jobId = job.id }, env)
+      eq(pending.state, "running")
+      eq(pending.files, nil)
+      local writes = mock.api_writes
+      mock.time = job.deadline_ms
+      listening.check(env)
+      eq(mock.api_writes, writes, "expired cursor readback cannot retry a write")
+      mock.finish_edit_position(60, 8)
+      listening.check(env)
+      eq(mock.api_writes, writes, "late native settling cannot revive cleanup")
+    end
     local failed = listening.status({ jobId = job.id }, env)
     eq(failed.state, "failed", fault)
     eq(failed.restored, false, fault)
-    eq(failed.code, "cursor_restore_failed", fault)
-    eq(tf.bpm, 120)
-    eq(tf.lpb, 4)
+    eq(failed.code, fault == "readback" and "tempo_restore_state_changed" or "cursor_restore_failed", fault)
+    eq(tf.bpm, fault == "selection" and 120 or 60)
+    eq(tf.lpb, fault == "selection" and 4 or 8)
     eq(tf.follow_player, true)
     eq(failed.files, nil)
+    ok(not exists(job.sources[1].file))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: cancellation waits for cursor readback but tool abort finishes with typed uncertainty", function()
+  for _, aborting in ipairs({ false, true }) do
+    local setup_env, peer = setup()
+    local song, tf = mock.data.song, mock.data.transport_fields
+    song.transport.edit_pos = renoise.SongPos(3, 7)
+    tf.follow_player = true
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    env.before_render = nil
+    listening.launch(job, env)
+    mock.finish_render()
+    mock.defer_edit_position = true
+    listening.check(env)
+    eq(job.state, "running")
+    local writes = mock.api_writes
+    if aborting then
+      listening.abort(env, "the tool stopped while the cursor was settling")
+      eq(job.state, "failed")
+      eq(job.code, "cursor_restore_failed")
+    else
+      local cancelled = listening.cancel({ jobId = job.id }, env)
+      eq(cancelled.state, "running")
+      eq(cancelled.stopping, true)
+    end
+    eq(mock.api_writes, writes, "cancel and abort do not repeat the pending cursor request")
+    mock.finish_edit_position(60, 8)
+    local done = listening.status({ jobId = job.id }, env)
+    eq(done.state, aborting and "failed" or "cancelled")
+    eq(done.restored, not aborting)
+    eq(done.files, nil)
+    eq(tf.bpm, aborting and 60 or 120)
+    eq(tf.lpb, aborting and 8 or 4)
+    eq(tf.edit_pos.sequence, 3)
+    eq(tf.edit_pos.line, 7)
+    eq(tf.follow_player, true)
     ok(not exists(job.sources[1].file))
     H.no_dialogs()
   end
@@ -1551,30 +1620,37 @@ test("listening: guarded deferred completion expires within the original deadlin
 end)
 
 test("listening: a producer pair changed during guarded deferral is never overwritten", function()
-  for _, field in ipairs({ "bpm", "lpb" }) do
-    local setup_env, peer = setup()
-    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
-    mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
-    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
-    env.before_render = nil
-    listening.launch(job, env)
-    local completed = mock.finish_render({ no_callback = true })
-    mock.impl(mock.data.song).rendering = true
-    completed.done()
-    listening.check(env)
-    eq(job.state, "running")
-    local changed = field == "bpm" and 137 or 7
-    mock.data.transport_fields[field] = changed
-    mock.impl(mock.data.song).rendering = false
-    local failed = listening.status({ jobId = job.id }, env)
-    eq(failed.state, "failed")
-    eq(failed.code, "tempo_restore_ownership_uncertain")
-    eq(failed.restored, false)
-    eq(mock.data.transport_fields.bpm, field == "bpm" and changed or 60)
-    eq(mock.data.transport_fields.lpb, field == "lpb" and changed or 8)
-    eq(failed.files, nil)
-    ok(not exists(job.sources[1].file))
-    H.no_dialogs()
+  for _, cursor_pending in ipairs({ false, true }) do
+    for _, field in ipairs({ "bpm", "lpb" }) do
+      local setup_env, peer = setup()
+      mock.data.song.transport.edit_pos = renoise.SongPos(3, 7)
+      mock.data.transport_fields.follow_player = true
+      mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+      mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
+      local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+      env.before_render = nil
+      listening.launch(job, env)
+      local completed = mock.finish_render({ no_callback = true })
+      mock.impl(mock.data.song).rendering = not cursor_pending
+      mock.defer_edit_position = cursor_pending
+      completed.done()
+      listening.check(env)
+      eq(job.state, "running")
+      local changed = field == "bpm" and 137 or 7
+      mock.data.transport_fields[field] = changed
+      mock.impl(mock.data.song).rendering = false
+      local writes = mock.api_writes
+      local failed = listening.status({ jobId = job.id }, env)
+      eq(failed.state, "failed")
+      eq(failed.code, "tempo_restore_ownership_uncertain")
+      eq(failed.restored, false)
+      eq(mock.api_writes, writes, "a producer's changed pair stops every new cleanup write")
+      eq(mock.data.transport_fields.bpm, field == "bpm" and changed or 60)
+      eq(mock.data.transport_fields.lpb, field == "lpb" and changed or 8)
+      eq(failed.files, nil)
+      ok(not exists(job.sources[1].file))
+      H.no_dialogs()
+    end
   end
 end)
 
