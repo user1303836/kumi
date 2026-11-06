@@ -1,8 +1,10 @@
 //! Live's backend for the variations tool (#401): only Live's facts. Its material is what a Session MIDI clip plays (core's
 //! shared note form and operators), its takes are new clips below the source on its track, each in a scene with no other
-//! clip (a song's section plays what its scene holds), a scene added at the end when none is free, written by write_midi_clip, found where Kumi left them or by the names Kumi gave them, a
-//! rewrite the clip deleted and written again in its slot, kept takes renamed. Live plays a MIDI clip through its instrument
-//! only live, so its takes aren't rendered: the producer launches their slots to hear them. Core's tool does the rest.
+//! clip (a song's section plays what its scene holds), a scene added at the end when none is free (never for a plugin host,
+//! whose takes go only where a scene is empty: CC-24), written by write_midi_clip, found where Kumi left them or by the names
+//! Kumi gave them, a rewrite the clip deleted and written again in its slot, kept takes renamed. Live plays a MIDI clip
+//! through its instrument only live, so its takes aren't rendered: the producer launches their slots to hear them. Core's
+//! tool does the rest.
 use super::changes::CHANGES;
 use super::connection::LiveConnection;
 use super::history::History;
@@ -11,7 +13,7 @@ use super::notes::{clip_and_track, read_notes};
 use super::observation::Observer;
 use async_trait::async_trait;
 use kumi_agent::core::variations::{
-    backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
+    backend::{Rendered, Rewritten, Room, Source, Undroppable, VariationsBackend, Words},
     notes::{
         amount, anchors_in, foreign_classes, note_direction_ops, note_op, notes_apart, round, with_anchors, Note, NOTE_DIRECTIONS, NOTE_OPS,
     },
@@ -88,6 +90,9 @@ pub struct LiveVariations {
     mutations: Rc<Mutations>,
     history: Rc<History>,
     observer: Rc<Observer>,
+    /// Whether a take may go in a scene Kumi adds at the end when none is free (standalone); a plugin host's take goes only
+    /// in an empty scene that's there (CC-24's 24-r2).
+    adds_scenes: bool,
 }
 
 /// A clip's slot (its scene) from its long ref (`E:clip:T:S`).
@@ -105,6 +110,11 @@ fn clip_at(track: &str, scene: u64) -> Option<String> {
 /// plays what it holds, an empty slot there included (it stops the track).
 fn free_below(slots: &[(u64, Option<String>)], scene: u64, empty: &BTreeSet<u64>) -> Option<u64> {
     slots.iter().find(|(at, clip)| *at > scene && clip.is_none() && empty.contains(at)).map(|(at, _)| *at)
+}
+
+/// How many takes have a slot below `scene` in a scene with no clip on any track: each take takes the first.
+fn room_below(slots: &[(u64, Option<String>)], scene: u64, empty: &BTreeSet<u64>) -> usize {
+    slots.iter().filter(|(at, clip)| *at > scene && clip.is_none() && empty.contains(at)).count()
 }
 
 /// The part of a clip that plays (beats from its start): its loop when it loops, else its markers.
@@ -211,8 +221,14 @@ fn pick(slots: &[(u64, Option<String>)], named: &BTreeMap<String, String>, at: O
 }
 
 impl LiveVariations {
-    pub fn new(connection: Rc<LiveConnection>, mutations: Rc<Mutations>, history: Rc<History>, observer: Rc<Observer>) -> Self {
-        LiveVariations { connection, mutations, history, observer }
+    pub fn new(
+        connection: Rc<LiveConnection>,
+        mutations: Rc<Mutations>,
+        history: Rc<History>,
+        observer: Rc<Observer>,
+        adds_scenes: bool,
+    ) -> Self {
+        LiveVariations { connection, mutations, history, observer, adds_scenes }
     }
 
     fn lengthen(&self, short: &str) -> String {
@@ -417,6 +433,15 @@ impl VariationsBackend for LiveVariations {
         digest_of(material)
     }
 
+    async fn room(&self, set: &LiveSet, signal: &Signal) -> Result<Option<Room>, String> {
+        let track = self.track_now(&set.source.data, signal).await?;
+        let fits = room_below(&self.slots(&track, signal).await?, set.source.data.scene, &self.empty_scenes(signal).await?);
+        let scenes = if fits == 1 { "empty scene" } else { "empty scenes" };
+        let words =
+            format!("Live has {fits} {scenes} below \u{201c}{}\u{201d} on its track, and Kumi adds none here", set.source.data.clip_name);
+        Ok(Some(Room { fits, words }))
+    }
+
     async fn write_new(
         &self,
         set: &LiveSet,
@@ -431,6 +456,9 @@ impl VariationsBackend for LiveVariations {
         let mut free = free_below(&self.slots(&track, signal).await.map_err(|why| (why, true))?, set.source.data.scene, &empty);
         let mut made = Vec::new();
         if free.is_none() {
+            if !self.adds_scenes {
+                return Err(("no empty scene is left below the source on its track, and Kumi adds none here".into(), true));
+            }
             let (id, _) = self.change("add_tracks_and_scenes", json!({"tracks": [], "scenes": [{"name": name}]}), signal).await?;
             made.push(id);
             track = self.track_now(&set.source.data, signal).await.map_err(|why| (why, true))?;
@@ -736,6 +764,18 @@ mod tests {
         // (moved: found by its name)
         assert_eq!(pick(&slots, &named, Some(1), &wanted("V2 \u{b7} Arp")), Some((4, "c4".into())));
         assert_eq!(pick(&slots, &named, Some(4), &wanted("V3 \u{b7} Arp")), None);
+    }
+
+    /// (CC-24's 24-r2) A plugin host's takes fit only where a scene below the source is empty: none when every slot below is
+    /// full or its scene plays another track's clip.
+    #[test]
+    fn a_plugin_hosts_takes_fit_only_in_the_empty_scenes_below_the_source() {
+        let slots = vec![(0, Some("c0".to_string())), (1, None), (2, Some("c2".into())), (3, None), (4, None)];
+        let empty: BTreeSet<u64> = [1, 3].into();
+        assert_eq!(room_below(&slots, 0, &empty), 2, "scene 4 plays another track's clip");
+        assert_eq!(room_below(&slots, 3, &empty), 0, "a full slot range: no take fits");
+        let full: Vec<(u64, Option<String>)> = (0..4).map(|scene| (scene, Some(format!("c{scene}")))).collect();
+        assert_eq!(room_below(&full, 0, &[].into()), 0);
     }
 
     /// Every direction Kumi picks makes a take of an ordinary clip: a make of five gets five takes (real Live: V3 "looser" moved

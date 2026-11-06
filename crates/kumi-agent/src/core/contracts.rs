@@ -710,6 +710,29 @@ pub trait Integration {
         let _ = signal;
         Ok(None)
     }
+    /// Whether a play would record: the DAW records now, or its record is armed whatever the transport does (Live's
+    /// Arrangement or Session Record, REAPER's record, Renoise's edit mode). None when it can't say, which a host that
+    /// starts playback takes as yes.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        let _ = signal;
+        Ok(None)
+    }
+    /// Whether this DAW can start a play `from` there; when it can't, why, in its words.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        let _ = from;
+        Err(format!("Kumi doesn't start {}'s playback.", self.profile().words.app))
+    }
+    /// Starts the DAW's playback `from` there with its own transport, once `plays_from` said it can: nothing in the
+    /// project changes but where play starts, and no change is kept in HISTORY.
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        let _ = (from, signal);
+        Err(RuntimeError::plain(format!("Kumi doesn't start {}'s playback.", self.profile().words.app)))
+    }
+    /// Stops the DAW's playback with its own transport.
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let _ = signal;
+        Err(RuntimeError::plain(format!("Kumi doesn't stop {}'s playback.", self.profile().words.app)))
+    }
     fn has_instant(&self) -> bool {
         self.profile().caps.instant
     }
@@ -1590,6 +1613,25 @@ pub struct TakenBack {
 pub struct InstantOutcome {
     pub text: String,
     pub is_error: bool,
+}
+
+/// Where a play starts, as the producer asked: where the DAW is; a timeline's bar (from 1) or beat (quarter notes from
+/// the start); a tracker's sequence slot (from 1) and line (from 0); Live's Session clip (its ref) or scene (from 0).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayFrom {
+    Here,
+    Bar(u32),
+    Beat(f64),
+    Slot { slot: Option<u32>, line: Option<u32> },
+    Clip(String),
+    Scene(u32),
+}
+
+/// Where a play or a stop left the DAW: playing or not, and where (quarter notes from the start) when it said.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Played {
+    pub playing: bool,
+    pub position_beats: Option<f64>,
 }
 
 /// What /music shows: what Kumi knows of the producer's music and how learning it goes, whether they agreed it learns

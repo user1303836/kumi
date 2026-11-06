@@ -438,10 +438,11 @@ pub const VIEW: ViewPresentation = ViewPresentation {
 pub fn create_renoise_integration(options: OwnOptions) -> Rc<dyn Integration> {
     create_own_integration::<RenoiseRefs>(&DAW, options, |parts| {
         let caps = &DAW.profile.caps;
-        // (M7) the variations tool: Renoise's patterns and phrases (#401)
+        // (M7) the variations tool: Renoise's patterns and phrases (#401); a plugin host's under its own state, with its
+        // rules (CC-24)
         let variations = caps.variations.then(|| {
             let backend = crate::variations::RenoiseBackend::new(parts.changes.clone(), parts.renderer.clone());
-            kumi_agent::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+            kumi_agent::core::variations::tool::Variations::for_policy(backend, &parts.policy, parts.kumi_home.clone()).tool()
         });
         OwnTools {
             // (#401) the sample map

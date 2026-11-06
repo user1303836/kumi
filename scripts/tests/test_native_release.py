@@ -28,11 +28,13 @@ release = vendor.release
 EXEC_BITS = os.name != "nt"
 # The two kinds of bridge a bundle carries (scripts/daws.toml): REAPER's extension, a library, and Renoise's tool.
 REAPER, RENOISE = release.DAW_BRIDGES["reaper"], release.DAW_BRIDGES["renoise"]
+# The words a library built from kumi-daw/1's contract carries in its read-only data, for Kumi's setup to read.
+MARK = release.identity_mark().encode()
 
 # Libraries as each system's linker lays them out, cut down to what the release script reads: their exported names
 # and, by format, what REAPER's loader on that system cares about.
 
-def elf_library(machine=62, exports=("ReaperPluginEntry",), glibc=("2.2.5", "2.34")):
+def elf_library(machine=62, exports=("ReaperPluginEntry",), glibc=("2.2.5", "2.34"), mark=True):
     strings = bytearray(b"\0")
     def name(text):
         strings.extend(text.encode() + b"\0")
@@ -59,9 +61,9 @@ def elf_library(machine=62, exports=("ReaperPluginEntry",), glibc=("2.2.5", "2.3
                 struct.pack("<IIQQQQIIQQ", 17, 0x6FFFFFFE, 2, 0, offsets[2], len(blobs[2]), 1, 1, 8, 0),
                 struct.pack("<IIQQQQIIQQ", 32, 3, 0, 0, offsets[3], len(blobs[3]), 0, 0, 1, 0)]
     data = header + b"".join(blobs)
-    return data + b"\0" * (table - len(data)) + b"".join(sections)
+    return data + b"\0" * (table - len(data)) + b"".join(sections) + (MARK if mark else b"")
 
-def macho_library(cpu=0x0100000C, exports=("ReaperPluginEntry",), install_name="@rpath/reaper_kumi.dylib", signed=True):
+def macho_library(cpu=0x0100000C, exports=("ReaperPluginEntry",), install_name="@rpath/reaper_kumi.dylib", signed=True, mark=True):
     edges = [b"_" + export.encode() + b"\0" for export in exports]
     root = 2 + sum(len(edge) + 1 for edge in edges)
     trie = bytes([0, len(edges)]) + b"".join(edge + bytes([root + 4 * i]) for i, edge in enumerate(edges))
@@ -74,7 +76,7 @@ def macho_library(cpu=0x0100000C, exports=("ReaperPluginEntry",), install_name="
     if signed:
         commands.append(struct.pack("<IIII", 0x1D, 16, trie_at + len(trie), 16))
     header = struct.pack("<IiIIIIII", 0xFEEDFACF, cpu, 0, 6, len(commands), sum(map(len, commands)), 0, 0)
-    return header + b"".join(commands) + trie + (b"\0" * 16 if signed else b"")
+    return header + b"".join(commands) + trie + (b"\0" * 16 if signed else b"") + (MARK if mark else b"")
 
 def universal(*slices):
     data = bytearray(struct.pack(">II", 0xCAFEBABE, len(slices)))
@@ -89,7 +91,7 @@ def universal(*slices):
         data += b"\0" * (at - len(data)) + piece
     return bytes(data)
 
-def pe_library(machine=0x8664, exports=("ReaperPluginEntry",), imports=("KERNEL32.dll",), delayed=()):
+def pe_library(machine=0x8664, exports=("ReaperPluginEntry",), imports=("KERNEL32.dll",), delayed=(), mark=True):
     base, raw = 0x1000, 0x200
     blob = bytearray()
     def put(data):
@@ -113,7 +115,7 @@ def pe_library(machine=0x8664, exports=("ReaperPluginEntry",), imports=("KERNEL3
     head = bytearray(b"MZ" + b"\0" * 0x3E)
     struct.pack_into("<I", head, 0x3C, 0x40)
     head += b"PE\0\0" + struct.pack("<HHIIIHH", machine, 1, 0, 0, 0, len(optional), 0x2022) + optional + section
-    return bytes(head) + b"\0" * (raw - len(head)) + bytes(blob)
+    return bytes(head) + b"\0" * (raw - len(head)) + bytes(blob) + (MARK if mark else b"")
 
 class NativeRelease(unittest.TestCase):
     def setUp(self):
@@ -698,7 +700,10 @@ class NativeRelease(unittest.TestCase):
                  "needs the C runtime installed (api-ms-win-crt-runtime-l1-1-0.dll, vcruntime140.dll)"),
                 ("x86_64-pc-windows-msvc", pe_library(delayed=("ucrtbase.dll",)), "needs the C runtime installed (ucrtbase.dll)"),
                 # Windows on Arm gets the x64 build: REAPER's Arm build is ARM64EC, which loads x64 libraries.
-                ("aarch64-pc-windows-msvc", pe_library(machine=0xAA64), "holds arm64, not x86_64")]:
+                ("aarch64-pc-windows-msvc", pe_library(machine=0xAA64), "holds arm64, not x86_64"),
+                # A build that lost kumi-daw/1's identity mark: setup would say the extension keeps a project's id.
+                ("x86_64-unknown-linux-gnu", elf_library(mark=False), "setup would say REAPER's extension keeps a project's id"),
+                ("aarch64-apple-darwin", universal(macho_library(0x01000007, mark=False), macho_library(mark=False)), "doesn't carry")]:
             with self.subTest(said=said), self.assertRaisesRegex(ValueError, re.escape(said)):
                 release.check_extension(REAPER, self.library(data, release.extension_name(REAPER, target)), target)
         # CI's REAPER job checks its one build of the runner's own architecture.

@@ -385,10 +385,10 @@ pub fn create_reaper_integration(options: OwnOptions) -> Rc<dyn Integration> {
     create_own_integration::<ReaperRefs>(&DAW, options, |parts| {
         let caps = &DAW.profile.caps;
         OwnTools {
-            // (M7) the variations tool: REAPER's items (#401)
+            // (M7) the variations tool: REAPER's items (#401); a plugin host's under its own state, with its rules (CC-24)
             variations: caps.variations.then(|| {
                 let backend = variations::ReaperVariations::new(parts.changes.clone(), parts.renderer.clone());
-                kumi_agent::core::variations::tool::Variations::new(backend, parts.kumi_home.clone()).tool()
+                kumi_agent::core::variations::tool::Variations::for_policy(backend, &parts.policy, parts.kumi_home.clone()).tool()
             }),
             // (#401) delivery
             delivery: caps.delivery.then(|| {

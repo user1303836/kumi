@@ -354,6 +354,43 @@ mod tests {
         assert_eq!((preset.name.as_str(), preset.format.as_str(), preset.size), ("Approved", "patch", 256));
         assert!(preset.package_fingerprint.is_some());
         assert_eq!(learn(run()).await.unwrap().presets.done, 0);
+
+        // Audio-only rebuilds skip an atomic package whether it is the approved root or a child of one. Adding a
+        // profile-specific audio child must neither leak that sound nor refresh the package's saved preset facts.
+        put(&package.join("Audio/Snare.caf"), &[3; 128]);
+        let preserved: Vec<_> = ["presets.jsonl", "taste.json"]
+            .into_iter()
+            .map(|name| {
+                let path = Path::new(&plan.dir).join(name);
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect();
+        for approved in [&package, &root] {
+            let mut sources = options(&root);
+            sources.approved_folders = Some(vec![approved.to_string_lossy().into_owned()]);
+            let audio_plan = plan_learning(PlanOptions {
+                dir: plan.dir.clone(),
+                sources: Some(sources),
+                daws: Daws(&DAWS),
+                audio_only: true,
+                workers: Some(0),
+                ..Default::default()
+            })
+            .await;
+            assert_eq!(audio_plan.daw, Some(DawId::Logic));
+            assert_eq!(audio_plan.sources.len(), 1);
+            assert_eq!(audio_plan.sources[0].path, approved.to_string_lossy());
+            let audio =
+                learn(LearnOptions { daws: Daws(&DAWS), rebuild: true, ..LearnOptions::new(audio_plan, Signal::new()) }).await.unwrap();
+            assert_eq!(audio.sounds, kumi_library::learn::Counts::default(), "approved root: {}", approved.display());
+            assert_eq!(audio.presets, kumi_library::learn::Counts::default());
+            assert_eq!(audio.sets, kumi_library::learn::Counts::default());
+            assert_eq!(audio.failed, 0);
+            for (path, bytes) in &preserved {
+                assert_eq!(&std::fs::read(path).unwrap(), bytes, "{} changed for {}", path.display(), approved.display());
+            }
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

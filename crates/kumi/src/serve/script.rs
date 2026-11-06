@@ -531,10 +531,12 @@ fn lua_ran(app: &str, ran: Result<ToolResult, RuntimeError>) -> Ran {
     let first = |name: &str| said.get(name).and_then(Value::as_array).and_then(|steps| steps.first()).cloned();
     if let Some(done) = first("done") {
         let failed = done.get("failed").filter(|failed| !failed.is_null()).cloned();
+        // (Lua's JSON writes an empty table, nothing printed, as `{}`)
+        let printed = done.get("printed").filter(|printed| !matches!(printed, Value::Object(empty) if empty.is_empty())).cloned();
         return Ran {
             state: if failed.is_some() { "failed" } else { "ran" },
             result: done.get("result").cloned(),
-            stdout: done.get("printed").cloned(),
+            stdout: printed,
             error: failed,
         };
     }
@@ -1105,6 +1107,15 @@ mod tests {
             assert_eq!(stopped(DawId::Reaper, json!({"message": "attempt to call a nil value", "line": 2})), Some(json!({"message": "attempt to call a nil value", "line": 2})));
             let ran = Ran { state: "ran", result: None, stdout: Some(json!("Python exceeded timeoutMs")), error: None };
             assert_eq!(ran.stopped_at_deadline(DawId::Ableton).state, "ran", "a script that printed the words wasn't stopped");
+            // Lua that kept nothing still says what it said, as the plan answers for it (lab, Renoise 3.5.4): the endless loop
+            // stopped at its time is failed in Kumi's words, a read gives its value, and nothing printed (Lua's empty table,
+            // `{}`) is no stdout.
+            let plan = |step: Value| Ok(ToolResult::text(json!({"done": [step]}).to_string()));
+            let looped = lua_ran("Renoise", plan(json!({"step": 1, "changed": "Ran Lua: while true do end: Only Renoise's own undo can take back what it did (Edit > Undo); Kumi can't", "change": null, "printed": {}, "failed": {"message": "kumi:1: Kumi stopped it: it ran longer than 800 ms"}})))
+                .stopped_at_deadline(DawId::Renoise);
+            assert_eq!((looped.state, looped.output()), ("failed", json!({"error": "Kumi stopped the script after 0.8 seconds."})));
+            let read = lua_ran("Renoise", plan(json!({"step": 1, "changed": "Ran Lua: return song.transport.bpm: …", "change": null, "printed": {}, "result": 80})));
+            assert_eq!((read.state, read.output()), ("ran", json!({"result": "80"})));
         })
         .await;
     }

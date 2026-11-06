@@ -607,6 +607,18 @@ async fn renoises_changes_follow_its_epoch_and_its_undo_that_skips_mute() {
             assert!(left.is_error && left.text.contains("Renoise's own undo can"), "{}", left.text);
             let row = told.borrow().iter().rev().find(|record| record.title.starts_with("Ran Lua")).cloned().unwrap();
             assert_eq!(row.state, ChangeState::Kept, "{row:?}");
+            // Lua that only reads, or is stopped at its time, keeps nothing (no row) and still says what it said: its value,
+            // or the error it stopped at (the lab's Renoise lost both).
+            let rows = told.borrow().len();
+            let lua = |code: &str| input(json!({"steps": [{"tool": "run_lua", "input": {"code": code}}]}));
+            let read = plan.execute(lua("return song.transport.bpm"), Signal::new()).await.unwrap();
+            assert!(!read.is_error && read.text.contains("\"result\":"), "its value: {}", read.text);
+            let stopped = plan.execute(lua("while true do end"), Signal::new()).await.unwrap();
+            assert!(stopped.text.contains("Kumi stopped it: it ran longer than 800 ms"), "where it stopped: {}", stopped.text);
+            for _ in 0..200 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(told.borrow().len(), rows, "no row for either");
             // The song changed behind Kumi's back (another epoch): the tool refuses, and Kumi says so in the model's ref.
             script.switch_song();
             let stale = tool(&latest, "track_volume").execute(input(json!({"ref": kick, "volumeDb": -2})), Signal::new()).await.unwrap();

@@ -46,6 +46,18 @@ impl Lease {
     /// refused `leased` when another runtime holds it.
     pub async fn take(&self, host: &Host) -> Result<Held<'_>, OpError> {
         let turn = self.turns.lock().await;
+        self.hold(turn, host)
+    }
+
+    /// Takes the lease for `host`'s call without waiting: refused `busy` while this runtime is writing, playing or
+    /// importing (`busy` says what of), or `leased` when another runtime holds it.
+    pub fn try_take(&self, host: &Host, busy: &str) -> Result<Held<'_>, OpError> {
+        let turn = self.turns.try_lock().map_err(|_| OpError::Refused { code: "busy", reason: busy.into(), owner: None })?;
+        self.hold(turn, host)
+    }
+
+    /// This runtime's turn on the lease, held with the endpoint's lock, or refused `leased` when another runtime holds it.
+    fn hold<'a>(&'a self, turn: tokio::sync::MutexGuard<'a, ()>, host: &Host) -> Result<Held<'a>, OpError> {
         let unopened = |error: std::io::Error| OpError::Failed { reason: format!("Kumi couldn't open the DAW's write lease: {error}") };
         if let Some(folder) = self.path.parent() {
             super::ctx::make_private_dir(folder).map_err(unopened)?;

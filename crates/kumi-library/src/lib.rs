@@ -81,6 +81,8 @@ pub struct LibraryOptions {
     pub sources: Option<SourceOptions>,
     /// Applied to both scanning workers and reference measurements.
     pub decode: DecodeOptions,
+    /// Learn audio only; standalone callers retain all-kind learning by default.
+    pub audio_only: bool,
     pub fork: Option<bool>,
     pub workers: Option<usize>,
     pub delay_ms: Option<u64>,
@@ -199,6 +201,7 @@ impl Library {
             projects_dir: self.options.projects_dir.clone(),
             sources: self.options.sources.clone(),
             decode: self.options.decode.clone(),
+            audio_only: self.options.audio_only,
             find_sets: self.options.find_sets,
             workers: self.options.workers,
             daws: self.options.daws,
@@ -270,8 +273,8 @@ impl Library {
                 StatusState::New
             },
             sounds: counts.0,
-            presets: counts.1,
-            sets: counts.2,
+            presets: if self.options.audio_only { 0 } else { counts.1 },
+            sets: if self.options.audio_only { 0 } else { counts.2 },
             todo: running.map(|p| p.sounds.todo),
             done: running.map(|p| p.sounds.done),
             learned_at,

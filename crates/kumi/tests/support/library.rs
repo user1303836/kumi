@@ -176,6 +176,7 @@ impl Studio {
                 ..Default::default()
             }),
             approved_folders: None,
+            audio_only: false,
             decode: Default::default(),
             set_folders: vec![],
             set_files: vec![],

@@ -406,7 +406,7 @@ jobs:
             Windows) file=target/release/reaper_kumi.dll ;;
           esac
           echo "REAPER_KUMI_ARTIFACT=$PWD/$file" >> "$GITHUB_ENV"
-      - name: It's what a bundle may carry (REAPER's entry point; signed and named for itself on macOS; the C runtime linked in on Windows; no newer glibc than Kumi's on Linux)
+      - name: It's what a bundle may carry (REAPER's entry point; signed and named for itself on macOS; the C runtime linked in on Windows; no newer glibc than Kumi's on Linux; the identity mark setup reads)
         if: steps.affected.outputs.reaper_extension == 'true'
         run: |
           python scripts/build-native-release.py --check-extension "$REAPER_KUMI_ARTIFACT" --target "$(rustc -vV | sed -n 's/^host: //p')" --thin

@@ -42,6 +42,7 @@ def register(ctx) -> None:
         policy.post_tool_call(host, **kwargs)
 
     def focus(**kwargs):
+        policy.turn_started(host, **kwargs)  # a turn Hermes forks in the background never comes through here
         return context.pre_llm_call(host, **kwargs)
 
     def kumi_command(raw_args: str = "", **kwargs):

@@ -849,7 +849,7 @@ fn restricted_live_preview_and_capture_refuse_without_touching_the_daw() {
 
     on_a_paused_clock(async {
         let live = Live::configured(&[("Drums", &["Simpler"])], |_, options, folder| {
-            options.policy = HostPolicy::plugin(folder.join("scratch"), folder.join("quarantine"));
+            options.policy = HostPolicy::plugin(folder.join("scratch"), folder.join("quarantine"), folder.to_path_buf());
         })
         .await;
         live.set.asked.borrow_mut().clear();

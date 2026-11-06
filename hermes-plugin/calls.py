@@ -118,3 +118,39 @@ class CallIds:
             self._entries[key].remove(entry)
             if not self._entries[key]:
                 del self._entries[key]
+
+
+TURNS_PER_CHAT = 16
+CHATS = 2000
+
+
+class Turns:
+    """The producer's own turns, as Hermes's `pre_llm_call` names them (session id → its latest turn ids).
+
+    Hermes's background review (and a side question, `/btw`) forks a chat after a turn: the fork has the chat's session
+    id and a turn id of its own, and it never goes through `pre_llm_call` (`_persist_disabled`, Hermes v0.22.7). Its
+    tool whitelist is thread-local and doesn't reach the thread a tool runs on, so its calls reach Kumi's hook, where a
+    "this session" approval would let them run unasked. A turn of a chat whose turns Kumi has seen, and that isn't one
+    of them, is such a fork, and so is a call there that names no turn (rgzm: a Hermes that stopped passing turn ids
+    must not reopen it). A chat Kumi has seen no turn of (it was enabled mid-turn) can't be told apart."""
+
+    def __init__(self) -> None:
+        self._turns: dict[str, list[str]] = {}
+        self._lock = threading.Lock()
+
+    def saw(self, session: Any, turn: Any) -> None:
+        if not (isinstance(session, str) and session and isinstance(turn, str) and turn):
+            return
+        with self._lock:
+            seen = self._turns.pop(session, [])  # (re-inserted last: the dict keeps the chats in the order last seen)
+            self._turns[session] = [*seen[1 - TURNS_PER_CHAT:], turn] if turn not in seen else seen
+            while len(self._turns) > CHATS:
+                del self._turns[next(iter(self._turns))]
+
+    def forked(self, session: Any, turn: Any) -> bool:
+        """Whether a call of `turn` in `session` comes from a turn Hermes forked, not one of the producer's own."""
+        if not (isinstance(session, str) and session):
+            return False
+        with self._lock:
+            seen = self._turns.get(session)
+            return seen is not None and not (isinstance(turn, str) and turn in seen)

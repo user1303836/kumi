@@ -1,7 +1,7 @@
 //! The variations tool against a fake DAW of sixteen steps, with no DAW at all: what core owns, the same for every backend
 //! (numbering across makes, keep, change, drop and "rest", the checks and their warnings, the sets kept across a restart,
 //! takes found again by their names, and when takes are rendered and drawn again).
-use super::backend::{Rendered, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
+use super::backend::{Rendered, Rewritten, Room, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::Heard;
 use super::tool::{names, Variations};
 use super::{Material, Rng};
@@ -66,6 +66,8 @@ struct Daw {
     uncertain_write: Cell<bool>,
     stale_board: RefCell<Option<std::path::PathBuf>>,
     refuses_apply: Cell<bool>,
+    /// How many new takes have an empty place (None: always room).
+    room: Cell<Option<usize>>,
 }
 
 impl Daw {
@@ -293,6 +295,17 @@ impl VariationsBackend for Fake {
             return Err("the DAW was busy".into());
         }
         self.0.takes.borrow().get(&id_of(row)).map(|(_, steps)| steps.clone()).ok_or("gone".into())
+    }
+
+    async fn room(&self, _: &Set<Self>, _: &Signal) -> Result<Option<Room>, String> {
+        Ok(self.0.room.get().map(|fits| Room { fits, words: format!("the fake has {fits} empty places") }))
+    }
+
+    async fn at_is_empty(&self, _: &Set<Self>, _: usize, _: &Value, at: &JsonObject, _: &Signal) -> Result<(), String> {
+        match at.get("empty") {
+            Some(Value::Bool(true)) => Ok(()),
+            _ => Err("a take is there".into()),
+        }
     }
 
     async fn rewrite(&self, _: &Set<Self>, row: &Value, _: &Steps, after: &Steps, _: &Signal) -> Result<Rewritten<Steps>, (String, bool)> {
@@ -1036,4 +1049,212 @@ async fn a_backend_without_atomic_source_guard_refuses_apply_before_any_pending_
     assert_eq!(daw.source_reads.get(), source_reads);
     assert_eq!((daw.changes.get(), daw.renders.get()), (0, 0));
     assert_eq!(run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap()["takes"][0]["state"], "planned");
+}
+
+// A plugin host's takes (CC-24)
+
+/// A plugin host's Kumi with the fake DAW: its sets under the host's `state` (W1-e), never the Kumi home beside it.
+fn hosted(daw: &Rc<Daw>, state: &std::path::Path) -> Rc<dyn KernelTool> {
+    let policy = crate::core::context::HostPolicy::plugin(state.join("scratch"), state.join("quarantine"), state.into());
+    Variations::for_policy(Fake(daw.clone()), &policy, state.join("kumi-home")).tool()
+}
+
+/// `ask` with `more`'s fields.
+fn with(ask: &Value, more: Value) -> Value {
+    let mut out = ask.clone();
+    for (key, value) in more.as_object().unwrap() {
+        out[key] = value.clone();
+    }
+    out
+}
+
+/// `ask` previewed, then dispatched with its preview's seed and takes: what the dispatch answered.
+async fn approved(tool: &Rc<dyn KernelTool>, ask: Value) -> Value {
+    let preview = run(tool, with(&ask, json!({"preview": true}))).await.unwrap();
+    assert_eq!(preview["state"], "preview", "{preview}");
+    run(tool, with(&ask, json!({"seed": preview["seed"], "expect_takes": preview["takes_digest"]}))).await.unwrap()
+}
+
+/// (CC-24e, W1-b, W1-e) A host's preview draws the takes and writes, renders, keeps and numbers nothing; its seed, with the
+/// same arguments, draws the same takes at dispatch, one change a take, none rendered (a host's listening is off), and the
+/// set is kept under the host's state.
+#[tokio::test(flavor = "current_thread")]
+async fn a_hosts_preview_writes_nothing_and_its_seed_draws_the_same_takes_at_dispatch() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    let ask = json!({"action": "make", "source": {"steps": BEAT}, "count": 3});
+    let preview = run(&tool, with(&ask, json!({"preview": true}))).await.unwrap();
+    assert_eq!((preview["state"].clone(), preview["fits"].clone()), (json!("preview"), json!(3)), "{preview}");
+    assert_eq!(preview["source"], "steps of “Beat”");
+    let digest = preview["takes_digest"].as_str().unwrap();
+    assert!(digest.len() == 64 && digest.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{digest}");
+    assert_eq!((daw.changes.get(), daw.renders.get()), (0, 0), "nothing written or rendered");
+    assert!(!state.path().join("variations").exists(), "nothing kept");
+    let again = run(&tool, with(&ask, json!({"preview": true, "seed": preview["seed"]}))).await.unwrap();
+    assert_eq!(
+        (again["takes"].clone(), again["takes_digest"].clone()),
+        (preview["takes"].clone(), preview["takes_digest"].clone()),
+        "numbered as before: a preview takes no number"
+    );
+
+    let made = run(&tool, with(&ask, json!({"seed": preview["seed"], "expect_takes": digest}))).await.unwrap();
+    let shown = preview["takes"].as_array().unwrap();
+    let written = made["takes"].as_array().unwrap();
+    assert_eq!(written.len(), 3, "{made}");
+    for (written, shown) in written.iter().zip(shown) {
+        assert_eq!(written["take"], shown["take"]);
+        let line = written["line"].as_str().unwrap();
+        assert!(line.starts_with(shown["line"].as_str().unwrap()) && line.ends_with(')'), "the line approved, with its change: {line}");
+    }
+    assert_eq!((daw.changes.get(), daw.renders.get()), (3, 0), "one change a take, none rendered");
+    assert!(state.path().join("variations").join("fake-song_1.json").exists(), "kept under the host's state");
+    assert!(!state.path().join("kumi-home").exists(), "never in the Kumi home");
+    // (a host has no drop: undo takes a take back)
+    assert!(run(&tool, json!({"action": "drop", "names": ["V1"]})).await.is_err());
+    assert_eq!(daw.names().len(), 3);
+}
+
+/// (W1-a) A dispatch is held to its preview's takes: a source changed since, or a make on the same source in between (it
+/// moves the numbering), refuses it `stale` with nothing written; one without its preview's digest is refused.
+#[tokio::test(flavor = "current_thread")]
+async fn a_dispatch_whose_takes_would_come_out_differently_is_stale_and_writes_nothing() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    let ask = json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 11});
+    let preview = run(&tool, with(&ask, json!({"preview": true}))).await.unwrap();
+    let digest = preview["takes_digest"].clone();
+    let mut edited = BEAT;
+    edited[2] = 4;
+    let changed =
+        run(&tool, json!({"action": "make", "source": {"steps": edited}, "count": 2, "seed": 11, "expect_takes": digest})).await.unwrap();
+    assert_eq!(
+        changed,
+        json!({"state": "refused", "code": "stale", "reason": "The takes would come out differently now: preview them again."})
+    );
+    assert_eq!(daw.changes.get(), 0);
+
+    approved(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 1, "seed": 12})).await;
+    assert_eq!(daw.changes.get(), 1);
+    let late = run(&tool, with(&ask, json!({"expect_takes": digest}))).await.unwrap();
+    assert_eq!((late["state"].clone(), late["code"].clone()), (json!("refused"), json!("stale")), "{late}");
+    assert_eq!(daw.changes.get(), 1, "nothing more written");
+
+    let bare = run(&tool, ask.clone()).await.unwrap();
+    assert_eq!((bare["state"].clone(), bare["code"].clone()), (json!("refused"), json!("invalid")), "{bare}");
+    assert_eq!(daw.changes.get(), 1);
+}
+
+/// (24-r1) A change never writes over a take the producer edited since Kumi made it: the whole change is refused, naming
+/// the take, with nothing rewritten. An unedited take changes as its preview drew it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_hosts_change_never_writes_over_a_take_the_producer_edited() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    approved(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 14})).await;
+    daw.takes.borrow_mut().get_mut(&1).unwrap().1 .0[15] = 9;
+    let before = daw.takes.borrow().clone();
+    let refusal = json!({"state": "refused", "code": "changed_since", "reason": "V1 was changed in Fake since Kumi made it; make a new take instead."});
+    assert_eq!(run(&tool, json!({"action": "change", "names": ["V1", "V2"], "preview": true})).await.unwrap(), refusal);
+    let dispatched = run(&tool, json!({"action": "change", "names": ["V1", "V2"], "expect_takes": "0".repeat(64)})).await.unwrap();
+    assert_eq!(dispatched, refusal);
+    assert_eq!((daw.takes.borrow().clone(), daw.changes.get()), (before.clone(), 2), "nothing rewritten");
+
+    let changed = approved(&tool, json!({"action": "change", "names": ["V2"]})).await;
+    assert_eq!(changed["changed"].as_array().unwrap().len(), 1, "{changed}");
+    assert_eq!(daw.changes.get(), 3);
+    assert_ne!(daw.takes.borrow()[&2], before[&2]);
+}
+
+/// (24-r2) Takes that don't all have an empty place are refused, never trimmed, with how many fit; nothing is written.
+#[tokio::test(flavor = "current_thread")]
+async fn takes_that_dont_all_have_an_empty_place_are_refused_never_trimmed() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    daw.room.set(Some(2));
+    let ask = json!({"action": "make", "source": {"steps": BEAT}, "count": 4, "seed": 13});
+    let refusal = json!({"state": "refused", "code": "no_room", "fits": 2,
+        "reason": "Only 2 of the 4 takes fit: the fake has 2 empty places. Ask for 2, or make room in Fake first."});
+    assert_eq!(run(&tool, with(&ask, json!({"preview": true}))).await.unwrap(), refusal);
+    assert_eq!(run(&tool, with(&ask, json!({"expect_takes": "0".repeat(64)}))).await.unwrap(), refusal);
+    daw.room.set(Some(0));
+    let none = run(&tool, with(&ask, json!({"preview": true}))).await.unwrap();
+    assert_eq!(none["reason"], "No take fits: the fake has 0 empty places. Make room in Fake first.", "{none}");
+    assert_eq!(none["fits"], 0, "{none}");
+    assert_eq!(daw.changes.get(), 0, "nothing written");
+
+    daw.room.set(Some(2));
+    let fits = run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 13, "preview": true})).await.unwrap();
+    assert_eq!(fits["fits"], 2, "{fits}");
+}
+
+/// (24a, 24b, 24-r2) A host's keep previews each take's name after, and places a take only into an empty place.
+#[tokio::test(flavor = "current_thread")]
+async fn a_hosts_keep_previews_its_renames_and_places_a_take_only_into_an_empty_place() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    approved(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 15})).await;
+    let preview = run(&tool, json!({"action": "keep", "names": ["V1"], "preview": true})).await.unwrap();
+    assert_eq!(preview, json!({"state": "preview", "takes": [{"take": "V1", "name_after": "V1 \u{b7} Beat \u{b7} kept"}], "skipped": []}));
+    assert_eq!(daw.changes.get(), 2, "a preview renames nothing");
+    let over = run(&tool, json!({"action": "keep", "names": ["V1"], "at": {}})).await.unwrap();
+    assert_eq!(over, json!({"state": "refused", "code": "no_room", "reason": "V1 can't go there: a take is there."}));
+    assert_eq!(daw.names(), ["V1 \u{b7} Beat", "V2 \u{b7} Beat"], "nothing kept or placed");
+    let kept = run(&tool, json!({"action": "keep", "names": ["V1"], "at": {"empty": true}})).await.unwrap();
+    assert_eq!(kept["placed"], "at the end", "{kept}");
+    assert_eq!(daw.names(), ["V1 \u{b7} Beat \u{b7} kept", "V2 \u{b7} Beat"]);
+    // (a kept take is never rewritten here, force or not)
+    assert!(run(&tool, json!({"action": "change", "names": ["V1"], "force": true, "preview": true}))
+        .await
+        .unwrap_err()
+        .contains("V1 is kept"));
+}
+
+/// A hosted owner uses the same durable board and numbering as its foreground preview: planning writes nothing, and
+/// the next approved take cannot reuse a number reserved by the board.
+#[tokio::test(flavor = "current_thread")]
+async fn a_hosts_candidate_board_stays_inspectable_and_reserves_its_foreground_numbers() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let policy =
+        crate::core::context::HostPolicy::plugin(state.path().join("scratch"), state.path().join("quarantine"), state.path().into());
+    let owner = Variations::for_policy(Fake(daw.clone()), &policy, state.path().join("kumi-home"));
+    let tool = owner.tool();
+    approved(&tool, json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":30})).await;
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":3,"seed":31}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    let made = owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap();
+    assert_eq!((daw.changes.get(), daw.renders.get()), (1, 0), "background planning writes and renders nothing");
+    assert_eq!(run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap(), made);
+    let ask = json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":36});
+    let preview = run(&tool, with(&ask, json!({"preview":true}))).await.unwrap();
+    assert_eq!(preview["takes"][0]["take"], "V5", "the preview skips the board's reserved V2–V4");
+    let written = run(&tool, with(&ask, json!({"seed":preview["seed"],"expect_takes":preview["takes_digest"]}))).await.unwrap();
+    assert_eq!(written["takes"][0]["take"], "V5", "dispatch keeps the approved number");
+    assert_eq!((daw.changes.get(), daw.renders.get()), (2, 0));
+    assert_eq!(run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap(), made, "the board stays immutable");
+}
+
+/// Hosted changes retain the earlier writes an undo may restore, as standalone changes do; the producer-edit guard
+/// still refuses material outside that history in the hosted tests above.
+#[tokio::test(flavor = "current_thread")]
+async fn a_hosts_undone_change_recognizes_its_earlier_material() {
+    let state = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = hosted(&daw, state.path());
+    approved(&tool, json!({"action":"make","source":{"steps":BEAT},"count":2,"seed":14})).await;
+    let original = daw.takes.borrow()[&2].1.clone();
+    let changed = approved(&tool, json!({"action":"change","names":["V2"]})).await;
+    assert_eq!(changed["changed"].as_array().unwrap().len(), 1, "{changed}");
+    assert_ne!(daw.takes.borrow()[&2].1, original);
+    daw.takes.borrow_mut().get_mut(&2).unwrap().1 = original; // The DAW's undo restores a known Kumi write.
+    let again = approved(&tool, json!({"action":"change","names":["V2"]})).await;
+    assert_eq!(again["changed"].as_array().unwrap().len(), 1, "{again}");
+    assert_eq!((daw.changes.get(), daw.renders.get()), (4, 0), "the undo is recognized without a listening rewrite");
 }

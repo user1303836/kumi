@@ -90,6 +90,14 @@ pub enum Undroppable {
     InUse(String),
 }
 
+/// How many new takes the DAW has an empty place for now, without making one (CC-24's 24-r2), and the DAW's words for
+/// where they go ("Live has 2 empty scenes below the clip, and Kumi adds none here").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Room {
+    pub fits: usize,
+    pub words: String,
+}
+
 /// A rewrite made: its change, and what the take holds instead of what was asked when only part went in (and why).
 pub type Rewritten<M> = (String, Option<(M, String)>);
 
@@ -185,6 +193,12 @@ pub trait VariationsBackend: Sized {
         None
     }
 
+    /// How many new takes of `set` have an empty place now, read without making one (a plugin host's make writes only
+    /// there: CC-24's 24-r2). None when there's always one (a take after the last item on its track).
+    async fn room(&self, _set: &Set<Self>, _signal: &Signal) -> Result<Option<Room>, String> {
+        Ok(None)
+    }
+
     /// Writes take `number` (one change): its change id, its place and its long ref.
     async fn write_new(
         &self,
@@ -223,6 +237,12 @@ pub trait VariationsBackend: Sized {
 
     /// Puts a kept take where the producer says (one change): what it answered.
     async fn place(&self, set: &mut Set<Self>, number: usize, row: &Value, at: &JsonObject, signal: &Signal) -> Result<Value, String>;
+
+    /// Whether `at` puts found take `number` into an empty place, writing over nothing (a plugin host's keep places a take
+    /// only there: CC-24's 24-r2): why not. By default no place is known to be empty.
+    async fn at_is_empty(&self, _set: &Set<Self>, _number: usize, _row: &Value, _at: &JsonObject, _signal: &Signal) -> Result<(), String> {
+        Err(format!("Kumi can't tell that place is empty in {}: keep the take where it is", self.words().app))
+    }
 
     /// Why a found take stays out of a drop (it holds the producer's edit where its digest doesn't look, or it's in use
     /// elsewhere), or None.

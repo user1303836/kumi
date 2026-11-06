@@ -24,6 +24,9 @@ pub struct PlanOptions {
     pub sources: Option<SourceOptions>,
     #[serde(default, skip_serializing_if = "DecodeOptions::is_default")]
     pub decode: DecodeOptions,
+    /// Audio-only scans never discover or parse presets and projects.
+    #[serde(default)]
+    pub audio_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub find_sets: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +96,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
             sources,
             approved_folders,
             decode: options.decode,
+            audio_only: options.audio_only,
             set_folders: vec![],
             set_files: vec![],
             plugin_presets: vec![],
@@ -110,7 +114,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
         .filter(|s| matches!(s.kind, SourceKind::Pack | SourceKind::Core | SourceKind::Splice | SourceKind::Daw(_)))
         .map(|s| s.path.clone())
         .collect();
-    let find_sets = options.find_sets != Some(false);
+    let find_sets = !options.audio_only && options.find_sets != Some(false);
     let recent: Vec<_> = if find_sets {
         recent_projects(options.daws, &original_sources)
             .into_iter()
@@ -128,6 +132,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
         sources,
         approved_folders: None,
         decode: options.decode,
+        audio_only: options.audio_only,
         set_folders: if find_sets { set_folders(&recent, Some(&home), Some(&platform)) } else { vec![] },
         set_files: recent,
         plugin_presets: if find_sets {
