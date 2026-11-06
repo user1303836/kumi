@@ -358,9 +358,10 @@ async fn once_live_reports_track_ids_the_next_look_reads_them_with_the_tracks() 
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn the_look_names_the_returns_and_main_after_the_tracks() {
+async fn kumi_for_hermess_look_names_the_returns_and_main_after_the_tracks_and_kumis_own_reads_as_before() {
     // An approval says "on "Main"" only when the look named Main: its ref was never in the look before, so a load on
-    // Main read `trackRef "track:7"`. Returns and Main follow the tracks, as Live numbers them, named and typed.
+    // Main read `trackRef "track:7"`. Kumi for Hermes's look (`every_track`) lists the returns and Main after the tracks,
+    // as Live numbers them, named and typed; Kumi's own look asks Live nothing more (its oracles pin every read).
     tokio::task::LocalSet::new()
         .run_until(async {
             let fixture: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/observation-oracle.json")).unwrap();
@@ -399,15 +400,27 @@ async fn the_look_names_the_returns_and_main_after_the_tracks() {
             connection.start(Signal::new()).await.unwrap();
             let remember = Remember::new(connection.clone(), None, None);
             let observer = Observer::new(connection.clone(), remember.clone());
-            let seen = observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap();
-            let context: Value = serde_json::from_str(&seen.context).unwrap();
-            let tracks = context["tracks"].as_array().unwrap_or_else(|| panic!("no tracks in {context}"));
-            let shown: Vec<(Value, Value, Value)> =
-                tracks.iter().map(|track| (track["ref"].clone(), track["name"].clone(), track["type"].clone())).collect();
+            let shown = |seen: Observation| -> Vec<(Value, Value, Value)> {
+                let context: Value = serde_json::from_str(&seen.context).unwrap();
+                let tracks = context["tracks"].as_array().unwrap_or_else(|| panic!("no tracks in {context}")).clone();
+                tracks.iter().map(|track| (track["ref"].clone(), track["name"].clone(), track["type"].clone())).collect()
+            };
+            let asked_others = |endpoint: &Replies| {
+                endpoint
+                    .calls
+                    .borrow()
+                    .iter()
+                    .any(|(_, args)| matches!(args.get("kind").and_then(Value::as_str), Some("return-track" | "main-track")))
+            };
+            let own = shown(observer.observe(endpoint.as_ref(), Signal::new(), None).await.unwrap());
+            assert_eq!(own.len(), 3, "{own:?}");
+            assert!(!asked_others(&endpoint), "Kumi's own look reads as it always has");
+            let every = Some(ObserveHints { every_track: true, ..ObserveHints::default() });
+            let hermes = shown(observer.observe(endpoint.as_ref(), Signal::new(), every).await.unwrap());
             assert_eq!(
-                &shown[3..],
+                &hermes[3..],
                 [(json!("track:4"), json!("A Reverb"), json!("return")), (json!("track:5"), json!("Main"), json!("main"))],
-                "{shown:?}"
+                "{hermes:?}"
             );
             assert_eq!(observer.model().tracks.len(), 3, "the Set model stays the tracks");
             remember.cancel_timer();

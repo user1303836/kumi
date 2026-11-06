@@ -369,8 +369,10 @@ impl Observer {
             let track_args = context::discovery_args(&object(
                 json!({"kind":"track","fields":fields,"limit":connection.page_limit(),"budget":connection.whole_budget()}),
             ))?;
-            // The returns and Main, after the tracks in the look: Main is named there (an approval's "on Main", FOCUS's
-            // Main) and its devices show. A read either can't make shows none of that kind; the look goes on.
+            // The returns and Main, after the tracks, in Kumi for Hermes's look (`every_track`): Main is named there (an
+            // approval's "on Main", FOCUS's Main) and its devices show. Kumi's own look reads as it always has. A read
+            // either can't make shows none of that kind; the look goes on.
+            let every_track = hints.as_ref().is_some_and(|hints| hints.every_track);
             let others: Vec<&str> = ["name", "kind", "mediaKind"].into_iter().chain(fields.iter().copied().filter(|field| *field == "mixer")).collect();
             let return_args =
                 context::discovery_args(&object(json!({"kind":"return-track","fields":others,"limit":connection.page_limit()})))?;
@@ -440,7 +442,7 @@ impl Observer {
                 }
             };
 
-            // All eight reads start before a result is interpreted. Failures remain in their own result slots.
+            // All the reads start before a result is interpreted. Failures remain in their own result slots.
             let (song_read, status_read, set_read, tracks_read, devices_read, selection_read, returns_read, main_read) = futures::join!(
                 async {
                     match song_ready {
@@ -459,8 +461,8 @@ impl Observer {
                     }
                 },
                 read(selection_args),
-                read(return_args.clone()),
-                read(main_args.clone())
+                async { if every_track { Some(read(return_args.clone()).await) } else { None } },
+                async { if every_track { Some(read(main_args.clone()).await) } else { None } }
             );
 
             connection.assert_lease(lease, &signal)?;
@@ -552,7 +554,7 @@ impl Observer {
                 let mut shown = rows.iter().map(|row| track_row(connection, row)).collect::<Result<Vec<_>, _>>()?;
                 let mut every = rows.clone();
                 for (kind, read, args) in [("return-track", &returns_read, &return_args), ("main-track", &main_read, &main_args)] {
-                    let Some(others) = other_tracks(read, kind, epoch) else { continue };
+                    let Some(others) = read.as_ref().and_then(|read| other_tracks(read, kind, epoch)) else { continue };
                     connection.register_rows(kind, &others, args, None)?;
                     for row in &others {
                         shown.push(track_row(connection, row)?);

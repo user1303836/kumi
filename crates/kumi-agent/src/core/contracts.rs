@@ -554,6 +554,9 @@ pub struct ObserveHints {
     /// What the message names with `@` in the project, in its order: each is checked and described as the pin is, and
     /// one the project no longer has is said to be gone.
     pub references: Vec<PinnedNode>,
+    /// The look lists the DAW's other tracks too (Live's returns and Main), after its tracks: Kumi for Hermes's look, so
+    /// an approval names Main and FOCUS's Main is one the look shows. Off for Kumi's own look, whose reads stay as they are.
+    pub every_track: bool,
 }
 
 /// Why a guarded undo ([`Integration::guarded_undo`]) wasn't asked of the DAW: `changed_since` (a value changed since
