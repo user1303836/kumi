@@ -4712,11 +4712,15 @@ class LiveObjectMapper:
     def selection_tick(self) -> None:
         """Selects again what a keepSelection delete kept (checked on every display tick). Live moves the selection to the
         deleted device's track, slot and clip on its next tick, after the delete's step, so what's selected in that step
-        doesn't hold: it's selected on the display tick after the delete's own, once Live has moved it."""
+        doesn't hold: it's selected on the display tick after the delete's own, once Live has moved it. Only while the
+        selection is still as the delete left it or on the deleted device's track: one elsewhere is the producer's own
+        choice since, which is never taken back."""
         self._display_ticks += 1
         pending = self._put_back
         if pending is None or self._display_ticks <= pending["tick"] + 1: return
         self._put_back = None
+        now = self._selection_capture()["identities"]
+        if now != pending["left"] and now["trackRef"] != pending["moved_to"]: return
         try: self._put_selection_back(pending["targets"])
         except BaseException: pass
 
@@ -11488,7 +11492,7 @@ class LiveObjectMapper:
         keep = args.get("keepSelection")
         if keep is not None and not (isinstance(keep, dict) and sorted(keep) == ["left", "previous"] and all(self._selection_capture_valid(capture) for capture in keep.values())):
             raise ValueError(f"keepSelection is invalid{UNRUN_SUFFIX}")
-        owner, device, _, _, _ = self._device_location(str(reference), args.get("expectedObjectIdentity"), args.get("expectedOwnerRef"), args.get("expectedOwnerIdentity"), args.get("expectedSiblings"), args.get("expectedTrackRef"), args.get("expectedTrackIdentity"))
+        owner, device, track_index, _, _ = self._device_location(str(reference), args.get("expectedObjectIdentity"), args.get("expectedOwnerRef"), args.get("expectedOwnerIdentity"), args.get("expectedSiblings"), args.get("expectedTrackRef"), args.get("expectedTrackIdentity"))
         deleter = getattr(owner, "delete_device", None)
         if not callable(deleter):
             raise ValueError("device deletion is unavailable")
@@ -11536,8 +11540,12 @@ class LiveObjectMapper:
         # The device is gone: from here every outcome says so, the selection back or not. Live moves the selection to the
         # deleted device's track on its next tick, after this step, so it's selected again on the display tick after that
         # (selection_tick), and the host reads it until it holds. What's said here is the selection as this step reads it.
-        self._put_back = {"targets": targets, "tick": self._display_ticks}
+        # The put-back keeps where the selection may be then without the producer having chosen: as this step leaves it,
+        # or on the deleted device's track (Live's move).
         after = self._selection_capture()
+        entry = self._track_entry(track_index)
+        self._put_back = {"targets": targets, "tick": self._display_ticks, "left": after["identities"],
+                          "moved_to": None if entry is None else self._capture_object_identity(entry[0])}
         restored = after["identities"] == {key: (None if found is None else self._capture_object_identity(found)) for key, found in targets.items()}
         return {"deleted": reference, "selection": {"before": before, "after": after["row"], "restored": restored, "previous": previous}}
 

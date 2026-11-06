@@ -6057,6 +6057,19 @@ class DeletePreservingSelectionTests(unittest.TestCase):
         self.assertIs(keys.view.selected_device, tape)
         self.assertEqual(mapper.snapshot()["selection"], previous["row"])
 
+    def test_a_choice_the_producer_makes_after_live_moves_the_selection_is_not_taken_back(self):
+        # Between Live's move and the bridge's next display tick, the producer chooses the keys and their chords: the
+        # selection is neither as the delete left it nor on the deleted device's track, so nothing is selected again.
+        song, mapper, request, (drums, keys, kit, ears, tape, chords) = self.load_ears()
+        self.delete(mapper, request)
+        mapper.selection_tick()
+        for move in song.live_tick: move()
+        self.assertIs(song.view.selected_track, drums, "Live moved it")
+        song.view.selected_track = keys; song.view.highlighted_clip_slot = keys.clip_slots[0]; song.view.detail_clip = chords
+        mapper.selection_tick()
+        self.assertIs(song.view.detail_clip, chords, "the producer's clip stays")
+        self.assertIsNone(mapper._put_back, "and the put-back is dropped")
+
     def test_ears_left_selected_on_a_track_it_had_to_itself_goes_and_the_selection_before_it_comes_back(self):
         # The producer is on a track with no devices: Live selects the device a load adds, and a script can't select
         # none, so the load leaves Ears selected. That selection is the load's own, so what was before it comes back.
