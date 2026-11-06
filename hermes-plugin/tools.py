@@ -1055,6 +1055,46 @@ def kumi_job(host: Host, args: dict, **kwargs: Any) -> dict:
     return found
 
 
+# Where play can start, per DAW (CC-17, its W5-a: a static table that refuses, never over-offers; Live's from_bar and
+# from_beat join it in the release that ships #1074's start-time seam, with its re-pin).
+TRANSPORT_FIELDS = {"ableton": frozenset({"clip_ref", "scene_index"}), "reaper": frozenset({"from_bar", "from_beat"}),
+                    "renoise": frozenset({"from_slot", "from_line"})}
+_TRANSPORT_WHERE = {"ableton": ("Live plays the Arrangement from its own start marker here: launch a Session clip "
+                                "(clip_ref) or a scene (scene_index) instead"),
+                    "reaper": "REAPER plays from a bar (from_bar) or a beat (from_beat)",
+                    "renoise": "Renoise plays from a sequence slot (from_slot) and its line (from_line)"}
+
+
+def transport_refusal(host: Host, args: dict) -> str | None:
+    """Why kumi_transport can't take these arguments in the producer's DAW, or None; the hook checks this, and the
+    handler again. stop takes nothing else; play takes at most one place to start (Renoise's slot and line are one)."""
+    action = args.get("action")
+    given = set(args) - {"action", "expected_project_key"}
+    if action == "stop":
+        return "stop takes nothing else." if given or "expected_project_key" in args else None
+    if action != "play":
+        return "action is play or stop."
+    daw = host.daw()
+    unknown = sorted(given - TRANSPORT_FIELDS.get(daw, frozenset()))
+    if unknown:
+        return f"{', '.join(unknown)} isn't how play starts here: {_TRANSPORT_WHERE.get(daw, 'play from the playhead')}."
+    if len(given - {"from_line"}) > 1:
+        return "play starts from one place."
+    if not isinstance(args.get("expected_project_key"), str) or not args["expected_project_key"]:
+        return "play takes kumi_observe's project_key, as expected_project_key."
+    return None
+
+
+def kumi_transport(host: Host, args: dict, **kwargs: Any) -> dict:
+    """Start or stop playback (CC-17): a playback-class action the producer approves (play only), with no HISTORY."""
+    refusal = transport_refusal(host, args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    return host.live().call("transport", {key: value for key, value in args.items() if key != "preview"},
+                            host.identity(kwargs), timeout=READ_TIMEOUT)
+
+
+
 # name, schema, handler, emoji: every one registered every time (catalog rule 6).
 TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_status", schemas.KUMI_STATUS, kumi_status, "🎛️"),
@@ -1070,6 +1110,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
     ("kumi_job", schemas.KUMI_JOB, kumi_job, "⏳"),
     ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
+    ("kumi_transport", schemas.KUMI_TRANSPORT, kumi_transport, "▶️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1083,7 +1124,8 @@ def approved_only(name: str, args: dict) -> bool:
             or (name == "kumi_listen" and is_track_listen(args))
             or (name == "kumi_setup" and args.get("action") in ("install", "adopt"))
             or (name == "kumi_generate" and (args.get("action") == "create"
-                                             or (args.get("action") == "quote" and args.get("kind") == "audio_to_midi"))))
+                                             or (args.get("action") == "quote" and args.get("kind") == "audio_to_midi")))
+            or (name == "kumi_transport" and args.get("action") == "play"))
 
 
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:
