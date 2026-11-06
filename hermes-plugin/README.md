@@ -28,7 +28,7 @@ a DAW to work in.
 - **Every change is approved by Hermes (unless its approvals are off), and most are undoable while Kumi runs.** Hermes
   asks before Kumi changes your project and shows exactly what will change; Kumi records the result in its HISTORY,
   with an undo while the Kumi runtime that made the change is running. A few only your DAW's own Undo takes back (in
-  Live, a rack chain or a pad load; a script in any DAW), and Kumi says so before you approve.
+  Live, a rack chain, a device move or a pad load; a script in any DAW), and Kumi says so before you approve.
 - **Kumi knows what you're looking at.** When what you've selected changes, the chat connected to Kumi gets a short
   note of the track, device and clip (FOCUS), and of what changed in the project while Kumi was away.
 - **Your own sounds, on a map.** Kumi learns the sample folders you list and lays them out by how they sound; in
@@ -190,6 +190,8 @@ project as…** with **Copy all media into project directory**), or they'll miss
   - **Allowing for the session or always** covers that kind of call (changes, undos, listens, play, sample-folder adds
     and scans) in this chat only, including a one-shot run that resumes it (`hermes chat -q --resume`). Another chat,
     a new one-shot run or a scheduled job asks again or is refused.
+  - **Only your own turns:** when Hermes works on a chat in the background (its review after a turn) or answers a
+    side question (`/btw`), Kumi only reads, whatever you allowed for the session.
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
     asks under its own kind. With Mirelo, an upload's covers its one file in this chat, and a paid generation's only
     its own estimate, once.
@@ -207,8 +209,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
   refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway. A few
-  changes only the DAW's own Undo takes back: in Live, adding a chain to a rack and loading a sample onto a pad, each
-  a change of its own, with how Cmd+Z (Ctrl+Z) takes it back said before you approve; and a script, in any DAW.
+  changes only the DAW's own Undo takes back: in Live, adding a chain to a rack, moving a device and loading a sample
+  onto a pad, each a change of its own, with how Cmd+Z (Ctrl+Z) takes it back said before you approve; and a script,
+  in any DAW.
 - **Listening:** Kumi measures audio files on this computer. In REAPER and Renoise it can also listen to a track or
   the mix: after you approve, the DAW renders only that window (60 seconds at most, with the DAW stopped) into the
   listening folder of Kumi's part in that DAW, and Kumi copies that one file into its data. The render's temporary

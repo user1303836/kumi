@@ -95,9 +95,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   says why it matches, and on what: the tempo, key or note Kumi indexed at the folder's last scan (from the audio, or
   from a file's or folder's name; a rescan updates them), or what it measured ("dark", "bright", "dusty", "lo-fi",
   "punchy"). A tempo matches that tempo or half or double time, and a key the same key, its relative major or minor,
-  or a one-shot's root note; the answer says which, and nothing is transposed. Artist and genre words match only names
-  and folders: Kumi doesn't recognise genres or artists. "More like this" ranks by closeness to that sound among
-  yours on this map, never a percentage.
+  or a one-shot's root note; the answer says which, and nothing is transposed. A sound with no indexed tempo or key
+  isn't found by that filter. Artist and genre words match only names and folders: Kumi doesn't recognise genres or
+  artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change Hermes asks about.
 - "Put it on pad 2" puts it on that Drum Rack pad in Live: into the pad's Simpler, or onto an empty pad in a new
@@ -138,8 +138,8 @@ When no change Kumi knows fits, Hermes can write code for it.
   EQ." Kumi writes a new device from GenExpr code into `User Library/Kumi/Audio Effects`, with up to 16 controls of
   its own, plus Mix and Output. What it adds is held under −0.3 dBFS; the track's own signal passes through
   untouched. Hermes Desktop shows its controls and code while you decide. Putting it in your Set is a second change
-  Hermes asks about: Kumi can undo loading it at the end of the chain, but moving it elsewhere only Live's own Undo
-  takes back. The file stays in your User Library after an undo.
+  Hermes asks about: Kumi loads it at the end of the track's chain, and can undo that. Moving it from there is a third
+  change, which only Live's own Undo takes back. The file stays in your User Library after an undo.
 - **Asked every time, once a chat has read outside content:** web pages, transcripts, files Hermes fetched from the
   internet, another plugin's results, or any terminal command or code run. Files already on your disk, installed
   skills, and the names in your library and projects don't count. In such a chat, each script and device is asked
@@ -152,10 +152,11 @@ When no change Kumi knows fits, Hermes can write code for it.
 Hermes asks before each change, undo, listen and play because its approvals are on. Allowing a Kumi call for the
 session or always covers that kind of call (changes, undos, listens, play, sample-folder adds and scans) in this chat
 only, including a one-shot run that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a
-scheduled job asks again or is refused. A change only your DAW's own Undo takes back asks under its own kind, so
-allowing other changes doesn't cover it. A setup step's approval covers its own plan. Choosing **Always** leaves an
-entry in Hermes's `command_allowlist` (your profile's config.yaml) that Kumi never edits: to remove it, delete the
-`plugin_rule:kumi:` entries there.
+scheduled job asks again or is refused. Kumi acts only in your own turns: when Hermes works on the chat in the
+background (its review after a turn) or answers a side question (`/btw`), Kumi only reads, whatever you allowed. A
+change only your DAW's own Undo takes back asks under its own kind, so allowing other changes doesn't cover it. A
+setup step's approval covers its own plan. Choosing **Always** leaves an entry in Hermes's `command_allowlist` (your
+profile's config.yaml) that Kumi never edits: to remove it, delete the `plugin_rule:kumi:` entries there.
 
 With `--yolo`, a chat's `/yolo` or `approvals.mode: off`, Hermes runs Kumi's changes, undos, listens, play,
 sample-folder adds and scans, setup steps, and, with Mirelo set up, its paid generations and uploads (up to your credit
@@ -243,11 +244,11 @@ run without asking there, and Kumi can't tell it from a chat.
   ends, when Hermes unloads the plugin or exits, or after 15 minutes with nothing to do (2 hours while it's connected
   to your DAW for a chat). A job it's running, such as a library scan, keeps it going for up to 6 hours.
   After it stops, the change stays in HISTORY, and your DAW's own Undo is the way back.
-- In Live, a few changes only Live's own Undo takes back: adding a chain to a rack, and loading a sample onto a pad.
-  Kumi says so before you approve, with how Cmd+Z (Ctrl+Z on Windows) takes the change back, and HISTORY marks the
-  row. Undo right away: if you've done anything in Live since, Cmd+Z takes that back first. Such a change holds
-  nothing else: Kumi asks for any other steps separately. A script is the same in every DAW: Kumi can't undo it, and
-  the DAW's own Undo may.
+- In Live, a few changes only Live's own Undo takes back: adding a chain to a rack, moving a device, and loading a
+  sample onto a pad. Kumi says so before you approve, with how Cmd+Z (Ctrl+Z on Windows) takes the change back, and
+  HISTORY marks the row. Undo right away: if you've done anything in Live since, Cmd+Z takes that back first. Such a
+  change holds nothing else: Kumi asks for any other steps separately. A script is the same in every DAW: Kumi can't
+  undo it, and the DAW's own Undo may.
 - In Live, Kumi won't undo a change to a track's mixer, the tempo or a device's parameters if you've changed that
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand
