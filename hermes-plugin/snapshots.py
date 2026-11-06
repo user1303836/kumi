@@ -35,8 +35,11 @@ MEDIA_MAX_BYTES = 50 * 1024 * 1024
 # CC-19 r4/r8: one cap for a script everywhere (the plugin's schema, serve's preview, the saved file, this read).
 SCRIPT_MAX_BYTES = 32 * 1024
 SCRIPT_MAX_LINES = 400
-# A script's file extension, fixed by its language (CC-19): nothing else is ever read from state/scripts.
-SCRIPT_EXTENSIONS = {"python": ".py", "lua": ".lua"}
+# A script's file extension, fixed by its language (CC-19): nothing else is ever read from state/scripts. A device's
+# file (CC-22) is its whole spec as canonical JSON, named by that JSON's hash: what the approval keyed on.
+SCRIPT_EXTENSIONS = {"python": ".py", "lua": ".lua", "device": ".device.json"}
+# A device's spec holds its code (CC-19's cap) and up to 16 controls; JSON escaping can grow the code a little.
+DEVICE_MAX_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 # The largest snapshot read: a big library's map is a few MB.
 SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024
@@ -547,6 +550,7 @@ def script(state: Path, sha256: str, language: str) -> dict | None:
     cap, valid UTF-8, and only if its bytes still hash to its name, so the pane never shows code other than what the
     approval named. None otherwise. Read-only: nothing here runs anything."""
     extension = SCRIPT_EXTENSIONS.get(language)
+    most = DEVICE_MAX_BYTES if language == "device" else SCRIPT_MAX_BYTES
     if extension is None or not isinstance(sha256, str) or not _SHA256.fullmatch(sha256):
         return None
     folder = state / "scripts"
@@ -561,16 +565,26 @@ def script(state: Path, sha256: str, language: str) -> dict | None:
     with os.fdopen(handle, "rb") as file:
         info = os.fstat(file.fileno())
         same = (info.st_dev, info.st_ino) == (checked.st_dev, checked.st_ino)
-        if not stat.S_ISREG(checked.st_mode) or not stat.S_ISREG(info.st_mode) or not same or info.st_size > SCRIPT_MAX_BYTES:
+        if not stat.S_ISREG(checked.st_mode) or not stat.S_ISREG(info.st_mode) or not same or info.st_size > most:
             return None
-        data = file.read(SCRIPT_MAX_BYTES + 1)
-    if len(data) > SCRIPT_MAX_BYTES or hashlib.sha256(data).hexdigest() != sha256:
+        data = file.read(most + 1)
+    if len(data) > most or hashlib.sha256(data).hexdigest() != sha256:
         return None
     try:
         code = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    lines = len(code.splitlines())
+    if language == "device":
+        # The canonical spec: an object whose code is a string within CC-19's line cap. Its lines are the code's.
+        try:
+            spec = json.loads(code)
+        except ValueError:
+            return None
+        if not isinstance(spec, dict) or not isinstance(spec.get("code"), str) or not isinstance(spec.get("controls", []), list):
+            return None
+        lines = len(spec["code"].splitlines())
+    else:
+        lines = len(code.splitlines())
     if lines > SCRIPT_MAX_LINES:
         return None
     return {"sha256": sha256, "language": language, "code": code, "lines": lines}
