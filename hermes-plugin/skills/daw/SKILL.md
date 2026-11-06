@@ -23,7 +23,7 @@ rules keep its changes exact, approved and reversible.
   - Use the refs, project key and epoch from your latest `kumi_observe` or `kumi_read`.
   - **A done `kumi_change` returns the project's `project_key` and new `epoch`.** The next change in the same turn uses those, with refs that change didn't remove or replace, and needs no new look.
   - When a change is refused as stale, observe or read again. Never guess a ref or reuse one from earlier in the chat.
-- **Read narrowly.** `kumi_read` with `action: data` takes a query in the DAW's read schema and pages with its cursor. Read what the task needs, not the whole project.
+- **Read narrowly.** `kumi_read` with `action: data` runs one of the DAW's readers, named in `tool` (REAPER's `reaper_read`, Renoise's `renoise_read`; Live's `read_notes` and its bridge's reads; `action: schema` with no `tool` lists them), with `query` its input, and pages with its cursor. Read what the task needs, not the whole project.
 
 ## Change
 - **One `kumi_change` per intent.**

@@ -77,13 +77,16 @@ KUMI_OBSERVE = _tool(
 
 KUMI_READ = _tool(
     "kumi_read",
-    "Read rows from the open project in the DAW's own read schema (tracks, devices, clips, parameters, with refs and a "
-    "cursor for more), or the input schema of one step kumi_change accepts. Use it to find the exact refs and current "
-    "values a change needs. Reads only; never runs code.",
+    "Read rows from the open project with one of the DAW's readers (tracks, devices, clips, parameters, with refs and "
+    "a cursor for more), or the input schema of one step kumi_change accepts or one reader. Use it to find the exact "
+    "refs and current values a change needs. action schema without tool lists the steps and the readers (REAPER's "
+    "reaper_read, Renoise's renoise_read; Live's are its note reader and its bridge's reads). Reads only; never runs "
+    "code.",
     {"action": {"type": "string", "enum": ["data", "schema"]},
-     "query": {"type": "object", "description": "action data: what to read, in the DAW's read schema."},
-     "tool": {"type": "string", "description": "action schema: the step to describe, e.g. set_mixer (Live) or "
-                                               "track_volume (REAPER, Renoise)."}},
+     "query": {"type": "object", "description": "action data: the reader's input, as its schema says."},
+     "tool": {"type": "string", "description": "action data: the reader to run, e.g. reaper_read or renoise_read "
+                                               "(required). action schema: the step or reader to describe, e.g. "
+                                               "set_mixer (Live) or track_volume (REAPER, Renoise)."}},
     ("action",))
 
 KUMI_CHANGE = _tool(
