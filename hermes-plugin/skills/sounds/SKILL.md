@@ -45,12 +45,36 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
-  - Live: `replace_sample` swaps a Simpler's audio (a drum pad's, by its `deviceRef` from your latest observe); `import_audio` fills an empty Session slot or a take lane.
+  - **Live, from a sound:**
+    - `load_sample_to_pad` puts it on a Drum Rack pad that's empty (`deviceRef`: the Drum Rack; `note`: the pad), in a new Simpler. **Kumi can't undo a pad load:** Live's own Undo (Cmd+Z, or Ctrl+Z on Windows) takes it back, usually in two steps: press it one step at a time, right away, and stop as soon as the pad is empty. Live's Redo won't bring the sample back: to have it again, ask Kumi to load it again. So load one pad a change, with nothing else in it: Kumi refuses a pad load beside any other step.
+    - `replace_sample` swaps the audio of a pad, or a track, that already has a Simpler (`deviceRef`: that Simpler).
+    - `load_sample` puts it in a new Simpler on an empty MIDI track, and Kumi can undo it.
+    - `import_audio` puts it in an empty Session slot of an audio track.
   - REAPER: `item_import` puts it on a track at a position. Renoise: `sample_load` loads it into an instrument.
   - For a new track, add it in an earlier step of the same plan, named with `as`, and refer to it as `@name`.
-  - Example (Live, a drum pad): `{"tool": "replace_sample", "input": {"deviceRef": "<the Simpler's ref>", "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
-- **The producer approves the exact placement,** and HISTORY lets them undo it.
+  - Example (Live, an empty pad): `{"tool": "load_sample_to_pad", "input": {"deviceRef": "<the Drum Rack's ref>", "note": 38, "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
+- **"Find me a dusty, lo-fi snare and put it on pad 3", end to end, in Live:**
+  1. `kumi_sounds` with the producer's words in `query` and the kind (`{"query": "dusty lo-fi", "kind": "snare"}`).
+  2. Offer the two or three likeliest by name. Measure them if the producer wants to compare them (skill `kumi:listening`).
+  3. Look (`kumi_observe` with `scope: focus`) for the Drum Rack's ref, and whether that pad already holds a Simpler.
+  4. **Name the pad by its note.** A pad's note is the reliable name: "pad 3" counted from the first is `note` 38 (D1), since the first pad is 36 (C1), row by row. When the producer's numbering could mean another pad, ask.
+  5. Place the pick with one `kumi_change`:
+     - for an empty pad, `load_sample_to_pad`, on its own;
+     - for a pad holding a Simpler, `replace_sample` on that Simpler, which Kumi can undo.
+     - If the pad holds anything else (another instrument, or several devices), say so and ask. Never clear a pad to make room.
+
+     Then report the pad, the sound and the HISTORY id, and for a pad load, Kumi's words on taking it back with Live's Undo: one step at a time, right away, until the pad is empty.
+- **The producer approves the exact placement.** HISTORY lets them undo a replaced sample; a pad load is taken back with Live's own Undo, one step at a time, right away, until the pad is empty.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
+- **"Put “<name>” (sound <id> from map <rev>) on the Drum Rack pad C1 (note 36) on the selected track"** is Desktop's request from the map's "Use on pad…". Its sound and map revision are the source, and its note is the pad.
+  - **Live:** look (`kumi_observe` with `scope: focus`) for the selected track's Drum Rack, and the pad with that note. Then:
+    - an empty pad: `load_sample_to_pad`, with the rack's `deviceRef` and that `note`;
+    - a pad holding a Simpler: `replace_sample`, with that Simpler's `deviceRef`;
+    - anything else on the pad, or no Drum Rack on the track: say so and ask. Never clear a pad to make room.
+  - **Renoise** (its request reads "the drum pad for note 36"): Renoise's notes are MIDI's numbers, so note 36 is `C-3`.
+    - Where a sample of the selected instrument already plays on that key, `sample_load` into that sample (`ref`: the sample).
+    - Otherwise, `sample_load` it as a new sample of the instrument, then `keyzone_set` it to that one key (`noteRange` and `baseNote`).
+  - **REAPER:** Kumi can't put a sound on a drum pad there yet: REAPER's drum kit step is refused. Say so, and offer to place it as an item on a track (`item_import`).
 
 ## A sound another Hermes plugin made (ElevenLabs)
 - **Use the file that plugin already made.** ElevenLabs Music (`elevenlabs_music_compose`, `elevenlabs_music_compose_plan`, `elevenlabs_music_stems`, `elevenlabs_music_from_video`; a job still running is checked with `elevenlabs_music_job`, and a finished one returns its files) and Sound Effects (`elevenlabs_sound_effect`) return the finished file as a `MEDIA:` line. Their own skills cover making it, and their own approvals cover paying and uploading. Kumi never makes it again or calls ElevenLabs. It reads only the finished file, never that plugin's private files or credentials.
