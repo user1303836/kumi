@@ -1096,7 +1096,14 @@ async fn pad_loads_keep_standalone_undo_and_are_kept_only_for_a_plugin() {
             .unwrap();
             for (policy, kept) in [
                 (HostPolicy::standalone(), false),
-                (HostPolicy::plugin(dir.path().join("listen"), dir.path().join("quarantine")), true),
+                (
+                    HostPolicy::plugin(
+                        dir.path().join("listen"),
+                        dir.path().join("quarantine"),
+                        dir.path().join("variations"),
+                    ),
+                    true,
+                ),
             ] {
                 for tool in ["load_sample_to_pad", "load_samples_to_pads"] {
                     let calls = Rc::new(RefCell::new(Vec::new()));
@@ -1178,7 +1185,7 @@ async fn an_occupied_pad_refuses_a_whole_pad_batch_before_any_apply() {
             let previews = Rc::new(RefCell::new(Vec::new()));
             let seen = previews.clone();
             let integration = pictured_reply(
-                HostPolicy::plugin(dir.path().join("listen"), dir.path().join("quarantine")),
+                HostPolicy::plugin(dir.path().join("listen"), dir.path().join("quarantine"), dir.path().join("variations")),
                 vec!["live_status", "live_drum_pad_preview", "live_drum_pad_apply"],
                 move |name, args| {
                     assert_eq!(name, "live_drum_pad_preview", "nothing may apply after an occupied pad was found");
