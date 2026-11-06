@@ -2,7 +2,7 @@
 //! `kumi_daw::plugin::check`. Every step `make_changes` can offer is in exactly one of [`PLUGIN_STEPS`] (allowed, with
 //! the action values each refuses) and [`PLUGIN_REFUSED`] (refused, with the reason).
 
-use kumi_daw::plugin::PluginStep;
+use kumi_daw::plugin::{DawUndoSteps, PluginStep};
 
 /// Why a device's move is left to Live's own Undo, said after CC-20's words of such a change.
 const MOVE_BECAUSE: &str = "Kumi can't yet put a moved device back itself.";
@@ -66,6 +66,23 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_song", "tempo"),
     PluginStep::new("set_scale", "tempo"),
     PluginStep::new("set_groove", "tempo"),
+    PluginStep::new("load_sample", "device").file(
+        "sample",
+        "Load an audio source into a new Simpler on an empty MIDI track: trackRef and sample. \
+         sample names a sound from the map, a file Kumi made, or an approved file, never a path.",
+    ),
+    PluginStep::new("load_sample_to_pad", "device")
+        .file(
+            "sample",
+            "Load an audio source onto an empty Drum Rack pad: deviceRef, optional note (otherwise the next empty pad), \
+             and optional instrument \"Drum Sampler\". sample names a sound from the map, a file Kumi made, \
+             or an approved file, never a path. Load one pad per change, with no other steps; only Live's own Undo takes it back.",
+        )
+        .daw_undo_always()
+        .daw_undo_steps_by("route", &[("hotswap", DawUndoSteps { in_plan: true, own: 1 })])
+        .daw_undo_uncounted(crate::changes::PAD_UNDO_UNCOUNTED)
+        .daw_undo_because(crate::changes::PAD_UNDO_REASON)
+        .alone(),
     PluginStep::new("replace_sample", "device").file(
         "sample",
         "Swap the sample in a Simpler for another: deviceRef (the Simpler), and sample, where the file comes from: a \
@@ -95,8 +112,6 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
 
 /// The other steps `make_changes` can offer, each with why a plugin's plan may not use it.
 pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
-    ("load_sample", "It loads an audio file by path into a new Simpler."),
-    ("load_sample_to_pad", "It loads an audio file by path onto a Drum Rack pad."),
     ("set_transport", "It moves the playhead and changes the metronome and punch settings."),
     ("edit_clip", "Live gives Kumi no undo for any of its edits, and crop destroys material."),
     ("move_clip", "It replaces clips where it drops one, and a copy or a move to another track has no Kumi undo."),
@@ -178,7 +193,7 @@ mod tests {
         assert!(check(PLUGIN_STEPS, "edit_device", &json!({"deviceRef":"d1","action":"resend"})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_clip", &json!({"clipRef":"c1","action":"duplicate-loop"})).is_err());
         assert!(check(PLUGIN_STEPS, "wait", &json!({"seconds":10})).is_err());
-        for tool in ["move_clip", "load_sample_to_pad", "capture_midi", "use_looper", "delete_track", "record"] {
+        for tool in ["move_clip", "capture_midi", "use_looper", "delete_track", "record"] {
             assert!(check(PLUGIN_STEPS, tool, &json!({})).is_err(), "{tool}");
         }
         // Output routing only: nothing that records, and no input, however it's written (Live crashed on Main, #195).
@@ -274,10 +289,61 @@ mod tests {
         for route in [json!({"trackRef":"t1","outputType":"Drum Bus"}), json!({"trackRef":"t2","outputType":"Sends Only"})] {
             assert!(check(PLUGIN_STEPS, "set_routing", &route).is_ok(), "{route}");
         }
-        let source = json!({"sound_id":"s-r1-1","map_revision":"r1"});
-        for tool in ["replace_sample", "import_audio"] {
-            assert!(check(PLUGIN_STEPS, tool, &json!({"deviceRef":"d1","trackRef":"t1","sample":source})).is_ok(), "{tool}");
-            assert!(check(PLUGIN_STEPS, tool, &json!({"deviceRef":"d1","sample":"/Users/me/kick.wav"})).is_err(), "{tool}");
+        for tool in ["replace_sample", "import_audio", "load_sample", "load_sample_to_pad"] {
+            for source in [
+                json!({"sound_id":"s-r1-1","map_revision":"r1"}),
+                json!({"artifact_id":"a-1"}),
+                json!({"file":"/approved/Kick.wav","provenance":{"host_tool":"audio.make","tool_call_id":"call-1"}}),
+            ] {
+                assert!(check(PLUGIN_STEPS, tool, &json!({"deviceRef":"d1","trackRef":"t1","sample":source})).is_ok(), "{tool}");
+            }
+            for sample in [
+                json!("/Users/me/kick.wav"),
+                json!({"random":true}),
+                json!({"folders":["/Users/me"]}),
+                json!({"words":["kick"]}),
+                json!({"artifact_id":"a-1","path":"/Users/me/kick.wav"}),
+            ] {
+                assert!(check(PLUGIN_STEPS, tool, &json!({"deviceRef":"d1","sample":sample})).is_err(), "{tool}: {sample}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_pad_mark_waives_no_other_provider_refusal_in_any_pad_mode() {
+        use kumi_daw::{plugin::DawUndo, provider::DawProvider};
+        let live = crate::app::provider::Ableton;
+        let kind = crate::changes::CHANGES.iter().find(|kind| kind.tool == "load_sample_to_pad").unwrap();
+        let instruments = kind.input_schema.as_ref().unwrap()["properties"]["instrument"]["enum"].as_array().unwrap();
+        // An unconditional waiver needs review when another step is added, unlike an exact conditional action.
+        assert_eq!(
+            PLUGIN_STEPS.iter().filter(|step| step.daw_undo == DawUndo::Always).map(|step| step.tool).collect::<Vec<_>>(),
+            ["load_sample_to_pad"]
+        );
+        for source in [
+            json!({"sound_id":"s-r1-1","map_revision":"r1"}),
+            json!({"artifact_id":"a-1"}),
+            json!({"file":"/approved/Kick.wav","provenance":{"host_tool":"audio.make","tool_call_id":"call-1"}}),
+        ] {
+            for note in std::iter::once(None).chain((0..=127).map(Some)) {
+                for instrument in std::iter::once(None).chain(instruments.iter().map(Some)) {
+                    let mut input = json!({"deviceRef":"7:device:0:0", "sample":source});
+                    if let Some(note) = note {
+                        input["note"] = json!(note);
+                    }
+                    if let Some(instrument) = instrument {
+                        input["instrument"] = instrument.clone();
+                    }
+                    let step = check(PLUGIN_STEPS, "load_sample_to_pad", &input).unwrap();
+                    assert!(step.daw_undo_only(&input));
+                    assert!(live.plugin_refuses(step.tool, &input).is_none(), "{input}");
+                    let mut batch_pad = input;
+                    batch_pad.as_object_mut().unwrap().remove("deviceRef");
+                    batch_pad["sample"] = json!("/approved/Kick.wav");
+                    let batch = json!({"deviceRef":"7:device:0:0", "pads":[batch_pad]});
+                    assert!(live.plugin_refuses("load_samples_to_pads", &batch).is_none(), "{batch}");
+                }
+            }
         }
     }
 }

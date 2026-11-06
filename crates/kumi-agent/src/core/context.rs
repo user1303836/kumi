@@ -23,6 +23,7 @@ pub struct HostPolicy {
     pub persist_identity: bool,
     /// Kumi's undo of a value it set (a mixer, the tempo, a device's parameters) first reads it again, right before the
     /// DAW is asked, and refuses when it's changed since (`Integration::guarded_undo`): the plugin host's.
+    /// A known inverse that cannot guard later producer edits is kept for the DAW's own Undo instead.
     pub guards_undo: bool,
     pub listening: ListeningPolicy,
     /// May drive the DAW's own menus and dialogs (Live's Hands). A plugin host never does: no step reaches them, and the
