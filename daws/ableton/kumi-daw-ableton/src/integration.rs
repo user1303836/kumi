@@ -104,6 +104,12 @@ fn kumi_home() -> std::path::PathBuf {
 fn replaced_devices() -> std::path::PathBuf {
     kumi_home().join("devices").join("replaced")
 }
+/// The Session slot a long clip ref is or holds: `E:clip_slot:T:S` itself, or `E:clip:T:S`'s slot; None for anything
+/// else (an Arrangement clip, another kind).
+fn session_slot(long: &str) -> Option<String> {
+    static SESSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]+):(clip|clip_slot):([0-9]+):([0-9]+)$").unwrap());
+    SESSION.captures(long).map(|found| format!("{}:clip_slot:{}:{}", &found[1], &found[3], &found[4]))
+}
 impl Ableton {
     pub fn new(options: AbletonOptions) -> Rc<Self> {
         let options = Rc::new(options);
@@ -794,6 +800,19 @@ impl Integration for Ableton {
     fn conversation(&self, id: &str) {
         self.made.borrow_mut().conversation(id);
     }
+    /// FOCUS's refs as the look names them: Live's long refs (`E:track:6`, `E:clip_slot:0:0`) in the turn's short form, so
+    /// a track has one number in the look, in FOCUS and in a plan's steps. The native views keep the long ones. The
+    /// highlighted slot FOCUS shows is one the model may launch (`transport`'s clip_ref), as a read's would be: Live's
+    /// preview still refuses an empty one.
+    fn model_focus(&self, focus: &DawFocus) -> DawFocus {
+        let Ok(value) = serde_json::to_value(focus) else { return focus.clone() };
+        let mut references = self.connection.references.borrow_mut();
+        if let Some(slot) = focus.slot_ref.as_deref().and_then(session_slot) {
+            references.refs.entry(slot).or_insert_with(|| "clip-slot".into());
+        }
+        let short = references.shorten(&value);
+        serde_json::from_value(short).unwrap_or_else(|_| focus.clone())
+    }
     /// Willington's words, as its switch stands now (read again for each new model session).
     fn instructions_addendum(&self, offered: &dyn Fn(&str) -> bool) -> String {
         super::willington::willington_instructions(self.options.willington.as_ref().and_then(|on| on()), offered).to_string()
@@ -984,12 +1003,14 @@ impl Integration for Ableton {
         })
     }
     /// Live plays from its start marker, or launches a Session clip or a scene. Moving the start marker is a change in
-    /// Kumi (set_transport), so a bar or a beat waits for a way that isn't.
+    /// Kumi (set_transport), so a bar or a beat waits for a way that isn't. A Session clip is named by its ref or by its
+    /// slot's (FOCUS gives the highlighted slot): the slot is what's launched either way.
     fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
         match from {
             PlayFrom::Here | PlayFrom::Scene(_) => Ok(()),
-            PlayFrom::Clip(clip) if self.long_ref(clip, "clipRef").contains(":clip:") => Ok(()),
-            PlayFrom::Clip(_) => Err("Only a Session clip is launched; an Arrangement clip plays from its bar, which Kumi can't start Live at yet.".into()),
+            PlayFrom::Clip(clip) if session_slot(&self.long_ref(clip, "clipRef")).is_some() => Ok(()),
+            PlayFrom::Clip(clip) if self.long_ref(clip, "clipRef").contains(":arrangement_clip:") => Err("Only a Session clip is launched; an Arrangement clip plays from its bar, which Kumi can't start Live at yet.".into()),
+            PlayFrom::Clip(_) => Err("clip_ref takes a Session clip or its slot (clip:N or clip_slot:N, from a look, a read or FOCUS).".into()),
             PlayFrom::Bar(_) | PlayFrom::Beat(_) => Err("Live plays from its start marker, and Kumi can't move it there yet without a change: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
             PlayFrom::Slot { .. } => Err("Live has no sequence slots: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
         }
@@ -1000,7 +1021,7 @@ impl Integration for Ableton {
         let signal = self.combined(signal);
         match from {
             PlayFrom::Clip(clip) => {
-                let slot = self.long_ref(clip, "clipRef").replacen(":clip:", ":clip_slot:", 1);
+                let slot = session_slot(&self.long_ref(clip, "clipRef")).unwrap_or_default();
                 self.transport_action("launch_clip", json!({"slotRef": slot}), signal).await
             }
             PlayFrom::Scene(index) => {

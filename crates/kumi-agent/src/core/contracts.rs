@@ -769,6 +769,12 @@ pub trait Integration {
     fn pin_for_recipe(&self, pin: &PinnedNode) -> Option<PinnedNode> {
         Some(pin.clone())
     }
+    /// The focus as a model is shown it beside a look: its refs in the turn's short form, the one a look and a plan's
+    /// steps use (Live's long refs become `track:7`, `clip_slot:3`), so FOCUS and the look number a track alike. A DAW
+    /// whose refs are already the ones its steps take shows it as it is.
+    fn model_focus(&self, focus: &DawFocus) -> DawFocus {
+        focus.clone()
+    }
     /// A body for FOCUS, read by the DAW; None when it can't say. Live's integration reads its views.
     async fn focus_body(&self, request: &BodyRequest, signal: Signal) -> Result<Option<FocusBody>, RuntimeError> {
         Ok(match request {

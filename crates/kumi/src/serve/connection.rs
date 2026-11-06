@@ -94,8 +94,10 @@ impl Connection {
         self.reported.connected.get()
     }
 
+    /// The focus as the model is shown it ([`Integration::model_focus`]): its refs in the form the look and a plan's
+    /// steps take, so FOCUS and the look number a track alike (Main is `track:7` in both).
     pub fn focus(&self) -> Option<DawFocus> {
-        self.reported.focus.borrow().clone()
+        self.reported.focus.borrow().as_ref().map(|focus| self.integration.model_focus(focus))
     }
 
     pub fn transport(&self) -> Option<Transport> {
@@ -560,7 +562,7 @@ pub fn publish_focus(ctx: &Weak<Ctx>) {
 
 /// The focus as `focus.json` and `observe` give it (CC-7): Kumi's `DawFocus`, its own fields only, with any name that
 /// is a whole path (a take or sample named by its file) cut to the file's name, so no folder of the producer's leaves
-/// the runtime. Refs (`…Ref`) are the DAW's own and stay as they are.
+/// the runtime. Refs (`…Ref`) are as [`Connection::focus`] gives them: the form a plan's steps take.
 pub fn focus_value(focus: &DawFocus) -> Value {
     let mut value = serde_json::to_value(focus).unwrap_or(Value::Null);
     names_only(&mut value);
@@ -747,7 +749,7 @@ mod tests {
         assert_eq!(
             (value["trackRef"].clone(), value["item"]["itemRef"].clone()),
             (json!("track:3"), json!("item:7/take:1")),
-            "refs are the DAW's"
+            "refs are as the integration gives them (this one, as the DAW's)"
         );
         let text = value.to_string();
         assert!(!text.contains("/Users/") && !text.contains("\\Users\\"), "{text}");
