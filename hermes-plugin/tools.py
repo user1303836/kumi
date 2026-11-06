@@ -45,6 +45,7 @@ class Host:
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
+        self.turns = calls.Turns()  # the producer's own turns, so a turn Hermes forks in the background is told apart
         self._data_dir = data_dir
         self._pinned = pinned
         self._hook_timeout = hook_timeout

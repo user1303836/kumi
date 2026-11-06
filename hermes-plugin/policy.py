@@ -58,6 +58,8 @@ UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
                      "the scan goes on.")
+FORKED = ("Kumi works only in the producer's own turns, and this call came from Hermes working on this chat in the "
+          "background (its review after a turn, or a side question), so it didn't run.")
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -92,6 +94,12 @@ def post_approval_response(host: Any, tool_call_id: Any = None, choice: Any = No
         host.calls.forget(tool_call_id)
 
 
+def turn_started(host: Any, session_id: Any = None, turn_id: Any = None, **kwargs: Any) -> None:
+    """Hermes's `pre_llm_call`, at the start of each of the producer's turns (never a forked one's): that turn is the
+    producer's (`calls.Turns`)."""
+    host.turns.saw(session_id, turn_id)
+
+
 def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **kwargs: Any) -> None:
     """Hermes's `post_tool_call`, after every call however it ended, a blocked one included (another plugin's veto, or
     no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it. A
@@ -104,11 +112,14 @@ def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **k
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     """The decision for one Kumi call. In a scheduled job, only a published read passes, before anything else is
-    looked at. Where nobody can answer an approval, a call that needs one is blocked whatever Hermes's settings or an
-    earlier "Always" say: before the runtime is asked when it always needs one, else after its decision."""
+    looked at. A turn Hermes forked in the background gets reads only. Where nobody can answer an approval, a call that
+    needs one is blocked whatever Hermes's settings or an earlier "Always" say: before the runtime is asked when it
+    always needs one, else after its decision."""
     unattended = host.unattended()
     if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
         return block(tools.SCHEDULED), {}
+    if tool not in PASS and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
+        return block(FORKED), {}
     if unattended and tool in ASKED:
         return block(UNATTENDED), {}
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
