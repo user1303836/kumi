@@ -96,6 +96,25 @@ class Tools(unittest.TestCase):
         self.assertEqual(refused["error"]["code"], "other_daw")
         self.assertEqual(support.call(self.host, "kumi_connect", {"daw": "logic"})["error"]["code"], "invalid")
 
+    def test_plugin_knowledge_refuses_writer_actions_fields_and_invalid_bounds_before_a_runtime_starts(self):
+        invalid = [
+            {"action": "wavetable"}, {"action": "prepare-preset"},
+            *({"action": "guide", "device_ref": "d1", key: "private"} for key in ("file", "wavetable", "name")),
+            {"action": "catalog", "file": "private"}, {"action": "catalog", "device_ref": "d1"},
+            {"action": "guide", "device_ref": "d1", "plugin": "vital"},
+            {"action": "guide"}, {"action": "guide", "device_ref": " "},
+            {"action": "guide", "device_ref": "d" * 257},
+            {"action": "catalog", "plugin": ""}, {"action": "catalog", "query": "q" * 1001},
+            *({"action": "catalog", "limit": value} for value in (True, 0, 41, 2.5, "2")),
+            *({"action": "catalog", "max_chars": value} for value in (False, 499, 20001, "8000")),
+        ]
+        for args in invalid:
+            with self.subTest(args=args):
+                answer = support.call(self.host, "kumi_plugin_knowledge", args, session_id="s1")
+                self.assertEqual(answer["error"]["code"], "invalid")
+        self.assertIsNone(self.host.runtimes.get(self.data))
+        self.assertEqual(support.requests(self.data / "state"), [])
+
     def test_a_change_its_history_and_its_undo(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         applied = support.call(self.host, "kumi_change", {**LOUDER, "preview": True}, session_id="s1")

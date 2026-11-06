@@ -11,7 +11,7 @@ homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
 license: MIT
 requires_hermes: ">=0.22.7"
 provides_tools: [kumi_status, kumi_setup, kumi_connect, kumi_observe, kumi_read, kumi_change, kumi_undo,
-                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate]
+                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate, kumi_plugin_knowledge]
 provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
                  on_session_finalize, agent_loop_stopped]
 config_schema:

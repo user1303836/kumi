@@ -51,7 +51,8 @@ _COMPACT = "_compact"
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
-PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
+PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job",
+        "kumi_plugin_knowledge"}
 # What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
