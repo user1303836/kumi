@@ -94,6 +94,8 @@ export interface Focus extends Liveness {
 
 export interface HistoryItem {
   id: string
+  /** The serve-made id every row of one `change` call shares (CC-3 A2); absent on a change of a single row. */
+  change_id?: string
   label?: string
   title?: string
   family?: string
@@ -109,6 +111,9 @@ export interface HistoryItem {
   cleanup?: string
   /** What `kumi serve` (#965) writes in plain words: why an undo didn't happen, or what's unsure. */
   note?: string
+  /** A row only the DAW's own undo can take back (#1101's device loads, whose undo Kumi refuses): `next` while it's
+   *  the DAW's next undo, `buried` once later work sits above it there, so the DAW's undo would take that back first. */
+  daw_undo?: 'next' | 'buried'
 }
 
 export interface History extends Liveness {
@@ -170,6 +175,8 @@ export interface SetupStatus {
   unpacked_bytes?: number
   runtime?: { installed?: boolean; version?: string; path?: string }
   daw?: string
+  /** Whether a DAW is chosen in Kumi's settings (`/setup` adds it). Unset, setup reads as its default DAW. */
+  daw_chosen?: boolean
   daw_component?: { state?: string; name?: string; path?: string | null; version?: string | null }
   existing_kumi?: { path?: string; adopted?: boolean } | null
   /** CC-10: whether Kumi's runtime can decode MP3, FLAC and other compressed audio, with the line to show. */
@@ -183,11 +190,18 @@ export interface Analysis {
   file?: string
   seconds?: number
   analyzed?: { from?: string; to?: string; focus?: string }
-  loudness?: { integratedLufs?: number | null; rangeLu?: number | null; truePeakDbtp?: number | null; samplePeakDbfs?: number | null }
-  balance?: { bands?: { name?: string; hz?: string; db?: number }[]; tiltDbPerOctave?: number; centroidHz?: number }
-  dynamics?: { crestDb?: number }
+  loudness?: { integratedLufs?: number | null; shortTermMaxLufs?: number | null; rangeLu?: number | null; truePeakDbtp?: number | null; samplePeakDbfs?: number | null }
+  /** Each band's `db` is its share of the whole file's energy, so two files' bands compare level-matched. `width` is the
+   *  band's side share (0 is mono). */
+  balance?: { bands?: { name?: string; hz?: string; db?: number; width?: number }[]; tiltDbPerOctave?: number; centroidHz?: number }
+  /** Absent for a mono file. `width` is the side share of the whole file (0 is mono). */
+  stereo?: { correlation?: number; width?: number; lowEndMono?: boolean } | null
+  dynamics?: { crestDb?: number; peakToLoudnessDb?: number | null }
   tempo?: { bpm?: number; confidence?: number } | null
   key?: { name?: string; confidence?: number } | null
+  /** Set when the audio is one sound (a sample, a one-shot): its pitch, envelope and movement. The runtime's own
+   *  summary of such a sound names no key, and neither does the card. */
+  sound?: object | null
 }
 
 /** `kumi_media::audio::Comparison`: current minus reference; paired values are `[current, reference]`. */

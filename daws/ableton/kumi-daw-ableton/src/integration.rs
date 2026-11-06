@@ -110,6 +110,7 @@ impl Ableton {
             let remember = Remember::new(connection.clone(), options.project_store.clone(), options.on_catch_up.clone());
             remember.persist_identity.set(options.policy.persist_identity);
             let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
+            history.host.guard.on.set(options.policy.guards_undo);
             let observer = Rc::new(Observer::new(connection.clone(), remember.clone()));
             let shown = Rc::downgrade(&observer);
             *history.on_shift.borrow_mut() = Some(Rc::new(move |shift| {
@@ -166,9 +167,10 @@ impl Ableton {
                 }),
             );
             let watch = Watch::new(mutations.clone());
-            let variations =
-                Variations::new(LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone()), kumi_home())
-                    .tool();
+            // (a plugin host's keeps its sets under its own state, adds no scene for a take, and has its rules: CC-24)
+            let hosted = options.policy.variations_home.is_some();
+            let backend = LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone(), !hosted);
+            let variations = Variations::for_policy(backend, &options.policy, kumi_home()).tool();
             Self {
                 weak: weak.clone(),
                 connection,
@@ -187,6 +189,82 @@ impl Ableton {
     }
     fn combined(&self, signal: Signal) -> Signal {
         abort::any([signal, self.connection.lifetime.clone()])
+    }
+    /// What make_device and a device built for Hermes write with: Live's User Library, this integration's devices, and
+    /// Live's Browser asked whether it lists one yet.
+    fn device_options(&self) -> DeviceToolOptions {
+        let owner = self.weak.upgrade().unwrap();
+        DeviceToolOptions {
+            user_library: self.user_library(),
+            wait_ms: None,
+            made: self.made.clone(),
+            browser_sees: Rc::new(move |item, signal| {
+                let owner = owner.clone();
+                async move {
+                    let Some(tools) = owner.connection.tools() else { return Ok(false) };
+                    Ok(tools
+                        .call("live_browser_inspect", object(&json!({"itemId":item}))?, signal, CallOptions::default())
+                        .await
+                        .is_ok_and(|r| r.is_error != Some(true)))
+                }
+                .boxed_local()
+            }),
+        }
+    }
+    fn user_library(&self) -> String {
+        self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None))
+    }
+    /// A ref as the model gave it (its short name, or the long ref), as Live's bridge spells it.
+    fn long_ref(&self, reference: &str, field: &str) -> String {
+        self.connection.references.borrow().lengthen(&json!({field: reference}))[field].as_str().unwrap_or(reference).to_owned()
+    }
+    /// Live's transport as its session-playback read gives it: playing, and Session and Arrangement Record.
+    async fn session_transport(&self, signal: Signal) -> Result<Value, RuntimeError> {
+        let read = payload(
+            &self
+                .connection
+                .call("live_discover", views::object(json!({"kind":"session-playback","limit":1})), self.combined(signal))
+                .await?,
+        )?;
+        Ok(read.get("items").and_then(|items| items.get(0)).and_then(|item| item.get("transport")).cloned().unwrap_or_default())
+    }
+    /// Whether no track is armed, by a fresh read of the Set's tracks: false when one is, or the read doesn't reach every
+    /// track.
+    async fn none_armed(&self, signal: Signal) -> Result<bool, RuntimeError> {
+        let read = payload(
+            &self.connection.call("live_discover", views::object(json!({"kind":"track","limit":512})), self.combined(signal)).await?,
+        )?;
+        let rows = read.get("items").and_then(Value::as_array);
+        let whole = read.get("nextCursor").is_none_or(Value::is_null);
+        Ok(whole && rows.is_some_and(|rows| rows.iter().all(|row| row.get("armed") != Some(&Value::Bool(true)))))
+    }
+    /// The scene at `index` (from 0), by a fresh read of the Set's scenes.
+    async fn scene_ref(&self, index: u32, signal: Signal) -> Result<String, RuntimeError> {
+        let read = payload(
+            &self
+                .connection
+                .call("live_discover", views::object(json!({"kind":"scene","limit":512,"fields":["name","index"]})), self.combined(signal))
+                .await?,
+        )?;
+        read.get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|item| item.get("index").and_then(Value::as_u64) == Some(u64::from(index)))
+            .and_then(|item| item.get("ref").and_then(Value::as_str))
+            .map(str::to_owned)
+            .ok_or_else(|| RuntimeError::plain(format!("The Set has no scene {}.", index + 1)))
+    }
+    /// One of Live's transport actions, as its tool runs it (Live's one call at a time), and where it left the play.
+    async fn transport_action(&self, tool: &str, input: Value, signal: Signal) -> Result<Played, RuntimeError> {
+        let kind = ACTIONS.iter().find(|kind| kind.tool == tool).ok_or_else(|| RuntimeError::plain(format!("Live has no {tool} here.")))?;
+        let stopping = input.get("action").and_then(Value::as_str) == Some("stop");
+        let _live = self.rendering.hold(&signal).await?;
+        let outcome = self.mutations.act(kind, views::object(input), signal, false).await;
+        if outcome.is_error {
+            return Err(RuntimeError::plain(outcome.text));
+        }
+        Ok(Played { playing: outcome.done.as_ref().and_then(|done| done.playing).unwrap_or(!stopping), position_beats: None })
     }
     fn tool(&self, name: &str, description: &str, schema: JsonObject) -> Rc<dyn KernelTool> {
         Rc::new(LiveTool {
@@ -579,23 +657,7 @@ impl ObservationHost for Ableton {
             offered.push(self.static_tool("read_notes"));
         }
         if tools.has("live_browser_inspect") && tools.has("live_browser_load_preview") {
-            let owner = self.weak.upgrade().unwrap();
-            offered.push(device_tool(DeviceToolOptions {
-                user_library: self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None)),
-                wait_ms: None,
-                made: self.made.clone(),
-                browser_sees: Rc::new(move |item, signal| {
-                    let owner = owner.clone();
-                    async move {
-                        let Some(tools) = owner.connection.tools() else { return Ok(false) };
-                        Ok(tools
-                            .call("live_browser_inspect", object(&json!({"itemId":item}))?, signal, CallOptions::default())
-                            .await
-                            .is_ok_and(|r| r.is_error != Some(true)))
-                    }
-                    .boxed_local()
-                }),
-            }));
+            offered.push(device_tool(self.device_options()));
         }
         // make_changes runs every change and action as a step; those that aren't tools of their own get a line each in
         // its description, with their input.
@@ -663,7 +725,8 @@ impl ObservationHost for Ableton {
         if self.mutations.supported(Some(PYTHON_BRIDGE)) && tools.has("live_run_python") {
             offered.push(self.static_tool("run_python"));
         }
-        if !matches!(self.options.hands, Some(HandsSetup::Disabled))
+        if self.options.policy.menus
+            && !matches!(self.options.hands, Some(HandsSetup::Disabled))
             && (self.options.hands.is_some() || cfg!(any(target_os = "macos", target_os = "windows")))
             && tools.has("live_selection_preview")
         {
@@ -725,7 +788,7 @@ impl Integration for Ableton {
         }
         // The file only: the conversation that loads it finds it in Live's Browser then.
         vec![device_tool(DeviceToolOptions {
-            user_library: self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None)),
+            user_library: self.user_library(),
             wait_ms: Some(0),
             made: self.made.clone(),
             browser_sees: Rc::new(|_, _| async { Ok(false) }.boxed_local()),
@@ -778,6 +841,49 @@ impl Integration for Ableton {
         let _live = self.rendering.hold(&signal).await?;
         let outcome = self.history.undo(id.unwrap_or("last"), signal, false).await?;
         outcome.record.ok_or_else(|| KumiError::new(FailureKind::Request, outcome.text).into())
+    }
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        if !self.connection.started.get() || self.connection.closed.get() {
+            return Err(KumiError::new(FailureKind::Request, "Kumi isn't connected to Live, so it can't undo.").into());
+        }
+        let _live = self.rendering.hold(&signal).await?;
+        let guard = &self.history.host.guard;
+        guard.take_refusal();
+        // A group's guarded changes are all read first, newest first, so one changed since leaves the whole group as it
+        // is; each is read again right before Live is asked to undo it.
+        let members = self.history.entries.borrow().get(id).and_then(|entry| entry.borrow().members.clone()).unwrap_or_default();
+        let guarded: Vec<_> = members
+            .iter()
+            .filter_map(|member| self.history.entries.borrow().get(member).map(|entry| entry.borrow().clone()))
+            .filter(|member| member.record.state == ChangeState::Applied && super::undo_guard::guarded(&self.history, member))
+            .collect();
+        if let Some(reason) = super::undo_guard::group_refusal(&self.history, &guarded, &signal).await {
+            return Ok(Err(UndoRefusal { code: "changed_since", reason }));
+        }
+        guard.asked(Some(signal.clone()));
+        let outcome = self.history.undo(id, signal, false).await;
+        guard.asked(None);
+        let outcome = outcome?;
+        let refused = guard.take_refusal();
+        match outcome.record {
+            Some(record) => {
+                if record.state == ChangeState::Undone {
+                    guard.forget(id);
+                }
+                Ok(Ok(record))
+            }
+            None => match refused {
+                Some(refusal) => Ok(Err(refusal)),
+                None => Err(KumiError::new(FailureKind::Request, outcome.text).into()),
+            },
+        }
+    }
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        let Some(entry) = self.history.entries.borrow().get(id).map(|entry| entry.borrow().clone()) else { return Ok(None) };
+        if !super::undo_guard::guarded(&self.history, &entry) {
+            return Ok(None);
+        }
+        Ok(Some(super::undo_guard::preview(&self.history, &entry, &signal).await))
     }
     async fn audio_file(&self, named: &str, signal: Signal) -> Result<Option<String>, RuntimeError> {
         self.mutations.clip_file(named, signal).await
@@ -842,16 +948,67 @@ impl Integration for Ableton {
         if !self.connection.has("live_discover") {
             return Ok(None);
         }
-        let read = payload(
-            &self
-                .connection
-                .call("live_discover", views::object(json!({"kind":"session-playback","limit":1})), self.combined(signal))
-                .await?,
-        )?;
-        let transport =
-            &read.get("items").and_then(|items| items.get(0)).and_then(|item| item.get("transport")).cloned().unwrap_or_default();
+        let transport = self.session_transport(signal).await?;
         let on = |key: &str| transport.get(key) == Some(&Value::Bool(true));
         Ok(Some(on("playing") && (on("sessionRecord") || on("arrangementRecord"))))
+    }
+    /// Session or Arrangement Record on, whatever Live plays: a play would record.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        if !self.connection.available() || !self.connection.has("live_discover") {
+            return Ok(None);
+        }
+        let transport = self.session_transport(signal).await?;
+        let on = |key: &str| transport.get(key).and_then(Value::as_bool);
+        // Either on would record; off only when both are known off, else Live can't say.
+        Ok(match (on("sessionRecord"), on("arrangementRecord")) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        })
+    }
+    /// Live plays from its start marker, or launches a Session clip or a scene. Moving the start marker is a change in
+    /// Kumi (set_transport), so a bar or a beat waits for a way that isn't.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        match from {
+            PlayFrom::Here | PlayFrom::Scene(_) => Ok(()),
+            PlayFrom::Clip(clip) if self.long_ref(clip, "clipRef").contains(":clip:") => Ok(()),
+            PlayFrom::Clip(_) => Err("Only a Session clip is launched; an Arrangement clip plays from its bar, which Kumi can't start Live at yet.".into()),
+            PlayFrom::Bar(_) | PlayFrom::Beat(_) => Err("Live plays from its start marker, and Kumi can't move it there yet without a change: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
+            PlayFrom::Slot { .. } => Err("Live has no sequence slots: play from where it is, or launch a Session clip (clip_ref) or a scene (scene_index).".into()),
+        }
+    }
+    /// Live's own play from its start marker, a Session clip's launch (its slot's) or a scene's: actions, no HISTORY row.
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        self.plays_from(from).map_err(RuntimeError::plain)?;
+        let signal = self.combined(signal);
+        match from {
+            PlayFrom::Clip(clip) => {
+                let slot = self.long_ref(clip, "clipRef").replacen(":clip:", ":clip_slot:", 1);
+                self.transport_action("launch_clip", json!({"slotRef": slot}), signal).await
+            }
+            PlayFrom::Scene(index) => {
+                // With "Start Recording on Scene Launch" on (a preference Kumi can't read), a scene records into an armed
+                // track's empty slots: Kumi fires one only while it can see that no track is armed.
+                if !self.none_armed(signal.clone()).await? {
+                    return Err(RuntimeError::plain(
+                        "A track is armed, or Kumi can't see every track's arm: firing a scene can record into an armed track's empty slots (Live's Start Recording on Scene Launch), so Kumi doesn't. Disarm it in Live, or launch a clip instead.",
+                    ));
+                }
+                let scene = self.scene_ref(*index, signal.clone()).await?;
+                self.transport_action("fire_scene", json!({"ref": scene}), signal).await
+            }
+            _ => self.transport_action("play", json!({"action": "start"}), signal).await,
+        }
+    }
+    /// Live's own stop, only while it plays: a stop with Live stopped moves its start marker back to the Set's start
+    /// (the #1074 trace saw it), which a producer's "stop" never asks for.
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let signal = self.combined(signal);
+        if self.connection.has("live_discover") && self.session_transport(signal.clone()).await?.get("playing") == Some(&Value::Bool(false))
+        {
+            return Ok(Played::default());
+        }
+        self.transport_action("play", json!({"action": "stop"}), signal).await
     }
     async fn instant(&self, intent: &kumi_agent::core::phrases::Intent, signal: Signal) -> Result<Option<InstantOutcome>, RuntimeError> {
         let Some(plan) = instant::steps(intent, &self.observer.model(), self.observer.beats_per_bar.get()) else { return Ok(None) };
@@ -881,9 +1038,28 @@ impl Integration for Ableton {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.open_goal(request, signal).await
     }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.rendering.preview_hear(request, self.combined(signal)).await
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.hear_in_set(request, signal).await
+    }
+    fn has_device_build(&self) -> bool {
+        true
+    }
+    async fn device_preview(&self, spec: &Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        Ok(crate::devices::build::preview(std::path::Path::new(&self.user_library()), spec))
+    }
+    /// `sha256` is serve's to check against the bytes it was given; the build is of `spec` as given.
+    async fn device_build(
+        &self,
+        spec: &Value,
+        _sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        crate::devices::build::build(&self.device_options(), spec, file, &self.combined(signal)).await
     }
 }
 

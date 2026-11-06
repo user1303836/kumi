@@ -1,6 +1,6 @@
 [package]
 name = "daw-mcp-server"
-version = "1.24.67"
+version = "1.24.69"
 description = "The MCP host for Kumi's own bridges (REAPER, Renoise, SoundCraft): MCP over stdio, speaking to Kumi's bridge inside or beside the DAW."
 edition.workspace = true
 license.workspace = true
@@ -29,4 +29,5 @@ tokio.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+daw-bridge = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

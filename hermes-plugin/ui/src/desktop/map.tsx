@@ -4,7 +4,7 @@ import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 
-import { soundRequest } from '../shared/format.ts'
+import { nearRequest, soundRequest } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import type { KumiStore } from '../shared/store.ts'
@@ -42,11 +42,17 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     <MapCanvas
       actions={(id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision)
+        const near = nearRequest(id, sound.name, map?.revision)
         return (
           <>
             <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title={t('map.playTitle')}>
               {playing === id ? t('map.stop') : t('map.play')}
             </TextButton>
+            {near && (
+              <TextButton onClick={() => void ask(ctx, near, { send: false, session: ownerSession(state) })} title={t('map.moreLikeTitle')}>
+                {t('map.moreLike')}
+              </TextButton>
+            )}
             {request && (
               <TextButton
                 onClick={() => void ask(ctx, request, { send: false, session: ownerSession(state) })}

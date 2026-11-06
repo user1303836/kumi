@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 import support
 from support import eventually
@@ -40,6 +41,7 @@ class Runtimes(unittest.TestCase):
         self.runtimes = self.make()
 
     def make(self, **options):
+        options.setdefault("hermes", lambda: (None, None))  # never this machine's Hermes homes
         runtimes = runtime.Runtimes(events=lambda event, payload: self.events.append((event, payload)),
                                     environ=lambda: {"PATH": "/usr/bin:/bin", "HOME": str(self.data),
                                                      "OPENAI_API_KEY": "sk-secret", "MIRELO_API_KEY": "m-secret",
@@ -82,6 +84,68 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(runtime.launch_environment({"Path": "C:\\Windows", "SystemRoot": "C:\\Windows",
                                                      "AWS_SECRET_ACCESS_KEY": "x"}, windows=True),
                          {"Path": "C:\\Windows", "SystemRoot": "C:\\Windows", "KUMI_NO_UPDATE_CHECK": "1"})
+
+    def test_the_runtime_is_told_hermess_homes_by_argument_never_by_its_environment(self):
+        home, root = str(self.data / "hermes" / "profiles" / "studio"), str(self.data / "hermes")
+        self.start(runtimes=self.make(hermes=lambda: (home, root)))  # where it takes no library root (#985)
+        started = self.started()
+        self.assertEqual(started["argv"][-4:], ["--hermes-home", home, "--hermes-root", root])
+        self.assertNotIn("HERMES_HOME", started["environment"])
+        argv = runtime.serve_argv(runtime.installed(self.data, support.VERSION), self.data / "state", "ableton",
+                                  hermes=("relative/home", None))
+        self.assertNotIn("--hermes-home", argv, "only a full path")
+
+    def test_every_flag_the_plugin_passes_kumi_serve_is_one_the_pinned_runtime_takes(self):
+        """kumi_release.json records the pinned release's `kumi serve` options (scripts/hermes_pin.py reads them from
+        that runtime when it pins it). Every flag serve_argv can pass must be one of them, or the pinned runtime refuses
+        to start, and nothing works for a new producer: #1028 passed --hermes-home to 1.24.67, which has none."""
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        ffmpeg = self.data / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ffmpeg.write_bytes(b"#!/bin/sh\n")
+        ffmpeg.chmod(0o755)
+        allowed = support.module("setup")._identity(os.path.realpath(ffmpeg))
+        install = runtime.Install(pin["kumi"], "any", self.data / "kumi", self.data / "kumi-home", allowed)
+        argv = runtime.serve_argv(install, self.data / "state", "reaper", [str(self.data)], [str(self.data)],
+                                  hermes=(str(self.data / "hermes"), str(self.data)))
+        passed = {part for part in argv if part.startswith("--")}
+        self.assertLessEqual({"--library-root", "--media-root", "--tool", "--hermes-home", "--hermes-root"}, passed,
+                             "every flag it can pass, each given what makes it pass it")
+        taken = set(pin["serve_options"])
+        self.assertLessEqual(passed, taken, f"kumi serve {pin['kumi']} doesn't take {sorted(passed - taken)}: "
+                                            "pin a release that does (scripts/hermes_pin.py)")
+
+    def test_every_operation_the_plugin_calls_is_one_the_pinned_runtime_serves(self):
+        """kumi_release.json records the pinned release's operations (its tools/list, read by scripts/hermes_pin.py).
+        Runtime.call sends only runtime.OPERATIONS, so each must be among them, or that tool fails for every producer:
+        the plugin's `generate` needs a runtime with #1048's generation."""
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        served = set(pin["serve_operations"])
+        self.assertLessEqual(runtime.OPERATIONS, served, f"kumi serve {pin['kumi']} doesn't serve "
+                                                         f"{sorted(runtime.OPERATIONS - served)}: pin a release that "
+                                                         "does (scripts/hermes_pin.py)")
+
+    def test_every_generation_kind_and_ledger_key_the_plugin_uses_is_one_the_pinned_runtime_has(self):
+        """CC-15's 15a: kumi_release.json records the pinned runtime's `generate` kinds and the ledger policy keys it
+        reads (generate's inputSchema and its _meta in tools/list). kumi_generate offers generate.KINDS, and the ledger
+        is configured with one switch for each of generate.SETTINGS: a kind the runtime lacks is refused, and a key its
+        ledger can't read stops paid generation for every producer."""
+        generate = support.module("generate")
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        kinds, keys = set(pin["generate_kinds"]), set(pin["ledger_policy_keys"])
+        self.assertLessEqual(set(generate.KINDS), kinds, f"kumi serve {pin['kumi']} doesn't generate "
+                                                         f"{sorted(set(generate.KINDS) - kinds)}: pin a release that "
+                                                         "does (scripts/hermes_pin.py)")
+        self.assertLessEqual(set(generate.SETTINGS), keys, f"kumi serve {pin['kumi']}'s ledger doesn't read "
+                                                           f"{sorted(set(generate.SETTINGS) - keys)}: pin a release "
+                                                           "whose does (scripts/hermes_pin.py)")
+
+    def test_an_operation_the_plugin_doesnt_declare_is_never_sent(self):
+        """So the pin test above covers every call: one the plugin would add without declaring it fails here first."""
+        live = self.start()
+        with self.assertRaises(ValueError):
+            live.call("jobs", {}, self.host(), timeout=10)
+        sent = [message.get("params", {}).get("name") for message in support.requests(self.data / "state")]
+        self.assertNotIn("jobs", sent)
 
     @unittest.skipIf(os.name == "nt", "a session of its own is POSIX's; Windows gives it no console")
     def test_the_runtime_runs_in_a_session_of_its_own_so_hermess_ctrl_c_never_reaches_it(self):
@@ -140,19 +204,73 @@ class Runtimes(unittest.TestCase):
         self.assertIn({"jsonrpc": "2.0", "method": "notifications/cancelled",
                        "params": {"requestId": asked, "reason": "Hermes stopped waiting"}}, received)
 
-    def test_each_snapshot_the_runtime_writes_becomes_a_desktop_event_for_its_profile(self):
+    def on_disk(self, *names: str) -> set[tuple[str, int]]:
+        """The (event, seq) each named snapshot (status, focus, history by default) has on disk now."""
+        state = self.data / "state"
+        return {(f"{name}.changed", json.loads((state / f"{name}.json").read_text(encoding="utf-8"))["seq"])
+                for name in names or ("status", "focus", "history")}
+
+    def reported(self) -> set[tuple[str, object]]:
+        return {(event, payload.get("seq")) for event, payload in self.events}
+
+    def test_each_snapshot_the_runtime_says_has_landed_is_a_desktop_event_at_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 3600):  # nothing is polled: only what the runtime says
+            live = self.start()  # it offers C2's resources
+            self.events.clear()
+            live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+            expected = self.on_disk()
+            self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
+            live.call("library", {"action": "scan"}, self.host(), timeout=10)
+            self.assertEqual(live.call("job", {"job_id": "j-scan-1"}, self.host(), timeout=10)["state"], "done")
+            seq = json.loads((self.data / "state" / "map" / "r1.json").read_text(encoding="utf-8"))["seq"]
+            changed = ("map.changed", {"revision": "r1", "seq": seq, "profile": "studio"})
+            self.assertTrue(eventually(lambda: changed in self.events), "the map's pointer flipped to the scan's")
+        self.assertEqual({payload["profile"] for _, payload in self.events}, {"studio"})
+
+    def test_a_snapshot_the_runtime_tells_of_is_never_reported_twice(self):
         live = self.start()
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        seqs = {name: json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"]
-                for name in ("status", "focus", "history")}
-        expected = {(f"{name}.changed", seq) for name, seq in seqs.items()}
-        self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
-                        self.events)
+        expected = self.on_disk()
+        live.call("library", {"action": "scan"}, self.host(), timeout=10)  # a job's file: only the polling sees it
+        self.assertTrue(eventually(lambda: any(event == "job.progress" for event, _ in self.events)), self.events)
+        told = [(event, payload.get("seq")) for event, payload in self.events if event != "job.progress"]
+        self.assertEqual(sorted(told), sorted(expected), "a pass that polled after them reported none again")
+
+    def test_what_the_runtime_writes_as_it_starts_is_reported_at_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 3600):  # one look, at once, and no polling after it
+            self.start("--publish-at-start")  # a new runtime's HISTORY and FOCUS, before anything subscribed
+            published = self.on_disk("history", "focus")
+            self.assertTrue(eventually(lambda: published <= self.reported()), self.events)
+
+    def test_a_snapshot_the_runtime_wont_tell_of_is_still_found_and_each_change_is_reported_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 0.02):  # the backstop looks every 0.2 s
+            live = self.start("--refuse-subscribe", "kumi://focus", "--quiet", "kumi://history")
+            self.events.clear()
+            live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+            expected = self.on_disk()  # status told, focus polled, history found by the backstop
+            self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
+            louder = {"title": "Louder drums", "expected_project_key": "live:night-drive", "expected_epoch": "1",
+                      "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": -4}}]}
+            self.assertEqual(live.call("change", louder, self.host(), timeout=10)["state"], "applied")
+            expected = self.on_disk()
+            self.assertTrue(eventually(lambda: expected <= self.reported()),
+                            "the change's HISTORY too, which only a later backstop look can find")
+        said = [(event, payload["seq"]) for event, payload in self.events if payload.get("seq") is not None]
+        self.assertEqual(len(said), len(set(said)), f"each change once, however it was found: {said}")
+
+    def test_a_runtime_that_offers_no_resources_has_each_snapshot_it_writes_found_and_reported(self):
+        live = self.start("--no-resources")  # kumi serve before #1047
+        self.events.clear()
+        live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+        expected = self.on_disk()
+        self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
         live.call("library", {"action": "scan"}, self.host(), timeout=10)
         job = ("job.progress", {"job_id": "j-scan-1", "state": "running", "progress": {"done": 0, "total": 2},
                                 "profile": "studio"})
         self.assertTrue(eventually(lambda: job in self.events), self.events)
+        live.call("job", {"job_id": "j-scan-1"}, self.host(), timeout=10)
+        self.assertTrue(eventually(lambda: any(event == "map.changed" for event, _ in self.events)), self.events)
         self.assertEqual({payload["profile"] for _, payload in self.events}, {"studio"})
 
     def test_a_runtime_flooding_its_stderr_still_answers(self):
@@ -180,6 +298,36 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(len(answers), 1, "the slow call outlived the idle time and was answered")
         self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "then, idle, it stopped")
         self.assertTrue(eventually(lambda: not live.client.running), "and its process ended")
+
+    def test_a_runtime_connected_to_the_daw_for_a_chat_waits_longer_before_its_idle_stop(self):
+        runtimes = self.make(idle_after=0.3, idle_connected=3600)
+        connected = self.start(session="s1", runtimes=runtimes)  # looked at first in each pass: started first
+        connected.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+        other = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        support.install(other)
+        self.addCleanup(support.stopped, runtimes, other)
+        idle = runtimes.start(other, runtime.installed(other, support.VERSION), "ableton", "s2", profile="other")
+        self.assertTrue(eventually(lambda: runtimes.get(other) is None), "a chat's runtime that isn't connected stops")
+        self.assertIs(runtimes.get(self.data), connected,
+                      "the connected one, idle longer and looked at in the same pass, still runs (kumi-adv's D2)")
+        status = json.loads((self.data / "state" / "status.json").read_text(encoding="utf-8"))
+        (self.data / "state" / "status.json").write_text(json.dumps({**status, "connected": False}), encoding="utf-8")
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "once the DAW is gone, the short wait")
+        self.assertTrue(eventually(lambda: not idle.client.running and not connected.client.running))
+
+    def test_a_runtime_running_a_job_nobody_asks_about_is_not_stopped_as_idle_until_it_ends(self):
+        runtimes = self.make(idle_after=0.3, job_busy_for=3600)
+        scanning = self.start(session=None, runtimes=runtimes)  # looked at first in each pass: started first
+        scanning.call("library", {"action": "scan"}, self.host(), timeout=10)  # jobs/j-scan-1.json: running
+        other = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        support.install(other)
+        self.addCleanup(support.stopped, runtimes, other)
+        runtimes.start(other, runtime.installed(other, support.VERSION), "ableton", None, profile="other")
+        self.assertTrue(eventually(lambda: runtimes.get(other) is None), "a runtime with nothing running stops")
+        self.assertIs(runtimes.get(self.data), scanning, "the scanning one, idle longer, still runs (rgzm, #1059)")
+        job = self.data / "state" / "jobs" / "j-scan-1.json"
+        job.write_text(json.dumps({**json.loads(job.read_text(encoding="utf-8")), "state": "done"}), encoding="utf-8")
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "its scan done, the short wait again")
 
     def test_an_idle_runtime_is_stopped_in_the_context_of_the_profile_that_started_it(self):
         profile = contextvars.ContextVar("profile")
@@ -216,7 +364,9 @@ class Runtimes(unittest.TestCase):
         answers = []
         caller = threading.Thread(target=lambda: answers.append(live.call("history", {}, self.host(), timeout=30)))
         caller.start()
-        self.assertTrue(eventually(lambda: live.in_flight == 1), "the call is in flight")
+        sent = lambda: [m for m in support.requests(self.data / "state") if m.get("params", {}).get("name") == "history"]
+        # Counted in flight isn't sent yet: a stop between the two ends the call with "Nothing was sent" (Windows, #1051).
+        self.assertTrue(eventually(lambda: live.in_flight == 1 and sent()), "the call is in flight, at the runtime")
         self.events.clear()
         self.runtimes.stop_session("s1")
         self.assertTrue(live.client.running, "the stop returned without waiting for the call to settle")
@@ -250,7 +400,9 @@ class Runtimes(unittest.TestCase):
 
         caller = threading.Thread(target=call)
         caller.start()
-        self.assertTrue(eventually(lambda: live.in_flight == 1))
+        self.assertTrue(eventually(lambda: live.in_flight == 1 and any(
+            m.get("params", {}).get("name") == "history" for m in support.requests(self.data / "state"))),
+            "the call is in flight, at the runtime")
         runtimes.stop_session("s1")
         caller.join()
         self.assertEqual(failures, ["stopped"], "its call ended unknown, never resent")

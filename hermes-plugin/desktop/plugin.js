@@ -44,6 +44,7 @@ var en = {
     undoable: (n) => `· ${n} can be undone`,
     undo: "Undo",
     undoTitle: "Ask Hermes to undo this change",
+    undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change) => `Undo ${change}`,
     openMap: "Open the sound map",
     undoNeedsConnection: "Undo needs a connected Kumi."
@@ -82,7 +83,11 @@ var en = {
     lookFirst: "Ask Hermes to look again before another change.",
     restored: "Kumi put back what it changed meanwhile.",
     restoreUnsure: "Kumi isn’t sure it put everything back.",
-    restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+    restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+    dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
+    dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
+    byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+    byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
   },
   job: {
     scanning: "Scanning",
@@ -109,7 +114,7 @@ var en = {
     keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
-    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
+    empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
     search: "Search sounds",
     searchHint: "Search the map: name, kind or folder",
     count: (n) => `${n} sounds`,
@@ -125,6 +130,8 @@ var en = {
     playTitle: "Play it here (nothing changes in your DAW)",
     use: "Use…",
     useTitle: "Put a request to use this sound in the chat, to finish and send",
+    moreLike: "More like this",
+    moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
     playFailed: (error) => `Kumi couldn't play that sound: ${error}`
   },
   measurements: {
@@ -155,6 +162,20 @@ var en = {
     crest: "Crest",
     tempo: "Tempo",
     key: "Key",
+    peakToLoudness: "Peak to loudness",
+    tilt: "Tilt",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "Stereo width",
+    lowEnd: "Low end",
+    mono: "mono",
+    notMono: "not mono",
+    overlay: "Band levels, level-matched",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name} (${hz2} Hz): this ${mine} dB, reference ${reference} dB, ${difference} dB`,
+    round: (number) => `Round ${number}`,
+    roundTitle: "Each comparison with this reference since this window opened, oldest first: this minus reference",
+    loudnessGap: (trend) => `loudness ${trend} LU`,
+    tiltGap: (trend) => `tilt ${trend} dB/oct`,
+    widthGap: (trend) => `width ${trend}`,
     interpretation: "Interpretation",
     noInterpretation: (why) => `No model interpretation: ${why}`,
     more: "More",
@@ -226,6 +247,13 @@ var en = {
     generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
     soundTitle: "Generated sound",
     notesTitle: "Notes from audio",
+    kinds: { video_to_sfx: "Sound for a video", extend: "Extended audio", inpaint: "Inpainted audio" },
+    // CC-15: what a generation's billed seconds covered, never the returned file's length.
+    window: {
+      video_to_sfx: (first) => `Sound for video · first ${first}`,
+      extend: (added, source) => `Extended by ${added} (source ${source})`,
+      inpaint: (span2, source) => `Replaced ${span2} of ${source}`
+    },
     credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
     creditsTitle: "Mirelo API credits, not money. An estimate or a reservation is not a price.",
     cost: (credits2, estimate) => `${credits2} (est. ${estimate})`,
@@ -266,7 +294,7 @@ var en = {
     copied: "Copied",
     copyRequest: "Copy request",
     copyUndo: "Copy undo",
-    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+    mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
     askLook: "Ask Hermes in your chat to look again before another change."
   }
 };
@@ -309,6 +337,7 @@ var ja = {
     undoable: (n) => `· ${n} 件取り消せます`,
     undo: "取り消す",
     undoTitle: "この変更の取り消しを Hermes に頼む",
+    undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: (change) => `${change} を取り消す`,
     openMap: "サンプルマップを開く",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -347,7 +376,11 @@ var ja = {
     lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
     restored: "その間に変えたものは Kumi が元に戻しました。",
     restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-    restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+    restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
+    dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
+    dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
+    byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+    byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
   },
   job: {
     scanning: "スキャン中",
@@ -374,7 +407,7 @@ var ja = {
     keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
-    empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+    empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
     search: "サウンドを検索",
     searchHint: "マップを検索: 名前・種類・フォルダ",
     count: (n) => `${n} 個のサウンド`,
@@ -390,6 +423,8 @@ var ja = {
     playTitle: "ここで再生（DAW は何も変わりません）",
     use: "使う…",
     useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+    moreLike: "似たサウンド",
+    moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
     playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
   },
   measurements: {
@@ -420,6 +455,20 @@ var ja = {
     crest: "クレスト",
     tempo: "テンポ",
     key: "キー",
+    peakToLoudness: "ピーク対ラウドネス",
+    tilt: "ティルト",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "ステレオ幅",
+    lowEnd: "低域",
+    mono: "モノ",
+    notMono: "モノではない",
+    overlay: "帯域レベル（レベル合わせ済み）",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）: これ ${mine} dB、リファレンス ${reference} dB、差 ${difference} dB`,
+    round: (number) => `ラウンド ${number}`,
+    roundTitle: "このウィンドウを開いてからの、このリファレンスとの各比較（古い順、これ − リファレンス）",
+    loudnessGap: (trend) => `ラウドネス ${trend} LU`,
+    tiltGap: (trend) => `ティルト ${trend} dB/oct`,
+    widthGap: (trend) => `幅 ${trend}`,
     interpretation: "解釈",
     noInterpretation: (why) => `モデルによる解釈なし: ${why}`,
     more: "もっと見る",
@@ -491,6 +540,12 @@ var ja = {
     generatedTitle: "Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。",
     soundTitle: "生成したサウンド",
     notesTitle: "オーディオから取り出したノート",
+    kinds: { video_to_sfx: "映像の効果音", extend: "延長したオーディオ", inpaint: "一部を差し替えたオーディオ" },
+    window: {
+      video_to_sfx: (first) => `映像の効果音 · 最初の ${first}`,
+      extend: (added, source) => `${added} 延長（元は ${source}）`,
+      inpaint: (span2, source) => `${source} のうち ${span2} を差し替え`
+    },
     credits: (_n, shown) => `${shown} クレジット`,
     creditsTitle: "Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。",
     cost: (credits2, estimate) => `${credits2}（見積 ${estimate}）`,
@@ -531,7 +586,7 @@ var ja = {
     copied: "コピーしました",
     copyRequest: "依頼をコピー",
     copyUndo: "取り消しをコピー",
-    mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。",
+    mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
     askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
   }
 };
@@ -574,6 +629,7 @@ var zh = {
     undoable: (n) => `· ${n} 项可撤销`,
     undo: "撤销",
     undoTitle: "让 Hermes 撤销这次改动",
+    undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: (change) => `撤销 ${change}`,
     openMap: "打开采样地图",
     undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -612,7 +668,11 @@ var zh = {
     lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
     restored: "Kumi 已还原期间做出的改动。",
     restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-    restoreUnsure: "Kumi 不确定是否已全部还原。"
+    restoreUnsure: "Kumi 不确定是否已全部还原。",
+    dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
+    dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
+    byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+    byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
   },
   job: {
     scanning: "正在扫描",
@@ -639,7 +699,7 @@ var zh = {
     keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
-    empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。",
+    empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
     search: "搜索声音",
     searchHint: "搜索地图：名称、种类或文件夹",
     count: (n) => `${n} 个声音`,
@@ -655,6 +715,8 @@ var zh = {
     playTitle: "在这里播放（DAW 不会有任何改动）",
     use: "使用…",
     useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+    moreLike: "更多类似的",
+    moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
     playFailed: (error) => `Kumi 无法播放这个声音：${error}`
   },
   measurements: {
@@ -685,6 +747,20 @@ var zh = {
     crest: "峰值因数",
     tempo: "速度",
     key: "调性",
+    peakToLoudness: "峰值响度比",
+    tilt: "倾斜",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "立体声宽度",
+    lowEnd: "低频",
+    mono: "单声道",
+    notMono: "非单声道",
+    overlay: "频段电平（已对齐电平）",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）：当前 ${mine} dB，参考 ${reference} dB，差 ${difference} dB`,
+    round: (number) => `第 ${number} 轮`,
+    roundTitle: "本窗口打开以来与此参考的每次比较（从旧到新，当前减参考）",
+    loudnessGap: (trend) => `响度 ${trend} LU`,
+    tiltGap: (trend) => `倾斜 ${trend} dB/oct`,
+    widthGap: (trend) => `宽度 ${trend}`,
     interpretation: "解读",
     noInterpretation: (why) => `没有模型解读：${why}`,
     more: "展开",
@@ -756,6 +832,12 @@ var zh = {
     generatedTitle: "由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。",
     soundTitle: "生成的声音",
     notesTitle: "从音频提取的音符",
+    kinds: { video_to_sfx: "视频音效", extend: "延长的音频", inpaint: "局部替换的音频" },
+    window: {
+      video_to_sfx: (first) => `视频音效 · 前 ${first}`,
+      extend: (added, source) => `延长 ${added}（原长 ${source}）`,
+      inpaint: (span2, source) => `替换了 ${source} 中的 ${span2}`
+    },
     credits: (_n, shown) => `${shown} 积分`,
     creditsTitle: "Mirelo API 积分，不是钱。预估或预留不是价格。",
     cost: (credits2, estimate) => `${credits2}（预估 ${estimate}）`,
@@ -796,7 +878,7 @@ var zh = {
     copied: "已复制",
     copyRequest: "复制请求",
     copyUndo: "复制撤销",
-    mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。",
+    mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
     askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
   }
 };
@@ -939,6 +1021,22 @@ function canUndo(status, item) {
 function undoRequest(item) {
   return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
 }
+function changesOf(items) {
+  const byChange = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const key = typeof item.change_id === "string" && item.change_id ? `change:${item.change_id}` : `row:${item.id}`;
+    const rows = byChange.get(key);
+    if (rows) rows.push(item);
+    else byChange.set(key, [item]);
+  }
+  return [...byChange.values()];
+}
+function undoRowOf(rows) {
+  return rows.find((row2) => row2.state !== "undone");
+}
+function canUndoChange(status, rows) {
+  return canUndo(status, undoRowOf(rows));
+}
 var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
 function quotable(name, max = 80) {
   return clean(typeof name === "string" ? name.replace(QUOTE_MARKS, " ") : name, max).replace(QUOTE_MARKS, " ").replace(/\s+/g, " ").trim();
@@ -962,6 +1060,14 @@ function soundRequest(soundId, name, revision) {
   const said = quotable(name);
   const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
   return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
+}
+function nearRequest(soundId, name, revision) {
+  const id = plainId(soundId);
+  if (!id) return null;
+  const from = revision ? plainId(revision) : null;
+  const said = quotable(name);
+  const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
+  return said ? `Find more sounds like “${said}” (${which})` : `Find more sounds like ${which}`;
 }
 function setupRequest(daw) {
   return `Set up Kumi for ${dawName(daw)}`;
@@ -1146,7 +1252,7 @@ function row(label, mine, reference, show, delta, deltaShow) {
   }
   return out;
 }
-function listenView(result, t = english) {
+function listenView(result, t = english, referenceName2) {
   const mine = result.metrics ?? {};
   const compare = result.compare;
   const reference = compare?.metrics;
@@ -1155,12 +1261,16 @@ function listenView(result, t = english) {
   const rows = [
     row(t("listen.loudness"), mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
     row(t("listen.truePeak"), mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
-    row(t("listen.brightness"), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
     row(t("listen.range"), mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
     row(t("listen.crest"), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.peakToLoudness"), mine.dynamics?.peakToLoudnessDb, theirs(reference?.dynamics?.peakToLoudnessDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.tilt"), mine.balance?.tiltDbPerOctave, theirs(reference?.balance?.tiltDbPerOctave), (v) => t("listen.perOctave", num(v)), void 0, (v) => t("listen.perOctave", signed(v))),
+    row(t("listen.brightness"), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
+    row(t("listen.width"), mine.stereo?.width, theirs(reference?.stereo?.width), (v) => num(v, 2), void 0, (v) => signed(v, 2)),
+    lowEnd(t, mine.stereo?.lowEndMono, compare ? reference?.stereo?.lowEndMono ?? null : void 0),
     row(t("listen.tempo"), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
   ].filter((value) => value !== null);
-  const key = mine.key?.name;
+  const key = mine.sound ? void 0 : mine.key?.name;
   if (typeof key === "string" && key) {
     const otherKey = reference?.key?.name;
     rows.push({ label: t("listen.key"), mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
@@ -1171,20 +1281,23 @@ function listenView(result, t = english) {
   const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
     (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
   );
+  const headlines = Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [];
+  const said = typeof result.verdict_text === "string" ? headlines.length ? result.verdict_text.split("\n")[0] : result.verdict_text : "";
   const view = {
     title: fileName(mine, t("listen.measuredAudio")),
     mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
     rows,
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? "difference" : "level",
-    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
+    overlay: compare ? overlayOf(mine, reference) : [],
+    headlines,
+    verdict: said.trim() ? clean(said, 400) : void 0,
     capture: captureWords(result.capture, t),
     // CC-2 A3: one line of at most 200 characters, shown as it is and never read for a decision.
     captureNote: typeof result.capture?.note === "string" && result.capture.note.trim() ? clean(result.capture.note, 200) : void 0
   };
   if (compare) {
-    view.referenceTitle = fileName(reference, t("listen.reference"));
+    view.referenceTitle = referenceName2 ? clean(referenceName2, 60) : fileName(reference, t("listen.reference"));
     view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
   }
   const interpretation = result.interpretation;
@@ -1196,11 +1309,83 @@ function listenView(result, t = english) {
   }
   return view;
 }
+function overlayOf(mine, reference) {
+  const ours = Array.isArray(mine.balance?.bands) ? mine.balance.bands : [];
+  const theirs = Array.isArray(reference?.balance?.bands) ? reference.balance.bands : [];
+  if (!ours.length || ours.length !== theirs.length) return [];
+  const overlay = [];
+  for (const [index, band] of ours.entries()) {
+    const other = theirs[index];
+    if (!band || !other || band.name !== other.name || !finite(band.db) || !finite(other.db)) return [];
+    overlay.push({ name: clean(band.name ?? "", 16), hz: clean(band.hz ?? "", 16), mine: band.db, reference: other.db });
+  }
+  return overlay;
+}
+function lowEnd(t, mine, reference) {
+  const words = (value) => value === true ? t("listen.mono") : value === false ? t("listen.notMono") : "—";
+  if (typeof mine !== "boolean" && typeof reference !== "boolean") return null;
+  return { label: t("listen.lowEnd"), mine: words(mine), ...reference === void 0 ? {} : { reference: words(reference) }, direction: 0 };
+}
+function referenceKey(result) {
+  const reference = result.compare?.metrics;
+  if (!reference) return null;
+  const lufs = reference.loudness?.integratedLufs;
+  return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+}
+function keptBy(result, rounds) {
+  const kept = result.compare?.artifact_id;
+  if (typeof kept !== "string" || !kept) return null;
+  for (const [key, each] of Object.entries(rounds)) {
+    const round = each.find((other) => other.kept === kept);
+    if (round) return [key, round];
+  }
+  return null;
+}
+function roundKey(result, rounds) {
+  return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+}
+function referenceName(result, rounds) {
+  return keptBy(result, rounds)?.[1].name || void 0;
+}
+function roundOf(result, id, rounds) {
+  const kept = result.compare?.artifact_id;
+  return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+}
+function gapsOf(result) {
+  const mine = result.metrics ?? {};
+  const reference = result.compare?.metrics;
+  if (!reference) return {};
+  const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
+  const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
+  const out = {};
+  if (loudness !== void 0) out.loudness = loudness;
+  const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
+  if (tilt !== void 0) out.tilt = tilt;
+  const width = gap(mine.stereo?.width, reference.stereo?.width);
+  if (width !== void 0) out.width = width;
+  return out;
+}
+function roundWords(number, rounds, t = english) {
+  if (number < 2 || rounds.length < 2) return void 0;
+  const trend = (pick2, digits) => {
+    const values = rounds.map(pick2);
+    return values.every(finite) ? values.map((value) => signed(value, digits)).join(" → ") : void 0;
+  };
+  const parts = [
+    [trend((gaps) => gaps.loudness, 1), (text) => t("listen.loudnessGap", text)],
+    [trend((gaps) => gaps.tilt, 1), (text) => t("listen.tiltGap", text)],
+    [trend((gaps) => gaps.width, 2), (text) => t("listen.widthGap", text)]
+  ];
+  const said = parts.flatMap(([text, words]) => text ? [words(text)] : []);
+  return [t("listen.round", number), ...said].join(" · ");
+}
 
 // src/shared/store.ts
 var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
+var MOST_ROUNDS = 6;
+var MOST_REFERENCES = 8;
+var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
 function finished(job) {
   return typeof job.state === "string" && job.state !== "running";
 }
@@ -1240,6 +1425,9 @@ var KumiStore = class {
   generation = 0;
   /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
   cards = /* @__PURE__ */ new Map();
+  /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+   *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+  started = /* @__PURE__ */ new Set();
   get = () => this.state;
   subscribe = (fn) => {
     this.listeners.add(fn);
@@ -1260,6 +1448,7 @@ var KumiStore = class {
     this.generation += 1;
     this.reads.clear();
     this.cards.clear();
+    this.started.clear();
     this.state = EMPTY;
     for (const fn of [...this.listeners]) fn();
   }
@@ -1309,7 +1498,7 @@ var KumiStore = class {
       if (liveness || moved("focus")) reads.push(this.refresh("focus"));
       if (liveness || moved("history")) reads.push(this.refresh("history"));
       if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
-      if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
+      if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
       await Promise.all(reads);
     });
   }
@@ -1334,10 +1523,30 @@ var KumiStore = class {
   measure(toolCallId, result) {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
   }
-  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-  trackJob(id) {
+  /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+   *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+   *  twice (both signals for one call) counts once. */
+  noteListen(result) {
+    const parsed = parseListen(result);
+    const key = parsed ? roundKey(parsed, this.state.rounds) : null;
+    const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
+    if (!parsed || !key || !id) return;
+    const before = this.state.rounds[key] ?? [];
+    if (before.some((round) => round.id === id)) return;
+    const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
+    const keys = Object.keys(rounds);
+    if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
+    this.set({ rounds });
+  }
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+   *  the source says it was running: a call that started it, or an event that reported it running. */
+  trackJob(id, started = false) {
     const jobId = plainId(id);
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+    if (started) {
+      this.started.add(jobId);
+      if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
+    }
     void this.refreshJob(jobId);
   }
   /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
@@ -1373,8 +1582,8 @@ var KumiStore = class {
         const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
         if (generation !== this.generation) return;
         const before = this.state.jobs[id];
-        const waiting = this.cards.has(id);
-        if (!before && finished(read) && !waiting) return;
+        const news = this.started.delete(id) || this.cards.has(id);
+        if (!before && finished(read) && !news) return;
         const card = before?.card ?? this.cards.get(id);
         this.cards.delete(id);
         const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
@@ -1533,6 +1742,7 @@ function wordsOf(ctx) {
 }
 var OPEN_WAIT_MS = 1e3;
 var OPEN_POLL_MS = 100;
+var NEW_CHAT = "/";
 async function ask(ctx, text, options) {
   const t = wordsOf(ctx);
   const composer = host.composer;
@@ -1546,7 +1756,7 @@ async function ask(ctx, text, options) {
     return { outcome: copied ? "copied" : "none" };
   }
   if (!session) {
-    if (await composer.insertText(null, text)) return { outcome: "drafted" };
+    if (await composer.insertText(null, text) || await inNewChat(ctx, composer, text)) return { outcome: "drafted" };
     host.notify({ kind: "warning", message: t("notify.openChat") });
     return { outcome: "none" };
   }
@@ -1570,6 +1780,20 @@ async function ask(ctx, text, options) {
   }
   host.notify({ kind: "warning", message: t("notify.openChat") });
   return { outcome: "none" };
+}
+async function inNewChat(ctx, composer, text) {
+  try {
+    host.navigate(NEW_CHAT);
+  } catch {
+    return false;
+  }
+  for (let waited = 0; waited < OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
+    const tick = Promise.withResolvers();
+    ctx.setTimeout(tick.resolve, OPEN_POLL_MS);
+    await tick.promise;
+    if (await composer.insertText(null, text)) return true;
+  }
+  return false;
 }
 
 // src/desktop/card.tsx
@@ -1648,8 +1872,39 @@ function Rows({ view }) {
     ] })
   );
 }
+function Overlay({ view }) {
+  const t = useT();
+  const values = view.overlay.flatMap((band) => [band.mine, band.reference]);
+  const low = Math.min(...values) - 3;
+  const high = Math.max(...values) + 1;
+  const at = (value) => `${Math.max(2, (value - low) / (high - low) * 100)}%`;
+  return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
+    /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx2("span", { style: S.faint, children: t("listen.overlay") }),
+      /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 4, ...S.faint }, children: [
+        /* @__PURE__ */ jsx2("span", { "aria-hidden": true, style: { width: 8, height: 8, background: T.accent, opacity: 0.8 } }),
+        t("listen.this")
+      ] }),
+      /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 4, ...S.faint }, children: [
+        /* @__PURE__ */ jsx2("span", { "aria-hidden": true, style: { width: 10, borderTop: `2px solid ${T.text}` } }),
+        t("listen.reference")
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx2("div", { style: { display: "flex", alignItems: "stretch", gap: 3, height: 64 }, children: view.overlay.map((band) => {
+      const label = t("listen.overlayBand", band.name, band.hz, num(band.mine), num(band.reference), signed(band.mine - band.reference));
+      return /* @__PURE__ */ jsxs2("div", { role: "img", "aria-label": label, title: label, style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }, children: [
+        /* @__PURE__ */ jsxs2("div", { style: { position: "relative", flex: 1, width: "100%" }, children: [
+          /* @__PURE__ */ jsx2("div", { style: { position: "absolute", left: "18%", right: "18%", bottom: 0, height: at(band.mine), background: T.accent, opacity: 0.8 } }),
+          /* @__PURE__ */ jsx2("div", { style: { position: "absolute", left: 0, right: 0, bottom: at(band.reference), borderTop: `2px solid ${T.text}` } })
+        ] }),
+        /* @__PURE__ */ jsx2("span", { style: { fontSize: 9, color: T.faint, ...S.ellipsis, maxWidth: "100%" }, children: band.name })
+      ] }, band.name);
+    }) })
+  ] });
+}
 function Bands({ view }) {
   const t = useT();
+  if (view.overlay.length) return /* @__PURE__ */ jsx2(Overlay, { view });
   if (!view.bands.length) return null;
   const top = Math.max(...view.bands.map((band) => Math.abs(band.value)), view.bandsAre === "difference" ? 3 : 1);
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
@@ -1692,15 +1947,20 @@ function Interpretation({ view }) {
     long && /* @__PURE__ */ jsx2("span", { children: /* @__PURE__ */ jsx2(TextButton, { onClick: () => setOpen(!open), children: open ? t("listen.less") : t("listen.more") }) })
   ] });
 }
-function ListenCard({ media, audition }) {
+function ListenCard({ media, audition, store }) {
   if (media.file?.kind !== "audio") return media.fallback;
-  return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result });
+  return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result, store });
 }
-function ListenResultCard({ result, audition, fallback }) {
+function ListenResultCard({ result, audition, fallback, store }) {
   const t = useT();
+  const { rounds } = useKumi(store);
   const parsed = parseListen(result);
   if (!parsed) return fallback;
-  const view = listenView(parsed, t);
+  const view = listenView(parsed, t, referenceName(parsed, rounds));
+  const key = roundKey(parsed, rounds);
+  const seen = key ? rounds[key] ?? [] : [];
+  const index = seen.findIndex((round2) => round2.id === parsed.artifact_id);
+  const round = index < 0 ? void 0 : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map((each) => each.gaps), t);
   return /* @__PURE__ */ jsxs2(
     "div",
     {
@@ -1719,13 +1979,14 @@ function ListenResultCard({ result, audition, fallback }) {
         view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: t("listen.captureTitle"), children: view.capture }),
         view.captureNote && /* @__PURE__ */ jsx2("span", { style: { ...S.muted, whiteSpace: "normal" }, children: view.captureNote }),
         view.verdict && /* @__PURE__ */ jsx2("span", { style: S.text, children: view.verdict }),
+        round && /* @__PURE__ */ jsx2("span", { style: { ...S.muted, fontVariantNumeric: "tabular-nums" }, title: t("listen.roundTitle"), children: round }),
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
           view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? t("listen.reference") })
         ] }) : fallback,
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
-        view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index)) }),
+        view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index2) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index2)) }),
         /* @__PURE__ */ jsx2(Interpretation, { view })
       ]
     }
@@ -1733,6 +1994,29 @@ function ListenResultCard({ result, audition, fallback }) {
 }
 
 // src/shared/generate.ts
+var WINDOWED = /* @__PURE__ */ new Set(["video_to_sfx", "extend", "inpaint"]);
+function timing(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.abs(value * 1e3 - Math.round(value * 1e3)) < 1e-6 ? value : null;
+}
+var ms = (value) => Math.round(value * 1e3);
+function windowOf(kind, result) {
+  const source = timing(result.source_seconds);
+  const billed = timing(result.seconds);
+  if (source === null || source === 0 || billed === null || billed === 0) return null;
+  if (kind === "video_to_sfx") return billed <= source ? { kind, seconds: billed, source } : null;
+  if (kind === "extend") {
+    const append = timing(result.append_seconds);
+    return append !== null && ms(append) === ms(billed) ? { kind, append, source } : null;
+  }
+  if (kind === "inpaint") {
+    const start = timing(result.region_start_seconds);
+    const end = timing(result.region_end_seconds);
+    if (start === null || end === null || !(start < end) || end > source || ms(end) - ms(start) !== ms(billed)) return null;
+    return { kind, start, end, source };
+  }
+  return null;
+}
 var STATES = /* @__PURE__ */ new Set(["running", "done", "failed", "cancelled", "interrupted"]);
 function objectOf(value) {
   let found = value;
@@ -1766,14 +2050,16 @@ function parseGeneration(value) {
   const error = objectOf(outer.error);
   const progress = objectOf(outer.progress);
   const notes = result.note_count;
+  const kind = typeof result.kind === "string" ? clean(result.kind, 24) : "";
   return {
     state,
-    kind: typeof result.kind === "string" ? clean(result.kind, 24) : "",
+    kind,
     prompt: typeof result.prompt === "string" ? clean(result.prompt, 200) : "",
     artifactId: plainId(result.artifact_id),
     file: typeof result.file === "string" ? clean(result.file.split(/[\\/]/).pop() ?? "", 80) : "",
     outputType: typeof result.output_type === "string" ? clean(result.output_type, 16) : null,
     seconds: positive(result.seconds),
+    window: WINDOWED.has(kind) ? windowOf(kind, result) : null,
     noteCount: typeof notes === "number" && Number.isInteger(notes) && notes >= 0 ? notes : null,
     estimate: credits(spent?.estimate ?? estimate?.credits),
     reserved: credits(spent?.reserved ?? estimate?.max_credits),
@@ -1804,12 +2090,23 @@ function capWords(made, t = english) {
 }
 var NOTES = /* @__PURE__ */ new Set(["midi", "notes", "musicxml"]);
 function outputKind(made) {
-  if (made.outputType === null) return made.kind === "sfx" ? "audio" : made.kind === "audio_to_midi" ? "notes" : null;
+  if (made.outputType === null) return made.kind === "sfx" || WINDOWED.has(made.kind) ? "audio" : made.kind === "audio_to_midi" ? "notes" : null;
   if (made.outputType === "audio") return "audio";
   return NOTES.has(made.outputType) ? "notes" : null;
 }
 function generationTitle(made, t = english) {
-  return made.prompt || (outputKind(made) === "notes" ? t("generate.notesTitle") : t("generate.soundTitle"));
+  if (made.prompt) return made.prompt;
+  if (WINDOWED.has(made.kind)) return t(`generate.kinds.${made.kind}`);
+  return outputKind(made) === "notes" ? t("generate.notesTitle") : t("generate.soundTitle");
+}
+var clock = (value) => `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
+var span = (from, to) => to < 60 ? `${num(from, 2)}–${seconds(to)}` : `${clock(from)}–${clock(to)}`;
+function lengthWords(made, t = english) {
+  const covered = made.window;
+  if (covered?.kind === "video_to_sfx") return t("generate.window.video_to_sfx", seconds(covered.seconds));
+  if (covered?.kind === "extend") return t("generate.window.extend", seconds(covered.append), seconds(covered.source));
+  if (covered?.kind === "inpaint") return t("generate.window.inpaint", span(covered.start, covered.end), seconds(covered.source));
+  return WINDOWED.has(made.kind) || made.seconds === null ? "" : seconds(made.seconds);
 }
 function generationJobWords(job, t = english) {
   const words = jobWords(job, t);
@@ -1818,7 +2115,8 @@ function generationJobWords(job, t = english) {
   const frozen = (made.ledger ?? parseGeneration(job.card)?.ledger)?.frozen === true;
   const over = made.actual !== null && made.reserved !== null && made.actual > made.reserved;
   const reason = made.state === "failed" || made.state === "interrupted" ? made.error?.reason ?? "" : "";
-  const detail = [made.state === "running" ? made.message : made.file, reason, costWords(made, t), frozen ? t("generate.frozen") : ""];
+  const covered = made.window ? lengthWords(made, t) : "";
+  const detail = [made.state === "running" ? made.message : made.file, covered, reason, costWords(made, t), frozen ? t("generate.frozen") : ""];
   return { ...words, detail: detail.filter(Boolean).join(" · "), tone: (frozen || over) && words.tone === "good" ? "warn" : words.tone };
 }
 function generationRequest(made, t = english) {
@@ -1892,12 +2190,25 @@ function FocusView({ focus, now }) {
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
   ] });
 }
+function undoKeys(target) {
+  const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+  return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+}
+function DawUndo({ daw, how, keys }) {
+  const t = useT();
+  const app = dawName(daw, t);
+  if (how === "buried") {
+    return /* @__PURE__ */ jsx3("span", { title: t("history.byHandTitle", app), style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) });
+  }
+  return /* @__PURE__ */ jsx3("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
+}
 function HistoryView({
   history,
   now,
   action,
   live = false,
-  daw
+  daw,
+  target
 }) {
   const t = useT();
   const items = history?.items ?? [];
@@ -1907,6 +2218,7 @@ function HistoryView({
   return /* @__PURE__ */ jsx3("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
     const state = stateOf(item, t, live);
     const track = nameOf(item.track);
+    const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
     return /* @__PURE__ */ jsxs3("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
       /* @__PURE__ */ jsx3("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
       /* @__PURE__ */ jsxs3("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
@@ -1917,10 +2229,11 @@ function HistoryView({
         ] }),
         item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
           // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
-          item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
-        )
+          item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
+        ),
+        dawUndo && /* @__PURE__ */ jsx3(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) })
       ] }),
-      action?.(item)
+      dawUndo ? null : action?.(item)
     ] }, item.id);
   }) });
 }
@@ -1985,14 +2298,27 @@ function ownerSession(state) {
   return typeof session === "string" && session ? session : null;
 }
 var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true };
-function nextStep(state, t = english) {
+var IN_DAW = { choose_control_surface: true, restart_daw: true, enable_tool: true };
+var SETUP_DAWS = ["ableton", "reaper", "renoise"];
+function dawChosen(state) {
+  return state.setup?.daw_chosen !== false;
+}
+function nextSteps(state, t = english) {
   const setup = state.setup;
   const daw = state.status?.daw ?? setup?.daw;
   if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
-    return { label: t("step.setup", dawName(daw, t)), request: setupRequest(daw) };
+    return (dawChosen(state) ? [daw] : SETUP_DAWS).map((each) => ({ label: t("step.setup", dawName(each, t)), request: setupRequest(each) }));
   }
-  if (setup?.state === "ready" && !state.status?.connected) return { label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) };
-  return null;
+  if (setup?.state === "ready" && !state.status?.connected) return [{ label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) }];
+  return [];
+}
+function setupWords(state) {
+  const setup = state.setup;
+  const said = setup?.state;
+  if (typeof setup?.message !== "string" || !setup.message || !said || said === "unknown" || dawPartWorks(state)) return null;
+  if (said === "ready") return !state.status?.connected && IN_DAW[setup.next_step ?? ""] ? setup.message : null;
+  if (said === "needs_daw_component" && !dawChosen(state)) return null;
+  return setup.message;
 }
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function KumiPane({ ctx, store, onOpenMap }) {
@@ -2009,12 +2335,13 @@ function KumiPane({ ctx, store, onOpenMap }) {
     return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: t("pane.reading") });
   }
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step2 = nextStep(state, t);
+  const steps = nextSteps(state, t);
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
-  const setupState = state.setup?.state;
-  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" && !dawPartWorks(state) ? state.setup.message : null;
-  const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
+  const setupMessage = setupWords(state);
+  const changes = changesOf(state.history?.items ?? []);
+  const changeOf = new Map(changes.flatMap((rows) => rows.map((row2) => [row2, rows])));
+  const undoable = changes.filter((rows) => canUndoChange(state.status, rows)).length;
   return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
       /* @__PURE__ */ jsxs5("div", { style: { ...S.row, gap: 8 }, children: [
@@ -2035,11 +2362,11 @@ function KumiPane({ ctx, store, onOpenMap }) {
         ].filter(Boolean).join(" ") }),
         /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
       ] }),
-      step2 && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: true, children: step2.label }) })
+      steps.length > 0 && /* @__PURE__ */ jsx5("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: steps.map((step2) => /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: steps.length === 1, children: step2.label }, step2.request)) })
     ] }),
     /* @__PURE__ */ jsx5(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
     Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs, onRequest: (request) => void ask(ctx, request, { send: false, session }) }) }),
-    /* @__PURE__ */ jsx5(
+    /* @__PURE__ */ jsxs5(
       Section,
       {
         title: /* @__PURE__ */ jsxs5(Fragment, { children: [
@@ -2047,30 +2374,36 @@ function KumiPane({ ctx, store, onOpenMap }) {
           " ",
           /* @__PURE__ */ jsx5("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? t("pane.undoable", undoable) : "" })
         ] }),
-        children: /* @__PURE__ */ jsx5(
-          HistoryView,
-          {
-            daw: state.status?.daw,
-            history: state.history,
-            live: Boolean(state.status?.connected) && state.status?.stale !== true,
-            now,
-            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
-              TextButton,
-              {
-                label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
-                onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
-                title: t("pane.undoTitle"),
-                children: t("pane.undo")
+        children: [
+          /* @__PURE__ */ jsx5(
+            HistoryView,
+            {
+              daw: state.status?.daw,
+              history: state.history,
+              live: Boolean(state.status?.connected) && state.status?.stale !== true,
+              now,
+              target: state.setup?.target,
+              action: (item) => {
+                const rows = changeOf.get(item);
+                if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null;
+                const left = rows.filter((row2) => row2.state !== "undone").length;
+                return /* @__PURE__ */ jsx5(
+                  TextButton,
+                  {
+                    label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
+                    onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
+                    title: left > 1 ? t("pane.undoChangeTitle", left) : t("pane.undoTitle"),
+                    children: t("pane.undo")
+                  }
+                );
               }
-            ) : null
-          }
-        )
+            }
+          ),
+          !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
+        ]
       }
     ),
-    /* @__PURE__ */ jsxs5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: [
-      /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: t("pane.openMap") }),
-      !connected && state.status?.owner && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
-    ] })
+    /* @__PURE__ */ jsx5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: t("pane.openMap") }) })
   ] });
 }
 
@@ -2086,6 +2419,7 @@ function GenerateCard({ media, audition, ctx, store }) {
   const kind = outputKind(made);
   const cost = costWords(made, t);
   const left = capWords(made, t);
+  const length = lengthWords(made, t);
   const offer = generationRequest(made, t);
   return /* @__PURE__ */ jsxs6(
     "div",
@@ -2102,7 +2436,7 @@ function GenerateCard({ media, audition, ctx, store }) {
           /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 4, flexShrink: 0 }, children: [
             made.outputType && OUTPUTS.has(made.outputType) && /* @__PURE__ */ jsx6(Chip, { children: t(`generate.outputs.${made.outputType}`) }),
             made.noteCount !== null && /* @__PURE__ */ jsx6(Chip, { children: t("generate.notes", made.noteCount, String(made.noteCount)) }),
-            made.seconds !== null && /* @__PURE__ */ jsx6(Chip, { children: seconds(made.seconds) }),
+            length && /* @__PURE__ */ jsx6(Chip, { children: length }),
             ENDED.has(made.state) ? /* @__PURE__ */ jsx6(Chip, { tone: "bad", children: t(`generate.states.${made.state}`) }) : /* @__PURE__ */ jsx6(Chip, { title: t("generate.generatedTitle"), tone: "accent", children: t("generate.generated") })
           ] })
         ] }),
@@ -2179,7 +2513,7 @@ function StatusChip({
   const state = useKumi(store);
   if (state.available !== true) return null;
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step2 = nextStep(state, t);
+  const steps = nextSteps(state, t);
   const connected = Boolean(state.status?.connected);
   return /* @__PURE__ */ jsxs8(DropdownMenu, { children: [
     /* @__PURE__ */ jsx8(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs8(
@@ -2212,7 +2546,7 @@ function StatusChip({
     ) }),
     /* @__PURE__ */ jsxs8(DropdownMenuContent, { align: "end", side: "top", children: [
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
-      step2 && /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step2.request, { send: true, session: connected ? ownerSession(state) : null }), children: step2.label }),
+      steps.map((step2) => /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step2.request, { send: true, session: connected ? ownerSession(state) : null }), children: step2.label }, step2.request)),
       /* @__PURE__ */ jsx8(DropdownMenuSeparator, {}),
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
     ] })
@@ -2394,15 +2728,26 @@ function keepInView(view, px, py, width, height, margin = 24) {
 function mapLabel(name) {
   return clean(name, 28);
 }
+var haystacks = /* @__PURE__ */ new WeakMap();
+function haystackOf(model) {
+  let text = haystacks.get(model);
+  if (!text) {
+    text = model.points.map((point) => {
+      const sound = model.sounds[point.id];
+      return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter((value) => typeof value === "string").join(" ").toLowerCase();
+    });
+    haystacks.set(model, text);
+  }
+  return text;
+}
 function searchSounds(model, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
+  const text = haystackOf(model);
   const found = /* @__PURE__ */ new Set();
-  for (const point of model.points) {
-    const sound = model.sounds[point.id];
-    const text = [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(Boolean).join(" ").toLowerCase();
-    if (words.every((word) => text.includes(word))) found.add(point.id);
-  }
+  model.points.forEach((point, index) => {
+    if (words.every((word) => text[index].includes(word))) found.add(point.id);
+  });
   return found;
 }
 function frame(model, ids, width, height, margin = 48) {
@@ -2412,8 +2757,8 @@ function frame(model, ids, width, height, margin = 48) {
   const ys = chosen.map((point) => point.y);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const size = Math.max(1, Math.min(width, height) - 32);
-  const span = Math.max(x1 - x0, y1 - y0, 0.04);
-  const scale = Math.min(40, Math.max(1, (Math.min(width, height) - 2 * margin) / (span * size)));
+  const span2 = Math.max(x1 - x0, y1 - y0, 0.04);
+  const scale = Math.min(40, Math.max(1, (Math.min(width, height) - 2 * margin) / (span2 * size)));
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
   return { scale, dx: width / 2 - cx * size * scale, dy: height / 2 - cy * size * scale };
@@ -2433,6 +2778,7 @@ function resolve(canvas) {
     strong: read(CANVAS.strong, "#ddd")
   };
 }
+var ROUNDS = 8;
 var maps = 0;
 function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
   const t = useT();
@@ -2442,27 +2788,50 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const [size, setSize] = useState3({ width: 0, height: 0 });
   const [view, setView] = useState3(null);
   const [query, setQuery] = useState3("");
+  const [searchFor, setSearchFor] = useState3("");
   const [hidden, setHidden] = useState3(() => /* @__PURE__ */ new Set());
   const [hover, setHover] = useState3(null);
   const drag = useRef(null);
+  const viewRef = useRef(null);
+  viewRef.current = view;
+  const nextView = useRef(null);
+  const frameRef = useRef(0);
+  const queueView = (next) => {
+    nextView.current = next;
+    if (frameRef.current) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = 0;
+      const latest = nextView.current;
+      nextView.current = null;
+      if (latest) setView(latest);
+    });
+  };
+  useEffect4(() => () => cancelAnimationFrame(frameRef.current), []);
+  const backing = useRef("");
   const [said, setSaid] = useState3("");
   const [hintId] = useState3(() => `kumi-map-keys-${maps += 1}`);
   const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
   const hasPoints = model.points.length > 0;
-  const searched = useMemo(() => searchSounds(model, query), [model, query]);
+  useEffect4(() => {
+    if (query === searchFor) return;
+    const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0);
+    return () => clearTimeout(timer);
+  }, [query, searchFor]);
+  const searched = useMemo(() => searchSounds(model, searchFor), [model, searchFor]);
   const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model]);
   const foundIds = useMemo(
     () => found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null,
     [found, model.revision]
   );
-  const visible = useMemo(() => {
-    const groupHidden = hidden.size > 0;
-    return (index) => {
-      const point = model.points[index];
-      if (groupHidden && hidden.has(point.group)) return false;
-      return !searched || searched.has(point.id);
-    };
+  const mask = useMemo(() => {
+    const out = new Uint8Array(model.points.length);
+    model.points.forEach((point, index) => {
+      out[index] = hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
+    });
+    return out;
   }, [model, hidden, searched]);
+  const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
+  const shown = useMemo(() => mask.reduce((count2, keep) => count2 + keep, 0), [mask]);
   const matches = useMemo(() => {
     const ids = searched ?? foundIds;
     return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -2503,7 +2872,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       event.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 25e-4));
-      setView((current) => current ? zoomAt(current, factor, event.clientX - rect.left, event.clientY - rect.top) : current);
+      const base = nextView.current ?? viewRef.current;
+      if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top));
     };
     canvas.addEventListener("wheel", wheel, { passive: false });
     return () => canvas.removeEventListener("wheel", wheel);
@@ -2512,32 +2882,54 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const canvas = canvasRef.current;
     if (!canvas || !view || size.width === 0) return;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(size.width * ratio);
-    canvas.height = Math.round(size.height * ratio);
+    const wanted = `${Math.round(size.width * ratio)}x${Math.round(size.height * ratio)}`;
+    if (backing.current !== wanted) {
+      backing.current = wanted;
+      canvas.width = Math.round(size.width * ratio);
+      canvas.height = Math.round(size.height * ratio);
+    }
     const context = canvas.getContext("2d");
     if (!context) return;
     const colors = resolve(canvas);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, size.width, size.height);
-    const count2 = model.points.length;
+    const points = model.points;
+    const count2 = points.length;
     const base = count2 <= 40 ? 5 : count2 <= 300 ? 3.2 : 2.2;
     const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
     const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+    const unit = mapSize * view.scale;
+    const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8];
     const labelled = [];
-    for (const pass of [false, true]) {
+    let onScreen = 0;
+    for (const pass of [0, 1]) {
+      const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
+      for (let index = 0; index < count2; index++) {
+        if (mask[index] !== pass) continue;
+        const point = points[index];
+        const x = point.x * unit + view.dx;
+        const y = point.y * unit + view.dy;
+        if (x < left || y < top || x > right || y > bottom) continue;
+        const color = groupColor2.get(point.group) ?? colors.faint;
+        const paths = rounds[index % ROUNDS];
+        let path = paths.get(color);
+        if (!path) {
+          path = new Path2D();
+          paths.set(color, path);
+        }
+        path.moveTo(x + radius, y);
+        path.arc(x, y, radius, 0, Math.PI * 2);
+        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
+      }
       context.globalAlpha = pass ? 0.92 : 0.16;
-      model.points.forEach((point, index) => {
-        if (visible(index) !== pass) return;
-        const [x, y] = toScreen(view, mapSize, point.x, point.y);
-        if (x < -8 || y < -8 || x > size.width + 8 || y > size.height + 8) return;
-        context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
-        context.beginPath();
-        context.arc(x, y, radius, 0, Math.PI * 2);
-        context.fill();
-        if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
-      });
+      for (const paths of rounds) {
+        for (const [color, path] of paths) {
+          context.fillStyle = color;
+          context.fill(path);
+        }
+      }
     }
-    if (labelled.length <= 40) {
+    if (onScreen <= 40) {
       context.globalAlpha = 0.85;
       context.fillStyle = colors.text;
       context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
@@ -2547,7 +2939,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         const text = mapLabel(name);
         if (!text) continue;
         const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
-        if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+        if (placed.some(([left2, top2, width, height]) => box[0] < left2 + width && left2 < box[0] + box[2] && box[1] < top2 + height && top2 < box[1] + box[3])) continue;
         placed.push(box);
         context.fillText(text, box[0], y);
       }
@@ -2566,7 +2958,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
     if (playing) ring(playing, colors.accent, 6, 2);
     if (selected) ring(selected, colors.strong, 4, 2);
-  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted]);
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -2600,7 +2992,6 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-  const shown = model.points.reduce((count2, _, index) => count2 + (visible(index) ? 1 : 0), 0);
   return /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
     /* @__PURE__ */ jsxs9("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx9(
@@ -2684,7 +3075,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             const held = drag.current;
             if (held) {
               if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
-              if (held.moved) setView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
+              if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
               return;
             }
             if (!view) return;
@@ -2723,7 +3114,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
       )
     ] }),
-    selected && chosen && /* @__PURE__ */ jsxs9("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+    selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+    /* @__PURE__ */ jsxs9("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
         /* @__PURE__ */ jsx9("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
         /* @__PURE__ */ jsxs9("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
@@ -2733,7 +3125,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           chosen.folder && /* @__PURE__ */ jsx9("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx9("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+      /* @__PURE__ */ jsx9("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions?.(selected, chosen) })
     ] })
   ] });
 }
@@ -2768,8 +3160,10 @@ function MapWorkspace({ ctx, store, audition }) {
     {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision);
+        const near = nearRequest(id, sound.name, map?.revision);
         return /* @__PURE__ */ jsxs10(Fragment2, { children: [
           /* @__PURE__ */ jsx10(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
+          near && /* @__PURE__ */ jsx10(TextButton, { onClick: () => void ask(ctx, near, { send: false, session: ownerSession(state) }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
           request && /* @__PURE__ */ jsx10(
             TextButton,
             {
@@ -2803,7 +3197,7 @@ function MeasurementsWorkspace({ store, audition }) {
   const note = (text) => /* @__PURE__ */ jsx11("span", { style: S.muted, children: text });
   return /* @__PURE__ */ jsx11("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs11(Fragment3, { children: [
     /* @__PURE__ */ jsx11("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
-    /* @__PURE__ */ jsx11(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result })
+    /* @__PURE__ */ jsx11(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
 }
 
@@ -2859,13 +3253,15 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const [openOnFind, setOpenOnFind] = useState5(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
   const [petLines, setPetLines] = useState5(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
-  const step2 = nextStep(state, t);
-  const daw = state.status?.daw ?? setup?.daw;
+  const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
   const partWorks = dawPartWorks(state);
   const setupState = partWorks ? "ready" : setup?.state ?? "unknown";
   const componentState = component?.state ?? "unknown";
+  const named = dawChosen(state) || partWorks || componentState === "installed" || Boolean(state.status?.connected);
+  const daw = named ? state.status?.daw ?? setup?.daw : null;
+  const next = setup?.message && !partWorks && (named || setupState !== "needs_daw_component") ? setup.message : null;
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
       /* @__PURE__ */ jsx12("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
@@ -2875,7 +3271,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsxs12("div", { children: [
         /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        setup?.message && !partWorks && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        next && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(next, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
           setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
@@ -2919,14 +3315,15 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
       ] }),
       /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step2 && /* @__PURE__ */ jsx12(
+        steps.map((step2) => /* @__PURE__ */ jsx12(
           TextButton,
           {
             onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
-            strong: true,
+            strong: steps.length === 1,
             children: step2.label
-          }
-        ),
+          },
+          step2.request
+        )),
         /* @__PURE__ */ jsx12(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
         /* @__PURE__ */ jsx12(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })
@@ -2983,6 +3380,7 @@ function WithT({ children }) {
     children
   ] });
 }
+var besideTheChat = (open) => open ? { pane: `plugin-workspace:${open}`, pos: "center" } : { pane: "workspace", pos: "right" };
 var plugin = {
   id: PLUGIN_ID,
   name: "Kumi",
@@ -2993,12 +3391,15 @@ var plugin = {
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;
+    let closeMeasurements = null;
+    let measurementsPane = null;
     const mapView = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
           title: wordsOf(ctx)("map.tab"),
           minWidth: "26rem",
+          dock: besideTheChat(closeMeasurements ? MEASUREMENTS_WORKSPACE : null),
           render: mapView,
           onClose: () => {
             closeMap = null;
@@ -3014,8 +3415,6 @@ var plugin = {
         render: mapView
       });
     };
-    let closeMeasurements = null;
-    let measurementsPane = null;
     const openMeasurements = () => {
       const render = () => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(MeasurementsWorkspace, { audition, store }) });
       const title = wordsOf(ctx)("measurements.tab");
@@ -3023,6 +3422,7 @@ var plugin = {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
           title,
           minWidth: "24rem",
+          dock: besideTheChat(closeMap ? MAP_WORKSPACE : null),
           render,
           onClose: () => {
             closeMeasurements = null;
@@ -3049,7 +3449,7 @@ var plugin = {
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id, payload.state === "running")));
     ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, (event) => {
       const payload = payloadOf(event);
       if (forThisProfile(payload)) store.noteGeneration(payload.card);
@@ -3082,7 +3482,9 @@ var plugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, (event) => {
       const payload = payloadOf(event);
       const id = callId(payload.tool_call_id);
-      if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return;
+      if (!id || !forChatInFront(payload)) return;
+      store.noteListen(payload.result);
+      if (calls.has(id) || waiting.has(id)) return;
       const result = payload.result ?? null;
       if (result !== null && !parseListen(result)) return;
       waiting.set(
@@ -3101,8 +3503,9 @@ var plugin = {
       const name = typeof payload.name === "string" ? payload.name : "";
       if (!name.startsWith("kumi_")) return;
       refresh();
-      store.trackJob(jobOf(payload.result));
+      store.trackJob(jobOf(payload.result), name !== "kumi_job");
       const id = callId(payload.tool_id);
+      if (name === "kumi_listen") store.noteListen(payload.result);
       if (name === "kumi_listen" && id) {
         calls.add(id);
         waiting.get(id)?.();
@@ -3163,7 +3566,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(ListenCard, { audition, media: props }) })
+          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(ListenCard, { audition, media: props, store }) })
         }
       });
       contributions.push({
@@ -3198,13 +3601,14 @@ var plugin = {
           keywords: ["kumi", "undo", "history", "revert"],
           run: () => {
             const state = store.get();
-            const last = state.history?.items.find((item) => item.state !== "undone");
-            if (!last || !canUndo(state.status, last)) {
-              const unsure = Boolean(state.status?.unsure) || last?.state === "unsure" || last?.state === "partial";
+            const last = changesOf(state.history?.items ?? []).find((rows) => undoRowOf(rows) !== void 0);
+            const next = last && undoRowOf(last);
+            if (!last || !next || !canUndoChange(state.status, last)) {
+              const unsure = Boolean(state.status?.unsure) || next?.state === "unsure" || next?.state === "partial";
               host6.notify({ kind: "info", message: wordsOf(ctx)(unsure ? "notify.undoUnsure" : "notify.nothingToUndo") });
               return;
             }
-            void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) });
+            void ask(ctx, undoRequest(next), { send: true, session: ownerSession(state) });
           }
         }
       },

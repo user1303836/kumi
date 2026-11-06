@@ -196,7 +196,7 @@ impl Look {
                 paths.extend([script.clone(), bridge.clone()]);
             }
             PartState::Newer => effects.push(format!(
-                "Kumi's Remote Script in {script} is {installed}, newer than this Kumi's {}: it stays as it is. Update Kumi for Hermes to match it",
+                "Kumi's Remote Script in {script} is {installed}, newer than this Kumi's {}: it stays as it is. Update the Kumi plugin (hermes plugins update kumi) to match it, then set Kumi up again",
                 self.bundled
             )),
             PartState::OtherOwner => effects.push(match &self.owner {

@@ -59,7 +59,9 @@ class Focus(unittest.TestCase):
         body = fenced(self.note())
         self.assertTrue(body.startswith(context.HEADER), body)
         self.assertIn('Project: "Night Drive" (epoch 1)', body, "W1's epoch is a number")
-        self.assertIn('On: track "Drums", device "Drum Rack" (view "Arrangement")', body)
+        self.assertIn('On: track "Drums" (ref "t1"), device "Drum Rack" (ref "t1/d1") (view "Arrangement")', body)
+        self.assertIn('"This" here means the device "Drum Rack" (ref "t1/d1") on track "Drums".', body,
+                      "item 3: the most particular selection with a ref")
         self.assertIn("Transport: stopped, 124 BPM", body)
         self.assertIsNone(self.note(), "nothing changed, so nothing is added again (Hermes keeps the last one)")
         self.assertIsNone(self.note("s2"), "another chat on the profile")
@@ -69,6 +71,28 @@ class Focus(unittest.TestCase):
         self.ctx.settings["inject_focus"] = False
         support.call(self.host, "kumi_observe", {"scope": "focus"}, session_id="s1")
         self.assertIsNone(self.note(), "the producer switched it off")
+
+    def test_the_note_names_kumis_latest_changes_by_id_and_comes_again_when_one_is_made(self):
+        self.connect()
+        self.assertNotIn("Kumi's latest changes", fenced(self.note()), "no change yet")
+        made = [support.call(self.host, "kumi_change", {
+            "title": title, "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": db}}],
+            "expected_project_key": "live:night-drive", "expected_epoch": "1"}, session_id="s1")
+            for title, db in (("Louder drums", -4.0),)]
+        body = fenced(self.note())
+        latest = body.split("Kumi's latest changes, newest first:\n", 1)[1].splitlines()
+        self.assertEqual(latest[0], f'- "Louder drums" on "Drums": "applied", can be undone (id "{made[0]["history_ids"][0]}")')
+
+    def test_a_change_another_chat_made_is_marked_so_undo_that_means_this_chats(self):
+        context.LINEAGE.compacted("s1-c", "s1")
+        rows = [{"id": "h-3", "title": "Brighter", "state": "applied", "undo_available": True, "session_id": "s2"},
+                {"id": "h-2", "title": "Wider", "state": "applied", "undo_available": True, "session_id": "s1"},
+                {"id": "h-1", "title": "Older", "state": "applied", "undo_available": True}]
+        focus = {"project": {"name": "Night Drive", "epoch": 1}}
+        body = fenced(context.focus_text(focus, {}, changes=rows, session="s1-c"))
+        self.assertIn('- "Brighter" (another chat\'s): "applied", can be undone (id "h-3")', body)
+        self.assertIn('- "Wider": "applied", can be undone (id "h-2")', body, "the same chat before its compaction")
+        self.assertIn('- "Older": "applied", can be undone (id "h-1")', body, "a row without a chat isn't guessed")
 
     def test_a_compacted_chat_keeps_focus_and_a_subagent_never_gets_it(self):
         self.connect("s1")
@@ -84,8 +108,14 @@ class Focus(unittest.TestCase):
 
     def test_a_quiet_stopped_or_disconnected_runtime_says_so(self):
         self.connect()
-        later = int(time.time() * 1000) + 30_000
-        with mock.patch.object(snapshots, "_now_ms", lambda: later):
+        owner = self.data / "state" / "owner.json"
+
+        def thirty_seconds_after_the_heartbeat() -> int:
+            # (read on every call: a clock taken after connect() adds a slow runner's delay, and 30.5 s says 31; #1160)
+            published = json.loads(owner.read_text(encoding="utf-8"))
+            return snapshots._ms(published.get("heartbeat", published.get("at"))) + 30_000
+
+        with mock.patch.object(snapshots, "_now_ms", thirty_seconds_after_the_heartbeat):
             self.assertIn("Stale: Kumi hasn't heard from its runtime for 30 s", fenced(self.note()))
         status = self.data / "state" / "status.json"
         status.write_text(json.dumps({**json.loads(status.read_text(encoding="utf-8")), "connected": False, "seq": 99}),
@@ -170,10 +200,10 @@ class Cli(unittest.TestCase):
         ctx.settings["library_folders"] = [support.DRUMS]
         shown = self.run_cli(host).splitlines()
         self.assertEqual(shown, self.run_cli(host, "status").splitlines(), "`hermes kumi` alone is status")
-        self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
+        self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({setup.platform_name(setup.host_target())}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
-        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}",
-                                     "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: there's no "
+        self.assertEqual(shown[3:], ["Connected to Live: Night Drive.", f"Sample folders: {support.DRUMS}",
+                                     "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: setup found no "
                                      "ffmpeg on this computer.",
                                      "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that)."])
         host.runtimes.stop_all()
@@ -218,7 +248,7 @@ class Cli(unittest.TestCase):
 
 class Approvals(unittest.TestCase):
     """Hermes's approvals off (`approvals.mode: off`, `--yolo`, a chat's `/yolo`): kumi_status, /kumi and `hermes kumi
-    status` say plainly that Kumi's changes run without asking."""
+    status` say plainly that what Kumi asks about runs without asking."""
 
     def setUp(self):
         environ = mock.patch.dict("os.environ", {key: value for key, value in os.environ.items()
@@ -279,8 +309,9 @@ class Approvals(unittest.TestCase):
 
     def test_hermes_kumi_status_says_whether_hermes_asks(self):
         host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
-        self.assertIn("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking.",
-                      commands.status_text(host))
+        unasked = support.module("tools").UNASKED
+        self.assertIn(f"Approvals: off in Hermes (approvals.mode: off or --yolo), so {unasked} run without asking "
+                      "first.", commands.status_text(host))
         with self.chat_yolo(True):  # a terminal can't see any chat's /yolo
             host, _, _ = support.host(self)
             self.assertIn("Approvals: Hermes asks before each Kumi change", commands.status_text(host))

@@ -30,6 +30,9 @@ pub const MAX_PAGE_BYTES: usize = 256 * 1024;
 /// Connections a bridge holds at once, before and after they authenticate.
 pub const MAX_UNAUTHENTICATED: usize = 4;
 pub const MAX_AUTHENTICATED: usize = 4;
+/// Kumi's host (`daw-mcp-server`) sends `keepIdentity` in its hellos when this is `1` in its environment: standalone Kumi
+/// sets it, the plugin's runtime doesn't. An environment variable, not an argument, so a host from before ignores it.
+pub const KEEP_IDENTITY_VARIABLE: &str = "KUMI_KEEP_IDENTITY";
 
 /// One line on the wire. Unknown types parse as [`Frame::Unknown`], which after the handshake is ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,6 +43,12 @@ pub enum Frame {
         nonce: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client: Option<String>,
+        /// The host asks the bridge to keep the project's id in the project (REAPER's `kumi`/`project` ProjExtState,
+        /// Renoise's song `tool_data`) while this connection lasts. Left out, it doesn't ask. A bridge that has the
+        /// capability says `keep_identity: true` in its `status`; one from before ignores the field and keeps the id
+        /// whoever is connected.
+        #[serde(default, rename = "keepIdentity", skip_serializing_if = "std::ops::Not::not")]
+        keep_identity: bool,
     },
     Challenge {
         nonce: String,

@@ -217,16 +217,31 @@ export function mapLabel(name: unknown): string {
   return clean(name, 28)
 }
 
+// Each map's search text per point (its name, class, kind and folder, lowercased), built on the map's first search
+// and kept with it: opening a 25,000-sound map doesn't pay for it, and every later keystroke is one pass of `includes`.
+const haystacks = new WeakMap<MapModel, string[]>()
+
+function haystackOf(model: MapModel): string[] {
+  let text = haystacks.get(model)
+  if (!text) {
+    text = model.points.map(point => {
+      const sound = model.sounds[point.id]
+      return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(value => typeof value === 'string').join(' ').toLowerCase()
+    })
+    haystacks.set(model, text)
+  }
+  return text
+}
+
 /** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */
 export function searchSounds(model: MapModel, query: string): Set<string> | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return null
+  const text = haystackOf(model)
   const found = new Set<string>()
-  for (const point of model.points) {
-    const sound = model.sounds[point.id]
-    const text = [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(Boolean).join(' ').toLowerCase()
-    if (words.every(word => text.includes(word))) found.add(point.id)
-  }
+  model.points.forEach((point, index) => {
+    if (words.every(word => text[index].includes(word))) found.add(point.id)
+  })
   return found
 }
 

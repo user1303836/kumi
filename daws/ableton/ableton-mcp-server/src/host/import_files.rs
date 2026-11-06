@@ -238,9 +238,9 @@ impl ImportFiles {
             }
         }
     }
-    /// Its staging folders' preview marks go before the change goes to Live: from then on a Set may play the files,
-    /// and only a release (never applied, or undone) takes them away. An error when a mark is still there, so the
-    /// change isn't sent.
+    /// Its staging folders' preview marks go before the change goes to Live: from then on a Set may play the files, and
+    /// Live's own Undo may bring back what plays them, so no release takes them away (#1151). An error when a mark is
+    /// still there, so the change isn't sent.
     pub(super) fn keep(&self, transaction: &Value) -> Result<(), LiveError> {
         let Some(root) = self.root.borrow().clone() else { return Ok(()) };
         for path in staged(transaction).into_iter().filter_map(Value::as_str) {
@@ -313,6 +313,9 @@ impl ImportFiles {
             let _ = fs::remove_file(path);
         }
     }
+    /// A staged file, with its folder, while it's still a preview's (its folder's mark is there): the change never went
+    /// to Live. One whose change went to Live stays, undone or not, released or evicted: Live's own Undo after Kumi's, or
+    /// a Set saved before Kumi's undo, can bring back the clip, Simpler or pad that plays it, and it would be offline.
     fn release(&self, path: &Value) {
         let Some(path) = path.as_str() else { return };
         let root = self.root.borrow();
@@ -321,20 +324,22 @@ impl ImportFiles {
             return;
         }
         let path = Path::new(path);
+        let Some(folder) = path.parent().filter(|p| *p != Path::new(root) && p.starts_with(root)) else { return };
+        let Some(name) = folder.file_name() else { return };
+        if !previews(root).join(name).exists() {
+            return;
+        }
         if chmod(path, 0o600).is_err() || fs::remove_file(path).is_err() {
             return;
         }
-        if let Some(folder) = path.parent().filter(|p| *p != Path::new(root) && p.starts_with(root)) {
-            let _ = fs::remove_file(format!("{}.asd", path.display()));
-            let _ = fs::remove_dir(folder);
-            if let Some(name) = folder.file_name() {
-                let _ = fs::remove_file(previews(root).join(name));
-            }
-        }
+        let _ = fs::remove_file(format!("{}.asd", path.display()));
+        let _ = fs::remove_dir(folder);
+        let _ = fs::remove_file(previews(root).join(name));
     }
-    /// `release_for`, when nothing in Live can be using the files: the change was never applied, or it was undone.
-    /// An applied or uncertain one's sample is what its clip, Simpler or pad plays, now or once the Set is opened
-    /// again, so it stays; a Drum Sampler preset is needed only while Live loads it, and goes either way.
+    /// `release_for`, when nothing in Live can be using the files now: the change was never applied, or it was undone.
+    /// A sample only a preview staged goes (`release`); one that went to Live stays whatever its state, since Live's own
+    /// Undo or a saved Set may play it again. A Drum Sampler preset is needed only while Live loads it, and goes either
+    /// way.
     pub(super) fn release_unused(&self, transaction: &Value) {
         if matches!(transaction["state"].as_str(), Some("previewed" | "undone")) {
             self.release_for(transaction)
@@ -342,6 +347,7 @@ impl ImportFiles {
             self.release_presets(transaction)
         }
     }
+    /// The staged files a change names, each as `release` takes it (a preview's only), and its Drum Sampler presets.
     pub(super) fn release_for(&self, transaction: &Value) {
         for path in staged(transaction) {
             self.release(path)
@@ -583,13 +589,19 @@ mod tests {
         Rig { _folder: folder, host, root, presets }
     }
     impl Rig {
-        /// A staged sample, where staging leaves one (a folder of its own under the root).
+        /// A staged sample whose change went to Live: a folder of its own under the root, with no preview mark.
         fn staged(&self, name: &str) -> String {
             let folder = Path::new(&self.root).join(format!("copy-{name}"));
             fs::create_dir(&folder).unwrap();
             let path = folder.join(format!("{name}.wav"));
             fs::write(&path, b"RIFF").unwrap();
             path_text(&path)
+        }
+        /// A staged sample only a preview made: its folder still marked.
+        fn previewed(&self, name: &str) -> String {
+            let path = self.staged(name);
+            self.host.import_files.mark_preview(Path::new(&path).parent().unwrap());
+            path
         }
         fn preset(&self, name: &str) -> String {
             let path = self.presets.join(format!("{name}.adv"));
@@ -618,13 +630,20 @@ mod tests {
         rig.keep("drumpad_uncertain", json!({"kind":"drum-pad","state":"uncertain","payload":{"samplePath":sample,"presetPath":preset}}));
         rig.host.clip_lifecycle_transactions.delete("drumpad_uncertain");
         assert!(exists(&sample) && !exists(&preset));
-        // Never applied, or undone: nothing plays it, so it goes, with its folder.
-        for (state, name) in [("previewed", "previewed"), ("undone", "undone")] {
-            let path = rig.staged(name);
-            rig.keep(name, json!({"kind":"simpler","state":state,"payload":{"filePath":path}}));
-            rig.host.clip_lifecycle_transactions.delete(name);
-            assert!(!exists(&path) && !Path::new(&path).parent().unwrap().exists(), "{state}");
-        }
+        // Never applied: nothing in Live has seen it, so it goes, with its folder and its mark.
+        let path = rig.previewed("previewed");
+        rig.keep("previewed", json!({"kind":"simpler","state":"previewed","payload":{"filePath":path}}));
+        rig.host.clip_lifecycle_transactions.delete("previewed");
+        assert!(!exists(&path) && !Path::new(&path).parent().unwrap().exists());
+        assert!(!previews(&rig.root).join("copy-previewed").exists());
+        // Undone after it went to Live: Live's own Undo, or a Set saved before Kumi's undo, can bring back what plays it,
+        // so it stays, whether the transaction is evicted or its undo releases it straight away (#1151).
+        let undone = rig.staged("undone");
+        rig.keep("undone", json!({"kind":"simpler","state":"undone","payload":{"filePath":undone}}));
+        rig.host.clip_lifecycle_transactions.delete("undone");
+        rig.host.release_staged_import_for(&json!({"kind":"simpler","payload":{"filePath":undone}}));
+        rig.host.release_staged_import_file(&json!(undone));
+        assert!(exists(&undone), "a file Live was sent stays");
     }
     #[cfg(unix)]
     #[test]
@@ -684,9 +703,9 @@ mod tests {
         let transaction = json!({"kind":"simpler","state":"previewed","payload":{"filePath":staged}});
         rig.host.keep_staged(&transaction).unwrap();
         assert!(!previews(&rig.root).join(&name).exists() && exists(&staged));
-        // An undo still releases it at once, as it did before.
+        // An undo or a release after that leaves it: Live's own Undo may bring back what plays it (#1151).
         rig.host.release_staged_import_for(&transaction);
-        assert!(!exists(&staged));
+        assert!(exists(&staged));
         // A mark that can't be taken away keeps the change from going to Live.
         #[cfg(unix)]
         if unsafe { libc::getuid() } != 0 {

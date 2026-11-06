@@ -28,7 +28,7 @@ fn body(result: &Value) -> Value {
     result_body(result).unwrap()
 }
 #[tokio::test]
-async fn initial_sample_uses_verified_copy_and_undo_cleans_only_owned_media() {
+async fn initial_sample_uses_verified_copy_and_undo_keeps_the_copy_live_was_sent() {
     for change in ["none", "source-edit", "staged-edit", "track-replaced"] {
         let temp = tempfile::tempdir().unwrap();
         let root = fixture_paths::native_path(&temp.path().canonicalize().unwrap());
@@ -98,7 +98,8 @@ async fn initial_sample_uses_verified_copy_and_undo_cleans_only_owned_media() {
                 .await
                 .unwrap(),
         );
-        assert!(!staged.exists());
+        // The device goes, and the copy it played stays: Live's own Undo after Kumi's can bring the Simpler back (#1151).
+        assert_eq!(fs::read(&staged).unwrap(), wave);
         assert_eq!(sim.state.borrow()["tracks"][0]["devices"].as_array().unwrap().len(), 1);
         assert_eq!(fs::read(&original).unwrap(), if change == "source-edit" { b"later source edit".to_vec() } else { wave });
     }

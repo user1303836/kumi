@@ -23,18 +23,26 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 import threading
 import time
+from typing import Any
 
 VERSION = "1.24.66"
 PROTOCOL = "kumi-serve/1"
 MCP = "2025-11-25"
-# The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`).
-STEPS = {"set_track_volume", "replace_sample"}
+DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
+# serve/change.rs's words for a change an earlier runtime made (agent-s, kumi-adv's D2).
+RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo it in {daw} if it's still the latest "
+             "step there, or ask Hermes to set it back.")
+RESOURCES = ("kumi://status", "kumi://focus", "kumi://history", "kumi://map")  # C2's, as #1047's kumi serve offers
+# The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
+# the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
+STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
 SET = {
     "name": "Night Drive", "key": "live:night-drive", "tempo": 124.0,
     "tracks": [
@@ -54,21 +62,33 @@ class Fixture:
         self.state.mkdir(parents=True, exist_ok=True)
         self.artifacts: dict[str, dict] = {}  # artifacts.json's table, as W3's runtime keeps a measured file
         self.scans: dict[str, str] = {}  # job id -> running, cancelling, cancelled or done (CC-14)
+        self.quoted: dict[str, dict] = {}  # Mirelo quotes this runtime made (CC-13)
+        self.generations: dict[str, dict] = {}  # generation jobs it created
+        self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
+        self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
+        self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
         self.seq = 0
         self.connected = False
         self.daw = options.daw
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
-        self.history: list[dict] = []
+        # As kumi serve's History::new: an earlier runtime's rows stay for the record, none of them undoable from here.
+        self.generation = options.generation
+        kept = (json.loads((self.state / "history.json").read_text(encoding="utf-8"))
+                if (self.state / "history.json").exists() else {})
+        self.history: list[dict] = [{**row, "undo_available": False} for row in reversed(kept.get("items") or [])]
         self.owner: dict | None = None
         self.running = True
         self.since = now()
         self.seen_at: int | None = None  # the last look (connect or observe), as focus.json's project.seen_at
+        self.subscribed: set[str] = set()  # the resources the host subscribed to (C2)
+        self.map_revision: str | None = None
         self.slow = dict(item.split("=", 1) for item in options.slow)
         self.writing = threading.Lock()
         self.counting = threading.Lock()
         self.beating = threading.RLock()  # owner.json's writes: a heartbeat never lands after stopped()'s
-        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ)})
+        self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ),
+                                           "pid": os.getpid()})  # its own: on Windows the client's is kumi.bat's cmd.exe
         if options.stderr_flood:
             sys.stderr.write("noise " * (options.stderr_flood // 6) + "\n")
             sys.stderr.flush()
@@ -80,10 +100,12 @@ class Fixture:
             sys.stdout.flush()
 
     def serve(self) -> None:
+        if self.options.publish_at_start:  # as #1047's kumi serve: a new runtime's HISTORY and FOCUS, before any call
+            self.publish("history", "focus")
         for line in sys.stdin:
             message = json.loads(line)
             with open(self.state / "fixture-requests.jsonl", "a", encoding="utf-8") as log:
-                log.write(json.dumps(message) + "\n")
+                log.write(json.dumps(logged(message)) + "\n")
             method, ident = message.get("method"), message.get("id")
             if ident is None:
                 continue  # notifications: initialized, cancelled
@@ -107,18 +129,24 @@ class Fixture:
             self.running = False
             if self.owner is None:
                 return
-            self.record("status.json", {"schema": 1, "seq": self.next_seq(), "at": now(), "owner": self.owner,
-                                        **self.status(), "stale": True, "connected": False})
+            self.record("status.json", {**self.status(), "stale": True, "connected": False, "schema": 1,
+                                        "seq": self.next_seq(), "at": now(), "owner": self.owner})
             beat(self)
 
     def answer(self, method: str, params: dict) -> dict:
         if method == "initialize":
+            offered = {} if self.options.no_resources else {"resources": {"subscribe": True, "listChanged": False}}
             return {"protocolVersion": MCP, "serverInfo": {"name": "kumi-serve", "version": self.options.server_version},
-                    "capabilities": {"tools": {}}}
+                    "capabilities": {"tools": {}, **offered}}
         if method == "tools/list":
             return {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in TOOLS]}
         if method == "tools/call":
             return self.call(params["name"], dict(params.get("arguments") or {}))
+        if method in ("resources/subscribe", "resources/unsubscribe") and not self.options.no_resources:
+            if params.get("uri") not in RESOURCES or params.get("uri") in self.options.refuse_subscribe:
+                raise LookupError(f"no resource {params.get('uri')!r}")
+            (self.subscribed.add if method == "resources/subscribe" else self.subscribed.discard)(params["uri"])
+            return {}
         raise LookupError(f"no method {method}")
 
     def call(self, name: str, args: dict) -> dict:
@@ -144,7 +172,7 @@ class Fixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f"{path.suffix}.{threading.get_ident()}.tmp")  # one a thread: the heartbeat's own
         temporary.write_text(json.dumps(value, indent=1), encoding="utf-8")
-        os.replace(temporary, path)
+        replaced(temporary, path)
 
     def next_seq(self) -> int:
         with self.counting:
@@ -155,15 +183,36 @@ class Fixture:
         for name in names:
             seq = self.next_seq()
             body = {"status": self.status, "focus": self.focus, "history": self.history_snapshot}[name]()
-            self.record(f"{name}.json", {"schema": 1, "seq": seq, "at": now(), "owner": self.owner, **body})
+            self.record(f"{name}.json", {**body, "schema": 1, "seq": seq, "at": now(), "owner": self.owner})
+            self.landed(f"kumi://{name}")
+
+    def publish_map(self, revision: str) -> None:
+        """A scan's map (C3), as kumi serve ends one: the revision's file, then its pointer flips to it."""
+        self.record(f"map/{revision}.json", {
+            "schema": 1, "seq": self.next_seq(), "at": now(), "revision": revision, "made": now(), "points": [],
+            "groups": {}, "sounds": {sound["sound_id"]: {key: sound[key] for key in ("name", "kind", "class", "folder",
+                                                                                      "duration")} for sound in SOUNDS}})
+        pointer = self.state / "map" / "current"
+        pointer.with_name("current.tmp").write_text(f"{revision}\n", encoding="utf-8")
+        replaced(pointer.with_name("current.tmp"), pointer)
+        self.map_revision = revision
+        self.landed("kumi://map")
+
+    def landed(self, uri: str) -> None:
+        """A resource's snapshot is on disk anew: a subscriber hears of it (notifications/resources/updated)."""
+        if uri in self.subscribed and uri not in self.options.quiet:
+            self.send({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": uri}})
 
     def project(self) -> dict | None:
         return {"name": self.set["name"], "key": self.set["key"], "epoch": self.epoch} if self.connected else None
 
     def status(self) -> dict:
+        """The status tool's answer, as kumi serve's (serve/core.rs): `owner` is the DAW's write lease while a call
+        holds it (pid and profile, never a chat), so None between this fixture's calls. A snapshot's envelope names
+        the chat (`owner`, set after the body, as serve/snapshots.rs does)."""
         return {"runtime": {"version": self.options.server_version, "protocol": self.options.protocol},
                 "connected": self.connected, "stale": False, "daw": self.daw, "project": self.project(),
-                "owner": self.owner, "capabilities": ["observe", "read", "change", "undo", "history"]}
+                "owner": None, "capabilities": ["observe", "read", "change", "undo", "history"]}
 
     def focus(self) -> dict:
         """focus.json as kumi serve writes it (CC-7): `project` with its epoch as a number (W1's u64) and `seen_at`,
@@ -173,20 +222,43 @@ class Fixture:
         project = self.project()
         return {"project": {**project, "epoch": int(project["epoch"]), "seen_at": self.seen_at} if project else None,
                 "focus": {"track": {"name": drums["name"]}, "trackRef": drums["ref"], "device": "Drum Rack",
-                          "view": "Arrangement"},
+                          "deviceRef": drums["devices"][0]["ref"], "view": "Arrangement"},
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
-        """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it."""
-        return {"items": [{key: value for key, value in row.items() if key != "before"}
-                          for row in reversed(self.history)][:200]}
+        """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it, and this
+        runtime's generation (#1047), which an earlier runtime's rows don't have."""
+        return {"generation": self.generation, "items": [{key: value for key, value in row.items() if key != "before"}
+                                                         for row in reversed(self.history)][:200]}
 
     def track(self, ref: str) -> dict | None:
         return next((track for track in self.set["tracks"] if track["ref"] == ref), None)
 
+    def simpler(self, ref: str) -> tuple[dict, dict] | None:
+        """The track and the drum pad whose Simpler has device ref `ref` (the demo's replace_sample target)."""
+        return next(((track, pad) for track in self.set["tracks"] for device in track["devices"]
+                     for pad in device.get("pads", []) if pad["ref"] == ref), None)
+
 
 def now() -> int:
     return int(time.time() * 1000)
+
+
+# As kumi serve replaces a snapshot (serve/snapshots.rs `replace`, TRIES): Windows refuses to rename over a file a
+# reader has open, such as the plugin's snapshot watcher reading it just then, so the writer tries again, 20 ms apart.
+# Without this, a change's publish raised PermissionError on Windows and ended this runtime's loop mid-test (#1141).
+REPLACE_TRIES = 25
+
+
+def replaced(temporary: Path, path: Path) -> None:
+    for attempt in range(REPLACE_TRIES):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(0.02)
 
 
 def error(code: str, reason: str) -> dict:
@@ -257,38 +329,81 @@ def read(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"rows": copy.deepcopy(fixture.set["tracks"]), "cursor": None, "epoch": fixture.epoch}
 
 
-def plan_refusal(fixture: Fixture, args: dict) -> str | None:
-    """Why a change plan can't run (CC-3's refusals), or None."""
+def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
+    """Why a change plan can't run, as (code, reason) (#965: not_connected, stale, unknown_step, invalid, not_allowed),
+    or None."""
     if not fixture.connected:
-        return "Kumi isn't connected to the DAW: connect first."
+        return "not_connected", "Kumi isn't connected to the DAW: connect first."
     if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
-        return "stale: the project or its epoch changed since it was read; read it again"
+        return "stale", "The project or its epoch changed since it was read: read it again."
     steps = args.get("steps") or []
     unknown = [step.get("tool") for step in steps if step.get("tool") not in STEPS]
     if not steps or len(steps) > 20 or unknown:
-        return f"Kumi doesn't take these steps here: {unknown or 'none given'}"
+        return "unknown_step", f"Kumi doesn't take these steps here: {unknown or 'none given'}"
     for step in steps:
         target = step.get("input") or {}
-        if fixture.track(target.get("track_ref", "")) is None:
-            return f"no track {target.get('track_ref')!r} in the project"
-        if step["tool"] == "set_track_volume" and not isinstance(target.get("volume_db"), (int, float)):
-            return "set_track_volume needs volume_db, a number"
-        if step["tool"] == "replace_sample" and not isinstance(target.get("sample"), str):
-            return "replace_sample needs sample, a file name"
+        if step["tool"] == "set_track_volume":
+            if fixture.track(target.get("track_ref", "")) is None:
+                return "invalid", f"no track {target.get('track_ref')!r} in the project"
+            if not isinstance(target.get("volume_db"), (int, float)):
+                return "invalid", "set_track_volume needs volume_db, a number"
+        elif step["tool"] == "replace_sample":
+            if fixture.simpler(target.get("deviceRef", "")) is None:
+                return "invalid", f"no Simpler {target.get('deviceRef')!r} in the project"
+            refusal = source_refusal(fixture, target.get("sample"))
+            if refusal is not None:
+                return refusal
     return None
 
 
+def source_refusal(fixture: Fixture, source: Any) -> tuple[str, str] | None:
+    """CC-11: a file step's file field holds a source, never a path."""
+    if isinstance(source, str):
+        return "not_allowed", "A file step takes a sound, an artifact or an approved file as its source, never a path."
+    if not isinstance(source, dict):
+        return "invalid", "replace_sample needs sample, a source"
+    if "sound_id" in source:
+        if source.get("map_revision") != "r1":
+            return "stale", "That sound is from another map revision: search again."
+        if source["sound_id"] not in {sound["sound_id"] for sound in SOUNDS}:
+            return "invalid", f"no sound {source['sound_id']!r} on the map"
+        return None
+    if "artifact_id" in source:
+        return None if source["artifact_id"] in ("a-1", "a-track-1") else ("invalid", "no such artifact")
+    if "file" in source:
+        roots = [*fixture.options.library_root, *fixture.options.media_root]
+        inside = isinstance(source["file"], str) and any(
+            os.path.commonpath([os.path.abspath(source["file"]), os.path.abspath(root)]) == os.path.abspath(root)
+            for root in roots)
+        return None if inside else ("not_allowed", "That file isn't in an approved folder.")
+    return "invalid", "replace_sample needs sample, a source"
+
+
+def source_name(source: dict) -> str:
+    """The file a source names, by its name only (CC-11: the preview never shows a path)."""
+    if "sound_id" in source:
+        return next(sound["name"] for sound in SOUNDS if sound["sound_id"] == source["sound_id"])
+    if "artifact_id" in source:
+        return f"{source['artifact_id']}.wav"
+    return os.path.basename(source["file"])
+
+
 def describe(fixture: Fixture, step: dict) -> dict:
-    """A step's preview (CC-3): one sentence naming the targets by their current names, values as read just now."""
+    """A step's preview (CC-3) as #1005's runtime writes it: the step, its values first, then ` — on ` and its targets
+    by their current names, each quoted and cut at 40 characters; and the step's HISTORY family."""
     target = step["input"]
-    track = fixture.track(target["track_ref"])
     if step["tool"] == "set_track_volume":
-        text = f"Set {track['name']} volume from {track['volume_db']:g} dB to {float(target['volume_db']):g} dB"
-        return {"tool": step["tool"], "family": "mixer", "effect": "write", "text": text}
-    pad = track["devices"][0]["pads"][0]
-    text = (f"Replace the sample in the {pad['device']} on {track['name']} > {track['devices'][0]['name']} pad "
-            f"{pad['pad']} ({pad['sample']}) with {target['sample']}")
-    return {"tool": step["tool"], "family": "sample", "effect": "write", "text": text}
+        name = fixture.track(target["track_ref"])["name"]
+        text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
+    else:
+        track, pad = fixture.simpler(target["deviceRef"])
+        name = f"{pad['device']} ({track['name']} > {track['devices'][0]['name']} pad {pad['pad']})"
+        text = f"Replace sample: sample {quoted(source_name(target['sample']))} — on {quoted(name)}"
+    return {"tool": step["tool"], "family": STEPS[step["tool"]], "effect": "write", "text": text}
+
+
+def quoted(name: str) -> str:
+    return json.dumps(name if len(name) <= 40 else name[:39] + "…", ensure_ascii=False)
 
 
 def change(fixture: Fixture, args: dict, host: dict) -> dict:
@@ -296,52 +411,55 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
         owner = {"profile": "default", "session_id": fixture.options.leased_by, "pid": 4242, "since": now()}
         return {"error": {"code": "leased", "reason": "Another chat holds the DAW for changes.", "owner": owner}}
     refusal = plan_refusal(fixture, args)
+    if refusal is not None:
+        return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
     if args.get("preview"):
-        if refusal is not None:
-            return {"state": "refused", "code": "refused", "reason": refusal}
         return {"state": "preview", "title": args.get("title"),
                 "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
                 "steps": [describe(fixture, step) for step in args["steps"]]}
-    if refusal is not None:
-        return {"state": "refused", "history_ids": [], "steps": [], "summary": "Nothing changed.",
-                "undo_available": False, "reason": refusal}
     steps = args["steps"]
     before = copy.deepcopy(fixture.set)
     for step in steps:
         target = step["input"]
-        track = fixture.track(target["track_ref"])
         if step["tool"] == "set_track_volume":
-            track["volume_db"] = float(target["volume_db"])
+            fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
         else:
-            track["devices"][0]["pads"][0]["sample"] = target["sample"]
-    ident = f"h-{fixture.set['key']}-g1-c{len(fixture.history) + 1}"
-    track = fixture.track(steps[0]["input"]["track_ref"])
-    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
-    # (tool_call_id, digest, call_outcome), which the plugin never passes on.
+            fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
+    first = steps[0]["input"]
+    track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
+    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note), CC-5's
+    # (tool_call_id, digest, call_outcome) and CC-3 A2's change_id, which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
-                            "runtime_generation": "g1", "title": args.get("title") or "Kumi change",
-                            "family": describe(fixture, steps[0])["family"], "at": now(), "state": "applied",
+                            "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
+                            "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                            "call_outcome": "applied", "before": before})
+                            "call_outcome": "applied", "change_id": f"x-{fixture.generation}-{len(fixture.history) + 1}",
+                            "before": before})
     fixture.publish("history", "focus")
-    applied = [{"tool": step["tool"], "state": "applied"} for step in steps]
-    return {"state": "applied", "history_ids": [ident], "steps": applied, "summary": args.get("title") or "Applied.",
-            "undo_available": True}
+    done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
+    return {"state": "applied", "history_ids": [ident],
+            "steps": {"done": done, "refused": [], "held_back": [], "stopped": None, "skipped": 0},
+            "summary": args.get("title") or "Applied.", "undo_available": True, "project_key": fixture.set["key"],
+            "epoch": fixture.epoch}
 
 
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
+    # Why it can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words.
+    why_not = (("restarted", "expired", RESTARTED) if row and row["runtime_generation"] != fixture.generation
+               else ("expired", "expired", "It can't be undone any more.") if row and not row["undo_available"]
+               else None)
     if args.get("preview"):
         if row is None:
             return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}",
-                   "undo_available": row["undo_available"]}
-        return preview if row["undo_available"] else {**preview, "reason": "expired"}
+        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
+        return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-    if not row["undo_available"]:
-        return {"state": "expired", "reason": "That change can't be undone any more."}
+    if why_not:
+        return {"state": why_not[1], "reason": why_not[2].format(daw=DAW_NAMES[fixture.daw])}
     fixture.set = row.pop("before")
     row.update(state="undone", undo_available=False)
     fixture.publish("history", "focus")
@@ -392,11 +510,46 @@ def listen(fixture: Fixture, args: dict, host: dict) -> dict:
     source = args.get("source") or {}
     if "track" in source:
         return listen_track(fixture, args, host)
+    if "file" in source and isinstance(args.get("compare_to"), dict) and "file" in args["compare_to"]:
+        return listen_bounce(fixture, source["file"], args["compare_to"]["file"])
     if source.get("sound_id") not in {sound["sound_id"] for sound in SOUNDS}:
         return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
     return {"metrics": analysis(lufs=-14.2, peak=-1.3, centroid=1840.0, seconds=0.42), "artifact_id": "a-1",
             "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
             "media_tag": kept(fixture, "a-1")}
+
+
+# A bounce of the mix after each mastering pass (flow A): integrated LUFS, tilt and stereo width, coming closer to the
+# reference's -8.6 LUFS, -3.1 dB/oct and 0.31.
+PASSES = ((-12.7, -3.9, 0.22), (-10.2, -3.4, 0.27), (-9.0, -3.2, 0.30))
+
+
+def listen_bounce(fixture: Fixture, bounce: str, reference: str) -> dict:
+    """A bounce measured against a reference file, as kumi serve's `retain` answers: the bounce's measurements, its
+    audio and the reference's kept as two new artifacts, and the differences (current minus reference)."""
+    fixture.bounces += 1
+    lufs, tilt, width = PASSES[min(fixture.bounces, len(PASSES)) - 1]
+    mine = analysis(lufs=lufs, peak=-1.0, centroid=2050.0 + 120 * fixture.bounces, seconds=30.0)
+    mine["file"] = Path(bounce).name
+    mine["balance"]["tiltDbPerOctave"] = tilt
+    mine["balance"]["bands"] = [{**band, "db": band["db"] - 1.2 / fixture.bounces} for band in mine["balance"]["bands"]]
+    mine["stereo"]["width"] = width
+    theirs = analysis(lufs=-8.6, peak=-0.2, centroid=2450.0, seconds=30.0)
+    theirs["file"] = Path(reference).name
+    theirs["balance"]["tiltDbPerOctave"] = -3.1
+    theirs["stereo"] = {"correlation": 0.5, "width": 0.31, "lowEndMono": True}
+    theirs["dynamics"]["peakToLoudnessDb"] = 8.4
+    difference = round(lufs + 8.6, 1)
+    bands = [{"band": ours["name"], "hz": ours["hz"], "difference": round(ours["db"] - other["db"], 1)}
+             for ours, other in zip(mine["balance"]["bands"], theirs["balance"]["bands"])]
+    headlines = [f"{abs(difference)} LU quieter overall ({lufs} vs -8.6 LUFS)"]
+    mine_id, reference_id = f"a-bounce-{fixture.bounces}", f"a-reference-{fixture.bounces}"
+    kept(fixture, reference_id)
+    return {"metrics": mine, "artifact_id": mine_id, "media_tag": kept(fixture, mine_id),
+            "verdict_text": "\n".join([f"{lufs} LUFS", *headlines]),
+            "compare": {"artifact_id": reference_id, "metrics": theirs,
+                        "differences": {"headlines": headlines, "loudness": {"differenceLu": difference},
+                                        "balance": bands}}}
 
 
 # A short silent WAV (44-byte header, 4 samples), standing in for a measured file.
@@ -483,14 +636,19 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
-    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done."""
+    """A generation's job, or a scan's: a scan settles when it's next read, a cancelled one as cancelled, any other as
+    done, its map then the current one."""
     job_id = args.get("job_id")
+    if job_id in fixture.generations:
+        return generation_job(fixture, job_id)
     state = fixture.scans.get(job_id)
     if state is None:
         return error("not_found", f"no job {job_id!r}")
     fixture.scans[job_id] = "cancelled" if state in ("cancelling", "cancelled") else "done"
     if fixture.scans[job_id] == "cancelled":
         return {"state": "cancelled"}
+    if fixture.map_revision != "r1":
+        fixture.publish_map("r1")
     return {"state": "done", "progress": 1.0, "result": {"sounds": len(SOUNDS), "map_revision": "r1"}}
 
 
@@ -521,9 +679,97 @@ def setup_daw(fixture: Fixture, args: dict, host: dict) -> dict:
             "parts": [{**part, "state": "same"} for part in reply["parts"]]}
 
 
+def logged(message: dict) -> dict:
+    """What the fixture keeps of a request: a `_mirelo` key is never written (kumi serve strips it from every record,
+    13-R3); that one came, and the request's other `_mirelo` fields, are."""
+    arguments = (message.get("params") or {}).get("arguments")
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("_mirelo"), dict):
+        return message
+    sealed = {key: value for key, value in arguments["_mirelo"].items() if key != "api_key"}
+    sealed["api_key"] = "<given>" if arguments["_mirelo"].get("api_key") else None
+    return {**message, "params": {**message["params"], "arguments": {**arguments, "_mirelo": sealed}}}
+
+
+def generate(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Mirelo generation as W3's native `generate` answers it (CC-13): a quote (for MIDI, first a preview naming the
+    file it would send, pinned to the host call it was for, and that call's quote is stale without it), a create that
+    needs the host's `_mirelo` with a reservation, and its job."""
+    action, sealed = args.get("action"), args.get("_mirelo") if isinstance(args.get("_mirelo"), dict) else {}
+    if action == "quote":
+        kind, source = args.get("kind"), args.get("source") if isinstance(args.get("source"), dict) else {}
+        name = next((sound["name"] for sound in SOUNDS if sound["sound_id"] == source.get("sound_id")), "a-1.wav")
+        call = (host.get("profile_id"), host.get("session_id"), host.get("tool_call_id"))
+        identity = hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest()
+        if kind == "audio_to_midi" and args.get("preview"):
+            if call[2] is not None:
+                fixture.previews[call] = identity
+            return {"state": "preview", "upload": {"file": name, "bytes": 480044, "identity_sha256": identity}}
+        if not sealed.get("api_key"):
+            return error("not_configured", "no Mirelo key came with this quote")
+        if kind == "audio_to_midi" and fixture.previews.pop(call, None) != identity:
+            return error("stale", "no upload preview was pinned for this call and file")
+        sfx = kind == "sfx"
+        seconds = float(args.get("seconds") or 5) if sfx else 0.42
+        request = {"kind": kind, "prompt": args.get("prompt"), "seconds": seconds, "source": source}
+        quote_id = f"q-{os.getpid()}-{len(fixture.quoted) + 1}"  # unique across restarts, as the runtime's are
+        credits = fixture.options.generate_estimate
+        fixture.quoted[quote_id] = quote = {
+            "state": "quoted", "quote_id": quote_id, "kind": kind, "prompt": args.get("prompt") if sfx else None,
+            "file": None if sfx else name, "seconds": seconds, "estimate": {"credits": credits, "max_credits": credits},
+            "credit_unit": "mirelo_credits", "upload": not sfx,
+            "expires_at": int(time.time() * 1000) + fixture.options.generate_expires_ms,
+            "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(),
+            "summary": f"One {seconds:g}-second sound effect" if sfx else f"MIDI notes from {name}"}
+        return quote
+    if action == "create":
+        quote = fixture.quoted.get(args.get("quote_id"))
+        if quote is None:
+            return error("unknown_quote", "no such quote")
+        if not sealed.get("api_key") or not sealed.get("reservation_id"):
+            return error("not_approved", "a create needs the host's reservation")
+        if fixture.options.generate_create == "not_submitted":
+            return error("not_submitted", "Mirelo refused it before anything was sent")
+        busy = fixture.options.generate_create == "ledger_busy" or (
+            fixture.options.generate_create == "ledger_busy_once" and not fixture.ledger_busy_said)
+        if busy:  # its ledger lock timed out before anything was posted; the same call may come again
+            fixture.ledger_busy_said = True
+            return error("ledger_unavailable", "Kumi's credit ledger is busy.")
+        job_id = f"g-{os.getpid()}-{len(fixture.generations) + 1}"
+        fixture.generations[job_id] = {"quote": quote, "reserved": sealed.get("reserved_credits")}
+        fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "job_id": job_id,
+                                               "kind": "generate", "state": "running"})  # as kumi serve lists its jobs
+        return {"state": "running", "job_id": job_id, "quote_id": quote["quote_id"], "kind": quote["kind"],
+                "prompt": quote["prompt"], "seconds": quote["seconds"], "estimate": quote["estimate"],
+                "credit_unit": "mirelo_credits"}
+    if action == "job":
+        return generation_job(fixture, args.get("job_id"))
+    return error("invalid_request", "action is quote, create or job")
+
+
+def generation_job(fixture: Fixture, job_id: object) -> dict:
+    """A generation job's envelope, as `generate`'s job action and the plain `job` tool both give it (C3's one job
+    store): its checkpointed result names its quote, whatever became of the create's answer."""
+    made = fixture.generations.get(job_id)
+    if made is None:
+        return error("not_found", f"no job {job_id!r}")
+    quote, artifact = made["quote"], f"a-{job_id}"
+    actual = fixture.options.generate_actual
+    tag = kept(fixture, artifact)
+    return {"job_id": job_id, "kind": "generate", "state": "done", "progress": {"done": 1, "total": 1},
+            "result": {"quote_id": quote["quote_id"], "kind": quote["kind"], "prompt": quote["prompt"],
+                       "seconds": quote["seconds"], "provider": "mirelo", "provider_job_id": "v-1",
+                       "submission": "submitted", "artifact_id": artifact, "file": f"{artifact}.wav",
+                       "output_type": "audio", "media_tag": tag,
+                       "outputs": [{"artifact_id": artifact, "file": f"{artifact}.wav", "type": "audio",
+                                    "mime": "audio/wav", "bytes": len(WAV)}],
+                       "credits": {"estimate": quote["estimate"]["credits"], "reserved": made["reserved"],
+                                   "actual": None if actual < 0 else actual},
+                       "credit_unit": "mirelo_credits"}}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw}
+         "setup_daw": setup_daw, "generate": generate}
 
 
 def main() -> None:
@@ -541,7 +787,15 @@ def main() -> None:
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
+    parser.add_argument("--generation", default="g1", help="this runtime's generation, as HISTORY's ids carry it")
+    parser.add_argument("--no-resources", action="store_true", help="offer no resources, as kumi serve before #1047")
+    parser.add_argument("--refuse-subscribe", action="append", default=[], help="refuse a subscription to this URI")
+    parser.add_argument("--quiet", action="append", default=[], help="never tell a subscriber this URI changed")
+    parser.add_argument("--publish-at-start", action="store_true", help="write HISTORY and FOCUS as it starts")
     parser.add_argument("--library-root", action="append", default=[])
+    parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
+    parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")
+    parser.add_argument("--media-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
     parser.add_argument("--listen-deadline", type=int, default=75,
@@ -550,6 +804,12 @@ def main() -> None:
     parser.add_argument("--component-state", default="missing",
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")
+    parser.add_argument("--generate-estimate", type=int, default=15, help="a quote's estimate, in credits")
+    parser.add_argument("--generate-create", default="running",
+                        choices=["running", "not_submitted", "ledger_busy_once", "ledger_busy"])
+    parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
+    parser.add_argument("--generate-expires-ms", type=int, default=300_000,
+                        help="how long a quote lasts from now, in milliseconds (negative: already expired)")
     Fixture(parser.parse_args()).serve()
 
 

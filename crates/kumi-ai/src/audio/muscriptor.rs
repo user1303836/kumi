@@ -32,8 +32,7 @@ pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signa
             form = form.text("instruments", name.to_owned());
         }
     }
-    let file = tokio::fs::File::open(&media.path).await.map_err(|_| Failure::new("Could not open media file"))?;
-    let part = multipart::Part::stream_with_length(file, media.bytes)
+    let part = multipart::Part::stream_with_length(media.file, media.bytes)
         .file_name(media.name)
         .mime_str(media.mime)
         .map_err(|_| Failure::new("Invalid media MIME type"))?;

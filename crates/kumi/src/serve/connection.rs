@@ -13,7 +13,7 @@ use kumi_agent::core::contracts::{CatchUp, ConnectionState, Integration, Observa
 use kumi_agent::core::view::{DawFocus, Transport};
 use kumi_daw::component::same_folder;
 use kumi_daw::provider::DawSession;
-use kumi_types::contracts::{KernelTool, ToolRole};
+use kumi_types::contracts::{JsonObject, KernelTool, ToolRole};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
@@ -26,6 +26,32 @@ use std::time::Duration;
 const MOST_REFS: usize = 200;
 /// How long the integration gets to close when the runtime stops.
 const CLOSING: Duration = Duration::from_secs(5);
+
+/// Each `{ref, name}` a look's context shows, by its ref: a track by its name, and what's inside one (a device, a chain,
+/// a clip) as "<name> (on <track>)", as a look's `refs` say it. A name with its track wins over one without it (a
+/// selection shows a device alone).
+pub(super) fn look_names(context: &JsonObject) -> HashMap<String, String> {
+    fn walk(value: &Value, on: Option<&str>, names: &mut HashMap<String, (String, bool)>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| walk(item, on, names)),
+            Value::Object(fields) => {
+                let here = fields.get("ref").and_then(Value::as_str).zip(fields.get("name").and_then(Value::as_str));
+                if let Some((reference, name)) = here {
+                    if names.get(reference).is_none_or(|(_, placed)| on.is_some() && !placed) {
+                        let named = on.map_or_else(|| name.to_string(), |track| format!("{name} (on {track})"));
+                        names.insert(reference.to_string(), (named, on.is_some()));
+                    }
+                }
+                let inside = on.or(here.map(|(_, name)| name));
+                fields.values().for_each(|item| walk(item, inside, names));
+            }
+            _ => {}
+        }
+    }
+    let mut names = HashMap::new();
+    context.values().for_each(|value| walk(value, None, &mut names));
+    names.into_iter().map(|(reference, (named, _))| (reference, named)).collect()
+}
 
 /// The project as the runtime last saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +105,11 @@ impl Connection {
     /// What changed while no one looked, since the last time this was asked: bounded (see [`bounded_catch_up`]).
     pub fn take_catch_up(&self) -> Vec<CatchUp> {
         bounded_catch_up(std::mem::take(&mut *self.reported.catch_up.borrow_mut()))
+    }
+
+    /// The same, kept for the look that asks for it.
+    pub fn catch_up(&self) -> Vec<CatchUp> {
+        bounded_catch_up(self.reported.catch_up.borrow().clone())
     }
 }
 
@@ -158,8 +189,26 @@ impl Link {
         self.connection.borrow().clone()
     }
 
+    /// A connection to `integration` that answers, as `connect` makes one: for an operation's tests.
+    #[cfg(test)]
+    pub(super) fn connected_to(&self, integration: Rc<dyn Integration>) {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+    }
+
     pub fn project(&self) -> Option<Project> {
         self.project.borrow().clone()
+    }
+
+    /// A connection to `integration` that answers: a test's own DAW.
+    #[cfg(test)]
+    pub(crate) fn connect_for_test(&self, integration: Rc<dyn Integration>) {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
     }
 
     /// The DAW's plan tool, as the last look offered it (`make_changes`).
@@ -172,25 +221,24 @@ impl Link {
         self.tools.borrow().clone()
     }
 
-    /// The names the last look gave its refs (`refs`' label, with its detail).
+    /// The names the last look gave its refs, for saying what a plan's steps are on ([`Link::keep_refs`]).
     pub fn ref_names(&self) -> HashMap<String, String> {
         self.ref_names.borrow().clone()
     }
 
-    /// The refs a look gave (`observe`'s `refs`), kept for naming what a plan is on.
-    pub fn keep_refs(&self, refs: &[Value]) {
-        let names = refs
-            .iter()
-            .filter_map(|candidate| {
-                let reference = candidate["reference"]["node"]["ref"].as_str()?;
-                let label = candidate["label"].as_str()?;
-                let named = match candidate["detail"].as_str() {
-                    Some(detail) => format!("{label} ({detail})"),
-                    None => label.to_string(),
-                };
-                Some((reference.to_string(), named))
-            })
-            .collect();
+    /// The names a look gave its refs, kept for naming what a plan is on: `names`, what its context shows by the refs a
+    /// plan's steps take ([`look_names`]), then its `refs`' labels with their detail. A DAW whose `refs` are in another
+    /// form than its steps take (Live's long refs) is still named by what the look showed.
+    pub fn keep_refs(&self, refs: &[Value], mut names: HashMap<String, String>) {
+        names.extend(refs.iter().filter_map(|candidate| {
+            let reference = candidate["reference"]["node"]["ref"].as_str()?;
+            let label = candidate["label"].as_str()?;
+            let named = match candidate["detail"].as_str() {
+                Some(detail) => format!("{label} ({detail})"),
+                None => label.to_string(),
+            };
+            Some((reference.to_string(), named))
+        }));
         *self.ref_names.borrow_mut() = names;
     }
 
@@ -339,6 +387,13 @@ pub fn owned_elsewhere(daw: kumi_types::daw::DawId) -> String {
     }
 }
 
+/// The plugin's host policy for a runtime whose state is `state_dir`: listening keeps to its scratch and quarantine
+/// (#1035), and the variations tool keeps its sets under its state (`<state>/variations/`), never the Kumi home, so the
+/// plugin's V-numbering and kept takes never mix with standalone Kumi's on the same project (CC-24's W1-e).
+pub fn policy(state_dir: &Path) -> HostPolicy {
+    HostPolicy::plugin(state_dir.join("scratch").join("listen"), state_dir.join("quarantine"), state_dir.to_path_buf())
+}
+
 /// Connects to the DAW: its integration made with the plugin's host policy and started. One start at a time: a second
 /// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, when the part in
 /// the DAW is another Kumi's (its home isn't `--kumi-home`), and, for REAPER and Renoise, when `--kumi-home` is a home
@@ -398,7 +453,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     };
     let mut context = IntegrationContext::new(on_connection);
-    context.policy = HostPolicy::plugin(ctx.paths().state_dir.join("scratch").join("listen"));
+    context.policy = policy(ctx.paths().state_dir.as_path());
     // Polled about once a second: nothing draws it as it moves.
     context.focus_drawn = false;
     context.on_focus = Some({
@@ -426,9 +481,10 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     });
     context.on_catch_up = Some({
-        let reported = Rc::downgrade(&reported);
+        let (reported, ctx) = (Rc::downgrade(&reported), ctx.handle());
         Rc::new(move |catch_up| {
-            if let Some(reported) = reported.upgrade() {
+            let Some(reported) = reported.upgrade() else { return };
+            {
                 let mut kept = reported.catch_up.borrow_mut();
                 kept.push(catch_up);
                 if kept.len() > CATCH_UPS {
@@ -436,6 +492,8 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
                     kept.drain(..older);
                 }
             }
+            // focus.json carries it too, so the note the chat gets before its next turn tells it.
+            publish_focus(&ctx);
         })
     });
     // Each change Kumi records (made, undone, kept, unsure) becomes or updates a HISTORY row, on the project open now.
@@ -476,22 +534,24 @@ pub async fn refs(connection: &Connection, signal: kumi_common::abort::Signal) -
 
 /// `focus.json` (C3, as CC-7 words it): whether the DAW answers (`connected`), and while it does, the project as of the
 /// last look (`seen_at`: the focus may have moved to another since), the focus and the transport; and what changed
-/// while no one looked (as it stands, not taken). A DAW that doesn't answer has no project, focus or transport here.
+/// while no one looked (as it stands, not taken). A DAW that doesn't answer, or no connection yet, has no project,
+/// focus or transport here.
 pub fn publish_focus(ctx: &Weak<Ctx>) {
     let Some(ctx) = ctx.upgrade() else { return };
-    let Some(connection) = ctx.link().connection() else { return };
-    let connected = connection.answering();
+    let connection = ctx.link().connection();
+    let connected = connection.as_ref().is_some_and(|connection| connection.answering());
     let project = ctx
         .link()
         .project()
         .filter(|_| connected)
         .map(|project| json!({"name": project.name, "key": project.key, "epoch": project.epoch, "seen_at": project.seen_at}));
+    let answering = connection.as_ref().filter(|_| connected);
     let body = json!({
         "connected": connected,
         "project": project,
-        "focus": connection.focus().filter(|_| connected).map(|focus| focus_value(&focus)),
-        "transport": connection.transport().filter(|_| connected).as_ref().map(transport_value),
-        "catch_up": bounded_catch_up(connection.reported.catch_up.borrow().clone()),
+        "focus": answering.and_then(|connection| connection.focus()).map(|focus| focus_value(&focus)),
+        "transport": answering.and_then(|connection| connection.transport()).as_ref().map(transport_value),
+        "catch_up": connection.as_ref().map(|connection| bounded_catch_up(connection.reported.catch_up.borrow().clone())).unwrap_or_default(),
     });
     if let Err(error) = ctx.snapshots().write("focus", &body) {
         say(&format!("kumi serve: focus.json not written: {error}"));
@@ -508,9 +568,14 @@ pub fn focus_value(focus: &DawFocus) -> Value {
 }
 
 /// A whole path: an absolute one, a drive's or a share's.
+/// A path with a folder in it: a drive's (`C:\\…`), a share's (`\\\\server\\…`), or a rooted one with at least two parts
+/// (`/Users/…/x.wav`). A name that only starts with a slash ("/Bus") or a lone one ("Drums / Perc") isn't.
 fn whole_path(text: &str) -> bool {
     let bytes = text.as_bytes();
-    text.starts_with('/') || text.starts_with("\\\\") || (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+    let drive = bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/');
+    let share = text.strip_prefix("\\\\").is_some_and(|rest| rest.trim_end_matches(['\\', '/']).contains(['\\', '/']));
+    let rooted = text.strip_prefix('/').is_some_and(|rest| rest.trim_end_matches('/').contains('/'));
+    drive || share || rooted
 }
 
 /// Every string in `value` that's a whole path cut to its file name, the DAW's refs aside: what the runtime shows of
@@ -531,6 +596,27 @@ pub(super) fn names_only(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+/// What the DAW said of a plan's steps (`changed`, `error`, `reason`, as `change` answers them): [`names_only`], and
+/// each path inside those sentences ("Couldn't load /Users/…/x.wav") cut to its file name too.
+pub(super) fn names_only_said(value: &mut Value) {
+    names_only(value);
+    fn said(value: &mut Value) {
+        match value {
+            Value::Array(items) => items.iter_mut().for_each(said),
+            Value::Object(fields) => {
+                for (key, field) in fields.iter_mut() {
+                    match field {
+                        Value::String(text) if matches!(key.as_str(), "changed" | "error" | "reason") => *text = names_only_text(text),
+                        _ => said(field),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    said(value);
 }
 
 /// The same for text that isn't JSON: each whole path in it (as far as a space or a quote) cut to its file name.
@@ -570,6 +656,19 @@ pub fn transport_value(transport: &Transport) -> Value {
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
 pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))
+}
+
+/// A connection to `integration` that answers, with `observation` seen on it: as a `connect` and an `observe` leave the
+/// link, for an operation's tests.
+#[cfg(test)]
+impl Link {
+    pub(super) fn connected_for_test(&self, integration: Rc<dyn Integration>, observation: &Observation) -> Project {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+        self.saw(observation)
+    }
 }
 
 #[cfg(test)]
@@ -654,6 +753,27 @@ mod tests {
         assert!(!text.contains("/Users/") && !text.contains("\\Users\\"), "{text}");
         let known: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
         assert_eq!(known, ["track", "trackRef", "clip", "item"], "nothing but DawFocus's own fields");
+    }
+
+    #[test]
+    fn a_path_in_what_the_daw_says_of_a_step_is_its_file_name_and_a_name_with_a_slash_stays() {
+        let mut said = json!({"refused": [{"step": 2, "error": "Couldn't load /Users/producer/Samples/kick.wav: too long"}],
+        "done": [
+            {"changed": "Simpler now plays C:\\Users\\producer\\snare.wav", "trackRef": "7:track:0"},
+            {"changed": "Drums / Perc volume -6.0 dB → -2.0 dB", "track": "/Bus"},
+        ]});
+        names_only_said(&mut said);
+        assert_eq!(said["refused"][0]["error"], "Couldn't load kick.wav: too long");
+        assert_eq!(said["done"][0]["changed"], "Simpler now plays snare.wav");
+        assert_eq!(said["done"][0]["trackRef"], "7:track:0", "refs are the DAW's");
+        assert_eq!(
+            (said["done"][1]["changed"].clone(), said["done"][1]["track"].clone()),
+            (json!("Drums / Perc volume -6.0 dB → -2.0 dB"), json!("/Bus"))
+        );
+        // Names elsewhere (focus, observe, read) aren't rewritten as sentences, nor taken for paths.
+        let mut focus = json!({"track": {"name": "Drums / Perc"}, "group": "/Bus", "clip": "/Users/producer/Samples/Amen 170.wav"});
+        names_only(&mut focus);
+        assert_eq!(focus, json!({"track": {"name": "Drums / Perc"}, "group": "/Bus", "clip": "Amen 170.wav"}));
     }
 
     #[test]

@@ -447,6 +447,19 @@ function M:authenticated_count()
   return authenticated
 end
 
+-- Whether an authenticated connection that is still open asked in its hello (keepIdentity) that the song's id be kept in
+-- the song. A retired connection, or one whose peer has gone, no longer asks. (The field, not a method: a connection made
+-- by the payload before a reload carries the old Connection's methods.)
+function M:keeps_identity()
+  for _, record in pairs(self.ctx.connections) do
+    local conn = record.conn
+    if conn and conn.keep_identity == true and conn:authenticated() and not record.closing and not is_gone(record) then
+      return true
+    end
+  end
+  return false
+end
+
 -- From the timer: handshake deadlines, heartbeats, outboxes, deferred closes.
 function M:tick()
   local now = self.ctx.now_ms()

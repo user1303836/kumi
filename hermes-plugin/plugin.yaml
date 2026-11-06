@@ -1,16 +1,17 @@
 name: kumi
 # The Kumi release the plugin pins (kumi_release.json): the pin pull request sets both.
-version: "1.24.67"
+version: "1.24.69"
 description: >-
-  Kumi for Hermes: read and make supported typed changes in Ableton Live, REAPER and Renoise.
-  Changes use Hermes approvals and Kumi's HISTORY, with undo when the recorded handle remains valid.
-  Measure audio locally and map approved sample folders to find, audition and place sounds.
+  Kumi for Hermes: Hermes reads your Ableton Live, REAPER or Renoise project and makes the changes you approve,
+  each kept in Kumi's HISTORY and undoable while Kumi runs. Kumi measures audio on your computer and maps the
+  sample folders you choose, to find, audition and place sounds. It also reads finished audio other Hermes plugins
+  saved in this profile's generated audio folder, to place or measure it.
 author: Kumi
 homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
 license: MIT
 requires_hermes: ">=0.22.7"
 provides_tools: [kumi_status, kumi_setup, kumi_connect, kumi_observe, kumi_read, kumi_change, kumi_undo,
-                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job]
+                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate]
 provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
                  on_session_finalize, agent_loop_stopped]
 config_schema:
@@ -24,14 +25,39 @@ config_schema:
     choices: [ableton, reaper, renoise]
     default: ableton
     label: DAW
-    description: "The DAW Kumi connects to: ableton is Ableton Live."
+    description: "The DAW Kumi connects to: Ableton Live (ableton), REAPER (reaper) or Renoise (renoise)."
   library_folders:
     type: list
     default: []
     label: Sample folders
-    description: "Folders Kumi may read to build your sound map. Nothing else is scanned."
+    description: "Folders Kumi may read to build your sound map, as a list of full paths, such as [\"/Users/me/Samples\"]. Nothing else is scanned. In a chat, ask Hermes to add one: it asks you first."
   listen_interpretation:
     type: bool
     default: false
     label: Interpret measurements with a model
-    description: "After Kumi measures audio, the model set for Kumi's listening task in Hermes (it follows Vision, and must accept images) reads the numbers and a coarse band-energy image, never the audio. Its reading is added beside the measurements, which stay either way. The model or Hermes's fallback providers for that task may cost tokens."
+    description: "After Kumi measures audio, the model set for Kumi listening interpretation in Hermes's model settings (it follows Vision unless you change it, and must accept images) reads the numbers and a coarse band-energy image, never the audio. Its reading is added beside the measurements, which stay either way. The model or Hermes's fallback providers for that task may cost tokens."
+  mirelo_acknowledged:
+    type: bool
+    default: false
+    label: Use Mirelo for paid generation
+    description: "Lets the agent ask for paid sound effects and audio-to-MIDI from Mirelo, each approved by you with its estimate in Mirelo API credits (never a price). Your prompt, and for MIDI the audio file you approve, go to Mirelo."
+  mirelo_sfx_enabled:
+    type: bool
+    default: false
+    label: Mirelo sound effects
+    description: "Allows paid sound effects from a prompt, each quoted and approved first."
+  mirelo_midi_enabled:
+    type: bool
+    default: false
+    label: Mirelo audio to MIDI
+    description: "Allows paid audio-to-MIDI from an audio file, which is sent to Mirelo only after you approve it."
+  mirelo_credit_cap:
+    type: int
+    default: 0
+    label: Mirelo credit cap
+    description: "The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation."
+  mirelo_api_key:
+    type: secret
+    env: MIRELO_API_KEY
+    label: Mirelo API key
+    description: "Your Mirelo API key, kept as a Hermes secret. Kumi sends it only to Mirelo, with a generation you approved."

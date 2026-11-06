@@ -64,6 +64,8 @@ struct State {
     /// The next job fails with this, at its first status.
     fail_next: Option<(String, String)>,
     demo: bool,
+    /// Opt in to the new native guarded-render seam; historical fixture components lack it.
+    render_preflight: bool,
     playing_now: bool,
     audition_works: bool,
     next_copy: u32,
@@ -86,6 +88,8 @@ struct State {
     item_part: Option<(f64, f64, f64, bool)>,
     /// Renders' files don't say how long they are (a bridge that leaves `seconds` out).
     renders_unmeasured: bool,
+    /// The actual rendered audio length, when exercising a short or overlong native result.
+    render_seconds: Option<f64>,
     /// A copy's parameters (its device's place, the parameter's) whose scratch set is refused, and why: a batch holding
     /// one is refused whole, nothing in it set.
     refused_params: Vec<(u64, u64, String)>,
@@ -126,9 +130,59 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
     file.extend_from_slice(&(data.len() as u32).to_le_bytes());
     file.extend_from_slice(&data);
     if let Some(folder) = path.parent() {
-        std::fs::create_dir_all(folder)?;
+        #[cfg(not(windows))]
+        {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder.create(folder)?;
+        }
+        #[cfg(windows)]
+        {
+            if let Some(parent) = folder.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            match daw_bridge::lifecycle::native_acl::create_kumis_folder(folder) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
-    std::fs::write(path, file)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    #[cfg(not(windows))]
+    {
+        options.open(path)?.write_all(&file)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // The simulated renderer uses the same explicit ACL as the real component,
+        // never the Windows profile's inherited SYSTEM/Administrators grants.
+        options.access_mode(0xC006_0000).share_mode(0).create_new(true);
+        let mut output = match options.open(path) {
+            Ok(output) => {
+                // This simulator just created and pins the file. Set the creator explicitly
+                // too: an elevated Windows test runner otherwise defaults to Administrators.
+                daw_bridge::lifecycle::native_acl::make_kumis_shape(path).map_err(std::io::Error::other)?;
+                output
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options.create_new(false).open(path)?,
+            Err(error) => return Err(error),
+        };
+        output.write_all(&file)
+    }
 }
 
 impl SimListening {
@@ -158,6 +212,7 @@ impl SimListening {
                 restored: 0,
                 fail_next: None,
                 demo: false,
+                render_preflight: false,
                 playing_now: false,
                 audition_works: true,
                 next_copy: 0,
@@ -170,6 +225,7 @@ impl SimListening {
                 capture_marks: None,
                 item_part: None,
                 renders_unmeasured: false,
+                render_seconds: None,
                 refused_params: vec![],
             })),
         }
@@ -204,6 +260,14 @@ impl SimListening {
         self.state.lock().unwrap().tempo = tempo;
     }
 
+    pub fn set_render_preflight(&self, enabled: bool) {
+        self.state.lock().unwrap().render_preflight = enabled;
+    }
+
+    pub fn supports_render_preflight(&self) -> bool {
+        self.state.lock().unwrap().render_preflight
+    }
+
     /// A track the bridge won't make scratch copies of (by ref, or a Renoise track's place: "track:3"), and why.
     pub fn refuse_copies_of(&self, track: &str, why: &str) {
         self.state.lock().unwrap().refused_copies.push((track.into(), why.into()));
@@ -217,6 +281,11 @@ impl SimListening {
     /// Renders' files leave out how long they are, so Kumi measures them by the tempo.
     pub fn leave_out_render_seconds(&self) {
         self.state.lock().unwrap().renders_unmeasured = true;
+    }
+
+    /// Render this many seconds without changing the requested window or its preflight.
+    pub fn set_render_seconds(&self, seconds: Option<f64>) {
+        self.state.lock().unwrap().render_seconds = seconds;
     }
 
     /// What the next render tells of the tempo it played into the transport ({before: {bpm, lpb}, bpm, lpb}): Renoise's
@@ -300,6 +369,11 @@ impl SimListening {
         self.state.lock().unwrap().renders.clone()
     }
 
+    /// Native output paths, including those not yet published in a host answer.
+    pub fn job_files(&self, id: &str) -> Vec<PathBuf> {
+        self.state.lock().unwrap().jobs[id].files.iter().map(|(_, path, ..)| path.clone()).collect()
+    }
+
     /// Times a job put back what it changed.
     pub fn restored(&self) -> u32 {
         self.state.lock().unwrap().restored
@@ -333,14 +407,18 @@ impl SimListening {
     /// The `listening` flags `status` carries.
     pub fn flags(&self) -> Value {
         let state = self.state.lock().unwrap();
-        json!({
+        let mut flags = json!({
             "render": !state.demo,
             "capture": state.daw == Daw::Reaper,
             "audition": state.audition_works,
             "grid": true,
             "scratch": true,
             "version": 1,
-        })
+        });
+        if state.render_preflight {
+            flags["render_preflight"] = json!(true);
+        }
+        flags
     }
 
     /// The copies kept as tracks (`scratch-keep`), by ref, with their names.
@@ -503,12 +581,40 @@ impl SimListening {
         if state.jobs.values().any(|job| !matches!(job.state, "done" | "failed" | "cancelled")) {
             return Err(("busy".into(), format!("{} is rendering for Kumi; nothing changed", Self::app(state))));
         }
+        if let Some(value) = params.get("maxSeconds") {
+            if !state.render_preflight {
+                return Err(("unsupported".into(), "This component has no guarded render preflight.".into()));
+            }
+            let cap = value
+                .as_f64()
+                .filter(|cap| cap.is_finite() && *cap > 0.0 && *cap <= 60.0)
+                .ok_or_else(|| bad("maxSeconds: finite, more than 0 and at most 60"))?;
+            let from = params
+                .pointer("/range/fromBeat")
+                .and_then(Value::as_f64)
+                .filter(|from| from.is_finite() && *from >= 0.0)
+                .ok_or_else(|| bad("range.fromBeat is invalid"))?;
+            let beats = params
+                .pointer("/range/beats")
+                .and_then(Value::as_f64)
+                .filter(|beats| beats.is_finite() && *beats > 0.0 && (from + *beats).is_finite())
+                .ok_or_else(|| bad("range.beats is invalid"))?;
+            if params.get("preRollBeats").is_some_and(|v| v.as_f64() != Some(0.0)) {
+                return Err(bad("Restricted renders do not permit preroll."));
+            }
+            if !state.tempo.is_finite() || state.tempo <= 0.0 || beats * 60.0 / state.tempo > cap {
+                return Err(("stale".into(), "The approved render exceeds maxSeconds.".into()));
+            }
+            if state.playing_now || state.playing.is_some() {
+                return Err(("busy".into(), "Playback started before the restricted render.".into()));
+            }
+        }
         let tempo = state.next_tempo.take();
         let id = params["jobId"].as_str().ok_or_else(|| bad("jobId is missing"))?.to_string();
         let range = &params["range"];
         let (from, beats) = (range["fromBeat"].as_f64().unwrap_or(0.), range["beats"].as_f64().unwrap_or(0.));
         let pre_roll = params["preRollBeats"].as_f64().unwrap_or(0.).min(from);
-        let seconds = (beats + pre_roll) * 60. / state.tempo;
+        let seconds = state.render_seconds.unwrap_or((beats + pre_roll) * 60. / state.tempo);
         let start = pre_roll * 60. / state.tempo;
         let sources = params["sources"].as_array().cloned().unwrap_or_default();
         let mut files = vec![];

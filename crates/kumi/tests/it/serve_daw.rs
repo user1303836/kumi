@@ -6,6 +6,7 @@ use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::{
     host::Host,
     reaper::simulator::ReaperScript,
+    renoise::simulator::RenoiseScript,
     simulator::{Simulator, SimulatorConfig},
 };
 use futures::FutureExt;
@@ -15,6 +16,7 @@ use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::app::AbletonFactory;
+use kumi_daw_own::bridge::{HostStart, OwnOptions};
 use kumi_daw_own::provider::OwnHosts;
 use kumi_types::contracts::JsonObject;
 use kumi_types::system::Env;
@@ -84,6 +86,16 @@ impl Lab {
         config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
         adopted: bool,
     ) -> Lab {
+        Self::configured(daw, bridge, config, adopted, |_| {}).await
+    }
+
+    async fn configured(
+        daw: DawId,
+        bridge: Daw,
+        config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
+        adopted: bool,
+        configure: impl FnOnce(&mut Args),
+    ) -> Lab {
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         let transport = if adopted { elsewhere.path().join(".kumi") } else { home.path().join("kumi-home") };
@@ -120,18 +132,21 @@ impl Lab {
             ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
             ("KUMI_RENOISE_PREFS_DIR".into(), home.path().join("Renoise").display().to_string()),
         ]);
+        // (made as the integration starts it: its ask to keep the project's id is the host's, as KUMI_KEEP_IDENTITY is)
         let host_home = transport.clone();
         let own_host = OwnHosts(Rc::new(move |_| {
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home)), id: Cell::new(0) });
-            Rc::new(move |_| {
-                let endpoint = endpoint.clone();
+            let host_home = host_home.clone();
+            Rc::new(move |start: HostStart| {
+                let host =
+                    Host::new(bridge, &host_home, daw_mcp_server::host::ListeningMode::Restricted).with_keep_identity(start.keep_identity);
+                let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             })
         }));
         let answers = kumi_daw::io::Answers::default()
             .with(AbletonFactory(Rc::new(|_| panic!("a REAPER runtime makes no Ableton integration"))))
             .with(own_host);
-        let args = Args {
+        let mut args = Args {
             state_dir: home.path().join("state"),
             kumi_home: transport,
             hermes_home: None,
@@ -141,8 +156,18 @@ impl Lab {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
+        configure(&mut args);
         let ctx = Ctx::new(args, env, answers).unwrap();
         Lab { home, _elsewhere: elsewhere, ctx, simulator }
+    }
+
+    /// The DAW back after it quit, with `config` (its project as the producer left it), on the transport home's
+    /// discovery folder, as Lab::new starts it.
+    async fn restart(&mut self, config: impl FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig, bridge: Daw) {
+        let paths = BridgePaths::new(&self.home.path().join("kumi-home"), bridge);
+        let mut config = config(ensure_secret(&paths.secret()).unwrap());
+        config.discovery_dir = Some(paths.discovery());
+        self.simulator = Some(Rc::new(Simulator::start(config).await.unwrap()));
     }
 
     /// The methods Kumi's host sent the DAW, each once.
@@ -207,7 +232,13 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
         (Some(key.as_str()), Some(epoch)),
         "the same project, the same epoch"
     );
-    assert!(!seen["text"].as_str().unwrap().is_empty());
+    // The whole turn's look: the steps a change may use, each with its input's fields, and the readers, before the
+    // tracks, which come last (what a small room cuts).
+    let look: Value = serde_json::from_str(seen["text"].as_str().unwrap()).unwrap();
+    let volume = look["steps"].as_array().unwrap().iter().filter_map(Value::as_str).find(|line| line.starts_with("track_volume: "));
+    assert!(volume.is_some_and(|line| line.contains("(ref")), "{}", look["steps"]);
+    assert!(look["readers"].as_array().unwrap().contains(&json!("reaper_read")), "{}", look["readers"]);
+    assert_eq!(look.as_object().unwrap().keys().last().map(String::as_str), Some("tracks"), "{look}");
     let refs = seen["refs"].as_array().unwrap();
     assert!(refs.iter().filter(|candidate| candidate["kind"] == "track").count() >= 3, "{refs:?}");
     assert!(refs.iter().all(|candidate| candidate["reference"]["kind"] == "daw"), "only the project's things: {refs:?}");
@@ -262,10 +293,142 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let Err(OpError::NotConnected { .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch + 1) else {
         panic!("a plan while REAPER is away")
     };
+    // A look that can't read the project makes no project of REAPER's words for why: it's refused in them, and the last
+    // project read stays the one a plan names.
+    let Err(OpError::Failed { reason }) = lab.call("observe", json!({"scope": "project"})).await else {
+        panic!("a look while REAPER is away")
+    };
+    assert!(reason.contains("REAPER") && !reason.contains("Inference-only"), "{reason}");
+    assert_eq!(lab.ctx.link().project().map(|project| project.key), other["project_key"].as_str().map(str::to_owned));
     // Nothing but reads reached REAPER: connecting and looking write nothing into the project.
     let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
     let sent = lab.methods_sent();
     assert!(!sent.is_empty() && sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
+    lab.ctx.link().close().await;
+});
+
+/// What each hello the simulated bridge was sent said of keeping the project's id (`keepIdentity`), in order.
+fn identity_asks(simulator: &Simulator) -> Vec<Option<Value>> {
+    simulator
+        .transcript()
+        .into_iter()
+        .filter(|line| line.from_host)
+        .filter_map(|line| serde_json::from_str::<Value>(&line.text).ok())
+        .filter(|frame| frame["type"] == "hello")
+        .map(|frame| frame.get("keepIdentity").cloned())
+        .collect()
+}
+
+// The plugin's runtime only observes: its host never asks REAPER to keep the project's id, so nothing is written into the
+// project (contract C2), while REAPER says it would keep one for a client that asked.
+case!(serve_never_asks_reaper_to_keep_the_projects_id_and_nothing_is_written_into_it, async {
+    let script = ReaperScript::new(3, 0);
+    let written = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let connected = lab.call("connect", json!({"daw": "reaper"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    assert!(!simulator.keeps_identity());
+    assert_eq!(written.ids_written(), Vec::<String>::new(), "nothing written into the project");
+    let status = lab.state("status.json");
+    assert_eq!(status["connected"], true, "{status}");
+    lab.ctx.link().close().await;
+});
+
+case!(serve_never_requests_or_saves_a_renoise_identity, async {
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let saved = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
+    let connected = lab.call("connect", json!({"daw": "renoise"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    let native_epoch = lab.ctx.link().project().unwrap().native_epoch.unwrap();
+    let result = saved.respond()("project_save", &json!({"epoch": native_epoch})).unwrap().unwrap();
+    assert_eq!(result["dirty"], false);
+    assert!(saved.ids_written().is_empty(), "a producer's save while the plugin is connected must not keep a Kumi id");
+    assert!(!simulator.keeps_identity());
+    lab.ctx.link().close().await;
+});
+
+// Standalone Kumi (its integration with the standalone policy) asks, and REAPER writes the project's id into it while it
+// is connected.
+case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_written, async {
+    let home = tempfile::tempdir().unwrap();
+    let paths = BridgePaths::new(home.path(), Daw::Reaper);
+    let script = ReaperScript::new(3, 0);
+    let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "/lab/REAPER");
+    config.discovery_dir = Some(paths.discovery());
+    let simulator = Simulator::start(config).await.unwrap();
+    let host_home = home.path().to_path_buf();
+    let connect: kumi_daw_own::bridge::Connect = Rc::new(move |start: HostStart| {
+        let host =
+            Host::new(Daw::Reaper, &host_home, daw_mcp_server::host::ListeningMode::Standalone).with_keep_identity(start.keep_identity);
+        let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
+        async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+    });
+    let context = kumi_agent::core::context::IntegrationContext::new(Rc::new(|_, _| {}));
+    assert!(context.policy.persist_identity, "standalone Kumi's policy");
+    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+    reaper.start(Signal::new()).await.unwrap();
+    reaper.observe(Signal::new(), None).await.unwrap();
+    let asks = identity_asks(&simulator);
+    assert!(!asks.is_empty() && asks.iter().all(|ask| *ask == Some(json!(true))), "{asks:?}");
+    assert!(simulator.keeps_identity());
+    assert_eq!(script.ids_written(), ["/lab/Song.rpp"], "the project's id written into it");
+    reaper.close().await.unwrap();
+});
+
+case!(what_changed_while_reaper_was_away_reaches_the_note_and_waits_for_the_look_that_asks_for_it, async {
+    // REAPER quits while the runtime is connected; the producer opens the project again and changes it.
+    let script = ReaperScript::new(3, 0);
+    script.set_project_id(Some("0123456789abcdef0123456789abcdef"));
+    let (again, restarted) = (script.clone(), script.clone());
+    let mut lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    lab.call("connect", json!({"daw": "reaper"})).await.unwrap();
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    // As own_catchup_e2e: the integration keeps the project as it saw it just after the look.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    lab.simulator.as_ref().unwrap().stop();
+    for _ in 0..1000 {
+        if lab.state("focus.json")["connected"] == false {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    again.restart();
+    again.set_volume(3, -12.0);
+    lab.restart(move |secret| restarted.config(secret, "/lab/REAPER"), Daw::Reaper).await;
+    // Kumi comes back to REAPER (connect again until REAPER answers it); what changed meanwhile then reaches focus.json
+    // as soon as Kumi is told, with no look asking, so the chat's note has it.
+    for _ in 0..1000 {
+        if lab.call("connect", json!({"daw": "reaper"})).await.is_ok_and(|status| status["connected"] == true) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let mut note = Value::Null;
+    for _ in 0..1000 {
+        note = lab.state("focus.json");
+        if note["catch_up"].as_array().is_some_and(|told| !told.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let told = |value: &Value| value.to_string().contains("Track 3");
+    assert!(told(&note["catch_up"]), "{note}");
+    // A look at FOCUS shows it and leaves it; the look that asks for it gives it, once.
+    let focus = lab.call("observe", json!({"scope": "focus"})).await.unwrap();
+    assert!(told(&focus["catch_up"]), "{focus}");
+    let caught_up = lab.call("observe", json!({"scope": "catch_up"})).await.unwrap();
+    assert!(caught_up["text"].as_str().unwrap().contains("Track 3"), "{caught_up}");
+    let after = lab.call("observe", json!({"scope": "catch_up"})).await.unwrap();
+    assert!(after["text"].as_str().unwrap().starts_with("Nothing has changed"), "{after}");
     lab.ctx.link().close().await;
 });
 
@@ -403,6 +566,7 @@ struct Wire {
     from: BufReader<tokio::io::DuplexStream>,
     served: tokio::task::JoinHandle<std::io::Result<()>>,
     asked: u64,
+    response_wait: std::time::Duration,
 }
 
 impl Wire {
@@ -416,7 +580,8 @@ impl Wire {
             runtime_out,
             std::future::pending(),
         ));
-        let mut wire = Wire { to: Some(to), from: BufReader::new(from), served, asked: 0 };
+        let mut wire =
+            Wire { to: Some(to), from: BufReader::new(from), served, asked: 0, response_wait: std::time::Duration::from_secs(30) };
         wire.request("initialize", json!({"protocolVersion": "2025-06-18"})).await;
         wire.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
         wire
@@ -435,8 +600,7 @@ impl Wire {
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await;
         loop {
             let mut line = String::new();
-            let read =
-                tokio::time::timeout(std::time::Duration::from_secs(30), self.from.read_line(&mut line)).await.expect("an answer in time");
+            let read = tokio::time::timeout(self.response_wait, self.from.read_line(&mut line)).await.expect("an answer in time");
             assert!(read.unwrap() > 0, "the runtime stopped before answering {method}");
             let message: Value = serde_json::from_str(&line).unwrap();
             if message["id"] == id {
@@ -451,6 +615,13 @@ impl Wire {
         if let Some(id) = tool_call_id {
             arguments["_host"] = json!({"tool_call_id": id});
         }
+        let answer = self.request("tools/call", json!({"name": name, "arguments": arguments})).await;
+        (answer["result"]["structuredContent"].clone(), answer["result"]["isError"] == true)
+    }
+
+    /// [`Wire::call`] by a host call of the chat `session`.
+    async fn call_in(&mut self, name: &str, mut arguments: Value, tool_call_id: Option<&str>, session: &str) -> (Value, bool) {
+        arguments["_host"] = json!({"tool_call_id": tool_call_id, "session_id": session});
         let answer = self.request("tools/call", json!({"name": name, "arguments": arguments})).await;
         (answer["result"]["structuredContent"].clone(), answer["result"]["isError"] == true)
     }
@@ -515,6 +686,9 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
     }
+    // A step REAPER's list keeps out says why, at the plan and at a look at its input.
+    let (lua, _) = wire.call("change", plan(&key, epoch, json!([{"tool": "run_lua", "input": {"code": "x = 1"}}])), Some("tc-why")).await;
+    assert!(lua["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // A sound from a map this runtime hasn't made: stale at its preview, and nothing runs.
     let sound = json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]);
@@ -548,6 +722,7 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         (first["history_ids"][0].clone(), json!("mixer"), key.clone())
     );
     assert!(row.get("tool_call_id").is_none() && row.get("digest").is_none(), "{row}");
+    assert!(row["change_id"].is_string(), "the change it's part of, for an undo of it whole: {row}");
     let kept = lab.state("history.json");
     assert_eq!(kept["items"][0]["tool_call_id"], "tc-1");
     assert_eq!(kept["items"][0]["digest"].as_str().map(str::len), Some(64));
@@ -614,13 +789,205 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     let kept = lab.state("history.json");
     let audit = kept["items"].as_array().unwrap().iter().find(|row| row["family"] == "unsure").unwrap().clone();
     assert_eq!((audit["undo_available"].clone(), audit["tool_call_id"].clone()), (json!(false), json!("tc-1")));
-    assert!(changed["history_ids"].as_array().unwrap().contains(&audit["id"]));
+    let ids = changed["history_ids"].as_array().unwrap();
+    assert!(ids.contains(&audit["id"]));
+    // What the call recorded, its audit row among it, is one change.
+    let mut changes: Vec<Value> =
+        kept["items"].as_array().unwrap().iter().filter(|row| ids.contains(&row["id"])).map(|row| row["change_id"].clone()).collect();
+    changes.dedup();
+    assert!(changes.len() == 1 && changes[0].is_string(), "{changes:?}");
     assert_eq!(lab.state("status.json")["unsure"]["op"], "change");
     let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
     assert_eq!(stale["code"], "stale");
     // The next look sees the project as it is: nothing is unsure any more.
     wire.call("observe", json!({"scope": "focus"}), None).await;
     assert_eq!(lab.state("status.json")["unsure"], Value::Null);
+    wire.end().await;
+});
+
+/// A connected runtime's look: the project's key and epoch, and up to three tracks' refs.
+async fn looked_tracks(wire: &mut Wire) -> (Value, u64, Vec<String>) {
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let tracks = seen["refs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|candidate| candidate["kind"] == "track")
+        .map(|candidate| candidate["reference"]["node"]["ref"].as_str().unwrap().to_string())
+        .take(3)
+        .collect();
+    (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap(), tracks)
+}
+
+/// A volume step on each track, as one change.
+fn volume_steps(tracks: &[String]) -> Value {
+    Value::Array(
+        tracks
+            .iter()
+            .enumerate()
+            .map(|(n, reference)| json!({"tool": "track_volume", "input": {"ref": reference, "volumeDb": -6 - n as i64}}))
+            .collect(),
+    )
+}
+
+case!(serve_undoes_a_whole_reaper_change_newest_first_in_one_call_unless_its_steps_changed_since_the_approval, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let volumes = || (0..4).map(|n| script.volume(n)).collect::<Vec<f64>>();
+    let before = volumes();
+    let whole = |id: &Value| json!({"history_id": id, "whole_change": true});
+
+    // A change of three steps: its preview lists them newest first and changes nothing.
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    assert_eq!(tracks.len(), 3, "{tracks:?}");
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks)), Some("tc-1")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    assert_eq!((changed["state"].clone(), made.len()), (json!("applied"), 3), "{changed}");
+    let newest_first: Vec<Value> = made.iter().rev().cloned().collect();
+    let (applied, steps_made) = (volumes(), script.undo_history().len());
+    let mut asked = whole(&made[1]);
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("undo", asked, Some("tc-2")).await;
+    assert_eq!((preview["state"].clone(), preview["undo_available"].clone()), (json!("preview"), json!(true)), "{preview}");
+    let listed = |answer: &Value| answer["rows"].as_array().unwrap().iter().map(|row| row["history_id"].clone()).collect::<Vec<_>>();
+    assert_eq!(listed(&preview), newest_first);
+    assert!(preview["rows"].as_array().unwrap().iter().all(|row| row["family"] == "mixer"), "{preview}");
+    assert!(preview["text"].as_str().unwrap().starts_with("Undo 3 steps: "), "{preview}");
+    assert_eq!((volumes(), script.undo_history().len()), (applied, steps_made), "a preview changes nothing");
+    // Undone whole as approved: every step, newest first, in one call that moves the epoch on once.
+    let moved_from = lab.ctx.link().epoch();
+    let mut approved = whole(&made[1]);
+    approved["expect_rows"] = preview["rows_digest"].clone();
+    let (undone, _) = wire.call("undo", approved, Some("tc-3")).await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(listed(&undone), newest_first);
+    assert!(undone["rows"].as_array().unwrap().iter().all(|row| row["state"] == "undone"), "{undone}");
+    assert_eq!((volumes(), lab.ctx.link().epoch()), (before.clone(), moved_from + 1));
+
+    // Another change, its newest step undone by id after the approval: the approved set is stale and nothing is undone,
+    // and an undo of the whole change that names no set is refused; previewed again, the step undone already is passed
+    // over and the rest are undone.
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks)), Some("tc-4")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    let mut asked = whole(&made[0]);
+    asked["preview"] = json!(true);
+    let (preview, _) = wire.call("undo", asked, Some("tc-5")).await;
+    assert_eq!(wire.call("undo", json!({"history_id": made[2]}), Some("tc-6")).await.0["state"], "undone");
+    let one_back = volumes();
+    let mut approved = whole(&made[0]);
+    approved["expect_rows"] = preview["rows_digest"].clone();
+    let (stale, _) = wire.call("undo", approved, Some("tc-7")).await;
+    assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
+    assert_eq!(volumes(), one_back, "nothing undone of a stale set");
+    let (unbound, refused) = wire.call("undo", whole(&made[0]), Some("tc-8")).await;
+    assert_eq!((refused, unbound["error"]["code"].clone()), (true, json!("invalid")), "{unbound}");
+    assert_eq!(volumes(), one_back, "nothing undone without the set its preview gave");
+    let mut asked = whole(&made[0]);
+    asked["preview"] = json!(true);
+    let (again, _) = wire.call("undo", asked, Some("tc-9")).await;
+    assert_eq!(again["rows"][0]["state"], "undone", "listed, undone already: {again}");
+    let mut approved = whole(&made[0]);
+    approved["expect_rows"] = again["rows_digest"].clone();
+    let (rest, _) = wire.call("undo", approved, Some("tc-10")).await;
+    assert_eq!(rest["state"], "undone", "{rest}");
+    assert_eq!(listed(&rest), made.iter().rev().cloned().collect::<Vec<_>>());
+    assert_eq!(volumes(), before);
+    wire.end().await;
+});
+
+case!(serve_stops_a_whole_reaper_change_undo_at_the_first_step_reaper_wont_undo_and_asks_nothing_of_the_older_ones, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let restoring: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let asked = restoring.clone();
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = sim.config(secret, "/lab/REAPER");
+            let answer = config.respond.take().unwrap();
+            // REAPER is busy with each undo asked of it: nothing is undone, and the change stays as it was.
+            config.respond = Some(Arc::new(move |method, params| {
+                if method == "change_restore" {
+                    asked.lock().unwrap().push(params["target"]["ref"].as_str().unwrap_or_default().to_string());
+                    return Some(Err(("busy".into(), "a render is running".into())));
+                }
+                answer(method, params)
+            }));
+            config
+        })),
+    )
+    .await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let (key, epoch, tracks) = looked_tracks(&mut wire).await;
+    let (changed, _) = wire.call("change", plan(&key, epoch, volume_steps(&tracks[..2])), Some("tc-1")).await;
+    let made = changed["history_ids"].as_array().unwrap().clone();
+    assert_eq!(made.len(), 2, "{changed}");
+    let (preview, _) = wire.call("undo", json!({"history_id": made[0], "whole_change": true, "preview": true}), Some("tc-2")).await;
+    let approved = json!({"history_id": made[0], "whole_change": true, "expect_rows": preview["rows_digest"]});
+    let (whole, _) = wire.call("undo", approved, Some("tc-3")).await;
+    let rows = whole["rows"].as_array().unwrap();
+    assert_eq!((rows[0]["history_id"].clone(), rows[0]["state"].clone()), (made[1].clone(), json!("refused")), "{whole}");
+    assert_eq!((rows[1]["history_id"].clone(), rows[1]["state"].clone()), (made[0].clone(), json!("not_tried")), "{whole}");
+    assert_eq!((whole["state"].clone(), whole["reason"].clone()), (json!("refused"), rows[0]["reason"].clone()), "the newest step's");
+    let restored = restoring.lock().unwrap().clone();
+    assert!(!restored.is_empty() && !restored.contains(&tracks[0]), "nothing asked of the older step: {restored:?}");
+    wire.end().await;
+});
+
+case!(serve_undoes_nothing_of_a_change_only_reapers_own_undo_takes_back_whole_or_by_its_rows, async {
+    let script = ReaperScript::new(3, 0);
+    let sim = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| sim.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    assert!(!wire.call("connect", json!({}), None).await.1);
+    let (key, _, _) = looked_tracks(&mut wire).await;
+    // Two rows recorded as a call holding a step only REAPER's own Undo takes back records them (CC-20): no DAW marks
+    // one yet, so they're made in HISTORY as that call makes them.
+    let history = lab.ctx.history();
+    let note = "Kumi can't undo this change. REAPER's own Undo (Cmd+Z) takes all of it back while it's still REAPER's latest step.";
+    history.begin_call();
+    history.daw_undo_call(note.into());
+    for id in ["c901", "c902"] {
+        let record = json!({"id": id, "family": "mixer", "title": "Bass volume −6 dB", "state": "applied", "at": 1});
+        history.record(&serde_json::from_value(record).unwrap(), key.as_str().unwrap(), lab.ctx.snapshots());
+    }
+    let identity = kumi::serve::history::CallIdentity { profile_id: None, session_id: None, tool_call_id: None, digest: "d" };
+    let made: Vec<String> = history.end_call(identity, lab.ctx.snapshots()).into_iter().map(|row| row.id).collect();
+    history.one_change(&made, lab.ctx.snapshots());
+    let asked_before = lab.methods_sent().len();
+    // Whole or by a row, previewed or real, with the set its preview gave or without: refused with the change's words.
+    for (n, (asked, preview)) in [
+        (json!({"history_id": made[0], "whole_change": true, "preview": true}), true),
+        (json!({"history_id": made[1], "whole_change": true, "expect_rows": "0".repeat(64)}), false),
+        (json!({"history_id": made[1], "whole_change": true}), false),
+        (json!({"history_id": made[0]}), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (answer, _) = wire.call("undo", asked.clone(), Some(&format!("tc-{n}"))).await;
+        if preview {
+            assert_eq!(
+                (answer["undo_available"].clone(), answer["reason"].clone(), answer["note"].clone()),
+                (json!(false), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        } else {
+            assert_eq!(
+                (answer["state"].clone(), answer["code"].clone(), answer["reason"].clone()),
+                (json!("refused"), json!("daw_undo"), json!(note)),
+                "{asked}: {answer}"
+            );
+        }
+    }
+    let sent = lab.methods_sent();
+    assert!(!sent[asked_before..].iter().any(|method| method.starts_with("change_")), "REAPER asked nothing: {sent:?}");
     wire.end().await;
 });
 
@@ -692,6 +1059,7 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     assert!(import["input_schema"]["properties"]["path"]["anyOf"].is_array(), "{import}");
     let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
     assert!(error && lua["error"]["code"] == "invalid", "{lua}");
+    assert!(lua["error"]["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // The reader's rows, as REAPER gives them, names and not folders; never an API function by name, a query its
     // schema doesn't take, nor a tool that isn't a reader.
@@ -771,11 +1139,11 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     assert_eq!(seen["project_key"], a, "the look read A: {seen}");
     assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-1"), "A's key keeps A's epoch, never B's");
     assert!(!lab.ctx.link().page_is_looked(Some("sim-2")));
+    let retained = lab.ctx.link().project().unwrap();
     let (stale, error) = wire.call("read", track.clone(), None).await;
     assert!(error && stale["error"]["code"] == "stale", "B's page passed as A's: {stale}");
-    // Refused for its epoch, not for anything else that's stale (a return the focus poll saw, say).
-    let said = stale["error"]["reason"].as_str().unwrap_or_default();
-    assert!(said.contains("can't tell these rows are the looked project's"), "{stale}");
+    let after = lab.ctx.link().project().unwrap();
+    assert_eq!((after.key, after.epoch, after.native_epoch), (retained.key, retained.epoch, retained.native_epoch));
 
     // The next look is B's, with B's epoch: B's rows are B's.
     let (b, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
@@ -793,20 +1161,22 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     wire.end().await;
 });
 
-/// Live as far as a plan needs it: a look that offers the plan tool and its `replace_sample` step. The plan tool records
-/// every plan it's given and Kumi's change record for it, as Live's would.
+/// Live as far as a sample plan needs it. The plan tool records each plan and one change for a batched pad load;
+/// the real step schemas keep the source resolver's input contract aligned with Live.
 struct PlanLive {
     on_connection: kumi_agent::core::contracts::ConnectionListener,
     on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
     given: Rc<std::cell::RefCell<Vec<Value>>>,
+    route: Option<&'static str>,
 }
 
 struct PlanTool {
     on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
     given: Rc<std::cell::RefCell<Vec<Value>>>,
+    route: Option<&'static str>,
 }
 
-struct SampleStep;
+struct SampleStep(&'static str);
 
 #[async_trait(?Send)]
 impl kumi_types::contracts::KernelTool for PlanTool {
@@ -818,18 +1188,19 @@ impl kumi_types::contracts::KernelTool for PlanTool {
     }
     fn input_schema(&self) -> JsonObject {
         let schema = json!({"type": "object", "required": ["steps"], "properties": {"steps": {"type": "array", "items": {
-            "type": "object", "properties": {"tool": {"type": "string", "enum": ["replace_sample", "wait"]}, "input": {"type": "object"}}
+            "type": "object", "properties": {"tool": {"type": "string", "enum": ["replace_sample", "load_sample", "load_sample_to_pad", "edit_rack", "wait"]}, "input": {"type": "object"}}
         }}}});
         schema.as_object().unwrap().clone()
     }
     async fn execute(&self, input: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
+        let count = input.get("steps").and_then(Value::as_array).map_or(0, Vec::len);
         self.given.borrow_mut().push(Value::Object(input));
         let n = self.given.borrow().len();
         if let Some(on_change) = &self.on_change {
             on_change(kumi_types::contracts::ChangeRecord {
                 id: format!("c{n}"),
                 family: kumi_types::contracts::ChangeFamily::Device,
-                title: "Simpler sample replaced".into(),
+                title: if count > 1 { "Samples placed on pads" } else { "Sample placed" }.into(),
                 track: None,
                 from: None,
                 to: None,
@@ -845,23 +1216,33 @@ impl kumi_types::contracts::KernelTool for PlanTool {
                 batch: None,
             });
         }
-        Ok(kumi_types::contracts::ToolResult::text(json!({"done": [{"step": 1, "changed": true, "change": format!("c{n}")}]}).to_string()))
+        let done: Vec<Value> = (1..=count)
+            .map(|step| {
+                let mut done = json!({"step": step, "changed": true, "change": format!("c{n}")});
+                if let Some(route) = self.route {
+                    done["route"] = json!(route);
+                }
+                done
+            })
+            .collect();
+        Ok(kumi_types::contracts::ToolResult::text(json!({"done": done}).to_string()))
     }
 }
 
 #[async_trait(?Send)]
 impl kumi_types::contracts::KernelTool for SampleStep {
     fn name(&self) -> &str {
-        "replace_sample"
+        self.0
     }
     fn description(&self) -> &str {
-        "Swap the sample in a Simpler for another."
+        "Place a sample in Live."
     }
     fn input_schema(&self) -> JsonObject {
-        let schema = json!({"type": "object", "additionalProperties": false, "required": ["deviceRef", "sample"], "properties": {
-            "deviceRef": {"type": "string", "minLength": 1}, "sample": {"type": "string", "minLength": 1}
-        }});
-        schema.as_object().unwrap().clone()
+        kumi_daw_ableton::changes::CHANGES
+            .iter()
+            .find(|kind| kind.tool == self.0)
+            .and_then(|kind| kind.input_schema.clone())
+            .expect("the real sample step has a schema")
     }
     async fn execute(&self, _: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
         Ok(kumi_types::contracts::ToolResult::error("run through make_changes"))
@@ -879,8 +1260,14 @@ impl kumi_agent::core::contracts::Integration for PlanLive {
         _: Signal,
         _: Option<kumi_agent::core::contracts::ObserveHints>,
     ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
-        let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone() };
-        let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![Rc::new(plan), Rc::new(SampleStep)];
+        let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone(), route: self.route };
+        let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![
+            Rc::new(plan),
+            Rc::new(SampleStep("replace_sample")),
+            Rc::new(SampleStep("load_sample")),
+            Rc::new(SampleStep("load_sample_to_pad")),
+            Rc::new(SampleStep("edit_rack")),
+        ];
         Ok(kumi_agent::core::contracts::Observation {
             native_epoch: None,
             key: "live:demo".into(),
@@ -939,6 +1326,10 @@ struct ImportLab {
 
 impl ImportLab {
     fn new() -> ImportLab {
+        Self::with_route(None)
+    }
+
+    fn with_route(route: Option<&'static str>) -> ImportLab {
         let home = tempfile::tempdir().unwrap();
         let media = tempfile::tempdir().unwrap();
         let wav = |bytes: usize| {
@@ -974,6 +1365,7 @@ impl ImportLab {
                     on_connection: options.on_connection.clone(),
                     on_change: options.on_change.clone(),
                     given: given.clone(),
+                    route,
                 }) as Rc<dyn kumi_agent::core::contracts::Integration>
             }))
         };
@@ -993,6 +1385,15 @@ impl ImportLab {
 }
 
 /// A plan placing `sample` in the Simpler.
+/// A canonical path as a DAW gets it: on Windows without the verbatim `\\?\` prefix canonicalizing gives.
+fn daw_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}").into(),
+        None => text.strip_prefix(r"\\?\").map_or(path, std::path::PathBuf::from),
+    }
+}
+
 fn sample_plan(key: &Value, epoch: u64, sample: Value) -> Value {
     plan(key, epoch, json!([{"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": sample}}]))
 }
@@ -1036,8 +1437,9 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (placed, _) = wire.call("change", sample_plan(&key, epoch, file), Some("tc-1")).await;
     assert_eq!(placed["state"], "applied", "{placed}");
     let sent = lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap().to_string();
-    let artifacts = std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap();
+    let artifacts = daw_path(std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap());
     assert!(std::path::Path::new(&sent).starts_with(&artifacts), "{sent}");
+    assert!(!sent.starts_with(r"\\?\"), "the DAW gets a plain path: {sent}");
     let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];
     assert_eq!(
@@ -1073,6 +1475,16 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (switched, _) = wire.call("change", other, Some("tc-5")).await;
     assert_eq!((switched["state"].clone(), switched["code"].clone()), (json!("refused"), json!("stale")), "{switched}");
     assert_eq!(lab.given.borrow().len(), 2);
+    // A preview made by one call binds neither a dispatch with no call id nor the same id in another chat.
+    let mut previewed = unapproved.clone();
+    previewed["preview"] = json!(true);
+    wire.call("change", previewed.clone(), Some("tc-7")).await;
+    let (unnamed_dispatch, _) = wire.call("change", unapproved.clone(), None).await;
+    assert_eq!(unnamed_dispatch["code"], "stale", "{unnamed_dispatch}");
+    wire.call_in("change", previewed, Some("tc-8"), "chat-1").await;
+    let (other_chat, _) = wire.call_in("change", unapproved.clone(), Some("tc-8"), "chat-2").await;
+    assert_eq!(other_chat["code"], "stale", "{other_chat}");
+    assert_eq!(lab.given.borrow().len(), 2);
     // A preview that came with no call id (a hook that had none) binds its dispatch by the plan alone.
     let mut unnamed = unapproved.clone();
     unnamed["preview"] = json!(true);
@@ -1090,6 +1502,26 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     std::fs::write(media.join("Kick.wav"), b"RIFF and something else entirely").unwrap();
     let (stale, _) = wire.call("change", sample_plan(&key, epoch, kick), Some("tc-3")).await;
     assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
+    assert_eq!(lab.given.borrow().len(), 3);
+
+    // A plan with two host's files keeps neither when the second can't be copied (over the artifacts' 50 MiB): every
+    // file is staged before any is kept, so the first isn't left in the artifacts for nothing.
+    let big = media.join("Long Take.wav");
+    std::fs::File::create(&big).unwrap().set_len(51 * 1024 * 1024).unwrap();
+    let artifacts = lab.ctx.paths().state_dir.join("artifacts");
+    let kept_before = std::fs::read_dir(&artifacts).unwrap().count();
+    let two = |n: u64| {
+        json!({"title": "Two samples", "expected_project_key": key, "expected_epoch": n, "steps": [
+            {"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": {"file": media.join("Kick.wav").display().to_string(), "provenance": provenance}}},
+            {"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": {"file": big.display().to_string(), "provenance": provenance}}},
+        ]})
+    };
+    let mut asked = two(epoch);
+    asked["preview"] = json!(true);
+    wire.call("change", asked, Some("tc-two")).await;
+    let (too_long, _) = wire.call("change", two(epoch), Some("tc-two")).await;
+    assert_eq!(too_long["state"], "refused", "{too_long}");
+    assert_eq!(std::fs::read_dir(&artifacts).unwrap().count(), kept_before, "neither file kept");
     assert_eq!(lab.given.borrow().len(), 3);
 
     // 11d, the demo's step: a sound from a scanned library folder, found by its words, placed as it is.
@@ -1112,7 +1544,7 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     assert!(preview["steps"][0]["text"].as_str().is_some_and(|text| text.contains("\"Snare Tone.wav\"")), "{preview}");
     let (from_library, _) = wire.call("change", sample_plan(&key, epoch, from_map), Some("tc-map")).await;
     assert_eq!(from_library["state"], "applied", "{from_library}");
-    let library_file = std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap();
+    let library_file = daw_path(std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap());
     assert_eq!(lab.given.borrow()[3]["steps"][0]["input"]["sample"], json!(library_file.display().to_string()), "in place");
     let row = lab.ctx.history().row(from_library["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];
@@ -1124,20 +1556,406 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     wire.end().await;
 });
 
+case!(serve_loads_a_sample_or_empty_pad_only_from_the_exact_approved_copy, async {
+    for (tool, mut input) in
+        [("load_sample", json!({"trackRef": "7:track:0"})), ("load_sample_to_pad", json!({"deviceRef": "7:device:0:0", "note": 36}))]
+    {
+        let lab = ImportLab::new();
+        let mut wire = Wire::start(lab.ctx.clone()).await;
+        let (connected, refused) = wire.call("connect", json!({}), None).await;
+        assert!(!refused, "{connected}");
+        let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+        let (key, epoch) = (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap());
+        let original = std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap();
+        input["sample"] = json!({
+            "file": original.display().to_string(),
+            "provenance": {"host_tool": "elevenlabs_sound_effect", "tool_call_id": "made-kick"}
+        });
+        let asked = plan(&key, epoch, json!([{"tool": tool, "input": input}]));
+        let mut previewed = asked.clone();
+        previewed["preview"] = json!(true);
+        let (preview, _) = wire.call("change", previewed.clone(), Some("approve-old")).await;
+        assert_eq!(preview["state"], "preview", "{tool}: {preview}");
+        if tool == "load_sample_to_pad" {
+            assert_eq!(preview["undo"], "daw", "the host must not approve a pad load under an undoable key");
+            assert_eq!(preview["steps"][0]["undo"], "daw");
+            let key = if cfg!(target_os = "macos") { "Cmd+Z" } else { "Ctrl+Z" };
+            assert_eq!(
+                preview["undo_note"],
+                format!(
+                    "Kumi can't undo this change. Live's own Undo ({key}) takes it back, usually in two steps: \
+                    press it one step at a time, right away, and stop as soon as the pad is empty. \
+                    Kumi can't yet tell whether the pad was changed since. \
+                    Live's Redo won't bring the sample back: ask Kumi to load it again."
+                ),
+                "before the route is known, approval must not tell the producer to press Undo blindly"
+            );
+        } else {
+            assert!(preview.get("undo").is_none(), "a new Simpler still has Kumi's guarded undo");
+        }
+        assert!(lab.given.borrow().is_empty());
+
+        let replacement = tone_wav(80.0, 0.1);
+        std::fs::write(&original, &replacement).unwrap();
+        let (stale, _) = wire.call("change", asked.clone(), Some("approve-old")).await;
+        assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{tool}: {stale}");
+        assert!(lab.given.borrow().is_empty(), "a file changed after approval: nothing reached Live");
+
+        let (fresh, _) = wire.call("change", previewed, Some("approve-new")).await;
+        assert_eq!(fresh["state"], "preview", "{tool}: {fresh}");
+        let (placed, _) = wire.call("change", asked, Some("approve-new")).await;
+        assert_eq!(placed["state"], "applied", "{tool}: {placed}");
+        let retained = std::path::PathBuf::from(lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap());
+        let artifacts = daw_path(std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap());
+        assert!(retained.starts_with(artifacts), "{tool}: {}", retained.display());
+        assert_eq!(std::fs::read(&retained).unwrap(), replacement);
+        std::fs::remove_file(&original).unwrap();
+        assert_eq!(std::fs::read(&retained).unwrap(), replacement, "host cleanup cannot remove what Live was given");
+
+        let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
+        if tool == "load_sample_to_pad" {
+            assert!(!row.undo_available);
+            assert_eq!(row.reason.as_deref(), Some("daw_undo"));
+            assert_eq!(row.note.as_deref(), fresh["undo_note"].as_str(), "an unreported route stays uncounted in HISTORY");
+            let (preview, _) = wire.call("undo", json!({"history_id":row.id, "preview":true}), Some("pad-undo")).await;
+            assert_eq!(preview["reason"], "daw_undo", "{preview}");
+            assert_eq!(preview["undo_available"], false, "{preview}");
+            let (refused, _) = wire.call("undo", json!({"history_id":row.id}), Some("pad-undo")).await;
+            assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("daw_undo")), "{refused}");
+            assert_eq!(refused["reason"].as_str(), row.note.as_deref());
+            assert_eq!(lab.given.borrow().len(), 1, "no inverse may clear the pad");
+        }
+        let sources = row.sources.unwrap();
+        assert_eq!(sources.len(), 1, "{tool}: {sources:?}");
+        assert_eq!(
+            (&sources[0]["step"], &sources[0]["file"], &sources[0]["host_tool"]),
+            (&json!(1), &json!("Kick.wav"), &json!("elevenlabs_sound_effect"))
+        );
+        assert!(sources[0]["artifact_id"].as_str().is_some(), "{sources:?}");
+        wire.end().await;
+    }
+});
+
+case!(a_pad_history_note_counts_only_the_route_live_actually_reported, async {
+    for route in ["hotswap", "chain", "preset"] {
+        let lab = ImportLab::with_route(Some(route));
+        let mut wire = Wire::start(lab.ctx.clone()).await;
+        let (connected, refused) = wire.call("connect", json!({}), None).await;
+        assert!(!refused, "{connected}");
+        let (seen, _) = wire.call("observe", json!({"scope":"project"}), None).await;
+        let source = json!({
+            "file":std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap(),
+            "provenance":{"host_tool":"audio.make","tool_call_id":"kick"}
+        });
+        let asked = plan(
+            &seen["project_key"],
+            seen["epoch"].as_u64().unwrap(),
+            json!([{
+                "tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0","note":36,"sample":source}
+            }]),
+        );
+        let mut previewed = asked.clone();
+        previewed["preview"] = json!(true);
+        let (preview, _) = wire.call("change", previewed, Some("pad-route")).await;
+        assert_eq!(preview["state"], "preview", "{preview}");
+        assert!(preview["undo_note"].as_str().unwrap().contains("stop as soon as the pad is empty"));
+        assert!(!preview["undo_note"].as_str().unwrap().contains("twice"));
+        let (placed, _) = wire.call("change", asked, Some("pad-route")).await;
+        assert_eq!(placed["state"], "applied", "{placed}");
+        let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
+        assert_eq!(row.daw_undo_by, Some(json!({"route":route})));
+        if route == "hotswap" {
+            let key = if cfg!(target_os = "macos") { "Cmd+Z" } else { "Ctrl+Z" };
+            assert_eq!(
+                row.note,
+                Some(format!(
+                    "Kumi can't undo this change. Live's own Undo ({key}) takes it back in 2 steps while they're Live's latest: \
+                 press {key} twice, right away. Kumi can't yet tell whether the pad was changed since. \
+                 Live's Redo won't bring the sample back: ask Kumi to load it again."
+                ))
+            );
+        } else {
+            assert_eq!(row.note.as_deref(), preview["undo_note"].as_str(), "untraced routes must not give a blind count");
+        }
+        let (refused, _) = wire.call("undo", json!({"history_id":row.id}), Some("pad-route-undo")).await;
+        assert_eq!(refused["code"], "daw_undo", "{refused}");
+        assert_eq!(refused["reason"].as_str(), row.note.as_deref());
+        assert_eq!(lab.given.borrow().len(), 1, "Kumi must never clear any of these pads");
+        wire.end().await;
+    }
+});
+
+case!(serve_allows_only_one_pad_per_change_before_retaining_any_source, async {
+    let lab = ImportLab::new();
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope":"project"}), None).await;
+    let sample = json!({
+        "file": std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap(),
+        "provenance":{"host_tool":"audio.make", "tool_call_id":"kick"}
+    });
+    let pad = json!({"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":36, "sample":sample}});
+    let other = json!({"tool":"load_sample", "input":{"trackRef":"7:track:1", "sample":sample}});
+    let second_pad = json!({"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":38, "sample":sample}});
+    let chain = json!({"tool":"edit_rack", "input":{"rackRef":"7:device:0:0", "action":"add-chain"}});
+    let artifacts = lab.ctx.paths().state_dir.join("artifacts");
+    let kept_before = std::fs::read_dir(&artifacts).unwrap().count();
+    for (n, steps) in [json!([pad, other]), json!([other, pad]), json!([pad, second_pad]), json!([pad, chain]), json!([chain, pad])]
+        .into_iter()
+        .enumerate()
+    {
+        let asked = plan(&seen["project_key"], seen["epoch"].as_u64().unwrap(), steps);
+        for preview in [true, false] {
+            let mut asked = asked.clone();
+            asked["preview"] = json!(preview);
+            let (reply, _) = wire.call("change", asked, Some(&format!("isolated-{n}-{preview}"))).await;
+            assert_eq!((reply["state"].clone(), reply["code"].clone()), (json!("refused"), json!("not_allowed")), "{reply}");
+        }
+    }
+    assert!(lab.given.borrow().is_empty(), "neither a second pad nor another kind of step may run beside a pad load");
+    assert_eq!(std::fs::read_dir(&artifacts).unwrap().count(), kept_before, "a refused plan must retain no source");
+    wire.end().await;
+});
+
 case!(serve_refuses_a_path_in_renoises_file_field_before_anything_runs, async {
-    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(|secret| SimulatorConfig::renoise(secret, "/lab/Renoise")))).await;
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (connected, refused) = wire.call("connect", json!({}), None).await;
     assert!(!refused, "{connected}");
     let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
     let key = seen["project_key"].clone();
     let epoch = seen["epoch"].as_u64().unwrap_or_else(|| panic!("{seen}"));
-    let sent = lab.methods_sent();
+    let sent = lab.methods_sent().len();
     for (n, path) in ["/Users/me/Samples/kick.wav", "C:\\Samples\\kick.wav", "library:Drums/kick.wav"].into_iter().enumerate() {
         let steps = json!([{"tool": "sample_load", "input": {"ref": "i1", "path": path}}]);
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-path-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{path}: {refused}");
     }
-    assert_eq!(lab.methods_sent(), sent, "nothing reached Renoise");
+    let after = lab.methods_sent();
+    assert!(!after[sent..].iter().any(|method| method.starts_with("change_")), "nothing written into Renoise: {after:?}");
     wire.end().await;
 });
+
+/// Live whose undo is guarded, as Live's integration is on the plugin host: it says what an undo would do from fresh
+/// reads, and refuses one whose values changed since (`refuse`), counting the undos it lets through. Whether the
+/// runtime's write lease was held as it checked goes to `held`.
+struct Guarded {
+    on_connection: kumi_agent::core::contracts::ConnectionListener,
+    state: Rc<GuardedState>,
+}
+
+struct GuardedState {
+    refuse: Cell<bool>,
+    undos: Cell<usize>,
+    lease: std::cell::RefCell<std::rc::Weak<Ctx>>,
+    held: Cell<Option<bool>>,
+}
+
+#[async_trait(?Send)]
+impl kumi_agent::core::contracts::Integration for Guarded {
+    async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
+        (self.on_connection)(kumi_agent::core::contracts::ConnectionState::Connected, None);
+        Ok(())
+    }
+    async fn observe(
+        &self,
+        _: Signal,
+        _: Option<kumi_agent::core::contracts::ObserveHints>,
+    ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
+        Ok(kumi_agent::core::contracts::Observation {
+            native_epoch: None,
+            key: "live:demo".into(),
+            revision: None,
+            label: "Live — Demo".into(),
+            context: "Drums".into(),
+            instructions: String::new(),
+            tools: vec![],
+            project: None,
+            set: Some("set-1".into()),
+            tracks: None,
+            saved_at: None,
+            identity: None,
+        })
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn has_undo(&self) -> bool {
+        true
+    }
+    async fn guarded_undo(
+        &self,
+        id: &str,
+        _: Signal,
+    ) -> Result<Result<kumi_types::contracts::ChangeRecord, kumi_agent::core::contracts::UndoRefusal>, RuntimeError> {
+        let state = &self.state;
+        state.held.set(state.lease.borrow().upgrade().map(|ctx| ctx.lease().held()));
+        if state.refuse.get() {
+            let reason = "volume changed in Live since Kumi set it, so Kumi left the change as it is.".into();
+            return Ok(Err(kumi_agent::core::contracts::UndoRefusal { code: "changed_since", reason }));
+        }
+        state.undos.set(state.undos.get() + 1);
+        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": "undone", "at": 2})).unwrap()))
+    }
+    async fn undo_preview(&self, _: &str, _: Signal) -> Result<Option<kumi_agent::core::contracts::UndoPreview>, RuntimeError> {
+        let refusal = self.state.refuse.get().then(|| kumi_agent::core::contracts::UndoRefusal {
+            code: "changed_since",
+            reason: "volume changed in Live since Kumi set it, so Kumi left the change as it is.".into(),
+        });
+        Ok(Some(kumi_agent::core::contracts::UndoPreview { text: "Undo volume -4.0 dB → -6.0 dB".into(), refusal }))
+    }
+}
+
+case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_moved_on, async {
+    let home = tempfile::tempdir().unwrap();
+    let transport = home.path().join("kumi-home");
+    let config = transport.join("bridge/state/bridge-config.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "{}").unwrap();
+    let scripts = home.path().join("Remote Scripts");
+    std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
+    std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
+    let env = Env::from([
+        ("HOME".into(), home.path().display().to_string()),
+        ("KUMI_HOME".into(), transport.display().to_string()),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
+        ("KUMI_PROCESSES".into(), "none".into()),
+    ]);
+    let live = Rc::new(GuardedState { refuse: Cell::new(true), undos: Cell::new(0), lease: Default::default(), held: Cell::new(None) });
+    let factory = {
+        let live = live.clone();
+        AbletonFactory(Rc::new(move |options| {
+            Rc::new(Guarded { on_connection: options.on_connection.clone(), state: live.clone() })
+                as Rc<dyn kumi_agent::core::contracts::Integration>
+        }))
+    };
+    let args = Args {
+        state_dir: home.path().join("state"),
+        kumi_home: transport,
+        hermes_home: None,
+        hermes_root: None,
+        daw: DawId::Ableton,
+        library_roots: vec![],
+        media_roots: vec![],
+        tools: BTreeMap::new(),
+    };
+    let ctx = Ctx::new(args, env, kumi_daw::io::Answers::default().with(factory)).unwrap();
+    *live.lease.borrow_mut() = Rc::downgrade(&ctx);
+    let mut wire = Wire::start(ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
+    let key = seen["project_key"].as_str().unwrap().to_owned();
+    // A change of Kumi's to that mixer, as the integration's record of it reaches HISTORY.
+    let made = json!({"id": "c1", "family": "mixer", "title": "Drums volume -6.0 dB → -4.0 dB", "state": "applied", "at": 1});
+    let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
+    let before = (wire.call("history", json!({}), None).await.0, wire.call("status", json!({}), None).await.0["project"].clone());
+    // Its preview is the integration's fresh read, with why it won't go: never the title the change was made with.
+    let (preview, _) = wire.call("undo", json!({"history_id": row.id, "preview": true}), None).await;
+    assert_eq!((preview["undo_available"].clone(), preview["reason"].clone()), (json!(false), json!("changed_since")), "{preview}");
+    assert!(preview["text"].as_str().unwrap().contains("-4.0 dB → -6.0 dB"), "{preview}");
+    // The undo: refused, and nothing recorded, audited, or moved on.
+    let (undone, error) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo")).await;
+    assert!(!error, "{undone}");
+    assert_eq!(
+        (undone["state"].clone(), undone["code"].clone(), undone.get("history_ids")),
+        (json!("refused"), json!("changed_since"), None)
+    );
+    let after = (wire.call("history", json!({}), None).await.0, wire.call("status", json!({}), None).await.0["project"].clone());
+    assert_eq!(after, before, "HISTORY and the epoch as they were");
+    assert_eq!((live.undos.get(), live.held.get()), (0, Some(true)), "checked under the endpoint's write lease");
+    // Untouched since: undone.
+    live.refuse.set(false);
+    let (undone, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-2")).await;
+    assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
+    wire.end().await;
+});
+
+/// What the host sent the simulator, each request as JSON, in order.
+fn requests(lab: &Lab) -> Vec<Value> {
+    let simulator = lab.simulator.as_ref().unwrap();
+    simulator.transcript().into_iter().filter(|line| line.from_host).filter_map(|line| serde_json::from_str(&line.text).ok()).collect()
+}
+
+case!(serve_plays_reaper_from_a_bar_with_its_own_transport_and_never_while_it_would_record, async {
+    let script = ReaperScript::new(3, 0);
+    script.set_time_signature(4, 4);
+    let knobs = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, _, _, _) = looked(&mut wire).await;
+    let played_any = |lab: &Lab| requests(lab).iter().any(|sent| sent["method"] == "transport_play");
+    let play = |extra: Value| {
+        let mut args = json!({"action": "play", "expected_project_key": key.clone()});
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        args
+    };
+    // What it would do, in its words; a place REAPER doesn't play from, in its words; nothing played.
+    let (preview, _) = wire.call("transport", play(json!({"from_bar": 9, "preview": true})), None).await;
+    assert!(preview["text"].as_str().unwrap().contains("from bar 9"), "{preview}");
+    let (slot, error) = wire.call("transport", play(json!({"from_slot": 2})), Some("tc-slot")).await;
+    assert!(error && slot["error"]["code"] == "invalid", "{slot}");
+    // REAPER's record on: refused before anything is sent.
+    knobs.set_recording(true);
+    let (recording, error) = wire.call("transport", play(json!({"from_bar": 9})), Some("tc-record")).await;
+    assert!(error && recording["error"]["code"] == "recording", "{recording}");
+    assert!(!played_any(&lab), "nothing played");
+    knobs.set_recording(false);
+    // Bar 9 in 4/4 is beat 32: the cursor goes there, then REAPER plays; no change is kept.
+    let (played, error) = wire.call("transport", play(json!({"from_bar": 9})), Some("tc-play")).await;
+    assert!(!error && played["state"] == "playing", "{played}");
+    let sent = requests(&lab);
+    let cursor = sent.iter().position(|sent| sent["method"] == "cursor_set").expect("the cursor moved");
+    assert_eq!(sent[cursor]["params"]["positionBeats"], json!(32.0));
+    assert!(sent.iter().skip(cursor).any(|sent| sent["method"] == "transport_play"), "then played");
+    let (history, _) = wire.call("history", json!({}), None).await;
+    assert_eq!(history["items"], json!([]), "no HISTORY row: {history}");
+    // A listen holds the DAW: a play waits for it, and a stop doesn't.
+    let release = Rc::new(tokio::sync::Notify::new());
+    let held = release.clone();
+    lab.ctx
+        .start_job("listen", move |_, _| async move {
+            held.notified().await;
+            Ok(json!({}))
+        })
+        .unwrap();
+    let (busy, error) = wire.call("transport", play(json!({})), Some("tc-busy")).await;
+    assert!(error && busy["error"]["code"] == "busy", "{busy}");
+    let (stopped, error) = wire.call("transport", json!({"action": "stop"}), Some("tc-stop")).await;
+    assert!(!error && stopped["state"] == "stopped", "{stopped}");
+    release.notify_one();
+    wire.end().await;
+});
+
+case!(serve_plays_renoise_from_a_sequence_slot_and_line_and_never_in_edit_mode, async {
+    let script = RenoiseScript::new();
+    let knobs = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+    let key = seen["project_key"].clone();
+    let (bar, error) = wire.call("transport", json!({"action": "play", "from_bar": 9, "expected_project_key": key}), Some("tc-bar")).await;
+    assert!(error && bar["error"]["code"] == "invalid" && bar["error"]["reason"].as_str().unwrap().contains("sequence slot"), "{bar}");
+    // Edit mode records while it plays: refused.
+    knobs.set_song("editMode", json!(true));
+    let (edit, error) =
+        wire.call("transport", json!({"action": "play", "from_slot": 3, "expected_project_key": key}), Some("tc-edit")).await;
+    assert!(error && edit["error"]["code"] == "recording", "{edit}");
+    knobs.set_song("editMode", json!(false));
+    let args = json!({"action": "play", "from_slot": 3, "from_line": 16, "expected_project_key": key});
+    let (played, error) = wire.call("transport", args, Some("tc-play")).await;
+    assert!(!error && played["state"] == "playing", "{played}");
+    let sent = requests(&lab);
+    let play = sent.iter().find(|sent| sent["method"] == "transport_play").expect("Renoise played");
+    assert_eq!((play["params"]["sequence"].clone(), play["params"]["line"].clone()), (json!(3), json!(16)), "{play}");
+    let (stopped, _) = wire.call("transport", json!({"action": "stop"}), Some("tc-stop")).await;
+    assert_eq!(stopped["state"], "stopped", "{stopped}");
+    wire.end().await;
+});
+
+#[path = "serve_listen.rs"]
+mod track_listening;

@@ -66,7 +66,7 @@ BLUEPRINTS: tuple[dict[str, Any], ...] = (
         "prompt_template": (
             "Check whether Kumi is ready for today's session: call kumi_status, and no other Kumi tool. In two lines "
             "at most, say whether Kumi is set up, whether it can read compressed audio, and the one thing to do if "
-            "something needs doing (run hermes kumi setup, or open a chat and ask Kumi to connect to the DAW). Kumi "
+            "something needs doing (run hermes kumi setup, or open a chat and ask Hermes to connect to the DAW). Kumi "
             "not running yet is normal: just say it starts when a chat connects. " + DATA + " Never call " + NEVER +
             ": this runs unattended."
         ),

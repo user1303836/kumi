@@ -94,6 +94,16 @@ impl Integration for FallbackIntegration {
         }
         current.undo(id, signal).await
     }
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        let current = self.current();
+        if !current.has_undo() {
+            return Err(KumiError::new(FailureKind::Request, self.not_connected("undo")).into());
+        }
+        current.guarded_undo(id, signal).await
+    }
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        self.current().undo_preview(id, signal).await
+    }
     fn fingerprint(&self) -> Option<Value> {
         self.current().fingerprint()
     }
@@ -244,6 +254,19 @@ impl Integration for FallbackIntegration {
     fn has_hear(&self) -> bool {
         true
     }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        let current = self.current();
+        if current.has_hear() {
+            current.preview_hear(request, signal).await
+        } else {
+            Err(kumi_types::errors::HearFailure::Refused {
+                code: "not_connected",
+                reason: self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place)),
+                marked_modified: false,
+            }
+            .into())
+        }
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let c = self.current();
         if c.has_hear() {
@@ -251,5 +274,20 @@ impl Integration for FallbackIntegration {
         } else {
             Ok(Err(self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place))))
         }
+    }
+    fn has_device_build(&self) -> bool {
+        self.current().has_device_build()
+    }
+    async fn device_preview(&self, spec: &Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        self.current().device_preview(spec).await
+    }
+    async fn device_build(
+        &self,
+        spec: &Value,
+        sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        self.current().device_build(spec, sha256, file, signal).await
     }
 }

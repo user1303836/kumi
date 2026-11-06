@@ -30,7 +30,8 @@ struct Kumi {
 
 impl Kumi {
     async fn start(daw: Daw, home: &Path) -> Kumi {
-        let host = Rc::new(InProcess { host: Arc::new(Host::new(daw, home)), id: Cell::new(0) });
+        let host =
+            Rc::new(InProcess { host: Arc::new(Host::new(daw, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
         let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
             Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
             Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),

@@ -1,7 +1,7 @@
 // A sound or notes Kumi had made through Mirelo (`kumi_generate`, then `kumi_job`), in CC-13's shapes: what was asked,
 // the file it made, what it cost against what was reserved, and the producer's own cap. Credits are Mirelo API credits,
 // never money; `null` is unknown, never zero. Nothing here spends, places or retries anything.
-import { clean, jobWords, num, placeRequest, plainId, planNotesRequest } from './format.ts'
+import { clean, jobWords, num, placeRequest, plainId, planNotesRequest, seconds as secondsWords } from './format.ts'
 import { english, type Translate } from './i18n.ts'
 import type { Job } from './types.ts'
 
@@ -17,7 +17,7 @@ export interface Ledger {
 export interface Generation {
   /** The job's state: `running`, `done`, `failed`, `cancelled` or `interrupted`. */
   state: string
-  /** `sfx` or `audio_to_midi`. */
+  /** `sfx` or `audio_to_midi` (CC-13), or one of CC-15's `video_to_sfx`, `extend` and `inpaint`. */
   kind: string
   /** What was asked for (a sound effect's words); empty for notes from audio. */
   prompt: string
@@ -25,7 +25,10 @@ export interface Generation {
   artifactId: string | null
   file: string
   outputType: string | null
+  /** The billed span. For an `sfx` it's the sound's length; for CC-15's kinds it's the window, never the file's length. */
   seconds: number | null
+  /** CC-15's window, when the kind has one and its numbers hold (W4-b); null shows none rather than a guess. */
+  window: Window | null
   noteCount: number | null
   estimate: number | null
   reserved: number | null
@@ -36,6 +39,44 @@ export interface Generation {
   submission: string
   /** What the job is on now, in its own words (a real phase, never a path). */
   message: string
+}
+
+/** What a CC-15 generation covered, in the source's seconds: the video's first `seconds`, the span `extend` appended,
+ *  or the region `inpaint` replaced. */
+export type Window =
+  | { kind: 'video_to_sfx'; seconds: number; source: number }
+  | { kind: 'extend'; append: number; source: number }
+  | { kind: 'inpaint'; start: number; end: number; source: number }
+
+/** CC-15's kinds: each edits or scores a source, and its `seconds` is a window's, not the returned file's length. */
+const WINDOWED = new Set(['video_to_sfx', 'extend', 'inpaint'])
+
+/** A time as CC-15 gives it (W4-b): a finite, non-negative number of seconds in whole milliseconds. */
+function timing(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null
+  return Math.abs(value * 1000 - Math.round(value * 1000)) < 1e-6 ? value : null
+}
+
+const ms = (value: number): number => Math.round(value * 1000)
+
+/** The window a CC-15 result names, checked against its own billed `seconds`: any number missing, out of order or
+ *  disagreeing gives none. */
+function windowOf(kind: string, result: Record<string, unknown>): Window | null {
+  const source = timing(result.source_seconds)
+  const billed = timing(result.seconds)
+  if (source === null || source === 0 || billed === null || billed === 0) return null
+  if (kind === 'video_to_sfx') return billed <= source ? { kind, seconds: billed, source } : null
+  if (kind === 'extend') {
+    const append = timing(result.append_seconds)
+    return append !== null && ms(append) === ms(billed) ? { kind, append, source } : null
+  }
+  if (kind === 'inpaint') {
+    const start = timing(result.region_start_seconds)
+    const end = timing(result.region_end_seconds)
+    if (start === null || end === null || !(start < end) || end > source || ms(end) - ms(start) !== ms(billed)) return null
+    return { kind, start, end, source }
+  }
+  return null
 }
 
 const STATES = new Set(['running', 'done', 'failed', 'cancelled', 'interrupted'])
@@ -80,14 +121,16 @@ export function parseGeneration(value: unknown): Generation | null {
   const error = objectOf(outer.error)
   const progress = objectOf(outer.progress)
   const notes = result.note_count
+  const kind = typeof result.kind === 'string' ? clean(result.kind, 24) : ''
   return {
     state,
-    kind: typeof result.kind === 'string' ? clean(result.kind, 24) : '',
+    kind,
     prompt: typeof result.prompt === 'string' ? clean(result.prompt, 200) : '',
     artifactId: plainId(result.artifact_id),
     file: typeof result.file === 'string' ? clean(result.file.split(/[\\/]/).pop() ?? '', 80) : '',
     outputType: typeof result.output_type === 'string' ? clean(result.output_type, 16) : null,
     seconds: positive(result.seconds),
+    window: WINDOWED.has(kind) ? windowOf(kind, result) : null,
     noteCount: typeof notes === 'number' && Number.isInteger(notes) && notes >= 0 ? notes : null,
     estimate: credits(spent?.estimate ?? estimate?.credits),
     reserved: credits(spent?.reserved ?? estimate?.max_credits),
@@ -129,21 +172,39 @@ export function capWords(made: Generation, t: Translate = english): string {
 const NOTES = new Set(['midi', 'notes', 'musicxml'])
 
 /** What a generation's primary output is to the UI: `audio` (waveform, Place…), `notes` (MIDI, notes or MusicXML:
- *  Plan notes…, never an audio step), or null for a type CC-13 doesn't name, which gets neither (CC-13). */
+ *  Plan notes…, never an audio step), or null for a type CC-13 doesn't name, which gets neither (CC-13). Before its
+ *  output is known, a sound effect and CC-15's kinds are audio. */
 export function outputKind(made: Generation): 'audio' | 'notes' | null {
-  if (made.outputType === null) return made.kind === 'sfx' ? 'audio' : made.kind === 'audio_to_midi' ? 'notes' : null
+  if (made.outputType === null) return made.kind === 'sfx' || WINDOWED.has(made.kind) ? 'audio' : made.kind === 'audio_to_midi' ? 'notes' : null
   if (made.outputType === 'audio') return 'audio'
   return NOTES.has(made.outputType) ? 'notes' : null
 }
 
 /** What the card and the Jobs row call it: the words it was made from, else what it is. */
 export function generationTitle(made: Generation, t: Translate = english): string {
-  return made.prompt || (outputKind(made) === 'notes' ? t('generate.notesTitle') : t('generate.soundTitle'))
+  if (made.prompt) return made.prompt
+  if (WINDOWED.has(made.kind)) return t(`generate.kinds.${made.kind}`)
+  return outputKind(made) === 'notes' ? t('generate.notesTitle') : t('generate.soundTitle')
 }
 
-/** A generation job as a Jobs row: the shared title and progress, with its file, its cost and, when the job failed
- *  or the ledger is frozen, why. The raw `/job` snapshot has no ledger, so the frozen state comes from the latest
- *  `generate.updated` card kept on the job (`card`); a charge above the job's own reservation is amber either way. */
+// "2–4 s", or "1:10–1:14" past a minute: both ends in the same form.
+const clock = (value: number): string => `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, '0')}`
+const span = (from: number, to: number): string => (to < 60 ? `${num(from, 2)}–${secondsWords(to)}` : `${clock(from)}–${clock(to)}`)
+
+/** How long a generation is, as its card shows it: CC-15's window in words (never its `seconds` as the file's length),
+ *  an `sfx`'s length, or nothing. */
+export function lengthWords(made: Generation, t: Translate = english): string {
+  const covered = made.window
+  if (covered?.kind === 'video_to_sfx') return t('generate.window.video_to_sfx', secondsWords(covered.seconds))
+  if (covered?.kind === 'extend') return t('generate.window.extend', secondsWords(covered.append), secondsWords(covered.source))
+  if (covered?.kind === 'inpaint') return t('generate.window.inpaint', span(covered.start, covered.end), secondsWords(covered.source))
+  return WINDOWED.has(made.kind) || made.seconds === null ? '' : secondsWords(made.seconds)
+}
+
+/** A generation job as a Jobs row: the shared title and progress, with its file, CC-15's window, its cost and, when
+ *  the job failed or the ledger is frozen, why. The raw `/job` snapshot has no ledger, so the frozen state comes from
+ *  the latest `generate.updated` card kept on the job (`card`); a charge above the job's own reservation is amber
+ *  either way. */
 export function generationJobWords(job: Job & { card?: unknown }, t: Translate = english): ReturnType<typeof jobWords> {
   const words = jobWords(job, t)
   const made = parseGeneration({ ...job, kind: 'generate' })
@@ -151,7 +212,8 @@ export function generationJobWords(job: Job & { card?: unknown }, t: Translate =
   const frozen = (made.ledger ?? parseGeneration(job.card)?.ledger)?.frozen === true
   const over = made.actual !== null && made.reserved !== null && made.actual > made.reserved
   const reason = made.state === 'failed' || made.state === 'interrupted' ? made.error?.reason ?? '' : ''
-  const detail = [made.state === 'running' ? made.message : made.file, reason, costWords(made, t), frozen ? t('generate.frozen') : '']
+  const covered = made.window ? lengthWords(made, t) : ''
+  const detail = [made.state === 'running' ? made.message : made.file, covered, reason, costWords(made, t), frozen ? t('generate.frozen') : '']
   return { ...words, detail: detail.filter(Boolean).join(' · '), tone: (frozen || over) && words.tone === 'good' ? 'warn' : words.tone }
 }
 

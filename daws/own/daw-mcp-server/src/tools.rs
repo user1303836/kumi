@@ -28,8 +28,23 @@ pub fn kinds(daw: Daw) -> Kinds {
     match daw {
         Daw::Reaper => Kinds {
             read: &[
-                "project", "track", "item", "take", "fx", "param", "send", "marker", "region", "note", "event", "envelope", "point",
-                "autoitem", "call", "spans",
+                "project",
+                "track",
+                "item",
+                "take",
+                "fx",
+                "param",
+                "send",
+                "marker",
+                "region",
+                "note",
+                "event",
+                "envelope",
+                "point",
+                "autoitem",
+                "call",
+                "spans",
+                "render_preflight",
             ],
             bodies: &["arrange", "midi", "fx", "routing", "mixer", "levels"],
             // (r-tracks) The project's notes, grid and timebase make no step in REAPER's history either (7.82 lab).
@@ -62,6 +77,7 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "modset",
                 "chain",
                 "spans",
+                "render_preflight",
             ],
             bodies: &["pattern", "matrix", "phrase", "instrument", "dsp", "mixer"],
             outside_undo: &[
@@ -140,6 +156,11 @@ fn read_params(arguments: &Value) -> Result<Value, String> {
     }
     if !params.contains_key("kind") && !params.contains_key("ref") {
         return Err("kind: what to read (or ref: one object)".into());
+    }
+    if params.get("kind").and_then(Value::as_str) == Some("render_preflight") {
+        params.insert("range".into(), crate::listening::range(arguments, "range")?);
+    } else if arguments.get("range").is_some() {
+        return Err("range is only for kind render_preflight".into());
     }
     layout_arg(arguments, &mut params)?;
     hidden_arg(arguments, &mut params)?;

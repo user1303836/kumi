@@ -3,6 +3,7 @@ mod more_summaries;
 pub(crate) mod pictures;
 mod summaries;
 use async_trait::async_trait;
+use kumi_agent::core::context::HostPolicy;
 use kumi_common::js::{
     json::stringify,
     number,
@@ -16,6 +17,10 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, sync::LazyLock};
 pub type KnownTrack = TrackChip;
 pub use kumi_agent::integrations::shared::changes::ChangeSummary;
+pub const PAD_UNDO_REASON: &str = "Kumi can't yet tell whether the pad was changed since. \
+    Live's Redo won't bring the sample back: ask Kumi to load it again.";
+pub const PAD_UNDO_UNCOUNTED: &str = "Kumi can't undo this change. Live's own Undo ({key}) takes it back, usually in two steps: \
+    press it one step at a time, right away, and stop as soon as the pad is empty.";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SampleFile {
     pub path: String,
@@ -260,6 +265,9 @@ pub static REFERENCE_FIELDS: LazyLock<Vec<String>> = LazyLock::new(|| serde_json
 pub static UNDO_DESCRIPTION: LazyLock<String> = LazyLock::new(|| DATA["undoDescription"].as_str().unwrap().into());
 pub const UNDO_TOOL: &str = "undo_change";
 pub const EMERGENCY_STOP: &str = "live_session_emergency_stop";
+/// The changes whose undo takes out a device the change made: a device or preset loaded, a device duplicated, a sample
+/// loaded into a new Simpler or onto a pad. Kumi's undo of one runs inside one Live undo step (#1101).
+pub const MAKES_A_DEVICE: [&str; 5] = ["load_device", "duplicate_device", "load_sample", "load_sample_to_pad", "load_samples_to_pads"];
 pub use kumi_types::picture::format_number;
 pub fn note_name(note: f64) -> String {
     let index = note % 12.0;
@@ -801,6 +809,10 @@ impl ChangeKind {
         }
         schema.as_object().unwrap().clone()
     }
+    /// Whether Kumi's undo of this change takes out a device the change made ([`MAKES_A_DEVICE`]).
+    pub fn makes_a_device(&self) -> bool {
+        MAKES_A_DEVICE.contains(&self.tool.as_str())
+    }
     pub fn produces(&self, applied: &JsonObject) -> Option<Produced> {
         let (reference, kind) = match self.tool.as_str() {
             "add_tracks_and_scenes" | "group_tracks" => (
@@ -832,11 +844,27 @@ impl ChangeKind {
         };
         reference.map(|reference| Produced { reference: reference.into(), kind: kind.into() })
     }
+    /// A host requiring guarded undo keeps pad loads: their inverse cannot guard edits inside the chain (#1110).
+    /// Standalone keeps its existing inverse; the plugin uses Live's own Undo instead.
+    pub fn kept_for_live(&self, policy: &HostPolicy) -> Option<String> {
+        if !policy.guards_undo || !matches!(self.tool.as_str(), "load_sample_to_pad" | "load_samples_to_pads") {
+            return None;
+        }
+        use kumi_daw::plugin::daw_undo_said;
+        // The plan records the route and can count a traced hot-swap afterwards. Never assume that route here.
+        let mut note = daw_undo_said(PAD_UNDO_UNCOUNTED, "Live", std::env::consts::OS);
+        note.push(' ');
+        note.push_str(PAD_UNDO_REASON);
+        Some(note)
+    }
     pub fn permanent(&self, input: &JsonObject) -> Option<String> {
         let action = input.get("action").and_then(Value::as_str);
         let why = match self.tool.as_str() {
+            // The step says add-chain for the bridge's insert-chain: either spelling, before or after it's prepared.
             "edit_rack" => match action {
-                Some("insert-chain") => "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it.",
+                Some("insert-chain" | "add-chain") => {
+                    "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it."
+                }
                 Some("delete-variation") => "Live gives Kumi no way to bring a deleted variation back.",
                 _ => return None,
             },

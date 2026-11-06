@@ -186,14 +186,20 @@ def install(data_dir: Path, *fixture_args: str, version: str = VERSION, target: 
     return kumi
 
 
-def pin(plugin_dir: Path, version: str = VERSION) -> None:
-    """A kumi_release.json for `version` with this computer's bundle, as scripts/hermes_pin.py writes one."""
+# The fixture runtime listens to every kind of source in every DAW (CC-16's listen_sources as hermes_pin records them).
+LISTEN_ALL = {daw: ["artifact", "file", "sound", "track"] for daw in ("ableton", "reaper", "renoise")}
+
+
+def pin(plugin_dir: Path, version: str = VERSION, listen_sources: dict | None = LISTEN_ALL) -> None:
+    """A kumi_release.json for `version` with this computer's bundle, as scripts/hermes_pin.py writes one, with the
+    runtime's listen sources (none recorded when `listen_sources` is None, as on a pin from before CC-16)."""
     target = module("setup").host_target()
     record = {"url": f"https://github.com/user1303836/kumi/releases/download/v{version}/kumi-{target}.tar.xz",
               "sha256": "0" * 64, "size": 26_000_000, "unpacked_bytes": 82_000_000}
     (plugin_dir / "kumi_release.json").write_text(json.dumps(
         {"schema": 1, "kumi": version, "repository": "user1303836/kumi", "tag": f"v{version}",
-         "targets": {target: record}}), encoding="utf-8")
+         "targets": {target: record}, **({"listen_sources": listen_sources} if listen_sources is not None else {})}),
+        encoding="utf-8")
 
 
 def requests(state_dir: Path) -> list[dict]:
@@ -203,11 +209,13 @@ def requests(state_dir: Path) -> list[dict]:
 
 
 def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0,
-         daw_component: bool = True, hermes_config: dict | None = None, session_key: str = ""):
+         daw_component: bool = True, hermes_config: dict | None = None, session_key: str = "",
+         media_roots: list[str] | None = None, ledger=None, mirelo_key: str | None = None):
     """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
-    `installed` is false), a plugin folder whose kumi_release.json pins it, `hermes_config` as Hermes's own settings
-    (never this machine's), and `session_key` as the calling session's key (never this process's). Returns (host,
-    context, data folder); everything is cleaned up after `test`."""
+    `installed` is false), a plugin folder whose kumi_release.json pins it, `hermes_config` as Hermes's own settings,
+    `media_roots` as its media folders (none, unless a test names them), `session_key` as the calling session's key,
+    and `ledger` and `mirelo_key` as the credit ledger and Hermes's Mirelo secret: never this machine's or this
+    process's. Returns (host, context, data folder); everything is cleaned up after `test`."""
     import tempfile
     folder, plugin = tempfile.TemporaryDirectory(), tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
@@ -217,12 +225,15 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
     if installed:
         install(data, *fixture_args, daw_component=daw_component)
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
-    runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
+    runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10,
+                                          hermes=lambda: (None, None))  # never this machine's Hermes homes
     test.addCleanup(stopped, runtimes, data)
     return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
                                  hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name),
                                  hermes_config=lambda: dict(hermes_config or {}),
-                                 session_key=lambda: session_key), ctx, data)
+                                 session_key=lambda: session_key,
+                                 media_roots=lambda: list(media_roots or []), ledger=ledger,
+                                 mirelo_key=lambda: mirelo_key), ctx, data)
 
 
 def stopped(runtimes, data: Path, wait: float = 30.0) -> None:

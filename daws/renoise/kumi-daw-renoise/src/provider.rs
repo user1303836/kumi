@@ -18,6 +18,7 @@ pub static PROVIDER: Own = Own {
     presentation: &crate::PRESENTATION,
     view: &crate::VIEW,
     plugin_steps: crate::plugin_steps::PLUGIN_STEPS,
+    plugin_refused: crate::plugin_steps::PLUGIN_REFUSED,
     library: &crate::library::LIBRARY,
     site: "renoise.com",
     bridge: "Kumi's tool",

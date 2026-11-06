@@ -4,7 +4,8 @@ use crate::core::contracts::{ActionEvent, CatchUp, ConnectionListener, PinnedNod
 use crate::core::view::{DawFocus, Transport};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
-use kumi_types::contracts::{AuditionEvent, ChangeRecord};
+use kumi_types::contracts::{AuditionEvent, ChangeRecord, HearRequest};
+use kumi_types::errors::HearFailure;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -20,7 +21,20 @@ use kumi_listening::listener::ListenerSource;
 pub struct HostPolicy {
     /// May keep project and track identities in the DAW's saved document.
     pub persist_identity: bool,
+    /// Kumi's undo of a value it set (a mixer, the tempo, a device's parameters) first reads it again, right before the
+    /// DAW is asked, and refuses when it's changed since (`Integration::guarded_undo`): the plugin host's.
+    /// A known inverse that cannot guard later producer edits is kept for the DAW's own Undo instead.
+    pub guards_undo: bool,
     pub listening: ListeningPolicy,
+    /// May drive the DAW's own menus and dialogs (Live's Hands). A plugin host never does: no step reaches them, and the
+    /// integration doesn't offer them either.
+    pub menus: bool,
+    /// The folder whose `variations/` keeps the variations tool's sets, and with it the plugin host's rules for takes
+    /// (CC-24): a preview that draws without writing, a dispatch held to the takes its preview drew, no take rewritten
+    /// after the producer edited it, and no place made for a take. None: standalone Kumi's sets, in its home, and its
+    /// own rules. A plugin host's is under its own state, so its takes' numbering and kept takes never mix with
+    /// standalone Kumi's on the same project (W1-e).
+    pub variations_home: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -29,16 +43,66 @@ pub enum ListeningPolicy {
     Standalone,
     /// Only preinstalled capture devices and a caller-owned directory below this root. No recording
     /// fallback, automatic audition, installation or shared-cache sweep.
-    Restricted { scratch_root: PathBuf },
+    Restricted { scratch_root: PathBuf, quarantine_root: PathBuf },
+}
+
+impl ListeningPolicy {
+    /// Validate the runtime's private per-call directory. Preview never needs it, and this
+    /// method neither creates directories nor repairs permissions.
+    pub async fn scratch_dir(&self, request: &HearRequest) -> Result<PathBuf, HearFailure> {
+        let refused = || HearFailure::Refused {
+            code: "scratch_invalid",
+            reason: "Restricted listening requires a private per-call scratch directory inside its configured root.".into(),
+            marked_modified: false,
+        };
+        let Self::Restricted { scratch_root, .. } = self else { return Err(refused()) };
+        let Some(directory) = request.scratch_dir.as_ref() else { return Err(refused()) };
+        if !scratch_root.is_absolute() || !directory.is_absolute() {
+            return Err(refused());
+        }
+        let root_meta = tokio::fs::symlink_metadata(scratch_root).await.map_err(|_| refused())?;
+        let directory_meta = tokio::fs::symlink_metadata(directory).await.map_err(|_| refused())?;
+        if !root_meta.is_dir() || !directory_meta.is_dir() {
+            return Err(refused());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // The root may be traversable, but another user must not be able to replace
+            // its entries. The per-call directory itself is readable only by its owner.
+            let owner = unsafe { libc::geteuid() };
+            if root_meta.uid() != owner
+                || directory_meta.uid() != owner
+                || root_meta.mode() & 0o022 != 0
+                || directory_meta.mode() & 0o077 != 0
+            {
+                return Err(refused());
+            }
+        }
+        let root = tokio::fs::canonicalize(scratch_root).await.map_err(|_| refused())?;
+        let directory = tokio::fs::canonicalize(directory).await.map_err(|_| refused())?;
+        // Scratch allocates one directory directly under this root for each call. Accepting
+        // arbitrary descendants would also accept caller-created, unverified ancestors.
+        if directory.parent() != Some(root.as_path()) {
+            return Err(refused());
+        }
+        Ok(directory)
+    }
 }
 
 impl HostPolicy {
     pub fn standalone() -> Self {
-        Self { persist_identity: true, listening: ListeningPolicy::Standalone }
+        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone, menus: true, variations_home: None }
     }
 
-    pub fn plugin(listen_root: PathBuf) -> Self {
-        Self { persist_identity: false, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
+    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf, variations_home: PathBuf) -> Self {
+        Self {
+            persist_identity: false,
+            guards_undo: true,
+            listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root },
+            menus: false,
+            variations_home: Some(variations_home),
+        }
     }
 }
 

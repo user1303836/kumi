@@ -18,25 +18,35 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 import textwrap
 from typing import Any
 import unicodedata
 
-from . import calls, runtime, setup, snapshots, tools
+from . import calls, generate, runtime, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
 LINE = 120
-# The most of the agent's title an approval quotes: its first line, label and quotes included, stays within LINE.
-TITLE = 90
+# How the approval's first line labels the model's title as Hermes's, never Kumi's: the title is cut so the whole line,
+# label and quotes included, stays within LINE (rgzm, #1055).
+TITLE_LABEL = ("Hermes's change \"", "\", which Kumi will make:")
+TITLE = LINE - len("".join(TITLE_LABEL))
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
-TOO_LONG = ("Kumi didn't run this: its approval is longer than this window shows whole, and Kumi asks only with every "
-            "line in view. Split it into smaller changes, or approve it in Hermes Desktop.")
+TOO_LONG = ("Kumi didn't run this: its approval doesn't fit this window, even with like steps grouped, and Kumi asks only "
+            "when every step is in view. Split it into smaller changes, each approved on its own (by track, or by kind "
+            "of step), or approve it in Hermes Desktop.")
+# Where a change's plain approval (one line per step) doesn't show whole, a compact one is tried: adjacent steps of
+# one kind share a bullet, every step's own words whole and in plan order. Steps are never grouped across another
+# kind's, since the order carries meaning (beastmode). The footer and the chat note share one row. Nothing is dropped
+# or cut: if even that doesn't show whole, the plan isn't asked (TOO_LONG).
+COMPACT_CLOSING = "(Values read just now. Kumi's approvals cover this chat only.)"
+_COMPACT = "_compact"
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
@@ -48,6 +58,8 @@ UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
                      "the scan goes on.")
+FORKED = ("Kumi works only in the producer's own turns, and this call came from Hermes working on this chat in the "
+          "background (its review after a turn, or a side question), so it didn't run.")
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -82,6 +94,12 @@ def post_approval_response(host: Any, tool_call_id: Any = None, choice: Any = No
         host.calls.forget(tool_call_id)
 
 
+def turn_started(host: Any, session_id: Any = None, turn_id: Any = None, **kwargs: Any) -> None:
+    """Hermes's `pre_llm_call`, at the start of each of the producer's turns (never a forked one's): that turn is the
+    producer's (`calls.Turns`)."""
+    host.turns.saw(session_id, turn_id)
+
+
 def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **kwargs: Any) -> None:
     """Hermes's `post_tool_call`, after every call however it ended, a blocked one included (another plugin's veto, or
     no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it. A
@@ -94,22 +112,32 @@ def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **k
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     """The decision for one Kumi call. In a scheduled job, only a published read passes, before anything else is
-    looked at. Where nobody can answer an approval, a call that needs one is blocked whatever Hermes's settings or an
-    earlier "Always" say: before the runtime is asked when it always needs one, else after its decision."""
+    looked at. A turn Hermes forked in the background gets reads only. Where nobody can answer an approval, a call that
+    needs one is blocked whatever Hermes's settings or an earlier "Always" say: before the runtime is asked when it
+    always needs one, else after its decision."""
     unattended = host.unattended()
     if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
         return block(tools.SCHEDULED), {}
+    if tool not in PASS and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
+        return block(FORKED), {}
     if unattended and tool in ASKED:
         return block(UNATTENDED), {}
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
         return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
+    compact = decision.pop(_COMPACT, None) if isinstance(decision, dict) else None
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
-        decision = chat_scoped(decision, args, kwargs)
-        if not shows_whole(decision["message"], host.session_surface()):
-            return block(TOO_LONG), {}
+        scoped = not decision["rule_key"].startswith(ONE_THING)
+        if scoped:
+            decision = chat_scoped(decision, args, kwargs)
+        surface = host.session_surface()
+        if not shows_whole(decision["message"], surface):
+            tight = "\n".join([*compact, COMPACT_CLOSING if scoped else FOOTER]) if compact else None
+            if tight is None or not shows_whole(tight, surface):
+                return block(TOO_LONG), {}
+            decision = {**decision, "message": tight}
     return decision, extra
 
 
@@ -118,9 +146,9 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
 # ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own digest, never a
 # family alone. A one-shot run that resumes a chat (`hermes chat -q --resume`) is that chat, and its approvals apply
 # there. Setup's key is its plan's digest already (and a paid call's will be its quote's). Hermes keeps an "always" in
-# its config's command allowlist; Kumi never edits that.
-CHAT_ONLY = ("Kumi's approvals apply to one chat, including a one-shot run that resumes it (hermes chat -q --resume); a "
-             "scheduled job, a new one-shot run or another chat always asks or is refused.")
+# its config's command allowlist; Kumi never edits that. The approval says so in one row, so the steps keep the rest
+# of the window (research-1's copy review, P2); the docs say the whole rule.
+CHAT_ONLY = "Kumi's approvals cover this chat only."
 
 
 def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
@@ -128,6 +156,11 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
     session = kwargs.get("session_id")
     scope = session.strip() if isinstance(session, str) and session.strip() else f"plan-{calls.digest(args)}"
     return {**decision, "rule_key": f"{rule_key}:{scope}", "message": f"{decision['message']}\n{CHAT_ONLY}"}
+
+
+# A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
+# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c).
+ONE_THING = ("kumi:paid:",)
 
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -143,6 +176,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _library(host, args, kwargs), {}
     if tool == "kumi_setup":
         return _setup(host, args)
+    if tool == "kumi_generate":
+        return _generate(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -208,6 +243,9 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     refusal = tools.listen_refusal(args)
     if refusal:
         return block(f"Kumi didn't listen: {refusal}"), {}
+    unsupported = tools.listen_unsupported(host, args)
+    if unsupported:
+        return block(f"Kumi didn't listen: {unsupported}"), {}
     if not tools.is_track_listen(args):
         return None, {}
     try:
@@ -246,22 +284,85 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
     effects = sorted({one_line(step["effect"], 20) for step in steps})
     families = sorted({one_line(step["family"], 40) for step in steps})
     title = agents_title(answer.get("title") or args.get("title") or "a change")
-    return approve([title, *(f"• {step['text']}" for step in steps)], f"kumi:{'+'.join(effects)}:{'+'.join(families)}",
-                   footer=FOOTER)
+    rule_key = f"kumi:{'+'.join(effects)}:{'+'.join(families)}"
+    decision = approve([title, *(f"• {step['text']}" for step in steps)], rule_key, footer=FOOTER)
+    if decision["action"] == "approve" and (lines := compact_lines(title, steps)):
+        decision[_COMPACT] = lines
+    return decision
+
+
+def compact_lines(title: str, steps: list[dict]) -> list[str] | None:
+    """A change's approval lines with adjacent steps of one kind sharing a bullet, for a window too small for one line
+    per step: `• Set mixer ×3, volumeDb: -4 — on "Drums" · -6 — on "Bass" · …`.
+    - Only the repeated step name goes, and a setting's name when every step in the run sets just that one.
+    - Each step's own words stay whole, in plan order, as the runtime wrote them.
+    - A run is one line, which the window wraps (its steps never cut by Kumi). STEP_LINE bounds what the runtime writes
+      for one step; a run's line isn't that, and splitting it at a length would waste the panel's part-filled rows.
+    None when no two adjacent steps share a kind: there's nothing to gain."""
+    lines, grouped = [title], False
+    for tool, run in itertools.groupby(steps, key=lambda step: step.get("tool")):
+        texts = [one_line(step["text"], STEP_LINE + 1) for step in run]
+        name = tool.replace("_", " ")[:1].upper() + tool.replace("_", " ")[1:] if isinstance(tool, str) else ""
+        rests = [_after(text, name) for text in texts] if name else []
+        if len(texts) < 2 or not rests or any(rest is None for rest in rests):
+            lines.extend(f"• {text}" for text in texts)
+            continue
+        grouped = True
+        head, parts = f"• {name} ×{len(texts)}", rests
+        if (shared := _one_setting(rests)) is not None:
+            head, parts = f"{head}, {shared}", [rest[len(shared) + 1:] for rest in rests]
+        lines.append(f"{head}: {' · '.join(parts)}")
+    return lines if grouped else None
+
+
+def _after(text: str, name: str) -> str | None:
+    """What a step's line says after its step name (`volumeDb -4 — on "Drums"`), or None when it doesn't start with
+    it as the runtime writes it (then the step keeps its own line)."""
+    if not text.startswith(name):
+        return None
+    rest = text[len(name):]
+    if rest.startswith(": ") and rest[2:].strip():
+        return rest[2:]
+    if rest.startswith(" — ") and rest[3:].strip():
+        return rest[1:]
+    return None
+
+
+def _one_setting(rests: list[str]) -> str | None:
+    """The setting every step of a run sets, when each sets just that one (`volumeDb`): its name can lead the bullet
+    once. None when any step sets more, or another, or none."""
+    names = set()
+    for rest in rests:
+        settings = rest.split(" — on ", 1)[0]
+        name, _, value = settings.partition(" ")
+        if ", " in settings or not value or rest.startswith("— "):
+            return None
+        names.add(name)
+    return names.pop() if len(names) == 1 else None
 
 
 def agents_title(title: Any) -> str:
-    """A plan's title as the approval's first line: the model's own words, quoted and labelled as the agent's, never
-    as Kumi's (research-1's review, item 3). Every mark that reads as a quote (#994's list: curly, low, prime, CJK
-    corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the line stays
-    whole."""
+    """A plan's title as the approval's first line: the model's own words, quoted and labelled as Hermes's, never as
+    Kumi's (research-1's review, item 3; copy review P22). Every mark that reads as a quote (#994's list: curly, low,
+    prime, CJK corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the
+    line stays whole."""
     words = _QUOTE_MARKS.sub("'", one_line(title, TITLE))
-    return f"Kumi, for the agent's \"{words}\":"
+    return f"{TITLE_LABEL[0]}{words}{TITLE_LABEL[1]}"
 
 
 # What reads as a double quote (#994's QUOTE_MARKS in the UI): a title's own can't close the agent's.
 _QUOTE_MARKS = re.compile('["\u201c\u201d\u201e\u201f\u2033\u2036\u3003\uff02\u00ab\u00bb\u300c\u300d\u300e\u300f'
                           '\u301d\u301e\u301f\uff62\uff63\ufe41\ufe42\ufe43\ufe44]')
+
+
+# CC-3's reasons a change can't be undone, as an undo's preview gives them, in the runtime's own words for each (serve/
+# change.rs). The restart's are kumi-adv's D2, the same on every surface.
+UNDO_REFUSED = {
+    "restarted": ("Kumi restarted since this change, so it can't undo it safely: undo it in {daw} if it's still the "
+                  "latest step there, or ask Hermes to set it back."),
+    "expired": "It can't be undone any more.",
+    "kept": "That change can't be undone now (see its state in HISTORY).",
+}
 
 
 def _undo(host: Any, args: dict, kwargs: dict) -> dict:
@@ -271,7 +372,10 @@ def _undo(host: Any, args: dict, kwargs: dict) -> dict:
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(f"Kumi didn't undo anything: {_reason(failure)}")
     if answer.get("state") != "preview" or not answer.get("undo_available"):
-        return block(f"Kumi didn't undo anything: {answer.get('reason') or 'that change can no longer be undone.'}")
+        reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
+        words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
+                 else reason or "that change can no longer be undone.")
+        return block(f"Kumi didn't undo anything: {words}")
     return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo")
 
 
@@ -313,20 +417,137 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     if action == "plan":
         return None, {}
     if action not in ("install", "adopt"):
-        return block("Kumi did not set anything up: kumi_setup's action is plan, install or adopt."), {}
-    asked = setup.approval(args.get("daw") or host.daw(), action=action, data_dir=host.data_dir())
+        return block("Kumi didn't set anything up: kumi_setup's action is plan, install or adopt."), {}
+    daw = args.get("daw") or host.daw()
+    asked = setup.approval(daw, action=action, data_dir=host.data_dir())
     if asked is None:
-        return block("Kumi did not set anything up: run kumi_setup plan first."), {}
+        why = setup.dead_end(daw, data_dir=host.data_dir()) or "run kumi_setup plan first."
+        return block(f"Kumi didn't set anything up: {why}"), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     message = "\n".join(lines)
     surface = host.session_surface()
     if not shows_whole(message, surface):
         where = "Hermes Desktop or `hermes kumi setup` in a terminal" if surface not in ("cli", "tui") else \
             "`hermes kumi setup` in a terminal"
-        return block(f"Kumi did not set anything up: this setup step is longer than this window shows, and Kumi asks only "
+        return block(f"Kumi didn't set anything up: this setup step is longer than this window shows, and Kumi asks only "
                      f"with every line of it in view. Use {where}: it shows the whole plan before it asks."), {}
     decision = {"action": "approve", "message": message, "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}
+
+
+def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """Paid generation (CC-13). A sound effect's quote is a read: an estimate costs nothing. Sending an audio file to
+    Mirelo is asked first, in the words of the runtime's own description of the file it resolved (13-R2), keyed by that
+    file's identity. A create is asked from the stored quote alone, never the model's words (13-R1), keyed by its
+    quote_id; its approval binds the quote's digest and estimate, which the handler checks again before it reserves.
+    Where nobody can answer, both are refused (decide, 13-R6).
+
+    Its worst case stays within 15 s of Hermes's 30 s hook timeout (a timed-out hook blocks every tool for a minute):
+    each ledger call waits at most generate.LEDGER_WAIT (2 s) for its lock (amendment B-c). A create makes four (open,
+    configure, the quote, the totals): 8 s. An upload makes two, then the runtime's preview, at most PREVIEW_TIMEOUT
+    (10 s): 14 s."""
+    refusal = generate.refusal(args)
+    if refusal is not None:
+        return block(f"Kumi didn't run: {refusal}"), {}
+    if args["action"] == "quote":
+        return (None, {}) if args["kind"] == "sfx" else _upload(host, args, kwargs)
+    return _paid(host, args)
+
+
+def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """Sending an audio file to Mirelo (13-R2, amendment A). Where nobody can answer, it's refused before the runtime
+    looks at the file. The ledger is opened first, so the producer's current policy is in it before the runtime's
+    preview, a bounded local read (no network, copy or DSP); the approval names the file as that preview describes it,
+    under a key naming its content (A-a), in this chat (A-c)."""
+    if host.unattended():
+        return block(UNATTENDED), {}
+    not_ready = generate.ready(host, "audio_to_midi", host.mirelo_key())
+    if not_ready is not None:
+        return block(f"Kumi didn't send anything: {not_ready['error']['reason']}"), {}
+    try:
+        host.ledger()
+    except generate.LedgerUnavailable as failure:
+        return block(f"Kumi didn't send anything: {failure.reason}"), {}
+    try:
+        preview = _ask(host, "generate", {**args, "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't send anything: {_reason(failure)}"), {}
+    upload = preview.get("upload") if isinstance(preview.get("upload"), dict) else {}
+    name, size, identity = upload.get("file"), upload.get("bytes"), upload.get("identity_sha256")
+    if (preview.get("state") != "preview" or not isinstance(name, str) or not name.strip() or isinstance(size, bool)
+            or not isinstance(size, int) or size < 0 or not isinstance(identity, str)
+            or not _SHA256.fullmatch(identity)):
+        return block("Kumi didn't send anything: its runtime couldn't describe the file."), {}
+    decision = approve([f"Kumi: send {quoted(name)} ({_size(size)}) to Mirelo, to turn it into MIDI notes",
+                        "• Mirelo quotes it in credits first; nothing is paid until that quote is approved too."],
+                       f"kumi:upload:{identity}")
+    return decision, {}
+
+
+# A-a: a file's identity is its content's SHA-256, as lowercase hex.
+_SHA256 = re.compile("[0-9a-f]{64}")
+
+
+def _size(size: int) -> str:
+    """A file's size as people read it: bytes under a kilobyte, kilobytes under a megabyte, else megabytes."""
+    if size < 1_000:
+        return f"{size} bytes"
+    if size < 1_000_000:
+        return f"{size / 1_000:.0f} KB"
+    return f"{size / 1_000_000:.1f} MB"
+
+
+def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
+    """A create (13-R1), refused before anyone is asked, and before the ledger is opened where nobody can answer: a
+    used or expired quote, a kind switched off or no key, a ledger that doesn't add up, a cap of 0 (which refuses
+    every paid generation, a zero estimate's too), a freeze, or an estimate over what's left."""
+    if host.unattended():
+        return block(UNATTENDED), {}
+    quote_id = args["quote_id"]
+    try:
+        ledger = host.ledger()
+        record = ledger.quote(quote_id)
+        totals = ledger.snapshot()
+    except Exception as failure:
+        said = getattr(failure, "message", None) or getattr(failure, "reason", None)
+        why = said if isinstance(said, str) and said else "its credit ledger refused this quote."
+        return block(f"Kumi didn't create anything: {why}"), {}
+    if record.get("consumed"):
+        return block("Kumi didn't create anything: that quote was already used. Quote again."), {}
+    if generate.expired(record):
+        return block("Kumi didn't create anything: that quote expired. Quote again."), {}
+    not_ready = generate.ready(host, record.get("kind"), host.mirelo_key())
+    if not_ready is not None:
+        return block(f"Kumi didn't create anything: {not_ready['error']['reason']}"), {}
+    estimate = record.get("estimate") if isinstance(record.get("estimate"), dict) else {}
+    most, left, cap = estimate.get("max_credits"), totals.get("left"), totals.get("cap")
+    if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in (most, left, cap)):
+        return block("Kumi didn't create anything: its quote or credit ledger doesn't add up."), {}
+    if cap == 0:
+        return block("Kumi didn't create anything: the producer's credit cap is 0, which refuses every paid "
+                     "generation. They set one in Kumi's settings in Hermes."), {}
+    if totals.get("frozen"):
+        return block("Kumi didn't create anything: new paid generations are paused, since a charge came in above its "
+                     "estimate. The producer checks Mirelo, then runs hermes kumi credits unfreeze."), {}
+    if most > left:
+        return block(f"Kumi didn't create anything: its estimate ({most} credits) is more than the {left} left under "
+                     "the producer's credit cap."), {}
+    sfx = record.get("kind") == "sfx"
+    seconds = record.get("seconds")
+    lines = [f"Kumi: a paid Mirelo {'sound effect' if sfx else 'audio-to-MIDI job'}, from quote {quote_id}",
+             f"• Prompt: {quoted(record.get('prompt'))}" if sfx
+             else f"• From {quoted(record.get('file'))}, sent to Mirelo",
+             *([f"• {seconds:g} seconds"] if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
+               else []),
+             f"• Reserves up to {most} credits now (an estimate, not a price); {left - most} of the {cap} left after"]
+    bound = {"quote_id": quote_id, "request_sha256": record.get("request_sha256"), "max_credits": most}
+    return approve(lines, f"kumi:paid:{quote_id}"), bound
+
+
+def quoted(text: Any, limit: int = LINE) -> str:
+    """Untrusted words in an approval, as one quoted line: every mark that reads as a quote made plain (#1014's
+    `_QUOTE_MARKS`), so none can seem to close it early."""
+    return f"\"{_QUOTE_MARKS.sub(chr(39), one_line(text if isinstance(text, str) else '', limit))}\""
 
 
 def shows_whole(message: str, surface: str) -> bool:

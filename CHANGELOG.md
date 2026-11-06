@@ -3,6 +3,50 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.69 — 2026-11-05
+
+Ships with bridge 1.0.105, as 1.24.68 did.
+
+- Kumi for Hermes gives clearer next steps when a listening model cannot interpret measurements or a
+  sample folder cannot be used.
+- Kumi no longer says a track with no name is selected in REAPER or Renoise when nothing is.
+- Hermes can generate sound effects and transcribe approved audio with Mirelo, using exact quotes and
+  a durable credit cap.
+- Mirelo jobs keep their known charges through failed downloads and recover without creating a second
+  paid job.
+- `hermes kumi doctor` no longer asks you to check Hermes's default approvals, which still ask before
+  each Kumi change.
+- In Hermes, what changed while Kumi was away is still there after a look at your selection.
+- In Hermes, Kumi no longer adds a Live rack chain it couldn't take back, and never drives Live's
+  menus.
+- In Hermes, Kumi's note-writing steps now explain Live's notation and Renoise's limits, so beats and
+  basslines come out right the first time.
+- In Live, pressing Cmd+Z after Kumi undid a device it loaded no longer crashes Live.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.68 — 2026-11-05
+
+Ships with bridge 1.0.105, as 1.24.67 did.
+
+- Kumi can set a Live track's volume, pan and sends to a level as Live shows it (-6 dB, 25L), placed
+  exactly where Live shows that level; a level Live can't show is refused with the nearest ones it
+  can.
+- Hermes can scan approved sample folders, stop a scan, find similar sounds on their map, and measure
+  or compare audio while keeping the exact files it heard for playback.
+- Kumi for Hermes names your DAW as Live, REAPER or Renoise and says what to do next when it can't
+  connect, set up or undo a change from before a restart.
+- `hermes kumi doctor` checks Kumi's part in the DAW against the running runtime's own reading, names
+  the DAW Kumi is actually connected to, and no longer creates Kumi's data folder in a profile Kumi
+  never ran in.
+- Kumi for Hermes won't undo a change to a Live track's mixer, the tempo or a device's parameters that
+  you've since changed by hand; its undo preview shows each value as it is now and as the undo would
+  put it back.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.67 — 2026-11-05
 
 Ships with bridge 1.0.105, which Live loads when it restarts. After updating, Kumi offers to quit Live

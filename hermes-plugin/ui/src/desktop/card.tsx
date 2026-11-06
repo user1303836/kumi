@@ -7,8 +7,9 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
 import { num, signed } from '../shared/format.ts'
-import { type Audition, usePlaying } from '../shared/hooks.ts'
-import { listenView, parseListen, type ListenView } from '../shared/listen.ts'
+import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
+import { listenView, parseListen, referenceName, roundKey, roundWords, type ListenView } from '../shared/listen.ts'
+import type { KumiStore } from '../shared/store.ts'
 import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
@@ -105,8 +106,48 @@ function Rows({ view }: { view: ListenView }) {
   )
 }
 
+/** With a reference: each band's level in this file (a bar) and in the reference (a line across it), on one scale. Both
+ *  are the band's share of its own file's energy, so loudness doesn't move them: the shapes compare as they are. */
+function Overlay({ view }: { view: ListenView }) {
+  const t = useT()
+  const values = view.overlay.flatMap(band => [band.mine, band.reference])
+  const low = Math.min(...values) - 3
+  const high = Math.max(...values) + 1
+  const at = (value: number) => `${Math.max(2, ((value - low) / (high - low)) * 100)}%`
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <span style={{ ...S.row, gap: 10, flexWrap: 'wrap' }}>
+        <span style={S.faint}>{t('listen.overlay')}</span>
+        <span style={{ ...S.row, gap: 4, ...S.faint }}>
+          <span aria-hidden style={{ width: 8, height: 8, background: T.accent, opacity: 0.8 }} />
+          {t('listen.this')}
+        </span>
+        <span style={{ ...S.row, gap: 4, ...S.faint }}>
+          <span aria-hidden style={{ width: 10, borderTop: `2px solid ${T.text}` }} />
+          {t('listen.reference')}
+        </span>
+      </span>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 3, height: 64 }}>
+        {view.overlay.map(band => {
+          const label = t('listen.overlayBand', band.name, band.hz, num(band.mine), num(band.reference), signed(band.mine - band.reference))
+          return (
+            <div key={band.name} role="img" aria-label={label} title={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
+              <div style={{ position: 'relative', flex: 1, width: '100%' }}>
+                <div style={{ position: 'absolute', left: '18%', right: '18%', bottom: 0, height: at(band.mine), background: T.accent, opacity: 0.8 }} />
+                <div style={{ position: 'absolute', left: 0, right: 0, bottom: at(band.reference), borderTop: `2px solid ${T.text}` }} />
+              </div>
+              <span style={{ fontSize: 9, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{band.name}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Bands({ view }: { view: ListenView }) {
   const t = useT()
+  if (view.overlay.length) return <Overlay view={view} />
   if (!view.bands.length) return null
   const top = Math.max(...view.bands.map(band => Math.abs(band.value)), view.bandsAre === 'difference' ? 3 : 1)
   return (
@@ -164,19 +205,26 @@ function Interpretation({ view }: { view: ListenView }) {
   )
 }
 
-export function ListenCard({ media, audition }: { media: ToolMediaRendererProps; audition: Audition }): ReactNode {
+export function ListenCard({ media, audition, store }: { media: ToolMediaRendererProps; audition: Audition; store: KumiStore }): ReactNode {
   // Anything this card can't draw keeps Desktop's own player, so the audio always plays.
   if (media.file?.kind !== 'audio') return media.fallback
-  return <ListenResultCard audition={audition} fallback={media.fallback} result={media.result} />
+  return <ListenResultCard audition={audition} fallback={media.fallback} result={media.result} store={store} />
 }
 
 /** The card for a `kumi_listen` result, wherever it's drawn: in the transcript's tool part, or in the Measurements tab
  *  when the transcript shows no tool parts (CC-9). `fallback` stands in for what it can't draw. */
-export function ListenResultCard({ result, audition, fallback }: { result: unknown; audition: Audition; fallback: ReactNode }): ReactNode {
+export function ListenResultCard({ result, audition, fallback, store }: { result: unknown; audition: Audition; fallback: ReactNode; store: KumiStore }): ReactNode {
   const t = useT()
+  const { rounds } = useKumi(store)
   const parsed = parseListen(result)
   if (!parsed) return fallback
-  const view = listenView(parsed, t)
+  const view = listenView(parsed, t, referenceName(parsed, rounds))
+  // Which comparison with this reference this is, among those that arrived while the window was open: a mastering
+  // pass's rounds, with how far each was from the reference. Nothing for one the window didn't see arrive.
+  const key = roundKey(parsed, rounds)
+  const seen = key ? (rounds[key] ?? []) : []
+  const index = seen.findIndex(round => round.id === parsed.artifact_id)
+  const round = index < 0 ? undefined : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map(each => each.gaps), t)
   return (
     <div
       data-kumi-card="listen"
@@ -197,6 +245,11 @@ export function ListenResultCard({ result, audition, fallback }: { result: unkno
       {/* The runtime's own note on the capture (CC-2 A3): muted plain text, no tone, never a control. */}
       {view.captureNote && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{view.captureNote}</span>}
       {view.verdict && <span style={S.text}>{view.verdict}</span>}
+      {round && (
+        <span style={{ ...S.muted, fontVariantNumeric: 'tabular-nums' }} title={t('listen.roundTitle')}>
+          {round}
+        </span>
+      )}
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <Wave audition={audition} id={view.mineId} label={view.title} />

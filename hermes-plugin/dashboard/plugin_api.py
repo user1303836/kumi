@@ -42,6 +42,7 @@ def _load(name: str, file: str) -> Any:
 
 
 snapshots = _load("snapshots", "snapshots.py")
+schemas = _load("schemas", "schemas.py")
 
 router = APIRouter()
 
@@ -66,6 +67,14 @@ def _library_folders() -> list[str]:
     return snapshots.library_folders(_setting("library_folders"), hermes_home=snapshots.hermes_home())
 
 
+def _chosen_daw() -> str | None:
+    """The DAW chosen in Kumi's settings, or None while the setting is unset or names a DAW Kumi doesn't know: until the
+    producer picks one, nothing names a DAW for them, and setup is offered for each (setup makes the first one set up
+    Kumi's DAW)."""
+    daw = _setting("daw")
+    return daw if isinstance(daw, str) and daw in schemas.DAWS else None
+
+
 def _liveness(state: Path) -> dict:
     own = snapshots.owner(state)
     return {"connected": not own["stale"], "stale": own["stale"]}
@@ -73,8 +82,12 @@ def _liveness(state: Path) -> dict:
 
 @router.get("/status")
 def status() -> dict:
-    """Setup and connection, the project, the owner's session, and each snapshot's revision."""
-    return snapshots.status(snapshots.state_dir())
+    """Setup and connection, the project, the owner's session, and each snapshot's revision. Until a runtime has said
+    which DAW it works in, the DAW is the one chosen in Kumi's settings, so "not connected" names it."""
+    out = snapshots.status(snapshots.state_dir())
+    if not out.get("daw") and (chosen := _chosen_daw()):
+        out["daw"] = chosen
+    return out
 
 
 @router.get("/focus")
@@ -135,7 +148,9 @@ def setup() -> dict:
             daw = _setting("daw")
             found = read_status(daw=daw if isinstance(daw, str) else None)
             if isinstance(found, dict):
-                return found
+                # Whether the producer chose a DAW: before that, the page offers setup for each DAW instead of the
+                # default one setup.status() reads as.
+                return {**found, "daw_chosen": isinstance(daw, str) and daw in schemas.DAWS}
             _log.warning("kumi: setup.status() answered %s, not a dict", type(found).__name__)
             return {"state": "unknown", "message": "Kumi couldn't read its setup state."}
     except Exception:  # health: allow BLE001 -- setup state is shown, never fatal to the UI

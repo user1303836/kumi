@@ -13,7 +13,7 @@ import { useKumi, useWant } from '../shared/hooks.ts'
 import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
-import { nextStep, ownerSession } from './pane.tsx'
+import { dawChosen, nextSteps, ownerSession } from './pane.tsx'
 import { PET_LINES } from './pet.ts'
 
 export const OPEN_MAP_ON_FIND = 'openMapOnFind'
@@ -55,8 +55,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
   const [openOnFind, setOpenOnFind] = useState(() => ctx.storage.get(OPEN_MAP_ON_FIND, true))
   const [petLines, setPetLines] = useState(() => ctx.storage.get(PET_LINES, false))
   const setup = state.setup
-  const step = nextStep(state, t)
-  const daw = state.status?.daw ?? setup?.daw
+  const steps = nextSteps(state, t)
   const runtime = setup?.runtime
   const component = setup?.daw_component
   // Connected through a current part setup didn't install (an adopted Kumi's): setup's "needs its DAW part" and its
@@ -64,6 +63,11 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
   const partWorks = dawPartWorks(state)
   const setupState = partWorks ? 'ready' : (setup?.state ?? 'unknown')
   const componentState = component?.state ?? 'unknown'
+  // The DAW the page speaks of: none until one is chosen in Kumi's settings or set up (setup reads an unset DAW as
+  // Live, its default, and a REAPER user would be told about Live). Then each DAW's setup is offered below.
+  const named = dawChosen(state) || partWorks || componentState === 'installed' || Boolean(state.status?.connected)
+  const daw = named ? (state.status?.daw ?? setup?.daw) : null
+  const next = setup?.message && !partWorks && (named || setupState !== 'needs_daw_component') ? setup.message : null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 640, color: T.text }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -77,7 +81,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           <div>
             <h3 style={HEADING}>{t('settings.setup')}</h3>
             <Line label={t('settings.state')}>{STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40)}</Line>
-            {setup?.message && !partWorks && <Line label={t('settings.next')}>{clean(setup.message, 300)}</Line>}
+            {next && <Line label={t('settings.next')}>{clean(next, 300)}</Line>}
             {runtime && (
               <Line label={t('settings.runtime')}>
                 {runtime.installed ? t('settings.installed', clean(runtime.version ?? '', 20)) : t('settings.notInstalled')}
@@ -138,14 +142,15 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             )}
           </div>
           <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
-            {step && (
+            {steps.map(step => (
               <TextButton
+                key={step.request}
                 onClick={() => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null })}
-                strong
+                strong={steps.length === 1}
               >
                 {step.label}
               </TextButton>
-            )}
+            ))}
             <TextButton onClick={onOpenMap}>{t('settings.openMap')}</TextButton>
             <TextButton onClick={() => host.navigate('/settings?tab=plugins&agent=kumi')}>{t('settings.agentSettings')}</TextButton>
           </div>

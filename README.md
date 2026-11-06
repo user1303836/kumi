@@ -86,6 +86,13 @@ With more than one installed, setup asks which you work in; `/daw` switches late
 </details>
 
 <details>
+<summary><b>Can I use Kumi from Hermes Agent?</b></summary>
+
+Yes. Kumi is also a [Hermes Agent](https://hermes-agent.nousresearch.com) plugin: `hermes plugins install kumi` (once Kumi is in Hermes's plugin catalog; until then, see the guide) and `hermes plugins enable kumi`, then ask Hermes to set up Kumi for your DAW. Hermes stays your agent and asks before each change (unless its approvals are off), and Kumi keeps its HISTORY, with an undo while Kumi runs. See [Kumi for Hermes Agent](docs/en/HERMES.md).
+
+</details>
+
+<details>
 <summary><b>Which AI does it use, and what does it cost?</b></summary>
 
 Kumi is free and open source (MIT). You choose the model:
@@ -115,8 +122,8 @@ Audio analysis runs locally; the model gets the measurements. Your library and m
 
 ## Status
 
-- Kumi 1.24.67 is currently supported for Ableton Live 12.4.15b4 (beta) and above on macOS and Windows. You may run into issues on lower versions. If you do, **please file an issue!**
-- 1.24.67 is tested with Live on macOS. On Windows, installing and updating are tested; using it with Live there is still new. Please send a `kumi report` when something breaks.
+- Kumi 1.24.69 is currently supported for Ableton Live 12.4.15b4 (beta) and above on macOS and Windows. You may run into issues on lower versions. If you do, **please file an issue!**
+- 1.24.69 is tested with Live on macOS. On Windows, installing and updating are tested; using it with Live there is still new. Please send a `kumi report` when something breaks.
 - REAPER 7.82 and Renoise 3.5.4 are tested on macOS. On Windows and Linux, CI tests putting Kumi's extension and tool in place and loading the extension; using them with REAPER and Renoise there is new.
 
 ## Development

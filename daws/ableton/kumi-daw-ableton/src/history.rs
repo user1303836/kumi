@@ -1,7 +1,7 @@
 //! Live's change records and its ways back: the revert script, the bridge's transactions, material made again,
 //! Live's own undo and the emergency stop. HISTORY itself is core's (`core::history`).
 use super::{
-    changes::{undo_note, EMERGENCY_STOP},
+    changes::{undo_note, EMERGENCY_STOP, MAKES_A_DEVICE},
     connection::LiveConnection,
     context,
     fast::revert_script,
@@ -31,6 +31,11 @@ use std::{cell::RefCell, future::Future, rc::Rc};
 const RESTORE_MS: u64 = 30_000;
 /// How Kumi's Live script says a kept audio clip's file is gone, before its path (snapshots.py).
 const MISSING_FILE: &str = "audio file isn't there any more (";
+/// How long the Live undo step around Kumi's undo of a cut stays open at most: its restore calls take up to
+/// [`RESTORE_MS`] each.
+const MATERIAL_UNDO_STEP_MS: u64 = 120_000;
+/// How long the Live undo step around Kumi's undo of a device it made stays open at most: one delete.
+const DEVICE_UNDO_STEP_MS: u64 = 30_000;
 
 /// HISTORY over Live.
 pub type History = kumi_agent::core::history::History<LiveChanges>;
@@ -66,6 +71,8 @@ pub struct LiveChanges {
     pub connection: Rc<LiveConnection>,
     pub remember: Rc<Remember>,
     pub remade: snapshots::Remade,
+    /// What the values a change set read back as, for the plugin host's guarded undo.
+    pub guard: super::undo_guard::Guard,
 }
 #[async_trait(?Send)]
 impl ChangeHost for LiveChanges {
@@ -142,6 +149,9 @@ impl ChangeHost for LiveChanges {
     ) -> Result<UndoResult, RuntimeError> {
         history.undo_material(entry, snapshot, material, undo_key, discard, signal).await
     }
+    /// The change's own undo through the bridge. One that takes out a device the change made runs inside one Live undo
+    /// step: the bridge's delete outside one leaves Live's own undo naming the device that's gone, and the producer's
+    /// Cmd-Z after it stops Live (#1101). Without that step Kumi removes nothing, and says Live's undo takes it back.
     async fn undo_transaction(
         &self,
         history: &History,
@@ -150,8 +160,31 @@ impl ChangeHost for LiveChanges {
         undo_key: &str,
         discard: bool,
     ) -> Result<Option<UndoResult>, RuntimeError> {
-        history.bridge_undo(entry, snapshot, undo_key, discard).await
+        if !removes_a_device(snapshot) {
+            return history.bridge_undo(entry, snapshot, undo_key, discard).await;
+        }
+        let bound = abort::any([self.connection.lifetime.clone(), abort::timeout(10_000)]);
+        // One delete fits in far less: should the call be dropped before it's closed, Live closes the step itself then,
+        // and the producer's own edits in Live join it only until that deadline.
+        let Some(step) = history.open_undo_step(DEVICE_UNDO_STEP_MS, bound).await else {
+            return Ok(Some(UndoResult::error(format!(
+                "Kumi couldn't open one Live undo step to take “{}” back safely, so it removed nothing: Live's own undo (Cmd-Z in Live) takes it back while it's Live's latest step.",
+                snapshot.record.title
+            ))));
+        };
+        // Closed whatever the undo came to, a failure included: an open step would fold whatever happens next into it.
+        let undone = history.bridge_undo(entry, snapshot, undo_key, discard).await;
+        history.close_undo_step(Some(step)).await;
+        undone
     }
+}
+
+/// A change whose undo takes out a device it made: by the tool that made it, by the device the bridge said it made, or,
+/// read back from disk with its tool forgotten, by its family.
+fn removes_a_device(snapshot: &Applied) -> bool {
+    snapshot.tool.as_deref().is_some_and(|tool| MAKES_A_DEVICE.contains(&tool))
+        || snapshot.created.is_some()
+        || (snapshot.tool.is_none() && snapshot.record.family == ChangeFamily::Device)
 }
 
 /// What Live's HISTORY does that only Live's does: running Live's fast code, putting a change back in Live, its undo.
@@ -209,8 +242,9 @@ pub trait LiveHistory {
     ) -> UndoResult;
     /// Live's own undo, once: whether Live did one.
     async fn live_undo_once(&self, signal: Signal) -> bool;
-    /// One Live undo step around what follows, when the bridge offers it: its id, to close it by.
-    async fn open_undo_step(&self, signal: Signal) -> Option<String>;
+    /// One Live undo step around what follows, when the bridge offers it: its id, to close it by. Live closes it itself
+    /// after `ms` should it not be closed by then.
+    async fn open_undo_step(&self, ms: u64, signal: Signal) -> Option<String>;
     async fn close_undo_step(&self, step: Option<String>);
 }
 impl LiveHistory for History {
@@ -220,7 +254,7 @@ impl LiveHistory for History {
         timeout_ms: Option<u64>,
         on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
     ) -> Self {
-        Self::over(LiveChanges { connection, remember, remade: Default::default() }, timeout_ms, on_change)
+        Self::over(LiveChanges { connection, remember, remade: Default::default(), guard: Default::default() }, timeout_ms, on_change)
     }
     fn observed(&self) -> Vec<ObservedChange> {
         self.entries
@@ -260,6 +294,11 @@ impl LiveHistory for History {
             return Ok(UndoResult::error(cant_reach_to_undo(self.host.profile())));
         }
         signal.check()?;
+        // The plugin host's guard, the last thing before Live is asked: a value changed since Kumi set it leaves them all.
+        let snapshot = entry.borrow().clone();
+        if let Some(refused) = super::undo_guard::before_undo(self, &snapshot).await {
+            return Ok(refused);
+        }
         let done = self
             .run_fast(
                 revert_script(&json!(revert)),
@@ -292,6 +331,7 @@ impl LiveHistory for History {
         let gone = names("gone");
         self.remember.schedule_save(20_000);
         if moved.is_empty() && gone.is_empty() {
+            self.host.guard.forget(&entry.borrow().record.id);
             return Ok(self.undone(entry));
         }
         if back != 0. {
@@ -330,6 +370,10 @@ impl LiveHistory for History {
         if discard {
             args.insert("discard".into(), json!(true));
         }
+        // The plugin host's guard, the last thing before Live is asked: a value changed since Kumi set it is left.
+        if let Some(refused) = super::undo_guard::before_undo(self, snapshot).await {
+            return Ok(Some(refused));
+        }
         let bound = abort::any([self.connection.lifetime.clone(), abort::timeout(self.timeout_ms)]);
         let result = match self.connection.call("live_undo", args, bound).await {
             Ok(v) => v,
@@ -360,6 +404,8 @@ impl LiveHistory for History {
                 true,
             )));
         }
+        // Undone: nothing is left to check of it.
+        self.host.guard.forget(&snapshot.record.id);
         Ok(None)
     }
     async fn undo_material(
@@ -405,7 +451,7 @@ impl LiveHistory for History {
         };
         // What the track holds before: a rollback is only ever made back to it.
         let before = snapshots::state(self, &material, bound()).await;
-        let Some(step) = self.open_undo_step(bound()).await else {
+        let Some(step) = self.open_undo_step(MATERIAL_UNDO_STEP_MS, bound()).await else {
             return Ok(UndoResult::error(format!(
                 "Kumi couldn't open one Live undo step to bring back {names}, so it left the change as it is: try again, or Live's own undo (Cmd-Z in Live) can take it back."
             )));
@@ -540,12 +586,12 @@ impl LiveHistory for History {
             _ => false,
         }
     }
-    async fn open_undo_step(&self, signal: Signal) -> Option<String> {
+    async fn open_undo_step(&self, ms: u64, signal: Signal) -> Option<String> {
         if !self.connection.has("live_undo_step_begin") || !self.connection.has("live_undo_step_end") {
             return None;
         }
         let opened =
-            self.connection.call("live_undo_step_begin", object(json!({"label":"Kumi: undo","timeoutMs":120_000})), signal).await.ok()?;
+            self.connection.call("live_undo_step_begin", object(json!({"label":"Kumi: undo","timeoutMs":ms})), signal).await.ok()?;
         context::payload(&opened).ok()?.get("stepId").and_then(Value::as_str).map(str::to_owned)
     }
     async fn close_undo_step(&self, step: Option<String>) {

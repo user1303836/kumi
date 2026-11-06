@@ -76,6 +76,38 @@ impl fmt::Display for KumiError {
 
 impl std::error::Error for KumiError {}
 
+/// A restricted capture can refuse, finish cancellation with verified restoration, or remain
+/// uncertain. Hosts take cleanup and modified-state evidence from fields, never from prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HearFailure {
+    Refused {
+        code: &'static str,
+        reason: String,
+        marked_modified: bool,
+    },
+    Cancelled {
+        marked_modified: bool,
+    },
+    /// A specific native cause, when known, survives the host's cleanup classification.
+    Unsure {
+        code: Option<&'static str>,
+        reason: String,
+        restored: bool,
+        marked_modified: bool,
+    },
+}
+
+impl fmt::Display for HearFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused { reason, .. } | Self::Unsure { reason, .. } => f.write_str(reason),
+            Self::Cancelled { .. } => f.write_str("Listening was cancelled; temporary DAW state is restored."),
+        }
+    }
+}
+
+impl std::error::Error for HearFailure {}
+
 /// An error as the TypeScript threw it: one of Kumi's own, a plain `Error(message)`, or the abort
 /// `signal.throwIfAborted()` throws. Its `Display` is `error.message`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +117,8 @@ pub enum RuntimeError {
     Plain(String),
     /// A Live observation error, whose own message may be shown by integration tools.
     Observation(String),
+    /// A machine-readable capture refusal or uncertain DAW restoration.
+    Hear(HearFailure),
     /// The work was cancelled.
     Aborted,
 }
@@ -117,6 +151,7 @@ impl fmt::Display for RuntimeError {
         match self {
             Self::Kumi(error) => f.write_str(&error.message),
             Self::Plain(message) | Self::Observation(message) => f.write_str(message),
+            Self::Hear(error) => error.fmt(f),
             Self::Aborted => f.write_str("This operation was aborted"),
         }
     }
@@ -127,6 +162,12 @@ impl std::error::Error for RuntimeError {}
 impl From<KumiError> for RuntimeError {
     fn from(error: KumiError) -> Self {
         Self::Kumi(error)
+    }
+}
+
+impl From<HearFailure> for RuntimeError {
+    fn from(error: HearFailure) -> Self {
+        Self::Hear(error)
     }
 }
 

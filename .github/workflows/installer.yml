@@ -946,9 +946,13 @@ jobs:
         with:
           name: kumi-release
           path: release
+      # The script exits non-zero when it can't fetch and unpack it, which fails this step (bash -e stops at the
+      # assignment), never exporting an empty KUMI_LEGACY_APP.
       - name: Fetch the last JavaScript release (Kumi 1.7.5), whose updater existing installations run
         shell: bash
-        run: echo "KUMI_LEGACY_APP=$(python3 scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
+        run: |
+          app="$(python3 scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")"
+          echo "KUMI_LEGACY_APP=$app" >> "$GITHUB_ENV"
       - name: Verify old updater, native probes, data preservation and rollback
         env:
           KUMI_NATIVE_RELEASES: ${{ github.workspace }}/release

@@ -48,6 +48,10 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
   }
 }
 
+// How many interleaved paths each group's points are drawn in: enough that overlapping groups mix about as the map's
+// own order would, few enough that a pass stays a few hundred fills.
+const ROUNDS = 8
+
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
@@ -58,10 +62,32 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const boxRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState<Size>({ width: 0, height: 0 })
   const [view, setView] = useState<MapViewport | null>(null)
+  // What the search box holds, and what the map searches for: the latter a beat behind while the producer types, so a
+  // 25,000-sound map redraws once per pause, not on every key.
   const [query, setQuery] = useState('')
+  const [searchFor, setSearchFor] = useState('')
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport } | null>(null)
+  // A drag or a wheel moves the view at most once per frame: the latest view waits here for the next animation frame.
+  const viewRef = useRef<MapViewport | null>(null)
+  viewRef.current = view
+  const nextView = useRef<MapViewport | null>(null)
+  const frameRef = useRef(0)
+  const queueView = (next: MapViewport) => {
+    nextView.current = next
+    if (frameRef.current) return
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = 0
+      const latest = nextView.current
+      nextView.current = null
+      if (latest) setView(latest)
+    })
+  }
+  useEffect(() => () => cancelAnimationFrame(frameRef.current), [])
+  // The canvas's backing store, resized only when its size or the screen's pixel ratio changes: setting a canvas's
+  // width reallocates and clears it.
+  const backing = useRef('')
   // What a screen reader is told when the keyboard moves to a sound.
   const [said, setSaid] = useState('')
   const [hintId] = useState(() => `kumi-map-keys-${(maps += 1)}`)
@@ -69,20 +95,28 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // The canvas exists only once the map has points: the effects that attach to it wait for that.
   const hasPoints = model.points.length > 0
 
-  const searched = useMemo(() => searchSounds(model, query), [model, query])
+  useEffect(() => {
+    if (query === searchFor) return
+    const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0)
+    return () => clearTimeout(timer)
+  }, [query, searchFor])
+  const searched = useMemo(() => searchSounds(model, searchFor), [model, searchFor])
   const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model])
   const foundIds = useMemo(
     () => (found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null),
     [found, model.revision]
   )
-  const visible = useMemo(() => {
-    const groupHidden = hidden.size > 0
-    return (index: number): boolean => {
-      const point = model.points[index]
-      if (groupHidden && hidden.has(point.group)) return false
-      return !searched || searched.has(point.id)
-    }
+  // Which points the legend and the search keep, once per change of either, so a frame's draw and a hover read one
+  // byte per point instead of a set lookup by id.
+  const mask = useMemo(() => {
+    const out = new Uint8Array(model.points.length)
+    model.points.forEach((point, index) => {
+      out[index] = (hidden.size > 0 && hidden.has(point.group)) || (searched !== null && !searched.has(point.id)) ? 0 : 1
+    })
+    return out
   }, [model, hidden, searched])
+  const visible = useMemo(() => (index: number): boolean => mask[index] === 1, [mask])
+  const shown = useMemo(() => mask.reduce((count, keep) => count + keep, 0), [mask])
   // What a search, or else the agent's find, picked out, also as named rows: a keyboard or a screen reader can pick a
   // sound the canvas only draws.
   const matches = useMemo(() => {
@@ -137,48 +171,75 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       event.preventDefault()
       const rect = canvas.getBoundingClientRect()
       const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0025))
-      setView(current => (current ? zoomAt(current, factor, event.clientX - rect.left, event.clientY - rect.top) : current))
+      const base = nextView.current ?? viewRef.current
+      if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top))
     }
     canvas.addEventListener('wheel', wheel, { passive: false })
     return () => canvas.removeEventListener('wheel', wheel)
   }, [hasPoints])
 
-  // Draw whenever anything shown changes.
+  // Draw whenever anything shown changes. Points are batched into one path per group colour, so a 25,000-sound map is a
+  // few hundred fills, not 25,000. Each colour's points are split into `ROUNDS` interleaved paths, drawn round by round:
+  // where groups overlap, their colours still mix as the map's own order left them, instead of the last colour covering
+  // the rest.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !view || size.width === 0) return
     const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.round(size.width * ratio)
-    canvas.height = Math.round(size.height * ratio)
+    const wanted = `${Math.round(size.width * ratio)}x${Math.round(size.height * ratio)}`
+    if (backing.current !== wanted) {
+      backing.current = wanted
+      canvas.width = Math.round(size.width * ratio)
+      canvas.height = Math.round(size.height * ratio)
+    }
     const context = canvas.getContext('2d')
     if (!context) return
     const colors = resolve(canvas)
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, size.width, size.height)
     // A small map (a fresh folder of a few sounds) draws bigger points than a library of thousands.
-    const count = model.points.length
+    const points = model.points
+    const count = points.length
     const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2
     const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8))
     const groupColor = new Map(model.groups.map(group => [group.key, group.color]))
+    const unit = mapSize * view.scale
+    const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8]
+    // The labels need at most 41 on-screen points: past 40 there are none.
     const labelled: [number, number, string][] = []
+    let onScreen = 0
     // Dimmed points first, then the ones the search and legend keep, so those sit on top.
-    for (const pass of [false, true]) {
+    for (const pass of [0, 1]) {
+      const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
+      for (let index = 0; index < count; index++) {
+        if (mask[index] !== pass) continue
+        const point = points[index]
+        const x = point.x * unit + view.dx
+        const y = point.y * unit + view.dy
+        if (x < left || y < top || x > right || y > bottom) continue
+        const color = groupColor.get(point.group) ?? colors.faint
+        const paths = rounds[index % ROUNDS]
+        let path = paths.get(color)
+        if (!path) {
+          path = new Path2D()
+          paths.set(color, path)
+        }
+        path.moveTo(x + radius, y)
+        path.arc(x, y, radius, 0, Math.PI * 2)
+        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
+      }
       context.globalAlpha = pass ? 0.92 : 0.16
-      model.points.forEach((point, index) => {
-        if (visible(index) !== pass) return
-        const [x, y] = toScreen(view, mapSize, point.x, point.y)
-        if (x < -8 || y < -8 || x > size.width + 8 || y > size.height + 8) return
-        context.fillStyle = groupColor.get(point.group) ?? colors.faint
-        context.beginPath()
-        context.arc(x, y, radius, 0, Math.PI * 2)
-        context.fill()
-        if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
-      })
+      for (const paths of rounds) {
+        for (const [color, path] of paths) {
+          context.fillStyle = color
+          context.fill(path)
+        }
+      }
     }
     // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
     // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
     // a tight cluster stays legible (its sounds are named on hover and in the list above).
-    if (labelled.length <= 40) {
+    if (onScreen <= 40) {
       context.globalAlpha = 0.85
       context.fillStyle = colors.text
       context.font = `11px ${getComputedStyle(canvas).fontFamily || 'sans-serif'}`
@@ -207,7 +268,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
     if (playing) ring(playing, colors.accent, 6, 2)
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted])
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -246,7 +307,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const chosen = selected ? model.sounds[selected] : undefined
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
-  const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 240, color: T.text }}>
@@ -330,7 +390,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             const held = drag.current
             if (held) {
               if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true
-              if (held.moved) setView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y })
+              if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y })
               return
             }
             if (!view) return
@@ -367,7 +427,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         )}
       </div>
       {selected && chosen && (
-        <div style={{ ...S.row, justifyContent: 'space-between', gap: 8, padding: '8px 10px', borderTop: `1px solid ${T.border}` }}>
+        // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+        <div style={{ ...S.row, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 10px', borderTop: `1px solid ${T.border}` }}>
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600 }}>{clean(chosen.name, 80)}</span>
             <span style={{ ...S.row, gap: 4, marginTop: 2 }}>
@@ -377,7 +438,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               {chosen.folder && <span style={{ ...S.faint, ...S.ellipsis }}>{clean(chosen.folder, 60)}</span>}
             </span>
           </div>
-          <div style={{ ...S.row, gap: 6 }}>{actions?.(selected, chosen)}</div>
+          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>{actions?.(selected, chosen)}</div>
         </div>
       )}
     </div>

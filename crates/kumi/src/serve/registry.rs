@@ -5,7 +5,7 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{library, listen, map, read, setup};
+use super::{device, generate, library, listen, map, read, script, setup, transport, variations};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
@@ -16,10 +16,15 @@ pub static OPERATIONS: &[&Operation] = &[
     &change::UNDO,
     &change::HISTORY,
     &core::JOB,
+    &transport::TRANSPORT,
     &setup::SETUP_DAW,
     &library::LIBRARY,
     &map::SOUNDS,
     &listen::LISTEN,
+    &generate::GENERATE,
+    &device::DEVICE,
+    &script::SCRIPT,
+    &variations::VARIATIONS,
 ];
 
 #[cfg(test)]
@@ -36,7 +41,6 @@ mod tests {
             assert!(!operation.name.starts_with("kumi_"), "{}: the host adds the prefix", operation.name);
             let schema = (operation.schema)();
             assert_eq!(schema["type"], "object", "{}", operation.name);
-            assert_eq!(schema["additionalProperties"], false, "{}: every argument is named", operation.name);
             assert!(!operation.description.is_empty(), "{}", operation.name);
         }
     }

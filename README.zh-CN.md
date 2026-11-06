@@ -86,6 +86,13 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 </details>
 
 <details>
+<summary><b>能在 Hermes Agent 中使用吗？</b></summary>
+
+可以。Kumi 也是 [Hermes Agent](https://hermes-agent.nousresearch.com) 的插件：运行 `hermes plugins install kumi`（Kumi 列入 Hermes 插件目录之后；在此之前请看指南）和 `hermes plugins enable kumi`，然后让 Hermes 为你的 DAW 设置 Kumi。智能体仍然是 Hermes，每次修改前都会征求你的同意（除非你关闭了确认），Kumi 会记录 HISTORY，在 Kumi 运行期间可以撤销。详见 [Kumi for Hermes Agent](docs/zh-CN/HERMES.md)。
+
+</details>
+
+<details>
 <summary><b>它用什么 AI？要花多少钱？</b></summary>
 
 Kumi 是免费的开源软件（MIT）。模型由你选择：
@@ -115,7 +122,7 @@ Kumi 是免费的开源软件（MIT）。模型由你选择：
 
 ## 当前状态
 
-Kumi 1.24.67 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
+Kumi 1.24.69 已在 macOS 的 Ableton Live 12.4（测试版）中验证。
 在 Windows 上，安装和升级已经过验证，但与 Live 一起使用还是新的。
 出问题时请发送 `kumi report`。
 REAPER 7.82 和 Renoise 3.5.4 已在 macOS 上验证。在 Windows 和 Linux 上，CI 验证了装入 Kumi 的扩展和工具以及加载该扩展，但在那里配合 REAPER 和 Renoise 使用还是新的。

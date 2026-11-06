@@ -1076,14 +1076,12 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         if applied.pointer("/display/unchanged") == Some(&Value::Bool(true)) {
             self.history.release(std::slice::from_ref(&transaction));
             let why = applied.pointer("/display/note").and_then(Value::as_str).unwrap_or("it changed nothing the project keeps");
-            return ChangeOutcome {
-                // ("unkept", not "unchanged": it was done, and a plan's summary says it, unlike a step that was so already)
-                text: stringify(&json!({"changed": format!("{title}: {}", why.trim_end_matches('.')), "unkept": true})),
-                is_error: false,
-                missed: None,
-                stops: false,
-                applied: Some(applied.clone()),
-            };
+            // ("unkept", not "unchanged": it was done, and a plan's summary says it, unlike a step that was so already)
+            let mut reply = json!({"changed": format!("{title}: {}", why.trim_end_matches('.')), "unkept": true});
+            // (Lua that only read, or stopped at its time, keeps nothing and still said something: its value, what it printed,
+            // the error it stopped at)
+            self.answered(&applied, &mut reply);
+            return ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false, applied: Some(applied.clone()) };
         }
         // What the producer should know of it (a step the DAW's own undo skips), on its row and in its answer.
         let own_undo = self.link().words().vocab.own_undo;
@@ -1165,14 +1163,18 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         if let Some(restored) = applied.pointer("/applied/base") {
             reply["base"] = self.link().book.borrow_mut().shorten(restored);
         }
-        // What Lua or a call through the DAW's API answered: its value, what it printed, its out-values, or the error it
-        // stopped at (what it changed before that stays), with the DAW's refs in them short.
+        self.answered(&applied, &mut reply);
+        ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false, applied: Some(applied) }
+    }
+
+    /// What Lua or a call through the DAW's API answered, into a step's reply: its value, what it printed, its out-values,
+    /// or the error it stopped at (what it changed before that stays), with the DAW's refs in them short.
+    fn answered(&self, applied: &Value, reply: &mut Value) {
         for key in ["result", "printed", "out", "failed"] {
             if let Some(value) = applied.pointer(&format!("/applied/{key}")) {
                 reply[key] = crate::bridge::shorten_anywhere(&mut self.link().book.borrow_mut(), value);
             }
         }
-        ChangeOutcome { text: stringify(&reply), is_error: false, missed: None, stops: false, applied: Some(applied) }
     }
 
     /// One action through the host's tool: what the producer is told it did, or why it didn't.

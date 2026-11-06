@@ -6,6 +6,7 @@ import contextvars
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -72,6 +73,29 @@ class Approvals(unittest.TestCase):
             self.assertIsNone(self.hook("kumi_connect", {}), "a one-shot query still connects")
             self.assertIsNone(self.hook("kumi_observe", {"scope": "focus"}), "and reads")
 
+    def test_a_turn_hermes_forks_in_the_background_only_reads(self):
+        """Hermes's background review forks the chat after a turn (same session id, a turn of its own that never goes
+        through pre_llm_call), and its tool whitelist doesn't reach the tool's thread (v0.22.7): in the lab it ran a
+        script under the chat's "this session" approval. Kumi refuses its every call but a read."""
+        policy.turn_started(self.host, session_id="s1", turn_id="u1")
+        self.assertEqual(self.hook("kumi_change", change())["action"], "approve", "the producer's own turn is asked")
+        forked = {"session_id": "s1", "tool_call_id": "c2", "task_id": "t2", "turn_id": "s1:t2:9f3a1c2e"}
+        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
+        for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}), ("kumi_listen", track),
+                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}), ("kumi_setup", {})):
+            with self.subTest(tool=tool):
+                self.assertEqual(policy.pre_tool_call(self.host, tool_name=tool, args=args, **forked),
+                                 {"action": "block", "message": policy.FORKED})
+        self.assertIsNone(policy.pre_tool_call(self.host, tool_name="kumi_observe", args={"scope": "focus"}, **forked))
+        policy.turn_started(self.host, session_id="s1", turn_id="u2")  # the producer's next turn
+        self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id="s1",
+                                              tool_call_id="c3", turn_id="u2")["action"], "approve")
+        for unnamed in ({"turn_id": ""}, {}):  # a Hermes that stopped naming turns must not reopen the bypass (rgzm)
+            with self.subTest(turn=unnamed):
+                self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(),
+                                                      session_id="s1", tool_call_id="c4", **unnamed),
+                                 {"action": "block", "message": policy.FORKED})
+
     def test_an_api_call_or_a_webhook_never_runs_what_needs_an_approval_and_desktop_still_asks(self):
         for surface in ("api_server", "webhook", "msgraph_webhook"):  # Hermes's ctx.session_surface()
             with self.subTest(surface=surface):
@@ -114,7 +138,7 @@ class Approvals(unittest.TestCase):
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
         self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer:s1", "message": (
-            "Kumi, for the agent's \"Louder drums\":\n• Set Drums volume from -6 dB to -4 dB\n"
+            "Hermes's change \"Louder drums\", which Kumi will make:\n• Set track volume: volume_db -4 — on \"Drums\"\n"
             f"(Values as Kumi read them just now.)\n{policy.CHAT_ONLY}")})
         self.assertEqual(support.call(self.host, "kumi_history", {})["items"], [], "the preview wrote nothing")
         asked = [m["params"]["arguments"] for m in support.requests(self.data / "state")
@@ -127,26 +151,57 @@ class Approvals(unittest.TestCase):
         lines = decision["message"].splitlines()
         self.assertEqual(len(lines), 4, lines[:5])
         self.assertLessEqual(len(lines[0]), policy.LINE)
-        self.assertTrue(lines[0].startswith("Kumi, for the agent's \"") and lines[0].endswith('":'),
-                        "the model's words, quoted and labelled as the agent's, never as Kumi's")
+        longest = policy.agents_title("x" * 500)
+        self.assertEqual((len(longest), longest[-24:]), (policy.LINE, '", which Kumi will make:'),
+                         "the longest title is cut, never the label (rgzm, #1055)")
+        self.assertTrue(lines[0].startswith("Hermes's change \"") and lines[0].endswith('", which Kumi will make:'),
+                        "the model's words, quoted and labelled as Hermes's, never as Kumi's")
         for mark in ('"', "\u201d", "\u300d", "\uff02"):  # ASCII, curly, a CJK corner bracket, fullwidth
             with self.subTest(mark=mark):
                 quoted = policy.agents_title(f"Louder{mark} • Set Drums volume to 0 dB, approved by Kumi {mark}")
                 self.assertEqual(quoted.count(mark), 2 if mark == '"' else 0, "its own can't close the agent's quote")
         self.assertNotIn("\x1b", decision["message"])
-        self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
+        self.assertEqual(lines[1:], ['• Set track volume: volume_db 6 — on "Drums"', policy.FOOTER, policy.CHAT_ONLY])
 
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
-        self.assertEqual(self.hook("kumi_change", plan), {"action": "block", "message": policy.TOO_LONG},
-                         "twenty steps don't fit the terminal's panel: refused, the model told to split it")
+        # Twenty steps of one kind fit the terminal's panel grouped: the step name and setting once, every value and
+        # target whole, in plan order, with the footer and the chat note on one row.
+        decision = self.hook("kumi_change", plan)
+        self.assertEqual(decision["action"], "approve")
+        lines = decision["message"].splitlines()
+        self.assertTrue(lines[1].startswith('• Set track volume ×20, volume_db: -1 — on "Drums" · -2 — on "Drums"'), lines)
+        self.assertEqual(lines[-1], policy.COMPACT_CLOSING)
+        shown = " ".join(lines[1:-1])
+        self.assertEqual([shown.index(f'-{db} — on "Drums"') < shown.index(f'-{db + 1} — on "Drums"') for db in range(1, 20)],
+                         [True] * 19, "every step, in plan order")
+        self.assertTrue(policy.shows_whole(decision["message"], "cli"))
         self.ctx.surface = "desktop"
-        lines = self.hook("kumi_change", plan)["message"].splitlines()
-        self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows every step")
+        plain = self.hook("kumi_change", plan)
+        lines = plain["message"].splitlines()
+        self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows one line a step")
         self.assertEqual(lines[-2:], [policy.FOOTER, policy.CHAT_ONLY])
+        self.assertEqual(plain["rule_key"], decision["rule_key"], "the same approval in either form")
         self.ctx.surface = RuntimeError("the plugin host's channel is gone")
         self.assertEqual(self.host.session_surface(), "unknown")
         self.assertFalse(policy.shows_whole("Kumi: Louder drums", "unknown"), "never taken as whole")
+
+    def test_steps_group_only_with_their_neighbours_and_a_plan_that_still_cant_fit_isnt_asked(self):
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1", "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        lines = policy.compact_lines("T", [
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -4 — on "Drums"'},
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -6 — on "Bass"'},
+            {"tool": "replace_sample", "text": 'Replace sample: sample "Snare 04" — on "Drums"'},
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -2 — on "Keys"'},
+        ])
+        self.assertEqual(lines, ["T", '• Set track volume ×2, volume_db: -4 — on "Drums" · -6 — on "Bass"',
+                                 '• Replace sample: sample "Snare 04" — on "Drums"', '• Set track volume: volume_db -2 — on "Keys"'],
+                         "never grouped across another kind's step: the order carries meaning")
+        self.assertIsNone(policy.compact_lines("T", [{"tool": "a", "text": "A: x 1"}, {"tool": "b", "text": "B: y 2"}]),
+                          "nothing to group, no compact form")
+        # Kinds that alternate can't share a bullet: twenty such steps stay too long for the panel, and aren't asked.
+        alternating = change(*[step for db in range(1, 11) for step in (volume("t1", -db), sample)])
+        self.assertEqual(self.hook("kumi_change", alternating), {"action": "block", "message": policy.TOO_LONG})
 
     def test_the_terminals_panel_shows_a_change_undo_or_listen_whole_at_its_longest_step(self):
         def message(lines, footer=None):
@@ -157,17 +212,32 @@ class Approvals(unittest.TestCase):
         self.assertTrue(policy.shows_whole(message(["Kumi: Undo " + "t" * 300])["message"], "cli"))
         listen = message(["Kumi: play the track " + "d" * 200 + " of " + "s" * 40])["message"]
         self.assertTrue(policy.shows_whole(listen, "cli"), "a track listen with its names at their longest")
+        usual = message(["T" * 300, "• " + "e" * 98, "• " + "e" * 98], policy.FOOTER)["message"]
+        self.assertTrue(policy.shows_whole(usual, "cli"), "two 100-character steps fit beside the chat note")
         two = message(["T", "• " + "e" * (policy.STEP_LINE - 2), "• " + "e" * (policy.STEP_LINE - 2)], policy.FOOTER)
         self.assertFalse(policy.shows_whole(two["message"], "cli"), "so a longer plan is refused, never cut")
         self.assertEqual(policy.approve(["T", "• " + "e" * policy.STEP_LINE], "kumi:write:mixer")["action"], "block",
                          "a step longer than the runtime ever writes is refused, never cut")
 
     def test_a_plans_families_make_its_rule_key_so_always_covers_only_that_kind_in_this_chat(self):
-        sample = {"tool": "replace_sample", "input": {"track_ref": "t1", "sample": "Dusty Snare 04.wav"}}
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
         decision = self.hook("kumi_change", change(sample, volume("t2", -10)))
-        self.assertEqual(decision["rule_key"], "kumi:write:mixer+sample:s1")
-        self.assertIn("• Replace the sample in the Simpler on Drums > Drum Rack pad D1 (Snare 01.wav) with Dusty "
-                      "Snare 04.wav", decision["message"])
+        self.assertEqual(decision["rule_key"], "kumi:write:device+mixer:s1", "each step's HISTORY family (#965)")
+        self.assertIn('• Replace sample: sample "Dusty Snare 04.wav" — on "Simpler (Drums > Drum Rack pad D1)"',
+                      decision["message"], "the file by its name, never its path (CC-11)")
+
+    def test_the_demo_file_step_places_a_map_sound_by_its_id_and_never_by_a_path(self):
+        demo = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                    "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        applied = support.call(self.host, "kumi_change", change(demo, title="Dustier snare"), session_id="s1")
+        self.assertEqual((applied["state"], applied["steps"]["done"]), ("applied", [{"step": 1, "tool": "replace_sample"}]))
+        self.assertEqual(support.call(self.host, "kumi_history", {})["items"][0]["family"], "device")
+        for sample, code in (("/Samples/Drums/Dusty Snare 04.wav", "a path"),
+                             ({"sound_id": "s-r1-1", "map_revision": "r0"}, "another map revision")):
+            with self.subTest(code):
+                refused = self.hook("kumi_change", change({**demo, "input": {**demo["input"], "sample": sample}}))
+                self.assertEqual(refused["action"], "block", "refused before anyone is asked")
 
     def test_an_always_in_one_chat_never_covers_another_chat_a_one_shot_run_or_a_compacted_chat(self):
         keys = {session: policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id=session,
@@ -180,7 +250,7 @@ class Approvals(unittest.TestCase):
                          "without a session id, the plan's own digest, never a family alone")
 
     def test_a_plan_the_runtime_would_refuse_is_blocked_before_anyone_is_asked(self):
-        for args, reason in ((change(expected_epoch="0"), "stale"),
+        for args, reason in ((change(expected_epoch="0"), "changed since it was read"),
                              (change({"tool": "delete_track", "input": {"track_ref": "t1"}}), "delete_track"),
                              (change(volume("t9", -4)), "no track"),
                              (change(*[volume("t1", -4)] * 21), "doesn't take these steps")):
@@ -198,7 +268,19 @@ class Approvals(unittest.TestCase):
             "message": f"Kumi: Undo Louder drums on Drums\n{policy.CHAT_ONLY}"})
         self.assertEqual(support.call(self.host, "kumi_undo", undo, session_id="s1")["state"], "undone")
         decision = self.hook("kumi_undo", undo)
-        self.assertEqual((decision["action"], decision["message"]), ("block", "Kumi didn't undo anything: expired"))
+        self.assertEqual((decision["action"], decision["message"]),
+                         ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
+
+    def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
+        applied = support.call(self.host, "kumi_change", change(), session_id="s1")
+        undo = {"history_id": applied["history_ids"][0]}
+        self.host.runtimes.stop_all()  # its chat ended, or it was idle: the change's undo went with it
+        support.install(self.data, "--generation", "g2")
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        restarted = ("Kumi restarted since this change, so it can't undo it safely: undo it in Live if it's still the "
+                     "latest step there, or ask Hermes to set it back.")
+        self.assertEqual(self.hook("kumi_undo", undo), {"action": "block",
+                                                        "message": f"Kumi didn't undo anything: {restarted}"})
 
     def test_a_folder_is_approved_as_kumi_will_keep_it_and_never_a_whole_disk_or_home(self):
         written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep
@@ -244,13 +326,26 @@ class Approvals(unittest.TestCase):
         snapshots = support.module("snapshots")
         network = ([r"\\server\share\Samples", r"\\?\UNC\server\share\Samples", "//server/share/Samples"]
                    if os.name == "nt" else ["/net/server/Samples", "/Network/Servers/s/Samples", "/NET/server"])
-        touched = mock.Mock(side_effect=AssertionError("Kumi looked the folder up"))
-        with mock.patch.object(os.path, "realpath", touched), mock.patch.object(os.path, "ismount", touched), \
-                mock.patch.object(os.path, "samefile", touched), mock.patch.object(os, "stat", touched):
+        # Only this thread's calls count: the runtime setUp started has threads of its own (its snapshot watcher stats
+        # the state folder), which get the real functions (#1141: on Windows one ran inside this window).
+        mine, looked = threading.get_ident(), []
+
+        def guarded(original):
+            def lookup(*args, **kwargs):
+                if threading.get_ident() != mine:
+                    return original(*args, **kwargs)
+                looked.append((original.__name__, args))
+                raise AssertionError("Kumi looked the folder up")
+            return lookup
+
+        with mock.patch.object(os.path, "realpath", guarded(os.path.realpath)), \
+                mock.patch.object(os.path, "ismount", guarded(os.path.ismount)), \
+                mock.patch.object(os.path, "samefile", guarded(os.path.samefile)), \
+                mock.patch.object(os, "stat", guarded(os.stat)):
             for folder in network:
                 with self.subTest(folder=folder):
                     self.assertIsNone(snapshots.library_folder(folder)[0])
-        touched.assert_not_called()
+        self.assertEqual(looked, [], "Kumi looked the folder up")
 
     def test_a_scan_is_cancelled_by_its_job_id_from_a_chat_with_nothing_asked(self):
         cancel = {"action": "cancel", "job_id": "j-scan-1"}

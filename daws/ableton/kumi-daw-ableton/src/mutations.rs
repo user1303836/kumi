@@ -384,7 +384,10 @@ impl Mutations {
             None => None,
         };
         let permanent = if applied && kept.is_none() {
-            kind.permanent(&args).or_else(|| kind.replaced(&preview)).filter(|s| !s.is_empty())
+            kind.permanent(&args)
+                .or_else(|| kind.replaced(&preview))
+                .or_else(|| kind.kept_for_live(&self.options.policy))
+                .filter(|s| !s.is_empty())
         } else {
             None
         };
@@ -417,6 +420,11 @@ impl Mutations {
                 })
             })
         });
+        // The plugin host keeps what Live read back of each value it set, for its undo to check against (`undo_guard`).
+        if applied && history.host.guard.on.get() && super::undo_guard::GUARDED.contains(&kind.tool.as_str()) {
+            let set = super::undo_guard::applied(connection, &kind.tool, &args, &preview, &result, &signal).await;
+            history.host.guard.keep(&record.id, set);
+        }
         history.remember(record.clone(), transaction.into(), restore);
         if applied {
             super::parameters::curve_later(history, kind, args.get("deviceRef"), &record.id, final_summary.picture.as_ref());
@@ -572,6 +580,12 @@ impl Mutations {
         let mut reply = object(json!({"changed":record.title,"change":record.id,"state":record.state}));
         if let Some(produced) = produced {
             reply.insert("ref".into(), json!(connection.references.borrow_mut().short_ref(&produced.reference)));
+        }
+        // A plugin's pad-load warning is counted only after a traced route reports what ran (CC-18 18-r2).
+        if self.options.policy.guards_undo && kind.tool == "load_sample_to_pad" {
+            if let Some(route) = result.get("result").and_then(|made| made.get("route")).filter(|route| route.is_string()) {
+                reply.insert("route".into(), route.clone());
+            }
         }
         if let Some(lines) = final_summary.lines.filter(|lines| !lines.is_empty()) {
             reply.insert("lines".into(), json!(lines));

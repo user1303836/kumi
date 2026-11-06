@@ -143,8 +143,28 @@ pub struct OwnDaw {
     pub outside_code: &'static str,
 }
 
+/// What the integration says as it starts its host.
+pub struct HostStart {
+    pub signal: Signal,
+    /// The host's connections ask the bridge to keep the project's id in the project while they last (the hello's
+    /// `keepIdentity`; `KUMI_KEEP_IDENTITY=1` in `daw-mcp-server`'s environment): the context's `policy.persist_identity`,
+    /// true for standalone Kumi and false for the plugin's runtime, whose host then has nothing written into the project.
+    pub keep_identity: bool,
+}
+
+/// What `daw-mcp-server`'s environment gets beside the MCP client's own: `KUMI_KEEP_IDENTITY=1` when the host is to ask.
+/// In the environment, not the arguments: a host from before the ask ignores the variable and asks nothing, where it
+/// would refuse an argument it doesn't know.
+fn host_environment(keep_identity: bool) -> Vec<(String, String)> {
+    if keep_identity {
+        vec![(daw_bridge::wire::KEEP_IDENTITY_VARIABLE.into(), "1".into())]
+    } else {
+        vec![]
+    }
+}
+
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
-pub type Connect = Rc<dyn Fn(Signal) -> LocalBoxFuture<'static, Result<Rc<dyn McpEndpoint>, RuntimeError>>>;
+pub type Connect = Rc<dyn Fn(HostStart) -> LocalBoxFuture<'static, Result<Rc<dyn McpEndpoint>, RuntimeError>>>;
 
 /// What the app gives a DAW's integration beside the neutral context.
 #[derive(Clone)]
@@ -420,11 +440,12 @@ const HEARD_KEPT: usize = 512;
 const FLAGS_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a DAW's own tools are made from: the shared plan of its changes, the renderer the shared listening plays and
-/// renders with, and Kumi's folder.
+/// renders with, Kumi's folder, and what the host permits (a plugin host keeps its variations under its own state).
 pub struct OwnParts<S: RefScheme + 'static> {
     pub changes: Rc<OwnPlan<S>>,
     pub renderer: Rc<crate::listening::OwnRenderer<S>>,
     pub kumi_home: PathBuf,
+    pub policy: kumi_agent::core::context::HostPolicy,
 }
 
 /// The tools a DAW adds to the shared ones, where it offers them (its profile's caps): Renoise's variations of its
@@ -491,8 +512,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     let listening = OwnListening::new(link.clone(), changes.clone(), context, &options.kumi_home);
     // (#401) the DAW's own tools, where it offers them: variations, the sample map, chopping, delivery, routing, jams
     // and layered breaks (each DAW's own, from its own integration)
-    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers, ears } =
-        own_tools(&OwnParts { changes: changes.clone(), renderer: listening.renderer.clone(), kumi_home: options.kumi_home.clone() });
+    let OwnTools { variations, mapping, chop, delivery, routing, jam, layers, ears } = own_tools(&OwnParts {
+        changes: changes.clone(),
+        renderer: listening.renderer.clone(),
+        kumi_home: options.kumi_home.clone(),
+        policy: options.context.policy.clone(),
+    });
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
         let backend = crate::scripts::OwnScripts::new(changes.clone(), daw.scripts);
@@ -708,7 +733,42 @@ fn busy_words(code: &str, profile: &DawProfile) -> String {
     }
 }
 
+/// What a transport action's outcome says of the play: an error is the DAW's words (one it may or may not have run says
+/// so).
+fn played(outcome: kumi_agent::core::plan::ActionOutcome) -> Result<Played, RuntimeError> {
+    if outcome.is_error {
+        return Err(RuntimeError::plain(outcome.text));
+    }
+    let said: Value = serde_json::from_str(&outcome.text).unwrap_or_default();
+    Ok(Played {
+        playing: outcome
+            .done
+            .as_ref()
+            .and_then(|done| done.playing)
+            .or_else(|| said.get("playing").and_then(Value::as_bool))
+            .unwrap_or(false),
+        position_beats: said.get("positionBeats").and_then(Value::as_f64),
+    })
+}
+
 impl<S: RefScheme + 'static> OwnIntegration<S> {
+    /// The DAW's own action by its tool's name.
+    fn action(&self, tool: &str) -> Option<&'static crate::changes::OwnAction> {
+        self.daw.changes.actions.iter().find(|action| action.tool == tool)
+    }
+
+    /// A bar in quarter notes where the transport is, from the DAW's time signature (6/8's is 3).
+    async fn bar_quarter_notes(&self, signal: Signal) -> Result<f64, RuntimeError> {
+        let unknown =
+            || RuntimeError::plain(format!("Kumi can't tell {}'s bar length: play from a beat instead.", self.profile().words.app));
+        let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Err(unknown()) };
+        let signature = focus.pointer("/transport/timeSignature").and_then(Value::as_array);
+        match signature.map(|parts| (parts.first().and_then(Value::as_f64), parts.get(1).and_then(Value::as_f64))) {
+            Some((Some(beats), Some(unit))) if beats > 0. && unit > 0. => Ok(beats * 4. / unit),
+            _ => Err(unknown()),
+        }
+    }
+
     fn set_connected(&self, connected: bool) {
         if self.connected.replace(connected) != connected || !connected {
             let state = if connected { ConnectionState::Connected } else { ConnectionState::Disconnected };
@@ -720,23 +780,29 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         if let Some(endpoint) = self.endpoint.borrow().clone() {
             return Ok(endpoint);
         }
+        let keep_identity = self.options.context.policy.persist_identity;
         let endpoint = match &self.options.connect {
-            Some(connect) => connect(signal).await?,
+            Some(connect) => connect(HostStart { signal, keep_identity }).await?,
             None => {
-                let args = vec![
+                let mut args = vec![
                     "--daw".into(),
                     self.daw.host_flag.into(),
                     "--kumi-home".into(),
                     self.options.kumi_home.to_string_lossy().into_owned(),
                 ];
-                connect_mcp(Options {
+                if matches!(self.options.context.policy.listening, kumi_agent::core::context::ListeningPolicy::Restricted { .. }) {
+                    args.push("--restricted-listening".into());
+                }
+                let options = Options {
                     signal,
                     args,
+                    env: host_environment(keep_identity),
                     timeout_ms: Some(self.daw.call_ms),
                     bridge: Some(self.daw.descriptor),
                     ..Default::default()
-                })
-                .await?
+                };
+                connect_mcp(options).await?
+
             }
         };
         *self.endpoint.borrow_mut() = Some(endpoint.clone());
@@ -1710,6 +1776,9 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
     fn has_audio_file(&self) -> bool {
         self.connected.get() && self.listening.renderer.flags().known
     }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.listening.preview_hear(request, signal).await
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.listening.hear(request, signal).await
     }
@@ -1791,6 +1860,74 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Ok(None) };
         let on = |key: &str| focus.pointer(&format!("/transport/{key}")).and_then(Value::as_bool);
         Ok(on("playing").map(|playing| playing && on("recording") == Some(true)))
+    }
+    /// Whether a play would record, as the transport says whatever plays: REAPER's record, Renoise's edit mode.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        if self.closed.get() || !self.connected.get() {
+            return Ok(None);
+        }
+        let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Ok(None) };
+        let on = |key: &str| focus.pointer(&format!("/transport/{key}")).and_then(Value::as_bool);
+        // `recording` is what both DAWs say (Renoise's from its edit mode): off only when it's known off and nothing else
+        // says it would record, else the DAW can't say.
+        Ok(match (on("recording"), on("editMode")) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), _) => Some(false),
+            (None, _) => None,
+        })
+    }
+    /// What the DAW's own transport actions take: a timeline's (REAPER's: a cursor to move first) plays from a bar or a
+    /// beat, a tracker's (Renoise's: play takes a sequence slot) from a slot and line; neither has Live's clips or scenes.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        let app = self.profile().words.app;
+        let timeline = self.action("set_cursor").is_some();
+        let tracker = self
+            .action("play")
+            .and_then(|play| serde_json::from_str::<Value>(play.schema).ok())
+            .is_some_and(|schema| schema.pointer("/properties/sequence").is_some());
+        match from {
+            PlayFrom::Here if self.action("play").is_some() => Ok(()),
+            PlayFrom::Bar(_) | PlayFrom::Beat(_) if timeline => Ok(()),
+            PlayFrom::Slot { .. } if tracker => Ok(()),
+            PlayFrom::Clip(_) | PlayFrom::Scene(_) => Err(format!("{app} has no Session clips or scenes to launch: those are Live's.")),
+            _ if tracker => Err(format!("{app} plays from a sequence slot and a line (from_slot, from_line), not a bar or a beat.")),
+            _ if timeline => Err(format!("{app} plays from a bar or a beat (from_bar, from_beat), not a sequence slot.")),
+            _ => Err(format!("Kumi doesn't start {app}'s playback.")),
+        }
+    }
+    /// The DAW's own play, after its cursor moves to the bar or beat asked (an action each: no HISTORY row).
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        self.plays_from(from).map_err(RuntimeError::plain)?;
+        let beats = match from {
+            PlayFrom::Beat(beats) => Some(*beats),
+            PlayFrom::Bar(bar) => Some(f64::from(bar.saturating_sub(1)) * self.bar_quarter_notes(signal.clone()).await?),
+            _ => None,
+        };
+        if let (Some(beats), Some(cursor)) = (beats, self.action("set_cursor")) {
+            let mut at = JsonObject::new();
+            at.insert("positionBeats".into(), json!(beats));
+            let moved = self.changes.one_action(cursor, at, signal.clone()).await;
+            if moved.is_error {
+                return Err(RuntimeError::plain(moved.text));
+            }
+        }
+        let mut input = JsonObject::new();
+        if let PlayFrom::Slot { slot, line } = from {
+            if let Some(slot) = slot {
+                input.insert("sequence".into(), json!(slot));
+            }
+            if let Some(line) = line {
+                input.insert("line".into(), json!(line));
+            }
+        }
+        let play = self.action("play").ok_or_else(|| RuntimeError::plain("no play action"))?;
+        played(self.changes.one_action(play, input, signal).await)
+    }
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let stop = self
+            .action("stop")
+            .ok_or_else(|| RuntimeError::plain(format!("Kumi doesn't stop {}'s playback.", self.profile().words.app)))?;
+        played(self.changes.one_action(stop, JsonObject::new(), signal).await)
     }
     /// A fixed phrase as the DAW's change, in the project the session's look just read: one plan, so it lands in HISTORY
     /// with Kumi's undo and Kumi says what changed. A phrase the DAW has no such thing for is refused in its words; one
@@ -2458,6 +2595,12 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_host_is_asked_to_keep_the_projects_id_through_its_environment_only_when_the_policy_keeps_it() {
+        assert_eq!(host_environment(true), [("KUMI_KEEP_IDENTITY".to_string(), "1".to_string())]);
+        assert!(host_environment(false).is_empty());
+    }
 
     fn answered(message: Value) -> CallToolResult {
         CallToolResult::from_object(message.as_object().cloned().unwrap()).unwrap()

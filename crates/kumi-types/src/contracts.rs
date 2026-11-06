@@ -4,6 +4,7 @@
 //! The rest of the agent's contracts (the kernel, the session and its events, the stores, the DAW integrations) are
 //! kumi-agent's `core::contracts`.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -212,6 +213,60 @@ pub struct HearRequest {
     /// The whole song, from the Arrangement's start to its end, in one listen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub whole: Option<bool>,
+    /// Host-owned output for a restricted capture. Never accepted from or exposed on a tool's wire.
+    #[serde(skip)]
+    pub scratch_dir: Option<PathBuf>,
+    /// The native epoch of the host's exact observation, not a fresh probe or a model argument.
+    #[serde(skip)]
+    pub expected_native_epoch: Option<String>,
+    /// The host's approved native window and budget. A restricted capture never invents these.
+    #[serde(skip)]
+    pub approval: Option<HearApproval>,
+    /// The existing host native-phase deadline, carried privately to deferred native cleanup.
+    #[serde(skip)]
+    pub native_deadline_unix_ms: Option<u64>,
+}
+
+/// Internal approval for one bounded capture; never accepted through the listening tool's schema.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HearApproval {
+    pub seconds: f64,
+    pub deadline_seconds: u16,
+}
+
+impl HearApproval {
+    /// A fresh plan must fit the approved duration and native budget, even after a tempo change.
+    pub fn covers(&self, seconds: f64, deadline_seconds: u64) -> bool {
+        self.seconds.is_finite()
+            && self.seconds > 0.
+            && self.seconds <= 60.
+            && (1..=360).contains(&self.deadline_seconds)
+            && seconds.is_finite()
+            && seconds > 0.
+            && seconds <= self.seconds
+            && deadline_seconds > 0
+            && deadline_seconds <= u64::from(self.deadline_seconds)
+    }
+}
+
+/// A read-only preflight for hearing a bounded part; it starts no capture and creates no files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HearPreview {
+    pub label: String,
+    pub seconds: f64,
+    /// Host-visible caveats supplied by the DAW, without file paths or untrusted project text.
+    pub disclosure: &'static str,
+    pub method: HearMethod,
+    /// Total native call budget, including capture or rendering, restoration and measurement.
+    /// Does not include a host's subsequent model interpretation.
+    pub deadline_seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HearMethod {
+    Ears,
+    Offline,
 }
 
 /// One thing heard: its name, its file, where the part starts in it, and whether it was heard as it played.
@@ -226,6 +281,9 @@ pub struct HeardTake {
     /// What went short of the request (Live stopped before the part's end, say).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Restoration may leave the DAW's modified flag set. Kept off the standalone wire.
+    #[serde(skip)]
+    pub marked_modified: bool,
 }
 
 /// A gap no knob closes, and the structural change that closes it.

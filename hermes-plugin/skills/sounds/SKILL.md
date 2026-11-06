@@ -1,6 +1,6 @@
 ---
 name: sounds
-description: Find, audition and place sounds from the producer's own sample folders with Kumi's sound map - approved folders only, revision-scoped sound ids, placing as an approved change.
+description: Find, audition and place sounds from the producer's own sample folders with Kumi's sound map, or a file another Hermes plugin made (ElevenLabs) - approved folders only, revision-scoped sound ids, placing as an approved change.
 ---
 # The producer's sounds, with Kumi
 
@@ -24,11 +24,40 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 - **`kumi_listen`** with `source: {"sound_id", "map_revision"}` measures a sound (skill `kumi:listening`), and with `compare_to` compares two.
 - **In Hermes Desktop the producer can click sounds on the map** to hear them locally. That plays nothing in the DAW.
 - **To let the producer hear a sound in a messaging chat** (Telegram, Discord…), put the `MEDIA:` line `kumi_listen` returned for it in your reply, on a line of its own. A `MEDIA:` line inside a tool result isn't delivered there.
+- **"Find me a darker snare", end to end:**
+  1. `kumi_sounds` with `{"query": "", "kind": "snare"}`, or `{"query": "", "near": "<the current snare's sound id>"}` when it's a map sound. `query` is always given, even empty.
+  2. Measure the two or three likeliest with `kumi_listen`.
+     - Set `compare_to` to the current snare when Kumi can name it: `{"sound_id", "map_revision"}` together, or a file Kumi kept (`{"artifact_id"}`). Otherwise measure the candidates against the first of them.
+     - After the first answer, use its `compare.artifact_id` as `compare_to`.
+  3. Report each candidate's spectral centroid (lower is darker) and loudness difference, at matched loudness (skill `kumi:listening`).
+  4. Place the one the producer picks with one `kumi_change` file step, as below.
+  5. The placed sample measures as it did before. To check it in the mix, the producer exports or bounces into an approved folder, and you measure that file.
 
 ## Placing a sound
-- **Placing is a change:** `kumi_change` with an `import_audio` step.
-  - Its `source` is the sound (`{"sound_id", "map_revision"}`) or an earlier Kumi artifact (`{"artifact_id"}`).
-  - Its target is a `track_ref` from your latest observe, or a `new_track`.
-  - To swap the sample in an existing sampler (Live's Simpler on a drum pad), use that DAW's replace step: `kumi_read` with `action: schema` says which steps exist.
+- **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
+  - Live: `replace_sample` swaps a Simpler's audio (a drum pad's, by its `deviceRef` from your latest observe); `import_audio` fills an empty Session slot or a take lane.
+  - REAPER: `item_import` puts it on a track at a position. Renoise: `sample_load` loads it into an instrument.
+  - For a new track, add it in an earlier step of the same plan, named with `as`, and refer to it as `@name`.
+  - Example (Live, a drum pad): `{"tool": "replace_sample", "input": {"deviceRef": "<the Simpler's ref>", "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
 - **The producer approves the exact placement,** and HISTORY lets them undo it.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
+
+## A sound another Hermes plugin made (ElevenLabs)
+- **Use the file that plugin already made.** ElevenLabs Music (`elevenlabs_music_compose`, `elevenlabs_music_compose_plan`, `elevenlabs_music_stems`, `elevenlabs_music_from_video`; a job still running is checked with `elevenlabs_music_job`, and a finished one returns its files) and Sound Effects (`elevenlabs_sound_effect`) return the finished file as a `MEDIA:` line. Their own skills cover making it, and their own approvals cover paying and uploading. Kumi never makes it again or calls ElevenLabs. It reads only the finished file, never that plugin's private files or credentials.
+- **Take the path from the successful result's `MEDIA:` line.** It's a file on the computer Hermes runs on, which must also be where the DAW runs; a download on another computer isn't that file, and a URL is never a local file (don't fetch it through Kumi).
+  - Never read that plugin's library, `tracks.jsonl`, `sounds.jsonl` or jobs folder.
+  - A title or a chat attachment doesn't prove a generation finished. If you can't tell, check its job, and ask before another paid generation.
+- **Observe first,** then find the destination with `kumi_read`, so you have the current project key, epoch and destination ref. Ask `kumi_read` with `action: schema` for the DAW's file step; never invent a placement it doesn't have.
+- **Place it with one `kumi_change` file step,** with the DAW's own destination fields:
+  - Live `replace_sample`: `deviceRef` names the existing Simpler, and `sample` holds the source.
+  - Live `import_audio`: `sample` holds the source; `trackRef` and `sceneIndex` name an empty Session slot, or `takeLaneRef` and `position` a take lane.
+  - REAPER `item_import`: `path` holds the source; `ref` and `positionBeats` say where.
+  - Renoise `sample_load`: `path` holds the source; `ref` names the instrument or sample, as its schema says.
+
+  The source is `{"file": "<the MEDIA path>", "provenance": {"host_tool": "<the tool that made it>", "tool_call_id": "<that call's id, when you have it>"}}`, never a path string. Never invent a call id: provenance is a record, never a permission. A new track, where the DAW has one, is an earlier approved step in the same plan, named with `as` and referred to as `@name`.
+- **Kumi reads files only from approved places:** the producer's sample folders, Kumi's own results, and this profile's generated audio folder (`cache/generated/audio` in the Hermes home), where those plugins write. A `MEDIA:` line alone allows nothing else: a file anywhere else, through a link, or from another profile is refused. Ask the producer for an approved place; never widen a folder or move the file to get around the check.
+- **Kumi keeps its own copy.** Before the DAW imports it, Kumi copies the file into its own kept results and pins that copy, never moving or deleting the original, because Hermes may clean its generated audio. The project then refers to Kumi's copy until the producer collects the project's media (Live's "Collect All and Save", REAPER's consolidate).
+- **A file that changed after the approval is refused `stale`.** Preview it again for a fresh approval; never send the old one again.
+- **The producer approves the exact file and destination;** never place it straight from a media card or around `kumi_change`. Afterwards, report the HISTORY id and what happened; `kumi_undo` with that id takes it out again while it can. An `unsure` import is checked with `kumi_history` and an observe, never sent again.
+- **Importing and measuring are separate.** The DAW's file step takes only the formats that DAW imports. Music usually comes as MP3 or Opus, and a file step may refuse Opus even when Kumi has an ffmpeg. Measuring an MP3 or Opus needs the ffmpeg the producer allowed at setup (`kumi_status` says so). When either can't, say what's missing. Never download a decoder, convert it through the other plugin, change its format setting, or make the music again; a conversion is the producer's separate, approved choice.
+- **Measuring it** with `kumi_listen` (`{"source": {"file": "<the MEDIA path>"}}`, or the kept copy's `{"artifact_id"}`) stays on this computer. When the producer turned interpretation on, the measurements and a coarse band-energy image go to Hermes's listening model or its fallbacks, never to ElevenLabs. The model has not heard the audio itself.

@@ -1,7 +1,9 @@
 //! The variations tool (M7), the same in every DAW: make takes of a source, then keep, change and drop them by number. Core
 //! draws and checks each take, keeps the sets (in Kumi's folder, by the project's own id, so a restart forgets nothing kept),
 //! renders and hears takes before they're shown, and answers a line per take; the DAW's backend reads, writes, finds and renders.
-use super::backend::{found, gone, Recipe, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
+//! A plugin host's (CC-24) keeps its sets in its own folder and has its own rules: a preview draws the takes without writing,
+//! and its dispatch writes exactly the takes the preview drew, into empty places only, never over a take edited since.
+use super::backend::{found, gone, Recipe, Rewritten, Room, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::{db_text, Fault, Heard};
 use super::{
     bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
@@ -40,12 +42,28 @@ pub struct Variations<B: VariationsBackend> {
     numbered: RefCell<BTreeMap<String, usize>>,
     /// The project whose sets are loaded.
     loaded: RefCell<Option<String>>,
+    /// A plugin host's: its rules for takes (CC-24).
+    hosted: bool,
     description: String,
     schema: JsonObject,
 }
 
 impl<B: VariationsBackend + 'static> Variations<B> {
+    /// Standalone Kumi's, its sets in `home`.
     pub fn new(backend: B, home: PathBuf) -> Rc<Self> {
+        Self::with(backend, home, false)
+    }
+
+    /// The one `policy` says: a plugin host's, its sets in its own folder with its rules (CC-24), or standalone Kumi's in
+    /// `kumi_home`.
+    pub fn for_policy(backend: B, policy: &crate::core::context::HostPolicy, kumi_home: PathBuf) -> Rc<Self> {
+        match &policy.variations_home {
+            Some(home) => Self::with(backend, home.clone(), true),
+            None => Self::new(backend, kumi_home),
+        }
+    }
+
+    fn with(backend: B, home: PathBuf, hosted: bool) -> Rc<Self> {
         let words = backend.words();
         Rc::new(Variations {
             description: description(words),
@@ -55,6 +73,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             sets: RefCell::default(),
             numbered: RefCell::default(),
             loaded: RefCell::default(),
+            hosted,
         })
     }
 
@@ -67,6 +86,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         // (the project's sets, as Kumi kept them: a restart of Kumi forgets nothing kept)
         let project = self.backend.project_key(&signal).await;
         self.load(project.as_deref());
+        if self.hosted {
+            return self.run_hosted(action, &input, &signal).await;
+        }
         let answer = match action {
             "make" => self.make(&input, &signal).await,
             "change" => self.change(&input, &signal).await,
@@ -201,37 +223,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let recipes = self.recipes_of(input, &source)?;
         let bounds = bounds_of(input);
         let seed = input.get("seed").and_then(Value::as_u64).unwrap_or_else(fresh_seed);
-        // (the same source again, by its places now: its set goes on, V10 after V9; another source's set stays, by its number or
-        // name)
-        let candidates: Vec<Set<B>> = self.sets.borrow().iter().rev().filter(|set| set.source.short == source.short).cloned().collect();
-        let mut same = None;
-        for set in candidates {
-            let key = self.backend.key_now(&set.source, signal).await.unwrap_or_else(|| set.source.key.clone());
-            if key == source.key {
-                same = Some(set);
-                break;
-            }
-        }
-        let (mut set, continued) = {
-            let sets = self.sets.borrow();
-            match same {
-                Some(mut set) => {
-                    // (the source as it is now, its lines, anchors and settings; its takes and their places stay)
-                    set.source = source;
-                    (set, true)
-                }
-                None => {
-                    let id = sets.iter().map(|set| set.id).max().unwrap_or(0) + 1;
-                    // (numbers once given to takes of the same name never come back: names stay apart in the DAW)
-                    let floor = sets.iter().filter(|other| other.source.short == source.short).map(|other| other.next_number() - 1).max();
-                    let given = self.numbered.borrow().get(&source.short).copied().unwrap_or(0);
-                    let mut set: Set<B> = TakeSet::new(id, source, seed);
-                    set.floor = floor.unwrap_or(0).max(given);
-                    (set, false)
-                }
-            }
-        };
-        set.seed = seed;
+        let (mut set, continued) = self.set_for(source, seed, signal).await;
         let mut refs = BTreeMap::new();
         let mut written: BTreeMap<usize, Recipe> = BTreeMap::new();
         let mut skipped = Vec::new();
@@ -292,25 +284,67 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             reply["note"] = json!(note);
         }
         if !numbers.is_empty() || continued {
-            let mut numbered = self.numbered.borrow_mut();
-            let given = numbered.entry(set.source.short.clone()).or_insert(0);
-            *given = (*given).max(set.next_number() - 1);
-            let mut sets = self.sets.borrow_mut();
-            sets.retain(|held| held.id != set.id);
-            sets.push(set);
-            let excess = sets.len().saturating_sub(SETS_KEPT);
-            sets.drain(..excess);
+            self.keep_set(set);
         }
         Ok(reply)
     }
 
-    async fn change(&self, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
-        let force = input.get("force") == Some(&Value::Bool(true));
+    /// The set a make of `source` goes on with, with `seed`, and whether it goes on: the same source again (by its places
+    /// now) goes on, V10 after V9; another source starts a set of its own, and the others' stay, by their number or name.
+    async fn set_for(&self, source: Source<B::Material, B::Data>, seed: u64, signal: &Signal) -> (Set<B>, bool) {
+        let candidates: Vec<Set<B>> = self.sets.borrow().iter().rev().filter(|set| set.source.short == source.short).cloned().collect();
+        let mut same = None;
+        for set in candidates {
+            let key = self.backend.key_now(&set.source, signal).await.unwrap_or_else(|| set.source.key.clone());
+            if key == source.key {
+                same = Some(set);
+                break;
+            }
+        }
+        let (mut set, continued) = {
+            let sets = self.sets.borrow();
+            match same {
+                Some(mut set) => {
+                    // (the source as it is now, its lines, anchors and settings; its takes and their places stay)
+                    set.source = source;
+                    (set, true)
+                }
+                None => {
+                    let id = sets.iter().map(|set| set.id).max().unwrap_or(0) + 1;
+                    // (numbers once given to takes of the same name never come back: names stay apart in the DAW)
+                    let floor = sets.iter().filter(|other| other.source.short == source.short).map(|other| other.next_number() - 1).max();
+                    let given = self.numbered.borrow().get(&source.short).copied().unwrap_or(0);
+                    let mut set: Set<B> = TakeSet::new(id, source, seed);
+                    set.floor = floor.unwrap_or(0).max(given);
+                    (set, false)
+                }
+            }
+        };
+        set.seed = seed;
+        (set, continued)
+    }
+
+    /// A make's set, kept (the newest [`SETS_KEPT`]), with the numbers its takes were given.
+    fn keep_set(&self, set: Set<B>) {
+        let mut numbered = self.numbered.borrow_mut();
+        let given = numbered.entry(set.source.short.clone()).or_insert(0);
+        *given = (*given).max(set.next_number() - 1);
+        let mut sets = self.sets.borrow_mut();
+        sets.retain(|held| held.id != set.id);
+        sets.push(set);
+        let excess = sets.len().saturating_sub(SETS_KEPT);
+        sets.drain(..excess);
+    }
+
+    /// What a change rewrites: the takes it names, in order (a kept one only with `force`), a copy of their set, a recipe
+    /// for each (the model's, then directions Kumi picks, distinct from those and from each other), and the directions used.
+    #[allow(clippy::type_complexity)]
+    fn change_plan(&self, input: &JsonObject, force: bool) -> Result<(Vec<usize>, Set<B>, Vec<Recipe>, Vec<String>), String> {
         let names = names_of(input, &[]);
         if names.is_empty() {
             return Err("change needs names: the takes to change (V6, or rest)".into());
         }
-        let (numbers, mut set) = {
+        let (numbers, set) = {
             let sets = self.sets.borrow();
             let set = pick_set(&sets, input)?;
             (set.pick(&names, Purpose::Change, force)?, set.clone())
@@ -332,6 +366,12 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             used.push(direction.into());
             recipes.push(self.of_direction(&set.source, direction));
         }
+        Ok((numbers, set, recipes, used))
+    }
+
+    async fn change(&self, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
+        let force = input.get("force") == Some(&Value::Bool(true));
+        let (numbers, mut set, recipes, mut used) = self.change_plan(input, force)?;
         let bounds = bounds_of(input);
         let rows = self.backend.find(&mut set, &numbers, signal).await?;
         let mut lines_out = Vec::new();
@@ -854,6 +894,285 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             *slot = set;
         }
     }
+
+    // A plugin host's takes (CC-24)
+
+    /// A plugin host's request. A preview (`preview: true`) draws the takes from the DAW as it reads now, and writes,
+    /// renders, keeps and numbers nothing (W1-b); its dispatch (`expect_takes`, the preview's `takes_digest`) draws them
+    /// again and writes them only when they come to the same. No take is rendered to be heard: a render that clipped would
+    /// draw a take again from a salted seed (`redraw`), so the takes written would no longer be the ones approved. Its own
+    /// refusals are answers (`{state: "refused", code, reason}`), with nothing written.
+    async fn run_hosted(&self, action: &str, input: &JsonObject, signal: &Signal) -> Result<Value, String> {
+        let previewing = input.get("preview") == Some(&Value::Bool(true));
+        match action {
+            "make" => self.make_hosted(input, previewing, signal).await,
+            "change" => self.change_hosted(input, previewing, signal).await,
+            "keep" => self.keep_hosted(input, previewing, signal).await,
+            "list" => self.list(input),
+            _ => Err("action is make, change, keep or list".into()),
+        }
+    }
+
+    /// Draws a make's takes on a copy of `set`, each checked against the source and the takes drawn before it, as `make`
+    /// draws them, and writes nothing: the takes, and why any wasn't made.
+    fn draw_make(&self, set: &Set<B>, recipes: Vec<Recipe>, bounds: &Bounds) -> (Vec<Drawn<B::Material>>, Vec<String>) {
+        let mut drawing = set.clone();
+        let mut drawn: Vec<Drawn<B::Material>> = Vec::new();
+        let mut skipped = Vec::new();
+        let mut used: Vec<String> = recipes.iter().map(|recipe| recipe.direction.clone()).collect();
+        for mut recipe in recipes {
+            let number = drawing.next_number();
+            // (takes of a source with nothing in it that Kumi picks vary the first one drawn this time)
+            if recipe.picked && recipe.from.is_none() && drawing.source.material.is_none() {
+                recipe.from = drawn
+                    .first()
+                    .map(|take| take.number)
+                    .or_else(|| drawing.takes.iter().find(|take| take.state != TakeState::Dropped).map(|take| take.number));
+            }
+            match self.draw_picking(&drawing, number, &recipe, &mut used, bounds) {
+                Ok((take, _)) => {
+                    drawing.takes.push(Take {
+                        number,
+                        state: TakeState::Shown,
+                        place: Value::Null,
+                        change: None,
+                        direction: take.direction.clone(),
+                        digest: self.backend.digest(&take.material),
+                        material: take.material.clone(),
+                        line: String::new(),
+                    });
+                    drawn.push(take);
+                }
+                Err(why) => skipped.push(format!("V{number} ({}) wasn't made: {why}", direction_of(&recipe))),
+            }
+        }
+        (drawn, skipped)
+    }
+
+    /// The takes drawn, digested with why any wasn't (`takes_digest`).
+    fn digest_of(&self, drawn: &[&Drawn<B::Material>], skipped: &[String]) -> String {
+        let takes: Vec<(usize, &str, String)> =
+            drawn.iter().map(|take| (take.number, take.direction.as_str(), self.backend.digest(&take.material))).collect();
+        takes_digest(&takes, skipped)
+    }
+
+    async fn make_hosted(&self, input: &JsonObject, previewing: bool, signal: &Signal) -> Result<Value, String> {
+        let source = self.backend.source(input, signal).await?;
+        let recipes = self.recipes_of(input, &source)?;
+        let bounds = bounds_of(input);
+        let seed = input.get("seed").and_then(Value::as_u64).unwrap_or_else(fresh_seed);
+        let (mut set, continued) = self.set_for(source, seed, signal).await;
+        let (drawn, mut skipped) = self.draw_make(&set, recipes, &bounds);
+        if drawn.is_empty() {
+            return Err(format!("no take could be made: {}", skipped.join("; ")));
+        }
+        let digest = self.digest_of(&drawn.iter().collect::<Vec<_>>(), &skipped);
+        // (every take drawn has an empty place, or none is written: no scene, track or pattern is made for one, and none
+        // goes over anything; 24-r2)
+        let room = self.backend.room(&set, signal).await?;
+        let fits = room.as_ref().map_or(drawn.len(), |room| room.fits.min(drawn.len()));
+        if let Some(room) = room.filter(|room| room.fits < drawn.len()) {
+            // (how many fit, as a number too, so the model can ask for that many)
+            let mut refusal = refused("no_room", no_room(&room, drawn.len(), self.backend.words().app));
+            refusal["fits"] = json!(room.fits);
+            return Ok(refusal);
+        }
+        if previewing {
+            return Ok(
+                json!({"state": "preview", "seed": seed, "source": set.source.label, "takes": preview_lines(&drawn.iter().collect::<Vec<_>>()),
+                "skipped": skipped, "takes_digest": digest, "fits": fits}),
+            );
+        }
+        if let Some(refusal) = held_to(input, &digest) {
+            return Ok(refusal);
+        }
+        let mut refs = BTreeMap::new();
+        let mut written = Vec::new();
+        let mut drawn = drawn.into_iter();
+        while let Some(take) = drawn.next() {
+            let number = take.number;
+            match self.backend.write_new(&set, number, &take.material, signal).await {
+                Ok((change, place, reference)) => {
+                    let line = take_line(&take, &change);
+                    refs.insert(number, self.backend.short(&reference));
+                    written.push(number);
+                    set.takes.push(Take {
+                        number,
+                        state: TakeState::Shown,
+                        place,
+                        change: Some(change),
+                        direction: take.direction.clone(),
+                        digest: self.backend.digest(&take.material),
+                        material: take.material,
+                        line,
+                    });
+                }
+                Err((why, stops)) => {
+                    skipped.push(format!("V{number} ({}) wasn't made: {why}", take.direction));
+                    if stops {
+                        for rest in drawn.by_ref() {
+                            skipped.push(format!("V{} ({}) wasn't made: Kumi stopped at V{number}", rest.number, rest.direction));
+                        }
+                    }
+                }
+            }
+        }
+        let lines: Vec<Value> = written
+            .iter()
+            .filter_map(|n| set.take(*n))
+            .map(|take| json!({"take": format!("V{}", take.number), "ref": refs[&take.number], "line": take.line}))
+            .collect();
+        let mut reply = json!({"set": set.id, "source": set.source.label, "takes": lines, "skipped": skipped});
+        if let Some(note) = self.backend.end_note(&set).filter(|_| !written.is_empty()) {
+            reply["note"] = json!(note);
+        }
+        if !written.is_empty() || continued {
+            self.keep_set(set);
+            self.save();
+        }
+        Ok(reply)
+    }
+
+    async fn change_hosted(&self, input: &JsonObject, previewing: bool, signal: &Signal) -> Result<Value, String> {
+        // (a kept take is never named here: a host never sends force)
+        let (numbers, mut set, recipes, mut used) = self.change_plan(input, false)?;
+        let bounds = bounds_of(input);
+        let app = self.backend.words().app;
+        let rows = self.backend.find(&mut set, &numbers, signal).await?;
+        let mut skipped = Vec::new();
+        let mut edited = Vec::new();
+        let mut named = Vec::new();
+        for ((number, recipe), row) in numbers.iter().copied().zip(recipes).zip(rows) {
+            if !found(&row) {
+                skipped.push(format!("V{number} isn't in the {app} any more"));
+                continue;
+            }
+            let current = match self.backend.current(&set, &row, signal).await {
+                Ok(current) => current,
+                Err(why) => {
+                    skipped.push(format!("V{number} wasn't changed: Kumi couldn't read it ({why})"));
+                    continue;
+                }
+            };
+            if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
+                edited.push(changed_since(&self.backend, number, &current));
+                continue;
+            }
+            named.push((number, recipe, row, current));
+        }
+        // (a take the producer changed since Kumi made it is never written over: the whole change is refused, 24-r1)
+        if !edited.is_empty() {
+            let instead = if edited.len() == 1 { "make a new take instead" } else { "make new takes instead" };
+            return Ok(refused("changed_since", format!("{}; {instead}.", edited.join("; "))));
+        }
+        // (each take drawn against the others as they'll be, as `change` draws them)
+        let mut drawing = set.clone();
+        let mut planned = Vec::new();
+        for (number, mut recipe, row, current) in named {
+            if recipe.from.is_none() && drawing.source.material.is_none() {
+                recipe.from = Some(number);
+            }
+            match self.draw_picking(&drawing, number, &recipe, &mut used, &bounds) {
+                Ok((take, _)) => {
+                    if let Some(held) = drawing.take_mut(number) {
+                        held.material = take.material.clone();
+                    }
+                    planned.push((row, current, take));
+                }
+                Err(why) => skipped.push(format!("V{number} wasn't changed: {why}")),
+            }
+        }
+        if planned.is_empty() {
+            return Err(format!("no take could be changed: {}", skipped.join("; ")));
+        }
+        let drawn: Vec<&Drawn<B::Material>> = planned.iter().map(|(_, _, take)| take).collect();
+        let digest = self.digest_of(&drawn, &skipped);
+        if previewing {
+            return Ok(json!({"state": "preview", "seed": set.seed, "source": set.source.label, "takes": preview_lines(&drawn),
+                "skipped": skipped, "takes_digest": digest, "fits": drawn.len()}));
+        }
+        if let Some(refusal) = held_to(input, &digest) {
+            return Ok(refusal);
+        }
+        let mut lines_out = Vec::new();
+        let mut planned = planned.into_iter();
+        while let Some((row, current, take)) = planned.next() {
+            let number = take.number;
+            match self.backend.rewrite(&set, &row, &current, &take.material, signal).await {
+                Ok(done) => {
+                    let (change, material, line) = holding(&take, done);
+                    let reference = row.get("ref").and_then(Value::as_str).unwrap_or("");
+                    lines_out.push(json!({"take": format!("V{number}"), "ref": self.backend.short(reference), "line": line}));
+                    if let Some(held) = set.take_mut(number) {
+                        held.digest = self.backend.digest(&material);
+                        held.material = material;
+                        held.direction = take.direction;
+                        held.change = Some(change);
+                        held.line = line;
+                    }
+                }
+                Err((why, stops)) => {
+                    skipped.push(format!("V{number} wasn't changed: {why}"));
+                    if stops {
+                        for (_, _, rest) in planned.by_ref() {
+                            skipped.push(format!("V{} wasn't changed: Kumi stopped at V{number}", rest.number));
+                        }
+                    }
+                }
+            }
+        }
+        let reply = json!({"set": set.id, "changed": lines_out, "skipped": skipped, "takes": set.lines()});
+        self.put_back(set);
+        self.save();
+        Ok(reply)
+    }
+
+    /// Keeps takes as `keep` does; `at` places one only into an empty place (24-r2). A preview says each take's name after.
+    async fn keep_hosted(&self, input: &JsonObject, previewing: bool, signal: &Signal) -> Result<Value, String> {
+        let asked = names_of(input, &[]);
+        if asked.is_empty() {
+            return Err("keep needs names: the takes the producer keeps (V3)".into());
+        }
+        let (numbers, mut set) = {
+            let sets = self.sets.borrow();
+            let set = pick_set(&sets, input)?;
+            (set.pick(&asked, Purpose::Keep, false)?, set.clone())
+        };
+        let app = self.backend.words().app;
+        let rows = self.backend.find(&mut set, &numbers, signal).await?;
+        if let Some(at) = input.get("at").and_then(Value::as_object) {
+            let ([number], [row]) = (numbers.as_slice(), rows.as_slice()) else {
+                return Err("at places one take: keep the others without at".into());
+            };
+            if !found(row) {
+                return Err(format!("V{number} isn't in the {app} any more"));
+            }
+            if let Err(why) = self.backend.at_is_empty(&set, *number, row, at, signal).await {
+                return Ok(refused("no_room", format!("V{number} can't go there: {why}.")));
+            }
+        }
+        if !previewing {
+            let reply = self.keep(input, signal).await?;
+            self.save();
+            return Ok(reply);
+        }
+        let mut takes = Vec::new();
+        let mut skipped = Vec::new();
+        for (number, row) in numbers.iter().zip(&rows) {
+            if !found(row) {
+                skipped.push(format!("V{number} isn't in the {app} any more"));
+                continue;
+            }
+            // (renamed "… · kept", unless the producer named it otherwise: that name stays)
+            let [made, kept] = names(*number, &set.source.short);
+            let name_after = match row.get("name").and_then(Value::as_str) {
+                Some(now) if now != made && now != kept => now.to_string(),
+                _ => kept,
+            };
+            takes.push(json!({"take": format!("V{number}"), "name_after": name_after}));
+        }
+        Ok(json!({"state": "preview", "takes": takes, "skipped": skipped}))
+    }
 }
 
 fn actions(words: &Words) -> Vec<&'static str> {
@@ -1016,6 +1335,58 @@ fn holding<M: Clone>(drawn: &Drawn<M>, done: Rewritten<M>) -> (String, M, String
         }
         None => (change, drawn.material.clone(), line),
     }
+}
+
+/// A plugin host's refusal (CC-24): nothing was written.
+fn refused(code: &str, reason: impl Into<String>) -> Value {
+    json!({"state": "refused", "code": code, "reason": reason.into()})
+}
+
+/// Why a make whose takes don't all have an empty place is refused, never trimmed (24-r2): how many fit, and where.
+fn no_room(room: &Room, wanted: usize, app: &str) -> String {
+    match room.fits {
+        0 => format!("No take fits: {}. Make room in {app} first.", room.words),
+        fits => format!("Only {fits} of the {wanted} takes fit: {}. Ask for {fits}, or make room in {app} first.", room.words),
+    }
+}
+
+/// A dispatch holds to the takes its preview drew (`expect_takes`, that preview's `takes_digest`): drawn again now, they
+/// must come to the same, or nothing is written (W1-a: a set made on the source in between moves the numbering).
+fn held_to(input: &JsonObject, digest: &str) -> Option<Value> {
+    match input.get("expect_takes").and_then(Value::as_str) {
+        Some(expected) if expected == digest => None,
+        Some(_) => Some(refused("stale", "The takes would come out differently now: preview them again.")),
+        None => Some(refused("invalid", "expect_takes is the takes_digest of this call's preview: preview it first.")),
+    }
+}
+
+/// The takes a preview drew, digested (CC-24's `takes_digest`): the lowercase hex SHA-256 of the canonical JSON (keys
+/// sorted) of each take's name, direction and material digest, with why any wasn't made.
+pub fn takes_digest(takes: &[(usize, &str, String)], skipped: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let takes: Vec<Value> = takes
+        .iter()
+        .map(|(number, direction, digest)| json!({"direction": direction, "material_digest": digest, "take": format!("V{number}")}))
+        .collect();
+    let canonical = json!({"skipped": skipped, "takes": takes}).to_string();
+    Sha256::digest(canonical.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A take that holds other than Kumi wrote it, as a change refuses it (24-r1).
+fn changed_since<B: VariationsBackend>(backend: &B, number: usize, current: &B::Material) -> String {
+    let app = backend.words().app;
+    match backend.unsure(current) {
+        Some(why) => format!("Kumi can't tell whether V{number} was changed in {app} since it made it ({why})"),
+        None => format!("V{number} was changed in {app} since Kumi made it"),
+    }
+}
+
+/// The takes a preview drew, a line each: what the approval lists.
+fn preview_lines<M>(drawn: &[&Drawn<M>]) -> Vec<Value> {
+    drawn
+        .iter()
+        .map(|take| json!({"take": format!("V{}", take.number), "direction": take.direction, "line": take_line(take, "")}))
+        .collect()
 }
 
 fn fresh_seed() -> u64 {

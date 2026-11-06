@@ -83,6 +83,7 @@
       undoable: (n) => `· ${n} can be undone`,
       undo: "Undo",
       undoTitle: "Ask Hermes to undo this change",
+      undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
       undoLabel: (change) => `Undo ${change}`,
       openMap: "Open the sound map",
       undoNeedsConnection: "Undo needs a connected Kumi."
@@ -121,7 +122,11 @@
       lookFirst: "Ask Hermes to look again before another change.",
       restored: "Kumi put back what it changed meanwhile.",
       restoreUnsure: "Kumi isn’t sure it put everything back.",
-      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+      dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
+      dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
+      byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
     },
     job: {
       scanning: "Scanning",
@@ -148,7 +153,7 @@
       keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
-      empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
+      empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
       search: "Search sounds",
       searchHint: "Search the map: name, kind or folder",
       count: (n) => `${n} sounds`,
@@ -164,6 +169,8 @@
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
       useTitle: "Put a request to use this sound in the chat, to finish and send",
+      moreLike: "More like this",
+      moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
       playFailed: (error) => `Kumi couldn't play that sound: ${error}`
     },
     measurements: {
@@ -194,6 +201,20 @@
       crest: "Crest",
       tempo: "Tempo",
       key: "Key",
+      peakToLoudness: "Peak to loudness",
+      tilt: "Tilt",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "Stereo width",
+      lowEnd: "Low end",
+      mono: "mono",
+      notMono: "not mono",
+      overlay: "Band levels, level-matched",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name} (${hz2} Hz): this ${mine} dB, reference ${reference} dB, ${difference} dB`,
+      round: (number) => `Round ${number}`,
+      roundTitle: "Each comparison with this reference since this window opened, oldest first: this minus reference",
+      loudnessGap: (trend) => `loudness ${trend} LU`,
+      tiltGap: (trend) => `tilt ${trend} dB/oct`,
+      widthGap: (trend) => `width ${trend}`,
       interpretation: "Interpretation",
       noInterpretation: (why) => `No model interpretation: ${why}`,
       more: "More",
@@ -265,6 +286,13 @@
       generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
       soundTitle: "Generated sound",
       notesTitle: "Notes from audio",
+      kinds: { video_to_sfx: "Sound for a video", extend: "Extended audio", inpaint: "Inpainted audio" },
+      // CC-15: what a generation's billed seconds covered, never the returned file's length.
+      window: {
+        video_to_sfx: (first) => `Sound for video · first ${first}`,
+        extend: (added, source) => `Extended by ${added} (source ${source})`,
+        inpaint: (span, source) => `Replaced ${span} of ${source}`
+      },
       credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
       creditsTitle: "Mirelo API credits, not money. An estimate or a reservation is not a price.",
       cost: (credits, estimate) => `${credits} (est. ${estimate})`,
@@ -305,7 +333,7 @@
       copied: "Copied",
       copyRequest: "Copy request",
       copyUndo: "Copy undo",
-      mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+      mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
       askLook: "Ask Hermes in your chat to look again before another change."
     }
   };
@@ -348,6 +376,7 @@
       undoable: (n) => `· ${n} 件取り消せます`,
       undo: "取り消す",
       undoTitle: "この変更の取り消しを Hermes に頼む",
+      undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
       undoLabel: (change) => `${change} を取り消す`,
       openMap: "サンプルマップを開く",
       undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -386,7 +415,11 @@
       lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
       restored: "その間に変えたものは Kumi が元に戻しました。",
       restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
+      dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
+      dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
+      byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
     },
     job: {
       scanning: "スキャン中",
@@ -413,7 +446,7 @@
       keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
-      empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+      empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
       search: "サウンドを検索",
       searchHint: "マップを検索: 名前・種類・フォルダ",
       count: (n) => `${n} 個のサウンド`,
@@ -429,6 +462,8 @@
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
       useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+      moreLike: "似たサウンド",
+      moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
       playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
     },
     measurements: {
@@ -459,6 +494,20 @@
       crest: "クレスト",
       tempo: "テンポ",
       key: "キー",
+      peakToLoudness: "ピーク対ラウドネス",
+      tilt: "ティルト",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "ステレオ幅",
+      lowEnd: "低域",
+      mono: "モノ",
+      notMono: "モノではない",
+      overlay: "帯域レベル（レベル合わせ済み）",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）: これ ${mine} dB、リファレンス ${reference} dB、差 ${difference} dB`,
+      round: (number) => `ラウンド ${number}`,
+      roundTitle: "このウィンドウを開いてからの、このリファレンスとの各比較（古い順、これ − リファレンス）",
+      loudnessGap: (trend) => `ラウドネス ${trend} LU`,
+      tiltGap: (trend) => `ティルト ${trend} dB/oct`,
+      widthGap: (trend) => `幅 ${trend}`,
       interpretation: "解釈",
       noInterpretation: (why) => `モデルによる解釈なし: ${why}`,
       more: "もっと見る",
@@ -530,6 +579,12 @@
       generatedTitle: "Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。",
       soundTitle: "生成したサウンド",
       notesTitle: "オーディオから取り出したノート",
+      kinds: { video_to_sfx: "映像の効果音", extend: "延長したオーディオ", inpaint: "一部を差し替えたオーディオ" },
+      window: {
+        video_to_sfx: (first) => `映像の効果音 · 最初の ${first}`,
+        extend: (added, source) => `${added} 延長（元は ${source}）`,
+        inpaint: (span, source) => `${source} のうち ${span} を差し替え`
+      },
       credits: (_n, shown) => `${shown} クレジット`,
       creditsTitle: "Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。",
       cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
@@ -570,7 +625,7 @@
       copied: "コピーしました",
       copyRequest: "依頼をコピー",
       copyUndo: "取り消しをコピー",
-      mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。",
+      mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
       askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
     }
   };
@@ -613,6 +668,7 @@
       undoable: (n) => `· ${n} 项可撤销`,
       undo: "撤销",
       undoTitle: "让 Hermes 撤销这次改动",
+      undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
       undoLabel: (change) => `撤销 ${change}`,
       openMap: "打开采样地图",
       undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -651,7 +707,11 @@
       lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
       restored: "Kumi 已还原期间做出的改动。",
       restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-      restoreUnsure: "Kumi 不确定是否已全部还原。"
+      restoreUnsure: "Kumi 不确定是否已全部还原。",
+      dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
+      dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
+      byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
     },
     job: {
       scanning: "正在扫描",
@@ -678,7 +738,7 @@
       keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
-      empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。",
+      empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
       search: "搜索声音",
       searchHint: "搜索地图：名称、种类或文件夹",
       count: (n) => `${n} 个声音`,
@@ -694,6 +754,8 @@
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
       useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+      moreLike: "更多类似的",
+      moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
       playFailed: (error) => `Kumi 无法播放这个声音：${error}`
     },
     measurements: {
@@ -724,6 +786,20 @@
       crest: "峰值因数",
       tempo: "速度",
       key: "调性",
+      peakToLoudness: "峰值响度比",
+      tilt: "倾斜",
+      perOctave: (value) => `${value} dB/oct`,
+      width: "立体声宽度",
+      lowEnd: "低频",
+      mono: "单声道",
+      notMono: "非单声道",
+      overlay: "频段电平（已对齐电平）",
+      overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）：当前 ${mine} dB，参考 ${reference} dB，差 ${difference} dB`,
+      round: (number) => `第 ${number} 轮`,
+      roundTitle: "本窗口打开以来与此参考的每次比较（从旧到新，当前减参考）",
+      loudnessGap: (trend) => `响度 ${trend} LU`,
+      tiltGap: (trend) => `倾斜 ${trend} dB/oct`,
+      widthGap: (trend) => `宽度 ${trend}`,
       interpretation: "解读",
       noInterpretation: (why) => `没有模型解读：${why}`,
       more: "展开",
@@ -795,6 +871,12 @@
       generatedTitle: "由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。",
       soundTitle: "生成的声音",
       notesTitle: "从音频提取的音符",
+      kinds: { video_to_sfx: "视频音效", extend: "延长的音频", inpaint: "局部替换的音频" },
+      window: {
+        video_to_sfx: (first) => `视频音效 · 前 ${first}`,
+        extend: (added, source) => `延长 ${added}（原长 ${source}）`,
+        inpaint: (span, source) => `替换了 ${source} 中的 ${span}`
+      },
       credits: (_n, shown) => `${shown} 积分`,
       creditsTitle: "Mirelo API 积分，不是钱。预估或预留不是价格。",
       cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
@@ -835,7 +917,7 @@
       copied: "已复制",
       copyRequest: "复制请求",
       copyUndo: "复制撤销",
-      mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。",
+      mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
       askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
     }
   };
@@ -937,6 +1019,22 @@
   }
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+  }
+  function changesOf(items) {
+    const byChange = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const key = typeof item.change_id === "string" && item.change_id ? `change:${item.change_id}` : `row:${item.id}`;
+      const rows = byChange.get(key);
+      if (rows) rows.push(item);
+      else byChange.set(key, [item]);
+    }
+    return [...byChange.values()];
+  }
+  function undoRowOf(rows) {
+    return rows.find((row) => row.state !== "undone");
+  }
+  function canUndoChange(status, rows) {
+    return canUndo(status, undoRowOf(rows));
   }
   var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
   function quotable(name, max = 80) {
@@ -1214,12 +1312,25 @@
       focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
     ] });
   }
+  function undoKeys(target) {
+    const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+    return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+  }
+  function DawUndo({ daw, how, keys }) {
+    const t = useT();
+    const app = dawName(daw, t);
+    if (how === "buried") {
+      return /* @__PURE__ */ jsx("span", { title: t("history.byHandTitle", app), style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) });
+    }
+    return /* @__PURE__ */ jsx("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
+  }
   function HistoryView({
     history,
     now,
     action,
     live = false,
-    daw
+    daw,
+    target
   }) {
     const t = useT();
     const items = history?.items ?? [];
@@ -1229,6 +1340,7 @@
     return /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
       const state = stateOf(item, t, live);
       const track = nameOf(item.track);
+      const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
       return /* @__PURE__ */ jsxs("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
         /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
         /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
@@ -1239,10 +1351,11 @@
           ] }),
           item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
             // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
-            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
-          )
+            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
+          ),
+          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) })
         ] }),
-        action?.(item)
+        dawUndo ? null : action?.(item)
       ] }, item.id);
     }) });
   }
@@ -1373,15 +1486,26 @@
   function mapLabel(name) {
     return clean(name, 28);
   }
+  var haystacks = /* @__PURE__ */ new WeakMap();
+  function haystackOf(model) {
+    let text = haystacks.get(model);
+    if (!text) {
+      text = model.points.map((point) => {
+        const sound = model.sounds[point.id];
+        return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter((value) => typeof value === "string").join(" ").toLowerCase();
+      });
+      haystacks.set(model, text);
+    }
+    return text;
+  }
   function searchSounds(model, query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
+    const text = haystackOf(model);
     const found = /* @__PURE__ */ new Set();
-    for (const point of model.points) {
-      const sound = model.sounds[point.id];
-      const text = [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(Boolean).join(" ").toLowerCase();
-      if (words.every((word) => text.includes(word))) found.add(point.id);
-    }
+    model.points.forEach((point, index) => {
+      if (words.every((word) => text[index].includes(word))) found.add(point.id);
+    });
     return found;
   }
   function frame(model, ids, width, height, margin = 48) {
@@ -1411,6 +1535,7 @@
       strong: read(CANVAS.strong, "#ddd")
     };
   }
+  var ROUNDS = 8;
   var maps = 0;
   function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
     const t = useT();
@@ -1420,27 +1545,50 @@
     const [size, setSize] = useState({ width: 0, height: 0 });
     const [view, setView] = useState(null);
     const [query, setQuery] = useState("");
+    const [searchFor, setSearchFor] = useState("");
     const [hidden, setHidden] = useState(() => /* @__PURE__ */ new Set());
     const [hover, setHover] = useState(null);
     const drag = useRef(null);
+    const viewRef = useRef(null);
+    viewRef.current = view;
+    const nextView = useRef(null);
+    const frameRef = useRef(0);
+    const queueView = (next) => {
+      nextView.current = next;
+      if (frameRef.current) return;
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = 0;
+        const latest = nextView.current;
+        nextView.current = null;
+        if (latest) setView(latest);
+      });
+    };
+    useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
+    const backing = useRef("");
     const [said, setSaid] = useState("");
     const [hintId] = useState(() => `kumi-map-keys-${maps += 1}`);
     const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
     const hasPoints = model.points.length > 0;
-    const searched = useMemo(() => searchSounds(model, query), [model, query]);
+    useEffect(() => {
+      if (query === searchFor) return;
+      const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0);
+      return () => clearTimeout(timer);
+    }, [query, searchFor]);
+    const searched = useMemo(() => searchSounds(model, searchFor), [model, searchFor]);
     const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model]);
     const foundIds = useMemo(
       () => found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null,
       [found, model.revision]
     );
-    const visible = useMemo(() => {
-      const groupHidden = hidden.size > 0;
-      return (index) => {
-        const point = model.points[index];
-        if (groupHidden && hidden.has(point.group)) return false;
-        return !searched || searched.has(point.id);
-      };
+    const mask = useMemo(() => {
+      const out = new Uint8Array(model.points.length);
+      model.points.forEach((point, index) => {
+        out[index] = hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
+      });
+      return out;
     }, [model, hidden, searched]);
+    const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
+    const shown = useMemo(() => mask.reduce((count, keep) => count + keep, 0), [mask]);
     const matches = useMemo(() => {
       const ids = searched ?? foundIds;
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -1481,7 +1629,8 @@
         event.preventDefault();
         const rect = canvas.getBoundingClientRect();
         const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 25e-4));
-        setView((current) => current ? zoomAt(current, factor, event.clientX - rect.left, event.clientY - rect.top) : current);
+        const base = nextView.current ?? viewRef.current;
+        if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top));
       };
       canvas.addEventListener("wheel", wheel, { passive: false });
       return () => canvas.removeEventListener("wheel", wheel);
@@ -1490,32 +1639,54 @@
       const canvas = canvasRef.current;
       if (!canvas || !view || size.width === 0) return;
       const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.round(size.width * ratio);
-      canvas.height = Math.round(size.height * ratio);
+      const wanted = `${Math.round(size.width * ratio)}x${Math.round(size.height * ratio)}`;
+      if (backing.current !== wanted) {
+        backing.current = wanted;
+        canvas.width = Math.round(size.width * ratio);
+        canvas.height = Math.round(size.height * ratio);
+      }
       const context = canvas.getContext("2d");
       if (!context) return;
       const colors = resolve(canvas);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, size.width, size.height);
-      const count = model.points.length;
+      const points = model.points;
+      const count = points.length;
       const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2;
       const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
       const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+      const unit = mapSize * view.scale;
+      const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8];
       const labelled = [];
-      for (const pass of [false, true]) {
+      let onScreen = 0;
+      for (const pass of [0, 1]) {
+        const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
+        for (let index = 0; index < count; index++) {
+          if (mask[index] !== pass) continue;
+          const point = points[index];
+          const x = point.x * unit + view.dx;
+          const y = point.y * unit + view.dy;
+          if (x < left || y < top || x > right || y > bottom) continue;
+          const color = groupColor2.get(point.group) ?? colors.faint;
+          const paths = rounds[index % ROUNDS];
+          let path = paths.get(color);
+          if (!path) {
+            path = new Path2D();
+            paths.set(color, path);
+          }
+          path.moveTo(x + radius, y);
+          path.arc(x, y, radius, 0, Math.PI * 2);
+          if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
+        }
         context.globalAlpha = pass ? 0.92 : 0.16;
-        model.points.forEach((point, index) => {
-          if (visible(index) !== pass) return;
-          const [x, y] = toScreen(view, mapSize, point.x, point.y);
-          if (x < -8 || y < -8 || x > size.width + 8 || y > size.height + 8) return;
-          context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
-          context.beginPath();
-          context.arc(x, y, radius, 0, Math.PI * 2);
-          context.fill();
-          if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
-        });
+        for (const paths of rounds) {
+          for (const [color, path] of paths) {
+            context.fillStyle = color;
+            context.fill(path);
+          }
+        }
       }
-      if (labelled.length <= 40) {
+      if (onScreen <= 40) {
         context.globalAlpha = 0.85;
         context.fillStyle = colors.text;
         context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
@@ -1525,7 +1696,7 @@
           const text = mapLabel(name);
           if (!text) continue;
           const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
-          if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+          if (placed.some(([left2, top2, width, height]) => box[0] < left2 + width && left2 < box[0] + box[2] && box[1] < top2 + height && top2 < box[1] + box[3])) continue;
           placed.push(box);
           context.fillText(text, box[0], y);
         }
@@ -1544,7 +1715,7 @@
       foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
       if (playing) ring(playing, colors.accent, 6, 2);
       if (selected) ring(selected, colors.strong, 4, 2);
-    }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted]);
+    }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -1578,7 +1749,6 @@
     const chosen = selected ? model.sounds[selected] : void 0;
     const hovered = hover ? model.points[hover.index] : void 0;
     const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-    const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0);
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
         /* @__PURE__ */ jsx(
@@ -1662,7 +1832,7 @@
               const held = drag.current;
               if (held) {
                 if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
-                if (held.moved) setView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
+                if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
                 return;
               }
               if (!view) return;
@@ -1701,7 +1871,8 @@
           }
         )
       ] }),
-      selected && chosen && /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+      selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+      /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
         /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
           /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
           /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
@@ -1711,15 +1882,78 @@
             chosen.folder && /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
           ] })
         ] }),
-        /* @__PURE__ */ jsx("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+        /* @__PURE__ */ jsx("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions?.(selected, chosen) })
       ] })
     ] });
+  }
+
+  // src/shared/listen.ts
+  var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
+  function parseListen(result) {
+    let value = result;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+    const state = "state" in value ? value.state : void 0;
+    if (typeof state === "string" && NOT_MEASURED[state]) return null;
+    return value;
+  }
+  var finite = (value) => typeof value === "number" && Number.isFinite(value);
+  function fileName(analysis, fallback) {
+    const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+    return clean(file || fallback, 60);
+  }
+  function referenceKey(result) {
+    const reference = result.compare?.metrics;
+    if (!reference) return null;
+    const lufs = reference.loudness?.integratedLufs;
+    return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+  }
+  function keptBy(result, rounds) {
+    const kept = result.compare?.artifact_id;
+    if (typeof kept !== "string" || !kept) return null;
+    for (const [key, each] of Object.entries(rounds)) {
+      const round = each.find((other) => other.kept === kept);
+      if (round) return [key, round];
+    }
+    return null;
+  }
+  function roundKey(result, rounds) {
+    return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+  }
+  function referenceName(result, rounds) {
+    return keptBy(result, rounds)?.[1].name || void 0;
+  }
+  function roundOf(result, id, rounds) {
+    const kept = result.compare?.artifact_id;
+    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+  }
+  function gapsOf(result) {
+    const mine = result.metrics ?? {};
+    const reference = result.compare?.metrics;
+    if (!reference) return {};
+    const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
+    const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
+    const out = {};
+    if (loudness !== void 0) out.loudness = loudness;
+    const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
+    if (tilt !== void 0) out.tilt = tilt;
+    const width = gap(mine.stereo?.width, reference.stereo?.width);
+    if (width !== void 0) out.width = width;
+    return out;
   }
 
   // src/shared/store.ts
   var JOB_KEPT_MS = 6e4;
   var MOST_JOBS = 20;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
+  var MOST_ROUNDS = 6;
+  var MOST_REFERENCES = 8;
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
   }
@@ -1759,6 +1993,9 @@
     generation = 0;
     /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
     cards = /* @__PURE__ */ new Map();
+    /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+     *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+    started = /* @__PURE__ */ new Set();
     get = () => this.state;
     subscribe = (fn) => {
       this.listeners.add(fn);
@@ -1779,6 +2016,7 @@
       this.generation += 1;
       this.reads.clear();
       this.cards.clear();
+      this.started.clear();
       this.state = EMPTY;
       for (const fn of [...this.listeners]) fn();
     }
@@ -1828,7 +2066,7 @@
         if (liveness || moved("focus")) reads.push(this.refresh("focus"));
         if (liveness || moved("history")) reads.push(this.refresh("history"));
         if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
-        if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
+        if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
         await Promise.all(reads);
       });
     }
@@ -1853,10 +2091,30 @@
     measure(toolCallId, result) {
       this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
     }
-    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
-    trackJob(id) {
+    /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+     *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+     *  twice (both signals for one call) counts once. */
+    noteListen(result) {
+      const parsed = parseListen(result);
+      const key = parsed ? roundKey(parsed, this.state.rounds) : null;
+      const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
+      if (!parsed || !key || !id) return;
+      const before = this.state.rounds[key] ?? [];
+      if (before.some((round) => round.id === id)) return;
+      const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
+      const keys = Object.keys(rounds);
+      if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
+      this.set({ rounds });
+    }
+    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+     *  the source says it was running: a call that started it, or an event that reported it running. */
+    trackJob(id, started = false) {
       const jobId = plainId(id);
       if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+      if (started) {
+        this.started.add(jobId);
+        if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
+      }
       void this.refreshJob(jobId);
     }
     /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
@@ -1892,8 +2150,8 @@
           const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
           if (generation !== this.generation) return;
           const before = this.state.jobs[id];
-          const waiting = this.cards.has(id);
-          if (!before && finished(read) && !waiting) return;
+          const news = this.started.delete(id) || this.cards.has(id);
+          if (!before && finished(read) && !news) return;
           const card = before?.card ?? this.cards.get(id);
           this.cards.delete(id);
           const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
@@ -2017,11 +2275,15 @@
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
             {
-              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null,
+              action: (item) => {
+                const rows = changesOf(state.history?.items ?? []).find((change) => change.includes(item));
+                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null;
+              },
               daw: state.status?.daw,
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
-              now
+              now,
+              target: state.setup?.target
             }
           ) })
         ] }),

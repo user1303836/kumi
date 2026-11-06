@@ -8,7 +8,7 @@ import { useKumi } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
 import { FOCUSABLE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
-import { nextStep, ownerSession } from './pane.tsx'
+import { nextSteps, ownerSession } from './pane.tsx'
 
 export function StatusChip({
   ctx,
@@ -26,7 +26,7 @@ export function StatusChip({
   // Nothing in the bar until Kumi's backend answers: no dead control when the agent half is off.
   if (state.available !== true) return null
   const words = chipWords(state.status, state.focus?.transport?.tempo, t)
-  const step = nextStep(state, t)
+  const steps = nextSteps(state, t)
   const connected = Boolean(state.status?.connected)
   return (
     <DropdownMenu>
@@ -58,11 +58,11 @@ export function StatusChip({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top">
         <DropdownMenuItem onSelect={onOpenMap}>{t('chip.openMap')}</DropdownMenuItem>
-        {step && (
-          <DropdownMenuItem onSelect={() => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null })}>
+        {steps.map(step => (
+          <DropdownMenuItem key={step.request} onSelect={() => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null })}>
             {step.label}
           </DropdownMenuItem>
-        )}
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onOpenSettings}>{t('chip.settings')}</DropdownMenuItem>
       </DropdownMenuContent>

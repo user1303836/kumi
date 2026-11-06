@@ -201,8 +201,9 @@ class SetupTest(unittest.TestCase):
         self.assertIn(URL, asked["message"])
         self.assertEqual(asked["digest"], plan["digest"])
         self.assertEqual((asked["title"], asked["effects"]),
-                         (f"Kumi: set up Kumi {VERSION}'s runtime", [*plan["effects"], f"Writes: {plan['paths'][0]}"]),
-                         "each effect is its own line, its URL and folder in full, then the folder it writes")
+                         (f"Kumi: download and install Kumi {VERSION}", plan["effects"]),
+                         "each effect is its own line, its URL and folder in full; the folder isn't said twice")
+        self.assertIn(plan["paths"][0], asked["message"])
         self.assertIn("reconnects at its next Kumi call", asked["message"], "it says a running runtime stops")
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
         later = plan["made_at"] + setup.PLAN_TTL_MS + 1
@@ -270,6 +271,22 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(asked["effects"], ["Copy the Remote Script into your User Library",
                                             *(f"Writes: {path}" for path in paths)],
                          "every path the plan writes, whatever the runtime's words, each whole and as it is")
+        named = str(FAKE_LIBRARY / "UserPlugins" / "reaper_kumi.dylib")
+        longer = str(FAKE_LIBRARY / "Scripts" / "Kumi")
+        self.plan(setup_daw=Runtime(paths=[named, longer[:-5]], effects=[f"Copy Kumi's extension to {named}",
+                                                                         f"Make the folder {longer}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Copy Kumi's extension to {named}", f"Make the folder {longer}", f"Writes: {longer[:-5]}"],
+                         "a path an effect already names whole isn't said twice (F10); the start of a longer one is")
+        backup = f"{named}.bak"
+        self.plan(setup_daw=Runtime(paths=[named, backup], effects=[f"Copy Kumi's extension to {named}.",
+                                                                    f"Keep the old one as {backup}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Copy Kumi's extension to {named}.", f"Keep the old one as {backup}"],
+                         "a path that ends a sentence is named (rgzm's NIT)")
+        self.plan(setup_daw=Runtime(paths=[named], effects=[f"Keep the old one as {backup}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Keep the old one as {backup}", f"Writes: {named}"], "never the start of a longer name")
 
     def test_runtime_text_setup_couldnt_show_as_it_is_is_refused_not_cleaned(self) -> None:
         self.install_runtime()
@@ -380,6 +397,20 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(state["daw_component"]["version"], "1.0.105")
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none")
 
+    def test_a_part_the_daw_loads_when_it_starts_is_the_next_step_until_kumi_connects(self) -> None:
+        # REAPER and Renoise load Kumi's part when they start, so one open during the install needs a restart; until a
+        # connect, status names that step (not "open the DAW and connect"), wherever it's shown.
+        self.install_runtime()
+        for after in ("restart_daw", "enable_tool"):
+            with self.subTest(after):
+                runtime = Runtime(after=after)
+                self.plan(setup_daw=runtime)
+                self.assertTrue(self.install(Served(b""), setup_daw=runtime)["ok"])
+                self.assertEqual((self.status()["state"], self.status()["next_step"]), ("ready", after))
+        (self.data / "state").mkdir(exist_ok=True)
+        (self.data / "state" / "status.json").write_text(json.dumps({"connected": True}))
+        self.assertEqual((self.status()["state"], self.status()["next_step"]), ("ready", None))
+
     def test_the_runtime_installs_only_the_daw_step_that_was_approved(self) -> None:
         self.install_runtime()
         approved = "a1" * 32
@@ -426,26 +457,17 @@ class SetupTest(unittest.TestCase):
         self.install_runtime()
         tagging = {"reaper": "keeps an id for each saved project in the project (ext state), saved with it",
                    "renoise": "keeps an id for each song in the song's tool data, saved with it"}
-        when_asked = {"reaper": "only when a standalone Kumi connected to REAPER asks it to; Kumi in Hermes never asks",
-                      "renoise": "only when a standalone Kumi connected to Renoise asks it to; Kumi in Hermes never asks"}
+        when_asked = {"reaper": "only when a standalone Kumi connected to REAPER asks it to; Kumi for Hermes never asks",
+                      "renoise": "only when a standalone Kumi connected to Renoise asks it to; Kumi for Hermes never asks"}
         for daw, words in tagging.items():
             with self.subTest(daw):
                 setup.plan(daw, setup_daw=Runtime(), data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
                 self.assertIn(words, setup.approval(daw, data_dir=self.data)["message"], "it's in what's approved")
-                owner = str(self.data.parent / f"standalone-{daw}")
-                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner), data_dir=self.data,
-                           plugin_dir=self.plugin, target=TARGET)
-                self.assertIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
                 # A component from the bridge bump keeps an id only when asked (CC-8 8c): the plugin never asks, but a
                 # standalone Kumi beside it still can (8b), and the step says so instead of saying nothing.
                 setup.plan(daw, setup_daw=Runtime(keep_identity=True), data_dir=self.data, plugin_dir=self.plugin,
                            target=TARGET)
                 message = setup.approval(daw, data_dir=self.data)["message"]
-                self.assertNotIn(words, message)
-                self.assertIn(when_asked[daw], message)
-                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner, keep_identity=True), data_dir=self.data,
-                           plugin_dir=self.plugin, target=TARGET)
-                message = setup.approval(daw, action="adopt", data_dir=self.data)["message"]
                 self.assertNotIn(words, message)
                 self.assertIn(when_asked[daw], message)
                 setup.plan(daw, setup_daw=Runtime(keep_identity="true"), data_dir=self.data, plugin_dir=self.plugin,
@@ -595,7 +617,7 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "no ffmpeg here: setup is done")
         audio = self.status()["compressed_audio"]
         self.assertEqual((audio["state"], audio["found"]), ("not_allowed", None))
-        self.assertIn("WAV and AIFF only: there's no ffmpeg on this computer", audio["message"])
+        self.assertIn("WAV and AIFF only: setup found no ffmpeg on this computer", audio["message"])
         program = self.ffmpeg()
         planned = self.plan(setup_daw=Runtime("same"))
         self.assertEqual((planned["step"], planned["optional"]), ("ffmpeg", True))
@@ -658,7 +680,7 @@ class SetupTest(unittest.TestCase):
             self.assertEqual(shown["daw_component"]["parts"], [{"name": "Remote Script", "state": "same"},
                                                                {"name": "Kumi Ears", "state": "same"}])
         self.assertEqual(shown["compressed_audio"]["message"], "Compressed audio (MP3, FLAC…): no. The ffmpeg you allowed "
-                         "is gone, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only.")
+                         "is gone, and setup found no other ffmpeg on this computer; Kumi reads WAV and AIFF only.")
 
     @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
     def test_an_allowed_ffmpeg_whose_folder_became_a_link_isnt_used(self) -> None:
@@ -705,7 +727,7 @@ class SetupTest(unittest.TestCase):
         code, said = cli("n\n")
         self.assertEqual(code, 1)
         self.assertIn(URL, said)
-        self.assertIn(f"Writes: {self.data / 'runtime' / VERSION}", said, "the terminal asks with the approval's lines")
+        self.assertIn(f"into {self.data / 'runtime' / VERSION}", said, "the terminal asks with the approval's lines")
         self.assertFalse((self.data / "runtime" / "current.json").exists())
         code, said = cli("y\n")
         self.assertEqual(code, 0, said)

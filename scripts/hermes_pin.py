@@ -16,17 +16,36 @@ Both also download each bundle once (about 170 MB, one at a time, deleted after)
 and read it as setup will: a `.tar.xz` of plain files and folders, with `kumi` (`kumi.exe` on Windows) at its root.
 
 The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256, download size and
-unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. When a `plugin.yaml` sits beside
-it, the script also sets that manifest's one top-level `version: "x.y.z"` line to the pinned version (the catalog
-shows it as the plugin's version), and `--check` fails when the two differ. It changes nothing else in the manifest.
+unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. It also holds what the pinned
+runtime itself says it takes, read by running the bundle for this computer's target with a scratch HOME, KUMI_HOME,
+state and Kumi home, no DAW, and no update check:
+- `serve_options`, the long options `kumi serve` takes, from the usage it prints for an argument it doesn't know;
+- `serve_operations`, the operations `kumi serve --stdio` lists for each DAW it serves (MCP initialize, then
+  tools/list), sorted;
+- `generate_kinds` and `ledger_policy_keys`, from that listing's `generate` operation: the `kind` values its input
+  schema enumerates, and the ledger policy keys its `_meta` names (`kumi/ledger_policy_keys`), each sorted, and both
+  empty when the runtime offers no `generate` (CC-15's 15a and W5-c);
+- `listen_sources`, for each DAW, the sources that DAW's `listen` takes, sorted: `file`, `sound`, `artifact`, and
+  `track` (a track or the mix). A runtime that can hear the project says which DAWs can, per DAW, in `listen`'s
+  `_meta` (`kumi/listen_sources`). Without it, the input schema must be files-only, and the kinds are read from its
+  source fields; a schema offering a track without that declaration is refused. `[]` for a DAW that lists no `listen`
+  (core-gap item 2).
+The plugin's tests check every flag it passes `kumi serve`, every operation it calls, every kind it offers and every
+ledger key it writes against them, and the plugin offers a track or mix listen only where its DAW's `listen_sources`
+has `track`, so a plugin that needs a newer runtime than its pin fails before it reaches anyone.
+When a `plugin.yaml` sits beside it, the script also sets that manifest's one top-level `version: "x.y.z"` line to the
+pinned version (the catalog shows it as the plugin's version), and `--check` fails when the two differ. It changes
+nothing else in the manifest.
 """
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import subprocess
@@ -51,6 +70,16 @@ VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 # The DAW component versions each target's release file names, carried into the pin for setup to show.
 COMPONENTS = ("bridge", "reaper", "renoise")
+# The argument `kumi serve` is run with to read its usage: one it doesn't take, so it prints the usage and stops.
+PROBE = "--hermes-pin-probe"
+# The DAWs `kumi serve --daw` serves, each asked for its operations, and the MCP version the plugin speaks to it
+# (hermes-plugin/runtime.py's MCP_PROTOCOL).
+DAWS = ("ableton", "reaper", "renoise")
+MCP_PROTOCOL = "2025-11-25"
+# The sources a `listen` may take, as `listen_sources` names them (`track`: a track or the mix), and, for a runtime
+# that declares none in `_meta`, the input schema's source field that names each files-only kind.
+LISTEN_KINDS = ("artifact", "file", "sound", "track")
+SOURCE_FIELDS = {"file": "file", "sound_id": "sound", "artifact_id": "artifact"}
 
 
 class Refused(Exception):
@@ -192,10 +221,174 @@ def unpacked_bytes(path: Path, target: str) -> int:
     return sum(member.size for member in members if member.isfile())
 
 
-def measured(github: GitHub, pin: dict) -> dict:
+def host_target() -> str | None:
+    """This computer's release target, as the Installer names them; None for a system no release is built for."""
+    arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}.get(platform.machine().lower())
+    system = {"Darwin": "apple-darwin", "Linux": "unknown-linux-gnu", "Windows": "pc-windows-msvc"}.get(platform.system())
+    target = f"{arch}-{system}" if arch and system else None
+    return target if target in TARGETS else None
+
+
+def extracted(path: Path, target: str, into: Path) -> Path:
+    """The bundle's Kumi executable, alone, extracted into `into` and made executable."""
+    name = executable(target)
+    with tarfile.open(path, "r:xz") as archive:
+        member = next(member for member in archive.getmembers()
+                      if member.isfile() and member.name.removeprefix("./") == name)
+        data = archive.extractfile(member).read()
+    out = into / "probe" / name
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(data)
+    out.chmod(0o755)
+    return out
+
+
+def scratch_env(scratch: Path) -> dict[str, str]:
+    """The environment the pinned runtime is run with: a scratch HOME and KUMI_HOME, so nothing of this computer's Kumi
+    is read or written, and no update check, as the plugin starts it."""
+    home = scratch / "probe-home"
+    home.mkdir(exist_ok=True)
+    kept = {key: value for key, value in os.environ.items() if key in ("PATH", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP")}
+    return {**kept, "HOME": str(home), "USERPROFILE": str(home), "KUMI_HOME": str(home / "kumi"),
+            "KUMI_NO_UPDATE_CHECK": "1"}
+
+
+def serve_usage(kumi: Path, scratch: Path) -> str:
+    """What `kumi serve` prints for an argument it doesn't take: its usage, on stderr."""
+    try:
+        result = subprocess.run([str(kumi), "serve", PROBE], capture_output=True, stdin=subprocess.DEVNULL,
+                                env=scratch_env(scratch), timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Refused(f"couldn't run the pinned kumi to read kumi serve's options: {error}") from None
+    return result.stderr.decode(errors="replace") + result.stdout.decode(errors="replace")
+
+
+def serve_listing(kumi: Path, scratch: Path, version: str) -> dict:
+    """What `kumi serve --stdio` lists for each DAW it serves (MCP's initialize, then tools/list; the end of its input
+    stops it): `serve_operations`, and `generate`'s `generate_kinds` and `ledger_policy_keys` (both empty without a
+    `generate`), each the sorted union over the DAWs; and `listen_sources`, each DAW's own (`listen_kinds`). Refused
+    unless it names itself kumi-serve at `version` and lists some operations, unless a `generate` it lists names both
+    its kinds and its policy keys, and unless each `listen` it lists says which sources it takes."""
+    exchange = "".join(json.dumps(message) + "\n" for message in (
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+         "params": {"protocolVersion": MCP_PROTOCOL, "capabilities": {},
+                    "clientInfo": {"name": "hermes-pin", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})).encode()
+    names: set[str] = set()
+    kinds: set[str] = set()
+    keys: set[str] = set()
+    sources: dict[str, list[str]] = {}
+    for daw in DAWS:
+        room = Path(tempfile.mkdtemp(prefix=f"serve-{daw}-", dir=scratch))
+        argv = [str(kumi), "serve", "--stdio", "--state-dir", str(room / "state"), "--kumi-home", str(room / "kumi-home"),
+                "--daw", daw]
+        try:
+            result = subprocess.run(argv, input=exchange, capture_output=True, env=scratch_env(scratch), timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise Refused(f"couldn't run the pinned kumi serve --stdio to list its operations: {error}") from None
+        replies = {}
+        for line in result.stdout.decode(errors="replace").splitlines():
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and message.get("id") in (1, 2):
+                replies[message["id"]] = message.get("result")
+        info = (replies.get(1) or {}).get("serverInfo") if isinstance(replies.get(1), dict) else None
+        if not isinstance(info, dict) or (info.get("name"), info.get("version")) != ("kumi-serve", version):
+            raise Refused(f"the pinned kumi serve --daw {daw} answered initialize as {info!r}, not kumi-serve {version}")
+        tools = (replies.get(2) or {}).get("tools") if isinstance(replies.get(2), dict) else None
+        tools = [tool for tool in tools if isinstance(tool, dict)] if isinstance(tools, list) else []
+        listed = [tool.get("name") for tool in tools]
+        if not listed or not all(isinstance(name, str) and name for name in listed):
+            raise Refused(f"the pinned kumi serve --daw {daw} listed no operations by name: {tools!r:.200}")
+        names.update(listed)
+        sources[daw] = []
+        for tool in tools:
+            if tool.get("name") == "generate":
+                kinds.update(_strings(((tool.get("inputSchema") or {}).get("properties") or {}).get("kind", {}).get("enum"),
+                                      f"--daw {daw}'s generate enumerates no kinds in its input schema"))
+                keys.update(_strings((tool.get("_meta") or {}).get("kumi/ledger_policy_keys"),
+                                     f"--daw {daw}'s generate names no kumi/ledger_policy_keys in its _meta"))
+            elif tool.get("name") == "listen":
+                sources[daw] = listen_kinds(tool, daw)
+    return {"serve_operations": sorted(names), "generate_kinds": sorted(kinds), "ledger_policy_keys": sorted(keys),
+            "listen_sources": sources}
+
+
+def listen_kinds(tool: dict, daw: str) -> list[str]:
+    """The sources `--daw daw`'s `listen` takes, sorted (core-gap item 2): the kinds its `_meta` declares
+    (`kumi/listen_sources`, which the runtime's dispatch also enforces), or, without that, the files-only kinds its
+    input schema's source fields name. A schema that offers a track or the mix without the declaration is refused:
+    whether a DAW can capture is the runtime's to say, per DAW, and the schema is the same for every DAW."""
+    meta = tool.get("_meta")
+    declared = meta.get("kumi/listen_sources") if isinstance(meta, dict) else None
+    if declared is not None:
+        found = _strings(declared, f"--daw {daw}'s listen names no kumi/listen_sources in its _meta")
+    elif _offers_track(tool.get("inputSchema")):
+        raise Refused(f"the pinned kumi serve --daw {daw}'s listen offers a track or the mix but doesn't say, in its "
+                      "_meta's kumi/listen_sources, whether this DAW can capture")
+    else:
+        schema = tool.get("inputSchema") if isinstance(tool.get("inputSchema"), dict) else {}
+        source = (schema.get("properties") or {}).get("source")
+        fields = source.get("properties") if isinstance(source, dict) else None
+        found = [SOURCE_FIELDS[name] for name in (fields if isinstance(fields, dict) else {}) if name in SOURCE_FIELDS]
+        if not found:
+            raise Refused(f"the pinned kumi serve --daw {daw}'s listen names no source it takes: {schema!r:.200}")
+    unknown = sorted(set(found) - set(LISTEN_KINDS))
+    if unknown:
+        raise Refused(f"the pinned kumi serve --daw {daw}'s listen takes sources this script doesn't know: "
+                      f"{', '.join(unknown)}")
+    return sorted(set(found))
+
+
+def _offers_track(node: object) -> bool:
+    """Whether a JSON schema, anywhere in it, has a `track` property or requires one."""
+    if isinstance(node, dict):
+        properties, required = node.get("properties"), node.get("required")
+        if (isinstance(properties, dict) and "track" in properties) or (isinstance(required, list) and "track" in required):
+            return True
+        return any(_offers_track(value) for value in node.values())
+    return isinstance(node, list) and any(_offers_track(item) for item in node)
+
+
+def _strings(value: object, missing: str) -> list[str]:
+    """A non-empty list of non-empty strings, or a refusal saying what the pinned runtime left out."""
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise Refused(f"the pinned kumi serve {missing}: {value!r:.200}")
+    return value
+
+
+def serve_options(usage: str) -> list[str]:
+    """`kumi serve`'s long options, sorted, from the usage it printed: the `usage:` line and the indented lines that
+    continue it, never the error line above them, which quotes the argument it didn't take."""
+    lines = usage.splitlines()
+    start = next((index for index, line in enumerate(lines) if line.lstrip().startswith("usage:")), None)
+    if start is None:
+        raise Refused("the pinned kumi serve printed no usage line, so its options can't be recorded")
+    block = [lines[start]]
+    for line in lines[start + 1:]:
+        if not line.strip() or not line[:1].isspace():
+            break
+        block.append(line)
+    options = sorted(set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", "\n".join(block))))
+    if not options or PROBE in options:
+        raise Refused(f"the pinned kumi serve's usage names no options of its own: {block[0].strip()!r}")
+    return options
+
+
+def measured(github: GitHub, pin: dict, probe: Callable[[Path, Path], str] | None = None,
+             lister: Callable[[Path, Path, str], dict] | None = None) -> dict:
     """The pin with each target's unpacked size, after downloading each bundle (one at a time, deleted after) and
-    confirming its size and SHA-256 against the release's own records."""
-    targets = {}
+    confirming its size and SHA-256 against the release's own records; and what the bundle for this computer's target
+    says it takes when run: `serve_options` (`probe`, `serve_usage` unless a test says otherwise), and
+    `serve_operations`, `generate_kinds`, `ledger_policy_keys` and `listen_sources` (`lister`, `serve_listing`)."""
+    host = host_target()
+    if host not in pin["targets"]:
+        raise Refused(f"run this on one of the release's targets ({', '.join(TARGETS)}): it reads kumi serve's "
+                      "options and operations by running the pinned runtime")
+    targets, options, listing = {}, [], {}
     with tempfile.TemporaryDirectory(prefix="hermes-pin-") as scratch:
         for target, record in pin["targets"].items():
             name = record["url"].rsplit("/", 1)[1]
@@ -208,10 +401,22 @@ def measured(github: GitHub, pin: dict) -> dict:
             if size != record["size"] or digest.hexdigest() != record["sha256"]:
                 raise Refused(f"the downloaded {name} doesn't match its pin ({size} bytes, sha256 {digest.hexdigest()})")
             unpacked = unpacked_bytes(path, target)
+            if target == host:
+                kumi = extracted(path, target, Path(scratch))
+                options = serve_options((probe or serve_usage)(kumi, Path(scratch)))
+                listing = (lister or serve_listing)(kumi, Path(scratch), pin["kumi"])
+                print(f"  kumi serve {pin['kumi']} takes {' '.join(options)}")
+                print(f"  kumi serve {pin['kumi']} offers {' '.join(listing['serve_operations'])}; generate's kinds: "
+                      f"{' '.join(listing['generate_kinds']) or 'none'}; ledger policy keys: "
+                      f"{' '.join(listing['ledger_policy_keys']) or 'none'}")
+                print("  listen takes: " + "; ".join(f"{daw} {' '.join(kinds) or 'nothing'}"
+                                                     for daw, kinds in listing["listen_sources"].items()))
             path.unlink()
             targets[target] = {**record, "unpacked_bytes": unpacked}
             print(f"  {target}: {name} matches ({size} bytes, {unpacked} unpacked)")
-    return {**pin, "targets": targets}
+    return {**pin, "serve_options": options, "serve_operations": listing["serve_operations"],
+            "generate_kinds": listing["generate_kinds"], "ledger_policy_keys": listing["ledger_policy_keys"],
+            "listen_sources": listing["listen_sources"], "targets": targets}
 
 
 def text_of(pin: dict) -> str:
@@ -245,7 +450,9 @@ def manifest_line(manifest: Path) -> tuple[str, re.Match[str]] | None:
     return text, lines[0]
 
 
-def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
+def main(argv: list[str] | None = None, github: GitHub | None = None,
+         probe: Callable[[Path, Path], str] | None = None,
+         lister: Callable[[Path, Path, str], dict] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pin the Kumi release that Kumi's Hermes plugin installs.")
     parser.add_argument("version", help="a published Kumi version, e.g. 1.24.67 (never 'latest')")
     parser.add_argument("--repository", default=REPOSITORY, help=f"owner/name (default {REPOSITORY})")
@@ -257,7 +464,7 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
         if not VERSION.fullmatch(version):
             raise Refused(f"{args.version!r} isn't a version like 1.24.67: the pin names one exact release")
         github = github or GitHub(args.repository)
-        pin = measured(github, read_pin(github, version))
+        pin = measured(github, read_pin(github, version), probe, lister)
         manifest = args.out.parent / "plugin.yaml"
         line = manifest_line(manifest)
         if args.check:

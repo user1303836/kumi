@@ -170,6 +170,7 @@ impl Home {
             dir: self.dir.path().to_string_lossy().into(),
             sources: library_sources(&self.options()),
             approved_folders: None,
+            audio_only: false,
             decode: Default::default(),
             set_folders: vec![],
             set_files: vec![],

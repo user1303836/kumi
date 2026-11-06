@@ -753,8 +753,9 @@ impl<H: PlanHost> Plan<H> {
                 done.insert("unchanged".into(), Value::Bool(true));
             }
             // What Kumi read for itself in the step's notation, or left to the DAW (a sidechain's channel, an audio
-            // clip's looping): the model says it. And what Lua or a call through the DAW's API answered.
-            for key in ["notation", "channel", "looping", "result", "printed", "out", "failed"] {
+            // clip's looping): the model says it. The route can determine how the DAW's own Undo takes it back.
+            // And what Lua or a call through the DAW's API answered.
+            for key in ["notation", "channel", "looping", "route", "result", "printed", "out", "failed"] {
                 if let Some(said) = reply.get(key) {
                     done.insert(key.into(), said.clone());
                 }

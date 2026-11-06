@@ -100,6 +100,57 @@ fn make_folder(folder: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Guarded renders may adopt only a private cache, never repair an existing directory's permissions.
+fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
+    let refuse = || failed("guarded render cache and its parent must be private owned directories, not symlinks");
+    let private = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| {
+            #[cfg(windows)]
+            let owner_only = daw_bridge::lifecycle::native_acl::is_kumis_shape(path);
+            #[cfg(not(windows))]
+            let owner_only = daw_bridge::owner::is_owner_only(path);
+            if !meta.is_dir() || meta.file_type().is_symlink() || !owner_only {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                meta.permissions().mode() & 0o777 == 0o700
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        })
+    };
+    let parent = folder.parent().ok_or_else(refuse)?;
+    if !private(parent) {
+        return Err(refuse());
+    }
+    match std::fs::symlink_metadata(folder) {
+        Ok(_) if private(folder) => Ok(()),
+        Ok(_) => Err(refuse()),
+        Err(error) if create && error.kind() == std::io::ErrorKind::NotFound => {
+            #[cfg(unix)]
+            let made = {
+                use std::os::unix::fs::DirBuilderExt;
+                std::fs::DirBuilder::new().mode(0o700).create(folder)
+            };
+            #[cfg(windows)]
+            let made = daw_bridge::lifecycle::native_acl::create_kumis_folder(folder);
+            #[cfg(not(any(unix, windows)))]
+            let made = std::fs::create_dir(folder);
+            made.map_err(|error| failed(format!("couldn't create the private render cache: {error}")))?;
+            if private(folder) {
+                Ok(())
+            } else {
+                Err(refuse())
+            }
+        }
+        Err(_) => Err(refuse()),
+    }
+}
+
 /// What the main thread holds of listening.
 pub struct Listening {
     board: Arc<Board>,
@@ -208,8 +259,52 @@ impl Listening {
         }
     }
 
+    #[cfg(windows)]
+    fn prepare_owned_folder(folder: &Path) -> Result<(), String> {
+        use daw_bridge::lifecycle::native_acl;
+        use std::os::windows::fs::OpenOptionsExt;
+        if folder.file_name() != Some(std::ffi::OsStr::new("listening")) {
+            return Err("not the component's dedicated listening directory".into());
+        }
+        match std::fs::symlink_metadata(folder) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("the existing listening directory could not be inspected".into()),
+            Ok(_) => {}
+        }
+        let parent = folder.parent().ok_or("the listening directory has no parent")?;
+        let open = |path: &Path, access, share| {
+            std::fs::OpenOptions::new().access_mode(access).share_mode(share).custom_flags(0x0220_0000).open(path)
+        };
+        // Pin the owning bridge directory, then this exact existing cache; the native
+        // helper verifies current-account ownership and type before changing its handle.
+        let pinned_parent = open(parent, 0x0002_0081, 1).map_err(|_| "the owning bridge directory could not be pinned")?;
+        if !native_acl::is_kumis_shape(parent) || !native_acl::is_kumis_shape_handle(&pinned_parent, true) {
+            return Err("the owning bridge directory is not verifiably private".into());
+        }
+        if native_acl::is_kumis_shape(folder) {
+            return Ok(());
+        }
+        // FILE_LIST_DIRECTORY makes no-write/delete sharing effective; metadata-only
+        // ACL access stays compatible with both read pins throughout protection.
+        let original = open(folder, 0x0002_0081, 1).map_err(|_| "the existing listening directory could not be pinned")?;
+        let current = open(folder, 0x0006_0081, 1).map_err(|_| "the existing listening directory could not be protected")?;
+        if native_acl::file_path(&current)?.parent() != Some(native_acl::file_path(&pinned_parent)?.as_path()) {
+            return Err("the listening directory is outside its pinned owning bridge root".into());
+        }
+        native_acl::protect_owned_directory(&original, &current)
+    }
     /// Where listening's files go, once the bridge knows Kumi's folder (from its reference).
     pub fn set_folder(&self, folder: PathBuf) {
+        #[cfg(windows)]
+        if self.folder.borrow().is_none() {
+            // Upgrade only the component's dedicated directory at startup, never an
+            // adopted runtime path during a capture or a replacement after startup.
+            if Self::prepare_owned_folder(&folder).is_err() {
+                crate::log::line(
+                    "The component's existing listening directory could not be verified and protected; guarded rendering will refuse it.",
+                );
+            }
+        }
         *self.folder.borrow_mut() = Some(folder);
     }
 
@@ -241,12 +336,21 @@ impl Listening {
         if let Some(busy_now) = reaper.busy() {
             return Err(busy(format!("{}; nothing changed", busy_now.reason())));
         }
-        let folder = self.folder()?;
+        // Restricted planning must refuse before even preparing the listening directory.
+        let guarded = params.get("maxSeconds").is_some();
+        let folder = if guarded {
+            self.folder.borrow().clone().ok_or_else(|| failed("the bridge doesn't know Kumi's folder yet (no reference file)"))?
+        } else {
+            self.folder()?
+        };
         let info = reaper.current_project().ok_or_else(|| failed("REAPER has no project open"))?;
         if reaper.play_state(info.ptr).recording {
             return Err(failed("REAPER is recording: a render would stop the recording, so Kumi renders nothing"));
         }
         let plan = render::plan(reaper, reads, params, &folder)?;
+        if guarded {
+            guarded_folder(&folder, true)?;
+        }
         let answer = plan.answer();
         self.board.add(Job::new(&plan.job, Kind::Render, true));
         self.pressed.set(None);
@@ -592,9 +696,13 @@ impl Listening {
             }
             return;
         }
-        let Some(plan) = self.pending.borrow_mut().take() else { return };
+        let Some(mut plan) = self.pending.borrow_mut().take() else { return };
         if !self.board.start(&plan.job) {
             // Cancelled while it waited: nothing was done.
+            return;
+        }
+        if let Err((code, error)) = plan.recheck_start(reaper, reads) {
+            self.end(&plan.job, render::Ended::Failed { code, error, notes: vec![] });
             return;
         }
         if plan.items() {
@@ -716,6 +824,7 @@ impl Listening {
             folder && api.GetSetProjectInfo().is_some() && api.GetSetProjectInfo_String().is_some() && api.Main_OnCommandEx().is_some();
         let mut flags = json!({
             "render": render,
+            "render_preflight": render::preflight_supported(reaper),
             "capture": folder && audio && api.Audio_RegHardwareHook().is_some(),
             "audition": audio && api.PlayPreviewEx().is_some() && api.StopPreview().is_some() && api.PCM_Source_CreateFromFile().is_some(),
             "grid": api.TrackFX_FormatParamValueNormalized().is_some(),

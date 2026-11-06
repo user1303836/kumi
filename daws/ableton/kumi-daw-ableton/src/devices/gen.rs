@@ -501,6 +501,10 @@ pub static MIX: LazyLock<Control> = LazyLock::new(|| {
 pub static OUTPUT: LazyLock<Control> = LazyLock::new(|| {
     Control::Number(NumericControl { name: "Output".into(), min: -36.0, max: 12.0, default: 0.0, unit: Unit::Db, place: kumis_own() })
 });
+/// The guarded stage's Output (CC-22, W1-C): it never boosts.
+pub static GUARDED_OUTPUT: LazyLock<Control> = LazyLock::new(|| {
+    Control::Number(NumericControl { name: "Output".into(), min: -36.0, max: 0.0, default: 0.0, unit: Unit::Db, place: kumis_own() })
+});
 
 /// What an audio effect's or an instrument's patcher is built from (an instrument's `voices`).
 #[derive(Debug, Clone, PartialEq)]
@@ -553,8 +557,19 @@ pub fn voice_code(spec: &GenSpec) -> String {
     with_params(&spec.code, &lines, &format!("Made by Kumi: {} (one voice)", spec.name))
 }
 
-/// An audio effect's patcher.
+/// An audio effect's patcher, ending in standalone's output stage.
 pub fn audio_effect_patcher(spec: &GenSpec) -> Value {
+    effect_patcher(spec, OUTPUT_STAGE_EFFECT, &OUTPUT)
+}
+
+/// An audio effect's patcher for a device built for Hermes (CC-22): it ends in [`kumi_genexpr::guard::STAGE`], which
+/// holds the effect's own output within −0.3 dBFS, passes the dry signal untouched, and whose Output never boosts.
+pub fn guarded_effect_patcher(spec: &GenSpec) -> Value {
+    effect_patcher(spec, kumi_genexpr::guard::STAGE, &GUARDED_OUTPUT)
+}
+
+/// An audio effect's patcher: plugin~ → gen~ (the model's code) → `stage`'s gen~ (with the dry signal) → plugout~.
+fn effect_patcher(spec: &GenSpec, stage: &str, output: &Control) -> Value {
     let mut boxes: Vec<PatchBox> = Vec::new();
     let mut lines: Vec<Line> = Vec::new();
     let mut face = Face::new();
@@ -562,7 +577,7 @@ pub fn audio_effect_patcher(spec: &GenSpec) -> Value {
     let effect = gen_box("obj-effect", &effect_code(spec), [40.0, 120.0, 300.0, 22.0]);
     let ins = inputs_read(&spec.code);
     boxes.push(effect);
-    boxes.push(gen_box("obj-output", OUTPUT_STAGE_EFFECT, [40.0, 220.0, 300.0, 22.0]));
+    boxes.push(gen_box("obj-output", stage, [40.0, 220.0, 300.0, 22.0]));
     boxes.push(PatchBox::new(json!({ "id": "obj-plugout", "maxclass": "newobj", "text": "plugout~ 1 2", "numinlets": 2, "numoutlets": 0, "patching_rect": [40.0, 320.0, 80.0, 22.0] })));
     for channel in [0u32, 1] {
         if (channel as usize) < ins {
@@ -576,7 +591,7 @@ pub fn audio_effect_patcher(spec: &GenSpec) -> Value {
         face.add(control, &param_name(control.name()), &["obj-effect"]);
     }
     face.add(&MIX, "kumi_mix", &["obj-output"]);
-    face.add(&OUTPUT, "kumi_output", &["obj-output"]);
+    face.add(output, "kumi_output", &["obj-output"]);
     let width = face.finish(&look::Extras::default(), "obj-playhead").width;
     boxes.extend(face.boxes);
     lines.extend(face.lines);

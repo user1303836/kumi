@@ -4,8 +4,9 @@
 in this profile's plugin data, starts it with a scrubbed environment, checks it's the pinned runtime before anything else,
 and calls its tools. A profile has one runtime: this Hermes process holds the profile's state-folder lock while its
 runtime runs (CONTRACT-CHANGES CC-6), and another process's tools say where it runs. The runtime is owned by the chat
-that started it, and stops when that chat ends, after 15 minutes with nothing to do, when the plugin unloads, or when
-Hermes exits: its stdin closes, and it settles what's in flight and exits.
+that started it, and stops when that chat ends, after a while with nothing to do (2 hours while it's connected to the
+DAW for a chat, 15 minutes otherwise), when the plugin unloads, or when Hermes exits: its stdin closes, and it settles
+what's in flight and exits.
 
 Nothing here runs at import or in register(). Standard library only, Python 3.11.
 """
@@ -25,7 +26,7 @@ import threading
 import time
 from typing import Any, Callable, Iterable, Mapping
 
-from .setup import host_target
+from .setup import DAWS, host_target
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,12 @@ MCP_PROTOCOL = "2025-11-25"
 SERVER_NAME = "kumi-serve"
 RUNTIME_PROTOCOL = "kumi-serve/1"
 CLIENT_INFO = {"name": "kumi-hermes", "version": "1"}
+# C2's resources, each the snapshot (C3) it's read from: a runtime that offers subscriptions says when one has landed.
+RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history": "history", "kumi://map": "map"}
+# The runtime's tools the plugin calls (C2), and the only ones Runtime.call sends: the pinned release must serve each
+# (`serve_operations` in kumi_release.json, read from that runtime when it's pinned), or a call fails for every producer.
+OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "change", "undo", "history", "listen",
+                        "sounds", "library", "job", "generate"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -43,6 +50,13 @@ LAUNCH_VARIABLES = frozenset({
 })
 MAX_LINE = 16 * 1024 * 1024  # the longest message the runtime may send; a longer line is skipped
 IDLE_AFTER = 15 * 60.0  # RESEARCH.md §3.1
+# A runtime connected to the DAW for a chat waits this long: its undo goes when it stops, and a producer may take a
+# long break before "undo that" (kumi-adv's D2).
+IDLE_CONNECTED = 2 * 60 * 60.0
+# A job the runtime is running (a library scan, a Mirelo wait) keeps it up although nobody calls it, for at most this
+# long with nothing asked of it (rgzm, #1059): an unpolled job isn't ended for idleness, and a stuck one isn't kept.
+JOB_BUSY_FOR = 6 * 60 * 60.0
+_JOB_RUNNING = ("running", "cancelling")
 # How long a stop waits for an idle runtime to exit before ending it: within the 10 s Hermes's gateway gives a chat's
 # finalization, with the terminate's own wait after it.
 STOP_WAIT = 5.0
@@ -73,6 +87,11 @@ class Unavailable(Exception):
         super().__init__(reason)
         self.code = code
         self.reason = reason
+
+
+class NotSent(Unavailable):
+    """Unavailable before anything of the call was written to the runtime: proof, on Kumi's side, that nothing of it
+    reached the runtime, so nothing of it can have reached anyone else (a paid create's reservation is freed on it)."""
 
 
 class Refused(Exception):
@@ -160,17 +179,40 @@ def launch_environment(environ: Mapping[str, str], windows: bool = os.name == "n
     return kept
 
 
-def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = ()) -> list[str]:
+def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = (),
+               media_roots: Iterable[str] = (), hermes: tuple[str | None, str | None] = (None, None)) -> list[str]:
     """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, each sample folder
-    the producer approved (`--library-root`, the runtime's only grant to read them), and the ffmpeg they allowed at
-    setup while it's unchanged (`--tool ffmpeg=`, CC-10). Read at each start."""
+    the producer approved (`--library-root`, the runtime's only grant to read them), each folder of finished media it
+    may import or measure (`--media-root`: Hermes's generated audio, where other plugins' results land), the ffmpeg
+    they allowed at setup while it's unchanged (`--tool ffmpeg=`, CC-10), and Hermes's homes (`hermes_homes()`:
+    `--hermes-home`, `--hermes-root`), each only when it's a full path: inside them the runtime takes no library root
+    and reads no source, but for a media root it's given (#970). Read at each start."""
     argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
             "--daw", daw]
     for root in library_roots:
         argv += ["--library-root", root]
+    for root in media_roots:
+        argv += ["--media-root", root]
     if ffmpeg := allowed_tool(install.ffmpeg):
         argv += ["--tool", f"ffmpeg={ffmpeg}"]
+    for flag, home in zip(("--hermes-home", "--hermes-root"), hermes):
+        if isinstance(home, str) and home and Path(home).is_absolute():
+            argv += [flag, home]
     return argv
+
+
+def hermes_homes() -> tuple[str | None, str | None]:
+    """This profile's Hermes home and the root holding every profile (`<root>/profiles/<name>`), as Hermes resolves
+    them (`hermes_constants`, public: the platform's default, a data-dir suffix, a custom home), so the runtime never
+    re-derives Hermes's rules (#985). The environment stays scrubbed of HERMES_HOME. (None, None) where Hermes isn't
+    importable."""
+    try:
+        from hermes_constants import get_default_hermes_root, get_hermes_home  # Hermes's
+
+        home = get_hermes_home()
+        return str(home), str(get_default_hermes_root(home=home))
+    except Exception:
+        return None, None
 
 
 def _thread(target: Callable[..., Any], name: str, *args: Any) -> threading.Thread:
@@ -377,9 +419,9 @@ class Client:
         pending = _Pending()
         with self._lock:
             if self._gone is not None:
-                raise Unavailable("not_running", f"{self._gone} Nothing was sent.")
+                raise NotSent("not_running", f"{self._gone} Nothing was sent.")
             if self._input_ended:
-                raise Unavailable("not_running", "Kumi's runtime is stopping. Nothing was sent.")
+                raise NotSent("not_running", "Kumi's runtime is stopping. Nothing was sent.")
             ident = next(self._ids)
             self._pending[ident] = pending
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
@@ -401,8 +443,9 @@ class Client:
                 self._pending.pop(ident, None)
         if pending.gone is not None:
             raise Unavailable("stopped", pending.gone)
-        if pending.error is not None:
-            raise Unavailable("protocol", f"Kumi refused {method}: {pending.error.get('message') or pending.error}")
+        if pending.error is not None:  # unsure, not refused (tools.UNSURE_CODES): it may have done something
+            raise Unavailable("protocol", f"Kumi's runtime answered {method} with an error "
+                                          f"({pending.error.get('message') or pending.error}); what it did is unknown.")
         return pending.result
 
     def notify(self, method: str, params: dict | None = None) -> None:
@@ -561,6 +604,13 @@ class Runtime:
     # profile, stops this runtime in them, so what it logs lands in this profile's logs (research-1's review, item 12).
     context: contextvars.Context = field(default_factory=contextvars.copy_context)
     gone: threading.Event = field(default_factory=threading.Event)
+    # The snapshots the runtime tells of as they land (its resources, subscribed at the handshake), those it has told
+    # of since the watcher last looked, and what wakes it. What each snapshot's last event said (its seq, and the map's
+    # revision), so a change is reported once, whichever way it was found.
+    subscribed: frozenset[str] = frozenset()
+    told: set[str] = field(default_factory=set)
+    wake: threading.Event = field(default_factory=threading.Event)
+    reported: dict[str, Any] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
@@ -568,20 +618,25 @@ class Runtime:
         return self.data_dir / "state"
 
     def call(self, tool: str, args: dict, host: dict, *, timeout: float,
-             interrupted: Callable[[], bool] | None = None) -> dict:
+             interrupted: Callable[[], bool] | None = None, private: dict | None = None) -> dict:
         """Call one of the runtime's tools (C2: C1's names without `kumi_`), with Hermes's call identity in `_host`.
         Its answer's structured content, or Refused with the runtime's error. A key starting with `_` is the host's to
         give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
         the model, is dropped, never passed on (rgzm, #1007). With `interrupted`, the producer's Stop cancels the call
-        while it waits (Client.request)."""
+        while it waits (Client.request). `private` is the host's own (`_mirelo`, after the producer's approval): added
+        to this one request only, never logged, recorded or returned. `tool` is one of OPERATIONS, which the pinned
+        runtime must serve."""
+        if tool not in OPERATIONS:
+            raise ValueError(f"{tool!r} isn't in runtime.OPERATIONS: add it there, so the pin is checked for it")
         arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
+        hosts = {key: value for key, value in (private or {}).items() if isinstance(key, str) and key.startswith("_")}
         with self._lock:
             if self.closing:
-                raise Unavailable("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing "
-                                                 "was sent.")
+                raise NotSent("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing was "
+                                             "sent.")
             self.in_flight += 1
         try:
-            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, "_host": host}},
+            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, **hosts, "_host": host}},
                                          timeout=timeout, interrupted=interrupted)
         finally:
             with self._lock:
@@ -615,12 +670,17 @@ class Runtimes:
 
     def __init__(self, *, events: Callable[[str, dict], None] | None = None, spawn: Spawn = Client,
                  environ: Callable[[], Mapping[str, str]] = lambda: os.environ, start_timeout: float = 30.0,
-                 idle_after: float = IDLE_AFTER, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT):
+                 idle_after: float = IDLE_AFTER, idle_connected: float = IDLE_CONNECTED,
+                 job_busy_for: float = JOB_BUSY_FOR, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT,
+                 hermes: Callable[[], tuple[str | None, str | None]] = hermes_homes):
         self._events = events
         self._spawn = spawn
         self._environ = environ
+        self._hermes = hermes  # read at each start, in the starting call's context (its profile's home)
         self._start_timeout = start_timeout
         self._idle_after = idle_after
+        self._idle_connected = idle_connected
+        self._job_busy_for = job_busy_for
         self._stop_wait = stop_wait
         self._settle_wait = settle_wait
         self._lock = threading.Lock()  # the registry only: never held while a runtime starts or stops
@@ -654,7 +714,7 @@ class Runtimes:
         raise Unavailable("not_connected", "Kumi isn't connected to the DAW: call kumi_connect first.")
 
     def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *, profile: str,
-              library_roots: Iterable[str] = ()) -> Runtime:
+              library_roots: Iterable[str] = (), media_roots: Iterable[str] = ()) -> Runtime:
         """The profile's runtime, started for `session_id` when none runs: this process takes the profile's state
         lock (CC-6), then the runtime is initialized and checked to be the pinned runtime (its name, version and
         protocol, before anything else is asked of it), and its snapshots are watched for C5's events. A runtime that
@@ -667,7 +727,9 @@ class Runtimes:
             running = self.get(data_dir)
             if running is not None:
                 if running.daw != daw:
-                    raise Unavailable("other_daw", f"Kumi's runtime in this profile works in {running.daw}, not {daw}.")
+                    raise Unavailable("other_daw", f"Kumi is running for {DAWS.get(running.daw, running.daw)} in this "
+                                                   f"profile. To use {DAWS.get(daw, daw)}, end the chat using Kumi, then "
+                                                   "connect again.")
                 return running
             if self.settling(data_dir) is not None:  # stopping, it holds the profile until it exits
                 raise Unavailable("busy", BUSY)
@@ -680,11 +742,16 @@ class Runtimes:
             client = None
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
+                baseline = _baseline(state)  # what was there before it started isn't news; what it writes from now is
                 holder: dict[str, Runtime] = {}
-                client = self._spawn(serve_argv(install, state, daw, library_roots), launch_environment(self._environ()),
+                started: dict[str, Runtime] = {}
+                client = self._spawn(serve_argv(install, state, daw, library_roots, media_roots, self._hermes()),
+                                     launch_environment(self._environ()),
                                      cwd=str(data_dir), keep_fds=lock.keep(),
-                                     on_exit=lambda reason: self._exited(holder))
+                                     on_exit=lambda reason: self._exited(holder),
+                                     on_notification=lambda method, params: _notified(started, method, params))
                 runtime = Runtime(client, install, data_dir, daw, session_id, lock, profile)
+                started["runtime"] = runtime
                 runtime.info = self._handshake(runtime)
                 holder["runtime"] = runtime
                 with self._lock:  # the mark is checked and the runtime published as one step, so no stop falls between
@@ -707,7 +774,7 @@ class Runtimes:
                 raise
         if watch:
             _thread(self._watch_idle, "kumi-runtime-idle").start()
-        _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime).start()
+        _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime, baseline).start()
         self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         return runtime
 
@@ -758,8 +825,8 @@ class Runtimes:
             self.stop(key)
 
     def _watch_idle(self) -> None:
-        """Stop each runtime that has had nothing to do for `idle_after` seconds, never one with a call in flight; a
-        runtime no chat owns (cron, a call without a session) stops this way too."""
+        """Stop each runtime that has had nothing to do for its idle limit (`_idle_limit`), never one with a call in
+        flight; a runtime no chat owns (cron, a call without a session) stops this way too."""
         while True:
             time.sleep(min(60.0, max(self._idle_after / 4, 0.01)))
             with self._lock:
@@ -768,11 +835,20 @@ class Runtimes:
                     return
                 runtimes = list(self._running.values())
             for runtime in runtimes:
-                if runtime.close_if_idle(self._idle_after, time.monotonic()):
-                    runtime.context.copy().run(self._stop_idle, runtime)
+                limit = self._idle_limit(runtime)
+                if runtime.close_if_idle(limit, time.monotonic()):
+                    runtime.context.copy().run(self._stop_idle, runtime, limit)
 
-    def _stop_idle(self, runtime: Runtime) -> None:
-        log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
+    def _idle_limit(self, runtime: Runtime) -> float:
+        """How long `runtime` may have nothing to do: `idle_connected` while it's connected to the DAW (its status.json
+        says so) for a chat, whose end stops it anyway; `idle_after` otherwise; and at least `job_busy_for` while one of
+        its jobs (`jobs/*.json`) is running."""
+        connected = (_read_json(runtime.state_dir / "status.json") or {}).get("connected") is True
+        limit = self._idle_connected if connected and runtime.owner_session else self._idle_after
+        return max(limit, self._job_busy_for) if _job_running(runtime.state_dir) else limit
+
+    def _stop_idle(self, runtime: Runtime, limit: float) -> None:
+        log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, limit)
         runtime.client.close(timeout=self._stop_wait)
         self._retire(runtime)
 
@@ -801,40 +877,71 @@ class Runtimes:
         if protocol != RUNTIME_PROTOCOL:
             raise Unavailable("wrong_runtime", f"Kumi's runtime speaks {protocol}, not {RUNTIME_PROTOCOL}: set Kumi up "
                                                "again.")
+        capabilities = result.get("capabilities") if isinstance(result.get("capabilities"), dict) else {}
+        offered = capabilities.get("resources")
+        if isinstance(offered, dict) and offered.get("subscribe") is True:
+            subscribed = set()
+            for uri, name in RESOURCES.items():  # each on its own: one it refuses is polled instead (rgzm, #1051)
+                try:
+                    client.request("resources/subscribe", {"uri": uri}, timeout=left())
+                except Unavailable as refused:
+                    if refused.code != "protocol":
+                        raise
+                    log.warning("Kumi's runtime refused a subscription to %s (%s): it's polled", uri, refused.reason)
+                    continue
+                subscribed.add(name)
+            runtime.subscribed = frozenset(subscribed)
         return info
 
-    def _watch_snapshots(self, runtime: Runtime) -> None:
-        """C5's events from the snapshots the runtime publishes (C3): every `WATCH_EVERY` seconds while it runs, each
-        file that changed since becomes its event. What's there when it starts isn't news."""
-        seen: dict[str, tuple] = {}
-        try:
-            seen = _snapshot_marks(runtime.state_dir)
-        except Exception:
-            log.exception("Kumi couldn't look at its runtime's snapshots")
-        while not runtime.gone.wait(WATCH_EVERY):
+    def _watch_snapshots(self, runtime: Runtime, baseline: dict[str, tuple]) -> None:
+        """C5's events from the snapshots the runtime publishes (C3). At once: what it wrote while it started (against
+        `baseline`, what was there before), then each snapshot it tells of (its resources, C2). Every `WATCH_EVERY`
+        seconds, each other file that changed (a job's, a snapshot it doesn't tell of); every `BACKSTOP` passes, the
+        ones it tells of too, in case a word went missing (rgzm, #1051). A snapshot's seq is reported once."""
+        seen, checked, passes = baseline, baseline, 0
+        while True:
+            if passes:  # the first pass looks at once
+                runtime.wake.wait(WATCH_EVERY)
+            if runtime.gone.is_set():
+                return
+            runtime.wake.clear()  # before taking what it was told: what's told after wakes it again
+            with runtime._lock:
+                changed, runtime.told = runtime.told, set()
+            backstop, passes = passes % BACKSTOP == 0, passes + 1
             try:  # one bad pass (a file mid-replace, an unreadable folder) mustn't end the events
                 marks = _snapshot_marks(runtime.state_dir)
-                changed = sorted(name for name, mark in marks.items() if seen.get(name) != mark)
+                changed |= {name for name, mark in marks.items()
+                            if name not in runtime.subscribed and seen.get(name) != mark}
+                if backstop:
+                    changed |= {name for name, mark in marks.items()
+                                if name in runtime.subscribed and checked.get(name) != mark}
+                    checked = marks
                 seen = marks
-                for name in changed:
-                    self._snapshot_changed(runtime, name)
             except Exception:
                 log.exception("Kumi couldn't look at its runtime's snapshots")
+            for name in sorted(changed):
+                self._snapshot_changed(runtime, name)
 
     def _snapshot_changed(self, runtime: Runtime, name: str) -> None:
         state, profile = runtime.state_dir, runtime.profile
-        if name == "map":
-            revision = _read_text(state / "map" / "current")
-            snapshot = _read_json(state / "map" / f"{revision}.json") if revision else None
-            self._emit("map.changed", {"revision": revision, "seq": (snapshot or {}).get("seq"), "profile": profile})
-        elif name.startswith("jobs/"):
+        if name.startswith("jobs/"):
             job = _read_json(state / f"{name}.json")
             if job is not None and isinstance(job.get("job_id"), str):
                 self._emit("job.progress", {"job_id": job["job_id"], "state": job.get("state"),
                                             "progress": job.get("progress"), "profile": profile})
+            return
+        if name == "map":
+            revision = _read_text(state / "map" / "current")
+            snapshot = _read_json(state / "map" / f"{revision}.json") if revision else None
+            event = "map.changed"
+            payload = {"revision": revision, "seq": (snapshot or {}).get("seq"), "profile": profile}
         else:
             snapshot = _read_json(state / f"{name}.json")
-            self._emit(f"{name}.changed", {"seq": (snapshot or {}).get("seq"), "profile": profile})
+            event, payload = f"{name}.changed", {"seq": (snapshot or {}).get("seq"), "profile": profile}
+        said = (payload.get("revision"), payload["seq"])
+        if runtime.reported.get(name, _NEVER) != said:  # the runtime's word and a poll can find the same change
+            runtime.reported[name] = said
+            self._emit(event, payload)
 
     def _exited(self, holder: dict[str, Runtime]) -> None:
         runtime = holder.get("runtime")
@@ -857,6 +964,7 @@ class Runtimes:
             self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         finally:
             runtime.gone.set()
+            runtime.wake.set()  # its watcher ends now
 
     def _emit(self, event: str, payload: dict) -> None:
         if self._events is not None:
@@ -864,6 +972,18 @@ class Runtimes:
                 self._events(event, payload)
             except Exception:
                 log.exception("Kumi's %s event couldn't be sent", event)
+
+
+def _notified(started: dict[str, Runtime], method: str, params: Any) -> None:
+    """On the client's reader thread: the runtime says a resource's snapshot is on disk anew (C2), and its watcher reads
+    it at once, on its own thread."""
+    runtime = started.get("runtime")
+    name = RESOURCES.get(params.get("uri")) if isinstance(params, dict) else None
+    if method != "notifications/resources/updated" or runtime is None or name is None:
+        return
+    with runtime._lock:
+        runtime.told.add(name)
+    runtime.wake.set()
 
 
 def _read_json(path: Path) -> dict | None:
@@ -882,8 +1002,29 @@ def _read_text(path: Path) -> str | None:
     return text or None
 
 
+def _job_running(state: Path) -> bool:
+    """Whether any job the runtime keeps (`jobs/<id>.json`, C3) says it's still running."""
+    try:
+        entries = list(os.scandir(state / "jobs"))
+    except OSError:
+        return False
+    return any(entry.name.endswith(".json") and (_read_json(Path(entry.path)) or {}).get("state") in _JOB_RUNNING
+               for entry in entries)
+
+
 WATCH_EVERY = 0.5  # how often a running runtime's snapshots are looked at (C5)
+BACKSTOP = 10  # every this many looks, the snapshots the runtime tells of are compared too (rgzm, #1051)
 SNAPSHOTS = ("status", "focus", "history")
+_NEVER = object()  # a snapshot no event has reported yet
+
+
+def _baseline(state: Path) -> dict[str, tuple]:
+    """The snapshots' marks before a runtime starts; none when they can't be read (each is then news)."""
+    try:
+        return _snapshot_marks(state)
+    except Exception:
+        log.exception("Kumi couldn't look at its runtime's snapshots")
+        return {}
 
 
 def _snapshot_marks(state: Path) -> dict[str, tuple]:

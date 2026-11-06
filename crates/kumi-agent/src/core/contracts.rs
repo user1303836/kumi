@@ -556,6 +556,22 @@ pub struct ObserveHints {
     pub references: Vec<PinnedNode>,
 }
 
+/// Why a guarded undo ([`Integration::guarded_undo`]) wasn't asked of the DAW: `changed_since` (a value changed since
+/// Kumi set it, can't be read, or Kumi kept nothing to check it by), in plain words without a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoRefusal {
+    pub code: &'static str,
+    pub reason: String,
+}
+
+/// What a guarded undo would do now ([`Integration::undo_preview`]): each value as it is and as the undo would put it,
+/// in the DAW's own words, and the refusal it would meet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoPreview {
+    pub text: String,
+    pub refusal: Option<UndoRefusal>,
+}
+
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.
 #[async_trait(?Send)]
 pub trait Integration {
@@ -601,6 +617,19 @@ pub trait Integration {
     async fn undo(&self, id: Option<&str>, signal: Signal) -> Result<ChangeRecord, RuntimeError> {
         let _ = (id, signal);
         Err(absent())
+    }
+    /// [`Integration::undo`] of the change `id` for a host whose policy guards undo (`HostPolicy::guards_undo`): a value
+    /// Kumi set is read again right before the DAW is asked, and the undo refused when it's changed since. `Ok(Err)` is
+    /// that refusal: nothing was asked of the DAW and nothing changed. An integration that keeps nothing to check by
+    /// undoes as `undo` does.
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        self.undo(Some(id), signal).await.map(Ok)
+    }
+    /// What [`Integration::guarded_undo`] of the change `id` would do now, read fresh: each value as it is and as the
+    /// undo would put it, or why it won't. None when the integration keeps nothing to say it by.
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        let _ = (id, signal);
+        Ok(None)
     }
     /// The open Set's fingerprint, for what Kumi logs of the producer's reactions: its name, tempo, meter and scale,
     /// the roles its tracks play, its devices and the words in its track names. None before Kumi has read the Set.
@@ -660,6 +689,29 @@ pub trait Integration {
     async fn recording(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
         let _ = signal;
         Ok(None)
+    }
+    /// Whether a play would record: the DAW records now, or its record is armed whatever the transport does (Live's
+    /// Arrangement or Session Record, REAPER's record, Renoise's edit mode). None when it can't say, which a host that
+    /// starts playback takes as yes.
+    async fn record_armed(&self, signal: Signal) -> Result<Option<bool>, RuntimeError> {
+        let _ = signal;
+        Ok(None)
+    }
+    /// Whether this DAW can start a play `from` there; when it can't, why, in its words.
+    fn plays_from(&self, from: &PlayFrom) -> Result<(), String> {
+        let _ = from;
+        Err(format!("Kumi doesn't start {}'s playback.", self.profile().words.app))
+    }
+    /// Starts the DAW's playback `from` there with its own transport, once `plays_from` said it can: nothing in the
+    /// project changes but where play starts, and no change is kept in HISTORY.
+    async fn play(&self, from: &PlayFrom, signal: Signal) -> Result<Played, RuntimeError> {
+        let _ = (from, signal);
+        Err(RuntimeError::plain(format!("Kumi doesn't start {}'s playback.", self.profile().words.app)))
+    }
+    /// Stops the DAW's playback with its own transport.
+    async fn stop_playback(&self, signal: Signal) -> Result<Played, RuntimeError> {
+        let _ = signal;
+        Err(RuntimeError::plain(format!("Kumi doesn't stop {}'s playback.", self.profile().words.app)))
     }
     fn has_instant(&self) -> bool {
         self.profile().caps.instant
@@ -746,11 +798,69 @@ pub trait Integration {
     fn has_hear(&self) -> bool {
         self.profile().caps.hear
     }
+    /// Read-only preflight for a bounded listen. Never installs, captures, creates scratch
+    /// files or changes the DAW; the real hear call repeats the same preflight.
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        let _ = (request, signal);
+        Err(absent())
+    }
     /// Hear tracks (or the mix) in the Set directly: as they play now, or by playing a stretch of the Arrangement; a file each, or why not.
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _ = (request, signal);
         Err(absent())
     }
+    /// Whether the DAW builds a device from a typed spec into its library ([`Integration::device_preview`],
+    /// [`Integration::device_build`]): Live's Max for Live audio effects (CC-22).
+    fn has_device_build(&self) -> bool {
+        false
+    }
+    /// What building `spec` would write, reading only the library's folder for the free name: the device's name, its
+    /// file, controls and code. `Err` inside carries the findings that refuse the spec; nothing is ever written.
+    async fn device_preview(&self, spec: &serde_json::Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        let _ = spec;
+        Err(absent())
+    }
+    /// Builds `spec` as a new file in the library, never over one, as the preview named it (`file`), and waits for the
+    /// DAW's browser to list it. `sha256` is the spec's approved hash, for the integration's own record: the caller (serve)
+    /// checks it against the bytes it was given and has already refused a mismatch, so the integration doesn't check it.
+    /// `Err` inside carries the findings that refuse it (a spec refused, or a free name that's no longer `file`); nothing
+    /// is written then.
+    async fn device_build(
+        &self,
+        spec: &serde_json::Value,
+        sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        let _ = (spec, sha256, file, signal);
+        Err(absent())
+    }
+}
+
+/// What building a device would write ([`Integration::device_preview`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DevicePreview {
+    pub name: String,
+    /// The file it would be written as, from the library's root: "User Library/Kumi/Audio Effects/<free name>.amxd".
+    pub file: String,
+    /// Each control as the device has it: name, type, min, max, default, unit and options.
+    pub controls: Vec<serde_json::Value>,
+    pub code: String,
+    pub lines: usize,
+}
+
+/// A device built into the DAW's library ([`Integration::device_build`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuiltDevice {
+    pub name: String,
+    /// The browser's item id, which loading the device takes.
+    pub item: String,
+    /// The file, labelled as in the preview.
+    pub file: String,
+    /// Where the file is on disk, for the caller to keep a copy of: never said to a model.
+    pub path: std::path::PathBuf,
+    /// Whether the DAW's browser listed it before the wait was over.
+    pub listed: bool,
 }
 
 /// A goal's candidate chain in Live: its track, what it is, and the knobs a search may move.
@@ -1480,6 +1590,25 @@ pub struct TakenBack {
 pub struct InstantOutcome {
     pub text: String,
     pub is_error: bool,
+}
+
+/// Where a play starts, as the producer asked: where the DAW is; a timeline's bar (from 1) or beat (quarter notes from
+/// the start); a tracker's sequence slot (from 1) and line (from 0); Live's Session clip (its ref) or scene (from 0).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayFrom {
+    Here,
+    Bar(u32),
+    Beat(f64),
+    Slot { slot: Option<u32>, line: Option<u32> },
+    Clip(String),
+    Scene(u32),
+}
+
+/// Where a play or a stop left the DAW: playing or not, and where (quarter notes from the start) when it said.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Played {
+    pub playing: bool,
+    pub position_beats: Option<f64>,
 }
 
 /// What /music shows: what Kumi knows of the producer's music and how learning it goes, whether they agreed it learns

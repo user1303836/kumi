@@ -142,3 +142,10 @@ and invalid-value rejection also pass. See the [b6 receipts](../../evidence/live
 
 The exact `live-12.4.15b7-arm64` profile participates in default selection and
 normal matrix bundles. See the [b7 evidence and coverage limits](../../evidence/live-12.4.15b7-arm64/README.md).
+
+## Live 12.4.25b1 macOS ARM64
+
+The exact `live-12.4.25b1-arm64` profile participates in automatic selection and
+normal matrix bundles. All four components were checked in the installed beta,
+including Max, audio-engine behavior and fresh-process save/reopen. See the
+[validation receipts and limits](../../evidence/live-12.4.25b1-arm64/README.md).

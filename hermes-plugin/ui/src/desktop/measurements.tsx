@@ -21,7 +21,7 @@ export function MeasurementsWorkspace({ store, audition }: { store: KumiStore; a
           : (
               <>
                 <span style={S.faint}>{t('measurements.measured', ago(measured.at, Date.now(), t))}</span>
-                <ListenResultCard audition={audition} fallback={note(t('measurements.inReply'))} result={measured.result} />
+                <ListenResultCard audition={audition} fallback={note(t('measurements.inReply'))} result={measured.result} store={store} />
               </>
             )}
     </div>

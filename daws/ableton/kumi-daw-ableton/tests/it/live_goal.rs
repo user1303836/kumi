@@ -571,6 +571,9 @@ struct Live {
 }
 impl Live {
     async fn new(tracks: &[(&str, &[&str])]) -> Self {
+        Self::configured(tracks, |_, _, _| {}).await
+    }
+    async fn configured(tracks: &[(&str, &[&str])], configure: impl FnOnce(&Rc<Set>, &mut AbletonOptions, &Path)) -> Self {
         let folder = tempfile::tempdir().unwrap();
         let (take, reference) = (folder.path().join("take.wav"), folder.path().join("reference.wav"));
         noise(&take, 3);
@@ -593,6 +596,7 @@ impl Live {
         let told: Rc<RefCell<Vec<String>>> = Rc::default();
         let out = told.clone();
         options.on_action = Some(Rc::new(move |event| out.borrow_mut().push(event.title)));
+        configure(&set, &mut options, folder.path());
         let options = Rc::new(options);
         let connection = LiveConnection::new(options.connection_options());
         connection.start(Signal::new()).await.unwrap();
@@ -660,6 +664,30 @@ impl Live {
     fn was_told(&self, text: &str) -> bool {
         self.told.borrow().iter().any(|line| line.contains(text))
     }
+}
+
+#[test]
+fn restricted_live_preview_and_capture_refuse_without_touching_the_daw() {
+    use kumi_agent::core::context::HostPolicy;
+    use kumi_types::errors::HearFailure;
+
+    on_a_paused_clock(async {
+        let live = Live::configured(&[("Drums", &["Simpler"])], |_, options, folder| {
+            options.policy = HostPolicy::plugin(folder.join("scratch"), folder.join("quarantine"), folder.to_path_buf());
+        })
+        .await;
+        live.set.asked.borrow_mut().clear();
+        let request = serde_json::from_value(json!({"tracks":["7:track:0"],"fromBeat":0,"beats":4})).unwrap();
+        let preview = live.rendering.preview_hear(&request, Signal::new()).await.unwrap_err();
+        let capture = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap_err();
+        for error in [preview, capture] {
+            assert!(matches!(error, RuntimeError::Hear(HearFailure::Refused { code: "unsupported", marked_modified: false, .. })));
+        }
+        assert!(live.set.asked.borrow().is_empty(), "an unsupported capture must not load Ears, change transport or render");
+        assert!(!live.set.playing.get());
+        assert!(!live._folder.path().join("scratch").exists());
+        assert_eq!(live.set.tracks.borrow()[0].devices.len(), 1);
+    });
 }
 fn slot_named(goal: &Rc<dyn GoalRig>, name: &str) -> GoalSlotInfo {
     goal.slots().into_iter().find(|slot| slot.name == name).unwrap()

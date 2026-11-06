@@ -41,7 +41,7 @@ class Register(unittest.TestCase):
         self.assertEqual(set(ctx.commands), {"kumi"})
         self.assertEqual(set(ctx.cli), {"kumi"})
         self.assertEqual(set(ctx.references), {"kumi"})
-        self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening"})
+        self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening", "generate"})
         self.assertIn("kumi:daw", ctx.prompt["kumi"])
 
     def test_only_status_setup_and_connect_are_shown_before_kumi_is_set_up(self):
@@ -78,7 +78,8 @@ class Tools(unittest.TestCase):
 
     def test_connect_starts_this_chats_runtime_and_status_then_reads_it(self):
         connected = support.call(self.host, "kumi_connect", {}, session_id="s1", task_id="t1", user_task="connect")
-        self.assertEqual((connected["connected"], connected["owner"]["session_id"]), (True, "s1"))
+        self.assertEqual(connected["connected"], True)
+        self.assertEqual(self.host.runtimes.get(self.data).owner_session, "s1", "the chat that started it")
         self.assertEqual(connected["project"], {"name": "Night Drive", "key": "live:night-drive", "epoch": "1"})
         status = support.call(self.host, "kumi_status", {}, session_id="s2")
         self.assertEqual((status["connected"], status["runtime"]["protocol"]), (True, "kumi-serve/1"))
@@ -228,6 +229,27 @@ class Tools(unittest.TestCase):
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
         self.assertEqual(started["argv"][-2:], ["--library-root", support.DRUMS])
 
+    def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio(self):
+        generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
+        host, _, data = support.host(self, media_roots=[generated])
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        started = json.loads((data / "state" / "fixture-start.json").read_text(encoding="utf-8"))["argv"]
+        self.assertEqual([started[i + 1] for i, arg in enumerate(started) if arg == "--media-root"], [generated])
+
+    def test_hermess_generated_audio_folder_is_this_profiles_and_kumi_never_makes_it(self):
+        try:
+            import hermes_constants  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
+        except ImportError:
+            self.skipTest("Hermes isn't importable here")
+        import tempfile
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        host = support.module("tools").Host(support.Context(), None)
+        with mock.patch.dict("os.environ", {"HERMES_HOME": home.name}):
+            [root] = host.media_roots()
+        self.assertEqual(Path(root), Path(home.name) / "cache" / "generated" / "audio")
+        self.assertFalse((Path(home.name) / "cache").exists(), "Kumi writes nothing outside its plugin data")
+
     def test_sounds_reach_the_model_by_id_never_by_path(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         found = support.call(self.host, "kumi_sounds", {"query": "snare"})
@@ -313,13 +335,17 @@ class Command(unittest.TestCase):
                                                           "tools.approval": asks}))
         host, _, data = support.host(self, installed=False)
         self.assertEqual(commands.kumi(host, "", session_id="s1"),
-                         "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask the "
-                         "agent to set Kumi up, or run `hermes kumi setup` in a terminal (Hermes leaves plugin "
-                         "commands out when `plugins.isolation` is `host`).")
+                         "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask "
+                         "Hermes to set Kumi up, or run `hermes kumi setup` in a terminal.")
+        isolated, _, _ = support.host(self, installed=False, hermes_config={"plugins": {"isolation": "host"}})
+        self.assertTrue(commands.kumi(isolated, "", session_id="s1").endswith("Ask Hermes to set Kumi up."),
+                        "Hermes leaves plugin commands out: no terminal command is offered")
         support.install(data)
         support.call(host, "kumi_connect", {}, session_id="s1")
-        self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1],
-                         "Connected to Live: Night Drive (epoch 1). Changes are held by this chat.")
+        self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1:],
+                         ["Connected to Live: Night Drive. This chat is using Kumi."])
+        self.assertEqual(commands.kumi(host, "", session_id="s2").splitlines()[1:],
+                         ["Connected to Live: Night Drive. Another chat is using Kumi: use that chat, or end it."])
 
 
 if __name__ == "__main__":

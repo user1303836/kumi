@@ -86,6 +86,7 @@ pub async fn get(ctx: &Ctx) -> Result<Rc<Library>, OpError> {
         dir: text(&ctx.paths().state_dir.join("library"))?.to_owned(),
         sources: Some(SourceOptions { approved_folders: Some(folders), ..Default::default() }),
         decode: DecodeOptions { installed_only: true, ffmpeg: ctx.media().tool("ffmpeg").map(Path::to_path_buf) },
+        audio_only: true,
         fork: Some(false),
         workers: Some(1),
         find_sets: Some(false),
@@ -160,12 +161,9 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                     let folder = tokio::task::spawn_blocking(move || canonical_local_path(&folder).filter(|folder| folder.is_dir()))
                         .await
                         .map_err(failed)?
-                        .ok_or_else(|| {
-                            OpError::Invalid {
-                        reason:
-                            "Choose an existing local folder by its canonical absolute path, without symlinks or network/device namespaces."
+                        .ok_or_else(|| OpError::Invalid {
+                            reason: "Choose an existing folder on this computer by its full path: not a link, a network share or a device."
                                 .into(),
-                    }
                         })?;
                     check(&call.signal)?;
                     // The checked path is the grant. Resolving it again here could silently grant a replacement link.
@@ -235,7 +233,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                                 .map_err(failed)?
                                 .ok_or_else(|| OpError::Refused {
                                     code: "busy",
-                                    reason: "Another scan holds this library's lock.".into(),
+                                    reason: "Another library scan is running: wait for it to finish.".into(),
                                     owner: None,
                                 })?;
                             check(&job.signal)?;
@@ -324,9 +322,11 @@ fn folder_name(path: &Path) -> std::borrow::Cow<'_, str> {
 
 fn display_error(ctx: &Ctx, mut error: OpError) -> OpError {
     let reason = match &mut error {
-        OpError::Invalid { reason } | OpError::NotConnected { reason } | OpError::Refused { reason, .. } | OpError::Failed { reason } => {
-            reason
-        }
+        OpError::Invalid { reason }
+        | OpError::NotConnected { reason }
+        | OpError::Refused { reason, .. }
+        | OpError::Findings { reason, .. }
+        | OpError::Failed { reason } => reason,
     };
     for root in ctx.library_roots() {
         redact_path(reason, &root, &folder_name(&root));
@@ -418,6 +418,41 @@ mod tests {
             bytes.extend_from_slice(&sample.to_le_bytes());
         }
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[tokio::test]
+    async fn mixed_folder_scan_measures_only_audio() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path().join("Mixed");
+                std::fs::create_dir(&root).unwrap();
+                wav(&root.join("Tone.wav"), 220.);
+                let audio_before = std::fs::read(root.join("Tone.wav")).unwrap();
+                // Both parsers reject these if the scan ever reaches them.
+                let mut invalid = [b'x'; 256];
+                invalid[..2].copy_from_slice(&[0x1f, 0x8b]);
+                std::fs::write(root.join("Broken.adv"), invalid).unwrap();
+                std::fs::write(root.join("Broken.als"), invalid).unwrap();
+                let ctx = context(dir.path(), vec![root.canonicalize().unwrap()]);
+                let result = scan(&ctx).await;
+                assert_eq!(result["sounds"], 1);
+                assert_eq!(result["measured"], 1);
+                assert_eq!(result["failed"], 0);
+                let library = get(&ctx).await.unwrap();
+                assert_eq!((library.status().presets, library.status().sets), (0, 0));
+                let logs = kumi_library::learn::library_logs(ctx.paths().state_dir.join("library").to_str().unwrap());
+                let sounds = logs.sounds.load().await;
+                assert_eq!(sounds.len(), 1);
+                assert!(sounds.values().all(|sound| sound.vector.is_some() && sound.error.is_none()));
+                assert!(logs.presets.load().await.is_empty());
+                assert!(logs.sets.load().await.is_empty());
+                assert!(!ctx.paths().state_dir.join("library/taste.json").exists());
+                assert_eq!(std::fs::read(root.join("Tone.wav")).unwrap(), audio_before);
+                assert_eq!(std::fs::read(root.join("Broken.adv")).unwrap(), invalid);
+                assert_eq!(std::fs::read(root.join("Broken.als")).unwrap(), invalid);
+            })
+            .await;
     }
 
     #[test]

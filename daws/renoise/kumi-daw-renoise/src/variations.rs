@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use kumi_agent::core::{
     refs::RefScheme,
     variations::{
-        backend::{Rendered, Rewritten, Source, Undroppable, VariationsBackend, Words},
+        backend::{Rendered, Rewritten, Room, Source, Undroppable, VariationsBackend, Words},
         heard::{heard_of, Heard},
         tool::{names, names_to_find},
         Rng, TakeSet, TakeState,
@@ -27,6 +27,8 @@ use std::{collections::BTreeMap, collections::BTreeSet, rc::Rc};
 const LINE_PAGES: usize = 8;
 /// An instrument holds 126 phrases (0Z01 to 0Z7E).
 const MOST_PHRASES: u64 = 126;
+/// A song holds 1000 patterns and as many sequence slots: a pattern take is a new pattern in a slot of its own.
+const MOST_PATTERNS: u64 = 1000;
 /// The longest a phrase take plays in its render (beats).
 const PHRASE_BEATS_MOST: f64 = 32.;
 
@@ -885,6 +887,35 @@ impl<S: RefScheme + 'static> VariationsBackend for RenoiseBackend<S> {
         Ok(json!({"change": change, "title": applied.pointer("/display/title").cloned().unwrap_or(Value::Null)}))
     }
 
+    /// How many takes fit (CC-24's 24-r2): the patterns and slots the song has left, or the instrument's phrases.
+    async fn room(&self, set: &RenoiseSet, signal: &Signal) -> Result<Option<Room>, String> {
+        let (held, words) = match &set.source.data.placement {
+            Placement::Phrases { .. } => {
+                let reference = self.instrument_now(set, signal).await?;
+                let found = self.locate(vec![json!({"instrument": reference})], None, signal).await?;
+                let held = found
+                    .first()
+                    .and_then(|row| row.get("phrases"))
+                    .and_then(Value::as_u64)
+                    .ok_or("the instrument's phrases weren't read")?;
+                let name = &set.source.data.instrument_name;
+                (held, format!("\u{201c}{name}\u{201d} holds {held} of the {MOST_PHRASES} phrases Renoise takes"))
+            }
+            Placement::Patterns { .. } => {
+                let song = self.song(signal).await.ok_or("the song wasn't read")?;
+                let count = |key: &str| song.get(key).and_then(Value::as_u64);
+                let held = count("patternCount").max(count("sequenceLength")).ok_or("the song's patterns weren't read")?;
+                (held, format!("the song holds {held} of the {MOST_PATTERNS} patterns and sequence slots Renoise takes"))
+            }
+        };
+        let phrases = matches!(set.source.data.placement, Placement::Phrases { .. });
+        Ok(Some(Room { fits: room_for(phrases, held), words }))
+    }
+
+    async fn at_is_empty(&self, set: &RenoiseSet, _number: usize, _row: &Value, at: &JsonObject, _signal: &Signal) -> Result<(), String> {
+        at_into_empty(&set.source.data.placement, at)
+    }
+
     async fn undroppable(&self, set: &RenoiseSet, number: usize, row: &Value, signal: &Signal) -> Option<Undroppable> {
         match (&set.source.data.placement, &set.source.data.kind) {
             (Placement::Phrases { .. }, _) => None,
@@ -1069,6 +1100,28 @@ fn data_of(value: &Value) -> Option<RenoiseData> {
 /// review notes: a take after one moved mid-song landed there while the answer said "at the song's end").
 fn after_the_last_take(slot: Option<u64>, end: Option<u64>) -> Option<u64> {
     slot.filter(|slot| Some(*slot) == end)
+}
+
+/// How many takes fit where `held` of Renoise's most are taken: an instrument's phrases, or a song's patterns and slots.
+fn room_for(phrases: bool, held: u64) -> usize {
+    let most = if phrases { MOST_PHRASES } else { MOST_PATTERNS };
+    most.saturating_sub(held) as usize
+}
+
+/// Whether `at` puts a kept take into a place of its own (CC-24's 24-r2): a pattern take's `after` or `index` inserts a slot,
+/// writing over nothing; `over` writes it over the source's lines, and a phrase take's keys, program or switch writes into
+/// the instrument's mapping, its playback or a pattern's lines, where something may be.
+fn at_into_empty(placement: &Placement, at: &JsonObject) -> Result<(), String> {
+    match placement {
+        Placement::Patterns { .. } if at.get("over") == Some(&Value::Bool(true)) => {
+            Err("over writes the take over the source's lines".into())
+        }
+        Placement::Patterns { .. } => Ok(()),
+        Placement::Phrases { .. } => {
+            Err("a phrase take's keys, program or switch writes into the instrument's mapping or a pattern's lines, where something may be"
+                .into())
+        }
+    }
 }
 
 /// A pattern take whose other tracks hold lines or automation of their own (not its source's, by alias), in words: the producer's
@@ -1270,6 +1323,23 @@ mod tests {
             Some("has lines or automation of its own on 1 other track (written since Kumi made it)")
         );
         assert_eq!(edited_around(&json!({"slots": [9]})), None, "a bridge that doesn't say");
+    }
+
+    /// (CC-24's 24-r2) A plugin host's takes fit while the song has patterns and slots left, or the instrument phrases: none
+    /// in a full song or instrument. A kept pattern take goes into a slot of its own, never over the source.
+    #[test]
+    fn a_plugin_hosts_takes_fit_only_where_renoise_has_room() {
+        assert_eq!(room_for(false, 998), 2);
+        assert_eq!(room_for(false, 1000), 0, "a full song");
+        assert_eq!(room_for(true, 126), 0, "a full instrument");
+        assert_eq!(room_for(true, 120), 6);
+        let at = |value: Value| value.as_object().cloned().unwrap();
+        let patterns = Placement::Patterns { section: "Variations of A".into() };
+        assert!(at_into_empty(&patterns, &at(json!({"after": true}))).is_ok());
+        assert!(at_into_empty(&patterns, &at(json!({"index": 9}))).is_ok());
+        assert!(at_into_empty(&patterns, &at(json!({"over": true}))).is_err());
+        let phrases = Placement::Phrases { instrument: json!(1), settings: JsonObject::new() };
+        assert!(at_into_empty(&phrases, &at(json!({"keys": [36, 48]}))).is_err());
     }
 
     use super::*;

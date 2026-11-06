@@ -51,6 +51,7 @@ const en = {
     undoable: (n: number) => `· ${n} can be undone`,
     undo: 'Undo',
     undoTitle: 'Ask Hermes to undo this change',
+    undoChangeTitle: (n: number) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change: string) => `Undo ${change}`,
     openMap: 'Open the sound map',
     undoNeedsConnection: 'Undo needs a connected Kumi.'
@@ -90,7 +91,13 @@ const en = {
     restored: 'Kumi put back what it changed meanwhile.',
     restoreUnsure: 'Kumi isn’t sure it put everything back.',
     restartedSince: (daw: string) =>
-      `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+      `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+    dawUndo: (daw: string) => `Next in ${daw}'s Undo, if nothing has changed there since`,
+    dawUndoTitle: (daw: string, keys: string) =>
+      `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
+    byHand: (daw: string) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+    byHandTitle: (daw: string) =>
+      `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
   },
   job: {
     scanning: 'Scanning',
@@ -117,7 +124,7 @@ const en = {
     keys: 'Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.',
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: 'Reading the sound map…',
-    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
+    empty: 'No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.',
     search: 'Search sounds',
     searchHint: 'Search the map: name, kind or folder',
     count: (n: string) => `${n} sounds`,
@@ -133,6 +140,8 @@ const en = {
     playTitle: 'Play it here (nothing changes in your DAW)',
     use: 'Use…',
     useTitle: 'Put a request to use this sound in the chat, to finish and send',
+    moreLike: 'More like this',
+    moreLikeTitle: 'Put a request for sounds like this one in the chat, to send when you like',
     playFailed: (error: string) => `Kumi couldn't play that sound: ${error}`
   },
   measurements: {
@@ -163,6 +172,21 @@ const en = {
     crest: 'Crest',
     tempo: 'Tempo',
     key: 'Key',
+    peakToLoudness: 'Peak to loudness',
+    tilt: 'Tilt',
+    perOctave: (value: string) => `${value} dB/oct`,
+    width: 'Stereo width',
+    lowEnd: 'Low end',
+    mono: 'mono',
+    notMono: 'not mono',
+    overlay: 'Band levels, level-matched',
+    overlayBand: (name: string, hz: string, mine: string, reference: string, difference: string) =>
+      `${name} (${hz} Hz): this ${mine} dB, reference ${reference} dB, ${difference} dB`,
+    round: (number: number) => `Round ${number}`,
+    roundTitle: 'Each comparison with this reference since this window opened, oldest first: this minus reference',
+    loudnessGap: (trend: string) => `loudness ${trend} LU`,
+    tiltGap: (trend: string) => `tilt ${trend} dB/oct`,
+    widthGap: (trend: string) => `width ${trend}`,
     interpretation: 'Interpretation',
     noInterpretation: (why: string) => `No model interpretation: ${why}`,
     more: 'More',
@@ -236,6 +260,13 @@ const en = {
     generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
     soundTitle: 'Generated sound',
     notesTitle: 'Notes from audio',
+    kinds: { video_to_sfx: 'Sound for a video', extend: 'Extended audio', inpaint: 'Inpainted audio' },
+    // CC-15: what a generation's billed seconds covered, never the returned file's length.
+    window: {
+      video_to_sfx: (first: string) => `Sound for video · first ${first}`,
+      extend: (added: string, source: string) => `Extended by ${added} (source ${source})`,
+      inpaint: (span: string, source: string) => `Replaced ${span} of ${source}`
+    },
     credits: (n: number, shown: string) => (n === 1 ? `${shown} credit` : `${shown} credits`),
     creditsTitle: 'Mirelo API credits, not money. An estimate or a reservation is not a price.',
     cost: (credits: string, estimate: string) => `${credits} (est. ${estimate})`,
@@ -276,7 +307,7 @@ const en = {
     copied: 'Copied',
     copyRequest: 'Copy request',
     copyUndo: 'Copy undo',
-    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+    mapEmpty: 'No sound map yet: ask Hermes to add a sample folder and scan it.',
     askLook: 'Ask Hermes in your chat to look again before another change.'
   }
 }
@@ -321,6 +352,7 @@ const ja: Shape<typeof en> = {
     undoable: n => `· ${n} 件取り消せます`,
     undo: '取り消す',
     undoTitle: 'この変更の取り消しを Hermes に頼む',
+    undoChangeTitle: n => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: change => `${change} を取り消す`,
     openMap: 'サンプルマップを開く',
     undoNeedsConnection: '取り消すには Kumi の接続が必要です。'
@@ -360,7 +392,11 @@ const ja: Shape<typeof en> = {
     restored: 'その間に変えたものは Kumi が元に戻しました。',
     restartedSince: daw =>
       `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-    restoreUnsure: 'すべて元に戻せたか Kumi は確信できません。'
+    restoreUnsure: 'すべて元に戻せたか Kumi は確信できません。',
+    dawUndo: daw => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
+    dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
+    byHand: daw => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+    byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
   },
   job: {
     scanning: 'スキャン中',
@@ -387,7 +423,7 @@ const ja: Shape<typeof en> = {
     keys: '矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。',
     agentOff: 'このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。',
     reading: 'サンプルマップを読み込み中…',
-    empty: 'まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。',
+    empty: 'まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。',
     search: 'サウンドを検索',
     searchHint: 'マップを検索: 名前・種類・フォルダ',
     count: n => `${n} 個のサウンド`,
@@ -403,6 +439,8 @@ const ja: Shape<typeof en> = {
     playTitle: 'ここで再生（DAW は何も変わりません）',
     use: '使う…',
     useTitle: 'このサウンドを使う依頼をチャットに入れます。仕上げて送信してください',
+    moreLike: '似たサウンド',
+    moreLikeTitle: 'これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で',
     playFailed: error => `Kumi はそのサウンドを再生できませんでした: ${error}`
   },
   measurements: {
@@ -433,6 +471,20 @@ const ja: Shape<typeof en> = {
     crest: 'クレスト',
     tempo: 'テンポ',
     key: 'キー',
+    peakToLoudness: 'ピーク対ラウドネス',
+    tilt: 'ティルト',
+    perOctave: value => `${value} dB/oct`,
+    width: 'ステレオ幅',
+    lowEnd: '低域',
+    mono: 'モノ',
+    notMono: 'モノではない',
+    overlay: '帯域レベル（レベル合わせ済み）',
+    overlayBand: (name, hz, mine, reference, difference) => `${name}（${hz} Hz）: これ ${mine} dB、リファレンス ${reference} dB、差 ${difference} dB`,
+    round: number => `ラウンド ${number}`,
+    roundTitle: 'このウィンドウを開いてからの、このリファレンスとの各比較（古い順、これ − リファレンス）',
+    loudnessGap: trend => `ラウドネス ${trend} LU`,
+    tiltGap: trend => `ティルト ${trend} dB/oct`,
+    widthGap: trend => `幅 ${trend}`,
     interpretation: '解釈',
     noInterpretation: why => `モデルによる解釈なし: ${why}`,
     more: 'もっと見る',
@@ -506,6 +558,12 @@ const ja: Shape<typeof en> = {
     generatedTitle: 'Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。',
     soundTitle: '生成したサウンド',
     notesTitle: 'オーディオから取り出したノート',
+    kinds: { video_to_sfx: '映像の効果音', extend: '延長したオーディオ', inpaint: '一部を差し替えたオーディオ' },
+    window: {
+      video_to_sfx: first => `映像の効果音 · 最初の ${first}`,
+      extend: (added, source) => `${added} 延長（元は ${source}）`,
+      inpaint: (span, source) => `${source} のうち ${span} を差し替え`
+    },
     credits: (_n, shown) => `${shown} クレジット`,
     creditsTitle: 'Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。',
     cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
@@ -546,7 +604,7 @@ const ja: Shape<typeof en> = {
     copied: 'コピーしました',
     copyRequest: '依頼をコピー',
     copyUndo: '取り消しをコピー',
-    mapEmpty: 'まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。',
+    mapEmpty: 'まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。',
     askLook: '次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。'
   }
 }
@@ -590,6 +648,7 @@ const zh: Shape<typeof en> = {
     undoable: n => `· ${n} 项可撤销`,
     undo: '撤销',
     undoTitle: '让 Hermes 撤销这次改动',
+    undoChangeTitle: n => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: change => `撤销 ${change}`,
     openMap: '打开采样地图',
     undoNeedsConnection: '撤销需要 Kumi 已连接。'
@@ -628,7 +687,11 @@ const zh: Shape<typeof en> = {
     lookFirst: '下一次改动之前，请让 Hermes 重新查看。',
     restored: 'Kumi 已还原期间做出的改动。',
     restartedSince: daw => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-    restoreUnsure: 'Kumi 不确定是否已全部还原。'
+    restoreUnsure: 'Kumi 不确定是否已全部还原。',
+    dawUndo: daw => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
+    dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
+    byHand: daw => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+    byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
   },
   job: {
     scanning: '正在扫描',
@@ -655,7 +718,7 @@ const zh: Shape<typeof en> = {
     keys: '方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。',
     agentOff: '此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。',
     reading: '正在读取采样地图…',
-    empty: '还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。',
+    empty: '还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。',
     search: '搜索声音',
     searchHint: '搜索地图：名称、种类或文件夹',
     count: n => `${n} 个声音`,
@@ -671,6 +734,8 @@ const zh: Shape<typeof en> = {
     playTitle: '在这里播放（DAW 不会有任何改动）',
     use: '使用…',
     useTitle: '把使用这个声音的请求放进对话，补充完整后发送',
+    moreLike: '更多类似的',
+    moreLikeTitle: '把寻找类似声音的请求放进对话，由你决定何时发送',
     playFailed: error => `Kumi 无法播放这个声音：${error}`
   },
   measurements: {
@@ -701,6 +766,20 @@ const zh: Shape<typeof en> = {
     crest: '峰值因数',
     tempo: '速度',
     key: '调性',
+    peakToLoudness: '峰值响度比',
+    tilt: '倾斜',
+    perOctave: value => `${value} dB/oct`,
+    width: '立体声宽度',
+    lowEnd: '低频',
+    mono: '单声道',
+    notMono: '非单声道',
+    overlay: '频段电平（已对齐电平）',
+    overlayBand: (name, hz, mine, reference, difference) => `${name}（${hz} Hz）：当前 ${mine} dB，参考 ${reference} dB，差 ${difference} dB`,
+    round: number => `第 ${number} 轮`,
+    roundTitle: '本窗口打开以来与此参考的每次比较（从旧到新，当前减参考）',
+    loudnessGap: trend => `响度 ${trend} LU`,
+    tiltGap: trend => `倾斜 ${trend} dB/oct`,
+    widthGap: trend => `宽度 ${trend}`,
     interpretation: '解读',
     noInterpretation: why => `没有模型解读：${why}`,
     more: '展开',
@@ -772,6 +851,12 @@ const zh: Shape<typeof en> = {
     generatedTitle: '由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。',
     soundTitle: '生成的声音',
     notesTitle: '从音频提取的音符',
+    kinds: { video_to_sfx: '视频音效', extend: '延长的音频', inpaint: '局部替换的音频' },
+    window: {
+      video_to_sfx: first => `视频音效 · 前 ${first}`,
+      extend: (added, source) => `延长 ${added}（原长 ${source}）`,
+      inpaint: (span, source) => `替换了 ${source} 中的 ${span}`
+    },
     credits: (_n, shown) => `${shown} 积分`,
     creditsTitle: 'Mirelo API 积分，不是钱。预估或预留不是价格。',
     cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
@@ -812,7 +897,7 @@ const zh: Shape<typeof en> = {
     copied: '已复制',
     copyRequest: '复制请求',
     copyUndo: '复制撤销',
-    mapEmpty: '还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。',
+    mapEmpty: '还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。',
     askLook: '下一次改动之前，请在对话中让 Hermes 重新查看。'
   }
 }

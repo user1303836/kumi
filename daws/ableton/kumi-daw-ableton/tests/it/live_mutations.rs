@@ -4,7 +4,7 @@ kumi_testkit::fixture_paths!();
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::{
-    core::contracts::Integration,
+    core::{context::HostPolicy, contracts::Integration},
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -16,11 +16,19 @@ use kumi_common::{
 };
 use kumi_daw_ableton::history::Audible;
 use kumi_daw_ableton::{
-    actions::ACTIONS, arrange::ArrangeHost, changes::CHANGES, connection::LiveConnection, integration::Ableton, mutations::Mutations,
-    observation::ObservationHost, options::AbletonOptions, remember::CurrentProject, watch::Watch,
+    actions::ACTIONS,
+    arrange::ArrangeHost,
+    changes::{CHANGES, MAKES_A_DEVICE},
+    connection::LiveConnection,
+    integration::Ableton,
+    mutations::Mutations,
+    observation::ObservationHost,
+    options::{AbletonOptions, HandsSetup, IntegrationContext},
+    remember::CurrentProject,
+    watch::Watch,
 };
 use kumi_types::{
-    contracts::{JsonObject, ToolResult},
+    contracts::{ChangeState, JsonObject, ToolResult},
     errors::RuntimeError,
 };
 thread_local! { static FIXTURE_ROOT: RefCell<String> = const { RefCell::new(String::new()) }; }
@@ -680,7 +688,7 @@ fn oracle_comparisons_set_aside_only_what_a_watch_says_to_save() {
 /// it refuses.
 struct PictureFixture {
     tools: Vec<&'static str>,
-    answer: Box<dyn Fn(&str, &JsonObject) -> Value>,
+    answer: Box<dyn Fn(&str, &JsonObject) -> CallToolResult>,
     calls: Rc<RefCell<Vec<String>>>,
 }
 #[async_trait(?Send)]
@@ -692,7 +700,18 @@ impl McpEndpoint for PictureFixture {
         Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.99"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let tools: Vec<Value> = self.tools.iter().map(|name| json!({"name":name,"inputSchema":{"type":"object"}})).collect();
+        let tools: Vec<Value> = self
+            .tools
+            .iter()
+            .map(|name| {
+                let schema = if *name == "live_drum_pad_preview" {
+                    json!({"type":"object","properties":{"action":{"enum":["load-sample","load-samples"]}}})
+                } else {
+                    json!({"type":"object"})
+                };
+                json!({"name":name,"inputSchema":schema})
+            })
+            .collect();
         Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
@@ -700,9 +719,12 @@ impl McpEndpoint for PictureFixture {
         if !self.tools.contains(&name) {
             return Ok(serde_json::from_value(json!({"content":[{"type":"text","text":"unknown tool"}],"isError":true})).unwrap());
         }
-        let body =
-            if name == "live_status" { json!({"connected":true,"adapter":"real-live","epoch":7}) } else { (self.answer)(name, &args) };
-        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+        if name == "live_status" {
+            let body = json!({"connected":true,"adapter":"real-live","epoch":7});
+            Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+        } else {
+            Ok((self.answer)(name, &args))
+        }
     }
     fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
@@ -718,16 +740,37 @@ impl McpEndpoint for PictureFixture {
     }
 }
 
-/// Live's integration on a `PictureFixture`, connected, with the refs a test's changes name.
-/// The tools it was called with go to `calls`.
 async fn pictured(
     tools: Vec<&'static str>,
     answer: impl Fn(&str, &JsonObject) -> Value + 'static,
     refs: &[(&str, &str)],
     calls: Rc<RefCell<Vec<String>>>,
 ) -> Rc<Ableton> {
+    pictured_reply(
+        HostPolicy::standalone(),
+        tools,
+        move |name, args| {
+            let body = answer(name, args);
+            serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap()
+        },
+        refs,
+        calls,
+    )
+    .await
+}
+
+/// Live's integration on a `PictureFixture`, connected, with the refs a test's changes name.
+/// The tools it was called with go to `calls`.
+async fn pictured_reply(
+    policy: HostPolicy,
+    tools: Vec<&'static str>,
+    answer: impl Fn(&str, &JsonObject) -> CallToolResult + 'static,
+    refs: &[(&str, &str)],
+    calls: Rc<RefCell<Vec<String>>>,
+) -> Rc<Ableton> {
     let endpoint: Rc<dyn McpEndpoint> = Rc::new(PictureFixture { tools, answer: Box::new(answer), calls });
     let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+    options.policy = policy;
     options.connect = Some(Rc::new(move |_| {
         let endpoint = endpoint.clone();
         async move { Ok(endpoint) }.boxed_local()
@@ -849,6 +892,335 @@ async fn new_tracks_have_their_picture_and_a_plans_run_is_marked() {
             let [Some(made), Some(first), Some(second)] = batches.as_slice() else { panic!("{batches:?}") };
             assert_eq!(first, second, "one run across the two tracks");
             assert!(first.ends_with(":set_mixer") && made.ends_with(":add_tracks_and_scenes") && made != first, "{batches:?}");
+        })
+        .await;
+}
+
+/// A bridge listing what Live's menus (Hands) are offered with.
+struct MenusFixture;
+#[async_trait(?Send)]
+impl McpEndpoint for MenusFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        let tools = ["live_status", "live_selection_preview"].map(|name| json!({"name":name,"inputSchema":{"type":"object"}}));
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        assert_eq!(name, "live_status", "only a look");
+        let body = json!({"connected":true,"adapter":"real-live","epoch":7});
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+/// A plugin host never drives Live's menus: live_command isn't offered to it even with Hands able to open, as it is to
+/// standalone Kumi.
+#[tokio::test(flavor = "current_thread")]
+async fn a_plugin_host_is_never_offered_lives_menus() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let temporary = std::env::temp_dir();
+            let plugin = HostPolicy::plugin(
+                temporary.join("kumi-menus-listen"),
+                temporary.join("kumi-menus-quarantine"),
+                temporary.join("kumi-menus-variations"),
+            );
+            for (policy, offered) in [(HostPolicy::standalone(), true), (plugin, false)] {
+                let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+                context.policy = policy;
+                let mut options = AbletonOptions::with_context(context);
+                options.connect = Some(Rc::new(|_| async { Ok(Rc::new(MenusFixture) as Rc<dyn McpEndpoint>) }.boxed_local()));
+                options.hands = Some(HandsSetup::Open(Rc::new(|| async { Ok(None) }.boxed_local())));
+                let integration = Ableton::new(options);
+                let connection = integration.connection.clone();
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                let names: Vec<String> = integration.definitions().iter().map(|tool| tool.name().to_string()).collect();
+                assert_eq!(names.iter().any(|name| name == "live_command"), offered, "{names:?}");
+            }
+        })
+        .await;
+}
+
+/// A bridge that loads a device and takes it out again, offering Live's undo steps or not, its undo working or failing:
+/// the calls it was sent, in order.
+struct UndoFixture {
+    steps: bool,
+    undo_fails: bool,
+    calls: RefCell<Vec<String>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for UndoFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        let mut tools = vec!["live_status", "live_browser_load_preview", "live_browser_load_apply", "live_undo"];
+        if self.steps {
+            tools.extend(["live_undo_step_begin", "live_undo_step_end"]);
+        }
+        let tools: Vec<Value> = tools.iter().map(|name| json!({"name":name,"inputSchema":{"type":"object"}})).collect();
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
+    }
+    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.calls.borrow_mut().push(name.to_string());
+        let (body, error) = match name {
+            "live_status" => (json!({"connected":true,"adapter":"real-live","epoch":7}), false),
+            "live_browser_load_preview" => (
+                json!({"transactionId":"load1","epoch":7,"confirmation":"apply","undoable":true,"proposed":{"itemId":"audio_effects/Reverb"}}),
+                false,
+            ),
+            "live_browser_load_apply" => {
+                (json!({"state":"applied","undoable":true,"deviceObjectIdentity":"obj-42","loaded":{"name":"Reverb"}}), false)
+            }
+            "live_undo" if self.undo_fails => (json!({"reason":"Live refused to remove the device"}), true),
+            "live_undo" => (json!({"transactionId":"load1","state":"undone"}), false),
+            "live_undo_step_begin" => (json!({"open":true,"stepId":"undo_step_1"}), false),
+            "live_undo_step_end" => (json!({"closed":true,"stepId":"undo_step_1"}), false),
+            _ => (json!({"reason":format!("{name} isn't this fixture's")}), true),
+        };
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body,"isError":error}))
+            .unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// Kumi's undo of a device it loaded takes it out inside one Live undo step, closed even when the undo fails, so Live's
+/// own undo after it stays sound (#1101); with no Live undo step to open, it removes nothing and says Live's undo will.
+#[tokio::test(flavor = "current_thread")]
+async fn kumis_undo_of_a_device_it_loaded_runs_inside_one_live_undo_step_or_not_at_all() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (steps, undo_fails) in [(true, false), (true, true), (false, false)] {
+                let fixture = Rc::new(UndoFixture { steps, undo_fails, calls: RefCell::new(vec![]) });
+                let endpoint = fixture.clone();
+                let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint: Rc<dyn McpEndpoint> = endpoint.clone();
+                    async move { Ok(endpoint) }.boxed_local()
+                }));
+                let integration = Ableton::new(options);
+                let connection = integration.connection.clone();
+                connection.start(Signal::new()).await.unwrap();
+                connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+                connection.available.set(true);
+                connection.epoch.set(Some(7.));
+                connection.references.borrow_mut().refs.insert("7:track:0".into(), "track".into());
+                let steps_in = json!({"steps":[{"tool":"load_device","input":{"trackRef":"7:track:0","itemId":"audio_effects/Reverb"}}]});
+                let made = integration.mutations.make_changes(steps_in.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+                assert!(!made.is_error, "{}", made.text);
+                let id = integration.history.entries.borrow().values().next().unwrap().borrow().record.id.clone();
+                fixture.calls.borrow_mut().clear();
+                let undone = integration.history.undo(&id, Signal::new(), false).await.unwrap();
+                let calls = fixture.calls.borrow().clone();
+                let sent = |name: &str| calls.iter().position(|call| call == name);
+                match (steps, undo_fails) {
+                    (true, false) => {
+                        assert!(!undone.is_error, "{}", undone.text);
+                        let (begin, undo, end) = (sent("live_undo_step_begin"), sent("live_undo"), sent("live_undo_step_end"));
+                        assert!(begin.is_some() && begin < undo && undo < end, "{calls:?}");
+                    }
+                    (true, true) => {
+                        assert!(
+                            sent("live_undo").is_some() && sent("live_undo") < sent("live_undo_step_end"),
+                            "closed after it failed: {calls:?}"
+                        );
+                    }
+                    _ => {
+                        assert!(undone.is_error && undone.text.contains("Cmd-Z"), "{}", undone.text);
+                        assert_eq!(sent("live_undo"), None, "nothing removed: {calls:?}");
+                    }
+                }
+            }
+        })
+        .await;
+}
+
+/// Every change that makes a device is one whose undo runs inside a Live undo step: a kind that produces a device is on
+/// the list, and the list names only kinds Live has.
+#[test]
+fn every_change_that_makes_a_device_is_undone_inside_one_live_undo_step() {
+    let applied =
+        json!({"deviceRef":"7:device:0:1","created":{"ref":"7:device:0:1","deviceRef":"7:device:0:1"},"result":{"ref":"7:device:0:1"}});
+    for kind in CHANGES.iter() {
+        if kind.produces(applied.as_object().unwrap()).is_some_and(|made| made.kind == "device") {
+            assert!(kind.makes_a_device(), "{} makes a device", kind.tool);
+        }
+    }
+    for tool in MAKES_A_DEVICE {
+        assert!(CHANGES.iter().any(|kind| kind.tool == tool), "{tool} isn't a change of Live's");
+    }
+}
+
+/// A plugin never reaches the unguarded pad-clearing inverse (#1110); standalone keeps its existing undo,
+/// inside #1112's Live undo step. Both the public single load and the internal batch obey the host policy.
+#[tokio::test(flavor = "current_thread")]
+async fn pad_loads_keep_standalone_undo_and_are_kept_only_for_a_plugin() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let sample = dir.path().join("Pad.wav");
+            std::fs::write(
+                &sample,
+                b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x02\x00\x00\x00\x00\x00",
+            )
+            .unwrap();
+            for (policy, kept) in [
+                (HostPolicy::standalone(), false),
+                (
+                    HostPolicy::plugin(
+                        dir.path().join("listen"),
+                        dir.path().join("quarantine"),
+                        dir.path().join("variations"),
+                    ),
+                    true,
+                ),
+            ] {
+                for tool in ["load_sample_to_pad", "load_samples_to_pads"] {
+                    let calls = Rc::new(RefCell::new(Vec::new()));
+                    let integration = pictured_reply(
+                        policy.clone(),
+                        vec![
+                            "live_status",
+                            "live_drum_pad_preview",
+                            "live_drum_pad_apply",
+                            "live_undo",
+                            "live_undo_step_begin",
+                            "live_undo_step_end",
+                        ],
+                        |name, args| {
+                            let body = match name {
+                                "live_drum_pad_preview" => {
+                                    json!({"transactionId":"pad-load", "epoch":7, "confirmation":"apply", "undoable":true, "proposed":args})
+                                }
+                                "live_drum_pad_apply" => json!({"state":"applied", "undoable":true}),
+                                "live_undo" => json!({"transactionId":"pad-load", "state":"undone"}),
+                                "live_undo_step_begin" => json!({"open":true, "stepId":"undo-pad"}),
+                                "live_undo_step_end" => json!({"closed":true, "stepId":"undo-pad"}),
+                                _ => panic!("unexpected pad call: {name}"),
+                            };
+                            serde_json::from_value(json!({
+                                "content":[{"type":"text", "text":body.to_string()}], "structuredContent":body
+                            }))
+                            .unwrap()
+                        },
+                        &[("7:device:0:0", "device")],
+                        calls.clone(),
+                    )
+                    .await;
+                    let mut input = json!({"deviceRef":"7:device:0:0"});
+                    if tool == "load_sample_to_pad" {
+                        input["note"] = json!(36);
+                        input["sample"] = json!(sample);
+                    } else {
+                        input["pads"] = json!([{"note":36, "sample":sample}, {"note":38, "sample":sample}]);
+                    }
+                    let kind = CHANGES.iter().find(|kind| kind.tool == tool).unwrap();
+                    let applied = integration.mutations.change(kind, input.as_object().unwrap().clone(), Signal::new(), true).await;
+                    assert!(!applied.is_error, "{tool}: {}", applied.text);
+                    assert_eq!(calls.borrow().iter().filter(|name| *name == "live_drum_pad_apply").count(), 1);
+                    let id = {
+                        let entries = integration.history.entries.borrow();
+                        let entry = entries.values().next().unwrap().borrow();
+                        assert_eq!(entry.record.state, if kept { ChangeState::Kept } else { ChangeState::Applied }, "{tool}");
+                        entry.record.id.clone()
+                    };
+                    calls.borrow_mut().clear();
+                    let result = integration.history.undo(&id, Signal::new(), false).await.unwrap();
+                    if kept {
+                        assert!(result.is_error, "{tool}: {}", result.text);
+                        assert_eq!(result.record.unwrap().state, ChangeState::Kept, "{tool}");
+                        assert!(calls.borrow().is_empty(), "no read, undo step or pad clear may reach Live: {tool}");
+                    } else {
+                        assert!(!result.is_error, "{tool}: {}", result.text);
+                        assert_eq!(result.record.unwrap().state, ChangeState::Undone, "{tool}");
+                        let calls = calls.borrow();
+                        let sent = |name: &str| calls.iter().position(|call| call == name);
+                        let (begin, undo, end) = (sent("live_undo_step_begin"), sent("live_undo"), sent("live_undo_step_end"));
+                        assert!(begin.is_some() && begin < undo && undo < end, "{tool}: {calls:?}");
+                    }
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_occupied_pad_refuses_a_whole_pad_batch_before_any_apply() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let sample = dir.path().join("Pad.wav");
+            std::fs::write(&sample, b"RIFF").unwrap();
+            let calls = Rc::new(RefCell::new(Vec::new()));
+            let previews = Rc::new(RefCell::new(Vec::new()));
+            let seen = previews.clone();
+            let integration = pictured_reply(
+                HostPolicy::plugin(dir.path().join("listen"), dir.path().join("quarantine"), dir.path().join("variations")),
+                vec!["live_status", "live_drum_pad_preview", "live_drum_pad_apply"],
+                move |name, args| {
+                    assert_eq!(name, "live_drum_pad_preview", "nothing may apply after an occupied pad was found");
+                    seen.borrow_mut().push(args.clone());
+                    serde_json::from_value(json!({
+                        "content":[{"type":"text","text":"Pad D1 is occupied; load-samples needs empty pads."}],
+                        "isError":true
+                    }))
+                    .unwrap()
+                },
+                &[("7:device:0:0", "device")],
+                calls.clone(),
+            )
+            .await;
+            let result = integration
+                .mutations
+                .make_changes(
+                    plan(json!([
+                        {"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":36, "sample":sample}},
+                        {"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":38, "sample":sample}}
+                    ])),
+                    Signal::new(),
+                )
+                .await
+                .unwrap();
+            assert!(result.is_error, "{}", result.text);
+            let previews = previews.borrow();
+            assert_eq!(previews.len(), 1, "a refused batch must not be retried pad by pad");
+            assert_eq!(previews[0]["action"], "load-samples");
+            assert_eq!(
+                previews[0]["pads"].as_array().unwrap().iter().map(|pad| pad["note"].as_u64().unwrap()).collect::<Vec<_>>(),
+                [36, 38]
+            );
+            assert!(!calls.borrow().iter().any(|name| name == "live_drum_pad_apply"));
+            assert!(integration.history.entries.borrow().is_empty(), "a refused batch must leave no applied pad");
         })
         .await;
 }

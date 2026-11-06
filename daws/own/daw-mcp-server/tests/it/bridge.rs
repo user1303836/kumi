@@ -414,3 +414,357 @@ async fn a_host_tops_a_bridge_up_to_its_receive_buffer_then_gives_back_what_it_r
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(reaper.transcript().iter().all(|line| !line.from_host || !line.text.contains("\"credit\"")));
 }
+
+/// These production-host Windows boundaries are selected by ci-os as well as Extended.
+#[cfg(windows)]
+mod restricted_renoise_staging {
+    use super::*;
+    use daw_bridge::{
+        lifecycle::native_acl::{self, shapes},
+        paths::BridgePaths,
+        Daw,
+    };
+    use daw_mcp_server::host::{Host, ListeningMode};
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
+
+    fn private_home() -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        native_acl::create_kumis_folder(&home.path().join("bridges")).unwrap();
+        native_acl::create_kumis_folder(&BridgePaths::new(home.path(), Daw::Renoise).root).unwrap();
+        home
+    }
+
+    fn own_full(flags: u32) -> shapes::Ace {
+        shapes::Ace { allow: true, flags, mask: shapes::FULL, whose: shapes::Whose::Me }
+    }
+
+    fn request() -> Value {
+        json!({"sources": [{"id": "bounded", "what": "master"}], "range": {"fromBeat": 0, "beats": 1},
+            "maxSeconds": 2, "epoch": "sim-1"})
+    }
+
+    struct Lab {
+        host: Host,
+        _simulator: Simulator,
+        reply: Arc<Mutex<Value>>,
+        fail_status: Arc<std::sync::atomic::AtomicBool>,
+        // Dropped last, after the host releases its directory identity pins.
+        home: tempfile::TempDir,
+    }
+
+    impl Lab {
+        async fn start(home: tempfile::TempDir, mode: ListeningMode) -> Self {
+            Self::start_with_state(home, mode, false).await
+        }
+
+        async fn start_with_state(home: tempfile::TempDir, mode: ListeningMode, complete: bool) -> Self {
+            let paths = BridgePaths::new(home.path(), Daw::Renoise);
+            let secret = daw_bridge::files::ensure_secret(&paths.secret()).unwrap();
+            let reply = Arc::new(Mutex::new(Value::Null));
+            let kept = reply.clone();
+            let fail_status = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let fail_next = fail_status.clone();
+            let folder = paths.root.join("listening");
+            let mut config = SimulatorConfig::renoise(secret, "/lab/Renoise");
+            config.discovery_dir = Some(paths.discovery());
+            config.respond = Some(Arc::new(move |method, params| match method {
+                "render_start" | "audio_file" => {
+                    std::fs::create_dir_all(&folder).unwrap();
+                    let file = folder.join(format!("{}-bounded.wav", params["jobId"].as_str().unwrap()));
+                    std::fs::write(&file, b"owned render boundary fixture").unwrap();
+                    // Elevated CI's default token owner is Administrators; model normal
+                    // current-user output without weakening the production owner check.
+                    shapes::own_mine(&file);
+                    let answer = json!({"jobId": params["jobId"], "state": if complete { "done" } else { "running" },
+                        "files": [{"id": "bounded", "file": file}], "seconds": 0.5});
+                    *kept.lock().unwrap() = answer.clone();
+                    Some(Ok(answer))
+                }
+                "listen_status" | "listen_cancel" => {
+                    if fail_next.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        return Some(Err(("failed".into(), "A temporary status read failure.".into())));
+                    }
+                    let mut answer = kept.lock().unwrap().clone();
+                    answer["state"] = "done".into();
+                    Some(Ok(answer))
+                }
+                _ => None,
+            }));
+            let simulator = Simulator::start(config).await.unwrap();
+            let host = Host::new(Daw::Renoise, home.path(), mode);
+            Self { host, _simulator: simulator, reply, fail_status, home }
+        }
+
+        fn file(&self) -> PathBuf {
+            PathBuf::from(self.reply.lock().unwrap()["files"][0]["file"].as_str().unwrap())
+        }
+    }
+
+    #[test]
+    fn restricted_windows_renoise_never_repairs_an_untrusted_root() {
+        let home = private_home();
+        let root = BridgePaths::new(home.path(), Daw::Renoise).root;
+        shapes::write(
+            &root,
+            Some(&[
+                own_full(shapes::INHERITABLE),
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") },
+            ]),
+            true,
+        );
+        let before = shapes::descriptor(&root);
+        let runs = daw_bridge::owner::acl_runs_on_this_thread();
+        let _host = Host::new(Daw::Renoise, home.path(), ListeningMode::Restricted);
+        assert!(!root.join("listening").exists(), "no cache may be created beneath an unverified root");
+        assert_eq!(shapes::descriptor(&root), before, "startup has no authority to repair its root");
+        assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+    }
+
+    #[test]
+    fn restricted_windows_renoise_upgrades_only_owned_cache_and_pins_it() {
+        let home = private_home();
+        let root = BridgePaths::new(home.path(), Daw::Renoise).root;
+        let folder = root.join("listening");
+        std::fs::create_dir(&folder).unwrap();
+        shapes::own_mine(&folder);
+        shapes::write(
+            &folder,
+            Some(&[
+                own_full(shapes::INHERITABLE),
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-18") },
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-32-544") },
+            ]),
+            false,
+        );
+        let old = folder.join("previous.wav");
+        std::fs::write(&old, b"previous audio").unwrap();
+        let old_folder = folder.join("older");
+        std::fs::create_dir(&old_folder).unwrap();
+        let nested_old = old_folder.join("previous.wav");
+        std::fs::write(&nested_old, b"nested previous audio").unwrap();
+        let neighbor = root.join("other-cache");
+        std::fs::create_dir(&neighbor).unwrap();
+        let before = [&root, &old, &old_folder, &nested_old, &neighbor].map(|path| shapes::descriptor(path));
+        let runs = daw_bridge::owner::acl_runs_on_this_thread();
+        let host = Host::new(Daw::Renoise, home.path(), ListeningMode::Restricted);
+        assert!(native_acl::is_kumis_shape(&folder));
+        assert_eq!(
+            [&root, &old, &old_folder, &nested_old, &neighbor].map(|path| shapes::descriptor(path)),
+            before,
+            "startup changes only the exact cache directory, not old children, neighbors or its root"
+        );
+        assert_eq!(std::fs::read(&old).unwrap(), b"previous audio");
+        assert!(std::fs::rename(&folder, root.join("replaced")).is_err(), "the host pins its approved folder identity");
+        assert!(std::fs::rename(&root, root.with_file_name("renoise-replaced")).is_err(), "the owning root is pinned too");
+        for path in [&root, &folder] {
+            assert!(
+                std::fs::OpenOptions::new().access_mode(2).share_mode(7).custom_flags(0x0220_0000).open(path).is_err(),
+                "a pinned directory must exclude data writes that could replace its reparse metadata"
+            );
+        }
+        assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+        drop(host);
+        std::fs::rename(&folder, root.join("replaced")).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_refuses_foreign_or_reparse_cache_unchanged() {
+        for foreign in [true, false] {
+            let home = private_home();
+            let root = BridgePaths::new(home.path(), Daw::Renoise).root;
+            let folder = root.join("listening");
+            let target = root.join("other-cache");
+            native_acl::create_kumis_folder(&target).unwrap();
+            if foreign {
+                native_acl::create_kumis_folder(&folder).unwrap();
+                if !shapes::own_foreign_user(&folder) {
+                    assert!(std::env::var_os("CI").is_none(), "Windows CI must exercise a genuinely foreign owner");
+                    continue;
+                }
+            } else if let Err(error) = std::os::windows::fs::symlink_dir(&target, &folder) {
+                assert_eq!(error.raw_os_error(), Some(1314), "unexpected symlink fixture failure: {error}");
+                continue; // This case needs Windows' symbolic-link privilege.
+            }
+            let observed = if foreign { &folder } else { &target };
+            let before = shapes::descriptor(observed);
+            let lab = Lab::start(home, ListeningMode::Restricted).await;
+            let runs = daw_bridge::owner::acl_runs_on_this_thread();
+            let (answer, error) = lab.host.render(&request()).await;
+            assert!(error && answer["code"] == "failed", "{answer}");
+            assert!(lab.reply.lock().unwrap().is_null(), "unsafe startup must refuse before native render dispatch");
+            assert_eq!(shapes::descriptor(observed), before);
+            assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+            if foreign {
+                shapes::own_mine(&folder);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_protects_completed_owned_render_before_exposure() {
+        for mode in [ListeningMode::Restricted, ListeningMode::Standalone] {
+            let lab = Lab::start(private_home(), mode).await;
+            let runs = daw_bridge::owner::acl_runs_on_this_thread();
+            let (started, error) = lab.host.render(&request()).await;
+            assert!(!error && started["state"] == "running", "{started}");
+            assert_eq!(
+                started.get("files").is_none(),
+                mode == ListeningMode::Restricted,
+                "only the restricted host hides planned, unprotected paths"
+            );
+            let file = lab.file();
+            assert!(!native_acl::is_kumis_shape(&file), "the renderer initially inherits, not protects, its owner rule");
+            let before = shapes::descriptor(&file);
+            for cancel_reply in [false, true] {
+                let args = json!({"jobId": started["jobId"]});
+                let (done, error) = if cancel_reply { lab.host.listen_cancel(&args).await } else { lab.host.listen_job(&args).await };
+                assert!(!error && done["state"] == "done", "{done}");
+                assert_eq!(Path::new(done["files"][0]["file"].as_str().unwrap()), file.as_path());
+                assert_eq!(std::fs::read(&file).unwrap(), b"owned render boundary fixture");
+                assert_eq!(native_acl::is_kumis_shape(&file), mode == ListeningMode::Restricted);
+            }
+            if mode == ListeningMode::Standalone {
+                assert_eq!(shapes::descriptor(&file), before);
+            }
+            if mode == ListeningMode::Restricted {
+                assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_protects_immediately_completed_start() {
+        for pattern in [false, true] {
+            let lab = Lab::start_with_state(private_home(), ListeningMode::Restricted, true).await;
+            let (done, error) =
+                if pattern { lab.host.audio_file(&json!({"ref": "1:pattern:1"})).await } else { lab.host.render(&request()).await };
+            assert!(!error && done["state"] == "done", "{done}");
+            let path = Path::new(done["files"][0]["file"].as_str().unwrap());
+            assert_eq!(path, lab.file().as_path());
+            assert!(native_acl::is_kumis_shape(path), "even an immediately terminal start must pass the file boundary");
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_refuses_broad_hardlinked_foreign_reparse_or_unowned_output() {
+        for hazard in ["broad", "hardlink", "foreign", "reparse", "unowned"] {
+            let lab = Lab::start(private_home(), ListeningMode::Restricted).await;
+            let (started, error) = lab.host.render(&request()).await;
+            assert!(!error, "{started}");
+            let file = lab.file();
+            let outside = if hazard == "reparse" { file.with_file_name("neighbor.wav") } else { lab.home.path().join("outside.wav") };
+            std::fs::write(&outside, b"not this render").unwrap();
+            shapes::own_mine(&outside);
+            match hazard {
+                "broad" => shapes::write(
+                    &file,
+                    Some(&[own_full(0), shapes::Ace { allow: true, flags: 0, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") }]),
+                    true,
+                ),
+                // Linking into the pinned cache needs a writable directory handle,
+                // which the host intentionally excludes. A link outside it still
+                // raises this exact returned file's link count and must be refused.
+                "hardlink" => std::fs::hard_link(&file, lab.home.path().join("second-link.wav")).unwrap(),
+                "foreign" => {
+                    if !shapes::own_foreign_user(&file) {
+                        assert!(std::env::var_os("CI").is_none(), "Windows CI must exercise a genuinely foreign owner");
+                        continue;
+                    }
+                }
+                "reparse" => {
+                    std::fs::remove_file(&file).unwrap();
+                    if let Err(error) = std::os::windows::fs::symlink_file(&outside, &file) {
+                        assert_eq!(error.raw_os_error(), Some(1314), "unexpected symlink fixture failure: {error}");
+                        continue;
+                    }
+                }
+                "unowned" => lab.reply.lock().unwrap()["files"][0]["file"] = json!(outside),
+                _ => unreachable!(),
+            }
+            let observed = if matches!(hazard, "reparse" | "unowned") { &outside } else { &file };
+            let before = shapes::descriptor(observed);
+            let runs = daw_bridge::owner::acl_runs_on_this_thread();
+            let (done, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+            assert!(!error && done["state"] == "failed", "{hazard}: {done}");
+            assert!(done.get("files").is_none(), "{hazard}: unsafe files are never exposed");
+            assert!(!done["error"].as_str().unwrap().contains(&lab.home.path().to_string_lossy().to_string()));
+            assert_eq!(shapes::descriptor(observed), before, "{hazard}: a refusal must not change the ACL or owner");
+            assert_eq!(std::fs::read(&outside).unwrap(), b"not this render");
+            assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+            if hazard == "foreign" {
+                shapes::own_mine(&file);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_refuses_an_output_with_an_open_writer() {
+        let lab = Lab::start(private_home(), ListeningMode::Restricted).await;
+        let (started, error) = lab.host.render(&request()).await;
+        assert!(!error, "{started}");
+        let file = lab.file();
+        let writer = std::fs::OpenOptions::new().write(true).share_mode(7).open(&file).unwrap();
+        let before = shapes::descriptor(&file);
+        let (done, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(!error && done["state"] == "failed" && done.get("files").is_none(), "{done}");
+        assert_eq!(shapes::descriptor(&file), before, "the exclusive file pin must precede any ACL change");
+        drop(writer);
+        let (later, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(!error && later["state"] == "done" && native_acl::is_kumis_shape(&file), "{later}");
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_keeps_owned_paths_across_a_temporary_status_failure() {
+        let lab = Lab::start(private_home(), ListeningMode::Restricted).await;
+        let (started, error) = lab.host.render(&request()).await;
+        assert!(!error, "{started}");
+        lab.fail_status.store(true, std::sync::atomic::Ordering::SeqCst);
+        let (failed, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(error && failed.get("files").is_none(), "{failed}");
+        assert!(!native_acl::is_kumis_shape(&lab.file()));
+        let (later, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(!error && later["state"] == "done" && later["jobId"] == started["jobId"], "{later}");
+        assert_eq!(Path::new(later["files"][0]["file"].as_str().unwrap()), lab.file().as_path());
+        assert!(native_acl::is_kumis_shape(&lab.file()), "a later terminal observation can still authorize exact cleanup");
+    }
+
+    #[tokio::test]
+    async fn restricted_windows_renoise_blocks_swaps_through_pinned_file_protection() {
+        let lab = Lab::start(private_home(), ListeningMode::Restricted).await;
+        let (started, error) = lab.host.render(&request()).await;
+        assert!(!error, "{started}");
+        let file = lab.file();
+        let other = file.with_file_name("swapped.wav");
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = attempts.clone();
+        let expected = file.clone();
+        let swapped = other.clone();
+        let _probe = shapes::probe_next_render(move |pinned, protected| {
+            // This is the host's actual open, before the first ACL check and after
+            // protection/read-back, not a test-created handle with copied flags.
+            assert_eq!(native_acl::file_path(pinned).unwrap(), std::fs::canonicalize(&expected).unwrap());
+            assert_eq!(native_acl::is_kumis_shape_handle(pinned, false), protected);
+            assert!(std::fs::rename(&expected, &swapped).is_err());
+            assert!(std::fs::write(&expected, b"replacement").is_err());
+            assert!(std::fs::OpenOptions::new().append(true).share_mode(7).open(&expected).is_err());
+            assert!(std::fs::remove_file(&expected).is_err());
+            assert_eq!(std::fs::read(&expected).unwrap(), b"owned render boundary fixture");
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let (done, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(!error && done["state"] == "done", "{done}");
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2, "both ends of the real pinned interval were exercised");
+        assert_eq!(Path::new(done["files"][0]["file"].as_str().unwrap()), file.as_path());
+        assert!(native_acl::is_kumis_shape(&file));
+        assert_eq!(std::fs::read(&file).unwrap(), b"owned render boundary fixture");
+        // The file pin ended, but the host still pins the cache directory. Ordinary
+        // owner writes/deletion work; a rename would also need a cache-directory writer.
+        std::fs::write(&file, b"owner changed the exposed file").unwrap();
+        std::fs::remove_file(&file).unwrap();
+        assert!(!file.exists());
+    }
+}

@@ -29,6 +29,7 @@ impl Folders {
         for folder in [&user, &producers_kumi, &user.join(".kumi"), &transport] {
             std::fs::create_dir_all(folder).unwrap();
         }
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
         Folders { _dir: dir, user, producers_kumi, transport, state }
     }
 
@@ -194,7 +195,7 @@ fn serve_answers_status_on_stdio_without_reading_or_writing_the_producers_kumi()
     let status = &called["result"]["structuredContent"];
     assert_eq!(status["runtime"]["protocol"], "kumi-serve/1");
     assert_eq!(status["runtime"]["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(status["runtime"]["home"], folders.transport.display().to_string(), "the process's own KUMI_HOME is the transport home");
+    assert_eq!(status["runtime"].get("home"), None, "no path on this computer reaches the host");
     assert_eq!((status["daw"].clone(), status["connected"].clone()), (json!("reaper"), json!(false)));
     assert_eq!((status["project"].clone(), status["owner"].clone()), (Value::Null, Value::Null));
     assert_eq!((status["setup"]["component"]["installed"].clone(), status["setup"]["daw_open"].clone()), (json!(false), json!(false)));
@@ -203,6 +204,8 @@ fn serve_answers_status_on_stdio_without_reading_or_writing_the_producers_kumi()
     assert_eq!(serve.end(), 0, "the end of input ends it");
     let written = folders.state("status.json");
     assert_eq!((written["schema"].clone(), written["stale"].clone(), written["daw"].clone()), (json!(1), json!(true), json!("reaper")));
+    // HISTORY names the runtime it's from: its rows carry the same generation, an earlier runtime's another.
+    assert_eq!(folders.state("history.json")["generation"], status["runtime"]["generation"]);
     assert_eq!(written["owner"], json!({"profile": "default", "session_id": "s1", "pid": pid}));
     assert_eq!(folders.state("owner.json")["running"], false);
     for home in [&folders.producers_kumi, &folders.user.join(".kumi"), &folders.transport] {
@@ -210,6 +213,36 @@ fn serve_answers_status_on_stdio_without_reading_or_writing_the_producers_kumi()
         assert_eq!(listing(home), ["auth.json", "settings.json"], "nothing written in {}", home.display());
     }
     assert_eq!(listing(&folders.user), [".kumi", "the-producers-kumi"], "nor anywhere else in the producer's home");
+}
+
+#[test]
+fn listen_sources_advertise_only_available_guarded_capture() {
+    for daw in ["ableton", "reaper", "renoise"] {
+        let folders = Folders::new();
+        let mut serve = Running::start(folders.command(daw));
+        serve.initialize();
+        serve.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+        let tools = serve.answer(2);
+        let listen = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "listen").unwrap();
+        let sources = if daw == "ableton" { json!(["artifact", "file", "sound"]) } else { json!(["artifact", "file", "sound", "track"]) };
+        assert_eq!(listen["_meta"]["kumi/listen_sources"], sources, "{daw}: {listen}");
+        assert!(!listen["inputSchema"].to_string().contains("deadlineUnixMs"), "native deadlines are not model input");
+        assert!(!listen["inputSchema"].to_string().contains("native_deadline_unix_ms"));
+        if daw == "ableton" {
+            serve.send(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"listen","arguments":{
+                "source":{"track":{"mix":true},"from_beat":0,"beats":4},
+                "expected_project_key":"p-unconnected","expected_epoch":1,"preview":true
+            }}}));
+            let refused = serve.answer(3);
+            let content = &refused["result"]["structuredContent"];
+            assert_eq!(refused["result"]["isError"], false, "{refused}");
+            assert_eq!(content["state"], "refused", "{refused}");
+            assert_eq!(content["code"], "unsupported", "unsupported capture is refused before any connection: {refused}");
+            assert_eq!(content["cleanup"], "restored");
+            assert!(content.get("artifact_id").is_none());
+        }
+        assert_eq!(serve.end(), 0);
+    }
 }
 
 #[test]

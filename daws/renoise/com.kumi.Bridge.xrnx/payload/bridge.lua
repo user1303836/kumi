@@ -1944,9 +1944,11 @@ function M.on_release_document()
   conns:event("project", json.null)
 end
 
+-- The song's id goes into its tool_data as it is saved only while a connected host asked for it (keepIdentity: standalone
+-- Kumi's does, the plugin's runtime's doesn't). Without one, reads name a saved song by its path's id.
 function M.on_will_save()
   local song = renoise.song()
-  if song then status.write_song_id(b.memory, song) end
+  if song and conns and conns:keeps_identity() then status.write_song_id(b.memory, song) end
 end
 
 function M.on_saved()

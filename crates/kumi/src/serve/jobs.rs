@@ -22,7 +22,7 @@ use tokio::sync::Notify;
 
 /// How often a job's progress is written to its file at most (its state changes are written at once).
 const WRITE_EVERY: Duration = Duration::from_millis(500);
-/// How many jobs are kept, newest first: in memory and on disk.
+/// How many recent jobs are kept. Unsettled generation receipts additionally remain on disk.
 const KEPT: usize = 100;
 /// How many jobs may run at once: another is refused `busy` until one ends.
 pub const RUNNING: usize = 8;
@@ -99,10 +99,10 @@ pub struct Jobs {
 
 impl Jobs {
     /// The jobs of a runtime starting with `snapshots`: a job an earlier runtime left `running` now reads
-    /// `interrupted`, and only the newest [`KEPT`] jobs' files stay. Only one runtime works in a state folder at a time
+    /// `interrupted`. Old ordinary jobs are pruned; unresolved billing and failed delivery are retained.
     /// (CC-6: its parent holds the folder's lock), so no job found here is another live runtime's.
     pub(crate) fn new(snapshots: &Snapshots, state_dir: &Path) -> Jobs {
-        settle_earlier(snapshots, &state_dir.join("jobs"));
+        settle_earlier(snapshots, state_dir);
         Jobs {
             jobs: RefCell::new(HashMap::new()),
             order: RefCell::new(VecDeque::new()),
@@ -221,25 +221,43 @@ impl Jobs {
             write(ctx.snapshots(), &started, &job);
             let jobs = ctx.jobs();
             jobs.running.set(jobs.running.get() - 1);
-            jobs.forget_oldest(&ctx.paths().state_dir);
+            jobs.forget_oldest(&ctx.paths().state_dir).await;
             if jobs.running.get() == 0 {
                 jobs.settled.notify_waiters();
             }
         });
     }
 
-    /// Past [`KEPT`] jobs, the oldest finished ones are forgotten, their files with them.
-    fn forget_oldest(&self, state_dir: &Path) {
+    /// Evict old settled jobs from memory. A generation file stays until its ledger accounts for it;
+    /// even a charged job must retain its GET-only recovery route if output delivery failed.
+    async fn forget_oldest(&self, state_dir: &Path) {
+        let mut generations = Vec::new();
         while self.order.borrow().len() > KEPT {
             let oldest = {
                 let jobs = self.jobs.borrow();
                 let order = self.order.borrow();
                 order.iter().position(|id| jobs.get(id).is_some_and(|job| job.state.get() != State::Running))
             };
-            let Some(at) = oldest else { return };
-            let Some(id) = self.order.borrow_mut().remove(at) else { return };
-            self.jobs.borrow_mut().remove(&id);
-            let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+            let Some(at) = oldest else { break };
+            let Some(id) = self.order.borrow_mut().remove(at) else { break };
+            let removed = self.jobs.borrow_mut().remove(&id);
+            if removed.as_ref().is_some_and(|job| job.kind == "generate") {
+                generations.push((id, removed.is_some_and(|job| job.state.get() == State::Done)));
+            } else {
+                let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+            }
+        }
+        if !generations.is_empty() {
+            let state_dir = state_dir.to_owned();
+            let _ = tokio::task::spawn_blocking(move || {
+                let Ok(authority) = super::generate_ledger::Authority::read(&state_dir) else { return };
+                for (id, delivered) in generations {
+                    if can_prune_generation(&authority, &id, delivered) {
+                        let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+                    }
+                }
+            })
+            .await;
         }
     }
 
@@ -297,6 +315,11 @@ impl Jobs {
     /// The jobs still running.
     pub(crate) fn running(&self) -> usize {
         self.running.get()
+    }
+
+    /// Whether a job of one of these kinds runs here now.
+    pub fn running_of(&self, kinds: &[&str]) -> bool {
+        self.jobs.borrow().values().any(|job| kinds.contains(&job.kind) && job.state.get() == State::Running)
     }
 }
 
@@ -367,25 +390,43 @@ fn write(snapshots: &Snapshots, id: &str, job: &Job) {
     }
 }
 
-/// The jobs an earlier runtime left: `running` ones now `interrupted`, the oldest past [`KEPT`] deleted.
-fn settle_earlier(snapshots: &Snapshots, folder: &Path) {
-    let Ok(entries) = std::fs::read_dir(folder) else { return };
+fn can_prune_generation(authority: &super::generate_ledger::Authority, id: &str, delivered: bool) -> bool {
+    authority
+        .for_job(id)
+        .ok()
+        .flatten()
+        .is_some_and(|record| record.settlement == "not_submitted" || (record.settlement == "charged" && delivered))
+}
+
+/// Old ordinary jobs are pruned; unaccounted generation receipts and failed deliveries survive.
+fn settle_earlier(snapshots: &Snapshots, state_dir: &Path) {
+    let folder = state_dir.join("jobs");
+    let Ok(entries) = std::fs::read_dir(&folder) else { return };
     let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().ends_with(".json"))
         .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut authority = None;
     for (n, (_, path)) in files.iter().enumerate() {
-        if n >= KEPT {
-            let _ = std::fs::remove_file(path);
-            continue;
-        }
         let Some(id) = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()) else { continue };
         let Ok(mut kept) = std::fs::read(path).map_err(|_| ()).and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|_| ()))
         else {
             continue;
         };
+        if n >= KEPT {
+            let prune = if kept["kind"] == "generate" {
+                let authority = authority.get_or_insert_with(|| super::generate_ledger::Authority::read(state_dir));
+                authority.as_ref().is_ok_and(|authority| can_prune_generation(authority, &id, kept["state"] == "done"))
+            } else {
+                true
+            };
+            if prune {
+                let _ = std::fs::remove_file(path);
+                continue;
+            }
+        }
         if kept["state"] == State::Running.as_str() {
             kept["state"] = json!(State::Interrupted.as_str());
             if let Err(error) = snapshots.write(&format!("jobs/{id}"), &kept) {
@@ -407,7 +448,7 @@ mod tests {
 
     fn runtime(state: &Path) -> Rc<Ctx> {
         let args = Args {
-            state_dir: state.to_path_buf(),
+            state_dir: state.join("state"),
             kumi_home: state.join("home"),
             hermes_home: None,
             hermes_root: None,
@@ -446,7 +487,7 @@ mod tests {
             tokio::task::yield_now().await;
             earlier.snapshots().flush();
             let ctx = runtime(dir.path());
-            assert_eq!(ctx.jobs().get(&id, dir.path()).unwrap()["state"], "interrupted");
+            assert_eq!(ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap()["state"], "interrupted");
             // As another kind, or a job there isn't: not resumable.
             for (other, kind) in [(id.as_str(), "scan"), ("j1-999", "generate")] {
                 let refused = ctx.resume_job(other, kind, |_ctx, _job| async { Ok(json!({})) });
@@ -463,7 +504,7 @@ mod tests {
                 .unwrap();
             assert!(resumed);
             assert_eq!(said.await.unwrap(), id, "under its own id");
-            let running = ctx.jobs().get(&id, dir.path()).unwrap();
+            let running = ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap();
             assert_eq!(
                 (running["state"].clone(), running["result"]["provider_job_id"].clone()),
                 (json!("running"), json!("v-9")),
@@ -479,10 +520,10 @@ mod tests {
             let failing =
                 ctx.start_job("generate", |_ctx, _job| async { Err(OpError::Failed { reason: "the download failed".into() }) }).unwrap();
             ctx.jobs().all_settled().await;
-            assert_eq!(ctx.jobs().get(&failing, dir.path()).unwrap()["state"], "failed");
+            assert_eq!(ctx.jobs().get(&failing, &ctx.paths().state_dir).unwrap()["state"], "failed");
             assert!(ctx.resume_job(&failing, "generate", |_ctx, _job| async { Ok(json!({"delivered": true})) }).unwrap());
             ctx.jobs().all_settled().await;
-            let again = ctx.jobs().get(&failing, dir.path()).unwrap();
+            let again = ctx.jobs().get(&failing, &ctx.paths().state_dir).unwrap();
             assert_eq!((again["state"].clone(), again.get("error")), (json!("done"), None), "the earlier error gone with the new run");
             earlier.jobs().interrupt_running(earlier.snapshots());
         })
@@ -504,12 +545,12 @@ mod tests {
                 .unwrap();
             assert_eq!(file(&ctx, &id)["state"], "running", "its file is there at once");
             tokio::task::yield_now().await;
-            let running = ctx.jobs().get(&id, dir.path()).unwrap();
+            let running = ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap();
             assert_eq!((running["state"].clone(), running["kind"].clone()), (json!("running"), json!("scan")));
             assert_eq!(running["progress"], json!({"done": 1.0, "total": 4.0, "message": "Drums"}));
             go.send(()).unwrap();
             ctx.jobs().all_settled().await;
-            let done = ctx.jobs().get(&id, dir.path()).unwrap();
+            let done = ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap();
             assert_eq!((done["state"].clone(), done["result"].clone()), (json!("done"), json!({"sounds": 4})));
             let written = file(&ctx, &id);
             assert_eq!(
@@ -536,10 +577,10 @@ mod tests {
             tokio::task::yield_now().await;
             // On disk before the work goes on, and given while it runs.
             assert_eq!(file(&ctx, &failing)["result"]["submission"], "unknown");
-            assert_eq!(ctx.jobs().get(&failing, dir.path()).unwrap()["result"]["reservation_id"], "r-1");
+            assert_eq!(ctx.jobs().get(&failing, &ctx.paths().state_dir).unwrap()["result"]["reservation_id"], "r-1");
             go.send(()).unwrap();
             ctx.jobs().all_settled().await;
-            let failed = ctx.jobs().get(&failing, dir.path()).unwrap();
+            let failed = ctx.jobs().get(&failing, &ctx.paths().state_dir).unwrap();
             assert_eq!(
                 (failed["state"].clone(), failed["result"]["reservation_id"].clone()),
                 (json!("failed"), json!("r-1")),
@@ -558,7 +599,7 @@ mod tests {
             tokio::task::yield_now().await;
             ctx.snapshots().flush();
             let later = runtime(dir.path());
-            let found = later.jobs().get(&left, dir.path()).unwrap();
+            let found = later.jobs().get(&left, &later.paths().state_dir).unwrap();
             assert_eq!((found["state"].clone(), found["result"]["provider_job_id"].clone()), (json!("interrupted"), json!("v-9")));
         })
         .await;
@@ -630,7 +671,7 @@ mod tests {
             assert!(matches!(outcome.await.unwrap(), Err(OpError::Invalid { .. })));
             let written = file(&ctx, &id);
             assert_eq!((written["state"].clone(), written.get("result")), (json!("running"), None), "{written}");
-            assert!(ctx.jobs().get(&id, dir.path()).unwrap().get("result").is_none());
+            assert!(ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap().get("result").is_none());
             ctx.jobs().interrupt_running(ctx.snapshots());
         })
         .await;
@@ -652,12 +693,12 @@ mod tests {
             tokio::task::yield_now().await;
             ctx.shutdown().cancel();
             ctx.jobs().all_settled().await;
-            let failed = ctx.jobs().get(&failed, dir.path()).unwrap();
+            let failed = ctx.jobs().get(&failed, &ctx.paths().state_dir).unwrap();
             assert_eq!(
                 (failed["state"].clone(), failed["error"].clone()),
                 (json!("failed"), json!({"code": "failed", "reason": "the folder went away"}))
             );
-            assert_eq!(ctx.jobs().get(&stopped, dir.path()).unwrap()["state"], "cancelled");
+            assert_eq!(ctx.jobs().get(&stopped, &ctx.paths().state_dir).unwrap()["state"], "cancelled");
             assert_eq!(file(&ctx, &stopped)["state"], "cancelled");
         })
         .await;
@@ -674,12 +715,12 @@ mod tests {
                 id
             };
             let ctx = runtime(dir.path());
-            let found = ctx.jobs().get(&id, dir.path()).unwrap();
+            let found = ctx.jobs().get(&id, &ctx.paths().state_dir).unwrap();
             assert_eq!((found["state"].clone(), found["kind"].clone()), (json!("interrupted"), json!("scan")));
             assert!(found.get("seq").is_none(), "the answer is the job, not its file's envelope");
             assert_eq!(file(&ctx, &id)["state"], "interrupted");
-            assert!(ctx.jobs().get("j0-404", dir.path()).is_none());
-            assert!(ctx.jobs().get("../status", dir.path()).is_none());
+            assert!(ctx.jobs().get("j0-404", &ctx.paths().state_dir).is_none());
+            assert!(ctx.jobs().get("../status", &ctx.paths().state_dir).is_none());
         })
         .await;
     }
@@ -692,7 +733,7 @@ mod tests {
             let broken =
                 ctx.start_job("scan", |_ctx, _job| -> std::future::Ready<Result<Value, OpError>> { panic!("before its future") }).unwrap();
             ctx.jobs().all_settled().await;
-            assert_eq!(ctx.jobs().get(&broken, dir.path()).unwrap()["state"], "failed");
+            assert_eq!(ctx.jobs().get(&broken, &ctx.paths().state_dir).unwrap()["state"], "failed");
             assert_eq!(ctx.jobs().running(), 0, "its place is free again");
         })
         .await;
@@ -711,7 +752,7 @@ mod tests {
             };
             assert_eq!(code, "busy");
             ctx.jobs().interrupt_running(ctx.snapshots());
-            assert_eq!(ctx.jobs().get(&ids[0], dir.path()).unwrap()["state"], "interrupted");
+            assert_eq!(ctx.jobs().get(&ids[0], &ctx.paths().state_dir).unwrap()["state"], "interrupted");
             assert_eq!(file(&ctx, &ids[RUNNING - 1])["state"], "interrupted", "no file says running for a job nothing runs");
         })
         .await;

@@ -4,7 +4,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
-import { canUndo, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, soundRequest, undoRequest } from '../shared/format.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
@@ -121,11 +121,16 @@ function Dashboard() {
           </Section>
           <Section title={t('pane.history')}>
             <HistoryView
-              action={item => (canUndo(state.status, item) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null)}
+              action={item => {
+                // One Copy undo per change, on the row its undo starts from, as in Desktop's pane (CC-3 A2).
+                const rows = changesOf(state.history?.items ?? []).find(change => change.includes(item))
+                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null
+              }}
               daw={state.status?.daw}
               history={state.history}
               live={Boolean(state.status?.connected) && state.status?.stale !== true}
               now={now}
+              target={state.setup?.target}
             />
           </Section>
         </div>

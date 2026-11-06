@@ -13,7 +13,7 @@ import time
 from typing import Any, Callable
 import uuid
 
-from . import calls, listening, runtime, schemas, setup, snapshots
+from . import calls, generate, listening, runtime, schemas, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -39,16 +39,22 @@ class Host:
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
                  hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None,
-                 hermes_config: Callable[[], dict] | None = None, session_key: Callable[[], str] | None = None):
+                 hermes_config: Callable[[], dict] | None = None, session_key: Callable[[], str] | None = None,
+                 media_roots: Callable[[], list[str]] | None = None, ledger: Callable[..., Any] | None = None,
+                 mirelo_key: Callable[[], str | None] | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
+        self.turns = calls.Turns()  # the producer's own turns, so a turn Hermes forks in the background is told apart
         self._data_dir = data_dir
         self._pinned = pinned
         self._hook_timeout = hook_timeout
         self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
         self._hermes_config = hermes_config
+        self._ledger = ledger
+        self._mirelo_key = mirelo_key
         self._session_key = session_key
+        self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
 
@@ -86,6 +92,55 @@ class Host:
             return {}
         return config if isinstance(config, dict) else {}
 
+    def mirelo_key(self) -> str | None:
+        """The producer's Mirelo API key, read on each call: plugin.yaml's `mirelo_api_key` secret, which Hermes keeps in
+        the profile's .env as MIRELO_API_KEY and gives through its public, profile-scoped `get_env_value`. Kumi never
+        opens .env itself, and the key goes only into one request's `_mirelo`, after the producer's approval (13-R3)."""
+        if self._mirelo_key is not None:
+            return self._mirelo_key()
+        try:
+            from hermes_cli.config import get_env_value  # Hermes's
+            value = get_env_value(generate.KEY_ENV)
+        except Exception:
+            return None
+        return value if isinstance(value, str) and value.strip() else None
+
+    def generation(self) -> dict:
+        """The producer's Mirelo settings (CC-13), read on each call: acknowledged, each kind switched on, and the
+        lifetime credit cap (0, the default, refuses every paid generation). None of it comes from the model."""
+        cap = self._ctx.get_config("mirelo_credit_cap", 0)
+        return {"acknowledged": self._ctx.get_config("mirelo_acknowledged", False) is True,
+                "enabled": {kind: self._ctx.get_config(setting, False) is True
+                            for kind, setting in generate.SETTINGS.items()},
+                "cap": cap if isinstance(cap, int) and not isinstance(cap, bool) and cap >= 0 else 0}
+
+    def mirelo_status(self) -> dict:
+        """Mirelo's readiness as `hermes kumi doctor` reports it (#1058): whether the producer's key is held (never the
+        key), the onboarding acknowledged, a kind switched on, and a credit cap above 0. Settings only: the ledger
+        isn't opened, so nothing is written (rgzm)."""
+        settings = self.generation()
+        return {"key": self.mirelo_key() is not None, "acknowledged": settings["acknowledged"],
+                "task": any(settings["enabled"].values()), "cap": settings["cap"] > 0}
+
+    def ledger(self) -> Any:
+        """This profile's credit ledger (W3's `ledger.Ledger`, under its own file lock), with the cap as the producer
+        set it now, and their acknowledgement and each kind's switch written into it (`configure`): the runtime reads
+        that policy and a create's reservation from the ledger, never from `_mirelo`'s copy alone (agent-m). Raises
+        generate.LedgerUnavailable when it can't be had."""
+        settings = self.generation()
+        try:
+            opener = self._ledger
+            if opener is None:
+                from .ledger import Ledger as opener  # W3's
+            ledger = opener(Path(self.data_dir()), credit_cap=settings["cap"], lock_timeout=generate.LEDGER_WAIT)
+            ledger.configure(acknowledged=settings["acknowledged"], enabled=settings["enabled"])
+            return ledger
+        except Exception as failure:
+            log.warning("Kumi couldn't open its credit ledger: %s", type(failure).__name__)
+            raise generate.LedgerUnavailable("ledger_unavailable",
+                                             "Kumi can't read its credit ledger, so nothing is paid.") \
+                from None
+
     def session_surface(self) -> str:
         """The calling session's client (`cli`, `tui`, `desktop`, `acp`) or messaging platform (`telegram`, …), as
         Hermes names it (`ctx.session_surface()`): "" outside a session or on a Hermes without it, and "unknown" when
@@ -113,12 +168,24 @@ class Host:
             return 30.0
 
     def data_dir(self) -> Path:
+        """`data_path`, created (empty) on the first call, as Hermes's `plugin_data_dir` does; the only write a read
+        tool makes."""
+        path = self.data_path()
+        if path is None:
+            raise RuntimeError("Hermes's home can't be read, so Kumi has no plugin data folder")
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def data_path(self) -> Path | None:
+        """Where Kumi's plugin data is, without creating it: `setup.default_data_dir` (Hermes's documented
+        `<hermes home>/plugin-data/kumi`, `plugin_data_dir`'s folder), or the tests' own. What only reads
+        (`hermes kumi doctor`) uses it. None where Hermes's home can't be read."""
         if self._data_dir is not None:
             return self._data_dir()
-        # Hermes's, documented: <profile home>/plugin-data/kumi, which it creates (empty) on the first call; the only
-        # write a read tool makes.
-        from plugins.plugin_storage import plugin_data_dir
-        return plugin_data_dir(PLUGIN)
+        try:
+            return setup.default_data_dir()
+        except Exception:  # Hermes's home isn't readable (hermes_constants missing or failing)
+            return None
 
     def daw(self) -> str:
         daw = self._ctx.get_config("daw", "ableton")
@@ -155,6 +222,20 @@ class Host:
         if isinstance(configured, int) and not isinstance(configured, bool):
             retries = max(0, min(configured, 6))
         return total / (1 + retries)
+
+    def media_roots(self) -> list[str]:
+        """Folders of finished media the runtime may import or measure from (`--media-root`): this profile's
+        `<HERMES_HOME>/cache/generated/audio`, where other plugins' results land (ElevenLabs Music and Sound Effects).
+        Passed as is, even before it exists: the runtime keeps an absolute root and checks a file against it when it
+        resolves the file (CC-11). Kumi never makes the folder; it writes only in its plugin data."""
+        if self._media_roots is not None:
+            return self._media_roots()
+        try:
+            from hermes_constants import get_hermes_home  # Hermes's
+            return [str(Path(get_hermes_home()) / "cache" / "generated" / "audio")]
+        except Exception:
+            log.exception("Kumi couldn't find Hermes's generated audio folder")
+            return []
 
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)
@@ -268,14 +349,18 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
     """CC-9: after Hermes has a `kumi_sounds` or `kumi_listen` result, tell Desktop, so the sound map and the listen
     card work with tool progress off. Only a call Hermes reports `ok` with a result the model got (already without
     paths, CC-4, and without a failed listen's measurements, R5): `sounds.found` with up to 200 sound ids, and
-    `listen.done` with the result itself when it's at most 256 KiB. A failed broadcast never fails the call."""
-    if status != "ok" or tool not in ("kumi_sounds", "kumi_listen") or not isinstance(result, str):
+    `listen.done` with the result itself when it's at most 256 KiB. CC-13's `generate.updated` carries a quote's, a
+    create's or a generation job's card (13a: MIDI `notes` left out, none over 256 KiB). A failed broadcast never
+    fails the call."""
+    if status != "ok" or tool not in ("kumi_sounds", "kumi_listen", "kumi_generate", "kumi_job") \
+            or not isinstance(result, str):
         return
     try:
         data = json.loads(result)
     except ValueError:
         return
-    if not isinstance(data, dict) or "error" in data:
+    generation_job = tool == "kumi_job" and isinstance(data, dict) and data.get("kind") == "generate"
+    if not isinstance(data, dict) or ("error" in data and not generation_job):  # a job's error sits beside its result
         return
     base = {"profile": host.profile(), "session_id": session_id, "tool_call_id": tool_call_id}
     if tool == "kumi_sounds":
@@ -284,6 +369,12 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         if not ids:
             return
         event, payload = "sounds.found", {**base, "map_revision": data.get("map_revision"), "sound_ids": ids}
+    elif tool in ("kumi_generate", "kumi_job"):
+        if tool == "kumi_job" and not generation_job:
+            return
+        card = generate.card(data)
+        fits = len(json.dumps(card, ensure_ascii=False).encode("utf-8")) <= generate.CARD_BYTES
+        event, payload = "generate.updated", {**base, "tool": tool, **({"card": card} if fits else {})}
     else:
         if not isinstance(data.get("metrics"), dict) or data.get("state") in ("refused", "cancelled", "unsure"):
             return
@@ -295,11 +386,15 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         log.exception("Kumi couldn't tell Desktop about %s", tool)
 
 
-NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so Kumi's changes, track "
-                "listens, folder reads and setup steps run without asking the producer.")
+# What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
+# said the same everywhere (research-1's copy review, P3). Paid generations and their uploads are among them: only a
+# turn with nobody in it refuses them (policy._paid, policy._upload), and the credit cap bounds what they spend (#1079).
+UNASKED = ("Kumi's changes, undos, track listens, sample-folder adds and scans, setup steps, and paid Mirelo generations "
+           "and the files they send to Mirelo (up to the credit cap)")
+NO_APPROVALS = (f"Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so {UNASKED} run without "
+                "asking first.")
 UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
-                     "doesn't say). If it is, Kumi's changes, track listens, folder reads and setup steps run without "
-                     "asking the producer.")
+                     f"doesn't say). If it is, {UNASKED} run without asking first.")
 # Set in the environment of Hermes's plugin host (`plugins.isolation: host`), whose process holds no chat's /yolo.
 PLUGIN_HOST_ENV = "HERMES_PLUGIN_HOST_PROCESS"
 
@@ -314,10 +409,10 @@ def approval_gaps(host: Host) -> list[str]:
     delegation = config.get("delegation") if isinstance(config.get("delegation"), dict) else {}
     gaps = []
     if str(approvals.get("single_query_mode", "deny")).lower().strip() in {"approve", "off", "allow", "yes"}:
-        gaps.append("approvals.single_query_mode lets a one-shot hermes -q run Kumi's changes without asking.")
+        gaps.append(f"approvals.single_query_mode lets a one-shot hermes -q run {UNASKED} without asking first.")
     auto = delegation.get("subagent_auto_approve", False)
     if auto.strip().lower() in {"1", "true", "yes", "on"} if isinstance(auto, str) else bool(auto):
-        gaps.append("delegation.subagent_auto_approve lets a subagent's Kumi changes run without asking.")
+        gaps.append(f"delegation.subagent_auto_approve lets a subagent run {UNASKED} without asking first.")
     return gaps
 
 
@@ -398,10 +493,11 @@ def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dic
         live = host.runtimes.get(data_dir)
         if live is not None and live.daw != daw:
             raise runtime.Refused("other_daw", (
-                f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; set Kumi up for "
-                f"{schemas.DAW_NAMES[daw]} once the chat that started it ends."))
+                f"Kumi is running for {schemas.DAW_NAMES[live.daw]} in this profile. To set Kumi up for "
+                f"{schemas.DAW_NAMES[daw]}, end the chat using Kumi, then set it up again."))
         live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                           library_roots=host.library_folders(), profile=host.profile())
+                                           library_roots=host.library_folders(), media_roots=host.media_roots(),
+                                           profile=host.profile())
         timeout = READ_TIMEOUT if args.get("dry_run") else SETUP_TIMEOUT
         return live.call("setup_daw", args, host.identity(kwargs), timeout=timeout)
 
@@ -433,12 +529,13 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
                        "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
         shown = {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
         if planned["step"] == "none" and setup.next_daw(daw, current):  # set up, but another DAW stays Kumi's
-            shown["next"] = setup.next_daw(daw, current) + " The producer runs it in a terminal."
+            shown["next"] = (setup.next_daw(daw, current) + " The producer runs it in a terminal, or changes the DAW "
+                             "setting under Settings → Plugins → Kumi in Hermes Desktop.")
         return shown
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
     if not isinstance(digest, str) or not digest:
-        return {"error": {"code": "not_approved", "reason": "Kumi did not set anything up: this call carries no "
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't set anything up: this call carries no "
                                                             "approved setup plan. Run kumi_setup plan first."}}
     if action == "install":
         result = setup.install(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
@@ -475,10 +572,11 @@ def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
     live = host.runtimes.get(data_dir)
     if live is not None and live.daw != daw:
         return {"error": {"code": "other_daw", "reason": (
-            f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; it works in "
-            f"{schemas.DAW_NAMES[daw]} once the chat that started it ends.")}}
+            f"Kumi is running for {schemas.DAW_NAMES[live.daw]} in this profile. To use {schemas.DAW_NAMES[daw]}, "
+            "end the chat using Kumi, then connect again.")}}
     live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                       library_roots=host.library_folders(), profile=host.profile())
+                                       library_roots=host.library_folders(), media_roots=host.media_roots(),
+                                       profile=host.profile())
     return live.call("connect", {"daw": daw}, host.identity(kwargs), timeout=CONNECT_TIMEOUT)
 
 
@@ -607,6 +705,34 @@ def listen_refusal(args: dict) -> str | None:
     return None
 
 
+def source_kind(source: Any) -> str | None:
+    """A listen source's kind, as kumi_release.json's `listen_sources` names them (CC-16)."""
+    if not isinstance(source, dict):
+        return None
+    for key, kind in (("track", "track"), ("file", "file"), ("sound_id", "sound"), ("artifact_id", "artifact")):
+        if key in source:
+            return kind
+    return None
+
+
+def listen_unsupported(host: Host, args: dict) -> str | None:
+    """Why the pinned runtime can't take this listen in the producer's DAW, or None (CC-16: the pin records what each
+    DAW's runtime listens to; one that doesn't say listens to files alone). Refused before anything is asked or
+    played, in the hook and again here."""
+    daw = host.daw()
+    kinds = setup.listen_sources(daw, host.plugin_dir)
+    name = schemas.DAW_NAMES.get(daw, daw)
+    for field in ("source", "compare_to"):
+        kind = source_kind(args.get(field))
+        if kind is None or kind in kinds:
+            continue
+        if kind == "track":
+            return (f"this version of Kumi can't listen to a track or the mix in {name}. Measure a file instead: "
+                    "a bounce of the part, or the sample it plays.")
+        return f"this version of Kumi can't measure a {kind} in {name}."
+    return None
+
+
 def _file_source(source: Any) -> bool:
     return isinstance(source, dict) and bool(source) and set(source) <= SOURCE_KEYS
 
@@ -662,6 +788,9 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     refusal = listen_refusal(args)  # the approval hook checks this too; a dispatch without it mustn't play the DAW
     if refusal:
         return {"error": {"code": "invalid", "reason": refusal}}
+    unsupported = listen_unsupported(host, args)
+    if unsupported:
+        return {"error": {"code": "unsupported", "reason": f"Kumi didn't listen: {unsupported}"}}
     if not is_track_listen(args):
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
         return interpreted(host, kept_media(host, result))
@@ -776,6 +905,37 @@ def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     return result
 
 
+def kumi_generate(host: Host, args: dict, **kwargs: Any) -> dict:
+    """Paid generation with Mirelo (CC-13): a quote, then the create the producer approves from that quote. The
+    generation itself is a job, followed with kumi_job."""
+    refusal = generate.refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid_request", "reason": refusal}}
+    identity = host.identity(kwargs)
+    if args["action"] == "quote":
+        return generate.quote(host, args, identity, kwargs)
+    return generate.create(host, args, identity, kwargs)
+
+
+def kumi_job(host: Host, args: dict, **kwargs: Any) -> dict:
+    """A long job by its id: a generation's from its runtime's `generate`, settled in the credit ledger (CC-13), its
+    MEDIA: line only for its kept file; any other job from the runtime's `job`. A generation the ledger never bound
+    (its create's answer was lost) is recognized in that plain read and adopted by its quote (generate.adopt)."""
+    identity = host.identity(kwargs)
+    job_id = args.get("job_id")
+    routed = generate.find(host, job_id)
+    if routed is None:
+        plain = host.live().call("job", args, identity, timeout=READ_TIMEOUT)
+        routed = generate.adopt(host, job_id, plain)
+        if routed is None:
+            return plain
+    found = generate.follow(host, *routed, job_id, identity, READ_TIMEOUT)
+    result = found.get("result")
+    if isinstance(result, dict) and "media_tag" in result:
+        found = {**found, "result": kept_media(host, result)}
+    return found
+
+
 # name, schema, handler, emoji: every one registered every time (catalog rule 6).
 TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_status", schemas.KUMI_STATUS, kumi_status, "🎛️"),
@@ -789,7 +949,8 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_listen", schemas.KUMI_LISTEN, kumi_listen, "📈"),
     ("kumi_sounds", schemas.KUMI_SOUNDS, kumi_sounds, "🔎"),
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
-    ("kumi_job", schemas.KUMI_JOB, _forward("job", READ_TIMEOUT), "⏳"),
+    ("kumi_job", schemas.KUMI_JOB, kumi_job, "⏳"),
+    ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -801,7 +962,9 @@ def approved_only(name: str, args: dict) -> bool:
     return (name in ("kumi_change", "kumi_undo")
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
-            or (name == "kumi_setup" and args.get("action") in ("install", "adopt")))
+            or (name == "kumi_setup" and args.get("action") in ("install", "adopt"))
+            or (name == "kumi_generate" and (args.get("action") == "create"
+                                             or (args.get("action") == "quote" and args.get("kind") == "audio_to_midi"))))
 
 
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:

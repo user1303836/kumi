@@ -231,3 +231,10 @@ normal matrix bundles. See the [b7 evidence and coverage limits](../../evidence/
 Single-step macro removal undo is validated from Live timers and Max LiveAPI.
 A `_Framework.ControlSurface.update_display` callback can add a separate
 Custom Action undo entry; that callback context is not validated for one-step undo.
+
+## Live 12.4.25b1 macOS ARM64
+
+The exact `live-12.4.25b1-arm64` profile participates in automatic selection and
+normal matrix bundles. All four components were checked in the installed beta,
+including Max, audio-engine behavior and fresh-process save/reopen. See the
+[validation receipts and limits](../../evidence/live-12.4.25b1-arm64/README.md).

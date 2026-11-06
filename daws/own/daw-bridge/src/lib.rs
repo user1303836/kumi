@@ -40,7 +40,7 @@
 //! ## Handshake (host first; mutual HMAC-SHA256 challenge)
 //!
 //! ```text
-//! host   → bridge  {"type":"hello","protocol":"kumi-daw/1","nonce":<cn>,"client":"daw-mcp-server/x"}
+//! host   → bridge  {"type":"hello","protocol":"kumi-daw/1","nonce":<cn>,"client":"daw-mcp-server/x","keepIdentity":true?}
 //! bridge → host    {"type":"challenge","nonce":<sn>,"proof":HMAC(secret,"kumi-daw/1\nserver\n"+cn+"\n"+sn)}
 //! host   → bridge  {"type":"auth","proof":HMAC(secret,"kumi-daw/1\nclient\n"+cn+"\n"+sn)}
 //! bridge → host    {"type":"welcome","session":…,"daw":…,"bridge":…,"dawVersion":…,"pid":…,"resource":…,
@@ -51,6 +51,12 @@
 //! sends its own, so a program squatting on the port learns nothing. Refusals are
 //! `{"type":"refused","reason":"protocol"|"auth"|"limit"|"timeout"|"handshake"}` and then a close; a protocol
 //! refusal names the bridge's protocol.
+//!
+//! `keepIdentity` (left out means false) asks the bridge to keep the project's id in the project (REAPER's `kumi`/
+//! `project` ProjExtState, Renoise's song `tool_data`) while this connection lasts: a bridge with the capability writes
+//! it only while an authenticated connection that asked is open, and says `keep_identity: true` in its `status`. Its
+//! reads name the project by the stored id, or by its path's, either way. A bridge from before the field ignores it and
+//! keeps the id whoever is connected. Standalone Kumi's host asks; the plugin's runtime's doesn't.
 //!
 //! ## After auth
 //!
