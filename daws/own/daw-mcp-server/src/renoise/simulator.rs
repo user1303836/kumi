@@ -728,12 +728,25 @@ impl RenoiseScript {
             let State { chains, undo, .. } = state;
             return chains.change(epoch, method, params, undo);
         }
-        // Lua run in the song: one step of Renoise's undo, which only Renoise's own undo takes back.
+        // Lua run in the song: one step of Renoise's undo, which only Renoise's own undo takes back. Code that only reads, or
+        // is stopped at its time before it wrote, keeps nothing (`unchanged`, no undo step) and still says something, as the
+        // tool does: its value, or the error it stopped at; nothing printed is Lua's empty table, `{}`.
         if kind == "run-lua" {
-            let title = "Ran Lua: song.transport.bpm = 140";
+            let code = params["input"]["code"].as_str().unwrap_or_default().to_string();
+            let title = format!("Ran Lua: {}", code.lines().next().unwrap_or_default());
+            let reads = code.starts_with("return ") || code.starts_with("while true do");
             let mut value = match method {
                 "change_preview" => {
                     json!({"target": {"ref": format!("{epoch}:song:1"), "kind": "song"}, "prior": {}, "fence": {}, "display": {"title": title}})
+                }
+                "change_apply" if reads => {
+                    let note = "Only Renoise's own undo can take back what it did (Edit > Undo); Kumi can't.";
+                    let applied = if code.starts_with("while true do") {
+                        json!({"changed": false, "printed": {}, "writes": "none", "failed": {"message": "Kumi stopped it: it ran longer than 800 ms"}})
+                    } else {
+                        json!({"changed": false, "printed": {}, "writes": "none", "result": state.song["bpm"].clone()})
+                    };
+                    json!({"applied": applied, "display": {"title": title, "note": note, "unchanged": true}, "undo": {"desc": params["desc"], "entry": false}})
                 }
                 "change_apply" => {
                     let desc = params["desc"].as_str().unwrap_or_default().to_string();
