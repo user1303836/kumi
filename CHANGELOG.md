@@ -3,6 +3,31 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.71 — 2026-11-06
+
+Ships with bridge 1.0.107, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- In Hermes, Kumi finds sounds by their tempo, key, length and type, and says why each one matched.
+- Kumi in Hermes runs Python in Live and Lua in REAPER and Renoise, each script asked with its code,
+  and asked every time once the chat has read web content.
+- Kumi in Hermes makes variations of a clip, MIDI item or pattern, each take approved as drawn and
+  undone by its own HISTORY id.
+- Listening measures wide and opposite-polarity stereo audio accurately, including its spectral
+  balance and crest factor.
+- Compare approved reference-track excerpts and use up to five references as a measured target, with
+  spreads, explicit missing-data coverage and reusable retained audio.
+- Kumi for Hermes can measure an approved Live Arrangement track or mix window against a reference
+  file after its devices and before its fader, using preinstalled Kumi Ears and verified cleanup.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.107
+
+- Kumi can set where Live starts playing apart from the playhead, and its undo puts both back.
+- After a listen in Live, Detail View shows the clip you had open again, not the device.
+
 ## 1.24.70 — 2026-11-05
 
 Ships with bridge 1.0.106, which Live loads when it restarts. After updating, Kumi offers to quit Live
