@@ -45,6 +45,7 @@ a DAW to work in.
 | `kumi_connect` | Starts Kumi and connects to the DAW chosen in settings | no (changes nothing in your project) |
 | `kumi_observe` | A short, current look at the project: FOCUS, what changed, the project overview | no |
 | `kumi_read` | Bounded reads of tracks, devices, clips and their settings | no |
+| `kumi_plugin_knowledge` | Kumi's guide to a Live plug-in on a track and the parameters configured for it, or (in any DAW, even with none connected) its catalog of plug-in formats and the controls it has verified | no |
 | `kumi_change` | One typed change of one or more steps, recorded in HISTORY | yes |
 | `kumi_undo` | Undoes a HISTORY entry while it can still be undone, or your newest change whole ("undo that") | yes |
 | `kumi_history` | Lists recent changes and whether each can be undone | no |

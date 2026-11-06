@@ -110,6 +110,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 ### And the everyday ones
 
 - "What am I looking at?" Kumi reads the track, device and clip you have selected.
+- "What does Drive do on this Serum?" In Live, Kumi reads its guide to that plug-in and the parameters you've
+  configured for it; in any DAW, its catalog of plug-in formats and which controls it has verified. It only reads: it
+  doesn't scan your installed plug-ins, open a plug-in's editor, press Configure, or write presets, tunings or
+  wavetables. A range of values Kumi has only seen isn't one it promises.
 - "Make the bass 3 dB quieter." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to
   HISTORY.
 - "Send the bass's output to the Drum Bus." Kumi routes where a track's output goes. In Live it doesn't change a
