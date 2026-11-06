@@ -18,14 +18,18 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 """
 from __future__ import annotations
 
+import collections
 import itertools
+import json
 import logging
+from pathlib import Path
 import re
 import textwrap
+import time
 from typing import Any
 import unicodedata
 
-from . import calls, generate, runtime, setup, snapshots, tools
+from . import calls, generate, runtime, scripts, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +57,7 @@ PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
 # What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
-ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
+ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
@@ -83,8 +87,11 @@ def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: An
     except Exception:
         log.exception("Kumi's approval check for %s failed", tool_name)
         return block("Kumi couldn't check this call, so it didn't run. Hermes's log says why.")
+    event = decision.pop(_SCRIPT_EVENT, None) if isinstance(decision, dict) else None
     if decision is None or decision["action"] == "approve":
         host.calls.record(tool_name, args, kwargs, {"approved": decision is not None, **extra})
+    if event is not None and decision is not None and decision["action"] == "approve":
+        _broadcast("script.pending", event)
     return decision
 
 
@@ -92,6 +99,8 @@ def post_approval_response(host: Any, tool_call_id: Any = None, choice: Any = No
     """Hermes's `post_approval_response`: a Kumi call the producer denied, or nobody answered, loses its record."""
     if choice not in APPROVED:
         host.calls.forget(tool_call_id)
+        if isinstance(tool_call_id, str) and tool_call_id:
+            _DENIED.append(tool_call_id)
 
 
 def turn_started(host: Any, session_id: Any = None, turn_id: Any = None, **kwargs: Any) -> None:
@@ -103,11 +112,41 @@ def turn_started(host: Any, session_id: Any = None, turn_id: Any = None, **kwarg
 def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **kwargs: Any) -> None:
     """Hermes's `post_tool_call`, after every call however it ended, a blocked one included (another plugin's veto, or
     no one there to approve): the call's record goes, so no later dispatch of the same arguments can run on it. A
-    search or a listen that went well is announced to Desktop (CC-9)."""
+    search or a listen that went well is announced to Desktop (CC-9), and a script's end (CC-19). Any tool's result
+    that brings outside content into the chat marks the chat as having read some (CC-19 19a, r2)."""
+    try:
+        why = scripts.taints(tool_name)
+        if why is not None:
+            host.trust().taint(kwargs.get("session_id"), why)
+    except Exception:
+        log.exception("Kumi couldn't note what %s brought into the chat", tool_name)
     if isinstance(tool_name, str) and tool_name.startswith("kumi_"):
         host.calls.forget(tool_call_id)
         tools.announce(host, tool_name, kwargs.get("result"), status=kwargs.get("status"),
                        session_id=kwargs.get("session_id"), tool_call_id=tool_call_id)
+        if tool_name == "kumi_script":
+            _script_settled(host, kwargs.get("result"), session_id=kwargs.get("session_id"), tool_call_id=tool_call_id,
+                            args=kwargs.get("args"))
+
+
+def chat_turn(host: Any, session_id: Any = None, is_first_turn: Any = False, **kwargs: Any) -> None:
+    """Hermes's `pre_llm_call`: a chat's first turn, which nothing from outside has reached yet, starts it clean
+    (CC-19 r1). A chat Kumi first meets later keeps no record, and counts as having read outside content."""
+    if is_first_turn is not True:
+        return
+    try:
+        host.trust().first_turn(session_id, surface=host.session_surface())
+    except Exception:
+        log.exception("Kumi couldn't note a chat's first turn")
+
+
+def subagent_started(host: Any, child_session_id: Any = None, **kwargs: Any) -> None:
+    """Hermes's `subagent_start`: a delegated subagent's chat, whose task is the model's words, never the producer's,
+    so it never runs a script (CC-19)."""
+    try:
+        host.trust().subagent(child_session_id)
+    except Exception:
+        log.exception("Kumi couldn't note a delegated subagent's chat")
 
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -160,7 +199,7 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 
 # A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
 # a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c).
-ONE_THING = ("kumi:paid:",)
+ONE_THING = ("kumi:paid:", "kumi:script:")
 
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -180,6 +219,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _generate(host, args, kwargs)
     if tool == "kumi_transport":
         return _transport(host, args, kwargs), {}
+    if tool == "kumi_script":
+        return _script(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -653,3 +694,157 @@ def shows_whole(message: str, surface: str) -> bool:
         return True
     length = sum(2 if char in _TELEGRAM_ESCAPED else 1 for char in message) if surface == "telegram" else len(message)
     return length <= budget
+
+
+# CC-19: scripts. What `_script` hands `pre_tool_call` to tell Desktop's pane, once the producer is really asked; the
+# calls a producer denied, so the pane's `script.settled` says so (bounded: a denial is told once, soon after).
+_SCRIPT_EVENT = "_script_event"
+_DENIED: collections.deque[str] = collections.deque(maxlen=256)
+SCRIPT_SUBAGENT = ("Kumi runs scripts only in the producer's own chat, never in a delegated subagent, so this didn't "
+                   "run.")
+SCRIPT_MESSAGING = ("Kumi doesn't run scripts from a messaging chat unless the producer turns on \"Run scripts from "
+                    "messaging chats\" in Kumi's settings, so this didn't run.")
+SCRIPT_UNREVIEWED = ("Kumi asks before each script in this chat ({why}), and Hermes's approvals are off here (YOLO or "
+                     "approvals.mode: off): nobody would review it, so it didn't run. Turn approvals back on to run it.")
+SCRIPT_UNKNOWN_APPROVALS = ("Kumi asks before each script in this chat ({why}), and Kumi can't tell whether Hermes's "
+                            "approvals are on here, so it didn't run.")
+SCRIPT_TOO_LONG = ("Kumi didn't run the script: its approval can't be shown whole here, and Kumi asks only when all of "
+                   "it is in view. Ask for it in Hermes Desktop, which shows it whole.")
+# The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
+# length, how many of the code's first lines, how wide, where the code is (its full path, which Desktop and the
+# terminal can open; a short name; or nothing, in a messaging app), and the facts' length.
+_SCRIPT_FORMS = ((200, 12, 100, "path", "long"), (120, 6, 80, "path", "long"), (60, 4, 60, "path", "long"),
+                 (60, 2, 60, "path", "long"), (48, 1, 60, "path", "long"), (48, 0, 60, "path", "long"),
+                 (40, 0, 60, "name", "short"), (40, 0, 60, None, "short"))
+
+
+def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
+    """CC-19: a script is always asked, in a chat with the producer in it. While the chat has read nothing from
+    outside, under `kumi:script` (this chat's, so "Allow this session" covers its next scripts); once it has, under
+    the code's SHA-256, with why, and never while nobody reviews it (YOLO or approvals off). The runtime checks the
+    code first (the size cap, hidden characters, the denylist), so refused code never reaches the producer."""
+    language, code, purpose = args.get("language"), args.get("code"), args.get("purpose")
+    if language not in scripts.LANGUAGES or not isinstance(code, str) or not isinstance(purpose, str):
+        return block("Kumi didn't run the script: it needs a language (python or lua), its purpose and its code."), {}
+    session = kwargs.get("session_id")
+    trust = host.trust()
+    state, why = trust.state(session)
+    if state == scripts.SUBAGENT:
+        return block(SCRIPT_SUBAGENT), {}
+    surface = host.session_surface()
+    messaging = surface not in scripts.LOCAL_SURFACES
+    if messaging and not host.scripts_in_messaging():
+        return block(SCRIPT_MESSAGING), {}
+    if messaging and state == scripts.CLEAN:
+        state, why = scripts.TAINTED, scripts.MESSAGING
+    asked = {key: args[key] for key in ("language", "purpose", "code", "expected_project_key") if key in args}
+    try:
+        answer = _ask(host, "script", {**asked, "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't run the script: {_reason(failure)}"), {}
+    if answer.get("state") != "preview":
+        return block(f"Kumi didn't run the script: {answer.get('reason') or 'its runtime refused it.'}"), {}
+    digest = scripts.sha256(code)
+    if answer.get("sha256") != digest:
+        return block("Kumi didn't run the script: its runtime read different code than this."), {}
+    deadline = answer.get("deadline_seconds")
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not 0 < deadline <= 60:
+        return block("Kumi didn't run the script: its runtime didn't say when it would stop one that runs too "
+                     "long."), {}
+    tainted = state != scripts.CLEAN
+    if tainted:
+        bypassed = tools.approvals_bypassed(host)
+        if bypassed is not False:
+            return block((SCRIPT_UNREVIEWED if bypassed else SCRIPT_UNKNOWN_APPROVALS).format(
+                why=scripts.refused_because(why))), {}
+    try:
+        path = scripts.save(Path(host.data_dir()).joinpath(*scripts.CODE_FOLDER), code, language)
+    except OSError:
+        log.exception("Kumi couldn't keep the script's code")
+        return block("Kumi didn't run the script: it couldn't keep a copy of the code to show you."), {}
+    daw = setup.DAWS.get(host.daw(), "the DAW")
+    facts = {"daw": daw, "language": language, "purpose": purpose, "why": why if tainted else "", "digest": digest,
+             "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
+             "deadline": f"{deadline:g}"}
+    message = _script_message(code, facts, surface, chat_line=not tainted)
+    if message is None:
+        return block(SCRIPT_TOO_LONG), {}
+    decision = {"action": "approve", "message": message,
+                "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
+    decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
+                               "tool_call_id": kwargs.get("tool_call_id"), "language": language, "daw": daw,
+                               "purpose": one_line(purpose, 200), "warning": scripts.WARNING, "sha256": digest,
+                               "lines": facts["lines"], "bytes": facts["bytes"], "tainted": tainted,
+                               "at": int(time.time() * 1000)}
+    return decision, {}
+
+
+def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) -> str | None:
+    """The script's approval in the richest form that shows whole on `surface` (with the chat line Kumi's chat
+    scoping adds for a clean chat), or None when even the smallest doesn't."""
+    code_lines = code[:-1].split("\n") if code.endswith("\n") else code.split("\n")
+    for purpose_limit, head, width, where, facts_form in _SCRIPT_FORMS:
+        lines = [f"Kumi: run Hermes's {scripts.LANGUAGE_NAMES[facts['language']]} script in {facts['daw']}",
+                 f"Hermes says: {quoted(facts['purpose'], purpose_limit)}", scripts.WARNING]
+        if facts["why"]:
+            lines.append(scripts.asked_because(one_line(facts["why"], 60)))
+        count = f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''}"
+        stop = f"stopped after {facts['deadline']} s"
+        lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}… · {stop}"
+                     if facts_form == "long" else f"{count} · SHA-256 {facts['digest'][:8]}… · {stop}")
+        shown = code_lines[:head]
+        lines += [f"  {scripts.code_line(_visible(line), width)}" for line in shown]
+        if head and len(code_lines) > len(shown):
+            lines.append(f"  … {len(code_lines) - len(shown)} more")
+        if where == "path":
+            lines.append(f"Full code: {facts['path']}")
+        elif where == "name":
+            lines.append(f"Code: scripts/{facts['digest'][:12]}… in Kumi's data")
+        message = "\n".join(lines)
+        if shows_whole(f"{message}\n{CHAT_ONLY}" if chat_line else message, surface):
+            return message
+    return None
+
+
+def _visible(text: str) -> str:
+    """A line of code as the approval may show it: anything that could hide (control and format characters, which
+    the runtime refuses in a script anyway) drawn as U+XXXX, so nothing shown differs from what runs."""
+    return "".join(char if char == "\t" or (unicodedata.category(char) not in ("Cc", "Cf", "Zl", "Zp"))
+                   else f"<U+{ord(char):04X}>" for char in text)
+
+
+def _home_short(path: Path) -> str:
+    """`path` as a terminal opens it, with `~` for the home folder (a row fewer in the terminal's panel)."""
+    try:
+        return f"~/{path.relative_to(Path.home()).as_posix()}"
+    except ValueError:
+        return str(path)
+
+
+def _script_settled(host: Any, result: Any, *, session_id: Any, tool_call_id: Any, args: Any) -> None:
+    """CC-19, for Desktop's pane: a script's call ended, as `ran`, `failed`, `unsure`, `cancelled` (the producer's
+    Stop), `refused` (by Kumi or its runtime) or `denied` (by the producer). A failed broadcast fails nothing."""
+    data: Any = None
+    if isinstance(result, str):
+        try:
+            data = json.loads(result)
+        except ValueError:
+            data = None
+    state = data.get("state") if isinstance(data, dict) else None
+    if state == "unsure" and data.get("code") in ("stopped", "interrupted"):
+        outcome = "cancelled"
+    elif state in ("ran", "failed", "unsure", "refused"):
+        outcome = state
+    else:
+        outcome = "denied" if tool_call_id in _DENIED else "refused"
+    code = args.get("code") if isinstance(args, dict) else None
+    _broadcast("script.settled", {"profile": host.profile(), "session_id": session_id, "tool_call_id": tool_call_id,
+                                  "sha256": scripts.sha256(code) if isinstance(code, str) else None,
+                                  "outcome": outcome})
+
+
+def _broadcast(event: str, payload: dict) -> None:
+    try:
+        tools.broadcast(event, payload)
+    except Exception:
+        log.exception("Kumi couldn't tell Desktop about a script (%s)", event)
