@@ -296,4 +296,19 @@ impl Integration for FallbackIntegration {
     ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
         self.current().device_build(spec, sha256, file, signal).await
     }
+    fn has_preset_place(&self) -> bool {
+        self.current().has_preset_place()
+    }
+    async fn preset_preview(&self, bytes: &[u8], name: &str) -> Result<Result<PresetPreview, Vec<String>>, RuntimeError> {
+        self.current().preset_preview(bytes, name).await
+    }
+    async fn preset_place(
+        &self,
+        bytes: &[u8],
+        name: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<PlacedPreset, PresetRefusal>, RuntimeError> {
+        self.current().preset_place(bytes, name, file, signal).await
+    }
 }
