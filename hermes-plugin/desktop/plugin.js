@@ -2010,8 +2010,10 @@ function Rows({ view }) {
   return (
     // The card sits in the chat's markdown, whose prose styles reach any table in it: a 2em margin above and below,
     // a taller line, and a bright line under each row and the header. The table sets its own, so only its rows' quiet
-    // lines show.
-    /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, color: T.text, width: "100%", margin: 0 }, children: [
+    // lines show. In a narrow chat (the map docked beside it) the columns don't fit: the table scrolls sideways in its
+    // own region, focusable so the keyboard can scroll it, rather than spilling past the card, where the chat cut off
+    // the reference and the differences.
+    /* @__PURE__ */ jsx2("div", { "aria-label": t("measurements.tab"), className: FOCUSABLE, role: "region", style: { overflowX: "auto", maxWidth: "100%" }, tabIndex: 0, children: /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, color: T.text, width: "100%", margin: 0 }, children: [
       compared && /* @__PURE__ */ jsx2("thead", { style: { border: "none" }, children: /* @__PURE__ */ jsxs2("tr", { style: { color: T.muted, fontSize: 11, border: "none" }, children: [
         /* @__PURE__ */ jsx2("th", { style: { ...cell, textAlign: "left", fontWeight: 400 } }),
         /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.this") }),
@@ -2024,7 +2026,7 @@ function Rows({ view }) {
         compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: T.muted }, children: row2.reference ?? "—" }),
         compared && /* @__PURE__ */ jsx2("td", { style: { ...cell, color: row2.direction === 0 ? T.muted : T.text, fontWeight: 600 }, children: row2.delta ?? "—" })
       ] }, row2.label)) })
-    ] })
+    ] }) })
   );
 }
 function Overlay({ view }) {
