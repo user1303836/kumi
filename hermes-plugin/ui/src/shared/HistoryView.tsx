@@ -23,9 +23,9 @@ const STATE: Record<string, { mark: string; tone: 'bad' | 'good' | 'muted' | 'wa
 
 /** A row Kumi restarted since, so it can't undo it safely: `expired`, or an earlier runtime's `applied` row (no undo
  *  while a live runtime answers). A stale snapshot sets every row's undo false, so only a live one says so. A row
- *  with the runtime's own note keeps its note. */
+ *  with the runtime's own note keeps its note, and a script's has no undo from the start (Kumi never undoes one). */
 export function restartedSince(item: HistoryItem, live: boolean): boolean {
-  if (item.note) return false
+  if (item.note || item.family === 'script') return false
   return item.state === 'expired' || (live && item.state === 'applied' && item.undo_available === false)
 }
 
@@ -117,11 +117,13 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
 }
 
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
- *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. */
+ *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. `detail` adds
+ *  a surface's own part under a row's words (a script's code). */
 export function HistoryView({
   history,
   now,
   action,
+  detail,
   live = false,
   daw,
   target
@@ -129,6 +131,7 @@ export function HistoryView({
   history: History | null
   now?: number
   action?: (item: HistoryItem) => ReactNode
+  detail?: (item: HistoryItem) => ReactNode
   live?: boolean
   daw?: unknown
   target?: string
@@ -166,14 +169,18 @@ export function HistoryView({
                     .join(' ')}
                 </span>
               ) : (
-                // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
+                // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
+                // never undoes one, CC-19), or why a restart's can't.
                 item.note ? (
                   <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 400)}</span>
+                ) : item.family === 'script' ? (
+                  <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.scriptUndo', dawName(daw, t))}</span>
                 ) : (
                   restartedSince(item, live) && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.restartedSince', dawName(daw, t))}</span>
                 )
               )}
               {dawUndo && <DawUndo daw={daw} how={dawUndo} keys={undoKeys(target)} />}
+              {detail?.(item)}
             </span>
             {dawUndo ? null : action?.(item)}
           </li>
