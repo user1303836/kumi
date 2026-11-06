@@ -274,3 +274,23 @@ KUMI_GENERATE = _tool(
          "\"tool_call_id\"}} for a file another Hermes tool made in an approved folder.")},
      "quote_id": {"type": "string", "description": "create: the quote_id a quote returned."}},
     ("action",))
+
+# CC-19 r4/r8: one cap everywhere (the plugin's scripts.MOST_LINES/MOST_BYTES, serve's preview, Desktop's code route).
+SCRIPT_CHARACTERS = 32 * 1024
+
+KUMI_SCRIPT = _tool(
+    "kumi_script",
+    "Run a script in the DAW, for what no typed step can do: Python in Live, Lua in REAPER and Renoise. Prefer "
+    "kumi_change's typed steps whenever one fits (skill kumi:daw, Scripts). A script runs with the DAW's access to the "
+    "computer, and Kumi can't undo it (the DAW's own Undo may). The producer approves it first, reading its purpose and "
+    "code; in a chat that has read outside content (web pages, transcripts, other tools' results), every script is "
+    "asked and none runs while Hermes's approvals are off. At most 400 lines and 32 KB, with no hidden characters; "
+    "code that runs processes or reaches the network (os.execute, io.popen, subprocess, os.system, socket, urllib, "
+    "ctypes) is refused. Returns ran or failed with its output, unsure, or refused.",
+    {"language": {"type": "string", "enum": ["python", "lua"],
+                  "description": "python for Live, lua for REAPER and Renoise."},
+     "purpose": {"type": "string", "minLength": 1, "maxLength": 200,
+                 "description": "What the script does, in a short line the producer reads in the approval."},
+     "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS},
+     "expected_project_key": {"type": "string", "description": "The project key from kumi_observe."}},
+    ("language", "purpose", "code", "expected_project_key"))
