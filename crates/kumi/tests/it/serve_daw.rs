@@ -1161,20 +1161,22 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     wire.end().await;
 });
 
-/// Live as far as a plan needs it: a look that offers the plan tool and its `replace_sample` step. The plan tool records
-/// every plan it's given and Kumi's change record for it, as Live's would.
+/// Live as far as a sample plan needs it. The plan tool records each plan and one change for a batched pad load;
+/// the real step schemas keep the source resolver's input contract aligned with Live.
 struct PlanLive {
     on_connection: kumi_agent::core::contracts::ConnectionListener,
     on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
     given: Rc<std::cell::RefCell<Vec<Value>>>,
+    route: Option<&'static str>,
 }
 
 struct PlanTool {
     on_change: Option<Rc<dyn Fn(kumi_types::contracts::ChangeRecord)>>,
     given: Rc<std::cell::RefCell<Vec<Value>>>,
+    route: Option<&'static str>,
 }
 
-struct SampleStep;
+struct SampleStep(&'static str);
 
 #[async_trait(?Send)]
 impl kumi_types::contracts::KernelTool for PlanTool {
@@ -1186,18 +1188,19 @@ impl kumi_types::contracts::KernelTool for PlanTool {
     }
     fn input_schema(&self) -> JsonObject {
         let schema = json!({"type": "object", "required": ["steps"], "properties": {"steps": {"type": "array", "items": {
-            "type": "object", "properties": {"tool": {"type": "string", "enum": ["replace_sample", "wait"]}, "input": {"type": "object"}}
+            "type": "object", "properties": {"tool": {"type": "string", "enum": ["replace_sample", "load_sample", "load_sample_to_pad", "edit_rack", "wait"]}, "input": {"type": "object"}}
         }}}});
         schema.as_object().unwrap().clone()
     }
     async fn execute(&self, input: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
+        let count = input.get("steps").and_then(Value::as_array).map_or(0, Vec::len);
         self.given.borrow_mut().push(Value::Object(input));
         let n = self.given.borrow().len();
         if let Some(on_change) = &self.on_change {
             on_change(kumi_types::contracts::ChangeRecord {
                 id: format!("c{n}"),
                 family: kumi_types::contracts::ChangeFamily::Device,
-                title: "Simpler sample replaced".into(),
+                title: if count > 1 { "Samples placed on pads" } else { "Sample placed" }.into(),
                 track: None,
                 from: None,
                 to: None,
@@ -1213,23 +1216,33 @@ impl kumi_types::contracts::KernelTool for PlanTool {
                 batch: None,
             });
         }
-        Ok(kumi_types::contracts::ToolResult::text(json!({"done": [{"step": 1, "changed": true, "change": format!("c{n}")}]}).to_string()))
+        let done: Vec<Value> = (1..=count)
+            .map(|step| {
+                let mut done = json!({"step": step, "changed": true, "change": format!("c{n}")});
+                if let Some(route) = self.route {
+                    done["route"] = json!(route);
+                }
+                done
+            })
+            .collect();
+        Ok(kumi_types::contracts::ToolResult::text(json!({"done": done}).to_string()))
     }
 }
 
 #[async_trait(?Send)]
 impl kumi_types::contracts::KernelTool for SampleStep {
     fn name(&self) -> &str {
-        "replace_sample"
+        self.0
     }
     fn description(&self) -> &str {
-        "Swap the sample in a Simpler for another."
+        "Place a sample in Live."
     }
     fn input_schema(&self) -> JsonObject {
-        let schema = json!({"type": "object", "additionalProperties": false, "required": ["deviceRef", "sample"], "properties": {
-            "deviceRef": {"type": "string", "minLength": 1}, "sample": {"type": "string", "minLength": 1}
-        }});
-        schema.as_object().unwrap().clone()
+        kumi_daw_ableton::changes::CHANGES
+            .iter()
+            .find(|kind| kind.tool == self.0)
+            .and_then(|kind| kind.input_schema.clone())
+            .expect("the real sample step has a schema")
     }
     async fn execute(&self, _: JsonObject, _: Signal) -> Result<kumi_types::contracts::ToolResult, RuntimeError> {
         Ok(kumi_types::contracts::ToolResult::error("run through make_changes"))
@@ -1247,8 +1260,14 @@ impl kumi_agent::core::contracts::Integration for PlanLive {
         _: Signal,
         _: Option<kumi_agent::core::contracts::ObserveHints>,
     ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
-        let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone() };
-        let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![Rc::new(plan), Rc::new(SampleStep)];
+        let plan = PlanTool { on_change: self.on_change.clone(), given: self.given.clone(), route: self.route };
+        let tools: Vec<Rc<dyn kumi_types::contracts::KernelTool>> = vec![
+            Rc::new(plan),
+            Rc::new(SampleStep("replace_sample")),
+            Rc::new(SampleStep("load_sample")),
+            Rc::new(SampleStep("load_sample_to_pad")),
+            Rc::new(SampleStep("edit_rack")),
+        ];
         Ok(kumi_agent::core::contracts::Observation {
             native_epoch: None,
             key: "live:demo".into(),
@@ -1307,6 +1326,10 @@ struct ImportLab {
 
 impl ImportLab {
     fn new() -> ImportLab {
+        Self::with_route(None)
+    }
+
+    fn with_route(route: Option<&'static str>) -> ImportLab {
         let home = tempfile::tempdir().unwrap();
         let media = tempfile::tempdir().unwrap();
         let wav = |bytes: usize| {
@@ -1342,6 +1365,7 @@ impl ImportLab {
                     on_connection: options.on_connection.clone(),
                     on_change: options.on_change.clone(),
                     given: given.clone(),
+                    route,
                 }) as Rc<dyn kumi_agent::core::contracts::Integration>
             }))
         };
@@ -1529,6 +1553,168 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (history, _) = wire.call("history", json!({}), None).await;
     let shown = &history["items"][0];
     assert!(shown.get("tool_call_id").is_none() && shown["sources"][0].get("identity").is_none(), "{shown}");
+    wire.end().await;
+});
+
+case!(serve_loads_a_sample_or_empty_pad_only_from_the_exact_approved_copy, async {
+    for (tool, mut input) in
+        [("load_sample", json!({"trackRef": "7:track:0"})), ("load_sample_to_pad", json!({"deviceRef": "7:device:0:0", "note": 36}))]
+    {
+        let lab = ImportLab::new();
+        let mut wire = Wire::start(lab.ctx.clone()).await;
+        let (connected, refused) = wire.call("connect", json!({}), None).await;
+        assert!(!refused, "{connected}");
+        let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
+        let (key, epoch) = (seen["project_key"].clone(), seen["epoch"].as_u64().unwrap());
+        let original = std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap();
+        input["sample"] = json!({
+            "file": original.display().to_string(),
+            "provenance": {"host_tool": "elevenlabs_sound_effect", "tool_call_id": "made-kick"}
+        });
+        let asked = plan(&key, epoch, json!([{"tool": tool, "input": input}]));
+        let mut previewed = asked.clone();
+        previewed["preview"] = json!(true);
+        let (preview, _) = wire.call("change", previewed.clone(), Some("approve-old")).await;
+        assert_eq!(preview["state"], "preview", "{tool}: {preview}");
+        if tool == "load_sample_to_pad" {
+            assert_eq!(preview["undo"], "daw", "the host must not approve a pad load under an undoable key");
+            assert_eq!(preview["steps"][0]["undo"], "daw");
+            let key = if cfg!(target_os = "macos") { "Cmd+Z" } else { "Ctrl+Z" };
+            assert_eq!(
+                preview["undo_note"],
+                format!(
+                    "Kumi can't undo this change. Live's own Undo ({key}) takes it back, usually in two steps: \
+                    press it one step at a time, right away, and stop as soon as the pad is empty. \
+                    Kumi can't yet tell whether the pad was changed since. \
+                    Live's Redo won't bring the sample back: ask Kumi to load it again."
+                ),
+                "before the route is known, approval must not tell the producer to press Undo blindly"
+            );
+        } else {
+            assert!(preview.get("undo").is_none(), "a new Simpler still has Kumi's guarded undo");
+        }
+        assert!(lab.given.borrow().is_empty());
+
+        let replacement = tone_wav(80.0, 0.1);
+        std::fs::write(&original, &replacement).unwrap();
+        let (stale, _) = wire.call("change", asked.clone(), Some("approve-old")).await;
+        assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{tool}: {stale}");
+        assert!(lab.given.borrow().is_empty(), "a file changed after approval: nothing reached Live");
+
+        let (fresh, _) = wire.call("change", previewed, Some("approve-new")).await;
+        assert_eq!(fresh["state"], "preview", "{tool}: {fresh}");
+        let (placed, _) = wire.call("change", asked, Some("approve-new")).await;
+        assert_eq!(placed["state"], "applied", "{tool}: {placed}");
+        let retained = std::path::PathBuf::from(lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap());
+        let artifacts = daw_path(std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap());
+        assert!(retained.starts_with(artifacts), "{tool}: {}", retained.display());
+        assert_eq!(std::fs::read(&retained).unwrap(), replacement);
+        std::fs::remove_file(&original).unwrap();
+        assert_eq!(std::fs::read(&retained).unwrap(), replacement, "host cleanup cannot remove what Live was given");
+
+        let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
+        if tool == "load_sample_to_pad" {
+            assert!(!row.undo_available);
+            assert_eq!(row.reason.as_deref(), Some("daw_undo"));
+            assert_eq!(row.note.as_deref(), fresh["undo_note"].as_str(), "an unreported route stays uncounted in HISTORY");
+            let (preview, _) = wire.call("undo", json!({"history_id":row.id, "preview":true}), Some("pad-undo")).await;
+            assert_eq!(preview["reason"], "daw_undo", "{preview}");
+            assert_eq!(preview["undo_available"], false, "{preview}");
+            let (refused, _) = wire.call("undo", json!({"history_id":row.id}), Some("pad-undo")).await;
+            assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("daw_undo")), "{refused}");
+            assert_eq!(refused["reason"].as_str(), row.note.as_deref());
+            assert_eq!(lab.given.borrow().len(), 1, "no inverse may clear the pad");
+        }
+        let sources = row.sources.unwrap();
+        assert_eq!(sources.len(), 1, "{tool}: {sources:?}");
+        assert_eq!(
+            (&sources[0]["step"], &sources[0]["file"], &sources[0]["host_tool"]),
+            (&json!(1), &json!("Kick.wav"), &json!("elevenlabs_sound_effect"))
+        );
+        assert!(sources[0]["artifact_id"].as_str().is_some(), "{sources:?}");
+        wire.end().await;
+    }
+});
+
+case!(a_pad_history_note_counts_only_the_route_live_actually_reported, async {
+    for route in ["hotswap", "chain", "preset"] {
+        let lab = ImportLab::with_route(Some(route));
+        let mut wire = Wire::start(lab.ctx.clone()).await;
+        let (connected, refused) = wire.call("connect", json!({}), None).await;
+        assert!(!refused, "{connected}");
+        let (seen, _) = wire.call("observe", json!({"scope":"project"}), None).await;
+        let source = json!({
+            "file":std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap(),
+            "provenance":{"host_tool":"audio.make","tool_call_id":"kick"}
+        });
+        let asked = plan(
+            &seen["project_key"],
+            seen["epoch"].as_u64().unwrap(),
+            json!([{
+                "tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0","note":36,"sample":source}
+            }]),
+        );
+        let mut previewed = asked.clone();
+        previewed["preview"] = json!(true);
+        let (preview, _) = wire.call("change", previewed, Some("pad-route")).await;
+        assert_eq!(preview["state"], "preview", "{preview}");
+        assert!(preview["undo_note"].as_str().unwrap().contains("stop as soon as the pad is empty"));
+        assert!(!preview["undo_note"].as_str().unwrap().contains("twice"));
+        let (placed, _) = wire.call("change", asked, Some("pad-route")).await;
+        assert_eq!(placed["state"], "applied", "{placed}");
+        let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
+        assert_eq!(row.daw_undo_by, Some(json!({"route":route})));
+        if route == "hotswap" {
+            let key = if cfg!(target_os = "macos") { "Cmd+Z" } else { "Ctrl+Z" };
+            assert_eq!(
+                row.note,
+                Some(format!(
+                    "Kumi can't undo this change. Live's own Undo ({key}) takes it back in 2 steps while they're Live's latest: \
+                 press {key} twice, right away. Kumi can't yet tell whether the pad was changed since. \
+                 Live's Redo won't bring the sample back: ask Kumi to load it again."
+                ))
+            );
+        } else {
+            assert_eq!(row.note.as_deref(), preview["undo_note"].as_str(), "untraced routes must not give a blind count");
+        }
+        let (refused, _) = wire.call("undo", json!({"history_id":row.id}), Some("pad-route-undo")).await;
+        assert_eq!(refused["code"], "daw_undo", "{refused}");
+        assert_eq!(refused["reason"].as_str(), row.note.as_deref());
+        assert_eq!(lab.given.borrow().len(), 1, "Kumi must never clear any of these pads");
+        wire.end().await;
+    }
+});
+
+case!(serve_allows_only_one_pad_per_change_before_retaining_any_source, async {
+    let lab = ImportLab::new();
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope":"project"}), None).await;
+    let sample = json!({
+        "file": std::fs::canonicalize(lab.media.path().join("Kick.wav")).unwrap(),
+        "provenance":{"host_tool":"audio.make", "tool_call_id":"kick"}
+    });
+    let pad = json!({"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":36, "sample":sample}});
+    let other = json!({"tool":"load_sample", "input":{"trackRef":"7:track:1", "sample":sample}});
+    let second_pad = json!({"tool":"load_sample_to_pad", "input":{"deviceRef":"7:device:0:0", "note":38, "sample":sample}});
+    let chain = json!({"tool":"edit_rack", "input":{"rackRef":"7:device:0:0", "action":"add-chain"}});
+    let artifacts = lab.ctx.paths().state_dir.join("artifacts");
+    let kept_before = std::fs::read_dir(&artifacts).unwrap().count();
+    for (n, steps) in [json!([pad, other]), json!([other, pad]), json!([pad, second_pad]), json!([pad, chain]), json!([chain, pad])]
+        .into_iter()
+        .enumerate()
+    {
+        let asked = plan(&seen["project_key"], seen["epoch"].as_u64().unwrap(), steps);
+        for preview in [true, false] {
+            let mut asked = asked.clone();
+            asked["preview"] = json!(preview);
+            let (reply, _) = wire.call("change", asked, Some(&format!("isolated-{n}-{preview}"))).await;
+            assert_eq!((reply["state"].clone(), reply["code"].clone()), (json!("refused"), json!("not_allowed")), "{reply}");
+        }
+    }
+    assert!(lab.given.borrow().is_empty(), "neither a second pad nor another kind of step may run beside a pad load");
+    assert_eq!(std::fs::read_dir(&artifacts).unwrap().count(), kept_before, "a refused plan must retain no source");
     wire.end().await;
 });
 

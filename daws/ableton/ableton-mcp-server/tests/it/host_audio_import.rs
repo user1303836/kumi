@@ -1,4 +1,6 @@
 //! Replay full source-host file/transaction workflows against real native file staging.
+#[path = "../support/kept_sent_files.rs"]
+mod kept_sent_files;
 use ableton_mcp_server::{
     host::{helpers::canonical_mutation_identity, McpHost, McpHostOptions},
     live::*,
@@ -230,6 +232,7 @@ async fn source_audio_import_workflows_preserve_file_and_transaction_authority()
                     .unwrap(),
                 );
                 let mut tx = None::<String>;
+                let mut kept = kept_sent_files::Kept::default();
                 for (index, step) in case["steps"].as_array().unwrap().iter().enumerate() {
                     let at = format!("{label} step {index}");
                     *adapter.label.borrow_mut() = at.clone();
@@ -245,7 +248,13 @@ async fn source_audio_import_workflows_preserve_file_and_transaction_authority()
                                 fs::write(&path, b"tampered bytes").unwrap()
                             }
                             "staged-remove" => fs::remove_file(path).unwrap(),
-                            "staged-asd" => fs::write(format!("{path}.asd"), b"analysis").unwrap(),
+                            "staged-asd" => {
+                                let asd = format!("{path}.asd");
+                                fs::write(&asd, b"analysis").unwrap();
+                                let name = Path::new(&asd).file_name().unwrap().to_string_lossy().into_owned();
+                                let sha256 = hex::encode(Sha256::digest(b"analysis"));
+                                kept.beside(json!({"name":name,"size":8,"sha256":sha256,"mode":mode(Path::new(&asd))}));
+                            }
                             "expire" | "expire-sweep" => record.borrow_mut()["expiresAt"] = json!(0),
                             _ => panic!("unknown change"),
                         }
@@ -282,7 +291,7 @@ async fn source_audio_import_workflows_preserve_file_and_transaction_authority()
                     let record = tx.as_ref().and_then(|tx| host.transaction_record(tx)).map(|t| t.borrow().clone()).unwrap_or(Value::Null);
                     same(&clean(record, &root_text), &step["record"], &format!("{at} record"));
                     assert!(adapter.calls.borrow().is_empty(), "{at}: {} remaining adapter calls", adapter.calls.borrow().len());
-                    let expected_files = step["files"].clone();
+                    let expected_files = kept.files(&step["files"], &step["record"]["state"]);
                     #[cfg(windows)]
                     let expected_files = {
                         let mut files = expected_files;

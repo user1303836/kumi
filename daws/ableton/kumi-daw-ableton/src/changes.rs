@@ -3,6 +3,7 @@ mod more_summaries;
 pub(crate) mod pictures;
 mod summaries;
 use async_trait::async_trait;
+use kumi_agent::core::context::HostPolicy;
 use kumi_common::js::{
     json::stringify,
     number,
@@ -16,6 +17,10 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, sync::LazyLock};
 pub type KnownTrack = TrackChip;
 pub use kumi_agent::integrations::shared::changes::ChangeSummary;
+pub const PAD_UNDO_REASON: &str = "Kumi can't yet tell whether the pad was changed since. \
+    Live's Redo won't bring the sample back: ask Kumi to load it again.";
+pub const PAD_UNDO_UNCOUNTED: &str = "Kumi can't undo this change. Live's own Undo ({key}) takes it back, usually in two steps: \
+    press it one step at a time, right away, and stop as soon as the pad is empty.";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SampleFile {
     pub path: String,
@@ -838,6 +843,19 @@ impl ChangeKind {
             _ => return None,
         };
         reference.map(|reference| Produced { reference: reference.into(), kind: kind.into() })
+    }
+    /// A host requiring guarded undo keeps pad loads: their inverse cannot guard edits inside the chain (#1110).
+    /// Standalone keeps its existing inverse; the plugin uses Live's own Undo instead.
+    pub fn kept_for_live(&self, policy: &HostPolicy) -> Option<String> {
+        if !policy.guards_undo || !matches!(self.tool.as_str(), "load_sample_to_pad" | "load_samples_to_pads") {
+            return None;
+        }
+        use kumi_daw::plugin::daw_undo_said;
+        // The plan records the route and can count a traced hot-swap afterwards. Never assume that route here.
+        let mut note = daw_undo_said(PAD_UNDO_UNCOUNTED, "Live", std::env::consts::OS);
+        note.push(' ');
+        note.push_str(PAD_UNDO_REASON);
+        Some(note)
     }
     pub fn permanent(&self, input: &JsonObject) -> Option<String> {
         let action = input.get("action").and_then(Value::as_str);

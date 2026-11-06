@@ -218,7 +218,14 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
-        let (allowed, daw_undo) = allowed_step(provider, &offered, n + 1, tool, &input)?;
+        let at = n + 1;
+        let (allowed, daw_undo) = allowed_step(provider, &offered, at, tool, &input)?;
+        if allowed.alone && steps.len() != 1 {
+            return Err(refused(
+                "not_allowed",
+                format!("Step {at} ({tool}) must be the only step in this change. Ask for it in a separate change."),
+            ));
+        }
         match allowed.file_field {
             Some(field) if input.get(field).is_some() => checked.files.push((n, field)),
             _ => step_takes(ctx, n, tool, &input)?,
@@ -323,6 +330,31 @@ async fn placed(
     Ok((sources, named))
 }
 
+/// A native row may cover several batched steps. Keep every source those steps placed; an unmatched row keeps them all.
+fn record_sources(history: &History, rows: &[Row], done: &Value, sources: &[Value], snapshots: &super::snapshots::Snapshots) {
+    let mut steps_of: HashMap<&str, [bool; MOST_STEPS + 1]> = HashMap::new();
+    for done in done.as_array().into_iter().flatten() {
+        let (Some(change), Some(step)) = (done.get("change").and_then(Value::as_str), done.get("step").and_then(Value::as_u64)) else {
+            continue;
+        };
+        let placed = steps_of.entry(change).or_insert([false; MOST_STEPS + 1]);
+        if (1..=MOST_STEPS as u64).contains(&step) {
+            placed[step as usize] = true;
+        }
+    }
+    for row in rows {
+        let own: Vec<Value> = match steps_of.get(row.label.as_str()) {
+            Some(steps) => sources
+                .iter()
+                .filter(|source| source["step"].as_u64().is_some_and(|step| step <= MOST_STEPS as u64 && steps[step as usize]))
+                .cloned()
+                .collect(),
+            None => sources.to_vec(),
+        };
+        history.placed(std::slice::from_ref(&row.id), &own, snapshots);
+    }
+}
+
 async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let args = &call.args;
     let title = args.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -416,25 +448,16 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
     connection::names_only_said(&mut outcome.steps);
     outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
-    // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
-    // them all.
-    let steps_of: HashMap<String, u64> = outcome.steps["done"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|done| Some((done.get("change")?.as_str()?.to_string(), done.get("step")?.as_u64()?)))
-        .collect();
-    let done_of = |step: u64| outcome.steps["done"].as_array().into_iter().flatten().find(|done| done["step"].as_u64() == Some(step));
-    for row in &rows {
-        let own: Vec<Value> = match steps_of.get(&row.label) {
-            Some(step) => sources.iter().filter(|source| source["step"].as_u64() == Some(*step)).cloned().collect(),
-            None => sources.clone(),
+    record_sources(history, &rows, &outcome.steps["done"], &sources, ctx.snapshots());
+    // A row of a change only the DAW's own Undo takes back keeps what decided its count (a pad's route).
+    for done in outcome.steps["done"].as_array().into_iter().flatten() {
+        let (Some(change), Some(step)) = (done.get("change").and_then(Value::as_str), done.get("step").and_then(Value::as_u64)) else {
+            continue;
         };
-        history.placed(std::slice::from_ref(&row.id), &own, ctx.snapshots());
-        // A row of a change only the DAW's own Undo takes back keeps what decided its count (a pad's route).
-        let by = steps_of.get(&row.label).and_then(|step| checked.undo_by(*step, done_of(*step)?));
-        if let Some(by) = by.filter(|_| row.reason.as_deref() == Some(DAW_UNDO)) {
-            history.daw_undo_by(&row.id, by, ctx.snapshots());
+        if let Some(by) = checked.undo_by(step, done) {
+            if let Some(row) = rows.iter().find(|row| row.label == change && row.reason.as_deref() == Some(DAW_UNDO)) {
+                history.daw_undo_by(&row.id, by, ctx.snapshots());
+            }
         }
     }
     let mut ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
@@ -1170,6 +1193,34 @@ mod tests {
             sources: None,
             script: None,
         }
+    }
+
+    #[test]
+    fn every_source_of_a_twelve_pad_batch_stays_with_its_own_history_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        super::super::ctx::make_private_dir(&state).unwrap();
+        let rows = [
+            row("kept"),
+            Row { id: "h-g-c2".into(), label: "c2".into(), ..row("applied") },
+            Row { id: "h-g-audit".into(), label: "audit".into(), ..row("unsure") },
+        ];
+        std::fs::write(state.join("history.json"), serde_json::to_vec(&json!({"items": &rows})).unwrap()).unwrap();
+        let history = History::new(&state, "g".into());
+        let snapshots = super::super::snapshots::Snapshots::new(state.clone());
+        let sources: Vec<Value> =
+            (1..=13).map(|step| json!({"step":step, "file":format!("Pad {}.wav", step + 35), "artifact_id":format!("a-{step}")})).collect();
+        let done: Vec<Value> = (1..=13).map(|step| json!({"step":step, "change":if step <= 12 { "c1" } else { "c2" }})).collect();
+        record_sources(&history, &rows, &json!(done), &sources, &snapshots);
+        snapshots.flush();
+        let saved = History::new(&state, "next".into());
+        assert_eq!(saved.row("h-g-c1").unwrap().sources.as_deref(), Some(&sources[..12]), "no pad's source is overwritten by a later pad");
+        assert_eq!(saved.row("h-g-c2").unwrap().sources.as_deref(), Some(&sources[12..]), "another change keeps only its own source");
+        assert_eq!(
+            saved.row("h-g-audit").unwrap().sources.as_deref(),
+            Some(sources.as_slice()),
+            "an unsure row keeps every possible source"
+        );
     }
 
     fn said(text: Value, is_error: bool) -> Result<ToolResult, kumi_types::errors::RuntimeError> {
