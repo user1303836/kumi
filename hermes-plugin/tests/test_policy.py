@@ -73,6 +73,29 @@ class Approvals(unittest.TestCase):
             self.assertIsNone(self.hook("kumi_connect", {}), "a one-shot query still connects")
             self.assertIsNone(self.hook("kumi_observe", {"scope": "focus"}), "and reads")
 
+    def test_a_turn_hermes_forks_in_the_background_only_reads(self):
+        """Hermes's background review forks the chat after a turn (same session id, a turn of its own that never goes
+        through pre_llm_call), and its tool whitelist doesn't reach the tool's thread (v0.22.7): in the lab it ran a
+        script under the chat's "this session" approval. Kumi refuses its every call but a read."""
+        policy.turn_started(self.host, session_id="s1", turn_id="u1")
+        self.assertEqual(self.hook("kumi_change", change())["action"], "approve", "the producer's own turn is asked")
+        forked = {"session_id": "s1", "tool_call_id": "c2", "task_id": "t2", "turn_id": "s1:t2:9f3a1c2e"}
+        track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
+        for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}), ("kumi_listen", track),
+                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}), ("kumi_setup", {})):
+            with self.subTest(tool=tool):
+                self.assertEqual(policy.pre_tool_call(self.host, tool_name=tool, args=args, **forked),
+                                 {"action": "block", "message": policy.FORKED})
+        self.assertIsNone(policy.pre_tool_call(self.host, tool_name="kumi_observe", args={"scope": "focus"}, **forked))
+        policy.turn_started(self.host, session_id="s1", turn_id="u2")  # the producer's next turn
+        self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id="s1",
+                                              tool_call_id="c3", turn_id="u2")["action"], "approve")
+        for unnamed in ({"turn_id": ""}, {}):  # a Hermes that stopped naming turns must not reopen the bypass (rgzm)
+            with self.subTest(turn=unnamed):
+                self.assertEqual(policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(),
+                                                      session_id="s1", tool_call_id="c4", **unnamed),
+                                 {"action": "block", "message": policy.FORKED})
+
     def test_an_api_call_or_a_webhook_never_runs_what_needs_an_approval_and_desktop_still_asks(self):
         for surface in ("api_server", "webhook", "msgraph_webhook"):  # Hermes's ctx.session_surface()
             with self.subTest(surface=surface):

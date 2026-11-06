@@ -32,6 +32,9 @@ DAW_BRIDGES = {daw["id"]: daw for daw in tomllib.loads((ROOT / "scripts/daws.tom
 # The bridges with versions of their own, which the manifests name by the DAW's id: every one but a program, which
 # takes Kumi's.
 VERSIONED_BRIDGES = {daw_id: daw for daw_id, daw in DAW_BRIDGES.items() if "program" not in daw}
+# kumi-daw/1's contract: an extension built from it carries the words KEEPS_IDENTITY_ONLY_WHEN_ASKED says, which Kumi's
+# setup reads in the library (CC-8) to say it keeps a project's id only while a connection asks.
+CONTRACT = "daws/own/daw-bridge/src/contract.rs"
 # daw-mcp-server is Kumi's host for the other DAWs: Kumi starts it from beside its own binary, and it starts a DAW's
 # program (SoundCraft's soundcraft-kumi) from beside its own.
 # The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`),
@@ -552,11 +555,18 @@ def extension_archs(target: str) -> list[str]:
     arch = {"aarch64": "arm64", "x86_64": "x86_64"}
     return sorted(arch[build.split("-")[0]] for build in extension_builds(target))
 
+def identity_mark() -> str:
+    """The words kumi-daw/1's contract has an extension carry (KEEPS_IDENTITY_ONLY_WHEN_ASKED), read from its source."""
+    found = re.search(r'pub const KEEPS_IDENTITY_ONLY_WHEN_ASKED: &str = "([^"]+)";', (ROOT / CONTRACT).read_text(encoding="utf-8"))
+    if found is None:
+        raise ValueError(f"{CONTRACT} has no KEEPS_IDENTITY_ONLY_WHEN_ASKED")
+    return found[1]
+
 def check_extension(daw: dict, path: Path, target: str, archs: list[str] | None = None) -> dict:
     """The extension as the target's DAW loads it: the architectures the bundle promises (`archs`, else the target's
     builds), each exporting the DAW's entry point; on macOS signed (Apple silicon runs no unsigned code) and named for
     itself, not for the build folder; on Windows with the C runtime linked in; on Linux needing no newer glibc than Kumi
-    does."""
+    does. One built from kumi-daw/1's contract carries the identity mark Kumi's setup reads in it."""
     system = system_of(target)
     entry = daw["library"]["entry"]
     slices = binary_facts(path)
@@ -577,6 +587,11 @@ def check_extension(daw: dict, path: Path, target: str, archs: list[str] | None 
         if system == "linux" and (piece.get("glibc") or ()) > GLIBC_MOST:
             raise ValueError(f"{where} needs glibc {'.'.join(map(str, piece['glibc']))}, newer than Kumi's "
                              f"{'.'.join(map(str, GLIBC_MOST))}: build it on the bundle's Ubuntu 22.04 runner")
+    # A build that lost the mark would have setup say the extension keeps a project's id.
+    if CONTRACT in daw.get("loads", ()):
+        mark = identity_mark()
+        if mark.encode() not in path.read_bytes():
+            raise ValueError(f"{path.name} doesn't carry {mark!r}: setup would say {daw['name']}'s extension keeps a project's id")
     return {"archs": found, "sha256": digest(path)}
 
 def extension_of(path: Path) -> dict:

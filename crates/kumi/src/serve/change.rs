@@ -107,24 +107,34 @@ fn refusal(error: OpError) -> Value {
 }
 
 /// A plan's steps as checked: each one's HISTORY family, its file field when it places a file (CC-11), whether it's a
-/// change only the DAW's own Undo takes back (CC-20), and the reasons such steps give, with the DAW's name to say them.
+/// change only the DAW's own Undo takes back (CC-20), how the DAW's Undo holds those (by their step number), and the
+/// reasons such steps give, with the DAW's name to say them.
 struct Checked {
     families: Vec<&'static str>,
     files: Vec<(usize, &'static str)>,
     daw_undo: Vec<bool>,
+    undo_steps: Vec<(u64, kumi_daw::plugin::DawUndoCount)>,
     because: Vec<&'static str>,
+    uncounted: Option<&'static str>,
     app: &'static str,
 }
 
 impl Checked {
     /// What Kumi says of the change when a step of it is one only the DAW's own Undo takes back, on the system `os`
-    /// names: CC-20's words, then each reason such steps give, once (twelve pad loads give theirs once).
-    fn undo_note(&self, os: &str) -> Option<String> {
-        use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
+    /// names: CC-20's words with how many presses of the DAW's Undo take it back (or, while that isn't known, a step's
+    /// own words for it when it has them), then each reason such steps give, once (twelve pad loads give theirs once).
+    /// `ran` is what the plan answered once it ran (None for a preview); see [`Checked::presses`].
+    fn undo_note(&self, os: &str, ran: Option<Option<&Value>>) -> Option<String> {
+        use kumi_daw::plugin::{daw_undo_note, daw_undo_said};
         if !self.daw_undo.contains(&true) {
             return None;
         }
-        let mut said = vec![daw_undo_said(DAW_UNDO_NOTE, self.app, os)];
+        let presses = self.presses(ran);
+        let first = match (presses, self.uncounted) {
+            (None, Some(words)) => daw_undo_said(words, self.app, os),
+            _ => daw_undo_note(presses, self.app, os),
+        };
+        let mut said = vec![first];
         for why in &self.because {
             let why = daw_undo_said(why, self.app, os);
             if !said.contains(&why) {
@@ -151,6 +161,41 @@ impl Checked {
             ),
         ))
     }
+
+    /// What decided step `step`'s count, from its done entry, when a field of it does: `{"route": "hotswap"}`.
+    fn undo_by(&self, step: u64, done: &Value) -> Option<Value> {
+        let field = self.undo_steps.iter().find(|(n, _)| *n == step)?.1.field()?;
+        let said = done.get(field)?.clone();
+        Some(json!({ field: said }))
+    }
+
+    /// How many presses of the DAW's Undo take the change back, when that's known. Before it runs (`ran` None), as its
+    /// steps say, if they all can (a pad's route isn't known yet). Once it ran, from what the plan reports it did, and
+    /// only when it did every step: after a run that stopped part way (`ran` holding no answer to read, or one that
+    /// stopped, refused or held a step back), a number would have the producer undo their own work too.
+    fn presses(&self, ran: Option<Option<&Value>>) -> Option<u32> {
+        let step = |entry: &Value| entry.get("step").and_then(Value::as_u64);
+        let steps: Vec<_> = match ran {
+            None => self.undo_steps.iter().map(|(_, count)| count.steps(None)).collect::<Option<_>>()?,
+            Some(answer) => {
+                let answer = answer?;
+                let list = |name: &str| answer.get(name).and_then(Value::as_array);
+                let done = list("done")?;
+                let whole = answer.get("stopped").is_none_or(Value::is_null)
+                    && list("refused").is_none_or(Vec::is_empty)
+                    && list("heldBack").is_none_or(Vec::is_empty)
+                    && (1..=self.daw_undo.len() as u64).all(|n| done.iter().any(|entry| step(entry) == Some(n)));
+                if !whole {
+                    return None;
+                }
+                self.undo_steps
+                    .iter()
+                    .map(|(n, count)| count.steps(done.iter().find(|entry| step(entry) == Some(*n))))
+                    .collect::<Option<_>>()?
+            }
+        };
+        Some(kumi_daw::plugin::daw_undo_presses(steps))
+    }
 }
 
 /// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for (unless the step is
@@ -161,12 +206,26 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
         return Err(refused("unsupported", "This runtime's DAW isn't one this build integrates."));
     };
     let offered = offered_steps(&plan.input_schema());
-    let mut checked =
-        Checked { families: Vec::new(), files: Vec::new(), daw_undo: Vec::new(), because: Vec::new(), app: provider.profile().words.app };
+    let mut checked = Checked {
+        families: Vec::new(),
+        files: Vec::new(),
+        daw_undo: Vec::new(),
+        undo_steps: Vec::new(),
+        because: Vec::new(),
+        uncounted: None,
+        app: provider.profile().words.app,
+    };
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
-        let (allowed, daw_undo) = allowed_step(provider, &offered, n + 1, tool, &input)?;
+        let at = n + 1;
+        let (allowed, daw_undo) = allowed_step(provider, &offered, at, tool, &input)?;
+        if allowed.alone && steps.len() != 1 {
+            return Err(refused(
+                "not_allowed",
+                format!("Step {at} ({tool}) must be the only step in this change. Ask for it in a separate change."),
+            ));
+        }
         match allowed.file_field {
             Some(field) if input.get(field).is_some() => checked.files.push((n, field)),
             _ => step_takes(ctx, n, tool, &input)?,
@@ -174,7 +233,9 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
         checked.families.push(allowed.family);
         checked.daw_undo.push(daw_undo);
         if daw_undo {
+            checked.undo_steps.push(((n + 1) as u64, allowed.daw_undo_steps));
             checked.because.extend(allowed.daw_undo_because);
+            checked.uncounted = checked.uncounted.or(allowed.daw_undo_uncounted);
         }
     }
     checked.alone(steps)?;
@@ -269,6 +330,31 @@ async fn placed(
     Ok((sources, named))
 }
 
+/// A native row may cover several batched steps. Keep every source those steps placed; an unmatched row keeps them all.
+fn record_sources(history: &History, rows: &[Row], done: &Value, sources: &[Value], snapshots: &super::snapshots::Snapshots) {
+    let mut steps_of: HashMap<&str, [bool; MOST_STEPS + 1]> = HashMap::new();
+    for done in done.as_array().into_iter().flatten() {
+        let (Some(change), Some(step)) = (done.get("change").and_then(Value::as_str), done.get("step").and_then(Value::as_u64)) else {
+            continue;
+        };
+        let placed = steps_of.entry(change).or_insert([false; MOST_STEPS + 1]);
+        if (1..=MOST_STEPS as u64).contains(&step) {
+            placed[step as usize] = true;
+        }
+    }
+    for row in rows {
+        let own: Vec<Value> = match steps_of.get(row.label.as_str()) {
+            Some(steps) => sources
+                .iter()
+                .filter(|source| source["step"].as_u64().is_some_and(|step| step <= MOST_STEPS as u64 && steps[step as usize]))
+                .cloned()
+                .collect(),
+            None => sources.to_vec(),
+        };
+        history.placed(std::slice::from_ref(&row.id), &own, snapshots);
+    }
+}
+
 async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let args = &call.args;
     let title = args.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -335,7 +421,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             "steps": preview_steps(&names, &steps, &checked),
         });
         // A change holding a step only the DAW's own Undo takes back is one Kumi undoes nothing of (CC-20).
-        if let Some(note) = checked.undo_note(std::env::consts::OS) {
+        if let Some(note) = checked.undo_note(std::env::consts::OS, None) {
             preview["undo"] = json!("daw");
             preview["undo_note"] = json!(note);
         }
@@ -346,30 +432,33 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let input: Map<String, Value> = [("steps".to_string(), Value::Array(steps))].into_iter().collect();
     let history = ctx.history();
     history.begin_call();
-    // Every row of a change holding a step only the DAW's own Undo takes back says so, however the call ends (CC-20).
-    if let Some(note) = checked.undo_note(std::env::consts::OS) {
+    // Every row of a change holding a step only the DAW's own Undo takes back says so, however the call ends (CC-20):
+    // with no count until the plan says what it did, then with the count of that, when it did it all.
+    let os = std::env::consts::OS;
+    if let Some(note) = checked.undo_note(os, Some(None)) {
         history.daw_undo_call(note);
     }
     let ran = plan.execute(input, call.signal.clone()).await;
+    let answer = ran.as_ref().ok().and_then(|result| serde_json::from_str::<Value>(&result.text).ok());
+    if let Some(note) = checked.undo_note(os, Some(answer.as_ref())) {
+        history.daw_undo_call(note);
+    }
     let rows = history.end_call(identity, ctx.snapshots());
     let mut outcome = outcome(ran, &rows);
     // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
     connection::names_only_said(&mut outcome.steps);
     outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
-    // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
-    // them all.
-    let steps_of: HashMap<String, u64> = outcome.steps["done"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|done| Some((done.get("change")?.as_str()?.to_string(), done.get("step")?.as_u64()?)))
-        .collect();
-    for row in &rows {
-        let own: Vec<Value> = match steps_of.get(&row.label) {
-            Some(step) => sources.iter().filter(|source| source["step"].as_u64() == Some(*step)).cloned().collect(),
-            None => sources.clone(),
+    record_sources(history, &rows, &outcome.steps["done"], &sources, ctx.snapshots());
+    // A row of a change only the DAW's own Undo takes back keeps what decided its count (a pad's route).
+    for done in outcome.steps["done"].as_array().into_iter().flatten() {
+        let (Some(change), Some(step)) = (done.get("change").and_then(Value::as_str), done.get("step").and_then(Value::as_u64)) else {
+            continue;
         };
-        history.placed(std::slice::from_ref(&row.id), &own, ctx.snapshots());
+        if let Some(by) = checked.undo_by(step, done) {
+            if let Some(row) = rows.iter().find(|row| row.label == change && row.reason.as_deref() == Some(DAW_UNDO)) {
+                history.daw_undo_by(&row.id, by, ctx.snapshots());
+            }
+        }
     }
     let mut ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
     if outcome.state == "unsure" {
@@ -1066,7 +1155,7 @@ fn on_track(words: &str, track: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
+    use kumi_daw::plugin::{daw_undo_note, DawUndoCount, DawUndoSteps};
     use kumi_types::contracts::ToolResult;
 
     /// An undo's words say the track once: not again when the change's title names it, and not for a name that's only
@@ -1100,9 +1189,38 @@ mod tests {
             digest: None,
             call_outcome: None,
             change_id: None,
+            daw_undo_by: None,
             sources: None,
             script: None,
         }
+    }
+
+    #[test]
+    fn every_source_of_a_twelve_pad_batch_stays_with_its_own_history_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        super::super::ctx::make_private_dir(&state).unwrap();
+        let rows = [
+            row("kept"),
+            Row { id: "h-g-c2".into(), label: "c2".into(), ..row("applied") },
+            Row { id: "h-g-audit".into(), label: "audit".into(), ..row("unsure") },
+        ];
+        std::fs::write(state.join("history.json"), serde_json::to_vec(&json!({"items": &rows})).unwrap()).unwrap();
+        let history = History::new(&state, "g".into());
+        let snapshots = super::super::snapshots::Snapshots::new(state.clone());
+        let sources: Vec<Value> =
+            (1..=13).map(|step| json!({"step":step, "file":format!("Pad {}.wav", step + 35), "artifact_id":format!("a-{step}")})).collect();
+        let done: Vec<Value> = (1..=13).map(|step| json!({"step":step, "change":if step <= 12 { "c1" } else { "c2" }})).collect();
+        record_sources(&history, &rows, &json!(done), &sources, &snapshots);
+        snapshots.flush();
+        let saved = History::new(&state, "next".into());
+        assert_eq!(saved.row("h-g-c1").unwrap().sources.as_deref(), Some(&sources[..12]), "no pad's source is overwritten by a later pad");
+        assert_eq!(saved.row("h-g-c2").unwrap().sources.as_deref(), Some(&sources[12..]), "another change keeps only its own source");
+        assert_eq!(
+            saved.row("h-g-audit").unwrap().sources.as_deref(),
+            Some(sources.as_slice()),
+            "an unsure row keeps every possible source"
+        );
     }
 
     fn said(text: Value, is_error: bool) -> Result<ToolResult, kumi_types::errors::RuntimeError> {
@@ -1220,18 +1338,65 @@ mod tests {
             json!({"tool": "set_mixer", "input": {"trackRef": "7:track:1", "volume": 0.5}}),
             json!({"tool": "edit_rack", "input": {"rackRef": "7:device:1", "action": "add-chain"}}),
         ];
-        let checked =
-            Checked { families: vec!["mixer", "device"], files: Vec::new(), daw_undo: vec![false, true], because: Vec::new(), app: "Live" };
+        let checked = Checked {
+            families: vec!["mixer", "device"],
+            files: Vec::new(),
+            daw_undo: vec![false, true],
+            undo_steps: vec![(2, DawUndoCount::Fixed(DawUndoSteps::PLAN))],
+            because: Vec::new(),
+            uncounted: None,
+            app: "Live",
+        };
         let lines = preview_steps(&HashMap::new(), &steps, &checked);
         assert_eq!(lines.iter().map(|line| line.get("undo").cloned()).collect::<Vec<_>>(), [None, Some(json!("daw"))]);
         // The key the note names is the one on the machine Kumi runs on.
-        let note = daw_undo_said(DAW_UNDO_NOTE, "Live", "macos");
-        assert_eq!(checked.undo_note("macos"), Some(note.clone()));
-        assert!(checked.undo_note("windows").unwrap().contains("Live's own Undo (Ctrl+Z)"));
+        let note = daw_undo_note(Some(1), "Live", "macos");
+        assert_eq!(checked.undo_note("macos", None), Some(note.clone()));
+        assert!(checked.undo_note("windows", None).unwrap().contains("Live's own Undo (Ctrl+Z)"));
         // CC-20's words come first, then each reason the marked steps give, once.
-        let pads = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
-        assert_eq!(pads.undo_note("macos"), Some(format!("{note} Kumi can't tell.")));
-        assert_eq!(Checked { daw_undo: vec![false, false], ..pads }.undo_note("macos"), None, "no marked step, no note");
+        let reasons = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
+        assert_eq!(reasons.undo_note("macos", None), Some(format!("{note} Kumi can't tell.")));
+        assert_eq!(Checked { daw_undo: vec![false, false], ..reasons }.undo_note("macos", None), None, "no marked step, no note");
+    }
+
+    #[test]
+    fn the_count_of_presses_is_what_the_plan_did_and_none_after_a_run_that_stopped() {
+        let pad = DawUndoSteps { in_plan: true, own: 1 };
+        const BY_ROUTE: DawUndoCount =
+            DawUndoCount::By("route", &[("hotswap", DawUndoSteps { in_plan: true, own: 1 }), ("chain", DawUndoSteps::PLAN)]);
+        let pads = |undo_steps: Vec<(u64, DawUndoCount)>| Checked {
+            families: vec!["device"; undo_steps.len()],
+            files: Vec::new(),
+            daw_undo: vec![true; undo_steps.len()],
+            undo_steps,
+            because: Vec::new(),
+            uncounted: None,
+            app: "Live",
+        };
+        let fixed = pads(vec![(1, DawUndoCount::Fixed(pad)), (2, DawUndoCount::Fixed(pad))]);
+        let done = |routes: &[&str]| json!({"done": routes.iter().enumerate().map(|(n, route)| json!({"step": n + 1, "route": route})).collect::<Vec<_>>()});
+        // Before it runs, as the steps say; once it ran all of it, the same; two pads are three presses.
+        assert_eq!((fixed.presses(None), fixed.presses(Some(Some(&done(&["hotswap", "hotswap"]))))), (Some(3), Some(3)));
+        // A run that stopped, refused or held a step back, or gave no answer to read, says no number.
+        let stopped = json!({"done": [{"step": 1}], "stopped": {"step": 2, "error": "Live didn't answer"}});
+        let refused = json!({"done": [{"step": 1}], "refused": [{"step": 2, "error": "no such pad"}]});
+        for ran in [Some(&stopped), Some(&refused), Some(&json!({"done": [{"step": 1}]})), None] {
+            assert_eq!(fixed.presses(Some(ran)), None, "{ran:?}");
+        }
+        assert!(fixed.undo_note("macos", Some(Some(&stopped))).is_some_and(|note| !note.chars().any(|c| c.is_ascii_digit())));
+        // A route-decided step is counted by the route the plan reports, unknown before it runs or for an untraced one.
+        let routed = pads(vec![(1, BY_ROUTE), (2, BY_ROUTE)]);
+        assert_eq!(routed.presses(None), None);
+        assert_eq!(routed.presses(Some(Some(&done(&["hotswap", "chain"])))), Some(2));
+        assert_eq!(routed.presses(Some(Some(&done(&["hotswap", "elsewhere"])))), None);
+        // While the count isn't known, a step's own words say how to take it back; once it is, the count does.
+        let usually = Checked { uncounted: Some("Usually two presses of {key}."), ..routed };
+        assert_eq!(usually.undo_note("macos", None), Some("Usually two presses of Cmd+Z.".to_string()));
+        let counted = usually.undo_note("macos", Some(Some(&done(&["hotswap", "chain"])))).unwrap();
+        assert_eq!(counted, daw_undo_note(Some(2), "Live", "macos"));
+        // Each row keeps what decided its step's count, from that step's done entry; a fixed count keeps nothing.
+        assert_eq!(usually.undo_by(2, &json!({"step": 2, "route": "chain"})), Some(json!({"route": "chain"})));
+        assert_eq!(fixed.undo_by(1, &json!({"step": 1, "route": "hotswap"})), None);
     }
 
     #[test]
@@ -1242,7 +1407,9 @@ mod tests {
             families: vec!["device"; daw_undo.len()],
             files: Vec::new(),
             daw_undo,
+            undo_steps: Vec::new(),
             because: Vec::new(),
+            uncounted: None,
             app: "Live",
         };
         // Live keeps a load as an undo step of its own, so its Undo would take a mixed change back one part at a time.
@@ -1297,7 +1464,15 @@ mod tests {
             [&load, &place].iter().map(|plan| step(plan["tool"].as_str().unwrap(), plan["input"].clone()).unwrap().1).collect();
         assert_eq!(flags, [false, true]);
         assert!(step("move_device_to", json!({"deviceRef": "1:device:0:1", "targetTrackRef": "1:track:2", "index": 0})).unwrap().1);
-        let checked = Checked { families: vec!["device"; 2], files: Vec::new(), daw_undo: flags, because: Vec::new(), app: "Live" };
+        let checked = Checked {
+            families: vec!["device"; 2],
+            files: Vec::new(),
+            daw_undo: flags,
+            undo_steps: Vec::new(),
+            because: Vec::new(),
+            uncounted: None,
+            app: "Live",
+        };
         let refused = checked.alone(&[load, place]).unwrap_err();
         assert!(refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (move_device)")), "{refused}");
     }

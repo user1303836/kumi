@@ -5,17 +5,19 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{device, generate, library, listen, map, read, script, setup};
+use super::{device, generate, library, listen, map, plugin_knowledge, read, script, setup, transport, variations};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
     &core::CONNECT,
     &core::OBSERVE,
     &read::READ,
+    &plugin_knowledge::PLUGIN_KNOWLEDGE,
     &change::CHANGE,
     &change::UNDO,
     &change::HISTORY,
     &core::JOB,
+    &transport::TRANSPORT,
     &setup::SETUP_DAW,
     &library::LIBRARY,
     &map::SOUNDS,
@@ -23,6 +25,7 @@ pub static OPERATIONS: &[&Operation] = &[
     &generate::GENERATE,
     &device::DEVICE,
     &script::SCRIPT,
+    &variations::VARIATIONS,
 ];
 
 #[cfg(test)]

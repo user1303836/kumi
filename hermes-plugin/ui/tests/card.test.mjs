@@ -82,6 +82,14 @@ test('a mastering round says how far each comparison so far was from the referen
   // A comparison this window didn't see arrive (a chat opened later) isn't numbered, and the first one has no trend.
   assert.ok(!render({ result: pass(-9.0, 'a-9') }, store).includes(english('listen.round', 3)))
   assert.ok(!render({ result: pass(-12.7, 'a-1') }, store).includes(english('listen.round', 1)))
+  // From round 2 the skill compares against the copy Kumi kept (`compare_to: {"artifact_id"}`), measured under the
+  // copy's own name: still this reference's next round, shown under the reference's name.
+  const third = pass(-9.4, 'a-3')
+  const againstCopy = { ...third, compare: { ...third.compare, artifact_id: 'r-a-1', metrics: { ...third.compare.metrics, file: 'r-a-1.wav' } } }
+  store.noteListen(againstCopy)
+  const html3 = render({ result: againstCopy }, store)
+  assert.ok(html3.includes(english('listen.round', 3)), html3)
+  assert.ok(html3.includes('vs Ref.wav') && !html3.includes('r-a-1.wav'), html3)
 })
 
 test("a model's reading sits under a plain heading with its model, its own opening line said once", () => {
