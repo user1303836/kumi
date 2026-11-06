@@ -294,6 +294,14 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
 })
 
+test("the pad picker lays out Live's first sixteen pads as Live's Drum Rack does, and another DAW's by note", async () => {
+  const { PadPicker } = await load('src/desktop/map.tsx', { react: 'real' })
+  const labels = daw => [...renderToStaticMarkup(createElement(PadPicker, { daw, onPick() {}, onClose() {} })).matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(match => match[1])
+  // Top row first, as on screen: D#2 top right, C1 bottom left.
+  assert.deepEqual(labels('ableton'), ['C2', 'C#2', 'D2', 'D#2', 'G#1', 'A1', 'A#1', 'B1', 'E1', 'F1', 'F#1', 'G1', 'C1', 'C#1', 'D1', 'D#1'])
+  assert.deepEqual(labels('renoise').slice(-4), ['36', '37', '38', '39'])
+})
+
 test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
   const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
