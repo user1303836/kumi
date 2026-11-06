@@ -1413,7 +1413,15 @@ mod tests {
             [&load, &place].iter().map(|plan| step(plan["tool"].as_str().unwrap(), plan["input"].clone()).unwrap().1).collect();
         assert_eq!(flags, [false, true]);
         assert!(step("move_device_to", json!({"deviceRef": "1:device:0:1", "targetTrackRef": "1:track:2", "index": 0})).unwrap().1);
-        let checked = Checked { families: vec!["device"; 2], files: Vec::new(), daw_undo: flags, because: Vec::new(), app: "Live" };
+        let checked = Checked {
+            families: vec!["device"; 2],
+            files: Vec::new(),
+            daw_undo: flags,
+            undo_steps: Vec::new(),
+            because: Vec::new(),
+            uncounted: None,
+            app: "Live",
+        };
         let refused = checked.alone(&[load, place]).unwrap_err();
         assert!(refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (move_device)")), "{refused}");
     }
