@@ -1534,7 +1534,10 @@ async fn logics_changes_go_through_kumis_host_into_history_and_back_out_as_new_s
             let mut config = script.config(secret, "com.apple.logic10");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Logic, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -1799,7 +1802,10 @@ async fn logics_structural_and_unknown_marker_changes_require_manual_undo_and_un
                 let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
                 config.discovery_dir = Some(paths.discovery());
                 let simulator = Simulator::start(config).await.unwrap();
-                let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+                let endpoint = Rc::new(InProcess {
+                    host: Arc::new(Host::new(Daw::Logic, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                    id: Cell::new(0),
+                });
                 let counted = endpoint.clone();
                 let connect: Connect = Rc::new(move |_| {
                     let endpoint = endpoint.clone();
@@ -1922,7 +1928,10 @@ async fn logics_complete_known_marker_additions_and_moves_remain_reversible() {
                 let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
                 config.discovery_dir = Some(paths.discovery());
                 let simulator = Simulator::start(config).await.unwrap();
-                let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+                let endpoint = Rc::new(InProcess {
+                    host: Arc::new(Host::new(Daw::Logic, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                    id: Cell::new(0),
+                });
                 let connect: Connect = Rc::new(move |_| {
                     let endpoint = endpoint.clone();
                     async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -1985,7 +1994,10 @@ async fn logics_loop_range_uses_explicit_timebase_fences_noops_and_truthful_refu
             let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Logic, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -2068,7 +2080,10 @@ async fn logics_region_name_and_loop_require_complete_selected_facts_and_keep_re
                 let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
                 config.discovery_dir = Some(paths.discovery());
                 let simulator = Simulator::start(config).await.unwrap();
-                let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+                let endpoint = Rc::new(InProcess {
+                    host: Arc::new(Host::new(Daw::Logic, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                    id: Cell::new(0),
+                });
                 let connect: Connect = Rc::new(move |_| {
                     let endpoint = endpoint.clone();
                     async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

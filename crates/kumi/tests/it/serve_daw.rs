@@ -373,7 +373,12 @@ case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_wr
     });
     let context = kumi_agent::core::context::IntegrationContext::new(Rc::new(|_, _| {}));
     assert!(context.policy.persist_identity, "standalone Kumi's policy");
-    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions {
+        context,
+        kumi_home: home.path().into(),
+        connect: Some(connect),
+        open_file: None,
+    });
     reaper.start(Signal::new()).await.unwrap();
     reaper.observe(Signal::new(), None).await.unwrap();
     let asks = identity_asks(&simulator);
