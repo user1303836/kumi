@@ -43,6 +43,8 @@ pub struct PluginStep {
     /// Why Kumi doesn't undo such a change, when the step has its own reason: said after CC-20's words
     /// ([`daw_undo_note`]), as "Kumi can't yet tell whether the pad was changed since."
     pub daw_undo_because: Option<&'static str>,
+    /// It must be the only step in a change, including another step of the same kind.
+    pub alone: bool,
     /// What Kumi says of such a change in place of CC-20's words while it isn't known how many presses take it back
     /// (its approval, before a pad's route is), with `{app}` and `{key}`: "Kumi can't undo this change. {app}'s own
     /// Undo ({key}) usually takes it back in two steps: press it one at a time, and stop as soon as the pad is empty."
@@ -171,6 +173,7 @@ impl PluginStep {
             daw_undo: DawUndo::Never,
             daw_undo_steps: DawUndoCount::Fixed(DawUndoSteps::PLAN),
             daw_undo_because: None,
+            alone: false,
             daw_undo_uncounted: None,
         }
     }
@@ -229,6 +232,11 @@ impl PluginStep {
     /// Kumi says `why` after CC-20's words of such a change it's in.
     pub const fn daw_undo_because(self, why: &'static str) -> PluginStep {
         PluginStep { daw_undo_because: Some(why), ..self }
+    }
+
+    /// It must be the only step in a change.
+    pub const fn alone(self) -> PluginStep {
+        PluginStep { alone: true, ..self }
     }
 
     /// The DAW's own Undo holds such a step as `steps` says whatever it did, as a trace of it showed;
