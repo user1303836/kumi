@@ -485,7 +485,7 @@ async fn bounded(ears: bool) -> (Live, Rc<State>, HearRequest) {
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
             }
         }
-        options.policy = HostPolicy::plugin(scratch, root.join("quarantine"));
+        options.policy = HostPolicy::plugin(scratch, root.join("quarantine"), root.to_path_buf());
         options.ears = None; // Without an injected link, exercise the real read-only browser lookup.
         *set.bounded.borrow_mut() = Some(configured.clone());
         if ears {
