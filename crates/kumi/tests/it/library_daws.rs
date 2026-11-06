@@ -167,6 +167,7 @@ impl Home {
 
     fn plan(&self) -> LearnPlan {
         LearnPlan {
+            daw: None,
             dir: self.dir.path().to_string_lossy().into(),
             sources: library_sources(&self.options()),
             approved_folders: None,

@@ -7,8 +7,8 @@ pub mod daw_sources;
 pub mod daws;
 pub mod features;
 pub mod learn;
-pub mod manual;
 pub mod learner;
+pub mod manual;
 pub mod map;
 pub mod measure_worker;
 pub mod plan;
@@ -543,6 +543,7 @@ impl Library {
             let entries = reader
                 .entries
                 .values()
+                .filter(|entry| self.options.daws.accepts_sample(daw, &learn::extension(&entry.path.to_lowercase())))
                 .filter(|entry| !hidden.iter().any(|library| daw_sources::owns(library, self.options.daws.layout(library), &entry.path)))
                 // The reader's own entries, shared: not copies.
                 .map(|entry| Rc::clone(&entry.0))

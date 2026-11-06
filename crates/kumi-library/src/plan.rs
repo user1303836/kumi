@@ -89,6 +89,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
         let approved_folders = Some(sources.iter().map(|source| source.path.clone()).collect());
         return LearnPlan {
             dir: options.dir,
+            daw: original_sources.daw,
             sources,
             approved_folders,
             decode: options.decode,
@@ -123,6 +124,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     };
     LearnPlan {
         dir: options.dir,
+        daw: original_sources.daw,
         sources,
         approved_folders: None,
         decode: options.decode,

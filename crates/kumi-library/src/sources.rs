@@ -75,6 +75,9 @@ pub struct SourceOptions {
     /// Where Live's apps are (macOS) and its shared files (Windows), for tests.
     pub applications: Option<String>,
     pub program_data: Option<String>,
+    /// macOS's shared Library root; injected discovery never consults this machine's /Library when home is injected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_library: Option<String>,
     /// The DAW whose places these are (Live's when None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daw: Option<DawId>,

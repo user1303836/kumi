@@ -166,6 +166,7 @@ impl Studio {
         use kumi::daw::registry::library_sources;
         use kumi_library::sources::SourceOptions;
         kumi_library::learn::LearnPlan {
+            daw: None,
             dir: self.dir.to_string_lossy().into(),
             sources: library_sources(&SourceOptions {
                 home: Some(self.home.path().to_string_lossy().into()),
