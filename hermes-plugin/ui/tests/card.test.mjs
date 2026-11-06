@@ -302,6 +302,24 @@ test("the pad picker lays out Live's first sixteen pads as Live's Drum Rack does
   assert.deepEqual(labels('renoise').slice(-4), ['36', '37', '38', '39'])
 })
 
+test("a pending script (CC-19) shows Hermes's claim as one, its facts, the approval's warning and every numbered line", async () => {
+  const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const sha = 'f'.repeat(64)
+  const pending = { tool_call_id: 'call-7', language: 'lua', sha256: sha, purpose: 'Rename every pattern', lines: 3, warning: "Runs with the DAW's access to your computer; Kumi can't undo it" }
+  // A right-to-left override (Trojan Source) that got past serve is drawn where it is, never applied.
+  const code = 'for i = 1, #song.patterns do\n  song.patterns[i].name = "Part " .. i -- \u202E edit\nend\n'
+  const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: { sha256: sha, language: 'lua', code, lines: 3 } } }))
+  for (const text of [english('script.says', 'Rename every pattern'), 'Lua in Renoise', '3 lines', 'SHA-256 ffffffffffff', 'Kumi can&#x27;t undo it', 'for i = 1, #song.patterns do', '>3<', 'U+202E']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.ok(!html.includes('\u202E'), 'the override character itself never reaches the page')
+  // While its code is read, and when it can't be, the section says so rather than showing anything else.
+  const reading = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: null } }))
+  assert.ok(reading.includes(english('script.reading')) && !reading.includes('<pre'))
+  const unreadable = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: false } }))
+  assert.ok(unreadable.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !unreadable.includes('<pre'))
+})
+
 test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
   const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
@@ -400,6 +418,7 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     items: [
       { id: 'h-g2-u1', label: '', title: 'Raise the Drums fader', family: 'unsure', state: 'unsure', undo_available: false, note: 'Live stopped answering mid-change.', runtime_generation: 'g2' },
       { id: 'h-g2-c3', label: 'c3', title: 'Bass muted', family: 'mixer', state: 'kept', undo_available: false, track: 'Bass', note: 'Bass was changed by hand since, so Kumi kept it.', runtime_generation: 'g2' },
+      { id: 'h-g2-c2', label: 'c2', title: 'Script: Name the tracks', family: 'script', state: 'applied', undo_available: false, script: { sha256: 'a'.repeat(64), language: 'python' }, runtime_generation: 'g2' },
       { id: 'h-g1-c9', label: 'c9', title: 'Tempo 120 → 124', family: 'tempo', state: 'applied', undo_available: false, runtime_generation: 'g1' }
     ]
   }
@@ -413,6 +432,10 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
   const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
   assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
   assert.ok(!html.includes(restarted))
+  // A script's row has no undo from the start (Kumi never undoes one, CC-19): applied, saying so, never "restarted".
+  assert.equal(live.split(restarted).length - 1, 1, live)
+  assert.ok(live.includes(english('history.scriptUndo', 'Live').replaceAll("'", '&#x27;')), live)
+  assert.ok(live.includes(`aria-label="${english('history.applied')}"`), live)
 })
 
 test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their own names', async () => {
