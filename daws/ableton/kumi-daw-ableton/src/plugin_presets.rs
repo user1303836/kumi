@@ -123,9 +123,10 @@ pub fn taken(plan: &PresetPlan, bytes: &[u8], library: &Path) -> bool {
     std::fs::symlink_metadata(&file).is_ok() && !same_bytes(&file, bytes).unwrap_or(false)
 }
 
-/// Plug-ins Live's Browser lists for a name: each row's `(name, path)`, as `live_browser_search` answers them in the
-/// plug-ins category.
-pub type PluginsNamed = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Result<Vec<(String, String)>, RuntimeError>>>;
+/// The names of the plug-ins Live's Browser lists for a query, as `live_browser_search` answers them in the plug-ins
+/// category. The search is fuzzy (a query for "Pro-Q 4" also finds "Massive Passive EQ"), so only an exact name counts.
+/// Live groups plug-ins by maker, one row each, with no format in the path (26-s4's probe, LAB-SCHEDULE row 24a).
+pub type PluginsNamed = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Result<Vec<String>, RuntimeError>>>;
 
 /// Live's Browser as serve's `preset` (CC-26) asks it: which plug-ins it lists, and whether it lists a file yet
 /// (`options.browser_sees`, its wait and the conversation's [`crate::devices::tool::Made`]).
@@ -149,8 +150,9 @@ pub fn preview(library: &Path, bytes: &[u8], name: &str) -> Result<PresetPreview
     })
 }
 
-/// Places `bytes` as the preview named them (`file`), once Live's Browser lists the plug-in's VST3 (a `.vstpreset`
-/// loads only the VST3), then waits for the Browser to list the file. Nothing is written when it's refused.
+/// Places `bytes` as the preview named them (`file`), once Live's Browser lists the plug-in by its exact name, then
+/// waits for the Browser to list the file. Nothing is written when it's refused. Live's Browser doesn't say a plug-in's
+/// format; a `.vstpreset` loads only the VST3, so the device read back after the load is the last check (26d).
 pub async fn place_approved(
     browser: &Browser,
     bytes: &[u8],
@@ -169,12 +171,9 @@ pub async fn place_approved(
     if plan.file() != file || taken(&plan, bytes, &library) {
         return refusal("changed", changed());
     }
-    let rows = (browser.plugins)(plan.plugin.clone(), signal.clone()).await?;
-    if !rows
-        .iter()
-        .any(|(row, path)| row.trim().eq_ignore_ascii_case(&plan.plugin) && path.split('/').any(|part| part.eq_ignore_ascii_case("VST3")))
-    {
-        return refusal("not_installed", format!("{}'s VST3 isn't in Live's plug-ins. Install or enable it, then ask again.", plan.plugin));
+    let names = (browser.plugins)(plan.plugin.clone(), signal.clone()).await?;
+    if !names.iter().any(|listed| listed.trim().eq_ignore_ascii_case(&plan.plugin)) {
+        return refusal("not_installed", format!("{} isn't in Live's plug-ins. Install or enable its VST3, then ask again.", plan.plugin));
     }
     signal.check()?;
     let (owned, planned) = (bytes.to_vec(), plan.clone());
@@ -386,9 +385,10 @@ mod tests {
 
     const SERUM: &[u8] = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/serum-2/format-1/fixtures/init.vstpreset"));
 
-    /// Live's Browser listing `rows` among its plug-ins, and listing a file once `lists_files`; every plug-in search is kept.
-    fn browser(library: &Path, rows: &[(&str, &str)], lists_files: bool) -> (Browser, Rc<std::cell::RefCell<Vec<String>>>) {
-        let rows: Vec<(String, String)> = rows.iter().map(|(name, path)| (name.to_string(), path.to_string())).collect();
+    /// Live's Browser listing the plug-ins `names` for any query, and listing a file once `lists_files`; every plug-in
+    /// search is kept.
+    fn browser(library: &Path, names: &[&str], lists_files: bool) -> (Browser, Rc<std::cell::RefCell<Vec<String>>>) {
+        let rows: Vec<String> = names.iter().map(|name| name.to_string()).collect();
         let searched = Rc::new(std::cell::RefCell::new(Vec::new()));
         let asked = searched.clone();
         let browser = Browser {
@@ -408,24 +408,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_approved_preset_is_placed_as_previewed_only_where_live_lists_its_vst3() {
+    async fn an_approved_preset_is_placed_as_previewed_only_where_live_lists_its_plug_in_by_name() {
         let temp = tempfile::tempdir().unwrap();
         let kumi = temp.path().join("Kumi");
         let preview = preview(temp.path(), SERUM, "Night Bass").unwrap();
         assert_eq!(preview.file, format!("User Library/Kumi/Instruments/{}.vstpreset", preview.name));
         assert!(!kumi.exists(), "a preview writes nothing");
 
-        // Serum 2 only as an Audio Unit: a .vstpreset can't load it, so nothing is written.
-        let (au, _) = browser(temp.path(), &[("Serum 2", "plugins/Audio Units/Xfer Records/Serum 2")], true);
-        let refused = place_approved(&au, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err();
+        // Live's search is fuzzy: "Serum 2 FX" for "Serum 2" isn't Serum 2, so nothing is written.
+        let (near, _) = browser(temp.path(), &["Serum 2 FX"], true);
+        let refused = place_approved(&near, SERUM, "Night Bass", &preview.file, &Signal::new()).await.unwrap().unwrap_err();
         assert_eq!(
             (refused.code, refused.reason.as_str()),
-            ("not_installed", "Serum 2's VST3 isn't in Live's plug-ins. Install or enable it, then ask again.")
+            ("not_installed", "Serum 2 isn't in Live's plug-ins. Install or enable its VST3, then ask again.")
         );
         assert!(!kumi.exists());
 
         // Another name than the one approved is another file: refused before Live is asked.
-        let (vst3, searched) = browser(temp.path(), &[("Serum 2", "plugins/VST3/Xfer Records/Serum 2")], true);
+        let (vst3, searched) = browser(temp.path(), &["Serum 2"], true);
         assert_eq!(place_approved(&vst3, SERUM, "Night Bass 2", &preview.file, &Signal::new()).await.unwrap().unwrap_err().code, "changed");
         assert!(searched.borrow().is_empty() && !kumi.exists());
 
@@ -443,7 +443,7 @@ mod tests {
     async fn a_previewed_file_taken_by_other_bytes_or_not_yet_listed_is_said() {
         let temp = tempfile::tempdir().unwrap();
         let preview = preview(temp.path(), SERUM, "Night Bass").unwrap();
-        let rows = [("Serum 2", "plugins/VST3/Xfer Records/Serum 2")];
+        let rows = ["Serum 2"];
 
         // Live hasn't listed the file by the deadline: it's placed, and its first load waits for the Browser.
         let (slow, _) = browser(temp.path(), &rows, false);

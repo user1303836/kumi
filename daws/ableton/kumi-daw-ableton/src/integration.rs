@@ -245,9 +245,7 @@ impl Ableton {
                     let args = object(&json!({"category": "plugins", "query": name, "limit": 50}))?;
                     let found = payload(&tools.call("live_browser_search", args, signal, CallOptions::default()).await?)?;
                     let rows = found.get("items").and_then(Value::as_array).into_iter().flatten();
-                    Ok(rows
-                        .filter_map(|row| Some((row.get("name")?.as_str()?.to_owned(), row.get("path")?.as_str()?.to_owned())))
-                        .collect())
+                    Ok(rows.filter_map(|row| Some(row.get("name")?.as_str()?.to_owned())).collect())
                 }
                 .boxed_local()
             }),
