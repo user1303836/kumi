@@ -40,6 +40,9 @@ class Variations(unittest.TestCase):
         asked = self.hook(keep)
         self.assertEqual((asked["rule_key"], asked["message"].splitlines()[:2]), (
             "kumi:write:clip:s1", ["Kumi: keep 1 take of the source, renamed", '• V1 → "V1 · Bassline · kept"']))
+        undone = support.call(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual((undone["state"], sorted(row["history_id"] for row in undone["rows"])),
+                         ("undone", sorted(made["history_ids"])), "\"undo that\" takes the whole make back, every take")
 
     def test_takes_that_would_come_out_differently_after_the_approval_are_never_written(self):
         approved = make(count=2)
