@@ -190,13 +190,11 @@ pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut request = request(&call.args)?;
     if !crate::daw::registry::supports_restricted_listening(ctx.daw()) {
-        return Ok(outcome(
-            "refused",
-            "unsupported",
-            "Guarded track and mix listening is not available for this DAW; use an approved audio file.",
-            true,
-            false,
-        ));
+        let reason = match ctx.daw() {
+            DawId::Renoise => "Kumi can't capture Renoise's tracks yet; it can listen to a file.",
+            _ => "Guarded track and mix listening is not available for this DAW; use an approved audio file.",
+        };
+        return Ok(outcome("refused", "unsupported", reason, true, false));
     }
     let key = call
         .args

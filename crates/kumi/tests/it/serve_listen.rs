@@ -52,7 +52,7 @@ fn no_audio(result: &Value) {
 }
 
 case!(preview_is_read_only_and_a_restored_capture_is_retained_once, async {
-    for daw in [Daw::Reaper, Daw::Renoise] {
+    for daw in [Daw::Reaper] {
         let (lab, listening) = listening_lab(daw).await;
         let mut wire = Wire::start(lab.ctx.clone()).await;
         let (key, epoch, reference, _) = looked(&mut wire).await;
@@ -135,7 +135,7 @@ case!(bad_reference_and_stale_epoch_do_not_spend_a_playback, async {
 });
 
 case!(an_old_component_refuses_instead_of_using_an_unverified_renderer, async {
-    for daw in [Daw::Reaper, Daw::Renoise] {
+    for daw in [Daw::Reaper] {
         let (lab, listening) = listening_lab(daw).await;
         listening.set_render_preflight(false);
         let mut wire = Wire::start(lab.ctx.clone()).await;
@@ -153,7 +153,7 @@ case!(an_old_component_refuses_instead_of_using_an_unverified_renderer, async {
 });
 
 case!(a_short_restored_render_reports_measured_seconds_and_a_bounded_notice, async {
-    let (lab, listening) = listening_lab(Daw::Renoise).await;
+    let (lab, listening) = listening_lab(Daw::Reaper).await;
     listening.set_render_seconds(Some(1.));
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;
@@ -265,6 +265,9 @@ case!(a_slower_tempo_after_approval_is_stale_without_starting_a_render, async {
 });
 
 case!(a_slower_renoise_tempo_after_approval_refuses_without_rendering, async {
+    use kumi_types::contracts::{HearApproval, HearRequest};
+    use kumi_types::errors::HearFailure;
+
     let script = RenoiseScript::new();
     script.set_bpm(120.);
     let listening = script.listening();
@@ -273,13 +276,52 @@ case!(a_slower_renoise_tempo_after_approval_refuses_without_rendering, async {
     let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| bridge.config(secret, "/lab/Renoise")))).await;
     listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Renoise).root.join("listening"));
     let mut wire = Wire::start(lab.ctx.clone()).await;
-    let (key, epoch, _, _) = looked(&mut wire).await;
-    let args = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
+    let (_, epoch, _, _) = looked(&mut wire).await;
+    // Keep the adapter's tempo guard exercised below serve's disabled Renoise capture gate.
+    let integration = lab.ctx.connection().unwrap().integration.clone();
+    let mut request = HearRequest {
+        mix: Some(true),
+        from_beat: Some(0.),
+        beats: Some(4.),
+        expected_native_epoch: lab.ctx.link().project().unwrap().native_epoch,
+        ..Default::default()
+    };
+    let preview = integration.preview_hear(&request, Signal::new()).await.unwrap();
+    request.approval = Some(HearApproval { seconds: preview.seconds, deadline_seconds: preview.deadline_seconds.try_into().unwrap() });
     script.set_bpm(60.);
-    let (stale, error) = wire.call("listen", args, Some("renoise-tempo-drift")).await;
-    assert!(!error && stale["state"] == "refused" && stale["code"] == "stale", "{stale}");
-    no_audio(&stale);
+    let stale = integration.hear(&request, Signal::new()).await;
+    assert!(matches!(stale, Err(RuntimeError::Hear(HearFailure::Refused { code: "stale", .. }))), "{stale:?}");
     assert!(listening.renders().is_empty());
+    assert_eq!(lab.ctx.link().project().unwrap().epoch, epoch);
+    assert!(lab.ctx.history().rows(10).is_empty());
+    wire.end().await;
+});
+
+case!(renoise_hides_track_capture_and_refuses_it_without_touching_the_daw, async {
+    let (lab, listening) = listening_lab(Daw::Renoise).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let tools = wire.request("tools/list", json!({})).await;
+    let listen = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "listen").unwrap();
+    assert_eq!(listen["_meta"]["kumi/listen_sources"], json!(["artifact", "file", "sound"]));
+    let (key, epoch, reference, _) = looked(&mut wire).await;
+    for (target, track) in [json!({"ref": reference}), json!({"mix": true})].into_iter().enumerate() {
+        for preview in [true, false] {
+            let mut args = window(&key, epoch, track.clone());
+            args["preview"] = json!(preview);
+            // Even a fully approved dispatch cannot reach Renoise through the disabled capture gate.
+            args["_listen"] = json!({"estimated_seconds": 2, "prepare_seconds": 0, "deadline_seconds": 120});
+            let (refused, error) = wire.call("listen", args, Some(&format!("renoise-gate-{target}-{preview}"))).await;
+            assert!(!error, "{refused}");
+            assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("unsupported")));
+            no_audio(&refused);
+        }
+    }
+    assert!(listening.renders().is_empty());
+    assert!(listening.previews().is_empty());
+    let reads = ["digest", "focus", "focus_body", "preset_read", "read", "snapshot", "status"];
+    let sent = lab.methods_sent();
+    assert!(sent.iter().all(|method| reads.contains(&method.as_str())), "no playback or writes: {sent:?}");
+    assert!(!lab.ctx.paths().state_dir.join("artifacts.json").exists());
     assert_eq!(lab.ctx.link().project().unwrap().epoch, epoch);
     assert!(lab.ctx.history().rows(10).is_empty());
     wire.end().await;
@@ -443,10 +485,10 @@ case!(compressed_reference_preparation_never_holds_the_native_settle_guard, asyn
 
 case!(shutdown_cancels_capture_but_not_its_restoration_or_settle_guard, async {
     use std::time::Duration;
-    let (lab, listening) = listening_lab(Daw::Renoise).await;
+    let (lab, listening) = listening_lab(Daw::Reaper).await;
     listening.set_steps(1000);
     listening.set_slow_stop(true);
-    lab.call("connect", json!({"daw":"renoise"})).await.unwrap();
+    lab.call("connect", json!({"daw":"reaper"})).await.unwrap();
     lab.call("observe", json!({"scope":"project"})).await.unwrap();
     let project = lab.ctx.link().project().unwrap();
     let mut args = window(&json!(project.key), project.epoch, json!({"mix":true}));

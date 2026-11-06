@@ -224,11 +224,11 @@ fn listen_sources_advertise_only_available_guarded_capture() {
         serve.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
         let tools = serve.answer(2);
         let listen = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "listen").unwrap();
-        let sources = if daw == "ableton" { json!(["artifact", "file", "sound"]) } else { json!(["artifact", "file", "sound", "track"]) };
+        let sources = if daw == "reaper" { json!(["artifact", "file", "sound", "track"]) } else { json!(["artifact", "file", "sound"]) };
         assert_eq!(listen["_meta"]["kumi/listen_sources"], sources, "{daw}: {listen}");
         assert!(!listen["inputSchema"].to_string().contains("deadlineUnixMs"), "native deadlines are not model input");
         assert!(!listen["inputSchema"].to_string().contains("native_deadline_unix_ms"));
-        if daw == "ableton" {
+        if daw != "reaper" {
             serve.send(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"listen","arguments":{
                 "source":{"track":{"mix":true},"from_beat":0,"beats":4},
                 "expected_project_key":"p-unconnected","expected_epoch":1,"preview":true
