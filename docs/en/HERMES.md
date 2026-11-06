@@ -99,7 +99,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   isn't found by that filter. Artist and genre words match only names and folders: Kumi doesn't recognise genres or
   artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
-  or in a new instrument in Renoise, as one change Hermes asks about.
+  or in a new instrument in Renoise, as one change Hermes asks about. "Put it on a new track" puts it in a new Simpler
+  in Live.
 - "Put it on pad 2" puts it on that Drum Rack pad in Live: into the pad's Simpler, or onto an empty pad in a new
   Simpler, one pad a change. Kumi can't undo a load onto an empty pad, and says so before you approve: Live's Undo
   usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
@@ -253,6 +254,8 @@ run without asking there, and Kumi can't tell it from a chat.
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand
   since.
+- In Live, once Kumi has undone a sound it placed, ask Kumi to place it again: Cmd+Z (Ctrl+Z on Windows) would bring
+  it back with its sample offline.
 - Kumi for Hermes doesn't drive Live's menus, record, or save or open projects. In Live it doesn't group tracks: select
   them and press Cmd+G (Ctrl+G on Windows).
 

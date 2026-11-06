@@ -17,8 +17,8 @@ a DAW to work in.
   A minor". "Play it" starts playback after you approve; "make three variations" writes takes beside it, never over it.
 - **Find a sample and use it.** "Find me a dusty, dark snare", then "use it on the snare" or "put it on pad 2". Kumi
   searches your own sample folders by how each sound measures and by the words in its name and folder, then puts it in
-  the snare's Simpler or on a Drum Rack pad, an empty one included (Live), on a new track (REAPER) or in a new
-  instrument (Renoise).
+  a Simpler (the snare's, or a new one on a new track) or on a Drum Rack pad, an empty one included (Live), on a new
+  track (REAPER) or in a new instrument (Renoise).
 - **Build from a tutorial.** "Make the bass from this tutorial: <a YouTube link>." Hermes reads its transcript and,
   for values only on screen, views those moments in its browser; Kumi builds it. No video is downloaded.
 - **When no change fits, a script or a device.** Hermes can run a script you approve (Python in Live, Lua in REAPER
@@ -211,7 +211,8 @@ project as…** with **Copy all media into project directory**), or they'll miss
   refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway. A few
   changes only the DAW's own Undo takes back: in Live, adding a chain to a rack, moving a device and loading a sample
   onto a pad, each a change of its own, with how Cmd+Z (Ctrl+Z) takes it back said before you approve; and a script,
-  in any DAW.
+  in any DAW. In Live, once Kumi has undone a sound it placed, ask Kumi to place it again: Cmd+Z would bring it back
+  with its sample offline.
 - **Listening:** Kumi measures audio files on this computer. In REAPER and Renoise it can also listen to a track or
   the mix: after you approve, the DAW renders only that window (60 seconds at most, with the DAW stopped) into the
   listening folder of Kumi's part in that DAW, and Kumi copies that one file into its data. The render's temporary
