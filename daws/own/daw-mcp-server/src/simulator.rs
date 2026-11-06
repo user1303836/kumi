@@ -84,6 +84,7 @@ impl SimulatorConfig {
             discovery_dir: None,
             respond: None,
             status_more: None,
+            on_keep_identity: None,
         }
     }
     /// REAPER 7.82 on a portable resource folder, with a saved project.
