@@ -241,7 +241,7 @@ function ReferenceProfile({ result, audition }: { result: ListenResult; audition
   const cell = { padding: '5px 6px', verticalAlign: 'top', textAlign: 'left' } as const
   return (
     <section aria-label="Measured reference profile" style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      <strong style={S.text}>Reference target / spread · Heard / Profile</strong>
+      <strong style={S.text}>Reference target and spread</strong>
       <span style={S.muted}>{profile.usable_references}/{profile.references} usable references · equal per-reference weighting</span>
       <span style={S.faint}>{clean(profile.basis, 500)}</span>
       {profile.source_window && <span style={S.faint}>Source measured window · {windowWords(profile.source_window)?.replace('Reference file seconds', 'seconds')}</span>}
@@ -288,10 +288,10 @@ function ReferenceProfile({ result, audition }: { result: ListenResult; audition
             {[...unavailable].map(([reason, quantities]) => <li key={reason}>{quantities.join(', ')}: — · {reason}</li>)}
           </ul>}
           {reference.profile_quantities && <details>
-            <summary className={FOCUSABLE} style={{ ...S.muted, cursor: 'pointer' }}>{t('listen.more')} · Heard / Profile member measurements</summary>
+            <summary className={FOCUSABLE} style={{ ...S.muted, cursor: 'pointer' }}>{t('listen.more')} · Each reference's measurements</summary>
             <div style={{ overflowX: 'auto', marginTop: 5 }}>
-            <table aria-label={`${name}: Heard / Profile member measurements`} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
-              <caption style={{ ...S.faint, textAlign: 'left' }}>Heard / Profile member measurements · only covered regions contribute to the target</caption>
+            <table aria-label={`${name}: reference measurements`} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
+              <caption style={{ ...S.faint, textAlign: 'left' }}>Each reference's measurements · only covered regions contribute to the target</caption>
               <thead><tr style={{ color: T.muted }}>
                 {['Quantity / basis', 'Measured reference', 'Unavailable reason'].map(label => <th key={label} style={{ ...cell, fontWeight: 400 }}>{label}</th>)}
               </tr></thead>
@@ -303,8 +303,8 @@ function ReferenceProfile({ result, audition }: { result: ListenResult; audition
             </table>
             </div>
           </details>}
-          <span style={S.faint}>Canonical Analysis · separate from Heard / Profile target</span>
-          {canonical.rows.length ? <Rows view={canonical} /> : <span style={S.faint}>Canonical metrics unavailable</span>}
+          <span style={S.faint}>Standard measurements · a different meter from the reference target</span>
+          {canonical.rows.length ? <Rows view={canonical} /> : <span style={S.faint}>Standard measurements unavailable</span>}
           {availability && <span style={S.faint}>
             Profile availability: {availability.profile_reason ? clean(availability.profile_reason, 100) : `${availability.loud_frame_count} loud frames`}
             {availability.energy_zero && ' · zero energy'}
@@ -371,7 +371,7 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
         fallback
       )}
       {parsed.compare && (parsed.compare.window || parsed.compare.origin || parsed.compare.identity) && <ReferenceFacts reference={parsed.compare} />}
-      {parsed.reference_profile && <span style={S.faint}>Source canonical Analysis · separate from Heard / Profile target</span>}
+      {parsed.reference_profile && <span style={S.faint}>Source standard measurements · a different meter from the reference target</span>}
       <Rows view={view} />
       <Bands view={view} />
       <ReferenceProfile result={parsed} audition={audition} />

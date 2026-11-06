@@ -2182,7 +2182,7 @@ function ReferenceProfile({ result, audition }) {
   if (!profile) return null;
   const cell = { padding: "5px 6px", verticalAlign: "top", textAlign: "left" };
   return /* @__PURE__ */ jsxs2("section", { "aria-label": "Measured reference profile", style: { display: "flex", flexDirection: "column", gap: 9 }, children: [
-    /* @__PURE__ */ jsx2("strong", { style: S.text, children: "Reference target / spread · Heard / Profile" }),
+    /* @__PURE__ */ jsx2("strong", { style: S.text, children: "Reference target and spread" }),
     /* @__PURE__ */ jsxs2("span", { style: S.muted, children: [
       profile.usable_references,
       "/",
@@ -2262,10 +2262,10 @@ function ReferenceProfile({ result, audition }) {
         reference.profile_quantities && /* @__PURE__ */ jsxs2("details", { children: [
           /* @__PURE__ */ jsxs2("summary", { className: FOCUSABLE, style: { ...S.muted, cursor: "pointer" }, children: [
             t("listen.more"),
-            " · Heard / Profile member measurements"
+            " · Each reference's measurements"
           ] }),
-          /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto", marginTop: 5 }, children: /* @__PURE__ */ jsxs2("table", { "aria-label": `${name}: Heard / Profile member measurements`, style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, width: "100%", margin: 0 }, children: [
-            /* @__PURE__ */ jsx2("caption", { style: { ...S.faint, textAlign: "left" }, children: "Heard / Profile member measurements · only covered regions contribute to the target" }),
+          /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto", marginTop: 5 }, children: /* @__PURE__ */ jsxs2("table", { "aria-label": `${name}: reference measurements`, style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, width: "100%", margin: 0 }, children: [
+            /* @__PURE__ */ jsx2("caption", { style: { ...S.faint, textAlign: "left" }, children: "Each reference's measurements · only covered regions contribute to the target" }),
             /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsx2("tr", { style: { color: T.muted }, children: ["Quantity / basis", "Measured reference", "Unavailable reason"].map((label) => /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: label }, label)) }) }),
             /* @__PURE__ */ jsx2("tbody", { children: reference.profile_quantities.map((quantity) => /* @__PURE__ */ jsxs2("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
               /* @__PURE__ */ jsxs2("th", { scope: "row", style: { ...cell, fontWeight: 400 }, children: [
@@ -2277,8 +2277,8 @@ function ReferenceProfile({ result, audition }) {
             ] }, quantity.quantity)) })
           ] }) })
         ] }),
-        /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Canonical Analysis · separate from Heard / Profile target" }),
-        canonical.rows.length ? /* @__PURE__ */ jsx2(Rows, { view: canonical }) : /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Canonical metrics unavailable" }),
+        /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Standard measurements · a different meter from the reference target" }),
+        canonical.rows.length ? /* @__PURE__ */ jsx2(Rows, { view: canonical }) : /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Standard measurements unavailable" }),
         availability && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
           "Profile availability: ",
           availability.profile_reason ? clean(availability.profile_reason, 100) : `${availability.loud_frame_count} loud frames`,
@@ -2328,7 +2328,7 @@ function ListenResultCard({ result, audition, fallback, store }) {
           view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? t("listen.reference") })
         ] }) : fallback,
         parsed.compare && (parsed.compare.window || parsed.compare.origin || parsed.compare.identity) && /* @__PURE__ */ jsx2(ReferenceFacts, { reference: parsed.compare }),
-        parsed.reference_profile && /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Source canonical Analysis · separate from Heard / Profile target" }),
+        parsed.reference_profile && /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Source standard measurements · a different meter from the reference target" }),
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
         /* @__PURE__ */ jsx2(ReferenceProfile, { result: parsed, audition }),
