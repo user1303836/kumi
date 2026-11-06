@@ -12,3 +12,12 @@ fn a_release_without_a_checkout_brings_the_tool_it_carries() {
     std::fs::create_dir_all(&carried).unwrap();
     assert_eq!(release.bundled_beside(app.path()), Some(carried));
 }
+
+/// Setup reads CC-8's mark in the tool's `payload/status.lua` ([`daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED`])
+/// to say the tool keeps a song's id only while a connection asks: the tool Kumi ships carries it word for word.
+#[test]
+fn the_tool_kumi_ships_carries_the_mark_setup_reads_word_for_word() {
+    let status = kumi_testkit::workspace_path("daws/renoise/com.kumi.Bridge.xrnx/payload/status.lua");
+    let mark = daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED;
+    assert!(std::fs::read_to_string(&status).unwrap().contains(&format!("\"{mark}\"")), "{} doesn't carry {mark:?}", status.display());
+}

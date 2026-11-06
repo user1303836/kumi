@@ -422,6 +422,13 @@ test("reads: focus is cheap, names the view and follows the selection and the tr
   eq(f.selection.deviceName, nil, "no device selected")
   eq(f.transport.playing, false)
   eq(f.transport.recording, false)
+  eq(f.transport.editMode, false)
+  -- Edit mode records what plays into the pattern: the focus says so, so Kumi never starts a play that would record
+  mock.song.transport.edit_mode = true
+  local editing = call(peer, "focus").result.transport
+  eq(editing.editMode, true)
+  eq(editing.recording, true)
+  mock.song.transport.edit_mode = false
   eq(f.transport.tempo, 128)
   eq(f.transport.beatsPerBar, 4, "Renoise's own guess is a bar of four")
   eq(f.transport.beat, 0, "stopped at the edit cursor, line 1 of slot 1")

@@ -900,7 +900,11 @@ async fn a_plugin_host_is_never_offered_lives_menus() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let temporary = std::env::temp_dir();
-            let plugin = HostPolicy::plugin(temporary.join("kumi-menus-listen"), temporary.join("kumi-menus-quarantine"));
+            let plugin = HostPolicy::plugin(
+                temporary.join("kumi-menus-listen"),
+                temporary.join("kumi-menus-quarantine"),
+                temporary.join("kumi-menus-variations"),
+            );
             for (policy, offered) in [(HostPolicy::standalone(), true), (plugin, false)] {
                 let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
                 context.policy = policy;

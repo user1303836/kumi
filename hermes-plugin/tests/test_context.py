@@ -108,8 +108,14 @@ class Focus(unittest.TestCase):
 
     def test_a_quiet_stopped_or_disconnected_runtime_says_so(self):
         self.connect()
-        later = int(time.time() * 1000) + 30_000
-        with mock.patch.object(snapshots, "_now_ms", lambda: later):
+        owner = self.data / "state" / "owner.json"
+
+        def thirty_seconds_after_the_heartbeat() -> int:
+            # (read on every call: a clock taken after connect() adds a slow runner's delay, and 30.5 s says 31; #1160)
+            published = json.loads(owner.read_text(encoding="utf-8"))
+            return snapshots._ms(published.get("heartbeat", published.get("at"))) + 30_000
+
+        with mock.patch.object(snapshots, "_now_ms", thirty_seconds_after_the_heartbeat):
             self.assertIn("Stale: Kumi hasn't heard from its runtime for 30 s", fenced(self.note()))
         status = self.data / "state" / "status.json"
         status.write_text(json.dumps({**json.loads(status.read_text(encoding="utf-8")), "connected": False, "seq": 99}),
