@@ -8,6 +8,7 @@ use kumi_agent::core::presentation::ToolPresentation;
 use kumi_agent::core::view::ViewPresentation;
 use kumi_daw::provider::DawProvider;
 use kumi_daw_ableton::app::provider::Ableton;
+use kumi_daw_lynx as lynx;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
 use kumi_daw_soundcraft as soundcraft;
@@ -19,7 +20,7 @@ use std::sync::LazyLock;
 
 /// The DAWs this build integrates, Live's first, then the DAWs whose bridges are Kumi's own (SoundCraft's experimental:
 /// only `--daw soundcraft` reaches it, `super::offered`).
-pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &reaper::PROVIDER, &renoise::PROVIDER, &soundcraft::PROVIDER];
+pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &reaper::PROVIDER, &renoise::PROVIDER, &soundcraft::PROVIDER, &lynx::PROVIDER];
 
 /// The DAWs this build integrates, by profile.
 pub fn registered() -> impl Iterator<Item = &'static DawProfile> {

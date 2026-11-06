@@ -68,3 +68,11 @@ words = { ja = "SoundCraft プログラム", zh-CN = "SoundCraft 程序" }
 integration = "daws/soundcraft/kumi-daw-soundcraft"
 # SoundCraft never loads it: it runs beside SoundCraft and reaches it over SoundCraft's control channel.
 program = { crate = "daws/soundcraft/soundcraft-kumi", binary = "soundcraft-kumi" }
+
+[[daw]]
+id = "lynx"
+name = "LYNX SHARE"
+bridge = "program"
+words = { ja = "LYNX SHARE プログラム", zh-CN = "LYNX SHARE 程序" }
+integration = "daws/lynx/kumi-daw-lynx"
+program = { crate = "daws/lynx/lynx-kumi", binary = "lynx-kumi" }

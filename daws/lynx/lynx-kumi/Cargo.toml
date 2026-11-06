@@ -1,0 +1,31 @@
+[package]
+name = "lynx-kumi"
+version = "1.24.69"
+description = "Kumi's own bridge beside an opt-in native-control LYNX build."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "lynx_kumi"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lynx-kumi"
+path = "src/main.rs"
+
+[dependencies]
+base64.workspace = true
+daw-bridge.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -19,6 +19,8 @@
 
 **Kumi は、DAW の中であなたと一緒に作業する汎用の AI エージェントです。** 現在は Ableton Live、REAPER、Renoise に対応し、どの DAW でも同じことができます。プロジェクトを読み、その中のほぼすべてを変更し、結果を聴き、あなたの音、好み、癖を学びます。ターミナルで動くチャットに、普段の言葉で頼みます。Kumi は変更を計画して実行し、各ステップを取り消し付きで履歴に残します。使うほどに、Kumi はあなたの作業のしかた、好み、プロデューサーとしてのパターンをよく知るようになります。
 
+実験的な LYNX 対応には未リリースの Remote Control API が必要です。LYNX を開き、一般設定で Remote Control を有効にして `kumi --daw lynx` を使います。通常の LYNX 0.1.24 に API は含まれません。[設定と制限](docs/ja/DAWS.md#lynx-share実験的)を参照してください。
+
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 ## クイックスタート

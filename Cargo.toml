@@ -24,6 +24,8 @@ members = [
     "daws/reaper/kumi-daw-reaper",
     "daws/renoise/kumi-daw-renoise",
     "daws/soundcraft/kumi-daw-soundcraft",
+    "daws/lynx/kumi-daw-lynx",
+    "daws/lynx/lynx-kumi",
     "daws/own/kumi-daw-own",
     "daws/soundcraft/soundcraft-kumi",
 ]
@@ -55,6 +57,7 @@ kumi-daw-ableton = { path = "daws/ableton/kumi-daw-ableton" }
 kumi-daw-reaper = { path = "daws/reaper/kumi-daw-reaper" }
 kumi-daw-renoise = { path = "daws/renoise/kumi-daw-renoise" }
 kumi-daw-soundcraft = { path = "daws/soundcraft/kumi-daw-soundcraft" }
+kumi-daw-lynx = { path = "daws/lynx/kumi-daw-lynx" }
 kumi-daw-own = { path = "daws/own/kumi-daw-own" }
 
 async-trait = "0.1"

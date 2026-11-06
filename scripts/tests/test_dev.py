@@ -633,6 +633,18 @@ class RenoiseTestScripts(unittest.TestCase):
         programs = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": self.WITH_A_WORKER}
         self.assert_stops(signal.SIGTERM, programs, skip_check=False)
 
+    def test_an_exited_worker_is_stopped_before_its_parent_reaps_it(self):
+        worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            self.assertTrue(alive(worker.pid), "a running worker must still fail the cleanup check")
+            worker.kill()
+            # Observe its exit without reaping it: kill(pid, 0) still succeeds in this state.
+            os.waitid(os.P_PID, worker.pid, os.WEXITED | os.WNOWAIT)
+            self.assertFalse(alive(worker.pid), "an exited worker has no work left running")
+        finally:
+            worker.kill()
+            worker.wait(timeout=20)
+
     def test_what_the_programs_answer_is_still_the_answer(self):
         passes = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": "#!/bin/sh\necho 'no problems found'\n"}
         for programs, skip_check, answer in (
@@ -650,7 +662,10 @@ def alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return True
+    # A killed descendant can remain a zombie until its parent is scheduled to reap it. It is stopped even though
+    # kill(pid, 0) still finds its PID. Only an explicit zombie state counts here; a missing ps result can race an exit.
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return not state.startswith("Z")
 
 
 if __name__ == "__main__":
