@@ -17,9 +17,11 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("load_device", "device"),
     PluginStep::new("set_device_parameter", "parameter"),
     // add-chain is the step's own word for insert-chain. Live gives Kumi no way to take a chain away again, so a change
-    // that adds one is taken back only by Live's own Undo (CC-20); insert-chain, the same by another name, stays out.
+    // that adds one is taken back only by Live's own Undo (CC-20); insert-chain, the same by another name, stays out, and
+    // its refusal says to use add-chain.
     PluginStep::new("edit_rack", "device")
         .refusing(&[("action", &["remove-macro", "delete-variation", "insert-chain"])])
+        .because(&[("action", "insert-chain", "use action add-chain; adding a chain is a change only Live's own Undo takes back.")])
         .daw_undo(&[("action", "add-chain")]),
     PluginStep::new("set_chain_mixer", "mixer"),
     PluginStep::new("set_locators", "locators"),
@@ -32,10 +34,10 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_routing", "mixer")
         .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["*"]), ("inputSubRouting", &["*"])])
         .because(&[
-            ("arm", "arming a track is for recording, which Kumi for Hermes doesn't do."),
-            ("monitoring", "a track's monitoring is for recording, which Kumi for Hermes doesn't do."),
-            ("inputType", "a track's input is for recording, which Kumi for Hermes doesn't do."),
-            ("inputSubRouting", "a track's input is for recording, which Kumi for Hermes doesn't do."),
+            ("arm", "*", "arming a track is for recording, which Kumi for Hermes doesn't do."),
+            ("monitoring", "*", "a track's monitoring is for recording, which Kumi for Hermes doesn't do."),
+            ("inputType", "*", "a track's input is for recording, which Kumi for Hermes doesn't do."),
+            ("inputSubRouting", "*", "a track's input is for recording, which Kumi for Hermes doesn't do."),
         ])
         .described(
             "Route a track's output: outputType and outputSubRouting, exactly as Live names them (live_discover kind \
@@ -167,9 +169,11 @@ mod tests {
     fn plugin_steps_refuse_the_reviewers_examples() {
         assert!(check(PLUGIN_STEPS, "change_structure", &json!({"action":"delete-return","ref":"t1"})).is_err());
         assert!(check(PLUGIN_STEPS, "change_structure", &json!({"action":"create-return","name":"Verb"})).is_ok());
-        assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"delete-variation","index":0})).is_err());
-        assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"remove-macro"})).is_err());
-        assert!(check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef":"d1","action":"insert-chain"})).is_err(), "no undo takes a chain away");
+        let rack = |action: &str| check(PLUGIN_STEPS, "edit_rack", &json!({"rackRef": "d1", "action": action, "index": 0}));
+        assert!(rack("delete-variation").is_err_and(|why| !why.contains("add-chain")), "its own reason");
+        assert!(rack("remove-macro").is_err_and(|why| !why.contains("add-chain")), "its own reason");
+        // The alias stays out; a model that wrote it is told the name that's taken.
+        assert!(rack("insert-chain").is_err_and(|why| why.contains("use action add-chain")));
         assert!(check(PLUGIN_STEPS, "edit_device", &json!({"deviceRef":"d1","action":"slice-clear"})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_device", &json!({"deviceRef":"d1","action":"resend"})).is_err());
         assert!(check(PLUGIN_STEPS, "edit_clip", &json!({"clipRef":"c1","action":"duplicate-loop"})).is_err());
