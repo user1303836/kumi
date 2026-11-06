@@ -3469,12 +3469,9 @@ mod tests {
     #[test]
     fn a_matching_later_snapshot_does_not_override_native_restoration_failure() {
         use super::{after_restoration, native_hear_refused, DawId, HearFailure, RuntimeError};
-        for native in [
-            "tempo_restore_failed",
-            "cursor_restore_failed",
-            "cursor_restore_ownership_uncertain",
-            "cursor_restore_state_changed",
-        ] {
+        for native in
+            ["tempo_restore_failed", "cursor_restore_failed", "cursor_restore_ownership_uncertain", "cursor_restore_state_changed"]
+        {
             let error = native_hear_refused(Some(native), "render_failed", Some(DawId::Renoise));
             assert!(matches!(
                 after_restoration(error, false),
