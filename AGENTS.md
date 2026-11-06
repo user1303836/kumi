@@ -37,6 +37,8 @@ daws/                       everything DAW-specific, one folder per DAW
                             kumi-daw-own/ (L5: what the own-bridge integrations share, their provider among it)
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
   renoise/                  com.kumi.Bridge.xrnx/ (Lua tool), tests/ (against a mock Renoise), kumi-daw-renoise/ (L5)
+  logic/                    logic-kumi/ (program beside Logic and its Accessibility helper), kumi-daw-logic/ (L5:
+                            experimental integration/provider, file-library discovery and deferred manual lookup)
   soundcraft/               soundcraft-kumi/ (Kumi's bridge beside SoundCraft, a program its host starts: the client of
                             SoundCraft's control channel and its recorded vectors, starting SoundCraft, kumi-daw/1),
                             kumi-daw-soundcraft/ (L5: experimental and read-only; its provider, `Beside`, opens SoundCraft
