@@ -3,7 +3,7 @@
 use daw_bridge::files::{ensure_secret, read_secret, scan_discovery};
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::host::{Host, Pick};
+use daw_mcp_server::host::{Host, ListeningMode, Pick};
 use daw_mcp_server::mcp;
 use daw_mcp_server::simulator::logic::LogicScript;
 use daw_mcp_server::simulator::Simulator;
@@ -54,7 +54,7 @@ async fn an_existing_logic_bridge_attaches_without_starting_or_stopping_another_
     config.discovery_dir = Some(paths.discovery());
     let simulator = Simulator::start(config).await.unwrap();
     simulator.set_permission(Some("accessibility"));
-    let host = Host::new(Daw::Logic, home.path()).with_spawn(Spawn::new(
+    let host = Host::new(Daw::Logic, home.path(), ListeningMode::Standalone).with_spawn(Spawn::new(
         || panic!("a serving Logic bridge never needs a process-launch check"),
         || panic!("a serving Logic bridge is attached to, never started again"),
     ));
@@ -160,7 +160,7 @@ async fn logic_status_calls_share_one_started_bridge_and_closing_removes_its_dis
             })
         },
     );
-    let host = Host::new(Daw::Logic, home.path()).with_spawn(spawn);
+    let host = Host::new(Daw::Logic, home.path(), ListeningMode::Standalone).with_spawn(spawn);
     let pick = Pick::default();
     let (one, two) = tokio::join!(host.status(&pick), host.status(&pick));
     for status in [one, two] {

@@ -13,7 +13,7 @@ use common::{golden, normalized};
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::host::Host;
+use daw_mcp_server::host::{Host, ListeningMode};
 use daw_mcp_server::mcp;
 use daw_mcp_server::simulator::logic::LogicScript;
 use daw_mcp_server::simulator::Simulator;
@@ -41,7 +41,7 @@ impl Lab {
         let mut config = script.config(secret, BUNDLE);
         config.discovery_dir = Some(paths.discovery());
         let simulator = Simulator::start(config).await.unwrap();
-        let host = Arc::new(Host::new(Daw::Logic, home.path()));
+        let host = Arc::new(Host::new(Daw::Logic, home.path(), ListeningMode::Standalone));
         let events = host.events();
         Lab { _home: home, host, script, simulator, events, next_id: 100 }
     }

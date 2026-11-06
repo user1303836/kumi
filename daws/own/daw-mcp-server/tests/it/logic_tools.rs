@@ -2,7 +2,7 @@
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
-use daw_mcp_server::host::{Host, Pick};
+use daw_mcp_server::host::{Host, ListeningMode, Pick};
 use daw_mcp_server::mcp;
 use daw_mcp_server::simulator::logic::LogicScript;
 use daw_mcp_server::simulator::Simulator;
@@ -26,7 +26,7 @@ impl Lab {
         let mut config = script.config(secret, "com.apple.logic10");
         config.discovery_dir = Some(paths.discovery());
         let simulator = Simulator::start(config).await.unwrap();
-        let host = Arc::new(Host::new(Daw::Logic, home.path()).with_spawn(Spawn::new(
+        let host = Arc::new(Host::new(Daw::Logic, home.path(), ListeningMode::Standalone).with_spawn(Spawn::new(
             || panic!("the existing bridge is attached to"),
             || panic!("the existing bridge is never launched again"),
         )));
