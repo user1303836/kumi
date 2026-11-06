@@ -775,6 +775,12 @@ pub trait Integration {
     fn has_hear(&self) -> bool {
         self.profile().caps.hear
     }
+    /// Read-only preflight for a bounded listen. Never installs, captures, creates scratch
+    /// files or changes the DAW; the real hear call repeats the same preflight.
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        let _ = (request, signal);
+        Err(absent())
+    }
     /// Hear tracks (or the mix) in the Set directly: as they play now, or by playing a stretch of the Arrangement; a file each, or why not.
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _ = (request, signal);

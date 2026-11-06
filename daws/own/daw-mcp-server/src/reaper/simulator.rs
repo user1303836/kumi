@@ -19,6 +19,32 @@ const KINDS: [&str; 12] = ["project", "track", "item", "take", "fx", "param", "s
 pub const LISTENING_METHODS: [&str; 8] =
     ["render_start", "capture_start", "listen_status", "listen_cancel", "audition", "audition_stop", "audio_file", "scratch"];
 const BODIES: [&str; 6] = ["arrange", "midi", "fx", "routing", "mixer", "levels"];
+const RENDER_NUMBERS: [&str; 23] = [
+    "RENDER_SETTINGS",
+    "RENDER_BOUNDSFLAG",
+    "RENDER_CHANNELS",
+    "RENDER_SRATE",
+    "RENDER_STARTPOS",
+    "RENDER_ENDPOS",
+    "RENDER_TAILFLAG",
+    "RENDER_TAILMS",
+    "RENDER_ADDTOPROJ",
+    "RENDER_DITHER",
+    "RENDER_NORMALIZE",
+    "RENDER_NORMALIZE_TARGET",
+    "RENDER_BRICKWALL",
+    "RENDER_FADEIN",
+    "RENDER_FADEOUT",
+    "RENDER_FADEINSHAPE",
+    "RENDER_FADEOUTSHAPE",
+    "RENDER_FADELPF",
+    "RENDER_PADSTART",
+    "RENDER_PADEND",
+    "RENDER_TRIMSTART",
+    "RENDER_TRIMEND",
+    "RENDER_DELAY",
+];
+const RENDER_TEXTS: [&str; 5] = ["RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FORMAT2", "RENDER_EXTRAFILEDIR"];
 
 struct State {
     epoch: u32,
@@ -52,6 +78,9 @@ struct State {
     project: Option<Value>,
     /// Whether REAPER is playing (its transport, and what a capture needs).
     playing: bool,
+    recording: bool,
+    /// The project's actual fixed render settings, independent of the transient listening jobs.
+    render_state: Value,
     /// Each track's FX chain, by the track's ref ("r:track:master" is the first row's): M5's listening reads and sets them.
     fx: std::collections::HashMap<String, Vec<SimFx>>,
     next_fx: u32,
@@ -59,6 +88,11 @@ struct State {
     page_rows: Option<usize>,
     /// MIDI items a test adds (`add_midi_item`): groove reads their notes and moves them with notes-change.
     midi: Vec<SimMidi>,
+    /// Whether a connected client asks that the project's id be kept in the project (a hello's `keepIdentity`).
+    keep_identity: bool,
+    /// The paths of the saved projects the sim wrote an id into, in order, as the extension's
+    /// `SetProjExtState(kumi, project, …)`: it does that only while a client asks, once for a project with no id of its own.
+    ids_written: Vec<String>,
 }
 
 /// A MIDI item of the sim's: its GUID and its active take's, its track, name and place in beats, and its notes (pitch,
@@ -272,10 +306,18 @@ impl ReaperScript {
                 settings: json!({"bpm": 120.0, "loop": {"start": 0.0, "end": 0.0}, "repeat": false, "metronome": false}),
                 project: None,
                 playing: false,
+                recording: false,
+                render_state: json!({
+                    "numbers": RENDER_NUMBERS.into_iter().map(|key| (key.to_string(), json!(0.0))).collect::<serde_json::Map<_, _>>(),
+                    "texts": RENDER_TEXTS.into_iter().map(|key| (key.to_string(), json!(""))).collect::<serde_json::Map<_, _>>(),
+                    "projrenderlimit": 0, "master_fx": 1.0, "time_selection": [0.0, 0.0], "dirty": false,
+                }),
                 fx: std::collections::HashMap::new(),
                 next_fx: 0,
                 page_rows: None,
                 midi: vec![],
+                keep_identity: false,
+                ids_written: vec![],
             })),
             listening: SimListening::new(daw_bridge::Daw::Reaper),
         }
@@ -295,6 +337,24 @@ impl ReaperScript {
 
     pub fn set_tempo(&self, bpm: f64) {
         self.set_setting("bpm", bpm.into());
+    }
+
+    /// Change an actual stored render number, for example a producer's setting left behind after rendering.
+    pub fn set_render_number(&self, key: &str, value: f64) {
+        assert!(RENDER_NUMBERS.contains(&key), "not a fixed render number");
+        self.state.lock().unwrap().render_state["numbers"][key] = json!(value);
+    }
+
+    /// Change an actual stored render string.
+    pub fn set_render_text(&self, key: &str, value: &str) {
+        assert!(RENDER_TEXTS.contains(&key), "not a fixed render text");
+        self.state.lock().unwrap().render_state["texts"][key] = json!(value);
+    }
+
+    pub fn set_recording(&self, recording: bool) {
+        let mut state = self.state.lock().unwrap();
+        state.recording = recording;
+        self.listening.set_playing(state.playing || recording);
     }
 
     /// The producer renames a track.
@@ -467,8 +527,9 @@ impl ReaperScript {
 
     /// The producer starts or stops REAPER: its transport says so, and a capture can hear it.
     pub fn set_playing(&self, playing: bool) {
-        self.state.lock().unwrap().playing = playing;
-        self.listening.set_playing(playing);
+        let mut state = self.state.lock().unwrap();
+        state.playing = playing;
+        self.listening.set_playing(playing || state.recording);
     }
 
     /// The project switched tabs: refs and cursors from before are stale.
@@ -504,6 +565,25 @@ impl ReaperScript {
         self.state.lock().unwrap().asked.clone()
     }
 
+    /// The saved projects (their paths) whose id the sim wrote into them: only while a connected client asked.
+    pub fn ids_written(&self) -> Vec<String> {
+        self.state.lock().unwrap().ids_written.clone()
+    }
+
+    /// While a client asks, a saved project with no id of its own gets one written into it (the extension does it on its
+    /// next look at the project; the sim on the ask and on each request). What the project row says is unchanged: the
+    /// extension names such a project by its path's id before the write and after it alike.
+    fn keep_project_id(state: &mut State) {
+        if !state.keep_identity {
+            return;
+        }
+        let project = Self::project(state);
+        let path = project["path"].as_str().unwrap_or_default().to_owned();
+        if !path.is_empty() && project["id"].is_null() && !state.ids_written.contains(&path) {
+            state.ids_written.push(path);
+        }
+    }
+
     pub fn respond(&self) -> Respond {
         let script = self.clone();
         Arc::new(move |method, params| script.answer(method, params))
@@ -532,6 +612,12 @@ impl ReaperScript {
             let mut more = serde_json::Map::new();
             more.insert("listening".into(), listening.flags());
             more
+        }));
+        let script = self.clone();
+        config.on_keep_identity = Some(Arc::new(move |asked| {
+            let mut state = script.state.lock().unwrap();
+            state.keep_identity = asked;
+            Self::keep_project_id(&mut state);
         }));
         config
     }
@@ -1203,12 +1289,17 @@ impl ReaperScript {
     fn answer(&self, method: &str, params: &Value) -> Option<Result<Value, (String, String)>> {
         let mut state = self.state.lock().unwrap();
         state.asked.push((method.to_string(), params.clone()));
+        Self::keep_project_id(&mut state);
         let epoch = Self::epoch_text(&state);
         if LISTENING_METHODS.contains(&method) {
             if let Some(sent) = params.get("epoch").and_then(Value::as_str).filter(|sent| *sent != epoch) {
                 let message =
                     format!("those refs are from an earlier epoch ({sent}; now {epoch}): the project in the tab changed, read again");
                 return Some(Err(("stale".into(), message)));
+            }
+            if method == "render_start" && params.get("maxSeconds").is_some() {
+                self.listening.set_tempo(state.settings["bpm"].as_f64().unwrap_or(f64::NAN));
+                self.listening.set_playing(state.playing || state.recording);
             }
             let tracks: Vec<String> = state.tracks.iter().filter_map(|row| row["ref"].as_str().map(str::to_owned)).collect();
             drop(state);
@@ -1222,6 +1313,15 @@ impl ReaperScript {
                     format!("those refs are from an earlier epoch ({sent}; now {epoch}): the project in the tab changed, read again");
                 return Some(Err(("stale".into(), message)));
             }
+        }
+        if method == "read" && params["kind"] == "render_preflight" {
+            if !self.listening.supports_render_preflight() {
+                return Some(Err(("unsupported".into(), "render preflight is not available".into())));
+            }
+            if params.get("epoch").is_some_and(|value| !value.is_null() && !value.is_string()) {
+                return Some(Err(("bad-params".into(), "epoch must be a string".into())));
+            }
+            return Some(Self::render_preflight(&state, params));
         }
         // (M5) A copy kept as a track, muted: the listening side knows the kept copies.
         let muted = if method == "change_restore" { &params["target"]["ref"] } else { &params["input"]["ref"] };
@@ -1287,7 +1387,7 @@ impl ReaperScript {
                     "epoch": epoch,
                     "project": Self::project(&state),
                     // (the transport plays at the project's tempo, as REAPER's reads it)
-                    "transport": {"playing": false, "recording": false, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0, "loop": {"on": false, "start": 0.0, "end": 0.0}},
+                    "transport": {"playing": state.playing, "recording": state.recording, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0, "loop": {"on": false, "start": 0.0, "end": 0.0}},
                     "tracks": tracks,
                     "selection": {"trackRef": "r:track:{T0001}", "itemRef": null, "takeRef": null, "fxRef": null, "cursor": 0.0},
                     "markers": [],
@@ -1298,14 +1398,22 @@ impl ReaperScript {
                 }
                 Ok(snapshot)
             }
-            "focus" => Ok(json!({
-                "epoch": epoch,
-                "view": "arrange",
-                "selection": {"trackRef": "r:track:{T0001}", "cursor": 0.0},
-                "transport": {"playing": state.playing, "recording": false, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0},
-                "changed": state.changed,
-                "ageMs": 12,
-            })),
+            "focus" => {
+                let mut focus = json!({
+                    "epoch": epoch,
+                    "view": "arrange",
+                    "selection": {"trackRef": "r:track:{T0001}", "cursor": 0.0},
+                    "transport": {"playing": state.playing, "recording": state.recording, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0},
+                    "changed": state.changed,
+                    "ageMs": 12,
+                });
+                if self.listening.supports_render_preflight() {
+                    focus["transport"]["loop"] = json!({
+                        "on": state.settings["repeat"], "start": state.settings["loop"]["start"], "end": state.settings["loop"]["end"]
+                    });
+                }
+                Ok(focus)
+            }
             "focus_body" => match params.get("kind").and_then(Value::as_str) {
                 Some("arrange") => Self::arrange(&state, &epoch, params),
                 Some(kind) if BODIES.contains(&kind) => {
@@ -1460,6 +1568,51 @@ impl ReaperScript {
         state.project =
             Some(json!({"id": id, "identity": identity, "name": name, "path": path, "saved": !path.is_empty(), "tempo": 120.0}));
         state.changed += 1;
+    }
+
+    fn render_preflight(state: &State, params: &Value) -> Result<Value, (String, String)> {
+        let bad = || ("bad-params".into(), "range: finite fromBeat >= 0 and beats > 0".into());
+        let unsupported = || ("unsupported".into(), "render preflight state is incomplete or nonfinite".into());
+        let from = params["range"]["fromBeat"].as_f64().filter(|n| n.is_finite() && *n >= 0.0).ok_or_else(bad)?;
+        let beats = params["range"]["beats"].as_f64().filter(|n| n.is_finite() && *n > 0.0).ok_or_else(bad)?;
+        if !(from + beats).is_finite() {
+            return Err(bad());
+        }
+        if state.playing || state.recording {
+            return Err(("failed".into(), "guarded rendering requires stopped transport".into()));
+        }
+        let bpm = state.settings["bpm"].as_f64().filter(|n| n.is_finite() && *n > 0.0).ok_or_else(unsupported)?;
+        let seconds = (from + beats) * 60.0 / bpm - from * 60.0 / bpm;
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return Err(unsupported());
+        }
+        let mut render_state = state.render_state.clone();
+        if RENDER_NUMBERS.iter().any(|key| render_state["numbers"][*key].as_f64().is_none_or(|n| !n.is_finite()))
+            || RENDER_TEXTS.iter().any(|key| !render_state["texts"][*key].is_string())
+        {
+            return Err(unsupported());
+        }
+        let values = |field: &str| -> Result<Vec<Value>, (String, String)> {
+            state
+                .tracks
+                .iter()
+                .map(|track| {
+                    let reference = track["ref"].as_str().filter(|r| r.starts_with("r:track:")).ok_or_else(unsupported)?;
+                    let value = track[field].as_bool().ok_or_else(unsupported)?;
+                    Ok(json!({"ref": reference, "value": if value { 1.0 } else { 0.0 }}))
+                })
+                .collect()
+        };
+        render_state["selection"] = json!(values("selected")?);
+        render_state["mutes"] = json!(values("mute")?);
+        let answer = json!({
+            "schema": 1, "seconds": seconds, "offset": 0.0, "aligned": true, "irregular": false, "clipped": false,
+            "render_state": render_state,
+        });
+        if serde_json::to_vec(&answer).map_or(true, |bytes| bytes.len() > PAGE_BYTES) {
+            return Err(("unsupported".into(), "complete render preflight exceeds the answer bound".into()));
+        }
+        Ok(answer)
     }
 
     fn read(state: &State, epoch: &str, params: &Value) -> Result<Value, (String, String)> {

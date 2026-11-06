@@ -35,7 +35,7 @@ impl Session {
     fn start(daw: Daw, home: &Path) -> Self {
         let (input, host_input) = tokio::io::duplex(1 << 20);
         let (host_output, output) = tokio::io::duplex(1 << 20);
-        let host = Arc::new(Host::new(daw, home));
+        let host = Arc::new(Host::new(daw, home, daw_mcp_server::host::ListeningMode::Standalone));
         let served = tokio::spawn(daw_mcp_server::stdio::serve(host, host_input, host_output));
         let pid = std::process::id();
         let replace = vec![

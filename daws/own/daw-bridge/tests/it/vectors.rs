@@ -207,6 +207,14 @@ fn frame_vectors() {
     let heartbeat = |ms: &str| format!("{{\"type\":\"heartbeat\",\"ms\":{ms}}}");
     let event = |data: &str| format!("{{\"type\":\"event\",\"seq\":1,\"name\":\"x\",\"data\":{data}}}");
     let lines = [
+        (
+            "a guarded render from a client without deferred-finalization metadata",
+            r#"{"type":"request","id":1,"method":"render_start","params":{"jobId":"job1","sources":[{"id":"bounded","what":"master"}],"range":{"fromBeat":0,"beats":4},"preRollBeats":0,"maxSeconds":2,"epoch":"1"}}"#.to_string(),
+        ),
+        (
+            "a guarded render carrying its original native phase deadline",
+            r#"{"type":"request","id":1,"method":"render_start","params":{"jobId":"job1","sources":[{"id":"bounded","what":"master"}],"range":{"fromBeat":0,"beats":4},"preRollBeats":0,"maxSeconds":2,"deadlineUnixMs":1793894400000,"epoch":"1"}}"#.to_string(),
+        ),
         ("an event whose data nests to the limit", event(&nest(MAX_PAYLOAD_DEPTH))),
         ("an event whose data nests one level past the limit", event(&nest(MAX_PAYLOAD_DEPTH + 1))),
         ("an event whose data nests past serde_json's own limit", event(&nest(300))),
@@ -238,6 +246,15 @@ fn frame_vectors() {
         ("a credit without bytes", "{\"type\":\"credit\"}".to_string()),
         ("a welcome naming creditBytes", welcome_with("65536")),
         ("a welcome naming creditBytes written 1.5", welcome_with("1.5")),
+        (
+            "a hello asking the bridge to keep the project's identity",
+            "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"client\":\"kumi/1\",\"keepIdentity\":true}"
+                .to_string(),
+        ),
+        (
+            "a hello whose keepIdentity isn't a boolean",
+            "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"keepIdentity\":\"yes\"}".to_string(),
+        ),
         ("a name with a surrogate pair", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\ud83d\\ude00\"}".to_string()),
         ("a name with a lone high surrogate", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\ud800x\"}".to_string()),
         ("a name with a lone low surrogate", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\udc00\"}".to_string()),

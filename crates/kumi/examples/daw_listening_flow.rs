@@ -92,7 +92,7 @@ fn main() {
     let home = std::path::PathBuf::from(home);
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     tokio::task::LocalSet::new().block_on(&runtime, async {
-        let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(daw, &home)), id: Cell::new(0) });
+        let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(daw, &home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
         let connect: Connect = Rc::new(move |_| {
             let endpoint = endpoint.clone();
             async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

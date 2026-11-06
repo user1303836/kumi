@@ -15,6 +15,7 @@ use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::app::AbletonFactory;
+use kumi_daw_own::bridge::{HostStart, OwnOptions};
 use kumi_daw_own::provider::OwnHosts;
 use kumi_types::contracts::JsonObject;
 use kumi_types::system::Env;
@@ -84,6 +85,16 @@ impl Lab {
         config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
         adopted: bool,
     ) -> Lab {
+        Self::configured(daw, bridge, config, adopted, |_| {}).await
+    }
+
+    async fn configured(
+        daw: DawId,
+        bridge: Daw,
+        config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
+        adopted: bool,
+        configure: impl FnOnce(&mut Args),
+    ) -> Lab {
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         let transport = if adopted { elsewhere.path().join(".kumi") } else { home.path().join("kumi-home") };
@@ -120,18 +131,21 @@ impl Lab {
             ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
             ("KUMI_RENOISE_PREFS_DIR".into(), home.path().join("Renoise").display().to_string()),
         ]);
+        // (made as the integration starts it: its ask to keep the project's id is the host's, as KUMI_KEEP_IDENTITY is)
         let host_home = transport.clone();
         let own_host = OwnHosts(Rc::new(move |_| {
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home)), id: Cell::new(0) });
-            Rc::new(move |_| {
-                let endpoint = endpoint.clone();
+            let host_home = host_home.clone();
+            Rc::new(move |start: HostStart| {
+                let host =
+                    Host::new(bridge, &host_home, daw_mcp_server::host::ListeningMode::Restricted).with_keep_identity(start.keep_identity);
+                let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             })
         }));
         let answers = kumi_daw::io::Answers::default()
             .with(AbletonFactory(Rc::new(|_| panic!("a REAPER runtime makes no Ableton integration"))))
             .with(own_host);
-        let args = Args {
+        let mut args = Args {
             state_dir: home.path().join("state"),
             kumi_home: transport,
             hermes_home: None,
@@ -141,6 +155,7 @@ impl Lab {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
+        configure(&mut args);
         let ctx = Ctx::new(args, env, answers).unwrap();
         Lab { home, _elsewhere: elsewhere, ctx, simulator }
     }
@@ -289,6 +304,83 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let sent = lab.methods_sent();
     assert!(!sent.is_empty() && sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
     lab.ctx.link().close().await;
+});
+
+/// What each hello the simulated bridge was sent said of keeping the project's id (`keepIdentity`), in order.
+fn identity_asks(simulator: &Simulator) -> Vec<Option<Value>> {
+    simulator
+        .transcript()
+        .into_iter()
+        .filter(|line| line.from_host)
+        .filter_map(|line| serde_json::from_str::<Value>(&line.text).ok())
+        .filter(|frame| frame["type"] == "hello")
+        .map(|frame| frame.get("keepIdentity").cloned())
+        .collect()
+}
+
+// The plugin's runtime only observes: its host never asks REAPER to keep the project's id, so nothing is written into the
+// project (contract C2), while REAPER says it would keep one for a client that asked.
+case!(serve_never_asks_reaper_to_keep_the_projects_id_and_nothing_is_written_into_it, async {
+    let script = ReaperScript::new(3, 0);
+    let written = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let connected = lab.call("connect", json!({"daw": "reaper"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    assert!(!simulator.keeps_identity());
+    assert_eq!(written.ids_written(), Vec::<String>::new(), "nothing written into the project");
+    let status = lab.state("status.json");
+    assert_eq!(status["connected"], true, "{status}");
+    lab.ctx.link().close().await;
+});
+
+case!(serve_never_requests_or_saves_a_renoise_identity, async {
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let saved = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
+    let connected = lab.call("connect", json!({"daw": "renoise"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    let native_epoch = lab.ctx.link().project().unwrap().native_epoch.unwrap();
+    let result = saved.respond()("project_save", &json!({"epoch": native_epoch})).unwrap().unwrap();
+    assert_eq!(result["dirty"], false);
+    assert!(saved.ids_written().is_empty(), "a producer's save while the plugin is connected must not keep a Kumi id");
+    assert!(!simulator.keeps_identity());
+    lab.ctx.link().close().await;
+});
+
+// Standalone Kumi (its integration with the standalone policy) asks, and REAPER writes the project's id into it while it
+// is connected.
+case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_written, async {
+    let home = tempfile::tempdir().unwrap();
+    let paths = BridgePaths::new(home.path(), Daw::Reaper);
+    let script = ReaperScript::new(3, 0);
+    let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "/lab/REAPER");
+    config.discovery_dir = Some(paths.discovery());
+    let simulator = Simulator::start(config).await.unwrap();
+    let host_home = home.path().to_path_buf();
+    let connect: kumi_daw_own::bridge::Connect = Rc::new(move |start: HostStart| {
+        let host =
+            Host::new(Daw::Reaper, &host_home, daw_mcp_server::host::ListeningMode::Standalone).with_keep_identity(start.keep_identity);
+        let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
+        async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+    });
+    let context = kumi_agent::core::context::IntegrationContext::new(Rc::new(|_, _| {}));
+    assert!(context.policy.persist_identity, "standalone Kumi's policy");
+    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+    reaper.start(Signal::new()).await.unwrap();
+    reaper.observe(Signal::new(), None).await.unwrap();
+    let asks = identity_asks(&simulator);
+    assert!(!asks.is_empty() && asks.iter().all(|ask| *ask == Some(json!(true))), "{asks:?}");
+    assert!(simulator.keeps_identity());
+    assert_eq!(script.ids_written(), ["/lab/Song.rpp"], "the project's id written into it");
+    reaper.close().await.unwrap();
 });
 
 case!(what_changed_while_reaper_was_away_reaches_the_note_and_waits_for_the_look_that_asks_for_it, async {
@@ -473,6 +565,7 @@ struct Wire {
     from: BufReader<tokio::io::DuplexStream>,
     served: tokio::task::JoinHandle<std::io::Result<()>>,
     asked: u64,
+    response_wait: std::time::Duration,
 }
 
 impl Wire {
@@ -486,7 +579,8 @@ impl Wire {
             runtime_out,
             std::future::pending(),
         ));
-        let mut wire = Wire { to: Some(to), from: BufReader::new(from), served, asked: 0 };
+        let mut wire =
+            Wire { to: Some(to), from: BufReader::new(from), served, asked: 0, response_wait: std::time::Duration::from_secs(30) };
         wire.request("initialize", json!({"protocolVersion": "2025-06-18"})).await;
         wire.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
         wire
@@ -505,8 +599,7 @@ impl Wire {
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await;
         loop {
             let mut line = String::new();
-            let read =
-                tokio::time::timeout(std::time::Duration::from_secs(30), self.from.read_line(&mut line)).await.expect("an answer in time");
+            let read = tokio::time::timeout(self.response_wait, self.from.read_line(&mut line)).await.expect("an answer in time");
             assert!(read.unwrap() > 0, "the runtime stopped before answering {method}");
             let message: Value = serde_json::from_str(&line).unwrap();
             if message["id"] == id {
@@ -1045,11 +1138,11 @@ case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_
     assert_eq!(seen["project_key"], a, "the look read A: {seen}");
     assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-1"), "A's key keeps A's epoch, never B's");
     assert!(!lab.ctx.link().page_is_looked(Some("sim-2")));
+    let retained = lab.ctx.link().project().unwrap();
     let (stale, error) = wire.call("read", track.clone(), None).await;
     assert!(error && stale["error"]["code"] == "stale", "B's page passed as A's: {stale}");
-    // Refused for its epoch, not for anything else that's stale (a return the focus poll saw, say).
-    let said = stale["error"]["reason"].as_str().unwrap_or_default();
-    assert!(said.contains("can't tell these rows are the looked project's"), "{stale}");
+    let after = lab.ctx.link().project().unwrap();
+    assert_eq!((after.key, after.epoch, after.native_epoch), (retained.key, retained.epoch, retained.native_epoch));
 
     // The next look is B's, with B's epoch: B's rows are B's.
     let (b, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
@@ -1592,3 +1685,5 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
     assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
     wire.end().await;
 });
+#[path = "serve_listen.rs"]
+mod track_listening;

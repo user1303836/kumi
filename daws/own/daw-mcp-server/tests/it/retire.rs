@@ -63,7 +63,7 @@ async fn lab(heartbeat_ms: u64) -> (tempfile::TempDir, Host, Simulator) {
     config.discovery_dir = Some(paths.discovery());
     config.offer.heartbeat_ms = heartbeat_ms;
     let simulator = Simulator::start(config).await.unwrap();
-    let host = Host::new(Daw::Renoise, home.path());
+    let host = Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     (home, host, simulator)
 }
 

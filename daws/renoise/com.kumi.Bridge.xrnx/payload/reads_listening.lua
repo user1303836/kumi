@@ -17,6 +17,14 @@ M.DEFAULT_LIMIT = 64
 -- Set by the bridge: a pattern's count of changed lines, so the song's timeline is scanned again only where it changed.
 M.pattern_mark = nil
 
+-- One complete planning/state object, never a paginated row list.
+function M.render_preflight(params, epoch)
+  if params.epoch ~= epoch then fail("stale", "render preflight needs the current epoch: read focus again") end
+  local answer = listening.preflight(rows.the_song(), params.range, epoch, M.pattern_mark)
+  answer.epoch = epoch
+  return answer
+end
+
 -- Whether pattern `p`'s lines on track `t` play anything: a note in a note column that isn't muted, or an effect. An alias plays
 -- its source's lines.
 local function pattern_plays(song, p, t, muted, any_muted)

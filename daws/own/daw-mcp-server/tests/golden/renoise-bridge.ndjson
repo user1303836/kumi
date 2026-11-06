@@ -5,14 +5,14 @@
 1 > {"type":"request","id":1,"method":"ping","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":1,"ok":true,"result":{}}
 1 > {"type":"request","id":2,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":2,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Untitled"},"busy":false,"demo":false}}
+1 < {"type":"response","id":2,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Untitled"},"busy":false,"keep_identity":true,"demo":false}}
 1 > {"type":"request","id":3,"method":"render","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":3,"ok":false,"error":{"code":"unknown-method","message":"no method render"}}
 1 < {"type":"event","seq":1,"name":"project","data":{"name":"Next"}}
 1 > {"type":"request","id":4,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":4,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Next"},"busy":false,"demo":false}}
+1 < {"type":"response","id":4,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Next"},"busy":false,"keep_identity":true,"demo":false}}
 1 > {"type":"request","id":5,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":5,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Next"},"busy":"rendering","demo":false}}
+1 < {"type":"response","id":5,"ok":true,"result":{"daw":"renoise","bridge":"0.1.0","dawVersion":"3.5.4","pid":"<pid>","resource":"/lab/Renoise/V3.5.4","project":{"name":"Next"},"busy":"rendering","keep_identity":true,"demo":false}}
 1 > {"type":"request","id":6,"method":"render","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":6,"ok":false,"error":{"code":"busy","message":"renoise is rendering"}}
 1 < {"type":"bye","reason":"quit"}

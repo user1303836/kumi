@@ -5,6 +5,7 @@ mod catchup;
 mod changes;
 mod credit;
 mod fx_chain_save;
+mod keep_identity;
 mod listening;
 mod mcp;
 mod reads;

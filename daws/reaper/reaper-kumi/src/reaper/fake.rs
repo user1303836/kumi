@@ -501,6 +501,9 @@ pub struct State {
     pub tracks: Vec<FakeTrack>,
     pub markers: Vec<FakeMarker>,
     pub tempo_markers: Vec<FakeTempo>,
+    /// Historical fixtures set the transport tempo independently of the marker rows they read.
+    /// Opt in when exercising the SDK's piecewise tempo-map conversions.
+    pub integrate_tempo_map: bool,
     pub length: f64,
     pub cursor: f64,
     pub play_position: f64,
@@ -603,6 +606,7 @@ impl Default for State {
             tracks: vec![],
             markers: vec![],
             tempo_markers: vec![],
+            integrate_tempo_map: false,
             length: 0.0,
             cursor: 0.0,
             play_position: 0.0,
@@ -1018,11 +1022,47 @@ unsafe extern "C" fn time_map_get_time_sig_at_time(_proj: *mut ReaProject, time:
         }
     })
 }
+/// Integrate the fake tempo map, including a marker's linear ramp to the next one.
+fn tempo_time(s: &State, value: f64, to_time: bool) -> f64 {
+    if !s.integrate_tempo_map {
+        return if to_time { value * 60.0 / s.bpm } else { value * s.bpm / 60.0 };
+    }
+    let mut at = 0.0;
+    let mut beat = 0.0;
+    let mut bpm = s.bpm;
+    let mut linear = false;
+    for marker in &s.tempo_markers {
+        let duration = marker.time - at;
+        if duration > 0.0 {
+            let slope = if linear { (marker.bpm - bpm) / duration } else { 0.0 };
+            let span = (bpm * duration + 0.5 * slope * duration * duration) / 60.0;
+            if (to_time && value <= beat + span) || (!to_time && value <= marker.time) {
+                if to_time {
+                    let area = (value - beat) * 60.0;
+                    let elapsed = if slope == 0.0 { area / bpm } else { 2.0 * area / (bpm + (bpm * bpm + 2.0 * slope * area).sqrt()) };
+                    return at + elapsed;
+                }
+                let elapsed = value - at;
+                return beat + (bpm * elapsed + 0.5 * slope * elapsed * elapsed) / 60.0;
+            }
+            beat += span;
+        }
+        at = marker.time;
+        bpm = marker.bpm;
+        linear = marker.linear;
+    }
+    if to_time {
+        at + (value - beat) * 60.0 / bpm
+    } else {
+        beat + (value - at) * bpm / 60.0
+    }
+}
+
 unsafe extern "C" fn time_map2_time_to_qn(_proj: *mut ReaProject, time: f64) -> f64 {
-    counted(|s| time * s.bpm / 60.0)
+    counted(|s| tempo_time(s, time, false))
 }
 unsafe extern "C" fn time_map2_qn_to_time(_proj: *mut ReaProject, qn: f64) -> f64 {
-    counted(|s| qn * 60.0 / s.bpm)
+    counted(|s| tempo_time(s, qn, true))
 }
 unsafe extern "C" fn time_map2_time_to_beats(
     _proj: *mut ReaProject,
@@ -1033,7 +1073,7 @@ unsafe extern "C" fn time_map2_time_to_beats(
     denom: *mut c_int,
 ) -> f64 {
     counted(|s| {
-        let qn = time * s.bpm / 60.0;
+        let qn = tempo_time(s, time, false);
         // A measure is `num` beats of 1/`denom` notes long: 3 quarter notes in 6/8, counted by eighths as REAPER does.
         let per_measure = s.time_signature.0 as f64 * 4.0 / s.time_signature.1 as f64;
         let whole = (qn / per_measure).floor();

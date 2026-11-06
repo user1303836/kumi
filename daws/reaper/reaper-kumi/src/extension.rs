@@ -71,6 +71,12 @@ pub trait Outbox {
     fn attended(&self) -> bool {
         true
     }
+    /// Whether a connected client asked that the project's id be kept in the project (the hello's `keepIdentity`):
+    /// the id is written (`kumi`/`project` ProjExtState) only while one has. With none, reads still name a saved project
+    /// by its path's id.
+    fn keeps_identity(&self) -> bool {
+        false
+    }
 }
 
 /// Clears the flag when dropped.
@@ -318,7 +324,12 @@ impl Extension {
     pub fn new(api: Api, jobs: Receiver<Job>, out: Box<dyn Outbox>, snapshot: Arc<Mutex<Snapshot>>) -> Extension {
         let board = snapshot.lock().unwrap_or_else(|e| e.into_inner()).listening.clone();
         // (fixed for this REAPER: read once, not rebuilt sixty times a second)
-        let mut status_static = json!({"sdk": api::SDK_VERSION, "api": {"resolved": api.resolved(), "total": api::FUNCTION_COUNT}});
+        // (`keep_identity`: the project's id is written into it only while a connected client asks)
+        let mut status_static = json!({
+            "sdk": api::SDK_VERSION,
+            "api": {"resolved": api.resolved(), "total": api::FUNCTION_COUNT},
+            "keep_identity": true,
+        });
         let missing = Reaper::new(&api).missing_features();
         if !missing.is_empty() {
             status_static["missing"] =
@@ -704,8 +715,9 @@ impl Extension {
             self.listening.project_changed(&reaper, &*self.out);
         }
         // The tabs open (closed ones are forgotten) and the project's own id (one that came with a template is seen while
-        // the project is unsaved; a saved project without one is given its path's): every `TABS_EVERY`, and at once for a
-        // project that just came to the front, was replaced, or was saved under a name.
+        // the project is unsaved; a saved project without one is given its path's, written into it only while a connected
+        // client asks): every `TABS_EVERY`, and at once for a project that just came to the front, was replaced, or was
+        // saved under a name.
         let due = self.tabs_at.get().is_none_or(|at| at.elapsed() >= tabs_every());
         if settled && (switched || replaced || changed || due) {
             self.tabs_at.set(Some(Instant::now()));
@@ -714,7 +726,9 @@ impl Extension {
             if let Some(info) = info {
                 self.reads.note_project(info.ptr);
                 self.reads.project_id(&reaper, info.ptr, info);
-                self.reads.keep_project_id(&reaper, info.ptr, info);
+                if self.out.keeps_identity() {
+                    self.reads.keep_project_id(&reaper, info.ptr, info);
+                }
             }
         }
         if (changed && !first) || replaced {
@@ -924,8 +938,10 @@ mod tests {
 
     static OPEN: AtomicBool = AtomicBool::new(false);
 
+    /// The events and heartbeats sent, and whether a connected client asks that the project's id be kept (`setup`'s
+    /// does, as standalone Kumi's host does).
     #[derive(Clone, Default)]
-    struct Recorder(Rc<RefCell<Vec<(String, Value)>>>);
+    struct Recorder(Rc<RefCell<Vec<(String, Value)>>>, Rc<Cell<bool>>);
 
     impl Outbox for Recorder {
         fn event(&self, name: &str, data: Value) {
@@ -933,6 +949,9 @@ mod tests {
         }
         fn heartbeat(&self) {
             self.0.borrow_mut().push(("heartbeat".into(), Value::Null));
+        }
+        fn keeps_identity(&self) -> bool {
+            self.1.get()
         }
     }
 
@@ -946,6 +965,7 @@ mod tests {
         fake::reset();
         let (tx, rx) = queue::channel();
         let recorder = Recorder::default();
+        recorder.1.set(true);
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
         let extension = Extension::new(fake::api(), rx, Box::new(recorder.clone()), snapshot.clone());
         (extension, tx, recorder, snapshot)
@@ -1062,6 +1082,36 @@ mod tests {
         tick_with_throttles(&extension, Duration::from_secs(10));
         tick_with_throttles(&extension, Duration::from_secs(10));
         assert!(kept().is_some(), "a project saved under a name gets its id at once");
+    }
+
+    /// The project's id is written into it only while a connected client asks (standalone Kumi's host does, the plugin's
+    /// runtime doesn't); with nobody asking, reads still name a saved project by its path's id.
+    #[test]
+    fn the_projects_id_is_written_only_while_a_connected_client_asks() {
+        let (extension, tx, recorder, _) = setup();
+        fake::lab_project();
+        let kept = || fake::with(|s| s.project_ext.get(&("kumi".into(), "project".into())).cloned());
+        let song = crate::read::path_id("/lab/Projects/Song.rpp");
+        // No client asks (none connected, or the plugin's runtime): nothing is written, and the path names the project.
+        recorder.1.set(false);
+        tick_with_throttles(&extension, Duration::ZERO);
+        assert_eq!(kept(), None);
+        assert_eq!(project_id(&extension, &tx), song.as_str());
+        assert_eq!(extension.snapshot().status["keep_identity"], true, "status says the extension keeps it when asked");
+        // A client that asks: written at the next look.
+        recorder.1.set(true);
+        tick_with_throttles(&extension, Duration::ZERO);
+        assert_eq!(kept().as_deref(), Some(song.as_str()));
+        // That client gone: a project saved under another name gets nothing written, and is named by its new path.
+        recorder.1.set(false);
+        fake::with(|s| {
+            s.project_ext.clear();
+            s.project = Some(("/lab/Projects/Song 2.rpp".into(), "Song 2.rpp".into()));
+        });
+        tick_with_throttles(&extension, Duration::ZERO);
+        tick_with_throttles(&extension, Duration::ZERO);
+        assert_eq!(kept(), None);
+        assert_eq!(project_id(&extension, &tx), crate::read::path_id("/lab/Projects/Song 2.rpp").as_str());
     }
 
     #[test]

@@ -49,7 +49,10 @@ async fn reapers_integration_reads_what_kumis_host_answers() {
             let mut config = script.config(secret, "/lab/REAPER");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -128,7 +131,10 @@ async fn renoises_integration_reads_what_kumis_host_answers_from_the_tool() {
             let mut config = script.config(secret, "/lab/Renoise");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -322,7 +328,10 @@ async fn reapers_changes_go_through_kumis_host_into_history_and_back_out_as_new_
             let mut config = script.config(secret, "/lab/REAPER");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -483,7 +492,10 @@ async fn renoises_changes_follow_its_epoch_and_its_undo_that_skips_mute() {
             let mut config = script.config_with_changes(secret, "/lab/Renoise");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -603,7 +615,10 @@ async fn closing_retires_each_row_in_the_daws_words() {
             let mut config = script.config_with_changes(secret, "/lab/Renoise");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -655,7 +670,10 @@ async fn a_change_the_daws_undo_put_back_is_undone_again_and_an_uncertain_one_is
             let mut config = script.config(secret, "/lab/REAPER");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -759,7 +777,10 @@ async fn reapers_actions_make_a_row_only_with_a_point_and_saves_are_no_change() 
             let mut config = script.config(secret, "/lab/REAPER");
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess {
+                host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -884,7 +905,10 @@ async fn an_m3_kinds_no_op_and_change_are_as_before_and_an_action_reaper_made_no
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
             let endpoint = Rc::new(Recorded {
-                inner: InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) },
+                inner: InProcess {
+                    host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)),
+                    id: Cell::new(0),
+                },
                 calls: RefCell::default(),
             });
             let recorded = endpoint.clone();
@@ -957,7 +981,8 @@ async fn renoise_with_changes(
 /// (M7) Kumi (another run of it, when called again) on the Renoise the simulator plays.
 async fn kumi_on_renoise(home: &std::path::Path) -> (Rc<dyn Integration>, Observation, Rc<RefCell<Vec<ChangeRecord>>>) {
     // (a busy runner's simulated bridge may answer a render's start or status late: the host gives each 30 s)
-    let host = Host::new(Daw::Renoise, home).with_listening_timeout(std::time::Duration::from_secs(30));
+    let host = Host::new(Daw::Renoise, home, daw_mcp_server::host::ListeningMode::Standalone)
+        .with_listening_timeout(std::time::Duration::from_secs(30));
     let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
     let connect: Connect = Rc::new(move |_| {
         let endpoint = endpoint.clone();
@@ -998,7 +1023,7 @@ async fn a_reaper_midi_items_takes_move_their_notes_through_the_host() {
             let mut config = script.config(secret, "/lab/REAPER");
             config.discovery_dir = Some(paths.discovery());
             let _simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

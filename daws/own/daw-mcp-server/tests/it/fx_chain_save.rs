@@ -24,7 +24,7 @@ async fn an_fx_chain_save_goes_to_reapers_bridge_with_its_fields_and_comes_back_
     let mut config = SimulatorConfig::reaper(secret, "/lab/REAPER").with_methods(&["fx_chain_save"], respond);
     config.discovery_dir = Some(paths.discovery());
     let simulator = Simulator::start(config).await.unwrap();
-    let host = Host::new(Daw::Reaper, home.path());
+    let host = Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     assert!(tools(&host).as_array().unwrap().iter().any(|tool| tool["name"] == "fx_chain_save"));
     let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "fx_chain_save", "arguments": {
         "ref": "r:track:{T0001}", "fxRefs": ["r:fx:{F1}"], "name": "Lead", "overwrite": true, "input": false, "epoch": "1",
@@ -42,7 +42,7 @@ async fn an_fx_chain_save_goes_to_reapers_bridge_with_its_fields_and_comes_back_
 #[tokio::test]
 async fn renoise_has_no_fx_chain_save() {
     let home = tempfile::tempdir().unwrap();
-    let host = Host::new(Daw::Renoise, home.path());
+    let host = Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     assert!(!tools(&host).as_array().unwrap().iter().any(|tool| tool["name"] == "fx_chain_save"));
     let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "fx_chain_save", "arguments": {"ref": "x", "name": "y"}}});
     assert_eq!(handle(&host, &call).await.unwrap()["error"]["code"], -32602);

@@ -32,6 +32,10 @@ pub type Respond = Arc<dyn Fn(&str, &Value) -> Option<Result<Value, (String, Str
 /// `status` fields read as each status is answered (what listening the bridge can do now, M5).
 pub type StatusMore = Arc<dyn Fn() -> Map<String, Value> + Send + Sync>;
 
+/// Told whether an open, authenticated connection asks that the project's id be kept in the project (its hello's
+/// `keepIdentity`), each time that changes: a script tags its project only while one does, as the bridges do.
+pub type KeepIdentity = Arc<dyn Fn(bool) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct SimulatorConfig {
     pub secret: Secret,
@@ -45,6 +49,8 @@ pub struct SimulatorConfig {
     pub respond: Option<Respond>,
     /// `status` fields read at each status.
     pub status_more: Option<StatusMore>,
+    /// Told when whether a connection asks to keep the project's id changes.
+    pub on_keep_identity: Option<KeepIdentity>,
 }
 
 impl std::fmt::Debug for SimulatorConfig {
@@ -82,6 +88,7 @@ impl SimulatorConfig {
             discovery_dir: None,
             respond: None,
             status_more: None,
+            on_keep_identity: None,
         }
     }
 
@@ -117,6 +124,7 @@ impl SimulatorConfig {
             discovery_dir: None,
             respond: None,
             status_more: None,
+            on_keep_identity: None,
         }
     }
 }
@@ -136,6 +144,8 @@ struct State {
     /// Connections numbered up to this are retired as the Renoise tool retires a host: the line part sent is finished, a bye
     /// follows it, and only credit frames are taken from then on.
     retired_upto: usize,
+    /// The connections, by number, that are authenticated and asked in their hello to keep the project's id.
+    asking: std::collections::BTreeSet<usize>,
 }
 
 /// What a bridge that sends within credit has sent and held back, over every connection.
@@ -173,6 +183,7 @@ impl Simulator {
             silent_upto: 0,
             frozen: false,
             retired_upto: 0,
+            asking: Default::default(),
         }));
         let (events, _) = broadcast::channel(256);
         let (stop, stopped) = watch::channel(false);
@@ -294,6 +305,11 @@ impl Simulator {
         self.state.lock().unwrap().flow
     }
 
+    /// Whether an open, authenticated connection asked in its hello that the project's id be kept in the project.
+    pub fn keeps_identity(&self) -> bool {
+        !self.state.lock().unwrap().asking.is_empty()
+    }
+
     /// Every line so far, in order.
     pub fn transcript(&self) -> Vec<Line> {
         self.state.lock().unwrap().transcript.clone()
@@ -344,6 +360,8 @@ fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> 
         "status" => {
             let mut status = serde_json::to_value(&state.identity).unwrap();
             status["busy"] = busy.map_or(Value::Bool(false), Value::from);
+            // (as the bridges say: they keep the project's id in it only while a connection asks)
+            status["keep_identity"] = true.into();
             for (key, value) in &config.status_extra {
                 status[key] = value.clone();
             }
@@ -384,6 +402,38 @@ fn put(direct: &mut Vec<u8>, counted: &mut Vec<u8>, bytes: Vec<u8>) {
     }
 }
 
+/// A connection's ask to keep the project's id: made when it authenticates with a hello that asked, and taken back when
+/// the connection ends, however it ends.
+struct Asking {
+    number: usize,
+    state: Arc<Mutex<State>>,
+    told: Option<KeepIdentity>,
+}
+
+impl Asking {
+    fn start(&self) {
+        let first = {
+            let mut state = self.state.lock().unwrap();
+            state.asking.insert(self.number) && state.asking.len() == 1
+        };
+        if let Some(told) = self.told.as_ref().filter(|_| first) {
+            told(true);
+        }
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        let last = {
+            let mut state = self.state.lock().unwrap();
+            state.asking.remove(&self.number) && state.asking.is_empty()
+        };
+        if let Some(told) = self.told.as_ref().filter(|_| last) {
+            told(false);
+        }
+    }
+}
+
 async fn serve(
     stream: TcpStream,
     number: usize,
@@ -396,6 +446,7 @@ async fn serve(
     let (mut reader, mut writer) = stream.into_split();
     let clock = Instant::now();
     let mut connection = ServerConnection::new(config.secret.clone(), 0);
+    let asking = Asking { number, state: state.clone(), told: config.on_keep_identity.clone() };
     let mut chunk = vec![0u8; 64 * 1024];
     // A bridge that names `creditBytes` sends within the credit the host grants, as the Renoise tool does: what it may
     // not send yet waits in `queue`, and a `credit` frame lets more go.
@@ -427,7 +478,11 @@ async fn serve(
                     match action {
                         ServerAction::Send(bytes) => put(&mut direct, &mut out, bytes),
                         ServerAction::Close(_) => close = true,
-                        ServerAction::Authenticated => {}
+                        ServerAction::Authenticated => {
+                            if connection.keeps_identity() {
+                                asking.start();
+                            }
+                        }
                         ServerAction::Request(request) => {
                             if !state.lock().unwrap().held.contains(&request.method) {
                                 put(&mut direct, &mut out, answer(&request, &state, &config).encode());

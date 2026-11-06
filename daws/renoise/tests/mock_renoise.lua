@@ -58,6 +58,7 @@ local function object(class_name, fields, getters, setters)
       if not has_member(class_name, key) then
         error("renoise mock: " .. class_name .. " has no member '" .. tostring(key) .. "'", 2)
       end
+      M.api_writes = (M.api_writes or 0) + 1
       -- (a member the song keeps in its data: written there, with its undo step and notifiers)
       if setters[key] then
         setters[key](value)
@@ -508,6 +509,7 @@ function M.reset(options)
   impl_of = setmetatable({}, { __mode = "k" })
   M.errors, M.modals, M.statuses, M.popen_calls = {}, {}, {}, {}
   M.triggers, M.saves = {}, {}
+  M.api_writes = 0
   M.idle_work = {} -- (n-instruments)
   -- Calls that would crash the real Renoise.
   M.crashes = {}
