@@ -91,6 +91,13 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 "Find me a dusty, dark snare."
 - Kumi searches the sample folders you listed by how each sound measures, and by the words in its name and folder. In
   Hermes Desktop the sound map opens.
+- Ask by tempo, key, length or kind too: "120 BPM drum loops in A minor", "a dark kick under 300 ms". Each result
+  says why it matches, and on what: the tempo, key or note Kumi indexed at the folder's last scan (from the audio, or
+  from a file's or folder's name; a rescan updates them), or what it measured ("dark", "bright", "dusty", "lo-fi",
+  "punchy"). A tempo matches that tempo or half or double time, and a key the same key, its relative major or minor,
+  or a one-shot's root note; the answer says which, and nothing is transposed. Artist and genre words match only names
+  and folders: Kumi doesn't recognise genres or artists. "More like this" ranks by closeness to that sound among
+  yours on this map, never a percentage.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change Hermes asks about.
 - "Put it on pad 2" puts it on that Drum Rack pad in Live: into the pad's Simpler, or onto an empty pad in a new

@@ -53,7 +53,7 @@ a DAW to work in.
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | yes |
 | `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | yes, with its code |
 | `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | yes, with its code |
-| `kumi_sounds` | Searches your sound library by how sounds measure and by name | no |
+| `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
 | `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |
