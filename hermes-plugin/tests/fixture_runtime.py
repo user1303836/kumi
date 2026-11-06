@@ -715,6 +715,19 @@ def preset_record(options: argparse.Namespace) -> dict:
             "folder": "User Library/Kumi/Instruments", "settings": settings, "values_note": PRESET_NOTE}
 
 
+def preset_build(fixture: Fixture, args: dict, host: dict) -> dict:
+    """agent-m's preset_build: the verified writer's built preset, kept as an artifact, answered as W3's DTO."""
+    if args.get("plugin") not in ("serum-2", "fabfilter-pro-q-4", "ozone-12"):
+        return error("unsupported", "Use a verified Serum 2, Pro-Q 4 or Ozone 12 writer; Vital isn't supported.")
+    if not isinstance(args.get("edits"), list) or len(args["edits"]) > 32:
+        return error("invalid", "Use plugin, name and typed edits from the plug-in catalog; no file, bytes or version "
+                                "override.")
+    record = preset_record(fixture.options)
+    return {"state": "built", "artifact_id": PRESET_ARTIFACT,
+            **{key: record[key] for key in ("plugin", "class", "version", "format", "digest", "name", "settings",
+                                            "values_note")}}
+
+
 def preset(fixture: Fixture, args: dict, host: dict) -> dict:
     if fixture.daw != "ableton":
         return error("unsupported", "Kumi puts plug-in presets only into Ableton Live's User Library.")
@@ -1169,7 +1182,8 @@ def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
-         "variations": variations, "device": device, "preset": preset}
+         "variations": variations, "device": device, "preset_build": preset_build,
+         "preset": preset}
 
 
 def main() -> None:

@@ -37,6 +37,11 @@ class Presets(unittest.TestCase):
 
     def test_the_approval_shows_every_setting_as_stored_and_the_place_writes_only_what_was_approved(self):
         self.use()
+        build = {"plugin": "serum-2", "name": "Night Bass", "edits": [{"path": "global/volume", "value": 0.45}]}
+        self.assertIsNone(policy.pre_tool_call(self.host, tool_name="kumi_preset_build", args=build, session_id="s1",
+                                               tool_call_id="b1", turn_id="u1"), "Kumi's private copy isn't asked")
+        built = support.call(self.host, "kumi_preset_build", build, session_id="s1")
+        self.assertEqual((built["state"], built["artifact_id"], built["values_note"]), ("built", "a-preset-1", NOTE))
         asked = self.hook()
         self.assertEqual(asked["message"], "\n".join([
             "Kumi: put a Serum 2 preset in your User Library", f"File: {FILE}", "Serum 2 2.0.18, the version installed",

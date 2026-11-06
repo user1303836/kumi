@@ -27,6 +27,10 @@ def change(*steps: dict, **fields) -> dict:
     return {"title": "Louder drums", "steps": list(steps or [volume("t1", -4)]), **PROJECT, **fields}
 
 
+# CC-26: a preset build, Kumi's private copy only: never asked, and still never run with nobody in the chat (26-w1).
+BUILD = {"plugin": "serum-2", "name": "Night Bass", "edits": [{"path": "global/volume", "value": 0.45}]}
+
+
 class Approvals(unittest.TestCase):
     def setUp(self):
         self.host, self.ctx, self.data = support.host(self)
@@ -49,7 +53,8 @@ class Approvals(unittest.TestCase):
         calls = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
                  "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS},
                  "kumi_observe": {"scope": "focus"}, "kumi_read": {"action": "data"}, "kumi_sounds": {"query": "a"},
-                 "kumi_job": {"job_id": "j-1"}, "kumi_plugin_knowledge": {"action": "catalog", "plugin": "vital"}}
+                 "kumi_job": {"job_id": "j-1"}, "kumi_plugin_knowledge": {"action": "catalog", "plugin": "vital"},
+                 "kumi_preset_build": BUILD}
         before = support.requests(self.data / "state")
         self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
         for tool, args in calls.items():  # with the producer's chat's runtime running, whatever Hermes would allow
@@ -67,7 +72,8 @@ class Approvals(unittest.TestCase):
         track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
         with mock.patch.dict(os.environ, {"HERMES_SINGLE_QUERY_SESSION": "1"}):  # what `hermes -q` exports
             for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}), ("kumi_listen", track),
-                               ("kumi_library", {"action": "add_folder", "folder": support.DRUMS})):
+                               ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}),
+                               ("kumi_preset_build", BUILD)):
                 decision = self.hook(tool, args)
                 self.assertEqual((decision["action"], decision["message"]), ("block", policy.UNATTENDED), tool)
             self.assertIsNone(self.hook("kumi_connect", {}), "a one-shot query still connects")
@@ -82,7 +88,8 @@ class Approvals(unittest.TestCase):
         forked = {"session_id": "s1", "tool_call_id": "c2", "task_id": "t2", "turn_id": "s1:t2:9f3a1c2e"}
         track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
         for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}), ("kumi_listen", track),
-                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}), ("kumi_setup", {})):
+                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}), ("kumi_setup", {}),
+                           ("kumi_preset_build", BUILD)):
             with self.subTest(tool=tool):
                 self.assertEqual(policy.pre_tool_call(self.host, tool_name=tool, args=args, **forked),
                                  {"action": "block", "message": policy.FORKED})

@@ -819,6 +819,14 @@ def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
     return built
 
 
+def kumi_preset_build(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-26: a preset built from the verified writer's initialized template and the model's typed edits, kept only as
+    Kumi's private copy (an artifact): nothing reaches Live or the User Library until kumi_preset is approved. It runs
+    unasked in the producer's own turn, never unattended, forked or scheduled (policy, 26-w1)."""
+    sent = {key: args[key] for key in ("plugin", "class", "name", "edits") if key in args}
+    return host.live().call("preset_build", sent, host.identity(kwargs), timeout=WRITE_TIMEOUT)
+
+
 # A place whose answer never came: a preset file may be in the User Library, and placing again would write another.
 PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Don't place it again: ask the producer to look in "
                       "User Library/Kumi in Live's Browser.")
@@ -1434,6 +1442,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
     ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
     ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
+    ("kumi_preset_build", schemas.KUMI_PRESET_BUILD, kumi_preset_build, "🎚️"),
     ("kumi_preset", schemas.KUMI_PRESET, kumi_preset, "🎛️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md

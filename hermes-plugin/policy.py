@@ -60,6 +60,8 @@ PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_histor
         "kumi_plugin_knowledge"}
 # What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset"}
+# Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
+UNASKED_WRITERS = {"kumi_preset_build"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
@@ -161,7 +163,7 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(tools.SCHEDULED), {}
     if tool not in PASS and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
         return block(FORKED), {}
-    if unattended and tool in ASKED:
+    if unattended and (tool in ASKED or tool in UNASKED_WRITERS):
         return block(UNATTENDED), {}
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
         return block(UNATTENDED_CANCEL), {}
@@ -229,6 +231,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _variations(host, args, kwargs)
     if tool == "kumi_device":
         return _device(host, args, kwargs)
+    if tool == "kumi_preset_build":  # Kumi's private copy only: the producer approves at kumi_preset (26-w1)
+        return None, {}
     if tool == "kumi_preset":
         return _preset(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
