@@ -394,7 +394,8 @@ def describe(fixture: Fixture, step: dict) -> dict:
         text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
     elif step["tool"] == "edit_rack":
         track, rack = fixture.rack(target["deviceRef"])
-        text = f"Edit rack: action add-chain — on {quoted(f'{rack['name']} ({track['name']})')}"
+        name = f"{rack['name']} ({track['name']})"
+        text = f"Edit rack: action add-chain — on {quoted(name)}"
         return {"tool": step["tool"], "family": STEPS[step["tool"]], "effect": "write", "text": text, "undo": "daw"}
     else:
         track, pad = fixture.simpler(target["deviceRef"])
