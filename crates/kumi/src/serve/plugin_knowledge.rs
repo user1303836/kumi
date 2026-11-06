@@ -162,4 +162,5 @@ fn page(detail: Value, most: usize, note: &str, changed: bool) -> Value {
 }
 
 #[cfg(test)]
+#[path = "../daw/plugin_knowledge_tests.rs"]
 mod tests;
