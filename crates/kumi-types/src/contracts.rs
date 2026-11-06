@@ -125,7 +125,7 @@ impl ToolRole {
 
 /// Kumi's own tools that only read away from the DAW: several calls to them run at once.
 pub const CONCURRENT: &[&str] =
-    &["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "search_conversations"];
+    &["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "logic_manual", "search_conversations"];
 
 /// A configured audio model, supplied by the session to a DAW's converter without coupling the DAW to a provider.
 /// Input names the rendered audio file and the provider choice. A result carries `notes` with pitch, start/end in

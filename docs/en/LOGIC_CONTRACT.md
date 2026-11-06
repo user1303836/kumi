@@ -306,3 +306,9 @@ same restore without changing the project or pressing any native Undo step.
 - `track-add` places a track **below the selected one** (Logic's New Tracks behaviour), so `index`
   counts from 1 (0, above every track, is unreachable); a kind (`audio`, `instrument`, `external`)
   may be given.
+
+## Manual lookup without Logic
+
+- `logic_manual` searches Apple’s Logic Pro User Guide by question, or reads a topic by title, id or URL. It does not start or control Logic.
+- Guide pages are fetched on demand and cached in the library folder; cached pages remain usable while an older copy refreshes. Network retrieval and current-site acceptance remain separate from the offline fixture checks.
+- Pure MIDI-file and key-binding parsers do not import notes, post keys, or select a default key-command preset at runtime. Native M4 changes remain gated.

@@ -13,6 +13,10 @@ kumi-common.workspace = true
 kumi-daw.workspace = true
 kumi-daw-own.workspace = true
 kumi-library.workspace = true
+kumi-net.workspace = true
+kumi-web.workspace = true
+url.workspace = true
+async-trait.workspace = true
 kumi-agent.workspace = true
 kumi-types.workspace = true
 daw-bridge.workspace = true
@@ -22,6 +26,5 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 kumi-testkit.workspace = true
 tempfile.workspace = true

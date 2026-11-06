@@ -7,6 +7,7 @@ pub mod daw_sources;
 pub mod daws;
 pub mod features;
 pub mod learn;
+pub mod manual;
 pub mod learner;
 pub mod map;
 pub mod measure_worker;

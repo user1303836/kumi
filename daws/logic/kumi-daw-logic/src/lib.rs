@@ -6,6 +6,7 @@
 pub mod changes;
 mod inactive;
 pub mod library;
+pub mod manual;
 mod provider;
 
 pub use provider::{detect_logic, LogicInstall, LOGIC_BRIDGE_SOURCE_VAR, LOGIC_BUNDLES, PROVIDER};
