@@ -251,8 +251,8 @@ mod tests {
                 }
             }
         }
-        // A rack's new chain and a device's move are the only such changes. The refusal the chain's mark waives is that
-        // one, which Live's own Undo takes back: the mark waives nothing else; a move is refused by nothing to waive.
+        // These are the only approved provider-refusal waivers. The chain waives its irreversible inverse;
+        // device moves and pad loads waive no other refusal.
         let marked: Vec<_> =
             PLUGIN_STEPS.iter().filter(|step| step.daw_undo != DawUndo::Never).map(|step| (step.tool, step.daw_undo)).collect();
         assert_eq!(
@@ -260,7 +260,8 @@ mod tests {
             [
                 ("edit_rack", DawUndo::When(&[("action", "add-chain")])),
                 ("move_device", DawUndo::Always),
-                ("move_device_to", DawUndo::Always)
+                ("move_device_to", DawUndo::Always),
+                ("load_sample_to_pad", DawUndo::Always)
             ]
         );
         let move_input = json!({"deviceRef": "d1", "index": 0});
@@ -311,15 +312,10 @@ mod tests {
 
     #[test]
     fn the_pad_mark_waives_no_other_provider_refusal_in_any_pad_mode() {
-        use kumi_daw::{plugin::DawUndo, provider::DawProvider};
+        use kumi_daw::provider::DawProvider;
         let live = crate::app::provider::Ableton;
         let kind = crate::changes::CHANGES.iter().find(|kind| kind.tool == "load_sample_to_pad").unwrap();
         let instruments = kind.input_schema.as_ref().unwrap()["properties"]["instrument"]["enum"].as_array().unwrap();
-        // An unconditional waiver needs review when another step is added, unlike an exact conditional action.
-        assert_eq!(
-            PLUGIN_STEPS.iter().filter(|step| step.daw_undo == DawUndo::Always).map(|step| step.tool).collect::<Vec<_>>(),
-            ["load_sample_to_pad"]
-        );
         for source in [
             json!({"sound_id":"s-r1-1","map_revision":"r1"}),
             json!({"artifact_id":"a-1"}),
