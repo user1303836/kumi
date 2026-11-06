@@ -819,17 +819,26 @@ def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
     return built
 
 
+# What a build takes, as serve's preset_build schema does: anything else is refused before serve is asked (agent-m's
+# composition smoke: a version the model added was dropped, and the build went ahead).
+PRESET_BUILD_FIELDS = frozenset({"plugin", "class", "name", "edits"})
+PRESET_BUILD_FIELDS_ONLY = ("Kumi didn't build the preset: it takes only plugin, class, name and edits, never a file, "
+                            "bytes or a version of its own.")
+
+
 def kumi_preset_build(host: Host, args: dict, **kwargs: Any) -> dict:
     """CC-26: a preset built from the verified writer's initialized template and the model's typed edits, kept only as
     Kumi's private copy (an artifact): nothing reaches Live or the User Library until kumi_preset is approved. It runs
     unasked in the producer's own turn, never unattended, forked or scheduled (policy, 26-w1)."""
-    sent = {key: args[key] for key in ("plugin", "class", "name", "edits") if key in args}
-    return host.live().call("preset_build", sent, host.identity(kwargs), timeout=WRITE_TIMEOUT)
+    if not set(args) <= PRESET_BUILD_FIELDS:  # never filtered away: a version, file or bytes the model adds is refused
+        return {"error": {"code": "invalid", "reason": PRESET_BUILD_FIELDS_ONLY}}
+    return host.live().call("preset_build", dict(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
 
 
-# A place whose answer never came: a preset file may be in the User Library, and placing again would write another.
-PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Don't place it again: ask the producer to look in "
-                      "User Library/Kumi in Live's Browser.")
+# A place whose answer never came: the file may be in the User Library. The same preset always names the same file, and
+# placing it again answers that file without writing another (#1180), so asking again is safe.
+PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Ask for it again with kumi_preset: placing the same "
+                      "preset never writes a second file, it answers the one already there.")
 
 
 def kumi_preset(host: Host, args: dict, **kwargs: Any) -> dict:

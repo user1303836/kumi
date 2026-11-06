@@ -1097,12 +1097,14 @@ PRESET = "Kumi didn't put the preset in your User Library: "
 PRESET_ONLY_LIVE = PRESET + "Kumi puts plug-in presets only into Ableton Live's User Library."
 PRESET_WARNING = "Writes a new preset file into your User Library (Kumi folder). It stays there after an undo."
 PRESET_VALUES = "Values as the preset file stores them; the plug-in may show them differently."
+PRESET_UNEDITED = "• No settings changed: Kumi's initialized template as it is."
 PRESET_STAYS = "The file stays after an undo."  # the short form's warning: its first line says what's written
 PRESET_UNSHOWN = PRESET + "its runtime's preview has something Kumi can't show as it is, so it isn't asked."
 PRESET_TOO_LONG = PRESET + ("its approval doesn't fit this window with every setting in view, and Kumi asks only with "
                             "all of them shown. Build the preset with fewer changes, or ask in Hermes Desktop.")
 PRESET_FOLDERS = ("User Library/Kumi/Instruments/", "User Library/Kumi/Audio Effects/")
 MOST_PRESET_SETTINGS = 32  # W3's cap: the writer refuses more, never cuts them
+PRESET_PRODUCTS = {"serum-2": "Serum 2", "fabfilter-pro-q-4": "Pro-Q 4", "ozone-12": "Ozone 12"}  # catalog ids
 
 
 def _preset(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
@@ -1144,7 +1146,7 @@ def _preset_facts(answer: dict) -> dict | None:
     texts = (plugin, version, file, name, note)
     if not (all(isinstance(text, str) and _as_is(text) for text in texts) and isinstance(checked, bool)
             and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
-            and isinstance(settings, list) and 0 < len(settings) <= MOST_PRESET_SETTINGS):
+            and isinstance(settings, list) and len(settings) <= MOST_PRESET_SETTINGS):
         return None
     folder = next((folder for folder in PRESET_FOLDERS if file.startswith(folder)), None)
     if folder is None or "/" in file[len(folder):] or not file.endswith(".vstpreset"):
@@ -1152,7 +1154,8 @@ def _preset_facts(answer: dict) -> dict | None:
     shown = [_preset_setting(setting) for setting in settings]
     if None in shown or any(len(line) + 2 > STEP_LINE for line in shown) or len(note) > STEP_LINE:
         return None
-    return {"plugin": plugin, "version": version, "checked": checked, "file": file, "settings": shown, "note": note}
+    return {"plugin": PRESET_PRODUCTS.get(plugin, plugin), "version": version, "checked": checked, "file": file,
+            "settings": shown, "note": note}
 
 
 def _preset_message(facts: dict, surface: str) -> str | None:
@@ -1160,7 +1163,7 @@ def _preset_message(facts: dict, surface: str) -> str | None:
     doesn't. Both carry every setting, the whole file, the values note verbatim and that the file stays after an undo;
     the short one says the rest in fewer words."""
     plugin, version, file = facts["plugin"], facts["version"], facts["file"]
-    settings = [f"• {line}" for line in facts["settings"]]
+    settings = [f"• {line}" for line in facts["settings"]] or [PRESET_UNEDITED]
     long = [f"Kumi: put a {plugin} preset in your User Library", f"File: {file}",
             (f"{plugin} {version}, the version installed" if facts["checked"]
              else f"Verified with {plugin} {version} (Kumi couldn't read the installed version)"),
