@@ -120,6 +120,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             _ => None,
         };
         let names = fields.as_ref().map(connection::look_names).unwrap_or_default();
+        let volumes = fields.as_ref().map(connection::look_volumes).unwrap_or_default();
         let text = match scope {
             "focus" => focus_text(&project, focus.as_ref(), transport.as_ref()),
             "catch_up" if catch_up.is_empty() => format!("Nothing has changed in {} since the last look.", project.name),
@@ -139,6 +140,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         };
         let refs = connection::refs(&connection, call.signal.clone()).await;
         ctx.link().keep_refs(&refs, names);
+        ctx.link().keep_volumes(volumes);
         connection::publish_focus(&ctx.handle());
         publish_status(ctx, false).await;
         Ok(json!({
