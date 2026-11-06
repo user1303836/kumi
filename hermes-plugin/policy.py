@@ -394,8 +394,8 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return block(f"Kumi didn't add the folder: {refusal}")
-        return approve([f"Kumi: read the folder {folder} and everything in it, to build your sound map. It never "
-                        "changes or moves your files."], f"kumi:folder_read:{folder}")
+        return approve(["Kumi: read the audio files in this folder and its subfolders, to build your sound map:",
+                        *_path_lines(folder), AUDIO_ONLY], f"kumi:folder_read:{folder}")
     try:
         status = _ask(host, "library", {"action": "status"}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
@@ -403,8 +403,25 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     folders = [folder for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
     if not folders:
         return block("Kumi didn't scan anything: it has no approved sample folders yet. Add one first.")
-    return approve(["Kumi: scan these sample folders and update your sound map (it runs in the background and reads "
-                    "every audio file in them):", *(f"• {folder}" for folder in folders)], "kumi:folder_read:scan")
+    return approve(["Kumi: scan these sample folders and update your sound map, in the background:",
+                    *(line for folder in folders for line in _path_lines(folder)), AUDIO_ONLY], "kumi:folder_read:scan")
+
+
+def _path_lines(path: str) -> list[str]:
+    """A folder's path as approval lines, "• " first: whole, since the path is what's approved, so one too long for a
+    line goes on over the next ones, each ending after a separator where one falls in its second half."""
+    lines, rest, lead = [], path, "• "
+    while len(lead) + len(rest) > STEP_LINE:
+        room = STEP_LINE - len(lead)
+        separator = max(rest.rfind("/", 0, room), rest.rfind("\\", 0, room))
+        cut = separator + 1 if separator > room // 2 else room
+        lines.append(lead + rest[:cut])
+        rest, lead = rest[cut:], ""
+    return [*lines, lead + rest]
+
+
+# Item 7 (the owner's decision): a scan indexes audio files only, and the approvals say so.
+AUDIO_ONLY = "Kumi reads only the audio files there, and never changes or moves your files."
 
 
 def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
