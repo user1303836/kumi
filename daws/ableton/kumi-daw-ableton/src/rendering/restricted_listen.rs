@@ -144,7 +144,7 @@ impl LiveRenderer {
         let ready = self.restricted_preflight(request, signal).await?;
         Ok(HearPreview {
             label: ready.label, seconds: ready.seconds, method: HearMethod::Ears, deadline_seconds: CALL_DEADLINE_SECONDS,
-            disclosure: "Live captures Arrangement audio. Live may show the Set as modified, and its own Undo history includes the listen's temporary device steps (pressing Undo in Live can bring the Ears device back)",
+            disclosure: "Live captures Arrangement audio after the target's devices, before its mixer (volume, pan and sends); Main's fader is not captured. Live may show the Set as modified, and its own Undo history includes the listen's temporary device steps (pressing Undo in Live can bring the Ears device back)",
         })
     }
 
@@ -472,8 +472,11 @@ impl LiveRenderer {
             .iter()
             .map(object_identity)
             .collect();
+        // The tap must hear the whole existing device chain, including Main's limiter.
         if devices.iter().filter(|identity| identity.as_str() == created).count() != 1
             || devices.iter().filter(|identity| identity.as_str() != created).ne(ready.state.devices.iter())
+            || index != ready.state.devices.len() as u64
+            || devices.last().map(String::as_str) != Some(created)
         {
             return Err(unsure());
         }
@@ -799,7 +802,9 @@ impl LiveRenderer {
             start: 0.0,
             seconds: Some(seconds),
             live: true,
-            note: None,
+            note: Some(
+                "Captured after the target's devices, before its mixer (volume, pan and sends). Main's fader is not captured; changing it will not change these measurements.".into(),
+            ),
             marked_modified,
         }]))
     }

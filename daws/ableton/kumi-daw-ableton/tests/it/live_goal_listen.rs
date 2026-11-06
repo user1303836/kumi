@@ -57,6 +57,7 @@ pub(super) struct State {
     armed_from: Cell<f64>,
     tap_version: Cell<f64>,
     tap_available: Cell<bool>,
+    prepend_ears: Cell<bool>,
     raw_frames: Cell<usize>,
 }
 impl State {
@@ -116,6 +117,7 @@ impl State {
             armed_locations: RefCell::new(Vec::new()),
             tap_version: Cell::new(EARS_VERSION as f64),
             tap_available: Cell::new(true),
+            prepend_ears: Cell::new(false),
             raw_frames: Cell::new(usize::MAX),
         })
     }
@@ -345,9 +347,10 @@ impl State {
                 answer["deviceObjectIdentity"] = json!(device.identity.to_string());
                 set.undos.borrow_mut().insert(transaction.into(), Undo::RemoveDevice(device.identity));
                 let mut tracks = set.tracks.borrow_mut();
-                tracks[at].devices.push(device);
-                answer["deviceRef"] = json!(format!("7:device:{at}:d{}", tracks[at].devices.len() - 1));
-                answer["placement"] = json!({"owner":"track","index":tracks[at].devices.len() - 1});
+                let index = if self.prepend_ears.get() { 0 } else { tracks[at].devices.len() };
+                tracks[at].devices.insert(index, device);
+                answer["deviceRef"] = json!(format!("7:device:{at}:d{index}"));
+                answer["placement"] = json!({"owner":"track","index":index});
                 // The bridge privately retains previous/left selection receipts.
             }
             _ => return None,
@@ -833,6 +836,22 @@ fn whole_mix_capture_uses_main_and_restores_its_device_chain() {
         assert!(locations[0].starts_with("live_set master_track devices "), "{locations:?}");
         assert_eq!(live.set.chain("Main"), ["Limiter"]);
         restored(&live, &state);
+
+        let (live, state, mut request) = bounded(true).await;
+        request.tracks.clear();
+        request.mix = Some(true);
+        state.prepend_ears.set(true);
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", .. }))
+        ));
+        assert!(state.arms.borrow().is_empty(), "a tap before Main's limiter cannot represent the processed mix");
+        assert_eq!(state.starts.get(), 0);
+        assert_eq!(state.written.get(), 0);
+        assert_eq!(state.closed.get(), 1);
+        assert_eq!(live.set.chain("Main"), ["Limiter"]);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
 }
 
