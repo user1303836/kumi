@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -494,6 +495,12 @@ def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
+    # As serve orders it: a script's row first (CC-19: Kumi never undoes one), then CC-20's, then the whole change.
+    if row.get("family") == "script":
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Undo {row['title']}", "undo_available": False,
+                    "reason": "not_undoable", "note": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw])}
+        return {"state": "refused", "code": "not_undoable", "reason": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw])}
     if row.get("daw_undo"):  # CC-20's 20e: refused in 20c's words, before the DAW is asked anything, whole or not
         if args.get("preview"):
             return {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": False,
@@ -553,6 +560,68 @@ def undo_whole(fixture: Fixture, args: dict, row: dict) -> dict:
 
 def history(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"items": fixture.history_snapshot()["items"][:int(args.get("limit") or 20)]}
+
+
+# CC-19's script op, as the lead's interface in CONTRACT-CHANGES has serve check and answer it.
+SCRIPT_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
+SCRIPT_UNDO = "Kumi can't undo a script: {daw}'s own Undo may, if its step is still the latest there."
+SCRIPT_DENIED = {"lua": ("os.execute", "io.popen", "socket"),
+                 "python": ("subprocess", "os.system", "socket", "urllib", "ctypes")}
+SCRIPT_HIDDEN = ({*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C, 0x200B, 0x200C, 0x200D,
+                  0x2060, 0xFEFF, 0x2028, 0x2029, 0x7F, *range(0x80, 0xA0)}
+                 | ({*range(0x20)} - {0x09, 0x0A, 0x0D}))
+
+
+def script_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
+    code, language = args.get("code"), args.get("language")
+    if not isinstance(code, str) or not code.strip():
+        return "invalid", "The script has no code."
+    if language != SCRIPT_LANGUAGE[fixture.daw]:
+        return "invalid", (f"Live runs Python scripts, and REAPER and Renoise run Lua: this one is "
+                           f"{'Lua' if language == 'lua' else 'Python'}.")
+    lines = len(code[:-1].split("\n")) if code.endswith("\n") else len(code.split("\n"))
+    if lines > 400 or len(code.encode("utf-8")) > 32 * 1024:
+        return "too_long", "The script is over 400 lines or 32 KB, so Kumi won't run it: split it, or use a typed step."
+    for number, line in enumerate(code.split("\n"), 1):
+        hidden = next((char for char in line if ord(char) in SCRIPT_HIDDEN), None)
+        if hidden is not None:
+            return "hidden_characters", (f"The script has a hidden or direction-changing character (U+{ord(hidden):04X} "
+                                         f"on line {number}), which can make code read differently than it runs, so "
+                                         "Kumi won't run it.")
+    for entry in SCRIPT_DENIED[language]:
+        if re.search(rf"(?<![\w.]){re.escape(entry)}(?![\w])", code):
+            return "not_allowed", (f"Kumi refuses scripts that use `{entry}`: it reaches outside the DAW. (This check is "
+                                   "a safeguard, not a guarantee.)")
+    if not fixture.connected:
+        return "not_connected", "Kumi isn't connected to the DAW: connect first."
+    if args.get("expected_project_key") != fixture.set["key"]:
+        return "stale", "The project changed since it was read: read it again."
+    return None
+
+
+def script(fixture: Fixture, args: dict, host: dict) -> dict:
+    refusal = script_refusal(fixture, args)
+    if refusal is not None:
+        return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
+    code = args["code"]
+    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    if args.get("preview"):
+        return {"state": "preview", "daw": fixture.daw, "language": args["language"], "purpose": args.get("purpose"),
+                "sha256": digest, "lines": len(code.rstrip("\n").split("\n")), "bytes": len(code.encode("utf-8")),
+                "deadline_seconds": 0.8 if fixture.daw == "renoise" else 10,
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
+    if args.get("expected_sha256") != digest:
+        return {"state": "refused", "code": "stale", "reason": "The script changed since it was approved."}
+    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+    fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                            "runtime_generation": fixture.generation, "title": f"Script: {args.get('purpose')}",
+                            "family": "script", "at": now(), "state": "applied", "undo_available": False,
+                            "note": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw]),
+                            "track": None, "script": {"sha256": digest, "language": args["language"]},
+                            "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied"})
+    fixture.publish("history", "focus")
+    return {"state": "ran", "history_id": ident, "output": {"result": "ok", "stdout": "printed\n"},
+            "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
 
 
 # Each with the file's path, which a map has (CC-4) and the plugin must never pass to the model.
@@ -914,10 +983,14 @@ def transport(fixture: Fixture, args: dict, host: dict) -> dict:
 
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate, "transport": transport}
+         "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script}
 
 
 def main() -> None:
+    # Serve's stdio is UTF-8 everywhere; a pipe's default here is the locale's (cp1252 on Windows), which would read a
+    # script's U+202E as other characters and hash different code than the plugin sent.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["serve"])
     parser.add_argument("--stdio", action="store_true", required=True)

@@ -224,10 +224,24 @@ When the producer names a video tutorial ("make the bass from this video"):
 ## Hearing
 - Kumi measures audio; it doesn't hear it, and neither do you. Say what was measured (`kumi_listen`, skill `kumi:listening`), never that something "sounds" a way unless the producer said so.
 
+## Scripts
+- **Typed steps first.** A `kumi_change` step is previewed with the project's own names and values, and Kumi can undo it. Use a script (`kumi_script`) only for what no step can do: a Renoise tool's logic, a batch no step covers, reading something no reader gives.
+- **Its language is the DAW's:** Python in Live (its Live API, as a Remote Script sees it), Lua in REAPER (ReaScript) and Renoise (its scripting API).
+- **Keep it short and plain:**
+  - at most 400 lines and 32 KB;
+  - no hidden or direction-changing characters;
+  - nothing that runs processes or reaches the network (`os.execute`, `io.popen`, `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`), which Kumi refuses before anyone is asked.
+  - quick: Kumi stops a script after 10 seconds in Live and REAPER, and 0.8 seconds in Renoise (the approval says which), and it then comes back `failed`. Never wait or poll inside one.
+- **`purpose` is one line the producer reads in the approval,** with the warning and the code. Say plainly what the script changes.
+- **When it asks:** in a chat that has read nothing from outside, the producer can allow scripts for the chat. Once the chat has read outside content (a web page, a transcript, another tool's result), every script is asked, and none runs while Hermes's approvals are off. A delegated subagent never runs one, and a messaging chat only when the producer allowed it in Kumi's settings. When a script is refused for any of these, say why, and offer typed steps instead.
+- **After it runs:**
+  - Report `ran` or `failed` with its output and the HISTORY id.
+  - Kumi can't undo a script: the DAW's own Undo may, while its step is still the latest there. Never write a second script to reverse one, or run a script again after `unsure`: observe first.
+
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.
 - **Grouping tracks in Live:** Live's API can't group tracks without Kumi's native editing, which this plugin doesn't use. Ask the producer to select the tracks and press Cmd+G (Ctrl+G on Windows), then route and name the group with steps.
-- **Files and code:** it doesn't delete files, run scripts or code, or drive the DAW's menus.
+- **Files:** it doesn't delete files, or drive the DAW's menus. Code runs only as a script the producer approves (Scripts, above).
 - **Setup:** it doesn't build Max for Live devices or change the DAW's settings.
 
 Say so plainly when asked; don't try another route.
