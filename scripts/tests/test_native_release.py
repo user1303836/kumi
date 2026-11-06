@@ -148,14 +148,14 @@ class NativeRelease(unittest.TestCase):
         # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it), as
         # does SoundCraft's program, which that host starts.
         for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-types/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
-                     "daws/soundcraft/soundcraft-kumi/Cargo.toml"):
+                     "daws/soundcraft/soundcraft-kumi/Cargo.toml", "daws/lynx/lynx-kumi/Cargo.toml"):
             self.assertEqual(cargo_version(name), version, name)
         declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-types/src/version.rs").read_text())
         self.assertIsNotNone(declared)
         self.assertEqual(declared[1], version)
         cargo_lock = tomllib.loads((root / "Cargo.lock").read_text())["package"]
         for package in cargo_lock:
-            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server", "soundcraft-kumi"):
+            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server", "soundcraft-kumi", "lynx-kumi"):
                 self.assertEqual(package["version"], version, package["name"])
         bridge = cargo_version("daws/ableton/ableton-mcp-server/Cargo.toml")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)

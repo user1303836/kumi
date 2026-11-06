@@ -1,6 +1,6 @@
 [package]
 name = "lynx-kumi"
-version = "1.24.67"
+version = "1.24.69"
 description = "Kumi's own bridge beside an opt-in native-control LYNX build."
 edition.workspace = true
 license.workspace = true
