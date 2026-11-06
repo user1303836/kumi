@@ -1092,6 +1092,7 @@ impl DawProfile {
         // M3 changes have Kumi's by-value undo; listening, scripts, goals and general UI tools remain disabled.
         caps: Capabilities {
             manual: true,
+            presets: true,
             undo: true,
             device_tree: true,
             note_view: true,
@@ -1443,6 +1444,8 @@ mod tests {
         assert_eq!(
             DawProfile::LOGIC.caps,
             Capabilities {
+                manual: true,
+                presets: true,
                 undo: true,
                 device_tree: true,
                 note_view: true,

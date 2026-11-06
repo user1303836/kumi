@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 Experimental Logic Pro 12 integration is available on macOS by explicitly choosing `kumi --daw logic`. It reads projects and FOCUS bodies and offers the 16 M3 change kinds plus experimental Loop Range, Region Rename and Region Loop previews; added tracks, deleted tracks and deleted markers require manual Logic Undo History; marker changes also require it when original fields were unavailable. Current real-Logic acceptance is pending; listening remains disabled. See [Logic Pro](docs/en/DAWS.md#logic-pro-experimental-reader).
 
-`logic_manual` can search Apple’s guide without starting Logic; fetched pages are cached for later use.
+`logic_manual` can search Apple’s guide without starting Logic; fetched pages are cached for later use. Logic library lookup can also find local CAF sounds and preset/settings files, including `.patch` packages; loading them into Logic remains a manual step.
 
 ## Quickstart
 

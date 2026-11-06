@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
 macOS 上的 Logic Pro 12 可通过 `kumi --daw logic` 显式选择实验性集成。可读取工程和 FOCUS 正文，提供 M3 的16种修改及Loop Range、Region Rename 和 Region Loop 限定预览；新增和已删除轨道、已删除标记，以及原始信息不完整的标记修改需在 Logic 撤销历史中手动撤销。本次移植的真实 Logic 验收尚未完成；聆听仍未启用。详见 [Logic Pro](docs/zh-CN/DAWS.md#logic-pro实验性读取)。
 
-`logic_manual` 无需启动 Logic 即可查询 Apple 指南，已获取页面会缓存以供后续使用。
+`logic_manual` 无需启动 Logic 即可查询 Apple 指南，已获取页面会缓存以供后续使用。 还可查找本地 CAF 音频、预设／设置文件和 `.patch` 包；向 Logic 加载仍需手动完成。
 
 ## 快速开始
 

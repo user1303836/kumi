@@ -312,3 +312,6 @@ same restore without changing the project or pressing any native Undo step.
 - `logic_manual` searches Apple’s Logic Pro User Guide by question, or reads a topic by title, id or URL. It does not start or control Logic.
 - Guide pages are fetched on demand and cached in the library folder; cached pages remain usable while an older copy refreshes. Network retrieval and current-site acceptance remain separate from the offline fixture checks.
 - Pure MIDI-file and key-binding parsers do not import notes, post keys, or select a default key-command preset at runtime. Native M4 changes remain gated.
+
+- Logic library lookup reads existing user/system Logic and GarageBand sound folders on macOS, plus folders you explicitly approve. It indexes CAF audio, plug-in/channel-strip settings, EXS instruments and `.patch` packages as individual presets; package child changes invalidate the cache. An approved-folder allowlist excludes automatic discovery.
+- `find_sounds` and `find_presets` return local paths without opening Logic. They do not load presets into a project, inspect the native Loop Browser, or parse recent-project preferences.
