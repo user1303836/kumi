@@ -188,9 +188,21 @@ fn preview_text(request: &HearRequest, preview: &HearPreview) -> String {
     let label = one_line(&preview.label, 80).replace('"', "'");
     let target = request.tracks.first().map(|reference| format!("{} ", one_line(reference, 80))).unwrap_or_default();
     format!(
-        "{action} beats {from}–{to} ({:.3} s); restore the temporary transport, routing and device state before returning. {} Target: {target}\"{label}\".",
-        preview.seconds, preview.disclosure
+        "{action} beats {from}–{to} ({:.3} s); restore the temporary transport, routing and device state before returning. {}Target: {target}\"{label}\".",
+        preview.seconds,
+        sentence(preview.disclosure)
     )
+}
+
+/// A DAW's disclosure as its own sentence before "Target:": closed with a full stop when it isn't (Live's ends in a
+/// parenthesis), and nothing at all when the DAW has none, so no space is doubled.
+fn sentence(text: &str) -> String {
+    let text = text.trim();
+    match text.chars().last() {
+        None => String::new(),
+        Some('.' | '!' | '?') => format!("{text} "),
+        Some(_) => format!("{text}. "),
+    }
 }
 
 pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
@@ -407,4 +419,23 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     }
     call.progress.report(3., Some(3.), Some("Capture retained; temporary DAW state is restored."));
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(disclosure: &'static str) -> String {
+        let request = HearRequest { tracks: vec!["track:3".into()], from_beat: Some(0.0), beats: Some(8.0), ..Default::default() };
+        let preview = HearPreview { label: "Bass".into(), seconds: 4.0, disclosure, method: HearMethod::Ears, deadline_seconds: 60 };
+        preview_text(&request, &preview)
+    }
+
+    #[test]
+    fn the_capture_approval_closes_the_daws_disclosure_before_its_target() {
+        assert!(text("Pressing Undo in Live can bring the Ears device back (Live's own Undo)")
+            .contains("back (Live's own Undo). Target: track:3 \"Bass\"."));
+        assert!(text("REAPER may show the project as modified after a listen.").contains("after a listen. Target:"));
+        assert!(text("").contains("before returning. Target: track:3"), "no disclosure, no doubled space");
+    }
 }
