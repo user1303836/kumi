@@ -117,8 +117,8 @@ export interface HistoryItem {
   /** A script's row (CC-19, `Script: <purpose>`): which saved code it ran, so the pane can show it, after a restart
    *  too, through `/script`. */
   script?: { sha256?: string; language?: string }
-  /** The copy of the Set Kumi kept beside it before a long or destructive plan (a Live plan's third step, or a
-   *  delete): its file's name and why. Never a path (serve keeps those). */
+  /** The copy of the project Kumi kept beside it before a step that could lose material (Live's third step or a
+   *  delete, Renoise's sample load): its file's name and why. Never a path (serve keeps those). */
   copy?: { file?: string; why?: string }
 }
 

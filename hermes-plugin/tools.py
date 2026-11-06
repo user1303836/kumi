@@ -824,25 +824,27 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     if "expected_epoch" in change:
         change["expected_epoch"] = str(change["expected_epoch"])
     answer = _write(host, "change", change, kwargs)
-    note = copy_note(answer.get("copy")) if isinstance(answer, dict) else None
+    note = copy_note(answer.get("copy"), host.daw()) if isinstance(answer, dict) else None
     return {**answer, "copy_note": note} if note else answer
 
 
-# The copy of the Set a Live plan keeps beside it before its third step or a step that could lose material, as serve's
-# change answer gives it (`copy`: the file's name and why; absent when none was kept). Told to the model as standalone
-# Kumi tells it, by the file's name: serve keeps the producer's paths out of its answers.
+# The copy of the project a plan keeps beside it before a step that could lose material (Live's before its third step
+# or a delete; Renoise's before a sample load), as serve's change answer gives it (`copy`: the file's name and why;
+# absent when none was kept). Told to the model as standalone Kumi tells it, by the DAW's own word for the project and
+# the file's name: serve keeps the producer's paths out of its answers.
 COPY_WHY = {"third_step": "before the plan's third step", "deletes": "before a step that could lose material"}
+PLACES = {"ableton": "Set", "reaper": "project", "renoise": "song"}
 
 
-def copy_note(copy: Any) -> str | None:
-    """What the model tells the producer about the copy of their Set this change kept. A copy the DAW couldn't keep
-    never reaches serve (Live's keep_copy answers nothing then), so there's no failure to tell."""
+def copy_note(copy: Any, daw: str) -> str | None:
+    """What the model tells the producer about the copy of their Set, project or song this change kept. A copy the DAW
+    couldn't keep never reaches serve (Live's keep_copy answers nothing then), so there's no failure to tell."""
     file = _copy_file(copy)
     if file is None:
         return None
     why = COPY_WHY.get(copy.get("why"))
-    return (f"Before this, Kumi kept a copy of the producer's Set as last saved, next to it: {file}"
-            f"{f' ({why})' if why else ''}. Tell the producer in a few words, with the file's name.")
+    return (f"Before this, Kumi kept a copy of the producer's {PLACES.get(daw, 'project')} as last saved, next to it: "
+            f"{file}{f' ({why})' if why else ''}. Tell the producer in a few words, with the file's name.")
 
 
 def _copy_file(copy: Any) -> str | None:
@@ -945,8 +947,8 @@ def _c1_row(row: dict) -> dict:
 
 
 def _row_copy(copy: Any) -> dict | None:
-    """The copy of the Set a change kept, as a HISTORY row may say it outside Kumi: the file's name, never a path, and
-    why."""
+    """The copy of the project a change kept, as a HISTORY row may say it outside Kumi: the file's name, never a path,
+    and why."""
     if not isinstance(copy, dict):
         return None
     why = copy.get("why") if copy.get("why") in COPY_WHY else None
