@@ -122,6 +122,33 @@ pub fn scan(roots: &[PathBuf]) -> Inventory {
     out
 }
 
+/// Read one VST3 processor's installed version without loading its binary. Both preset creation and placement
+/// use this projection; callers supply standard roots in production and isolated roots in tests.
+/// Missing metadata remains `None`, never the version requested by a model or the newest bundled writer.
+pub fn installed_vst3(roots: &[PathBuf], plugin: &str, class_id: &str) -> std::io::Result<Option<InstalledPlugin>> {
+    let known = builtins()
+        .iter()
+        .any(|format| format.info.plugin == plugin && format.info.ids.vst3.iter().any(|class| class.id.eq_ignore_ascii_case(class_id)));
+    if !known {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Choose a VST3 processor from Kumi's plug-in catalog."));
+    }
+    let inventory = scan(roots);
+    if !inventory.warnings.is_empty() {
+        return Err(std::io::Error::other("Kumi couldn't read the VST3 folders completely; check their permissions, then ask again."));
+    }
+    let mut matching = inventory.plugins.into_iter().filter(|entry| {
+        entry.plugin.as_deref() == Some(plugin) && entry.class_id.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(class_id))
+    });
+    let Some(first) = matching.next() else { return Ok(None) };
+    if matching.any(|entry| entry.version != first.version || entry.installed_version_verified != first.installed_version_verified) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "More than one installed VST3 version matches; keep one version enabled before building or placing a preset.",
+        ));
+    }
+    Ok(Some(first))
+}
+
 // Walk prefixes before canonicalizing: canonicalize itself would already follow
 // a junction/symlink to a network share. Relative links are checked from their
 // resolved parent, with a finite hop budget for cycles.
@@ -745,6 +772,39 @@ mod tests {
         let conflict = scan(&[temp.path().into()]);
         assert_eq!(conflict.plugins[0].version, None);
         assert!(!conflict.plugins[0].create_preset);
+    }
+
+    #[test]
+    fn preset_version_lookup_preserves_missing_unverified_and_conflicting_installations() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = [temp.path().to_path_buf()];
+        let plugin = "fabfilter-pro-q-4";
+        let format = super::super::formats::structure::builtin(plugin).unwrap();
+        let class = &format.info.ids.vst3[0].id;
+        assert!(installed_vst3(&roots, plugin, class).unwrap().is_none());
+        let bundle = |name: &str, version: &str| {
+            let directory = temp.path().join(name).join("Contents/Resources");
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("moduleinfo.json"),
+                serde_json::to_vec(&serde_json::json!({"Classes":[{
+                    "Name":"Pro-Q 4", "CID":class, "Version":version, "Category":"Audio Module Class"
+                }]}))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        bundle("A.vst3", "4.1.3.0");
+        let found = installed_vst3(&roots, plugin, class).unwrap().unwrap();
+        assert_eq!(found.version.as_deref(), Some("4.1.3.0"));
+        assert_eq!(found.installed_version_verified, Some(true));
+        bundle("A.vst3", "99.0");
+        let found = installed_vst3(&roots, plugin, class).unwrap().unwrap();
+        assert_eq!(found.version.as_deref(), Some("99.0"));
+        assert_eq!(found.installed_version_verified, Some(false));
+        bundle("B.vst3", "4.1.3.0");
+        assert_eq!(installed_vst3(&roots, plugin, class).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(installed_vst3(&roots, plugin, "not-a-class").unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]
