@@ -1,4 +1,4 @@
-use super::support::Fake;
+use super::support::{document, Fake};
 use lynx_kumi::{
     native,
     project::{epoch, reference, Bridge},
@@ -24,10 +24,14 @@ async fn new_pattern_notes_clone_and_metadata_are_owned_steps_with_revision_boun
     let baseline = {
         let mut state = fake.state.lock().unwrap();
         state.session["playlist"] = json!([{"kind":"pattern","pattern":0,"clipId":"0000000000000001","start":0,"length":3840}]);
+        state.session["channels"][0]["loopStarter"] = json!([0, "slot", "genre", false]);
+        state.document_extra = json!({"blocks":[[0,0]],"arrangements":[{"name":"Current"},{"name":"Saved","clips":[[0,1,0,3840,0,0,0],[0,1,3840,960,0,0,0]],"blocks":[[0,0]],"markers":[[0,"Keep",0,0]]}]});
         state.session.clone()
     };
+    let baseline_document = document(&fake.state.lock().unwrap());
     let mut bridge = Bridge::new(native::Client::new(fake.path()));
     let session = bridge.session().await.unwrap();
+    assert!(session.pointer("/capabilities/patterns").is_none(), "the published API has no typed pattern endpoints");
     let input = json!({"index":0,"name":"Lead","lengthTicks":3840,"expectedRevision":1});
     let preview = bridge.preview(&json!({"kind":"pattern.create","input":input,"epoch":epoch(&session)})).await.unwrap();
     {
@@ -55,8 +59,18 @@ async fn new_pattern_notes_clone_and_metadata_are_owned_steps_with_revision_boun
     assert_eq!(cloned["applied"]["index"], 1);
     assert_ne!(cloned["applied"]["patternId"], cloned["target"]["patternId"]);
     let session = bridge.session().await.unwrap();
-    assert_eq!(session["patterns"][1]["lengthTicks"], 3840);
-    assert_eq!(session["patterns"][1]["colour"], session["patterns"][0]["colour"]);
+    let patterns = bridge.read(&json!({"kind":"pattern"})).await.unwrap();
+    assert_eq!(patterns["items"][1]["lengthTicks"], 3840);
+    assert_eq!(patterns["items"][1]["effectiveLengthTicks"], 3840);
+    let doc = document(&fake.state.lock().unwrap());
+    let mut expected = doc["patterns"][0].clone();
+    expected["name"] = json!("Lead double");
+    expected["uid"] = doc["patterns"][1]["uid"].clone();
+    assert_eq!(doc["patterns"][1], expected, "clone preserves the entire persisted pattern");
+    assert_eq!(doc["blocks"][0][0], 2);
+    assert_eq!(doc["arrangements"][1]["clips"][0][0], 2);
+    assert_eq!(doc["arrangements"][1]["blocks"][0][0], 2);
+    assert_eq!(doc["channels"][0]["loopStarter"][0], 2);
     assert_eq!(session["playlist"][0]["pattern"], 2);
     let read = bridge.read(&json!({"kind":"note","parent":reference("pattern",&[1],&session)})).await.unwrap();
     let mut observed = read["items"][0].clone();
@@ -65,8 +79,14 @@ async fn new_pattern_notes_clone_and_metadata_are_owned_steps_with_revision_boun
     apply(&mut bridge, "pattern.set", json!({"index":1,"name":"Final Lead","lengthTicks":1920}), &mut records).await;
     let session = bridge.session().await.unwrap();
     assert_eq!(session["patterns"][1]["name"], "Final Lead");
-    assert_eq!(session["patterns"][1]["lengthTicks"], 1920);
+    let patterns = bridge.read(&json!({"kind":"pattern"})).await.unwrap();
+    assert_eq!(patterns["items"][1]["lengthTicks"], 1920);
     assert_eq!(session["patterns"][1]["noteCount"], 1);
+    apply(&mut bridge, "pattern.set", json!({"index":2,"lengthTicks":7680}), &mut records).await;
+    let doc = document(&fake.state.lock().unwrap());
+    assert_eq!(doc["playlist"][0][3], 7680);
+    assert_eq!(doc["arrangements"][1]["clips"][0][3], 7680);
+    assert_eq!(doc["arrangements"][1]["clips"][1][3], 960, "trimmed clips keep their length");
     for (kind, preview, applied, desc) in records.iter().rev() {
         bridge
             .restore(&json!({"kind":kind,"target":preview["target"],"prior":preview["prior"],"applied":applied["applied"],"of":desc}))
@@ -77,10 +97,11 @@ async fn new_pattern_notes_clone_and_metadata_are_owned_steps_with_revision_boun
     assert_eq!(state.session["patterns"], baseline["patterns"]);
     assert_eq!(state.session["playlist"], baseline["playlist"]);
     assert_eq!(state.session["currentPattern"], baseline["currentPattern"]);
-    for kind in ["pattern.create", "pattern.replace_notes", "pattern.clone", "pattern.set"] {
-        assert_eq!(state.calls.iter().filter(|(op, _)| op == kind).count(), 1, "{kind}");
-    }
-    assert_eq!(state.calls.iter().filter(|(op, _)| op == "history.undo").count(), 4);
+    assert_eq!(document(&state), baseline_document, "all native fields and references restore after targeted undo");
+    assert!(!state.calls.iter().any(|(op, _)| matches!(op.as_str(), "pattern.create" | "pattern.clone" | "pattern.set")));
+    assert_eq!(state.calls.iter().filter(|(op, _)| op == "project.edit").count(), 4);
+    assert_eq!(state.calls.iter().filter(|(op, _)| op == "pattern.replace_notes").count(), 1);
+    assert_eq!(state.calls.iter().filter(|(op, _)| op == "history.undo").count(), 5);
 }
 
 #[tokio::test]
@@ -99,6 +120,7 @@ async fn invalid_pattern_previews_and_stale_apply_never_send_a_pattern_write() {
         ("pattern.clone", json!({})),
         ("pattern.clone", json!({"index":1})),
         ("pattern.set", json!({"index":0})),
+        ("pattern.set", json!({"index":0,"lengthTicks":1})),
         ("pattern.set", json!({"index":1,"name":"Missing"})),
         ("pattern.create", json!({"notes":[]})),
     ] {
@@ -118,7 +140,10 @@ async fn invalid_pattern_previews_and_stale_apply_never_send_a_pattern_write() {
         "changed"
     );
     let state = fake.finish().await;
-    assert!(!state.calls.iter().any(|(op, _)| matches!(op.as_str(), "pattern.create" | "pattern.clone" | "pattern.set" | "history.undo")));
+    assert!(!state
+        .calls
+        .iter()
+        .any(|(op, _)| matches!(op.as_str(), "pattern.create" | "pattern.clone" | "pattern.set" | "project.edit" | "history.undo")));
 }
 
 #[tokio::test]

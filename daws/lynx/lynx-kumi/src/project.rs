@@ -22,9 +22,6 @@ pub const WRITE_OPS: &[&str] = &[
     "tempo.set",
     "mixer.set",
     "channel.set",
-    "pattern.create",
-    "pattern.clone",
-    "pattern.set",
     "pattern.replace_notes",
     "plugin.parameters_set",
     "effect.load",
@@ -73,7 +70,7 @@ impl Bridge {
     }
 
     pub async fn read(&mut self, params: &Value) -> Result<Value> {
-        let session = self.session().await?;
+        let mut session = self.session().await?;
         check_epoch(params, &session)?;
         let mut params = params.clone();
         let direct = params["ref"].as_str().map(|r| parse_ref(r, &session)).transpose()?;
@@ -96,6 +93,9 @@ impl Bridge {
             return self.call_read(params, &session).await;
         }
         let kind = alias(kind);
+        if kind == "pattern" && session["playing"] != true && session["recording"] != true {
+            self.pattern_metadata(&mut session).await?;
+        }
         if kind == "document" {
             return self.document_read(params, &session).await;
         }

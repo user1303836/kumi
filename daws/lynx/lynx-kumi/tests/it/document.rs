@@ -26,7 +26,7 @@ async fn complete_document_is_decoded_into_bounded_pointer_pages_then_edited_as_
         cursor = page.get("nextCursor").cloned();
     }
     assert_eq!(text, "界".repeat(20000));
-    let input = json!({"snapshotId":root["snapshotId"],"expectedDocumentHash":root["documentHash"],"expectedRevision":1,"patch":[{"op":"replace","path":"/tempo","value":132},{"op":"replace","path":"/channels/0/name","value":"Document edit"}]});
+    let input = json!({"snapshotId":root["snapshotId"],"expectedDocumentHash":root["documentHash"],"expectedRevision":1,"patch":[{"op":"replace","path":"/bpm","value":132},{"op":"replace","path":"/channels/0/name","value":"Document edit"}]});
     let preview = bridge.preview(&json!({"kind":"project.edit","input":input,"epoch":epoch(&session)})).await.unwrap();
     assert_eq!(fake.state.lock().unwrap().session["bpm"], 120);
     let args = json!({"kind":"project.edit","input":input,"fence":preview["fence"],"desc":"Kumi: Document transaction [doc1]"});

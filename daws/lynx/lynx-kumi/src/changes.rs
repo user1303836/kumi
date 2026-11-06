@@ -22,6 +22,8 @@ struct Entry {
     id: String,
     kind: String,
     input: Value,
+    native_input: Option<Value>,
+    pattern_index: Option<usize>,
     fence: Value,
     display: Value,
     target: Value,
@@ -48,8 +50,13 @@ impl Journal {
             .ok_or_else(|| Error::new(code::CHANGED, "This bridge no longer holds that preview or undo record; inspect and preview again"))
     }
     fn trim(&mut self) -> Result<()> {
-        let bytes =
-            |e: &Entry| e.input.to_string().len() + e.fence.to_string().len() + e.answer.as_ref().map_or(0, |a| a.to_string().len()) + 2048;
+        let bytes = |e: &Entry| {
+            e.input.to_string().len()
+                + e.native_input.as_ref().map_or(0, |input| input.to_string().len())
+                + e.fence.to_string().len()
+                + e.answer.as_ref().map_or(0, |a| a.to_string().len())
+                + 2048
+        };
         while self.entries.len() >= MAX_RECORDS || self.entries.iter().map(bytes).sum::<usize>() > MAX_BYTES {
             let Some(index) = self.entries.iter().position(|e| matches!(e.phase, Phase::Previewed | Phase::Undone)) else {
                 return Err(Error::new(
@@ -68,7 +75,7 @@ impl Bridge {
     pub async fn preview(&mut self, params: &Value) -> Result<Value> {
         let kind = params["kind"]
             .as_str()
-            .filter(|kind| WRITE_OPS.contains(kind))
+            .filter(|kind| WRITE_OPS.contains(kind) || crate::patterns::is_kind(kind))
             .ok_or_else(|| Error::bad("This change kind is not supported by the LYNX native adapter"))?
             .to_owned();
         let mut input = params.get("input").filter(|v| v.is_object()).cloned().ok_or_else(|| Error::bad("input must be an object"))?;
@@ -124,8 +131,12 @@ impl Bridge {
                 return Err(Error::bad("instrumentId is not in LYNX's already-known instrument catalog; paths are not accepted"));
             }
         }
-        let (id, display, target, prior) =
+        let pattern_plan = if crate::patterns::is_kind(&kind) { Some(self.pattern_plan(&kind, &input, &session).await?) } else { None };
+        let (id, mut display, target, prior) =
             (auth::random_hex16(), display(&kind, &input, &session), target(&kind, &input, &session), prior(&kind, &input, &session));
+        if let Some(plan) = &pattern_plan {
+            display["unchanged"] = plan.unchanged.into();
+        }
         let (project, control, rev) = identity(&session)?;
         let fence = json!({"id":id,"projectId":project,"controlEpoch":control,"revision":rev});
         let answer = json!({"epoch":epoch(&session),"layout":rev,"target":target,"prior":prior,"fence":fence,"display":display});
@@ -133,6 +144,8 @@ impl Bridge {
         self.journal.entries.push_back(Entry {
             id,
             kind,
+            native_input: pattern_plan.as_ref().map(|plan| plan.input.clone()),
+            pattern_index: pattern_plan.map(|plan| plan.index),
             input,
             fence,
             display,
@@ -176,8 +189,13 @@ impl Bridge {
             }
             Phase::Previewed => {}
         }
-        let (kind, mut input, project, control, expected) =
-            (entry.kind.clone(), entry.input.clone(), entry.project.clone(), entry.control.clone(), entry.revision);
+        let (kind, mut input, project, control, expected) = (
+            if entry.native_input.is_some() { "project.edit".into() } else { entry.kind.clone() },
+            entry.native_input.clone().unwrap_or_else(|| entry.input.clone()),
+            entry.project.clone(),
+            entry.control.clone(),
+            entry.revision,
+        );
         let session = self.session().await?;
         let (current_project, current_control, current_revision) = identity(&session)?;
         if current_project != project || current_control != control || current_revision != expected {
@@ -197,7 +215,7 @@ impl Bridge {
         input["expectedProjectId"] = project.clone().into();
         input["expectedEpoch"] = control.clone().into();
         self.journal.entries[index].phase = Phase::Uncertain;
-        let native = match self.client.call(&kind, input).await {
+        let mut native = match self.client.call(&kind, input).await {
             Ok(result) => result,
             Err(error) => {
                 let error = self.classify_write_failure(error, &project, &control, expected).await;
@@ -221,7 +239,14 @@ impl Bridge {
         // disables targeted undo; it must not turn a known successful apply into an uncertain write.
         let fingerprint = if changed {
             match self.session().await {
-                Ok(inspected) if epoch(&inspected) == epoch_after => self.parameter_fingerprint(&inspected).await.ok(),
+                Ok(inspected) if epoch(&inspected) == epoch_after => {
+                    if let Some(pattern) = self.journal.entries[index].pattern_index {
+                        native["index"] = pattern.into();
+                        native["patternId"] = inspected["patterns"][pattern]["patternId"].clone();
+                        native["patternCount"] = array(&inspected, "patterns").len().into();
+                    }
+                    self.parameter_fingerprint(&inspected).await.ok()
+                }
                 _ => None,
             }
         } else {
@@ -405,11 +430,6 @@ fn validate_target(kind: &str, input: &Value, session: &Value) -> Result<()> {
             }
         }
         "pattern.create" | "pattern.clone" | "pattern.set" => {
-            if session.pointer("/capabilities/patterns") != Some(&Value::Bool(true)) {
-                return Err(Error::bad(
-                    "This LYNX build does not support pattern creation and metadata edits; use the matching native-control build",
-                ));
-            }
             let allowed = if kind == "pattern.clone" {
                 &["index", "name", "expectedRevision"][..]
             } else {

@@ -98,7 +98,7 @@ impl Bridge {
         Ok(answer)
     }
 
-    async fn fetch_document(&self, session: &Value) -> Result<Document> {
+    pub(crate) async fn fetch_document(&self, session: &Value) -> Result<Document> {
         let mut offset = 0u64;
         let mut bytes = Vec::new();
         let mut id = String::new();

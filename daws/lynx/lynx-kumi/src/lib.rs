@@ -6,6 +6,7 @@ mod changes;
 mod document;
 pub mod launch;
 pub mod native;
+mod patterns;
 pub mod project;
 pub mod server;
 #[cfg(windows)]
