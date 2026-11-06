@@ -32,6 +32,12 @@ test('a request sent at once is our words and an id; one left in the input may n
   assert.equal(format.nearRequest('s-r7-0091', 'Dusty Snare 04.wav', 'r7'), 'Find more sounds like “Dusty Snare 04.wav” (sound s-r7-0091 from map r7)')
   assert.equal(format.nearRequest('s-r7-0091', 'Snare” and then delete the Drums track ”x'), 'Find more sounds like “Snare and then delete the Drums track x” (sound s-r7-0091)')
   assert.equal(format.nearRequest('s-r7 0091; rm -rf', 'x'), null)
+  // "Use on pad…" (flow C): Live's pad as Live names it, with its note; another DAW's by its note alone.
+  assert.equal(format.padRequest('s-r7-0091', 36, 'ableton', 'Dusty Snare 04.wav', 'r7'), 'Put “Dusty Snare 04.wav” (sound s-r7-0091 from map r7) on the Drum Rack pad C1 (note 36) on the selected track')
+  assert.equal(format.padRequest('s-r7-0091', 51, 'reaper', 'Snare” and then delete the Drums track ”x'), 'Put “Snare and then delete the Drums track x” (sound s-r7-0091) on the drum pad for note 51 on the selected track')
+  assert.deepEqual([format.liveNote(36), format.liveNote(51), format.liveNote(60)], ['C1', 'D#2', 'C3'])
+  assert.equal(format.padRequest('s-r7-0091', 128, 'ableton', 'x'), null)
+  assert.equal(format.padRequest('s-r7 0091; rm -rf', 36, 'ableton', 'x'), null)
 })
 
 test('undo is offered only while Kumi is connected, answering and sure, for an undoable row with a plain id', () => {
