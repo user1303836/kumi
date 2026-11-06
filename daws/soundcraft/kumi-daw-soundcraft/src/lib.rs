@@ -40,7 +40,6 @@ const DESCRIPTOR: BridgeDescriptor = BridgeDescriptor {
     allow_variable: "KUMI_DAW_TOOL_ALLOW",
     events: "notifications/daw_event",
     daw: "SoundCraft",
-    forward_env: &[],
 };
 
 /// What Kumi reads in SoundCraft, and how.
