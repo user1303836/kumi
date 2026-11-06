@@ -79,6 +79,51 @@ If an image is absent, explicitly limit the reading to the measured numbers.
 Do not propose or execute DAW edits. Return the requested JSON object only.
 """
 
+_PROFILE_REASONS = frozenset(("not_requested", "zero_energy", "too_short_for_profile_frames", "no_usable_profile_energy",
+                              "too_short_for_loudness", "below_loudness_gate", "too_short_for_range", "mono",
+                              "no_low_band_energy", "not_measured", "no_reference_measurement",
+                              "above_nyquist", "partial_frequency_coverage"))
+_PROFILE_QUANTITIES = {
+    **{f"region/{name}": ("dB", "Heard 31-third-octave relative band power / Profile::regions")
+       for name in ("sub", "bass", "low mids", "mids", "upper mids", "presence", "brilliance", "air")},
+    "integrated": ("LUFS", "Heard BS.1770-4 integrated / Profile::integrated; distinct from canonical Analysis"),
+    "plr": ("dB", "Heard true peak minus Heard integrated / Profile::plr"),
+    "crest": ("dB", "Heard median 400 ms crest of the louder half / Profile::crest"),
+    "low_width": ("dB", "Heard side/mid power below 120 Hz / Profile::low_width; not canonical full-band width"),
+    "tilt": ("dB/octave", "Heard 100 Hz–10 kHz third-octave slope / Profile::tilt"),
+    "range": ("LU", "Heard EBU 3342 loudness range / Profile::range"),
+    "centroid": ("Hz", "Heard median loud-frame centroid / Profile::centroid; not canonical energy-weighted centroid"),
+    "noise": ("dB", "Heard loud-frame spectral flatness / Profile::noise"),
+    "attack": ("ms", "Heard median per-hit 10–90 percent attack / Profile::attack"),
+    "decay": ("ms", "Heard median per-hit peak to -20 dB decay / Profile::decay"),
+    "sustain": ("dB", "Heard per-hit level a quarter second after peak / Profile::sustain"),
+}
+_AVAILABILITY_QUANTITIES = frozenset(_PROFILE_QUANTITIES) | {
+    "regions", "tempo", "key", "busyness", "groove", "sound.width", "sound.pitch_drop", "sound.modulation",
+    "sound.bandwidth", "sound.noise_floor", "sound.warmth", "sound.tail", "sound.crackle", "sound.decay_time",
+    "sound.darkening", "sound.echo_time", "sound.echo_falls", "sound.swing", "sound.sweep", "sound.tail_share",
+    "sound.pumping", "sound.hit_crest",
+}
+_WINDOW_INSTRUCTIONS = """
+Exact sample windows supersede rounded analyzed clock labels. Retained excerpts replay at zero;
+original offsets describe provenance, never a second playback offset.
+"""
+_PROFILE_INSTRUCTIONS = """
+Numbered references are separate canonical Analysis measurements, not an averaged recording.
+The reference_profile quantities use real Heard/Profile on BOTH sides. Never subtract a canonical
+Analysis value from a Profile target, even when names or units match. Deviations are source minus
+target.mid. References have equal weight, not duration weight. Spreads include minimum tolerances;
+fewer than five references use member-center min/max. These are NOT confidence intervals or purely
+observed variation. A short-frame fixed region tolerance is not measured variability.
+Report null values with their reasons and actual contributor/reference counts; silence is not a tonal
+target. There is no Profile true-peak target and no scalar better score: keep each canonical peak and
+the producer's ceiling separate.
+Each member's profile_quantities is its Heard/Profile measurement, distinct from its canonical metrics.
+Null member values are excluded only from that quantity's target and contributor count. A low sample rate
+can leave above-Nyquist or partially covered regions unavailable; never replace them with a floor or zero,
+and never discard the member's other usable quantities or substitute canonical band measurements.
+"""
+
 
 class InterpretationError(RuntimeError):
     """A safe, user-facing failure; never contains a provider exception's text."""
@@ -184,6 +229,128 @@ def _measurements(analysis: Any) -> dict[str, Any]:
             ),
         }
     return result
+
+
+def _count(value: Any, *, maximum: int | None = None) -> int:
+    if type(value) is not int or value < 0 or (maximum is not None and value > maximum):
+        raise InterpretationError("The runtime returned an invalid measurement count.")
+    return value
+
+
+def _reason(value: Any) -> str | None:
+    if value is not None and (not isinstance(value, str) or value not in _PROFILE_REASONS):
+        raise InterpretationError("The runtime returned an unknown availability reason.")
+    return value
+
+
+def _nyquist(value: Any, reason: str | None) -> int | float | None:
+    number = _number(value)
+    if (number is not None and number <= 0) or (
+            reason in ("above_nyquist", "partial_frequency_coverage") and number is None):
+        raise InterpretationError("The runtime returned invalid frequency coverage.")
+    return number
+
+
+def _sample_window(value: Any) -> dict:
+    if not isinstance(value, dict):
+        raise InterpretationError("The runtime returned an invalid exact audio window.")
+    result = _numbers(value, ("original_seconds", "sample_rate", "replay_from"))
+    for key in ("start_frame", "frame_count", "channels"):
+        result[key] = _count(value.get(key))
+    total = value.get("original_total_frames")
+    result["original_total_frames"] = None if total is None else _count(total)
+    exact = value.get("original_duration_exact")
+    if (type(exact) is not bool or result.get("sample_rate") is None or result["sample_rate"] <= 0
+            or result["frame_count"] <= 0 or result["channels"] <= 0 or result.get("replay_from") != 0):
+        raise InterpretationError("The runtime returned an invalid exact audio window.")
+    result["original_duration_exact"] = exact
+    requested = value.get("requested")
+    result["requested"] = None if requested is None else _numbers(requested, ("from", "seconds"))
+    if requested is not None:
+        window = result["requested"]
+        if (set(window) != {"from", "seconds"} or window["from"] is None or window["seconds"] is None
+                or window["from"] < 0 or not 0 < window["seconds"] <= 60
+                or not math.isfinite(window["from"] + window["seconds"])):
+            raise InterpretationError("The runtime returned an invalid requested audio window.")
+    return result
+
+
+def _availability(value: Any) -> dict:
+    if not isinstance(value, dict) or any(type(value.get(key)) is not bool
+                                          for key in ("energy_zero", "fixed_region_tolerance")):
+        raise InterpretationError("The runtime returned invalid reference availability.")
+    missing = value.get("unavailable")
+    if not isinstance(missing, list) or len(missing) > len(_AVAILABILITY_QUANTITIES):
+        raise InterpretationError("The runtime returned invalid reference availability.")
+    rows = []
+    for row in missing:
+        key = row.get("quantity") if isinstance(row, dict) else None
+        if not isinstance(key, str) or key not in _AVAILABILITY_QUANTITIES:
+            raise InterpretationError("The runtime returned an unknown unavailable quantity.")
+        rows.append({"quantity": key, "reason": _reason(row.get("reason"))})
+    return {"energy_zero": value["energy_zero"], "fixed_region_tolerance": value["fixed_region_tolerance"],
+            "loud_frame_count": _count(value.get("loud_frame_count")),
+            "profile_reason": _reason(value.get("profile_reason")), "unavailable": rows}
+
+
+def _member_profile_facts(value: Any) -> list[dict]:
+    if not isinstance(value, list) or not value or len(value) > len(_PROFILE_QUANTITIES):
+        raise InterpretationError("The runtime returned invalid member profile quantities.")
+    rows, seen = [], set()
+    for row in value:
+        key = row.get("quantity") if isinstance(row, dict) else None
+        if not isinstance(key, str) or key not in _PROFILE_QUANTITIES or key in seen:
+            raise InterpretationError("The runtime returned an unknown or repeated member profile quantity.")
+        seen.add(key)
+        unit, basis = _PROFILE_QUANTITIES[key]
+        if row.get("unit") != unit or row.get("basis") != basis:
+            raise InterpretationError("The runtime returned an unsupported member profile basis.")
+        measured, reason = _number(row.get("value")), _reason(row.get("reason_code"))
+        nyquist = _nyquist(row.get("nyquist_hz"), reason)
+        if (measured is None) != (reason is not None):
+            raise InterpretationError("The runtime returned inconsistent member profile availability.")
+        rows.append({"quantity": key, "unit": unit, "basis": basis, "value": measured,
+                     "reason_code": reason, "nyquist_hz": nyquist})
+    return rows
+
+
+def _profile_facts(value: Any, references: int) -> dict:
+    if not isinstance(value, dict) or _count(value.get("references"), maximum=5) != references:
+        raise InterpretationError("The runtime returned an incomplete reference profile.")
+    quantities = value.get("quantities")
+    if not isinstance(quantities, list) or not quantities or len(quantities) > len(_PROFILE_QUANTITIES):
+        raise InterpretationError("The runtime returned invalid profile quantities.")
+    rows, seen = [], set()
+    usable = _count(value.get("usable_references"), maximum=references)
+    for row in quantities:
+        key = row.get("quantity") if isinstance(row, dict) else None
+        if not isinstance(key, str) or key not in _PROFILE_QUANTITIES or key in seen:
+            raise InterpretationError("The runtime returned an unknown or repeated profile quantity.")
+        seen.add(key)
+        unit, basis = _PROFILE_QUANTITIES[key]
+        if row.get("unit") != unit or row.get("basis") != basis or _count(row.get("references")) != references:
+            raise InterpretationError("The runtime returned an unsupported profile measurement basis.")
+        target = row.get("target")
+        target = None if target is None else _numbers(target, ("mid", "low", "high"))
+        source, deviation = _number(row.get("source")), _number(row.get("deviation"))
+        contributors = _count(row.get("contributors"), maximum=usable)
+        source_reason, target_reason = _reason(row.get("source_reason")), _reason(row.get("target_reason"))
+        source_nyquist = _nyquist(row.get("source_nyquist_hz"), source_reason)
+        inside = row.get("inside_spread")
+        if (target is not None and (set(target) != {"mid", "low", "high"} or any(v is None for v in target.values())
+                                   or not target["low"] <= target["mid"] <= target["high"])):
+            raise InterpretationError("The runtime returned an invalid profile spread.")
+        available = source is not None and target is not None
+        if ((source is None) != (source_reason is not None) or (target is None) != (target_reason is not None)
+                or (target is None) != (contributors == 0) or (deviation is not None) != available
+                or (type(inside) is bool) != available or (not available and inside is not None)):
+            raise InterpretationError("The runtime returned inconsistent profile availability.")
+        rows.append({"quantity": key, "unit": unit, "basis": basis, "source": source, "source_reason": source_reason,
+                     "source_nyquist_hz": source_nyquist, "target": target, "target_reason": target_reason,
+                     "contributors": contributors, "references": references, "deviation": deviation, "inside_spread": inside})
+    return {"basis": "Real Heard/Profile on both sides; equal per-original-reference weighting, not canonical Analysis",
+            "references": references, "usable_references": usable, "source_window": _sample_window(value.get("source_window")),
+            "quantities": rows}
 
 
 def _chunk(kind: bytes, data: bytes) -> bytes:
@@ -292,11 +459,33 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
         if not isinstance(comparison, dict):
             raise InterpretationError("The runtime returned an invalid comparison.")
         analyses.append(("reference", "comparison_metrics", "comparison_spectrogram", comparison.get("metrics")))
+    references = result.get("references")
+    if references is not None:
+        if (comparison is not None or not isinstance(references, list) or not 1 <= len(references) <= 5
+                or any(not isinstance(reference, dict) for reference in references)):
+            raise InterpretationError("The runtime returned an invalid reference set.")
+        for index, reference in enumerate(references, 1):
+            analyses.append((f"reference_{index}", f"references[{index - 1}].metrics",
+                             f"references[{index - 1}].spectrogram", reference.get("metrics")))
+    profile = result.get("reference_profile")
+    if (profile is None) != (references is None):
+        raise InterpretationError("The runtime returned an incomplete reference profile.")
+    exact_windows = profile is not None or (isinstance(comparison, dict) and comparison.get("window") is not None)
     supplied = []
     blocks = []
     for label, metrics_input, spectrum_input, analysis in analyses:
         measured = _measurements(analysis)
         supplied.append(metrics_input)
+        reference = comparison if label == "reference" else (
+            references[int(label.removeprefix("reference_")) - 1] if label.startswith("reference_") else None)
+        if reference is not None:
+            if reference.get("window") is not None:
+                measured["exactWindow"] = _sample_window(reference["window"])
+            if "availability" in reference:
+                measured["availability"] = _availability(reference["availability"])
+            if label.startswith("reference_"):
+                measured["profile_quantities"] = _member_profile_facts(reference.get("profile_quantities"))
+                supplied.append(f"references[{int(label.removeprefix('reference_')) - 1}].profile_quantities")
         spectrum = analysis.get("spectrogram")
         image = None
         if spectrum is not None:
@@ -307,11 +496,17 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
         blocks.append({"type": "text", "text": json.dumps({label: measured}, allow_nan=False, separators=(",", ":"))})
         if image is not None:
             blocks.append({"type": "image", "data": image, "mime_type": "image/png", "file_name": f"{label}-band-energy.png"})
+    if profile is not None:
+        facts = _profile_facts(profile, len(references))
+        supplied.append("reference_profile")
+        blocks.append({"type": "text", "text": json.dumps({"reference_profile": facts},
+                                                           allow_nan=False, separators=(",", ":"))})
     try:
         completed = llm.complete_structured(
             task=AUX_TASK_KEY,
             purpose="kumi.listen.interpret",
-            instructions=_INSTRUCTIONS,
+            instructions=_INSTRUCTIONS + (_WINDOW_INSTRUCTIONS if exact_windows else "")
+                         + (_PROFILE_INSTRUCTIONS if profile is not None else ""),
             input=blocks,
             json_schema=_SCHEMA,
             schema_name="kumi_audio_measurement_interpretation",

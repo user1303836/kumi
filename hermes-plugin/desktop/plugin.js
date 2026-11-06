@@ -1430,7 +1430,7 @@ function listenView(result, t = english, referenceName2) {
     captureNote: typeof result.capture?.note === "string" && result.capture.note.trim() ? clean(result.capture.note, 200) : void 0
   };
   if (compare) {
-    view.referenceTitle = referenceName2 ? clean(referenceName2, 60) : fileName(reference, t("listen.reference"));
+    view.referenceTitle = compare.name ? displayReferenceName(compare) : referenceName2 ? clean(referenceName2, 60) : fileName(reference, t("listen.reference"));
     view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
   }
   const interpretation = result.interpretation;
@@ -1459,7 +1459,42 @@ function lowEnd(t, mine, reference) {
   if (typeof mine !== "boolean" && typeof reference !== "boolean") return null;
   return { label: t("listen.lowEnd"), mine: words(mine), ...reference === void 0 ? {} : { reference: words(reference) }, direction: 0 };
 }
+function displayReferenceName(reference) {
+  return clean((reference.origin?.name ?? reference.name ?? "").split(/[\\/]/).pop() || "Reference", 160);
+}
+function windowWords(window2) {
+  if (!window2 || !finite(window2.sample_rate) || window2.sample_rate <= 0 || !finite(window2.frame_count) || !finite(window2.start_frame)) return void 0;
+  const start = window2.start_frame / window2.sample_rate;
+  const duration = window2.frame_count / window2.sample_rate;
+  const requested = window2.requested ? ` · requested ${num(window2.requested.from, 6)} + ${num(window2.requested.seconds, 6)} s` : "";
+  return `Reference file seconds ${num(start, 6)}–${num(start + duration, 6)} · ${num(duration, 6)} s measured (${window2.frame_count} frames at ${window2.sample_rate} Hz)${requested}`;
+}
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+function memberKey(reference) {
+  const window2 = reference.window;
+  const origin = reference.origin;
+  const replay = origin?.window && window2 && window2.start_frame === 0 && window2.frame_count === origin.window.frame_count && window2.sample_rate === origin.window.sample_rate && window2.channels === origin.window.channels;
+  const selected = replay ? origin : reference;
+  return stable({
+    identity: selected.identity ?? { artifact_id: reference.artifact_id },
+    window: selected.window ? {
+      start_frame: selected.window.start_frame,
+      frame_count: selected.window.frame_count,
+      sample_rate: selected.window.sample_rate,
+      channels: selected.window.channels
+    } : null
+  });
+}
+function hasReferenceFacts(result) {
+  return Array.isArray(result.references) || !!(result.compare?.identity || result.compare?.window || result.compare?.origin);
+}
 function referenceKey(result) {
+  if (Array.isArray(result.references)) return `profile:${stable(result.references.map(memberKey).sort())}`;
+  if (hasReferenceFacts(result) && result.compare) return `excerpt:${memberKey(result.compare)}`;
   const reference = result.compare?.metrics;
   if (!reference) return null;
   const lufs = reference.loudness?.integratedLufs;
@@ -1475,14 +1510,14 @@ function keptBy(result, rounds) {
   return null;
 }
 function roundKey(result, rounds) {
-  return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+  return hasReferenceFacts(result) ? referenceKey(result) : keptBy(result, rounds)?.[0] ?? referenceKey(result);
 }
 function referenceName(result, rounds) {
   return keptBy(result, rounds)?.[1].name || void 0;
 }
 function roundOf(result, id, rounds) {
   const kept = result.compare?.artifact_id;
-  return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+  return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
 }
 function gapsOf(result) {
   const mine = result.metrics ?? {};
@@ -1990,7 +2025,7 @@ async function inNewChat(ctx, composer, text) {
 
 // src/desktop/card.tsx
 import { useEffect as useEffect2, useState } from "react";
-import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 async function peaksOf(dataUrl, buckets = 96) {
   const comma = dataUrl.indexOf(",");
   const binary = atob(dataUrl.slice(comma + 1));
@@ -2141,6 +2176,157 @@ function Interpretation({ view }) {
     long && /* @__PURE__ */ jsx2("span", { children: /* @__PURE__ */ jsx2(TextButton, { onClick: () => setOpen(!open), children: open ? t("listen.less") : t("listen.more") }) })
   ] });
 }
+function ReferenceFacts({ reference }) {
+  const identity = reference.origin?.identity ?? reference.identity;
+  const file = identity?.file_identity;
+  const facts = file && typeof file === "object" ? Object.entries(file).filter(
+    ([key, value]) => ["dev", "ino", "size", "mtime_ns"].includes(key) && (typeof value === "number" || typeof value === "string")
+  ).map(([key, value]) => `${key}=${clean(String(value), 60)}`).join(" · ") : "";
+  const original = reference.origin?.window;
+  const measured = windowWords(reference.window);
+  return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3, overflowWrap: "anywhere" }, children: [
+    identity && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      "Identity: ",
+      clean(identity.kind ?? "", 20),
+      " ",
+      facts,
+      identity.sound_id && ` · sound ${clean(identity.sound_id.split(/[\\/]/).pop() ?? "", 80)}`,
+      identity.map_revision && ` · map ${clean(identity.map_revision, 80)}`,
+      identity.artifact_id && ` · artifact ${clean(identity.artifact_id, 80)}`
+    ] }),
+    original && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      "Original provenance · ",
+      windowWords(original)
+    ] }),
+    reference.artifact_id && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      "Retained artifact: ",
+      clean(reference.artifact_id, 100)
+    ] }),
+    measured && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      original ? "Artifact measured window · " : "",
+      measured
+    ] }),
+    reference.window && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      "Retained artifact playback starts at ",
+      num(reference.window.replay_from, 6),
+      " s"
+    ] })
+  ] });
+}
+function ReferenceProfile({ result, audition }) {
+  const t = useT();
+  const profile = result.reference_profile;
+  if (!profile) return null;
+  const cell = { padding: "5px 6px", verticalAlign: "top", textAlign: "left" };
+  return /* @__PURE__ */ jsxs2("section", { "aria-label": "Measured reference profile", style: { display: "flex", flexDirection: "column", gap: 9 }, children: [
+    /* @__PURE__ */ jsx2("strong", { style: S.text, children: "Reference target and spread" }),
+    /* @__PURE__ */ jsxs2("span", { style: S.muted, children: [
+      profile.usable_references,
+      "/",
+      profile.references,
+      " usable references · equal per-reference weighting"
+    ] }),
+    /* @__PURE__ */ jsx2("span", { style: S.faint, children: clean(profile.basis, 500) }),
+    profile.source_window && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+      "Source measured window · ",
+      windowWords(profile.source_window)?.replace("Reference file seconds", "seconds")
+    ] }),
+    /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, width: "100%", margin: 0 }, children: [
+      /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsx2("tr", { style: { color: T.muted }, children: ["Quantity / basis", "Measured source", "Target [spread]", "Source − target", "Contributors / total"].map((label) => /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: label }, label)) }) }),
+      /* @__PURE__ */ jsx2("tbody", { children: profile.quantities.map((quantity) => {
+        const value = (number) => typeof number === "number" && Number.isFinite(number) ? `${num(number, 2)} ${clean(quantity.unit, 30)}` : "—";
+        return /* @__PURE__ */ jsxs2("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
+          /* @__PURE__ */ jsxs2("th", { scope: "row", style: { ...cell, fontWeight: 400 }, children: [
+            clean(quantity.quantity, 80),
+            /* @__PURE__ */ jsx2("div", { style: S.faint, children: clean(quantity.basis, 300) })
+          ] }),
+          /* @__PURE__ */ jsxs2("td", { style: cell, children: [
+            value(quantity.source),
+            quantity.source === null && /* @__PURE__ */ jsx2("div", { style: S.faint, children: clean(quantity.source_reason_detail ?? quantity.source_reason ?? "not measured", 300) })
+          ] }),
+          /* @__PURE__ */ jsx2("td", { style: cell, children: quantity.target ? /* @__PURE__ */ jsxs2(Fragment, { children: [
+            value(quantity.target.mid),
+            /* @__PURE__ */ jsxs2("div", { style: S.faint, children: [
+              "[",
+              value(quantity.target.low),
+              " … ",
+              value(quantity.target.high),
+              "]"
+            ] })
+          ] }) : /* @__PURE__ */ jsxs2(Fragment, { children: [
+            "—",
+            /* @__PURE__ */ jsx2("div", { style: S.faint, children: clean(quantity.target_reason ?? "not measured", 100) })
+          ] }) }),
+          /* @__PURE__ */ jsxs2("td", { style: cell, children: [
+            quantity.deviation !== null && Number.isFinite(quantity.deviation) ? `${signed(quantity.deviation, 2)} ${quantity.unit === "LUFS" ? "LU" : clean(quantity.unit, 30)}` : "—",
+            quantity.inside_spread !== null && /* @__PURE__ */ jsx2("div", { style: S.faint, children: quantity.inside_spread ? "Inside spread" : "Outside spread" })
+          ] }),
+          /* @__PURE__ */ jsxs2("td", { style: cell, children: [
+            quantity.contributors,
+            "/",
+            quantity.references
+          ] })
+        ] }, quantity.quantity);
+      }) })
+    ] }) }),
+    /* @__PURE__ */ jsx2("span", { style: S.faint, children: clean(profile.range_note, 500) }),
+    /* @__PURE__ */ jsx2("span", { style: S.faint, children: clean(profile.peak_note, 500) }),
+    (result.references ?? []).map((reference, index) => {
+      const name = displayReferenceName(reference);
+      const availability = reference.availability;
+      const canonical = listenView({ metrics: reference.metrics }, t);
+      const unavailable = /* @__PURE__ */ new Map();
+      for (const quantity of reference.profile_quantities ?? []) {
+        if (quantity.value !== null) continue;
+        const reason = clean(quantity.reason ?? quantity.reason_code ?? "not measured", 300);
+        const quantities = unavailable.get(reason) ?? [];
+        quantities.push(clean(quantity.quantity, 80));
+        unavailable.set(reason, quantities);
+      }
+      return /* @__PURE__ */ jsxs2("section", { "aria-label": `Reference ${index + 1}: ${name}`, style: { display: "flex", flexDirection: "column", gap: 5, borderTop: `1px solid ${T.border}`, paddingTop: 8 }, children: [
+        /* @__PURE__ */ jsxs2("strong", { style: S.text, children: [
+          index + 1,
+          ". ",
+          name
+        ] }),
+        /* @__PURE__ */ jsx2(ReferenceFacts, { reference }),
+        reference.artifact_id && /* @__PURE__ */ jsx2(Wave, { audition, id: reference.artifact_id, label: name }),
+        unavailable.size > 0 && /* @__PURE__ */ jsx2("ul", { "aria-label": `${name}: unavailable profile quantities`, style: { margin: 0, paddingLeft: 16, ...S.faint }, children: [...unavailable].map(([reason, quantities]) => /* @__PURE__ */ jsxs2("li", { children: [
+          quantities.join(", "),
+          ": — · ",
+          reason
+        ] }, reason)) }),
+        reference.profile_quantities && /* @__PURE__ */ jsxs2("details", { children: [
+          /* @__PURE__ */ jsxs2("summary", { className: FOCUSABLE, style: { ...S.muted, cursor: "pointer" }, children: [
+            t("listen.more"),
+            " · Each reference's measurements"
+          ] }),
+          /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto", marginTop: 5 }, children: /* @__PURE__ */ jsxs2("table", { "aria-label": `${name}: reference measurements`, style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, width: "100%", margin: 0 }, children: [
+            /* @__PURE__ */ jsx2("caption", { style: { ...S.faint, textAlign: "left" }, children: "Each reference's measurements · only covered regions contribute to the target" }),
+            /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsx2("tr", { style: { color: T.muted }, children: ["Quantity / basis", "Measured reference", "Unavailable reason"].map((label) => /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: label }, label)) }) }),
+            /* @__PURE__ */ jsx2("tbody", { children: reference.profile_quantities.map((quantity) => /* @__PURE__ */ jsxs2("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
+              /* @__PURE__ */ jsxs2("th", { scope: "row", style: { ...cell, fontWeight: 400 }, children: [
+                clean(quantity.quantity, 80),
+                /* @__PURE__ */ jsx2("div", { style: S.faint, children: clean(quantity.basis, 300) })
+              ] }),
+              /* @__PURE__ */ jsx2("td", { style: cell, children: typeof quantity.value === "number" && Number.isFinite(quantity.value) ? `${num(quantity.value, 2)} ${clean(quantity.unit, 30)}` : "—" }),
+              /* @__PURE__ */ jsx2("td", { style: { ...cell, color: T.muted }, children: quantity.value === null ? clean(quantity.reason ?? "not measured", 300) : "—" })
+            ] }, quantity.quantity)) })
+          ] }) })
+        ] }),
+        /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Standard measurements · a different meter from the reference target" }),
+        canonical.rows.length ? /* @__PURE__ */ jsx2(Rows, { view: canonical }) : /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Standard measurements unavailable" }),
+        availability && /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
+          "Profile availability: ",
+          availability.profile_reason ? clean(availability.profile_reason, 100) : `${availability.loud_frame_count} loud frames`,
+          availability.energy_zero && " · zero energy",
+          availability.fixed_region_tolerance && " · fixed region tolerance, not observed variation",
+          !reference.profile_quantities && availability.unavailable.map((missing) => ` · ${clean(missing.quantity, 60)}: ${clean(missing.reason, 100)}`).join("")
+        ] })
+      ] }, reference.artifact_id ?? index);
+    })
+  ] });
+}
 function ListenCard({ media, audition, store }) {
   if (media.file?.kind !== "audio") return media.fallback;
   return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result, store });
@@ -2178,8 +2364,11 @@ function ListenResultCard({ result, audition, fallback, store }) {
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
           view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? t("listen.reference") })
         ] }) : fallback,
+        parsed.compare && (parsed.compare.window || parsed.compare.origin || parsed.compare.identity) && /* @__PURE__ */ jsx2(ReferenceFacts, { reference: parsed.compare }),
+        parsed.reference_profile && /* @__PURE__ */ jsx2("span", { style: S.faint, children: "Source standard measurements · a different meter from the reference target" }),
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
+        /* @__PURE__ */ jsx2(ReferenceProfile, { result: parsed, audition }),
         view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index2) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index2)) }),
         /* @__PURE__ */ jsx2(Interpretation, { view })
       ]
@@ -2529,7 +2718,7 @@ function CodeBlock({ code, label }) {
 }
 
 // src/desktop/script.tsx
-import { Fragment, jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
 var LANGUAGE = { python: "script.python", lua: "script.lua", device: "script.device" };
 function deviceSpecOf(text) {
   try {
@@ -2590,7 +2779,7 @@ function PendingScriptView({ script, daw }) {
     pending.warning && /* @__PURE__ */ jsx6("span", { style: { ...S.muted, color: T.warn }, children: clean(pending.warning, 300) }),
     code ? pending.language === "device" ? (() => {
       const spec = deviceSpecOf(code.code);
-      return spec ? /* @__PURE__ */ jsxs6(Fragment, { children: [
+      return spec ? /* @__PURE__ */ jsxs6(Fragment2, { children: [
         spec.name && /* @__PURE__ */ jsx6("span", { style: { ...S.text, fontWeight: 600 }, children: clean(spec.name, 32) }),
         /* @__PURE__ */ jsx6(Controls, { spec }),
         /* @__PURE__ */ jsx6(CodeBlock, { code: spec.code, label: t("script.deviceCode") })
@@ -2622,7 +2811,7 @@ function SavedScript({ item, store }) {
 }
 
 // src/desktop/pane.tsx
-import { Fragment as Fragment2, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 function useNow(every = 3e4) {
   const [now, setNow] = useState3(() => Date.now());
   useEffect4(() => {
@@ -2708,7 +2897,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
     /* @__PURE__ */ jsxs7(
       Section,
       {
-        title: /* @__PURE__ */ jsxs7(Fragment2, { children: [
+        title: /* @__PURE__ */ jsxs7(Fragment3, { children: [
           t("pane.history"),
           " ",
           /* @__PURE__ */ jsx7("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? t("pane.undoable", undoable) : "" })
@@ -3494,7 +3683,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment3, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
+import { Fragment as Fragment4, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
@@ -3561,7 +3750,7 @@ function MapWorkspace({ ctx, store, audition }) {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision);
         const near = nearRequest(id, sound.name, map?.revision);
-        return /* @__PURE__ */ jsxs12(Fragment3, { children: [
+        return /* @__PURE__ */ jsxs12(Fragment4, { children: [
           /* @__PURE__ */ jsx12(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
           near && /* @__PURE__ */ jsx12(TextButton, { onClick: () => void ask(ctx, near, { send: false, session: ownerSession(state) }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
           request && /* @__PURE__ */ jsx12(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
@@ -3606,12 +3795,12 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment4, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
+import { Fragment as Fragment5, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
   const note = (text) => /* @__PURE__ */ jsx13("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx13("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs13(Fragment4, { children: [
+  return /* @__PURE__ */ jsx13("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs13(Fragment5, { children: [
     /* @__PURE__ */ jsx13("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
     /* @__PURE__ */ jsx13(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
@@ -3640,7 +3829,7 @@ function petLine(before, after, t) {
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState6 } from "react";
-import { Fragment as Fragment5, jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
+import { Fragment as Fragment6, jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
@@ -3683,7 +3872,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsx14("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
       /* @__PURE__ */ jsx14("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx14("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs14(Fragment5, { children: [
+    state.available === false ? /* @__PURE__ */ jsx14("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs14(Fragment6, { children: [
       /* @__PURE__ */ jsxs14("div", { children: [
         /* @__PURE__ */ jsx14("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx14(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),

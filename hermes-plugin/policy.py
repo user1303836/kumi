@@ -374,13 +374,18 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     refusal = tools.listen_refusal(args)
     if refusal:
         return block(refused("Kumi didn't listen", refusal)), {}
-    unsupported = tools.listen_unsupported(host, args)
+    unsupported = tools.listen_feature_refusal(host, args) or tools.listen_unsupported(host, args)
     if unsupported:
         return block(refused("Kumi didn't listen", unsupported)), {}
     if not tools.is_track_listen(args):
         return None, {}
     try:
-        answer = _ask(host, "listen", {**tools.listen_args(args), "preview": True}, kwargs)
+        live = _live(host)
+        unsupported = tools.listen_feature_refusal(host, args, live)
+        if unsupported:
+            return block(refused("Kumi didn't listen", unsupported)), {}
+        answer = live.call("listen", {**tools.listen_args(args), "preview": True}, host.identity(kwargs),
+                           timeout=preview_timeout(host.hook_timeout()))
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(refused("Kumi didn't play anything", _reason(failure))), {}
     text = answer.get("text")
@@ -393,7 +398,43 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     decision = {"action": "approve", "message": one_line(f"Kumi: {text} (about {bounds['estimated_seconds']:.3g} s)",
                                                          PLAYBACK_LINE),
                 "rule_key": "kumi:playback:listen"}
+    if "references" in args or any("from" in reference or "seconds" in reference
+                                    for reference in tools.listen_references(args)):
+        try:
+            lines = _reference_lines(answer.get("reference_windows"), len(tools.listen_references(args)))
+        except ValueError:
+            return block("Kumi didn't play anything: its runtime didn't identify every prepared reference window."), {}
+        decision["message"] += "\n" + "\n".join(lines)
     return decision, {"listen": bounds}
+
+
+def _reference_lines(value: Any, expected: int) -> list[str]:
+    """Names come from authorized native preparation, never request paths; don't hide a last member."""
+    if not isinstance(value, list) or len(value) != expected:
+        raise ValueError("incomplete reference preview")
+    lines = []
+    for index, reference in enumerate(value, 1):
+        if not isinstance(reference, dict) or not isinstance(reference.get("name"), str) or not reference["name"].strip():
+            raise ValueError("missing reference name")
+        window = reference.get("window")
+        if not isinstance(window, dict):
+            raise ValueError("missing measured window")
+        start, frames, rate = (window.get(key) for key in ("start_frame", "frame_count", "sample_rate"))
+        if (type(start) is not int or start < 0 or type(frames) is not int or frames <= 0
+                or type(rate) not in (int, float) or not tools._finite(rate) or rate <= 0):
+            raise ValueError("invalid measured window")
+        requested = window.get("requested")
+        excerpt = f"file frames {start}–{start + frames} at {rate:g} Hz"
+        if requested is not None:
+            if (not isinstance(requested, dict) or type(requested.get("from")) not in (int, float)
+                    or type(requested.get("seconds")) not in (int, float)
+                    or not tools._finite(requested["from"]) or not tools._finite(requested["seconds"])
+                    or requested["from"] < 0 or not 0 < requested["seconds"] <= 60):
+                raise ValueError("invalid requested window")
+            excerpt = f"file excerpt from {requested['from']} s for {requested['seconds']} s; {excerpt}"
+        name = one_line(reference["name"], 160).replace('"', "'")
+        lines.append(f'Reference {index}: "{name}" — {excerpt}.')
+    return lines
 
 
 def _change(host: Any, args: dict, kwargs: dict) -> dict:

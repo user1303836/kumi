@@ -6,10 +6,11 @@ import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
-import { num, signed } from '../shared/format.ts'
+import { clean, num, signed } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
-import { listenView, parseListen, referenceName, roundKey, roundWords, type ListenView } from '../shared/listen.ts'
+import { displayReferenceName, listenView, parseListen, referenceName, roundKey, roundWords, windowWords, type ListenView } from '../shared/listen.ts'
 import type { KumiStore } from '../shared/store.ts'
+import type { ListenReference, ListenResult } from '../shared/types.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
@@ -209,6 +210,113 @@ function Interpretation({ view }: { view: ListenView }) {
   )
 }
 
+function ReferenceFacts({ reference }: { reference: ListenReference }) {
+  const identity = reference.origin?.identity ?? reference.identity
+  const file = identity?.file_identity
+  // Render only the native public identity fields, never an arbitrary nested value or source path.
+  const facts = file && typeof file === 'object' ? Object.entries(file).filter(([key, value]) =>
+    ['dev', 'ino', 'size', 'mtime_ns'].includes(key) && (typeof value === 'number' || typeof value === 'string')
+  ).map(([key, value]) => `${key}=${clean(String(value), 60)}`).join(' · ') : ''
+  const original = reference.origin?.window
+  const measured = windowWords(reference.window)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowWrap: 'anywhere' }}>
+      {identity && <span style={S.faint}>Identity: {clean(identity.kind ?? '', 20)} {facts}
+        {identity.sound_id && ` · sound ${clean(identity.sound_id.split(/[\\/]/).pop() ?? '', 80)}`}
+        {identity.map_revision && ` · map ${clean(identity.map_revision, 80)}`}
+        {identity.artifact_id && ` · artifact ${clean(identity.artifact_id, 80)}`}
+      </span>}
+      {original && <span style={S.faint}>Original provenance · {windowWords(original)}</span>}
+      {reference.artifact_id && <span style={S.faint}>Retained artifact: {clean(reference.artifact_id, 100)}</span>}
+      {measured && <span style={S.faint}>{original ? 'Artifact measured window · ' : ''}{measured}</span>}
+      {reference.window && <span style={S.faint}>Retained artifact playback starts at {num(reference.window.replay_from, 6)} s</span>}
+    </div>
+  )
+}
+
+function ReferenceProfile({ result, audition }: { result: ListenResult; audition: Audition }) {
+  const t = useT()
+  const profile = result.reference_profile
+  if (!profile) return null
+  const cell = { padding: '5px 6px', verticalAlign: 'top', textAlign: 'left' } as const
+  return (
+    <section aria-label="Measured reference profile" style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <strong style={S.text}>Reference target and spread</strong>
+      <span style={S.muted}>{profile.usable_references}/{profile.references} usable references · equal per-reference weighting</span>
+      <span style={S.faint}>{clean(profile.basis, 500)}</span>
+      {profile.source_window && <span style={S.faint}>Source measured window · {windowWords(profile.source_window)?.replace('Reference file seconds', 'seconds')}</span>}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
+          <thead><tr style={{ color: T.muted }}>
+            {['Quantity / basis', 'Measured source', 'Target [spread]', 'Source − target', 'Contributors / total'].map(label => <th key={label} style={{ ...cell, fontWeight: 400 }}>{label}</th>)}
+          </tr></thead>
+          <tbody>{profile.quantities.map(quantity => {
+            const value = (number: number | null) => typeof number === 'number' && Number.isFinite(number) ? `${num(number, 2)} ${clean(quantity.unit, 30)}` : '—'
+            return <tr key={quantity.quantity} style={{ borderTop: `1px solid ${T.border}` }}>
+              <th scope="row" style={{ ...cell, fontWeight: 400 }}>
+                {clean(quantity.quantity, 80)}<div style={S.faint}>{clean(quantity.basis, 300)}</div>
+              </th>
+              <td style={cell}>{value(quantity.source)}{quantity.source === null && <div style={S.faint}>{clean(quantity.source_reason_detail ?? quantity.source_reason ?? 'not measured', 300)}</div>}</td>
+              <td style={cell}>{quantity.target ? <>{value(quantity.target.mid)}<div style={S.faint}>[{value(quantity.target.low)} … {value(quantity.target.high)}]</div></> : <>—<div style={S.faint}>{clean(quantity.target_reason ?? 'not measured', 100)}</div></>}</td>
+              <td style={cell}>{quantity.deviation !== null && Number.isFinite(quantity.deviation) ? `${signed(quantity.deviation, 2)} ${quantity.unit === 'LUFS' ? 'LU' : clean(quantity.unit, 30)}` : '—'}
+                {quantity.inside_spread !== null && <div style={S.faint}>{quantity.inside_spread ? 'Inside spread' : 'Outside spread'}</div>}
+              </td>
+              <td style={cell}>{quantity.contributors}/{quantity.references}</td>
+            </tr>
+          })}</tbody>
+        </table>
+      </div>
+      <span style={S.faint}>{clean(profile.range_note, 500)}</span>
+      <span style={S.faint}>{clean(profile.peak_note, 500)}</span>
+      {(result.references ?? []).map((reference, index) => {
+        const name = displayReferenceName(reference)
+        const availability = reference.availability
+        const canonical = listenView({ metrics: reference.metrics }, t)
+        const unavailable = new Map<string, string[]>()
+        for (const quantity of reference.profile_quantities ?? []) {
+          if (quantity.value !== null) continue
+          const reason = clean(quantity.reason ?? quantity.reason_code ?? 'not measured', 300)
+          const quantities = unavailable.get(reason) ?? []
+          quantities.push(clean(quantity.quantity, 80))
+          unavailable.set(reason, quantities)
+        }
+        return <section key={reference.artifact_id ?? index} aria-label={`Reference ${index + 1}: ${name}`} style={{ display: 'flex', flexDirection: 'column', gap: 5, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+          <strong style={S.text}>{index + 1}. {name}</strong>
+          <ReferenceFacts reference={reference} />
+          {reference.artifact_id && <Wave audition={audition} id={reference.artifact_id} label={name} />}
+          {unavailable.size > 0 && <ul aria-label={`${name}: unavailable profile quantities`} style={{ margin: 0, paddingLeft: 16, ...S.faint }}>
+            {[...unavailable].map(([reason, quantities]) => <li key={reason}>{quantities.join(', ')}: — · {reason}</li>)}
+          </ul>}
+          {reference.profile_quantities && <details>
+            <summary className={FOCUSABLE} style={{ ...S.muted, cursor: 'pointer' }}>{t('listen.more')} · Each reference's measurements</summary>
+            <div style={{ overflowX: 'auto', marginTop: 5 }}>
+            <table aria-label={`${name}: reference measurements`} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
+              <caption style={{ ...S.faint, textAlign: 'left' }}>Each reference's measurements · only covered regions contribute to the target</caption>
+              <thead><tr style={{ color: T.muted }}>
+                {['Quantity / basis', 'Measured reference', 'Unavailable reason'].map(label => <th key={label} style={{ ...cell, fontWeight: 400 }}>{label}</th>)}
+              </tr></thead>
+              <tbody>{reference.profile_quantities.map(quantity => <tr key={quantity.quantity} style={{ borderTop: `1px solid ${T.border}` }}>
+                <th scope="row" style={{ ...cell, fontWeight: 400 }}>{clean(quantity.quantity, 80)}<div style={S.faint}>{clean(quantity.basis, 300)}</div></th>
+                <td style={cell}>{typeof quantity.value === 'number' && Number.isFinite(quantity.value) ? `${num(quantity.value, 2)} ${clean(quantity.unit, 30)}` : '—'}</td>
+                <td style={{ ...cell, color: T.muted }}>{quantity.value === null ? clean(quantity.reason ?? 'not measured', 300) : '—'}</td>
+              </tr>)}</tbody>
+            </table>
+            </div>
+          </details>}
+          <span style={S.faint}>Standard measurements · a different meter from the reference target</span>
+          {canonical.rows.length ? <Rows view={canonical} /> : <span style={S.faint}>Standard measurements unavailable</span>}
+          {availability && <span style={S.faint}>
+            Profile availability: {availability.profile_reason ? clean(availability.profile_reason, 100) : `${availability.loud_frame_count} loud frames`}
+            {availability.energy_zero && ' · zero energy'}
+            {availability.fixed_region_tolerance && ' · fixed region tolerance, not observed variation'}
+            {!reference.profile_quantities && availability.unavailable.map(missing => ` · ${clean(missing.quantity, 60)}: ${clean(missing.reason, 100)}`).join('')}
+          </span>}
+        </section>
+      })}
+    </section>
+  )
+}
+
 export function ListenCard({ media, audition, store }: { media: ToolMediaRendererProps; audition: Audition; store: KumiStore }): ReactNode {
   // Anything this card can't draw keeps Desktop's own player, so the audio always plays.
   if (media.file?.kind !== 'audio') return media.fallback
@@ -262,8 +370,11 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
       ) : (
         fallback
       )}
+      {parsed.compare && (parsed.compare.window || parsed.compare.origin || parsed.compare.identity) && <ReferenceFacts reference={parsed.compare} />}
+      {parsed.reference_profile && <span style={S.faint}>Source standard measurements · a different meter from the reference target</span>}
       <Rows view={view} />
       <Bands view={view} />
+      <ReferenceProfile result={parsed} audition={audition} />
       {view.headlines.length > 0 && (
         <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 1 }}>
           {view.headlines.map((line, index) => (

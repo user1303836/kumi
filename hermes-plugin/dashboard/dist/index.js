@@ -2054,7 +2054,35 @@
     const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
     return clean(file || fallback, 60);
   }
+  function displayReferenceName(reference) {
+    return clean((reference.origin?.name ?? reference.name ?? "").split(/[\\/]/).pop() || "Reference", 160);
+  }
+  function stable(value) {
+    if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+    if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
+    return JSON.stringify(value) ?? "null";
+  }
+  function memberKey(reference) {
+    const window2 = reference.window;
+    const origin = reference.origin;
+    const replay = origin?.window && window2 && window2.start_frame === 0 && window2.frame_count === origin.window.frame_count && window2.sample_rate === origin.window.sample_rate && window2.channels === origin.window.channels;
+    const selected = replay ? origin : reference;
+    return stable({
+      identity: selected.identity ?? { artifact_id: reference.artifact_id },
+      window: selected.window ? {
+        start_frame: selected.window.start_frame,
+        frame_count: selected.window.frame_count,
+        sample_rate: selected.window.sample_rate,
+        channels: selected.window.channels
+      } : null
+    });
+  }
+  function hasReferenceFacts(result) {
+    return Array.isArray(result.references) || !!(result.compare?.identity || result.compare?.window || result.compare?.origin);
+  }
   function referenceKey(result) {
+    if (Array.isArray(result.references)) return `profile:${stable(result.references.map(memberKey).sort())}`;
+    if (hasReferenceFacts(result) && result.compare) return `excerpt:${memberKey(result.compare)}`;
     const reference = result.compare?.metrics;
     if (!reference) return null;
     const lufs = reference.loudness?.integratedLufs;
@@ -2070,14 +2098,14 @@
     return null;
   }
   function roundKey(result, rounds) {
-    return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+    return hasReferenceFacts(result) ? referenceKey(result) : keptBy(result, rounds)?.[0] ?? referenceKey(result);
   }
   function referenceName(result, rounds) {
     return keptBy(result, rounds)?.[1].name || void 0;
   }
   function roundOf(result, id, rounds) {
     const kept = result.compare?.artifact_id;
-    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
   }
   function gapsOf(result) {
     const mine = result.metrics ?? {};

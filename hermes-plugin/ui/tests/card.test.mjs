@@ -7,6 +7,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { load } from './load.mjs'
+import { profileResult, reference, replay } from './reference.fixtures.mjs'
 
 const { ListenCard } = await load('src/desktop/card.tsx', { react: 'real' })
 const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
@@ -524,4 +525,82 @@ test('the generate card shows what was asked, the file, the waveform, the cost a
   const extended = card(fixtures.EXTEND.DONE)
   for (const text of ['Extended audio', 'Extended by 3 s (source 12 s)', 'a-extend.wav', 'Place…']) assert.ok(extended.includes(text), `${text} in ${extended}`)
   assert.ok(!extended.includes('>3 s<'), 'no bare seconds chip')
+})
+
+test('a measured profile keeps actual reference players, canonical facts and one Heard target separate', () => {
+  const native = profileResult()
+  native.references[0].name = '/private/music/<img onerror=attack>.wav'
+  const html = render({ result: native })
+  for (const text of ['2/3', '0/3', '−13.25 LUFS', '−11.25 LUFS', '−2 LU', '96000', '48000', '16–24']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.ok(html.includes('&lt;img onerror=attack&gt;.wav'))
+  assert.ok(!html.includes('<img'))
+  assert.ok(!html.includes('/private/'))
+  assert.ok(!html.includes('100 s measured'))
+  // Only source plus three retained members have players; the combined target has none.
+  assert.equal((html.match(/<button/g) ?? []).length, 4)
+  assert.equal((html.match(/−11.25 LUFS/g) ?? []).length, 1)
+  assert.ok(!html.includes('NaN'))
+})
+
+test('an excerpt replay discloses original file seconds separately from artifact offset zero', () => {
+  const ref = reference()
+  const html = render({ result: { metrics: result.metrics, artifact_id: 'source', compare: replay(ref) } })
+  assert.ok(html.includes('vs one.wav'))
+  assert.ok(html.includes('10–12'))
+  assert.ok(html.includes('0–2'))
+  assert.ok(!html.includes('never-display'))
+})
+
+test('low-rate member regions stay null with reasons while the target reports only covered contributors', () => {
+  const native = profileResult()
+  const low = reference('22k-reference')
+  low.window = { ...low.window, start_frame: 220500, frame_count: 44100, sample_rate: 22050 }
+  low.profile_quantities = [
+    { quantity: 'region/air', unit: 'dB', basis: 'Heard relative region power / Profile::regions', value: null, reason: 'Air is above the 11.025 kHz Nyquist limit.', reason_code: 'above_nyquist', nyquist_hz: 11025 },
+    { quantity: 'region/brilliance', unit: 'dB', basis: 'Heard relative region power / Profile::regions', value: null, reason: 'The region is only partially covered below the 11.025 kHz Nyquist limit.', reason_code: 'partial_frequency_coverage', nyquist_hz: 11025 }
+  ]
+  const high = name => ({ ...reference(name), profile_quantities: [
+    { quantity: 'region/air', unit: 'dB', basis: 'Heard relative region power / Profile::regions', value: -24, reason: null, reason_code: null, nyquist_hz: 24000 }
+  ] })
+  native.references = [low, high('48k-one'), high('48k-two')]
+  native.reference_profile.usable_references = 3
+  native.reference_profile.quantities = [
+    { quantity: 'region/air', unit: 'dB', basis: 'Heard relative region power / Profile::regions', source: -25, source_reason: null, target: { mid: -24, low: -25.5, high: -22.5 }, target_reason: null, contributors: 2, references: 3, deviation: -1, inside_spread: true }
+  ]
+  const html = render({ result: native })
+  const memberStart = html.indexOf('aria-label="Reference 1: 22k-reference.wav"')
+  const memberEnd = html.indexOf('aria-label="Reference 2:', memberStart)
+  const lowHtml = html.slice(memberStart, memberEnd)
+  assert.ok(lowHtml.includes('Air is above the 11.025 kHz Nyquist limit.'), lowHtml)
+  assert.ok(lowHtml.includes('only partially covered'), lowHtml)
+  assert.ok(!lowHtml.includes('−24 dB'), lowHtml)
+  assert.ok(lowHtml.includes('−12 LUFS'), 'canonical Analysis remains independently visible')
+  assert.equal(lowHtml.split('>—</td>').length - 1, 2, 'unavailable member values are dashes, never zero')
+  const disclosureStart = lowHtml.indexOf('<details>')
+  const disclosureEnd = lowHtml.indexOf('</details>', disclosureStart)
+  assert.ok(disclosureStart >= 0 && disclosureEnd > disclosureStart, lowHtml)
+  assert.ok(!lowHtml.slice(disclosureStart, lowHtml.indexOf('>', disclosureStart)).includes('open'), 'member details start collapsed')
+  const visible = lowHtml.slice(0, disclosureStart) + lowHtml.slice(disclosureEnd + '</details>'.length)
+  assert.ok(visible.includes('Air is above the 11.025 kHz Nyquist limit.'), 'Nyquist reason remains outside the collapsed disclosure')
+  assert.ok(visible.includes('only partially covered'), 'partial coverage remains outside the collapsed disclosure')
+  assert.ok(visible.includes('aria-label="Play 22k-reference.wav"'), 'real member playback remains outside the disclosure')
+  assert.ok(lowHtml.slice(disclosureStart, disclosureEnd).includes('Heard relative region power'), 'full basis remains accessible inside the disclosure')
+  const target = html.slice(0, memberStart)
+  assert.ok(target.includes('2/3'), target)
+  assert.ok(target.includes('−24 dB'), target)
+  assert.ok(!target.includes('3/3</td>'), target)
+})
+
+test('a missing source profile quantity prefers human coverage detail and falls back to its reason code', () => {
+  const native = profileResult()
+  const quantity = native.reference_profile.quantities[0]
+  Object.assign(quantity, { source: null, source_reason: 'above_nyquist', source_reason_detail: 'Source air is above the 11.025 kHz Nyquist limit.', source_nyquist_hz: 11025, deviation: null, inside_spread: null })
+  const detailed = render({ result: native })
+  assert.ok(detailed.includes('Source air is above the 11.025 kHz Nyquist limit.'), detailed)
+  assert.ok(!detailed.includes('above_nyquist'), detailed)
+  delete quantity.source_reason_detail
+  const fallback = render({ result: native })
+  assert.ok(fallback.includes('above_nyquist'), fallback)
 })

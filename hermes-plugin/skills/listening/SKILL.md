@@ -25,6 +25,20 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - Where a level change is the fix, offer one, as an approved `kumi_change`.
   - Measuring the same file again can't show that change: it measures as before. To check it, the producer exports or bounces again into an approved folder, and you measure the new file. Otherwise say Kumi can't check the result itself.
 
+
+## Reference excerpts and several references
+- **Connect first; only use fields the connected runtime advertises.** `compare_to` can select one reference. When offered, `references` selects 1–5 approved file, sound or artifact objects instead, never together with `compare_to`. A reference is never a track, mix, URL or output path. Do not repeat the same source/window to weight it twice.
+- **Choose like-for-like sections with the producer.** Put paired `from` and `seconds` only on each reference object: for example `compare_to: {"file": …, "from": 42, "seconds": 20}`. Both must be finite, `from` ≥ 0 and 0 < `seconds` ≤ 60, wholly within the file. A past-EOF window is refused, never padded or shortened. The source is unchanged; a source capture uses separate `from_beat`/`beats`, not these file seconds. A file source must already be the intended bounce/section.
+- **Names and windows matter.** Use the approved file's identity and returned `name`, `identity` and exact `window` (sample rate, channels, `start_frame`, `frame_count`), not an artifact's generated filename or `metrics.seconds`. That duration may still describe the original file; rounded `analyzed` clock labels are not exact sample bounds. Approval lists the reference file excerpts separately from source capture beats.
+- **One preparation allowance, not one per reference.** Every reference is authorized and measured before DAW preflight; a bad last reference means no capture. The set shares the existing preparation cap and one unchanged native capture deadline. A failure or cancellation returns no partial new reference artifacts; do not retry a capture with an unsure outcome.
+- **A profile is a measured target, not an averaged recording.** `references` returns each reference's canonical `metrics` and separate per-member `profile_quantities`, plus the combined `reference_profile`. Member Profile values and combined source/target/deviations use real Heard/Profile, with explicit `basis` and `unit`. Canonical Analysis and Profile are different meters even for similarly named LUFS, crest, centroid or width. Never subtract canonical `metrics` from a Profile target or relabel low-band side/mid dB as full-band width.
+- **Equal weighting and honest spreads.** Each original usable reference has equal weight, not duration weight; combine the original profiles once, never recursively combine targets. Report `target.mid`, `low`/`high`, source-minus-mid `deviation` and `inside_spread` per quantity, not a scalar "better". With fewer than five references the range covers member centers plus minimum tolerances; short-frame region tolerances are fixed values. Neither is a confidence interval or purely observed variation.
+- **Null is not zero.** Report `source_reason`, `target_reason`, per-reference `availability`, `usable_references` and each quantity's contributor/reference counts. Short audio can lack LUFS/LRA; mono lacks stereo evidence; silence/floor-only energy is no tonal target. Never silently average fewer references or invent missing values.
+- **Sample rate limits coverage per quantity.** Above-Nyquist or only partly covered frequency regions have null member `profile_quantities` with `reason_code` and numeric `nyquist_hz`, not meaningful floor/zero values. They do not contribute to that region's target or count. The source likewise carries `source_reason`/`source_nyquist_hz` when unavailable. Preserve the other usable quantities from a low-rate reference; do not refuse it globally, invent missing high bands, or substitute its canonical Analysis bands for Profile values.
+- **No Profile true-peak target.** Keep each reference's canonical peak and the producer's explicit ceiling as separate measurements/constraints. A reference that clips never excuses clipping the candidate.
+- **Retain and replay the measured excerpt at zero.** Reuse each returned reference `artifact_id` without the original `from`/`seconds`: the kept float32 excerpt starts at sample zero and contains the samples measured. `origin` records the original approved source/window separately; it is not a new path permission and never a second playback offset. A new source, excerpt or reference set is a new comparison identity, not the previous round.
+- **Hermes schema availability has a frozen-session limit.** With Tool Search on (the default), tool descriptions follow the live profile/process runtime. With Tool Search off, a session keeps its starting schema until a new session or compaction. A stale schema is not permission: both the hook and handler refuse unadvertised fields before any native call. No runtime still means connect first.
+
 ## Reporting
 - **Name what was measured, the numbers and what they suggest:** "The replacement measures 410 Hz lower in spectral centroid and 1.2 LU quieter, which fits a darker snare."
 - **Never say a file "sounds" a way** unless the producer said it.
@@ -69,24 +83,25 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **End** at the agreed count or when the goal is met, with one line: the chosen candidate's HISTORY ids (or none), any left unresolved, and what each candidate measured. Choosing a candidate isn't saving the project.
 
 ## Mastering against a reference
-"Master my mix like this reference" is a round of the kind above, on the master track, with a hard cap: **three rounds at most**.
+"Master my mix like this reference" (or "these references") is a round of the kind above, on the master track, with a hard cap: **three rounds at most**.
 - **Agree first:**
-  - the reference file (in an approved folder, a map sound, or a file Kumi made);
+  - the approved reference file and matching section, or a set of 1–5 approved references when `references` is offered;
   - one window of the mix, its loudest part, 60 s at most;
-  - the target: the reference's loudness and true peak, its tonal balance, its stereo width.
-- **The extents differ.** `kumi_listen` measures a reference file for up to its first 12 minutes, and the mix only over what was captured or bounced. So prefer a reference already cut to the matching section. Report the range each measurement covers (its `analyzed` from and to), and never take the window's loudness range for the whole song's.
+  - the target: the single reference's measurements, or the set's per-quantity Profile target/spread; keep each canonical true peak and the producer's ceiling separate, never invent a combined peak target.
+- **The extents differ.** Without an explicit reference excerpt, `kumi_listen` measures up to the reference file's first 12 minutes, versus only the captured/bounced mix section. When excerpt fields are offered, choose the matching reference section with `from`/`seconds`; otherwise use an already cut reference. Report exact returned `window` provenance where supplied, else the rounded `analyzed` span; never take a window's loudness range for the whole song's.
 - **Measuring the mix:** by capture where `kumi_listen` offers the mix in this DAW. Otherwise, and that's every DAW until its description says so, by bounce:
   - the producer bounces the same range, after each approved round, into an approved folder (`kumi_library` `add_folder` if needed);
   - Kumi can't tell a file from before a round from one after it, so the producer confirms which round each file is;
-  - measure it as `{"file": …}`, with `compare_to` the reference's kept copy;
+  - measure it as `{"file": …}`, reusing the chosen reference artifact or reference set as below;
   - window, epoch and length checks are for captures; they don't apply to a file.
   - A bounce is never a retry after a capture that was refused, cancelled or unsure.
-- **The baseline:** measure the mix (captured over the window, or the first bounce) with `compare_to` the reference. Report the gaps:
+- **The baseline:** measure the mix (captured over the window, or the first bounce) with `compare_to` for one reference or `references` for the agreed set. For one reference, report the canonical gaps:
   - integrated LUFS;
   - true peak;
   - the spectral balance (band levels and centroid);
   - the stereo width and correlation;
   - the dynamics: the crest factor, and the loudness range over what was measured.
+  - For a set, report the returned Profile source/target/deviations and contributor counts instead; keep each reference's canonical measurements separate. Never calculate a gap between canonical Analysis and a Profile target.
 - **A round is one plan on the master track, approved once.**
   - **The master:** Live's main track as `kumi_observe` gives it; REAPER's `r:track:master`; Renoise's master track, as read.
   - **The processors the producer chose come first:** iZotope Ozone when the producer asks for it or it's already on the master as read, set by the parameter names Kumi reads on it, in its own units.
@@ -101,7 +116,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. When you can't be sure of a device's parameter names in this version, load the devices in one change, read them, and set them in the next. Later rounds read the devices again and change only their settings.
   - **REAPER:** the master track's own FX chain, enabled, never its monitoring FX (monitoring FX aren't rendered).
 - **−1 dBTP is a measured target, not a knob value.** Set the limiter's ceiling with a margin under it, then let the next measurement show the true peak. Never report a ceiling setting as the result.
-- **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), with `compare_to` the reference's kept copy (`compare.artifact_id`), and report what moved.
+- **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), reusing `compare.artifact_id` as `compare_to`, or each `references[].artifact_id` as the same reference set. Never reapply their original file offsets. Report what moved on the same measurement basis.
   - **Rounds add up.** A round that made things better stays applied, and the next one builds on it. Keep the HISTORY ids of every round still applied.
   - **A round that made nothing better ends the rounds:** stop there, without another try.
   - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first, each approved. That returns the mix to the last round that stays. Stop at the first undo that doesn't come back undone.
