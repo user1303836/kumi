@@ -66,13 +66,16 @@ KUMI_CONNECT = _tool(
 KUMI_OBSERVE = _tool(
     "kumi_observe",
     "Look at the open project now: FOCUS (the track, device and clip the producer is on), what changed since Kumi last "
-    "looked (catch_up), or a bounded overview of the whole project. Returns text, the project key and epoch, and refs "
-    "for its tracks and devices. Refs and the epoch are what kumi_change needs; they go stale when the project changes, "
-    "so observe again rather than reuse old ones. Reads only: it writes nothing to the project.",
+    "looked (catch_up), or the whole turn's look (project): what's selected and what changed first, then the steps a "
+    "change may use, each with its fields, then the tracks, folded round the one in focus. Returns text, the project "
+    "key and epoch, and refs for its tracks and devices. Refs and the epoch are what kumi_change needs; they go stale "
+    "when the project changes, so observe again rather than reuse old ones. Refused, in the DAW's words, while the DAW "
+    "can't be read (a dialog open, say). Reads only: it writes nothing to the project.",
     {"scope": {"type": "string", "enum": ["focus", "catch_up", "project"],
                "description": "focus: what the producer is on; catch_up: changes since Kumi last looked; project: the "
-                              "whole project, bounded."},
-     "max_chars": {"type": "integer", "minimum": 200, "maximum": 4000, "description": "Longest text to return."}},
+                              "whole turn's look, bounded."},
+     "max_chars": {"type": "integer", "minimum": 200, "maximum": 20000,
+                   "description": "Longest text to return (12000 unless given)."}},
     ("scope",))
 
 KUMI_READ = _tool(
