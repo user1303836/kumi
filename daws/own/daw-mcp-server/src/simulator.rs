@@ -424,8 +424,10 @@ fn answer(request: &Request, state: &Mutex<State>, config: &SimulatorConfig) -> 
                 serde_json::to_value(&state.identity).unwrap()
             };
             status["busy"] = busy.map_or(Value::Bool(false), Value::from);
-            // (as the bridges say: they keep the project's id in it only while a connection asks)
-            status["keep_identity"] = true.into();
+            // REAPER and Renoise support conditional identity persistence; native Logic does not advertise it.
+            if !logic {
+                status["keep_identity"] = true.into();
+            }
             for (key, value) in &config.status_extra {
                 status[key] = value.clone();
             }
