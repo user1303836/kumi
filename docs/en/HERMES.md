@@ -68,7 +68,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   first. In Live, bounce your mix to a file in one of the sample folders you listed and name it: Kumi doesn't listen
   to Live's tracks yet.
 - **Compare:** Kumi measures your mix beside the reference file: loudness, true peak, spectral balance, stereo width
-  and dynamics.
+  and dynamics. Wide and opposite-polarity stereo are measured accurately, spectral balance and crest factor included.
+  A mono or silent file has no stereo width, and short audio may have no loudness or loudness range: Kumi shows them
+  as unavailable rather than guess.
 - **Master:** it proposes mastering moves on the master track (EQ, glue compression, a limiter) as one change Hermes
   asks about.
 - **Repeat:** it listens again (in Live, bounce again) and compares, for at most three rounds. Each round's change is
@@ -97,7 +99,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   "punchy"). A tempo matches that tempo or half or double time, and a key the same key, its relative major or minor,
   or a one-shot's root note; the answer says which, and nothing is transposed. A sound with no indexed tempo or key
   isn't found by that filter. Artist and genre words match only names and folders: Kumi doesn't recognise genres or
-  artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage.
+  artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage. In Hermes
+  Desktop, the map's list shows each sound's indexed values and why it matched.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change Hermes asks about. "Put it on a new track" puts it in a new Simpler
   in Live.
