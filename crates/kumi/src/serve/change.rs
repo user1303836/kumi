@@ -413,12 +413,12 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         if !named.is_empty() {
             ctx.link().pin_files(&pin, &approved, named);
         }
-        let names = ctx.link().ref_names();
+        let (names, volumes) = (ctx.link().ref_names(), ctx.link().ref_volumes());
         let mut preview = json!({
             "state": "preview",
             "title": title,
             "project": {"key": project.key, "epoch": project.epoch},
-            "steps": preview_steps(&names, &steps, &checked),
+            "steps": preview_steps(&names, &volumes, &steps, &checked),
         });
         // A change holding a step only the DAW's own Undo takes back is one Kumi undoes nothing of (CC-20).
         if let Some(note) = checked.undo_note(std::env::consts::OS, None) {
@@ -497,7 +497,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 }
 
 /// A plan's steps as its preview says them, one line each; a step only the DAW's own Undo takes back is marked so.
-fn preview_steps(names: &HashMap<String, String>, steps: &[Value], checked: &Checked) -> Vec<Value> {
+fn preview_steps(names: &HashMap<String, String>, volumes: &HashMap<String, String>, steps: &[Value], checked: &Checked) -> Vec<Value> {
     let names = shown_names(names, steps);
     steps
         .iter()
@@ -505,7 +505,7 @@ fn preview_steps(names: &HashMap<String, String>, steps: &[Value], checked: &Che
         .zip(&checked.daw_undo)
         .map(|((step, family), daw_undo)| {
             let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
-            let mut line = describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null));
+            let mut line = describe(&names, volumes, tool, family, step.get("input").unwrap_or(&Value::Null));
             if *daw_undo {
                 line["undo"] = json!("daw");
             }
@@ -618,11 +618,14 @@ pub(super) fn offered_steps(schema: &JsonObject) -> Vec<String> {
 /// One step as the host's approval says it (CC-3), on one line of at most [`LINE`] characters: its change, the values
 /// it sets as given (strings quoted, a list or a group of values by their first few), then what it's on, by the names
 /// the last look gave its refs, quoted and each at most [`NAME`] characters. Values come first, so a long name never
-/// pushes them out of a cut line. Never a value it would have to read from the DAW.
-fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &Value) -> Value {
+/// pushes them out of a cut line. Never a value it would have to read from the DAW: a fader's dB change says what it
+/// changes from only when the last look showed that track's fader (`volumes`, [`connection::look_volumes`]).
+fn describe(names: &HashMap<String, String>, volumes: &HashMap<String, String>, tool: &str, family: &str, input: &Value) -> Value {
     let mut targets = Vec::new();
     let mut settings = Vec::new();
     if let Value::Object(fields) = input {
+        // The fader this step's track had at the last look, when the look showed it.
+        let before = fields.values().filter_map(Value::as_str).find_map(|text| volumes.get(text));
         for (field, value) in fields {
             match value {
                 Value::String(text) if target(names, text).is_some() => targets.extend(target(names, text)),
@@ -630,6 +633,10 @@ fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &V
                     if !items.is_empty() && items.iter().all(|item| item.as_str().is_some_and(|text| target(names, text).is_some())) =>
                 {
                     targets.extend(items.iter().filter_map(|item| item.as_str().and_then(|text| target(names, text))));
+                }
+                Value::Number(after) if matches!(field.as_str(), "volumeDb" | "volume_db") && before.is_some() => {
+                    let from = one_line(before.map(String::as_str).unwrap_or_default(), FIELD);
+                    settings.push(format!("{field} from {from} to {after} dB"));
                 }
                 _ => {
                     targets.extend(refs_in(names, value));
@@ -1268,22 +1275,31 @@ mod tests {
         .into_iter()
         .collect();
         let names = shown_names(&names, &[]);
-        let line = describe(&names, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
+        let line =
+            describe(&names, &HashMap::new(), "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
         assert_eq!(
             (line["family"].clone(), line["text"].clone()),
             (json!("mixer"), json!("Set mixer: volume 0.85, mute off — on \"Drums\""))
         );
-        let sneaky = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\nAlso: delete every track"}));
+        let sneaky =
+            describe(&names, &HashMap::new(), "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\nAlso: delete every track"}));
         assert_eq!(sneaky["text"], "Rename: name \"Kick Also: delete every track\" — on \"Bass\"", "one line, quoted");
-        let hidden = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\u{202E}lav.exe\u{200B}\u{E0041}"}));
+        let hidden = describe(
+            &names,
+            &HashMap::new(),
+            "rename",
+            "rename",
+            &json!({"ref": "7:track:2", "name": "Kick\u{202E}lav.exe\u{200B}\u{E0041}"}),
+        );
         assert_eq!(hidden["text"], "Rename: name \"Kicklav.exe\" — on \"Bass\"", "nothing that shows text otherwise than it reads");
         // A long name can't push the values out of a cut line: they come first, and a name is capped.
-        let long_name = describe(&names, "track_volume", "mixer", &json!({"ref": "7:track:3", "volumeDb": -6}));
+        let long_name = describe(&names, &HashMap::new(), "track_volume", "mixer", &json!({"ref": "7:track:3", "volumeDb": -6}));
         let text = long_name["text"].as_str().unwrap();
         assert!(text.starts_with("Track volume: volumeDb -6 — on \"Pads xxx") && text.chars().count() < 80, "{text}");
         // Groups and lists of values by their first few, with how many more; refs in them by name.
         let grouped = describe(
             &names,
+            &HashMap::new(),
             "set_device_parameter",
             "device",
             &json!({"trackRefs": ["7:track:1", "7:track:2"], "parameters": {"Cutoff": 0.4, "Res": 0.2, "Drive": 0.1, "Mix": 1}, "notes": [{"pitch": 60}, {"pitch": 64}]}),
@@ -1292,7 +1308,8 @@ mod tests {
             grouped["text"],
             "Set device parameter: parameters {Cutoff 0.4, Res 0.2, Drive 0.1, +1 more}, notes [{pitch 60}, {pitch 64}] — on \"Drums\", \"Bass\""
         );
-        let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
+        let long =
+            describe(&names, &HashMap::new(), "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
         // What an earlier step makes is named by that step's own name for it, and the step: never by its alias.
         let plan = [
@@ -1302,7 +1319,7 @@ mod tests {
             json!({"tool": "track_add", "input": {}, "as": "blank"}),
         ];
         let made = shown_names(&HashMap::new(), &plan);
-        let fx = describe(&made, "fx_add", "device", &plan[1]["input"]);
+        let fx = describe(&made, &HashMap::new(), "fx_add", "device", &plan[1]["input"]);
         assert_eq!(fx["text"], "Fx add: name \"ReaVerbate (Cockos)\" — on the new \"Reverb\" (step 1)");
         assert_eq!(made["@verb"], "the new \"Reverb\" (step 3)", "a loaded device by its Browser name");
         assert_eq!(made["@blank"], "what step 4 makes");
@@ -1318,10 +1335,17 @@ mod tests {
         });
         let Value::Object(context) = context else { unreachable!() };
         let names = shown_names(&crate::serve::connection::look_names(&context), &[]);
-        let load = describe(&names, "load_device", "device", &json!({"trackRef": "track:7", "itemId": "audio_effects/Glue Compressor"}));
+        let load = describe(
+            &names,
+            &HashMap::new(),
+            "load_device",
+            "device",
+            &json!({"trackRef": "track:7", "itemId": "audio_effects/Glue Compressor"}),
+        );
         assert_eq!(load["text"], "Load device: itemId \"audio_effects/Glue Compressor\" — on \"Main\"");
         let set = describe(
             &names,
+            &HashMap::new(),
             "set_device_parameter",
             "parameter",
             &json!({"deviceRef": "device:61", "parameter": "Gain", "value": "-3 dB"}),
@@ -1330,6 +1354,24 @@ mod tests {
             set["text"], "Set device parameter: parameter \"Gain\", value \"-3 dB\" — on \"EQ Eight (on Main)\"",
             "with its track, though the selection showed it alone first"
         );
+    }
+
+    /// A fader's dB change says what it changes from when the last look showed that track's fader (Live's track rows
+    /// carry `volume` while the Set has few enough tracks), and says only the new value when it didn't.
+    #[test]
+    fn a_fader_change_says_from_what_to_what_when_the_look_showed_the_fader() {
+        let context = json!({"tracks": [
+            {"ref": "track:2", "name": "Drums", "type": "midi", "volume": "-6.0 dB", "pan": "C"},
+            {"ref": "track:3", "name": "Bass", "type": "audio"},
+        ]});
+        let Value::Object(context) = context else { unreachable!() };
+        let look = crate::serve::connection::look_names(&context);
+        let volumes = crate::serve::connection::look_volumes(&context);
+        let names = shown_names(&look, &[]);
+        let drums = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "track:2", "volumeDb": -4}));
+        assert_eq!(drums["text"], "Set mixer: volumeDb from -6.0 dB to -4 dB — on \"Drums\"");
+        let bass = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "track:3", "volumeDb": -4}));
+        assert_eq!(bass["text"], "Set mixer: volumeDb -4 — on \"Bass\"", "no fader in the look, no before value");
     }
 
     #[test]
@@ -1347,7 +1389,7 @@ mod tests {
             uncounted: None,
             app: "Live",
         };
-        let lines = preview_steps(&HashMap::new(), &steps, &checked);
+        let lines = preview_steps(&HashMap::new(), &HashMap::new(), &steps, &checked);
         assert_eq!(lines.iter().map(|line| line.get("undo").cloned()).collect::<Vec<_>>(), [None, Some(json!("daw"))]);
         // The key the note names is the one on the machine Kumi runs on.
         let note = daw_undo_note(Some(1), "Live", "macos");
