@@ -865,12 +865,15 @@ end
 
 local function restore_guarded_edit(job, env, song)
   local saved = job.edit_before
-  if not saved or edit_at(song, saved.edit, saved.selected, saved.pattern) then return true end
+  if not saved then return true end
   -- Restore after BPM/LPB, in the same synchronous guarded step. Never write follow-player,
   -- the selected track/instrument/device/column, or the producer's block selection.
-  local restored = pcall(env.quiet, function()
-    song.transport.edit_pos = renoise.SongPos(saved.edit[1], saved.edit[2])
-  end)
+  local restored = true
+  if not edit_at(song, saved.edit, saved.selected, saved.pattern) then
+    restored = pcall(env.quiet, function()
+      song.transport.edit_pos = renoise.SongPos(saved.edit[1], saved.edit[2])
+    end)
+  end
   if not restored or not edit_at(song, saved.edit, saved.selected, saved.pattern) or not same_edit_selection(song, saved) then
     return false, "cursor_restore_failed", "Renoise's edit position and selection did not read back as the launch snapshot. Observe again."
   end

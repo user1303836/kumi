@@ -1471,10 +1471,10 @@ test("listening: guarded deferred cleanup leaves producer cursor, selection and 
 end)
 
 test("listening: guarded cursor write and readback failures publish no audio", function()
-  for _, fault in ipairs({ "write", "readback" }) do
+  for _, fault in ipairs({ "write", "readback", "selection" }) do
     local setup_env, peer = setup()
     local song, tf = mock.data.song, mock.data.transport_fields
-    song.transport.edit_pos = renoise.SongPos(3, 7)
+    song.transport.edit_pos = fault == "selection" and renoise.SongPos(1, 1) or renoise.SongPos(3, 7)
     tf.follow_player = true
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
@@ -1490,6 +1490,7 @@ test("listening: guarded cursor write and readback failures publish no audio", f
         song.transport.edit_pos = renoise.SongPos(job.range.start[1], job.range.start[2])
       else
         quiet(fn)
+        if fault == "selection" and tf.bpm == 120 and tf.lpb == 4 then mock.data.song_fields.selected_track_index = 4 end
       end
     end
     completed.done()
