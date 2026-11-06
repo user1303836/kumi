@@ -899,13 +899,18 @@ impl Graph {
             let control = controls.iter().find(|control| control.name() == name).ok_or("a control has no spec")?;
             let given = set.and_then(|set| set.get(&name));
             let value = match control {
-                Control::Number(control) => Atom::Float(
-                    given
-                        .map_or(Some(control.default), Value::as_f64)
+                Control::Number(numeric_control) | Control::Integer(numeric_control) => {
+                    let value = given
+                        .map_or(Some(numeric_control.default), Value::as_f64)
                         .filter(|value| value.is_finite())
                         .ok_or("a test control value is not finite numeric data")?
-                        .clamp(control.min, control.max),
-                ),
+                        .clamp(numeric_control.min, numeric_control.max);
+                    let integer = matches!(control, Control::Integer(_));
+                    if integer && value.fract() != 0.0 {
+                        return Err("fractional integer-control test values are not simulated".into());
+                    }
+                    numeric(value, integer)?
+                }
                 Control::Choice(control) => {
                     let label =
                         given.map_or(Some(control.default.as_str()), Value::as_str).ok_or("a choice test value must name an option")?;
@@ -1067,6 +1072,16 @@ mod tests {
         second["set"] = json!({ "Transpose": -12 });
         let (_, result) = checked(TRANSPOSE, json!([first, second]), controls);
         assert_eq!(result, Checked { passed: 2, of: 2, problems: vec![], runaway: false });
+        let integer = json!([{ "name": "Transpose", "type": "integer", "min": -24, "max": 24, "default": 12 }]);
+        let mut integer_test = notes(60, 48, 0);
+        integer_test["set"] = json!({ "Transpose": -12 });
+        let (_, result) = checked(TRANSPOSE, json!([notes(60, 72, 0), integer_test]), integer.clone());
+        assert_eq!(result, Checked { passed: 2, of: 2, problems: vec![], runaway: false });
+        let mut fractional = notes(60, 72, 0);
+        fractional["set"] = json!({ "Transpose": 12.5 });
+        let (_, result) = checked(TRANSPOSE, json!([fractional]), integer);
+        assert_eq!((result.passed, result.of), (0, 1));
+        assert!(result.problems.iter().any(|problem| problem.contains("fractional integer-control")), "{result:?}");
     }
 
     #[test]
