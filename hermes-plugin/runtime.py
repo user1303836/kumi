@@ -40,7 +40,7 @@ RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history
 # (`serve_operations` in kumi_release.json, read from that runtime when it's pinned), or a call fails for every producer.
 OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "change", "undo", "history", "listen",
                         "sounds", "library", "job", "generate", "transport", "script", "variations",
-                        "device"})
+                        "device", "plugin_knowledge"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
