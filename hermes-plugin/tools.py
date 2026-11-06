@@ -823,7 +823,39 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
         change["expected_epoch"] = str(change["expected_epoch"])
-    return _write(host, "change", change, kwargs)
+    answer = _write(host, "change", change, kwargs)
+    note = copy_note(answer.get("copy")) if isinstance(answer, dict) else None
+    return {**answer, "copy_note": note} if note else answer
+
+
+# The copy of the Set a Live plan keeps beside it before its third step or a step that could lose material, as serve's
+# change answer gives it (`copy`: the file's name and why; absent when none was kept). Told to the model as standalone
+# Kumi tells it, by the file's name: serve keeps the producer's paths out of its answers.
+COPY_WHY = {"third_step": "before the plan's third step", "deletes": "before a step that could lose material"}
+
+
+def copy_note(copy: Any) -> str | None:
+    """What the model tells the producer about the copy of their Set this change kept. A copy the DAW couldn't keep
+    never reaches serve (Live's keep_copy answers nothing then), so there's no failure to tell."""
+    file = _copy_file(copy)
+    if file is None:
+        return None
+    why = COPY_WHY.get(copy.get("why"))
+    return (f"Before this, Kumi kept a copy of the producer's Set as last saved, next to it: {file}"
+            f"{f' ({why})' if why else ''}. Tell the producer in a few words, with the file's name.")
+
+
+def _copy_file(copy: Any) -> str | None:
+    """The kept copy's file name: only its last part, even if a path were ever sent, so no path shows."""
+    file = copy.get("file") if isinstance(copy, dict) else None
+    name = re.split(r"[/\\]", file)[-1].strip() if isinstance(file, str) else ""
+    return _words(name, 120) if name else None
+
+
+def _words(text: str, limit: int) -> str:
+    """`text` as one line of at most `limit` characters, without control or invisible format characters."""
+    line = " ".join("".join(char for char in text if char.isprintable()).split())
+    return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
 
 
 # kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), or where its newest step
@@ -907,7 +939,19 @@ def kumi_history(host: Host, args: dict, **kwargs: Any) -> dict:
 
 
 def _c1_row(row: dict) -> dict:
-    return {key: row[key] for key in HISTORY_FIELDS if key in row}
+    kept = {key: row[key] for key in HISTORY_FIELDS if key in row}
+    copy = _row_copy(row.get("copy"))
+    return {**kept, "copy": copy} if copy else kept
+
+
+def _row_copy(copy: Any) -> dict | None:
+    """The copy of the Set a change kept, as a HISTORY row may say it outside Kumi: the file's name, never a path, and
+    why."""
+    if not isinstance(copy, dict):
+        return None
+    why = copy.get("why") if copy.get("why") in COPY_WHY else None
+    file = _copy_file(copy)
+    return {"file": file, "why": why} if file else None
 
 
 def published_history(state: Path, limit: object, *, scheduled: bool) -> dict:

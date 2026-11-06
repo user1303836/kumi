@@ -439,6 +439,10 @@ async fn session<const P: bool>(answers: Answers) -> Vec<String> {
         answers.copies,
         "{reply}"
     );
+    // Why the copy was kept, for an answer that isn't standalone's reply (Kumi for Hermes): the third step came before
+    // the plan's delete, so that's the rule that kept it.
+    let plan_answer: Value = serde_json::from_str(&result.text).unwrap();
+    assert_eq!(plan_answer.get("copyWhy"), answers.copies.then(|| json!("third_step")).as_ref(), "{}", result.text);
     let calls = daw.history.host.calls.borrow().clone();
     assert_eq!(calls.contains(&"step begin".to_owned()), answers.plan_steps, "{calls:?}");
     assert_eq!(calls.contains(&"step end s1".to_owned()), answers.plan_steps, "{calls:?}");

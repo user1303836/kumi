@@ -475,6 +475,10 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     // Every row this call recorded, its audit row included, is one change (CC-3 A2).
     history.one_change(&ids, ctx.snapshots());
     history.call_came_to(&ids, outcome.state, ctx.snapshots());
+    // The copy of the project the plan kept before changing it: the answer and HISTORY say so, as standalone does.
+    if let Some(copy) = &outcome.copy {
+        history.copy(&ids, copy, ctx.snapshots());
+    }
     // Whatever ran, the refs an earlier look gave may no longer hold: the next plan is made on a fresh look.
     if outcome.state != "refused" {
         moved_on(ctx);
@@ -492,6 +496,9 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     });
     if let Some(reason) = outcome.reason {
         answer["reason"] = json!(reason);
+    }
+    if let Some(copy) = outcome.copy {
+        answer["copy"] = copy;
     }
     Ok(answer)
 }
@@ -547,6 +554,8 @@ struct Outcome {
     steps: Value,
     summary: String,
     reason: Option<String>,
+    /// The copy of the project the plan kept beside it, `{file, why}`: its file's name only, never the folder.
+    copy: Option<Value>,
 }
 
 /// The plan tool's answer, with the HISTORY rows it made: `applied` when every step went through, `partial` when some
@@ -563,18 +572,28 @@ fn outcome(ran: Result<kumi_types::contracts::ToolResult, kumi_types::errors::Ru
                 steps: Value::Array(vec![]),
                 summary: summary(rows),
                 reason: Some(format!("The plan stopped: {error}")),
+                copy: None,
             };
         }
     };
     let Ok(Value::Object(said)) = serde_json::from_str::<Value>(&result.text) else {
         // A plain answer: refused before it ran (its checks), an error after it changed something, or done.
         return match (result.is_error, rows.is_empty()) {
-            (true, true) => Outcome { state: "refused", steps: Value::Array(vec![]), summary: String::new(), reason: Some(result.text) },
-            (true, false) => Outcome { state: "unsure", steps: Value::Array(vec![]), summary: summary(rows), reason: Some(result.text) },
-            (false, _) => Outcome { state: "applied", steps: Value::Array(vec![]), summary: summary(rows), reason: None },
+            (true, true) => {
+                Outcome { state: "refused", steps: Value::Array(vec![]), summary: String::new(), reason: Some(result.text), copy: None }
+            }
+            (true, false) => {
+                Outcome { state: "unsure", steps: Value::Array(vec![]), summary: summary(rows), reason: Some(result.text), copy: None }
+            }
+            (false, _) => Outcome { state: "applied", steps: Value::Array(vec![]), summary: summary(rows), reason: None, copy: None },
         };
     };
     let list = |name: &str| said.get(name).and_then(Value::as_array).cloned().unwrap_or_default();
+    // A plan stopped or refused after its copy was kept still says the copy: it's beside the project either way.
+    let copy = said.get("copy").and_then(Value::as_str).filter(|path| !path.is_empty()).map(|path| {
+        let file = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned());
+        json!({"file": file, "why": said.get("copyWhy").cloned().unwrap_or(Value::Null)})
+    });
     let (done, refused, held) = (list("done"), list("refused"), list("heldBack"));
     let stopped = said.get("stopped").filter(|stopped| !stopped.is_null()).cloned();
     let steps = json!({"done": done, "refused": refused, "held_back": held, "stopped": stopped, "skipped": said.get("skipped").cloned().unwrap_or(json!(0))});
@@ -590,15 +609,16 @@ fn outcome(ran: Result<kumi_types::contracts::ToolResult, kumi_types::errors::Ru
             steps,
             summary: summary(rows),
             reason: reason().or(Some("The DAW didn't confirm a step.".into())),
+            copy,
         };
     }
     if !changed && done.is_empty() {
-        return Outcome { state: "refused", steps, summary: String::new(), reason: reason() };
+        return Outcome { state: "refused", steps, summary: String::new(), reason: reason(), copy };
     }
     if !refused.is_empty() || !held.is_empty() {
-        return Outcome { state: "partial", steps, summary: summary(rows), reason: reason() };
+        return Outcome { state: "partial", steps, summary: summary(rows), reason: reason(), copy };
     }
-    Outcome { state: "applied", steps, summary: summary(rows), reason: None }
+    Outcome { state: "applied", steps, summary: summary(rows), reason: None, copy }
 }
 
 /// The step names the plan tool takes (its schema's `steps.items.properties.tool.enum`).
@@ -1199,6 +1219,7 @@ mod tests {
             call_outcome: None,
             change_id: None,
             daw_undo_by: None,
+            copy: None,
             sources: None,
             script: None,
         }
@@ -1258,6 +1279,13 @@ mod tests {
         let late =
             outcome(Ok(ToolResult { text: "REAPER stopped answering".into(), is_error: true, ..Default::default() }), &[row("applied")]);
         assert_eq!(late.state, "unsure", "an error after rows were made isn't 'applied'");
+        // The copy the plan kept: its file's name and why, never the folder; still said when the plan then stopped.
+        let kept = json!({"done": [done], "copy": "/Users/me/Music/Night Drive/Night Drive.backup-20261106.als", "copyWhy": "third_step"});
+        let copied = outcome(said(kept, false), &[row("applied")]);
+        assert_eq!(copied.copy, Some(json!({"file": "Night Drive.backup-20261106.als", "why": "third_step"})));
+        let stopped_after = json!({"done": [done], "stopped": {"step": 3, "tool": "set_mixer", "error": "x"}, "copy": "/a/B.backup-1.als", "copyWhy": "deletes"});
+        assert_eq!(outcome(said(stopped_after, true), &[row("applied")]).copy, Some(json!({"file": "B.backup-1.als", "why": "deletes"})));
+        assert_eq!(outcome(said(json!({"done": [done]}), false), &[row("applied")]).copy, None, "no copy, no field");
     }
 
     #[test]

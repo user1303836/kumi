@@ -458,6 +458,9 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     # before it, and one serve-made change_id on all of them (CC-3 amendment A2). A rack's add-chain row is one only
     # Live's own Undo takes back (CC-20), so Kumi's undo isn't offered on it.
     change_id = f"ch-{len(fixture.history) + 1}"
+    # A Live plan of three steps or more keeps a copy of the Set beside it first, as serve's change answer and its rows
+    # say it (#1205's `copy`: the file's name and why; absent when none was kept).
+    kept = {"file": f"{fixture.set['name']}.backup-2026-11-06.als", "why": "third_step"} if len(steps) >= 3 else None
     ids = []
     for family in dict.fromkeys(STEPS[step["tool"]] for step in steps):
         before = copy.deepcopy(fixture.set)
@@ -480,14 +483,15 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
                                 "undo_available": not daw_undo, "track": track["name"], "daw_undo": daw_undo,
                                 "note": DAW_UNDO if daw_undo else "kept at /Users/someone/Set.als",
                                 "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                                "call_outcome": "applied", "before": before, "change_id": change_id})
+                                "call_outcome": "applied", "before": before, "change_id": change_id,
+                                **({"copy": kept} if kept else {})})
         ids.append(ident)
     fixture.publish("history", "focus")
     done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
     return {"state": "applied", "history_ids": ids,
             "steps": {"done": done, "refused": [], "held_back": [], "stopped": None, "skipped": 0},
             "summary": args.get("title") or "Applied.", "undo_available": True, "project_key": fixture.set["key"],
-            "epoch": fixture.epoch}
+            "epoch": fixture.epoch, **({"copy": kept} if kept else {})}
 
 
 def why_not(fixture: Fixture, row: dict) -> tuple[str, str, str] | None:
