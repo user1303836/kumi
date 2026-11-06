@@ -21,7 +21,7 @@ hermes plugins enable kumi
 
 让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup --daw reaper`（`--daw` 可取 `ableton`、`reaper` 或 `renoise`；不加时，为 Kumi 设置中的 DAW 进行设置，未更改时是 Live）。设置分两步，另有可选的第三步，每一步之前 Hermes 都会征求你的同意：
 
-1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（26–33 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（82–121 MB）。
+1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（27–34 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（85–125 MB）。
 2. **Kumi 的 DAW 组件：** Live 的 Remote Script（含 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
 3. **可选的 ffmpeg：** 如果你的电脑上已有 ffmpeg，设置会询问是否让 Kumi 用它读取 MP3、FLAC 等压缩音频。无论是否允许，设置都会完成；不使用时，Kumi 只能读取 WAV 和 AIFF。
 
