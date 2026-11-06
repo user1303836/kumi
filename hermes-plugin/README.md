@@ -22,6 +22,9 @@ a DAW to work in.
   for values only on screen, views those moments in its browser; Kumi builds it. No video is downloaded.
 - **When no change fits, a script or a device.** Hermes can run a script you approve (Python in Live, Lua in REAPER
   and Renoise), or build a Max for Live audio effect from GenExpr code; each shows its code before you decide.
+- **A preset for a plug-in you have (Live).** "Make a Pro-Q 4 preset that cuts the mud around 300 Hz." Kumi builds it
+  for the version installed (Serum 2, Pro-Q 4 or Ozone 12), shows every setting, and puts it in your User Library only
+  when you approve.
 - **Ask in plain words, from any Hermes surface.** The TUI, Hermes Desktop, the web dashboard and messaging all use the
   same tools.
 - **Every change is approved by Hermes (unless its approvals are off), and most are undoable while Kumi runs.** Hermes
@@ -53,6 +56,8 @@ a DAW to work in.
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | yes |
 | `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | yes, with its code |
 | `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | yes, with its code |
+| `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy; changes nothing in Live (Live only) | no |
+| `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | yes, with every setting |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
@@ -81,7 +86,7 @@ Kumi needs two things on the machine that runs Hermes, can use a third, and asks
 
 1. **Its runtime:** Kumi's official release for your platform, 27–34 MB, from
    `github.com/user1303836/kumi/releases/download/v<version>/`. Kumi checks it against the SHA-256 this plugin pins,
-   unpacks it (85–125 MB) into this profile's plugin data, and refuses anything that doesn't match.
+   unpacks it (85–126 MB) into this profile's plugin data, and refuses anything that doesn't match.
 2. **Its part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's extension or Renoise's tool,
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
    If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
@@ -136,8 +141,9 @@ settings:
 Kumi keeps what it writes for Hermes in this profile's `plugin-data/kumi/` folder: the runtime, the library index and
 map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
 changed), the code of each script you approved (`state/scripts`) and job records. Outside it, setup writes only Kumi's
-part in your DAW, at the location you approved, and each Max for Live device you approve is a new file in Live's
-User Library (`User Library/Kumi/Audio Effects`). A script you approve runs with your DAW's access, so what it writes
+part in your DAW, at the location you approved; each Max for Live device you approve is a new file in Live's User
+Library (`User Library/Kumi/Audio Effects`), and each preset you approve a new `.vstpreset` file there
+(`User Library/Kumi/Instruments` or `Audio Effects`). A script you approve runs with your DAW's access, so what it writes
 follows its code. Kumi reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already
 on your computer, if you allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`;
 deleting it removes everything Kumi wrote for Hermes there, including sounds from integrations that your projects may
@@ -178,6 +184,8 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Writes outside its data:** setup may install Live's Remote Script with its Kumi Ears device, a REAPER extension or
   a Renoise tool, only at the locations you approve. Each Max for Live device you approve is written as a new file in
   Live's User Library (`User Library/Kumi/Audio Effects`); it stays there after an undo, and in any Set that uses it.
+  Each preset you approve is a new `.vstpreset` file there too (`User Library/Kumi/Instruments` or `Audio Effects`),
+  and it stays after an undo.
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest
@@ -189,8 +197,10 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Reads:** the open project; the audio files in the sample folders you list (never a whole drive or volume, your
   home folder or above, or inside or above HERMES_HOME; links never lead it outside them); its renders of the windows
   you approve (REAPER and Renoise); and finished audio other Hermes plugins saved in
-  `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
-- **Approvals:** changes, undos, listens, play, scripts and devices go through Hermes's approval; stop never asks.
+  `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it. To tell which version of
+  Serum 2, Pro-Q 4 or Ozone 12 you have, the VST3 metadata in your standard plug-in folders (it never loads a plug-in).
+- **Approvals:** changes, undos, listens, play, scripts, devices and presets go through Hermes's approval; stop never
+  asks.
   - **Allowing for the session or always** covers that kind of call (changes, undos, listens, play, sample-folder adds
     and scans) in this chat only, including a one-shot run that resumes it (`hermes chat -q --resume`). Another chat,
     a new one-shot run or a scheduled job asks again or is refused.
@@ -198,7 +208,7 @@ project as…** with **Copy all media into project directory**), or they'll miss
     side question (`/btw`), Kumi only reads, whatever you allowed for the session.
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
     asks under its own kind. With Mirelo, an upload's covers its one file in this chat, and a paid generation's only
-    its own estimate, once.
+    its own estimate, once. A preset's covers its one file: each new preset is asked.
   - **Scripts and devices:** each shows its code (a device, its controls too) before you decide. In a chat that has
     read outside content (web pages, transcripts, files Hermes fetched from the internet, another plugin's results, or
     any terminal command or code run), each is asked every time; files already on your disk, installed skills, and the

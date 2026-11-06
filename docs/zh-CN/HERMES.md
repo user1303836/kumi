@@ -21,7 +21,7 @@ hermes plugins enable kumi
 
 让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup --daw reaper`（`--daw` 可取 `ableton`、`reaper` 或 `renoise`；不加时，为 Kumi 设置中的 DAW 进行设置，未更改时是 Live）。设置分两步，另有可选的第三步，每一步之前 Hermes 都会征求你的同意：
 
-1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（27–34 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（85–125 MB）。
+1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（27–34 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（85–126 MB）。
 2. **Kumi 的 DAW 组件：** Live 的 Remote Script（含 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
 3. **可选的 ffmpeg：** 如果你的电脑上已有 ffmpeg，设置会询问是否让 Kumi 用它读取 MP3、FLAC 等压缩音频。无论是否允许，设置都会完成；不使用时，Kumi 只能读取 WAV 和 AIFF。
 
@@ -86,6 +86,14 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **对话读取过外部内容后，每次都会询问：** 网页、文字稿、Hermes 从互联网获取的文件、其他插件的结果，或运行过的任何终端命令或代码。已在你磁盘上的文件、已安装的技能，以及你的音色库和工程中的名称不算在内。在这样的对话中，每个脚本和设备都会带着代码征求同意，Hermes 的确认关闭时一个也不会运行。在没有读取过外部内容的对话中，在本次会话中允许一个脚本，就对这个对话中的脚本都有效；每个新设备仍会征求同意。
 - **在询问任何人之前就会拒绝：** 超过 400 行或 32 KB 的脚本或设备代码；含有隐藏字符或改变文字方向字符的脚本，或会运行进程、访问网络的脚本（`os.execute`、`io.popen`、`subprocess`、`os.system`、`socket`、`urllib`、`ctypes`）。这项检查是一道保护措施，不是沙盒。
 
+### 插件预设（Live）
+
+“做一个削掉 300 Hz 附近浑浊感的 Pro-Q 4 预设。”在 Live 中，Kumi 会为 Serum 2（2.1.5）、Pro-Q 4（4.1.3.0）或 Ozone 12（12.1.0）制作一个新预设，只针对你已安装的版本：从插件的初始设置开始，只改动 Kumi 验证过的控件。
+- **制作本身不会改变任何东西：** Kumi 保留一份私有副本，并按预设文件存储的方式说明每个设置改动前后的值。
+- **放进你的用户库之前会征求同意：** 批准时会显示插件和已安装的版本、每个设置、“Values as the preset file stores them; the plug-in may show them differently.”，以及位于 `User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects` 的新文件。撤销之后文件仍会保留。在本次会话中或始终允许一个预设，只对那一个文件有效：每个新预设都会征求同意。
+- **把它加载到音轨上是另一次需要 Hermes 征求同意的修改。**
+- 制作预设时，Kumi 绝不会打开你自己的预设、运行插件或下载任何东西。未安装的插件，或已安装版本未经 Kumi 验证的插件，会被拒绝。
+
 Hermes 会在每次修改、撤销、聆听和播放前征求同意，因为它的确认功能是开启的。在本次会话中或始终允许某个 Kumi 调用，只对这个对话中的同类调用（修改、撤销、聆听、播放、采样文件夹的添加与扫描）有效，也包括恢复该对话的一次性运行（`hermes chat -q --resume`）；另一个对话、新的一次性运行或定时任务，会重新询问或被拒绝。Kumi 只在你自己的回合中行动：Hermes 在后台处理对话（每轮之后的回顾）或回答旁支问题（`/btw`）时，无论你允许了什么，Kumi 都只读取。只能用 DAW 自己的撤销来恢复的修改，会作为单独的一类征求同意，所以允许其他修改并不包括它。设置步骤的批准只针对它自己的计划。选择**始终允许**会在 Hermes 的 `command_allowlist`（你的配置中的 config.yaml）里留下一条记录，Kumi 从不编辑它：要取消，请删除其中以 `plugin_rule:kumi:` 开头的条目。
 
 使用 `--yolo`、对话中的 `/yolo` 或 `approvals.mode: off` 时，Hermes 会不经询问直接执行 Kumi 的修改、撤销、聆听、播放、采样文件夹的添加与扫描、设置步骤，以及设置了 Mirelo 时它的付费生成和上传（以你的点数上限为限）。脚本和设备在那里也会不经询问运行，但只限于没有读取过外部内容的对话：读取过的对话中，它们会被拒绝。`/kumi` 会说明这一点。如果 `approvals.single_query_mode` 或 `delegation.subagent_auto_approve` 让修改不经询问就通过，`hermes kumi status` 也会说明。一次性的 `hermes -z` 也等同于 yolo：Kumi 的调用会不经询问直接执行，而且 Kumi 无法把它与普通对话区分开。
@@ -120,6 +128,7 @@ Hermes 会在每次修改、撤销、聆听和播放前征求同意，因为它�
   - **Live：** Kumi 在 Live 停止且未录音时，通过 Kumi Ears 采集这段时间范围，结束后移除该设备；之后详细视图会重新显示你之前打开的片段。Live 可能显示 Set 已修改，并且 Live 自己的撤销历史中会留下这次聆听的临时设备步骤：在 Live 中按撤销可能会让 Kumi Ears 回来。这些步骤不是 Kumi 的 HISTORY 中的修改。
 - **脚本**以你的 DAW 对电脑的访问权限运行：它读取、写入或发送什么，取决于你批准的代码。Kumi 会把每个已批准脚本的代码保存在自己的数据中。
 - **Max for Live 设备**是 Kumi 写入 Live 用户库（`User Library/Kumi/Audio Effects`）的新文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。
+- **插件预设**是你批准后 Kumi 写入 Live 用户库（`User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects`）的新 `.vstpreset` 文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。为了知道你安装的 Serum 2、Pro-Q 4 或 Ozone 12 是哪个版本，Kumi 会读取标准插件文件夹中的 VST3 元数据；它从不加载插件。
 - **项目的副本：** 在某些修改之前，Kumi 会把最后保存的项目复制一份放在它旁边，每个保存的版本只复制一次。未保存的项目不会被复制，Kumi 也从不保存项目本身。
   - Live：当一次修改进行到第三步时（`<Set>.backup-<日期>.als`）。副本会一直保留，直到你删除它。
   - Renoise：在加载采样的修改之前，例如把资料库里的声音放进一个乐器时（`<Song> (Kumi copy <日期>).xrns`）。Kumi 为每首曲子保留最新的 5 份副本，并删除更早的副本。超过 512 MB 的曲子不会被复制。
@@ -142,6 +151,7 @@ Hermes 会在每次修改、撤销、聆听和播放前征求同意，因为它�
 - 在 Live 中，有几种修改只能用 Live 自己的撤销来恢复：给机架添加链、移动设备，以及把采样加载到打击垫上。Kumi 会在你批准前说明这一点，以及如何用 Cmd+Z（Windows 上为 Ctrl+Z）恢复，HISTORY 也会标记这一条。请立即撤销：如果你之后在 Live 中做过任何操作，Cmd+Z 会先撤销那些操作。这样的修改不包含其他内容：其他步骤 Kumi 会另外征求同意。脚本在所有 DAW 中都一样：Kumi 无法撤销它，DAW 自己的撤销也许可以。
 - 在 Live 中，如果 Kumi 修改了某条音轨的调音台设置、速度或某个设备的参数，而你之后又手动改过这个值，Kumi 不会撤销那次修改：撤销会说明这一点，并且不做任何改动。撤销在征求同意前，会列出每个值的当前值，以及撤销后会恢复成的值。在 REAPER 和 Renoise 中，即使你之后手动改过这个值，撤销也会把它改回去。
 - 在 REAPER 和 Renoise 中，Kumi 连接期间你手动做的编辑，在你问“有什么变化”时不会被列出；Kumi 下一次查看时仍会看到工程当前的样子。
+- Kumi 只在 Live 中制作插件预设，而且只针对 Serum 2（2.1.5）、Pro-Q 4（4.1.3.0）和 Ozone 12（12.1.0）。在 REAPER 和 Renoise 中，它会说明这一点（“Kumi builds plug-in presets only for Ableton Live for now.”），并且不写入任何东西。
 - Kumi for Hermes 不会操作 Live 的菜单、录音，也不会保存或打开工程。在 Live 中它不会为音轨编组：请选中它们并按 Cmd+G（Windows 上为 Ctrl+G）。
 
 ## 集成（可选）

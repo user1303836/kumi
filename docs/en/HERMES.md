@@ -30,7 +30,7 @@ Ask Hermes to "set up Kumi for Live" (or REAPER, or Renoise), or run `hermes kum
 changed it). Setup has two steps and an optional third, and Hermes asks before each:
 
 1. **Kumi's runtime:** Kumi's official release for your computer, 27–34 MB, from Kumi's GitHub releases. It's checked
-   against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (85–125 MB).
+   against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (85–126 MB).
 2. **Kumi's part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's
    extension or Renoise's tool, at the exact paths setup shows you. Quit Live first: its Remote Script can't be
    installed while Live runs. REAPER and Renoise can stay open; restart them after (on Windows, quit REAPER to update
@@ -165,6 +165,21 @@ When no change Kumi knows fits, Hermes can write code for it.
   direction-changing character, or one that runs processes or reaches the network (`os.execute`, `io.popen`,
   `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`). That check is a safeguard, not a sandbox.
 
+### Presets for your plug-ins (Live)
+
+"Make a Pro-Q 4 preset that cuts the mud around 300 Hz." In Live, Kumi builds a new preset for Serum 2 (2.1.5),
+Pro-Q 4 (4.1.3.0) or Ozone 12 (12.1.0), only for the version you have installed, starting from the plug-in's
+initialized settings and changing only controls Kumi has verified.
+- **Building it changes nothing:** Kumi keeps a private copy and says each setting before and after, as the preset file
+  stores it.
+- **Putting it in your User Library is asked:** the approval shows the plug-in and the version installed, every
+  setting, "Values as the preset file stores them; the plug-in may show them differently.", and the new file in
+  `User Library/Kumi/Instruments` or `User Library/Kumi/Audio Effects`. The file stays there after an undo. Allowing
+  one preset, for the session or always, covers that file only: each new preset is asked.
+- **Loading it on a track is another change Hermes asks about.**
+- Kumi never opens your own presets, runs the plug-in or downloads anything to build one. A plug-in that isn't
+  installed, or whose installed version Kumi hasn't verified, is refused.
+
 Hermes asks before each change, undo, listen and play because its approvals are on. Allowing a Kumi call for the
 session or always covers that kind of call (changes, undos, listens, play, sample-folder adds and scans) in this chat
 only, including a one-shot run that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a
@@ -230,6 +245,10 @@ run without asking there, and Kumi can't tell it from a chat.
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
+- **Plug-in presets** you approve are new `.vstpreset` files Kumi writes into Live's User Library
+  (`User Library/Kumi/Instruments` or `User Library/Kumi/Audio Effects`), outside Kumi's own data. They stay there
+  until you delete them. To tell which version of Serum 2, Pro-Q 4 or Ozone 12 you have, Kumi reads the VST3
+  metadata in your standard plug-in folders; it never loads a plug-in.
 - **A copy of your project:** before some changes, Kumi copies your project as last saved beside it, once for each
   saved version. An unsaved project gets no copy, and Kumi never saves the project itself.
   - Live: when a change reaches its third step (`<Set>.backup-<date>.als`). The copy stays until you delete it.
@@ -282,6 +301,8 @@ run without asking there, and Kumi can't tell it from a chat.
   since.
 - In REAPER and Renoise, an edit you make by hand while Kumi is connected isn't listed when you ask what changed;
   Kumi's next look still shows the project as it is.
+- Kumi builds plug-in presets only in Live, and only for Serum 2 (2.1.5), Pro-Q 4 (4.1.3.0) and Ozone 12 (12.1.0). In
+  REAPER and Renoise it says so ("Kumi builds plug-in presets only for Ableton Live for now.") and writes nothing.
 - Kumi for Hermes doesn't drive Live's menus, record, or save or open projects. In Live it doesn't group tracks: select
   them and press Cmd+G (Ctrl+G on Windows).
 
