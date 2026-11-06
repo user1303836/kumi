@@ -804,7 +804,8 @@ fn same_param(a: &Value, b: &Value) -> bool {
 
 /// The first number in what a plug-in prints for a value: `-3.0 dB`, `250 Hz`, `100 %`. A printed infinity is one: ReaComp
 /// prints its Threshold's bottom as `-inf` and its Ratio's top as `inf :1` (whose "1" isn't the ratio), so the range a
-/// value is looked for in runs to it.
+/// value is looked for in runs to it. Only the word: `inf`, `infinite` or `infinity` (or `∞`) not run into more letters,
+/// so "Inflate 50 %" reads 50.
 pub(super) fn reading(text: &str) -> Option<f64> {
     let text = text.replace('\u{2212}', "-");
     let lead = text.trim_start();
@@ -812,7 +813,8 @@ pub(super) fn reading(text: &str) -> Option<f64> {
         Some(rest) => (-1.0, rest),
         None => (1.0, lead.strip_prefix('+').unwrap_or(lead)),
     };
-    if rest.get(..3).is_some_and(|word| word.eq_ignore_ascii_case("inf")) || rest.starts_with('\u{221E}') {
+    let word: String = rest.chars().take_while(char::is_ascii_alphabetic).collect::<String>().to_ascii_lowercase();
+    if matches!(word.as_str(), "inf" | "infinite" | "infinity") || rest.starts_with('\u{221E}') {
         return Some(sign * f64::INFINITY);
     }
     let chars: Vec<char> = text.chars().collect();
@@ -1118,6 +1120,11 @@ mod tests {
         assert_eq!(reading("inf :1"), Some(f64::INFINITY), "ReaComp's Ratio at its top, not its \":1\"");
         assert_eq!(reading("1.000 :1"), Some(1.0));
         assert_eq!(reading("Infinite hold"), Some(f64::INFINITY));
+        assert_eq!(reading("Infinity"), Some(f64::INFINITY));
+        assert_eq!(reading("\u{221E}"), Some(f64::INFINITY));
+        assert_eq!(reading("Inflate 50 %"), Some(50.0), "a word that only starts with inf isn't infinity");
+        assert_eq!(reading("Info 3"), Some(3.0));
+        assert_eq!(reading("Infrared"), None);
         assert_eq!((decimals("-3.25 dB"), decimals("250 Hz"), decimals("1.5")), (2, 0, 1));
     }
 
