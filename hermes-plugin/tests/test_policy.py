@@ -297,10 +297,84 @@ class Approvals(unittest.TestCase):
     def test_the_undo_of_a_change_only_lives_undo_takes_back_is_refused_in_its_words(self):
         applied = support.call(self.host, "kumi_change", change(
             {"tool": "edit_rack", "input": {"deviceRef": "t1/d1", "action": "add-chain"}}), session_id="s1")
-        decision = self.hook("kumi_undo", {"history_id": applied["history_ids"][0]})
-        self.assertEqual(decision, {"action": "block", "message": (
+        refused = {"action": "block", "message": (
             "Kumi didn't undo anything: Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back "
-            "while it's still Live's latest step.")})
+            "while it's still Live's latest step.")}
+        self.assertEqual(self.hook("kumi_undo", {"history_id": applied["history_ids"][0]}), refused)
+        self.assertEqual(self.hook("kumi_undo", {}), refused, "'undo that' (whole) meets the same refusal first")
+
+    def test_undo_that_undoes_this_chats_newest_change_whole_under_a_key_no_single_undo_covers(self):
+        """CC-3 amendment A2: kumi_undo with no id is this chat's newest change, every step of it, newest first, in one
+        approval that lists every row (rgzm's A2-b), keyed by the families it spans, which no single-row undo's key
+        (and so no "Always" given to one) covers (A2-a)."""
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        single = support.call(self.host, "kumi_change", change(volume("t1", -6)), session_id="s1")
+        self.assertEqual(self.hook("kumi_undo", {"history_id": single["history_ids"][0]})["rule_key"],
+                         "kumi:write:undo:s1")
+        both = support.call(self.host, "kumi_change", change(sample, volume("t2", -10), title="Darker kit"),
+                            session_id="s1")
+        self.assertEqual(len(both["history_ids"]), 2, "a row for each family it touched")
+        asked = self.hook("kumi_undo", {})
+        self.assertEqual(asked["rule_key"], "kumi:write:undo:device+mixer:s1",
+                         "its own key: an Always for single-row undos, or for another set, doesn't cover it")
+        self.assertTrue(asked["message"].startswith("Kumi: undo a whole change, 2 steps, newest first\n"))
+        self.assertIn("Undo Darker kit (mixer)", asked["message"])
+        self.assertIn("Undo Darker kit (device)", asked["message"])
+        undone = support.call(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual((undone["state"], [row["state"] for row in undone["rows"]]), ("undone", ["undone", "undone"]))
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual([rows[ident] for ident in both["history_ids"]], ["undone", "undone"])
+        self.assertEqual(rows[single["history_ids"][0]], "applied", "the earlier change stays")
+        support.call(self.host, "kumi_change", change(volume("t1", -8), title="Long " * 40), session_id="s1")
+        long = self.hook("kumi_undo", {})
+        self.assertEqual(long["action"], "approve", "a step too long for a line is cut to fit, never blocking the undo")
+        step = long["message"].split("\n")[1]
+        self.assertTrue(step.startswith("• Undo Long Long") and step.endswith("…") and len(step) <= policy.STEP_LINE,
+                        step)
+
+    def test_undo_that_is_only_ever_this_chats_change_and_refused_when_it_moved_since_the_approval(self):
+        decision = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s2", tool_call_id="u0")
+        self.assertEqual((decision["action"], decision["message"]), ("block", tools.NOTHING_TO_UNDO),
+                         "a chat that made no change undoes nothing, least of all another chat's")
+        mine = support.call(self.host, "kumi_change", change(volume("t1", -6)), session_id="s1")
+        theirs = support.call(self.host, "kumi_change", change(volume("t2", -3)), session_id="s2")
+        approved = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s1",
+                                        tool_call_id="u1")
+        self.assertEqual(approved["action"], "approve")
+        self.assertIn("Undo Louder drums (mixer) on Drums", approved["message"], "mine, though theirs is newer")
+        policy.post_approval_response(self.host, tool_call_id="u1", choice="once")
+        support.call(self.host, "kumi_change", change(volume("t1", -9), title="Quieter still"), session_id="s1")
+        moved = support.handle(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual((moved["state"], moved["code"]), ("refused", "stale"),
+                         "this chat changed something newer since: nothing is undone on the old approval")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual((rows[mine["history_ids"][0]], rows[theirs["history_ids"][0]]), ("applied", "applied"))
+
+    def test_a_second_undo_that_reaches_the_change_before_and_a_row_undone_since_the_approval_is_stale(self):
+        """rgzm's review of #1088: each "undo that" takes this chat's newest change not yet undone; and a whole undo
+        whose rows changed between the approval and the dispatch (one undone by id) is refused by its digest."""
+        first = support.call(self.host, "kumi_change", change(volume("t1", -6), title="First"), session_id="s1")
+        second = support.call(self.host, "kumi_change", change(volume("t2", -3), title="Second"), session_id="s1")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1")["state"], "undone")
+        self.assertIn("Undo First (mixer)", self.hook("kumi_undo", {})["message"], "the change before")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1")["state"], "undone")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual((rows[first["history_ids"][0]], rows[second["history_ids"][0]]), ("undone", "undone"))
+        self.assertEqual(self.hook("kumi_undo", {}), {"action": "block", "message": tools.NOTHING_TO_UNDO})
+
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        both = support.call(self.host, "kumi_change", change(sample, volume("t2", -10)), session_id="s1")
+        approved = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s1", tool_call_id="u7")
+        policy.post_approval_response(self.host, tool_call_id="u7", choice="once")
+        self.assertEqual(approved["action"], "approve")
+        one = support.call(self.host, "kumi_undo", {"history_id": both["history_ids"][0]}, session_id="s1")
+        self.assertEqual(one["state"], "undone")
+        stale = support.handle(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual(stale["error"]["code"], "stale", "its rows aren't the ones the producer approved")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual(rows[both["history_ids"][1]], "applied", "nothing more was undone")
 
     def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
