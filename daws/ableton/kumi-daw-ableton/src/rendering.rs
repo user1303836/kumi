@@ -27,6 +27,7 @@ use futures::{
     FutureExt,
 };
 use indexmap::IndexMap;
+use kumi_agent::core::context::ListeningPolicy;
 use kumi_agent::core::contracts::*;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
@@ -40,7 +41,7 @@ use kumi_listening::{
 };
 use kumi_media::audio::tools::ResolveAudio;
 use kumi_types::contracts::*;
-use kumi_types::errors::RuntimeError;
+use kumi_types::errors::{HearFailure, RuntimeError};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -49,6 +50,15 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+
+fn restricted_track_unsupported() -> RuntimeError {
+    HearFailure::Refused {
+        code: "unsupported",
+        reason: "Kumi for Hermes does not capture Live tracks or the mix yet. Nothing was played; measure an audio file instead.".into(),
+        marked_modified: false,
+    }
+    .into()
+}
 
 pub type RenderStep = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<JsonObject, RuntimeError>>>;
 type OpeningEars = Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Rc<dyn EarsLink>, RuntimeError>>>;
@@ -76,6 +86,7 @@ pub struct LiveRenderer {
     /// audition in the next EARS_RETRY_MS records instead, rather than waiting for the same failure.
     ears_failed_at: Cell<Option<i64>>,
     ears_folder: PathBuf,
+    listening_policy: ListeningPolicy,
     rendering: ListenFlag,
     /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
     /// back, closing a render, removing copies), and the next call, or the next answer, waits for it.
@@ -164,6 +175,7 @@ impl LiveRenderer {
             ears_refused: Cell::new(false),
             ears_failed_at: Cell::new(None),
             ears_folder,
+            listening_policy: options.policy.listening.clone(),
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
             best_steps: RefCell::new(vec![]),
@@ -347,6 +359,9 @@ impl Rendering {
     /// How many auditions the answer has made.
     pub fn round_count(&self) -> usize {
         self.listening.round_count()
+    }
+    pub async fn preview_hear(&self, _request: &HearRequest, _signal: Signal) -> Result<HearPreview, RuntimeError> {
+        Err(restricted_track_unsupported())
     }
     pub async fn hear_in_set(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.live.hear_in_set(request, original).await

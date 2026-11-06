@@ -14,6 +14,7 @@ use super::history::CallIdentity;
 use super::{registry, say, MCP_PROTOCOL};
 use futures::FutureExt;
 use kumi_common::abort::{self, Signal};
+use kumi_types::daw::DawId;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
@@ -56,12 +57,19 @@ const RESOURCES: [(&str, &str, &str); 4] = [
 ];
 const INVALID_PARAMS: i64 = -32602;
 
-pub(super) fn tool_descriptor(operation: &Operation) -> Value {
+pub(super) fn tool_descriptor(operation: &Operation, daw: DawId) -> Value {
     let mut tool = json!({
         "name": operation.name, "description": operation.description, "inputSchema": (operation.schema)()
     });
     if operation.name == super::generate::GENERATE.name {
         tool["_meta"] = json!({"kumi/ledger_policy_keys": super::generate_ledger::POLICY_KEYS});
+    } else if operation.name == super::listen::LISTEN.name {
+        let sources: &[&str] = if crate::daw::registry::supports_restricted_listening(daw) {
+            &["artifact", "file", "sound", "track"]
+        } else {
+            &["artifact", "file", "sound"]
+        };
+        tool["_meta"] = json!({"kumi/listen_sources": sources});
     }
     tool
 }
@@ -326,7 +334,7 @@ impl Server {
             "ping" => self.send_result(id, json!({})),
             _ if !self.initialized.get() => self.send_error(id, INVALID_REQUEST, "initialize first"),
             "tools/list" => {
-                let tools: Vec<Value> = self.operations.iter().map(|operation| tool_descriptor(operation)).collect();
+                let tools: Vec<Value> = self.operations.iter().map(|operation| tool_descriptor(operation, self.ctx.daw())).collect();
                 self.send_result(id, json!({"tools": tools}));
             }
             "tools/call" => self.call(id, params),
@@ -768,7 +776,10 @@ fn momentary(answer: &Value) -> bool {
     } else {
         content["code"].as_str().filter(|_| content["state"] == "refused")
     };
-    matches!(code, Some("leased" | "busy" | "not_connected" | "stale" | "ledger_unavailable"))
+    matches!(
+        code,
+        Some("leased" | "busy" | "not_connected" | "stale" | "ledger_unavailable" | "transport_running" | "render_busy" | "ears_missing")
+    )
 }
 
 /// A snapshot bigger than a resource read gives.

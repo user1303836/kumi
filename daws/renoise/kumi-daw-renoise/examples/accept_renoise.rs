@@ -1163,7 +1163,7 @@ fn main() {
     }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     tokio::task::LocalSet::new().block_on(&runtime, async {
-        let host = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home)), id: Cell::new(0) });
+        let host = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
         let hooked = Rc::new(Hooked { inner: host.clone(), hooks: RefCell::default() });
         let endpoint = hooked.clone();
         let connect: Connect = Rc::new(move |_| {

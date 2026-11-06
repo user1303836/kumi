@@ -87,8 +87,9 @@ local function hmac(env, role, server_nonce, client_nonce)
   return sha256.hmac_hex(env.secret, PROTOCOL .. "\n" .. role .. "\n" .. (client_nonce or CLIENT_NONCE) .. "\n" .. server_nonce)
 end
 
-local function handshake(env, peer)
-  send(peer, { type = "hello", protocol = PROTOCOL, nonce = CLIENT_NONCE, client = "test/1" })
+-- keep_identity: the hello asks the tool to keep the song's id in the song (keepIdentity), as standalone Kumi's host does.
+local function handshake(env, peer, keep_identity)
+  send(peer, { type = "hello", protocol = PROTOCOL, nonce = CLIENT_NONCE, client = "test/1", keepIdentity = keep_identity or nil })
   local challenge = frames(peer)[1]
   eq(challenge.type, "challenge")
   ok(challenge.nonce:match("^[0-9a-f]+$") and #challenge.nonce == 32, "server nonce")
@@ -106,9 +107,10 @@ local function handshake(env, peer)
   return welcome
 end
 
+-- options: mock.connect's, and keep_identity (the hello asks to keep the song's id).
 local function connect(env, options)
   local peer = mock.connect(options)
-  local welcome = handshake(env, peer)
+  local welcome = handshake(env, peer, options and options.keep_identity)
   return peer, welcome
 end
 
@@ -501,7 +503,7 @@ end)
 
 test("bridge: song ids are stored in tool_data on save and survive reopening", function()
   local env = setup()
-  local peer, welcome = connect(env)
+  local peer, welcome = connect(env, { keep_identity = true })
   local id = welcome.project.id
   mock.save_song("/s/saved.xrns")
   eq(json.decode(mock.song.tool_data).songId, id, "tool_data holds the id")
@@ -542,11 +544,52 @@ end)
 
 test("bridge: other keys in tool_data are kept", function()
   local env = setup({ song = { tool_data = '{"note":"keep me"}' } })
-  connect(env)
+  connect(env, { keep_identity = true })
   mock.save_song("/s/x.xrns")
   local data = json.decode(mock.song.tool_data)
   eq(data.note, "keep me")
   ok(data.songId)
+  no_dialogs()
+end)
+
+-- The song's id in its tool_data, if it has one.
+local function stored_song_id()
+  local data = mock.song.tool_data
+  if type(data) ~= "string" or data == "" then return nil end
+  local value = json.decode(data)
+  return type(value) == "table" and value.songId or nil
+end
+
+test("bridge: a song's id goes into tool_data on save only while a connected host asks for it", function()
+  local env = setup()
+  -- Nobody connected: nothing is written.
+  mock.save_song("/s/a.xrns")
+  eq(stored_song_id(), nil, "no host")
+  -- A host that doesn't ask (the plugin's runtime): nothing is written, and the song is named by its path.
+  local plain = connect(env)
+  local status = request(plain, "status").result
+  eq(status.keep_identity, true, "status says the tool keeps the id when asked")
+  mock.save_song("/s/a.xrns")
+  eq(stored_song_id(), nil, "a host that didn't ask")
+  mock.load_song({ file_name = "/s/a.xrns" })
+  local by_path = request(plain, "status").result.project.id
+  mock.load_song({ file_name = "/s/a.xrns" })
+  eq(request(plain, "status").result.project.id, by_path, "the same file is the same song without a stored id")
+  -- A host that asks (standalone Kumi): the next save writes the id the song is named by.
+  local asking = connect(env, { keep_identity = true })
+  mock.save_song("/s/a.xrns")
+  eq(stored_song_id(), by_path, "written while a host asks")
+  -- That host gone (the plain one still connected): the next song's save writes nothing.
+  asking:close()
+  tick()
+  mock.load_song({ file_name = "/s/b.xrns" })
+  mock.save_song("/s/b.xrns")
+  eq(stored_song_id(), nil, "the asking host has gone")
+  -- An asking host that closed its end writes nothing even before the timer has let go of it.
+  local brief = connect(env, { keep_identity = true })
+  brief:close()
+  mock.save_song("/s/b.xrns")
+  eq(stored_song_id(), nil, "an asking host that closed, not yet reaped")
   no_dialogs()
 end)
 
@@ -1285,7 +1328,7 @@ end)
 
 test("bridge: a song born from a template doesn't share the template's id", function()
   local env = setup({ song = { tool_data = '{"songId":"0123456789abcdef0123456789abcdef"}' } })
-  local peer = connect(env)
+  local peer = connect(env, { keep_identity = true })
   local id = request(peer, "status").result.project.id
   ok(id ~= "0123456789abcdef0123456789abcdef", "a new id for a song never saved: " .. tostring(id))
   mock.save_song(env.dir .. "/a.xrns")
@@ -1307,7 +1350,7 @@ end)
 test("bridge: a song born from a template keeps its own id whichever comes first at its first save, the name or the announcement", function()
   local env = setup({ song = { tool_data = '{"songId":"0123456789abcdef0123456789abcdef"}' } })
   mock.name_first = true
-  local peer = connect(env)
+  local peer = connect(env, { keep_identity = true })
   local id = request(peer, "status").result.project.id
   ok(id ~= "0123456789abcdef0123456789abcdef", "a new id for a song never saved: " .. tostring(id))
   mock.save_song(env.dir .. "/b.xrns")

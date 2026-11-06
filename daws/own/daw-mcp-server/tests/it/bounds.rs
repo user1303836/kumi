@@ -21,7 +21,7 @@ async fn a_body_that_ignores_the_limit_is_asked_twice_not_five_times() {
     let mut config = SimulatorConfig::renoise(secret, "/lab/Renoise").with_methods(&["focus_body"], respond);
     config.discovery_dir = Some(paths.discovery());
     let simulator = Simulator::start(config).await.unwrap();
-    let host = Host::new(Daw::Renoise, home.path());
+    let host = Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     let (answer, is_error) = host.focus_body(&json!({"kind": "dsp", "ref": "1:track:1"})).await;
     assert!(is_error, "{answer}");
     assert!(answer["error"].as_str().unwrap().contains("answered more than"), "{answer}");

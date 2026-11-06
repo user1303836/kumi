@@ -43,13 +43,10 @@ pub(super) struct Step {
     pub fields: Vec<String>,
 }
 
-/// The project's `context` (the DAW's description of it, as JSON) as one look says it within `most` characters: what
-/// decides a request first, then the `steps` (each as whole as its share of the room holds) and the `readers`, then the
-/// rest, and the tracks last, folded round the one in focus. A context that isn't a JSON object is said as it is.
-pub(super) fn whole_turn(context: &str, steps: &[Step], readers: &[String], most: usize) -> String {
-    let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(context) else {
-        return context.to_string();
-    };
+/// The project's `context` (the DAW's description of it, as a JSON object) as one look says it within `most` characters:
+/// what decides a request first, then the `steps` (each as whole as its share of the room holds) and the `readers`, then
+/// the rest, and the tracks last, folded round the one in focus.
+pub(super) fn whole_turn(mut fields: Map<String, Value>, steps: &[Step], readers: &[String], most: usize) -> String {
     let focused = focused_track(&fields);
     if let Some(this) = this_track(&fields, focused.as_deref()) {
         fields.insert("this".into(), json!(this));
@@ -223,14 +220,13 @@ mod tests {
     #[test]
     fn what_decides_a_request_comes_first_and_the_far_tracks_are_what_a_small_room_cuts() {
         let tracks: Vec<Value> = (1..=200).map(track).collect();
-        let context = json!({
+        let context = fields(json!({
             "observedAt": "now", "daw": "REAPER", "project": {"name": "Song"}, "tracks": tracks,
             "selection": {"trackRef": "track:150"}, "kumiChanges": [{"title": "Bass −3 dB"}],
             "sinceLastTime": {"lines": ["Track 4 was added"]},
-        })
-        .to_string();
+        }));
         let steps: Vec<Step> = ["track_volume", "track_pan", "fx_add"].into_iter().map(step).collect();
-        let said = whole_turn(&context, &steps, &["reaper_read".into()], 6000);
+        let said = whole_turn(context, &steps, &["reaper_read".into()], 6000);
         assert!(said.chars().count() <= 6000, "{}", said.chars().count());
         let said: Value = serde_json::from_str(&said).unwrap();
         let keys: Vec<&str> = said.as_object().unwrap().keys().map(String::as_str).collect();
@@ -249,8 +245,8 @@ mod tests {
     /// A project that fits is said whole: nothing folded, and the steps their whole lines.
     #[test]
     fn a_project_that_fits_is_said_whole_with_its_steps() {
-        let context = json!({"daw": "REAPER", "tracks": [track(1), track(2)], "selection": {"trackRef": "track:2"}}).to_string();
-        let said: Value = serde_json::from_str(&whole_turn(&context, &[step("track_volume")], &[], 12000)).unwrap();
+        let context = fields(json!({"daw": "REAPER", "tracks": [track(1), track(2)], "selection": {"trackRef": "track:2"}}));
+        let said: Value = serde_json::from_str(&whole_turn(context, &[step("track_volume")], &[], 12000)).unwrap();
         assert_eq!(said["tracks"], json!([track(1), track(2)]));
         assert!(said.get("folded").is_none() && said.get("moreTracks").is_none());
         assert_eq!(said["steps"], json!([step("track_volume").line]));
@@ -272,14 +268,17 @@ mod tests {
         assert_eq!((named.as_array().unwrap().len(), named[0].clone()), (60, json!("track_volume")), "names when that's all that fits");
     }
 
-    /// Live's look says what "this" means itself: nothing is added; and a context that isn't JSON is said as it is.
+    /// Live's look says what "this" means itself: nothing is added.
     #[test]
-    fn lives_own_words_for_this_stand_and_text_stays_text() {
-        let context = json!({"selectedInLive": {"track": {"ref": "track:1", "name": "Drums"}, "note": "\"This track\"…"},
-            "tracks": [track(1)]})
-        .to_string();
-        let said: Value = serde_json::from_str(&whole_turn(&context, &[], &[], 12000)).unwrap();
+    fn lives_own_words_for_this_stand() {
+        let context = fields(json!({"selectedInLive": {"track": {"ref": "track:1", "name": "Drums"}, "note": "\"This track\"…"},
+            "tracks": [track(1)]}));
+        let said: Value = serde_json::from_str(&whole_turn(context, &[], &[], 12000)).unwrap();
         assert!(said.get("this").is_none() && said["selectedInLive"]["note"].is_string());
-        assert_eq!(whole_turn("Live couldn't be read", &[], &[], 12000), "Live couldn't be read");
+    }
+
+    fn fields(context: Value) -> Map<String, Value> {
+        let Value::Object(fields) = context else { unreachable!("a context is an object") };
+        fields
     }
 }

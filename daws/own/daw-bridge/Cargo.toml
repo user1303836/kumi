@@ -8,6 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+test-support = []
+
 [dependencies]
 base64.workspace = true
 hex.workspace = true

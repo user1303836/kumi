@@ -557,6 +557,8 @@ function M.read(job, params, epoch)
     return notes_page(job, tidy_from(params), params.byTrack == true)
   elseif kind == "spans" then
     return reads_listening.spans(job, params, epoch, page)
+  elseif kind == "render_preflight" then
+    return reads_listening.render_preflight(params, epoch)
   elseif kind == "modset" or kind == "chain" then
     -- n-instruments: an instrument's modulation sets or sample FX chains
     local at = need_parent(params, "instrument", 1, epoch)[1]

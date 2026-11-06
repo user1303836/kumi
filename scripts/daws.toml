@@ -31,9 +31,9 @@ words = { ja = "REAPER 拡張機能", zh-CN = "REAPER 扩展" }
 integration = "daws/reaper/kumi-daw-reaper"
 # REAPER loads the `reaper_*` libraries in its UserPlugins folder: the crate's library is reaper_kumi.
 library = { crate = "daws/reaper/reaper-kumi", entry = "ReaperPluginEntry" }
-# The extension, and the parts of daw-bridge it links (its own wire, handshake, auth, discovery and files:
-# `rg daw_bridge:: daws/reaper/reaper-kumi/src`, and what those use). The rest of daw-bridge (the lifecycle, detection,
-# the doctor, installing) is Kumi's alone.
+# The extension, and the parts of daw-bridge it links (wire, handshake, auth, discovery, files and the native ACL reader:
+# `rg daw_bridge:: daws/reaper/reaper-kumi/src`, and what those use). The rest of the lifecycle, detection,
+# the doctor and installing are Kumi's alone.
 loads = [
   "daws/reaper/reaper-kumi/",
   "crates/kumi-common/",
@@ -45,6 +45,7 @@ loads = [
   "daws/own/daw-bridge/src/files.rs",
   "daws/own/daw-bridge/src/frame.rs",
   "daws/own/daw-bridge/src/handshake.rs",
+  "daws/own/daw-bridge/src/lifecycle/native_acl.rs",
   "daws/own/daw-bridge/src/loopback.rs",
   "daws/own/daw-bridge/src/owner.rs",
   "daws/own/daw-bridge/src/paths.rs",

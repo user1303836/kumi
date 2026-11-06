@@ -101,6 +101,10 @@ impl LiveRenderer {
         request: &HearRequest,
         original: Signal,
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
+        if matches!(self.listening_policy, ListeningPolicy::Restricted { .. }) {
+            // Never fall through to standalone capture: it may install Ears, record or play.
+            return Err(restricted_track_unsupported());
+        }
         if !self.available() {
             return Ok(Err(NO_CURRENT_LIVE.into()));
         }
@@ -172,6 +176,7 @@ impl LiveRenderer {
                         seconds: Some(found.seconds.unwrap_or(beats * 60. / tempo)),
                         live: false,
                         note: None,
+                        marked_modified: false,
                     })
                 })
                 .collect())
@@ -302,6 +307,7 @@ impl LiveRenderer {
                             seconds: Some(capture.frames() as f64 / capture.sample_rate),
                             live: true,
                             note: None,
+                            marked_modified: false,
                         });
                         Ok(())
                     }

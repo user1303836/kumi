@@ -34,6 +34,9 @@ daw-mcp-server = { path = "../daw-mcp-server" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
-[target.'cfg(unix)'.dev-dependencies]
-# A started DAW's process group, which the provider's tests compare with the tests' own.
+[target.'cfg(unix)'.dependencies]
+# Descriptor-anchored, no-follow copying of this call's bridge staging files.
 libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }

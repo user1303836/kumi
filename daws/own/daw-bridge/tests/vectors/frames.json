@@ -3,6 +3,16 @@
   "maxJsonDepth": 64,
   "parse": [
     {
+      "name": "a guarded render from a client without deferred-finalization metadata",
+      "line": "{\"type\":\"request\",\"id\":1,\"method\":\"render_start\",\"params\":{\"jobId\":\"job1\",\"sources\":[{\"id\":\"bounded\",\"what\":\"master\"}],\"range\":{\"fromBeat\":0,\"beats\":4},\"preRollBeats\":0,\"maxSeconds\":2,\"epoch\":\"1\"}}",
+      "ok": true
+    },
+    {
+      "name": "a guarded render carrying its original native phase deadline",
+      "line": "{\"type\":\"request\",\"id\":1,\"method\":\"render_start\",\"params\":{\"jobId\":\"job1\",\"sources\":[{\"id\":\"bounded\",\"what\":\"master\"}],\"range\":{\"fromBeat\":0,\"beats\":4},\"preRollBeats\":0,\"maxSeconds\":2,\"deadlineUnixMs\":1793894400000,\"epoch\":\"1\"}}",
+      "ok": true
+    },
+    {
       "name": "an event whose data nests to the limit",
       "line": "{\"type\":\"event\",\"seq\":1,\"name\":\"x\",\"data\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
       "ok": true
@@ -150,6 +160,16 @@
     {
       "name": "a welcome naming creditBytes written 1.5",
       "line": "{\"type\":\"welcome\",\"session\":\"00000000000000000000000000000000\",\"daw\":\"renoise\",\"bridge\":\"0.1.0\",\"dawVersion\":\"3.5.4\",\"pid\":1,\"resource\":\"/r\",\"project\":null,\"maxFrameBytes\":67108864,\"heartbeatMs\":1000,\"creditBytes\":1.5}",
+      "ok": false
+    },
+    {
+      "name": "a hello asking the bridge to keep the project's identity",
+      "line": "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"client\":\"kumi/1\",\"keepIdentity\":true}",
+      "ok": true
+    },
+    {
+      "name": "a hello whose keepIdentity isn't a boolean",
+      "line": "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"keepIdentity\":\"yes\"}",
       "ok": false
     },
     {

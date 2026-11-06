@@ -32,7 +32,8 @@ threads-required = "num-cpus"
 # - REAPER's and Renoise's whole-flow runs on simulators: the listening flows (own_listening_e2e, fake_daw_listening:
 #   renders, auditions, goals and judged rounds, a minute of CPU), the word checks over whole sessions (daw_words) and
 #   the full-screen app's sessions (app_sessions). The engine's, the host's and the extension's own tests stay, and so do
-#   the wire vectors, auth, the lifecycle, the change kinds' fences and the kind guards.
+#   the wire vectors, auth, the lifecycle, the change kinds' fences and the kind guards. Bounded restricted-capture
+#   restoration regressions stay in `ci`.
 # Live's own pins (pin_first_request, the changes oracle) stay in `ci` whatever their names say.
 [profile.ci]
 default-filter = '''
@@ -40,7 +41,7 @@ not (
     (binary_id(kumi-daw-ableton::it) & test(/^live_rendering::/))
   | (binary_id(kumi-listening::it) & test(/^form::/))
   | (binary_id(kumi-web::it) & test(/^video::/))
-  | (binary_id(kumi::it) & test(/^own_listening_e2e::/))
+  | (binary_id(kumi::it) & test(/^own_listening_e2e::/) & not test(/^own_listening_e2e::restricted_/))
   | (binary_id(kumi-agent::it) & test(/^fake_daw_listening::/))
   | (binary_id(kumi::it) & test(/^(daw_words|app_sessions)::/))
   | (binary_id(kumi-daw-ableton::it) & test(/^listening::/))

@@ -10,6 +10,7 @@
 use super::connection;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::history::{CallIdentity, History, Row, DAW_UNDO};
+use kumi_daw::{plugin::PluginStep, provider::DawProvider};
 use kumi_types::contracts::{ChangeState, KernelTool};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -132,6 +133,24 @@ impl Checked {
         }
         Some(said.join(" "))
     }
+
+    /// A change holding a step only the DAW's own Undo takes back holds no other kind of step (CC-20's 20-r1): Live
+    /// keeps a device load as an undo step of its own, outside the plan's (20g's trace), so the DAW's Undo would take a
+    /// mixed change back one part at a time, not all of it as Kumi says. The refusal names the first such step.
+    fn alone(&self, steps: &[Value]) -> Result<(), Value> {
+        let (Some(first), true) = (self.daw_undo.iter().position(|marked| *marked), self.daw_undo.contains(&false)) else {
+            return Ok(());
+        };
+        let tool = steps.get(first).and_then(|step| step.get("tool")).and_then(Value::as_str).unwrap_or_default();
+        let app = self.app;
+        Err(refused(
+            "not_allowed",
+            format!(
+                "Step {} ({tool}) is a change only {app}'s own Undo takes back, so it goes in a change of its own: ask for the other steps separately.",
+                first + 1
+            ),
+        ))
+    }
 }
 
 /// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for (unless the step is
@@ -147,21 +166,7 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
-        let at = n + 1;
-        // A step the DAW keeps out of a plugin's plans says why, whether or not this DAW offers it now.
-        if let Some((_, why)) = provider.plugin_refused().iter().find(|(name, _)| *name == tool) {
-            return Err(refused("not_allowed", format!("Step {at}: Kumi for Hermes doesn't make {tool} here. {why}")));
-        }
-        if !offered.iter().any(|name| name == tool) {
-            return Err(refused("unknown_step", format!("Step {at}: {tool} isn't a change this DAW makes.")));
-        }
-        let allowed = kumi_daw::plugin::check(provider.plugin_steps(), tool, &input)
-            .map_err(|why| refused("not_allowed", format!("Step {at}: {why}")))?;
-        // A step marked as a change only the DAW's own Undo takes back is one the DAW keeps no undo for (CC-20).
-        let daw_undo = allowed.daw_undo_only(&input);
-        if let Some(why) = provider.plugin_refuses(tool, &input).filter(|_| !daw_undo) {
-            return Err(refused("not_allowed", format!("Step {at} ({tool}): {why}")));
-        }
+        let (allowed, daw_undo) = allowed_step(provider, &offered, n + 1, tool, &input)?;
         match allowed.file_field {
             Some(field) if input.get(field).is_some() => checked.files.push((n, field)),
             _ => step_takes(ctx, n, tool, &input)?,
@@ -172,7 +177,36 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
             checked.because.extend(allowed.daw_undo_because);
         }
     }
+    checked.alone(steps)?;
     Ok(checked)
+}
+
+/// Step `at` (`tool` with `input`) as a plugin's plan may hold it in this DAW, before what the step takes is checked: the
+/// DAW's list of the steps it keeps out says why one is out, the plan tool must offer it, the allowlist must take its
+/// input, and the DAW must keep an undo Kumi can use for it, unless it's marked as a change only the DAW's own Undo
+/// takes back (CC-20). The step, and whether it's one of those.
+fn allowed_step(
+    provider: &dyn DawProvider,
+    offered: &[String],
+    at: usize,
+    tool: &str,
+    input: &Value,
+) -> Result<(&'static PluginStep, bool), Value> {
+    // A step the DAW keeps out of a plugin's plans says why, whether or not this DAW offers it now.
+    if let Some((_, why)) = provider.plugin_refused().iter().find(|(name, _)| *name == tool) {
+        return Err(refused("not_allowed", format!("Step {at}: Kumi for Hermes doesn't make {tool} here. {why}")));
+    }
+    if !offered.iter().any(|name| name == tool) {
+        return Err(refused("unknown_step", format!("Step {at}: {tool} isn't a change this DAW makes.")));
+    }
+    let allowed =
+        kumi_daw::plugin::check(provider.plugin_steps(), tool, input).map_err(|why| refused("not_allowed", format!("Step {at}: {why}")))?;
+    // A step marked as a change only the DAW's own Undo takes back is one the DAW keeps no undo for (CC-20).
+    let daw_undo = allowed.daw_undo_only(input);
+    if let Some(why) = provider.plugin_refuses(tool, input).filter(|_| !daw_undo) {
+        return Err(refused("not_allowed", format!("Step {at} ({tool}): {why}")));
+    }
+    Ok((allowed, daw_undo))
 }
 
 /// Step `n` (`tool`) takes `input`, as its own tool says: a step with none to check it against isn't run.
@@ -1156,6 +1190,30 @@ mod tests {
         assert_eq!(made["@blank"], "what step 4 makes");
     }
 
+    /// Live gives its `refs` in its long form, while its steps take the short refs its look shows: what a step is on is
+    /// named by what the look showed, Main by its name and a device with the track it's on.
+    #[test]
+    fn a_live_approval_names_what_its_steps_are_on_by_the_refs_the_look_showed() {
+        let context = json!({
+            "selectedInLive": {"device": {"ref": "device:61", "name": "EQ Eight"}},
+            "tracks": [{"ref": "track:7", "name": "Main", "type": "main", "devices": [{"ref": "device:61", "name": "EQ Eight", "chains": []}]}],
+        });
+        let Value::Object(context) = context else { unreachable!() };
+        let names = shown_names(&crate::serve::connection::look_names(&context), &[]);
+        let load = describe(&names, "load_device", "device", &json!({"trackRef": "track:7", "itemId": "audio_effects/Glue Compressor"}));
+        assert_eq!(load["text"], "Load device: itemId \"audio_effects/Glue Compressor\" — on \"Main\"");
+        let set = describe(
+            &names,
+            "set_device_parameter",
+            "parameter",
+            &json!({"deviceRef": "device:61", "parameter": "Gain", "value": "-3 dB"}),
+        );
+        assert_eq!(
+            set["text"], "Set device parameter: parameter \"Gain\", value \"-3 dB\" — on \"EQ Eight (on Main)\"",
+            "with its track, though the selection showed it alone first"
+        );
+    }
+
     #[test]
     fn a_preview_marks_only_the_steps_only_the_daws_undo_takes_back() {
         let steps = [
@@ -1177,6 +1235,28 @@ mod tests {
     }
 
     #[test]
+    fn a_change_only_the_daws_undo_takes_back_holds_no_other_kind_of_step() {
+        let chain = json!({"tool": "edit_rack", "input": {"rackRef": "7:device:1", "action": "add-chain"}});
+        let load = json!({"tool": "load_device", "input": {"trackRef": "7:track:1", "itemId": "audio_effects/Utility"}});
+        let checked = |daw_undo: Vec<bool>| Checked {
+            families: vec!["device"; daw_undo.len()],
+            files: Vec::new(),
+            daw_undo,
+            because: Vec::new(),
+            app: "Live",
+        };
+        // Live keeps a load as an undo step of its own, so its Undo would take a mixed change back one part at a time.
+        let refused = checked(vec![false, true]).alone(&[load.clone(), chain.clone()]).unwrap_err();
+        assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")));
+        assert!(
+            refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (edit_rack) is a change only Live's own Undo")),
+            "{refused}"
+        );
+        assert!(checked(vec![true, true]).alone(&[chain.clone(), chain]).is_ok(), "chains alone");
+        assert!(checked(vec![false, false]).alone(&[load.clone(), load]).is_ok(), "nothing marked");
+    }
+
+    #[test]
     fn an_undo_of_a_change_only_the_daws_undo_takes_back_is_refused_with_its_words() {
         let dir = tempfile::tempdir().unwrap();
         let history = History::new(dir.path(), "g".into());
@@ -1193,5 +1273,32 @@ mod tests {
             (json!("refused"), json!(DAW_UNDO), json!(note))
         );
         assert!(refused.get("daw_undo").is_none(), "where it stands isn't known to a runtime that didn't make it");
+    }
+
+    #[test]
+    fn the_live_steps_left_to_lives_own_undo_are_a_racks_new_chain_and_a_device_move() {
+        let live = crate::daw::provider(kumi_types::daw::DawId::Ableton).unwrap();
+        let offered: Vec<String> = ["edit_rack", "import_audio", "load_device", "move_device", "move_device_to"].map(String::from).to_vec();
+        let step = |tool, input| allowed_step(live, &offered, 1, tool, &input);
+        let chain = step("edit_rack", json!({"rackRef": "1:device:0:0", "action": "add-chain"}));
+        assert!(chain.is_ok_and(|(allowed, daw_undo)| allowed.tool == "edit_rack" && daw_undo), "through, as one Live's Undo takes back");
+        for action in ["delete-variation", "remove-macro", "insert-chain"] {
+            let refused = step("edit_rack", json!({"rackRef": "1:device:0:0", "action": action})).unwrap_err();
+            assert_eq!(refused["code"], "not_allowed", "{action}: {refused}");
+        }
+        // A step Live keeps no undo for and that isn't marked stays refused: a sound into a take lane.
+        let lane = json!({"sample": {"sound_id": "s-r1-1", "map_revision": "r1"}, "takeLaneRef": "1:take_lane:0:0", "position": 4});
+        assert_eq!(step("import_audio", lane).unwrap_err()["code"], "not_allowed");
+        // A device's move is through, as one only Live's Undo takes back (#1139); so a load and the move that places it
+        // are two changes: the load Kumi undoes, the move Live's Undo takes back.
+        let load = json!({"tool": "load_device", "input": {"trackRef": "1:track:0", "itemId": "audio_effects/Utility"}, "as": "util"});
+        let place = json!({"tool": "move_device", "input": {"deviceRef": "@util", "index": 0}});
+        let flags: Vec<bool> =
+            [&load, &place].iter().map(|plan| step(plan["tool"].as_str().unwrap(), plan["input"].clone()).unwrap().1).collect();
+        assert_eq!(flags, [false, true]);
+        assert!(step("move_device_to", json!({"deviceRef": "1:device:0:1", "targetTrackRef": "1:track:2", "index": 0})).unwrap().1);
+        let checked = Checked { families: vec!["device"; 2], files: Vec::new(), daw_undo: flags, because: Vec::new(), app: "Live" };
+        let refused = checked.alone(&[load, place]).unwrap_err();
+        assert!(refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (move_device)")), "{refused}");
     }
 }

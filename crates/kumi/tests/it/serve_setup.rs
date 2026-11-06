@@ -352,6 +352,8 @@ fn runtime(root: &Path, state: &str, home: &Path, daw: DawId, env: Env, answers:
         media_roots: vec![],
         tools: BTreeMap::new(),
     };
+    // The Python host creates the plugin data folder before it starts the runtime.
+    std::fs::create_dir_all(args.state_dir.parent().unwrap()).unwrap();
     Ctx::new(args, env, answers).unwrap()
 }
 

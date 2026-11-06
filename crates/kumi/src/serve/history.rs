@@ -576,8 +576,9 @@ mod tests {
     #[test]
     fn a_calls_changes_are_its_rows_and_their_states_follow() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        let history = History::new(dir.path(), "g1".into());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        let history = History::new(&state, "g1".into());
         history.begin_call();
         history.record(&change("c1", ChangeState::Applied), "p-earlier", &snapshots);
         history.end_call(call("tc-0", "d0"), &snapshots);
@@ -599,17 +600,18 @@ mod tests {
         assert_eq!(undone.tool_call_id.as_deref(), Some("tc-1"));
         assert!(!history.record(&change("c3", ChangeState::Unsure), "p-1", &snapshots).undo_available, "unsure isn't undone from here");
         snapshots.flush();
-        let kept: Value = serde_json::from_slice(&std::fs::read(dir.path().join("history.json")).unwrap()).unwrap();
+        let kept: Value = serde_json::from_slice(&std::fs::read(state.join("history.json")).unwrap()).unwrap();
         assert_eq!(kept["items"][0]["id"], "h-g1-c3", "newest first");
     }
 
     #[test]
     fn rows_an_earlier_runtime_left_are_for_the_record_only() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        History::new(dir.path(), "g1".into()).record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        History::new(&state, "g1".into()).record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         snapshots.flush();
-        let later = History::new(dir.path(), "g2".into());
+        let later = History::new(&state, "g2".into());
         let row = later.row("h-g1-c1").unwrap();
         assert!(!row.undo_available, "its undo went with its runtime");
         later.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
@@ -623,8 +625,9 @@ mod tests {
     #[test]
     fn a_host_call_its_rows_remember_is_answered_from_them_after_a_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        let first = History::new(dir.path(), "g1".into());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        let first = History::new(&state, "g1".into());
         first.begin_call();
         first.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         first.record(&change("c2", ChangeState::Applied), "p-1", &snapshots);
@@ -638,7 +641,7 @@ mod tests {
         let next: Vec<String> = first.end_call(call("tc-3", "d3"), &snapshots).into_iter().map(|row| row.id).collect();
         first.one_change(&next, &snapshots);
         snapshots.flush();
-        let later = History::new(dir.path(), "g2".into());
+        let later = History::new(&state, "g2".into());
         // One change's rows keep one id, through an undo of one of them and a restart; another call's is another; a row
         // no `change` recorded is a change of its own.
         let kept = |id: &str| later.row(id).unwrap().change_id;
@@ -665,8 +668,9 @@ mod tests {
     #[test]
     fn a_change_only_the_daws_undo_takes_back_is_never_undone_here_and_says_where_it_stands() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        let history = History::new(dir.path(), "g1".into());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        let history = History::new(&state, "g1".into());
         history.begin_call();
         history.daw_undo_call("Live's own Undo takes it back.".into());
         history.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
@@ -690,10 +694,10 @@ mod tests {
         assert!(later[0].undo_available && later[0].reason.is_none(), "the next call is undone as ever");
         assert_eq!((place("h-g1-c1"), place("h-g1-c3")), (Some("buried"), None));
         snapshots.flush();
-        let kept: Value = serde_json::from_slice(&std::fs::read(dir.path().join("history.json")).unwrap()).unwrap();
+        let kept: Value = serde_json::from_slice(&std::fs::read(state.join("history.json")).unwrap()).unwrap();
         assert_eq!((kept["items"][1]["id"].clone(), kept["items"][1]["daw_undo"].clone()), (json!("h-g1-c2"), json!("buried")));
         // Another runtime knows the class, never where it stands.
-        let after = History::new(dir.path(), "g2".into());
+        let after = History::new(&state, "g2".into());
         let old = after.row("h-g1-c1").unwrap();
         assert_eq!((old.reason.as_deref(), after.daw_undo_place(&old)), (Some(DAW_UNDO), None));
     }
@@ -719,9 +723,10 @@ mod tests {
     #[test]
     fn a_row_without_its_chat_matches_any_only_when_an_earlier_runtime_wrote_it() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         let unscoped = |id| CallIdentity { profile_id: None, session_id: None, tool_call_id: Some(id), digest: "d1" };
-        let before = History::new(dir.path(), "g1".into());
+        let before = History::new(&state, "g1".into());
         before.begin_call();
         before.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         before.end_call(unscoped("call_0"), &snapshots);
@@ -729,7 +734,7 @@ mod tests {
         assert!(before.ran(call("call_0", "d1")).is_none(), "another chat's call_0, in the runtime that wrote the row");
         snapshots.flush();
         // A row from before rows kept the chat: a retry right after the update isn't run again.
-        let after = History::new(dir.path(), "g2".into());
+        let after = History::new(&state, "g2".into());
         assert!(after.ran(call("call_0", "d1")).is_some_and(|ran| ran.is_ok()));
     }
 }

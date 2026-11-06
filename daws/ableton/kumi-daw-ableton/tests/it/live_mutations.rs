@@ -938,7 +938,9 @@ impl McpEndpoint for MenusFixture {
 async fn a_plugin_host_is_never_offered_lives_menus() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for (policy, offered) in [(HostPolicy::standalone(), true), (HostPolicy::plugin(std::env::temp_dir()), false)] {
+            let temporary = std::env::temp_dir();
+            let plugin = HostPolicy::plugin(temporary.join("kumi-menus-listen"), temporary.join("kumi-menus-quarantine"));
+            for (policy, offered) in [(HostPolicy::standalone(), true), (plugin, false)] {
                 let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
                 context.policy = policy;
                 let mut options = AbletonOptions::with_context(context);

@@ -185,6 +185,8 @@ pub struct Artifacts {
     root: PathBuf,
     records: RefCell<Arc<Records>>,
     publishing: Mutex<()>,
+    #[cfg(test)]
+    before_enqueue: RefCell<Option<futures::future::LocalBoxFuture<'static, ()>>>,
 }
 impl Artifacts {
     pub fn new(state_dir: &Path) -> Result<Self, OpError> {
@@ -238,7 +240,13 @@ impl Artifacts {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Records::new(),
             Err(error) => return Err(failed(error)),
         };
-        Ok(Self { root, records: RefCell::new(Arc::new(records)), publishing: Mutex::new(()) })
+        Ok(Self {
+            root,
+            records: RefCell::new(Arc::new(records)),
+            publishing: Mutex::new(()),
+            #[cfg(test)]
+            before_enqueue: RefCell::new(None),
+        })
     }
 
     /// Copy through an opened regular file, bounded by its initial length. A growing/changing file is not a snapshot.
@@ -341,7 +349,7 @@ impl Artifacts {
         tool: &str,
         signal: &Signal,
     ) -> Result<SavedArtifact, OpError> {
-        let [saved] = self.publish_files(ctx, [(file, kind, mime)], tool, signal).await?;
+        let [saved] = self.publish_files(ctx, [(file, kind, mime)], tool, signal, None).await?;
         Ok(saved)
     }
 
@@ -352,16 +360,20 @@ impl Artifacts {
         source: StagedArtifact,
         source_mime: &str,
         reference: Option<(StagedArtifact, &str)>,
-        tool: &str,
         signal: &Signal,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<(SavedArtifact, Option<SavedArtifact>), OpError> {
         match reference {
             Some((reference, reference_mime)) => {
-                let [source, reference] =
-                    self.publish_files(ctx, [(source, "audio", source_mime), (reference, "audio", reference_mime)], tool, signal).await?;
+                let [source, reference] = self
+                    .publish_files(ctx, [(source, "audio", source_mime), (reference, "audio", reference_mime)], "listen", signal, deadline)
+                    .await?;
                 Ok((source, Some(reference)))
             }
-            None => Ok((self.publish(ctx, source, "audio", source_mime, tool, signal).await?, None)),
+            None => {
+                let [source] = self.publish_files(ctx, [(source, "audio", source_mime)], "listen", signal, deadline).await?;
+                Ok((source, None))
+            }
         }
     }
 
@@ -371,53 +383,66 @@ impl Artifacts {
         files: [(StagedArtifact, &str, &str); N],
         tool: &str,
         signal: &Signal,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<[SavedArtifact; N], OpError> {
-        let _publishing = tokio::select! {
-            guard = self.publishing.lock() => guard,
-            _ = signal.cancelled() => return Err(cancelled()),
+        let preparation = async {
+            let publishing = tokio::select! {
+                guard = self.publishing.lock() => guard,
+                _ = signal.cancelled() => return Err(cancelled()),
+            };
+            check(signal)?;
+            let root = self.checked_root()?;
+            let at = now_ms();
+            let mut added = Vec::with_capacity(N);
+            for (file, kind, mime) in &files {
+                if file.path().parent() != Some(root.as_path()) {
+                    return Err(refused("outside_root", "This staged file does not belong to this artifact store."));
+                }
+                file.verify()?;
+                match &file.file {
+                    StagedFile::Owned(_) => {
+                        if self.records.borrow().contains_key(&file.id) {
+                            return Err(refused("artifact_exists", "An artifact already has this id."));
+                        }
+                        added.push((
+                            file.id.clone(),
+                            Record { path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at },
+                        ));
+                    }
+                    StagedFile::Registered { .. } => {
+                        if self.resolve(ctx, &file.id)? != file.path() {
+                            return Err(refused("stale", "The retained audio is no longer the registered artifact."));
+                        }
+                    }
+                }
+            }
+            let saved = std::array::from_fn(|i| SavedArtifact { id: files[i].0.id.clone(), path: files[i].0.path().to_path_buf() });
+            if added.is_empty() {
+                return Ok((publishing, saved, None));
+            }
+            let existing = self.records.borrow().clone();
+            let (document, added) = tokio::task::spawn_blocking(move || -> Result<_, OpError> {
+                let mut document = serde_json::to_value(existing.as_ref()).map_err(failed)?;
+                let fields = document.as_object_mut().ok_or_else(|| failed("invalid artifact manifest"))?;
+                for (id, record) in &added {
+                    fields.insert(id.clone(), serde_json::to_value(record).map_err(failed)?);
+                }
+                Ok((document, added))
+            })
+            .await
+            .map_err(failed)??;
+            Ok((publishing, saved, Some((document, added))))
+        };
+        let expired = || refused("retention_timeout", "The capture deadline expired before retaining its audio.");
+        let (_publishing, saved, prepared) = match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, preparation).await.map_err(|_| expired())??,
+            None => preparation.await?,
         };
         check(signal)?;
-        let root = self.checked_root()?;
-        let at = now_ms();
-        let mut added = Vec::with_capacity(N);
-        for (file, kind, mime) in &files {
-            if file.path().parent() != Some(root.as_path()) {
-                return Err(refused("outside_root", "This staged file does not belong to this artifact store."));
-            }
-            file.verify()?;
-            match &file.file {
-                StagedFile::Owned(_) => {
-                    if self.records.borrow().contains_key(&file.id) {
-                        return Err(refused("artifact_exists", "An artifact already has this id."));
-                    }
-                    added.push((
-                        file.id.clone(),
-                        Record { path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at },
-                    ));
-                }
-                StagedFile::Registered { .. } => {
-                    if self.resolve(ctx, &file.id)? != file.path() {
-                        return Err(refused("stale", "The retained audio is no longer the registered artifact."));
-                    }
-                }
-            }
+        if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(expired());
         }
-        let saved = std::array::from_fn(|i| SavedArtifact { id: files[i].0.id.clone(), path: files[i].0.path().to_path_buf() });
-        if added.is_empty() {
-            return Ok(saved);
-        }
-        let existing = self.records.borrow().clone();
-        let (document, added) = tokio::task::spawn_blocking(move || -> Result<_, OpError> {
-            let mut document = serde_json::to_value(existing.as_ref()).map_err(failed)?;
-            let fields = document.as_object_mut().ok_or_else(|| failed("invalid artifact manifest"))?;
-            for (id, record) in &added {
-                fields.insert(id.clone(), serde_json::to_value(record).map_err(failed)?);
-            }
-            Ok((document, added))
-        })
-        .await
-        .map_err(failed)??;
-        check(signal)?;
+        let Some((document, added)) = prepared else { return Ok(saved) };
         // `keep` happens before the manifest can refer to a file. A failed commit drops only these owned copies.
         let mut retained = Vec::with_capacity(N);
         for (file, _, _) in files {
@@ -426,12 +451,25 @@ impl Artifacts {
                 retained.push(PendingFile { handle: Some(handle), path, committed: false });
             }
         }
+        #[cfg(test)]
+        {
+            let before = self.before_enqueue.borrow_mut().take();
+            if let Some(before) = before {
+                before.await;
+            }
+        }
+        // This is the commit boundary: no await from these checks through enqueue.
+        check(signal)?;
+        if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(expired());
+        }
+        let queued = ctx.snapshots().enqueue("artifacts", document, Some(MAX_MANIFEST_BYTES as usize)).map_err(failed)?;
         // Once queued, a forcibly dropped caller cannot know whether the writer committed. Keep those copies rather
         // than deleting files a manifest may now name; a known write failure can still roll the whole group back.
         for file in &mut retained {
             file.committed = true;
         }
-        if let Err(error) = ctx.snapshots().write_durably_bounded("artifacts", document, MAX_MANIFEST_BYTES as usize).await {
+        if let Err(error) = queued.wait().await {
             for file in &mut retained {
                 file.committed = false;
             }
@@ -621,12 +659,71 @@ mod tests {
         let paths = [current.path().to_path_buf(), other.path().to_path_buf()];
         // A directory cannot be replaced by the manifest's regular file, on any supported platform.
         std::fs::create_dir(ctx.paths().state_dir.join("artifacts.json")).unwrap();
-        let result = ctx.artifacts().publish_pair(ctx, current, "audio/wav", Some((other, "audio/wav")), "listen", &signal).await;
+        let result = ctx.artifacts().publish_pair(ctx, current, "audio/wav", Some((other, "audio/wav")), &signal, None).await;
         assert!(matches!(result, Err(OpError::Failed { .. })));
         assert!(paths.iter().all(|path| !path.exists()));
         assert!(ctx.artifacts().records.borrow().is_empty());
         assert_eq!(std::fs::read(source).unwrap(), b"current audio");
         assert_eq!(std::fs::read(reference).unwrap(), b"reference audio");
+    }
+
+    #[tokio::test]
+    async fn expiry_at_the_commit_boundary_removes_every_unpublished_copy() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let source = fixture.root.join("capture.wav");
+        std::fs::write(&source, b"captured audio").unwrap();
+        let signal = Signal::new();
+        let staged = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
+        let copy = staged.path().to_path_buf();
+        let (entered, at_boundary) = tokio::sync::oneshot::channel();
+        let (release, proceed) = tokio::sync::oneshot::channel();
+        *ctx.artifacts().before_enqueue.borrow_mut() = Some(Box::pin(async move {
+            entered.send(()).unwrap();
+            proceed.await.unwrap();
+        }));
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+        let (result, ()) = tokio::join!(ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)), async {
+            at_boundary.await.unwrap();
+            tokio::time::pause();
+            tokio::time::advance(std::time::Duration::from_secs(61)).await;
+            release.send(()).unwrap();
+        });
+        tokio::time::resume();
+        assert!(matches!(result, Err(OpError::Refused { code: "retention_timeout", .. })));
+        ctx.snapshots().flush();
+        assert!(!copy.exists());
+        assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
+        assert!(ctx.artifacts().records.borrow().is_empty());
+        assert_eq!(std::fs::read(source).unwrap(), b"captured audio");
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_enqueue_waits_for_one_real_committed_artifact() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let source = fixture.root.join("capture.wav");
+        std::fs::write(&source, b"captured audio").unwrap();
+        let signal = Signal::new();
+        let staged = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
+        let (entered, release) = ctx.snapshots().pause_next_commit("artifacts");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        let (result, ()) = tokio::join!(ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)), async {
+            entered.await.unwrap();
+            signal.cancel();
+            tokio::task::yield_now().await;
+            assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
+            release.send(()).unwrap();
+        });
+        let (saved, reference) = result.unwrap();
+        assert!(reference.is_none());
+        assert_eq!(ctx.artifacts().resolve(ctx, &saved.id).unwrap(), saved.path);
+        assert_eq!(std::fs::read(&saved.path).unwrap(), b"captured audio");
+        assert_eq!(ctx.artifacts().records.borrow().len(), 1);
+        assert_eq!(std::fs::read_dir(&ctx.artifacts().root).unwrap().count(), 1);
+        let committed = std::fs::read(ctx.paths().state_dir.join("artifacts.json")).unwrap();
+        ctx.snapshots().flush();
+        assert_eq!(std::fs::read(ctx.paths().state_dir.join("artifacts.json")).unwrap(), committed);
     }
 
     #[tokio::test]

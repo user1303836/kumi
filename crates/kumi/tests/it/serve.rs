@@ -29,6 +29,7 @@ impl Folders {
         for folder in [&user, &producers_kumi, &user.join(".kumi"), &transport] {
             std::fs::create_dir_all(folder).unwrap();
         }
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
         Folders { _dir: dir, user, producers_kumi, transport, state }
     }
 
@@ -212,6 +213,36 @@ fn serve_answers_status_on_stdio_without_reading_or_writing_the_producers_kumi()
         assert_eq!(listing(home), ["auth.json", "settings.json"], "nothing written in {}", home.display());
     }
     assert_eq!(listing(&folders.user), [".kumi", "the-producers-kumi"], "nor anywhere else in the producer's home");
+}
+
+#[test]
+fn listen_sources_advertise_only_available_guarded_capture() {
+    for daw in ["ableton", "reaper", "renoise"] {
+        let folders = Folders::new();
+        let mut serve = Running::start(folders.command(daw));
+        serve.initialize();
+        serve.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+        let tools = serve.answer(2);
+        let listen = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "listen").unwrap();
+        let sources = if daw == "ableton" { json!(["artifact", "file", "sound"]) } else { json!(["artifact", "file", "sound", "track"]) };
+        assert_eq!(listen["_meta"]["kumi/listen_sources"], sources, "{daw}: {listen}");
+        assert!(!listen["inputSchema"].to_string().contains("deadlineUnixMs"), "native deadlines are not model input");
+        assert!(!listen["inputSchema"].to_string().contains("native_deadline_unix_ms"));
+        if daw == "ableton" {
+            serve.send(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"listen","arguments":{
+                "source":{"track":{"mix":true},"from_beat":0,"beats":4},
+                "expected_project_key":"p-unconnected","expected_epoch":1,"preview":true
+            }}}));
+            let refused = serve.answer(3);
+            let content = &refused["result"]["structuredContent"];
+            assert_eq!(refused["result"]["isError"], false, "{refused}");
+            assert_eq!(content["state"], "refused", "{refused}");
+            assert_eq!(content["code"], "unsupported", "unsupported capture is refused before any connection: {refused}");
+            assert_eq!(content["cleanup"], "restored");
+            assert!(content.get("artifact_id").is_none());
+        }
+        assert_eq!(serve.end(), 0);
+    }
 }
 
 #[test]

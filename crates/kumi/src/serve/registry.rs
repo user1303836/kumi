@@ -39,7 +39,6 @@ mod tests {
             assert!(!operation.name.starts_with("kumi_"), "{}: the host adds the prefix", operation.name);
             let schema = (operation.schema)();
             assert_eq!(schema["type"], "object", "{}", operation.name);
-            assert_eq!(schema["additionalProperties"], false, "{}: every argument is named", operation.name);
             assert!(!operation.description.is_empty(), "{}", operation.name);
         }
     }

@@ -32,16 +32,40 @@ type Written = tokio::sync::oneshot::Sender<std::io::Result<()>>;
 /// Told each snapshot's name once its file is on disk ([`Snapshots::landed`]), from the writer thread.
 type Landed = std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>>;
 
+/// An already queued, ordered write. Dropping this handle never cancels that write.
+#[must_use = "await the queued write's actual outcome; dropping it does not cancel it"]
+pub(super) struct PendingWrite {
+    seq: u64,
+    written: tokio::sync::oneshot::Receiver<std::io::Result<()>>,
+}
+
+impl PendingWrite {
+    pub(super) async fn wait(self) -> std::io::Result<u64> {
+        self.written.await.map_err(|_| std::io::Error::other("the snapshot writer stopped"))??;
+        Ok(self.seq)
+    }
+}
+
+#[cfg(test)]
+struct CommitGate {
+    entered: tokio::sync::oneshot::Sender<()>,
+    release: Receiver<()>,
+}
+
+struct FileWrite {
+    name: String,
+    path: PathBuf,
+    snapshot: Value,
+    /// Compact JSON whose complete envelope must fit this reader limit; None retains the ordinary pretty format.
+    max_bytes: Option<usize>,
+    /// Told once the file is on disk, or why it isn't.
+    done: Option<Written>,
+    #[cfg(test)]
+    gate: Option<CommitGate>,
+}
+
 enum Write {
-    File {
-        name: String,
-        path: PathBuf,
-        snapshot: Value,
-        /// Compact JSON whose complete envelope must fit this reader limit; None retains the ordinary pretty format.
-        max_bytes: Option<usize>,
-        /// Told once the file is on disk, or why it isn't.
-        done: Option<Written>,
-    },
+    File(FileWrite),
     /// Told once every write sent before it is done.
     Flush(Sender<()>),
 }
@@ -53,6 +77,8 @@ pub struct Snapshots {
     /// None when the writer thread couldn't start: writes are done in place then.
     writer: Option<Sender<Write>>,
     landed: Landed,
+    #[cfg(test)]
+    next_gate: RefCell<Option<(String, CommitGate)>>,
 }
 
 impl Snapshots {
@@ -68,7 +94,15 @@ impl Snapshots {
             }
         };
         let seq = Cell::new(newest_seq(&dir));
-        Snapshots { dir, seq, owner: RefCell::new(Host::default()), writer, landed }
+        Snapshots {
+            dir,
+            seq,
+            owner: RefCell::new(Host::default()),
+            writer,
+            landed,
+            #[cfg(test)]
+            next_gate: RefCell::new(None),
+        }
     }
 
     /// Each snapshot's name (`status`, `map/r7`) once its file is on disk, in the order they land, and the names
@@ -131,11 +165,25 @@ impl Snapshots {
     }
 
     async fn write_wait(&self, name: &str, body: Value, max_bytes: Option<usize>) -> std::io::Result<u64> {
+        self.enqueue(name, body, max_bytes)?.wait().await
+    }
+
+    /// Enqueues synchronously, with no cancellation point before `send`. Once this
+    /// returns, only the writer's actual result can establish whether it committed.
+    pub(super) fn enqueue(&self, name: &str, body: Value, max_bytes: Option<usize>) -> std::io::Result<PendingWrite> {
         let (done, written) = tokio::sync::oneshot::channel();
         let (seq, write) = self.stamped(name, body, Some(done), max_bytes)?;
         self.send(write)?;
-        written.await.map_err(|_| std::io::Error::other("the snapshot writer stopped"))??;
-        Ok(seq)
+        Ok(PendingWrite { seq, written })
+    }
+
+    #[cfg(test)]
+    pub(super) fn pause_next_commit(&self, name: &str) -> (tokio::sync::oneshot::Receiver<()>, Sender<()>) {
+        assert!(self.writer.is_some(), "this fixture needs the normal writer thread");
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (release, released) = channel();
+        *self.next_gate.borrow_mut() = Some((name.into(), CommitGate { entered, release: released }));
+        (waiting, release)
     }
 
     /// Snapshot `name`'s write: `body`'s fields in the envelope, with its `seq`.
@@ -152,7 +200,27 @@ impl Snapshots {
         snapshot.insert("seq".into(), json!(seq));
         snapshot.insert("at".into(), json!(kumi_common::time::now_ms()));
         snapshot.insert("owner".into(), json!({"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()}));
-        Ok((seq, Write::File { name: name.to_owned(), path, snapshot: Value::Object(snapshot), max_bytes, done }))
+        #[cfg(test)]
+        let gate = {
+            let mut next = self.next_gate.borrow_mut();
+            if next.as_ref().is_some_and(|(target, _)| target == name) {
+                next.take().map(|(_, gate)| gate)
+            } else {
+                None
+            }
+        };
+        Ok((
+            seq,
+            Write::File(FileWrite {
+                name: name.to_owned(),
+                path,
+                snapshot: Value::Object(snapshot),
+                max_bytes,
+                done,
+                #[cfg(test)]
+                gate,
+            }),
+        ))
     }
 
     /// To the writer thread; written in place only when there's none to take it.
@@ -161,13 +229,13 @@ impl Snapshots {
             Some(writer) => writer.send(write).err().map(|failed| failed.0),
             None => Some(write),
         };
-        if let Some(Write::File { name, path, snapshot, max_bytes, done }) = unsent {
-            let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
+        if let Some(Write::File(mut file)) = unsent {
+            let written = write_file(&mut file);
             if written.is_ok() {
-                tell(&self.landed, &name);
+                tell(&self.landed, &file.name);
             }
             let failed = written.as_ref().err().map(|error| std::io::Error::new(error.kind(), error.to_string()));
-            if let Some(done) = done {
+            if let Some(done) = file.done {
                 let _ = done.send(written);
             }
             if let Some(error) = failed {
@@ -241,17 +309,17 @@ fn write_files(writes: Receiver<Write>, landed: Landed) {
         let mut waiting = waiting.into_iter().peekable();
         while let Some(write) = waiting.next() {
             match write {
-                Write::File { name, path, snapshot, max_bytes, done } => {
-                    let superseded = done.is_none() && matches!(waiting.peek(), Some(Write::File { path: next, .. }) if *next == path);
+                Write::File(mut file) => {
+                    let superseded = file.done.is_none() && matches!(waiting.peek(), Some(Write::File(next)) if next.path == file.path);
                     if superseded {
                         continue;
                     }
-                    let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
+                    let written = write_file(&mut file);
                     match &written {
-                        Ok(()) => tell(&landed, &name),
-                        Err(error) => say(&format!("kumi serve: {} not written: {error}", path.display())),
+                        Ok(()) => tell(&landed, &file.name),
+                        Err(error) => say(&format!("kumi serve: {} not written: {error}", file.path.display())),
                     }
-                    if let Some(done) = done {
+                    if let Some(done) = file.done {
                         let _ = done.send(written);
                     }
                 }
@@ -268,6 +336,15 @@ fn tell(landed: &Landed, name: &str) {
     if let Some(told) = landed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
         let _ = told.send(name.to_owned());
     }
+}
+
+fn write_file(file: &mut FileWrite) -> std::io::Result<()> {
+    #[cfg(test)]
+    if let Some(gate) = file.gate.take() {
+        let _ = gate.entered.send(());
+        gate.release.recv_timeout(FLUSH).map_err(std::io::Error::other)?;
+    }
+    serialized(&file.snapshot, file.max_bytes).and_then(|bytes| replace(&file.path, &bytes))
 }
 
 /// A reader-bounded snapshot is compact; ordinary snapshots keep their readable format.
@@ -361,19 +438,21 @@ mod tests {
     #[tokio::test]
     async fn a_write_waited_for_is_on_disk_when_it_returns_after_every_write_made_before_it() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write_owned("map/r7", json!({"revision": "r7"})).unwrap();
         let seq = snapshots.write_durably("map/current", json!({"revision": "r7"})).await.unwrap();
-        assert_eq!(read(&dir.path().join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
-        assert_eq!(read(&dir.path().join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
+        assert_eq!(read(&state.join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
+        assert_eq!(read(&state.join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
     }
 
     #[tokio::test]
     async fn a_reader_bound_includes_escaping_and_the_envelope_and_preserves_the_prior_file_on_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write_durably_bounded("map/r1", json!({"revision":"r1","sounds":{}}), 1024).await.unwrap();
-        let path = dir.path().join("map/r1.json");
+        let path = state.join("map/r1.json");
         let before = std::fs::read(&path).unwrap();
         // The raw string fits; its JSON escaping plus the envelope does not.
         let error = snapshots.write_durably_bounded("map/r1", json!({"name":"\n".repeat(512)}), 1024).await.unwrap_err();
@@ -381,7 +460,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert_eq!(read(&path)["revision"], "r1");
         assert_eq!(snapshots.write_durably_bounded("map/r2", json!({}), 2).await.unwrap_err().kind(), std::io::ErrorKind::InvalidData,);
-        assert!(!dir.path().join("map/r2.json").exists());
+        assert!(!state.join("map/r2.json").exists());
     }
 
     #[tokio::test]
@@ -395,34 +474,38 @@ mod tests {
     #[test]
     fn the_last_write_of_a_file_is_the_one_kept() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         let mut last = 0;
         for n in 0..200 {
             last = snapshots.write("focus", &json!({"n": n})).unwrap();
         }
         snapshots.flush();
-        let focus = read(&dir.path().join("focus.json"));
+        let focus = read(&state.join("focus.json"));
         assert_eq!((focus["n"].clone(), focus["seq"].clone()), (json!(199), json!(last)));
     }
 
     #[test]
     fn a_restarted_runtime_writes_past_the_newest_snapshot_even_one_from_ahead_of_the_clock() {
         let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        super::super::ctx::make_private_dir(&state).unwrap();
         let ahead = now_us() + 3_600_000_000;
-        std::fs::write(dir.path().join("status.json"), json!({"schema": 1, "seq": ahead}).to_string()).unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        std::fs::write(state.join("status.json"), json!({"schema": 1, "seq": ahead}).to_string()).unwrap();
+        let snapshots = Snapshots::new(state);
         assert!(snapshots.write("focus", &json!({})).unwrap() > ahead);
     }
 
     #[test]
     fn a_snapshot_another_runtime_wrote_last_isnt_this_ones() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write("status", &json!({})).unwrap();
         snapshots.flush();
-        let mut theirs = read(&dir.path().join("status.json"));
+        let mut theirs = read(&state.join("status.json"));
         theirs["owner"]["pid"] = json!(std::process::id() + 1);
-        std::fs::write(dir.path().join("status.json"), theirs.to_string()).unwrap();
+        std::fs::write(state.join("status.json"), theirs.to_string()).unwrap();
         assert!(!snapshots.is_mine("status"));
     }
 

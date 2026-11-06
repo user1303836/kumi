@@ -1,0 +1,20 @@
+{
+  "platform": "macos",
+  "architecture": "arm64",
+  "version": "12.4.25b1 (2026-10-28_e04f372900)",
+  "executable": "/Applications/Ableton Live 12 Beta.app/Contents/MacOS/Live",
+  "source_sha256": "7d429daae0905e5819dabdf425e1da4f8499404ae8a5c8cc7be175d2f6cfe0d3",
+  "arm64_sha256": "096efbcf53ad8fbf49aa88b69b898adb63f45b09bfeb87cb7e80509c12e45c65",
+  "native_source_sha256": "4ae7c94f0a51e0aba7eacedaeccf851257208ce39ebc4c5920dad4f97b17eb6d",
+  "profile_id": "live-12.4.25b1-arm64",
+  "profile_sha256": "aa67c4ccef53f9405331c9b8323363bb1cd3390f2bc3ec63c686795e8c92e784",
+  "validation_status": "validated",
+  "runtime_notes": [
+    "All four components validated against this exact macOS ARM64 executable within retained fixture coverage.",
+    "The Max object-name callback moved from 0x1e0 to 0x1e8; the new profile uses the reviewed offset.",
+    "Macro single-undo behavior passes Live.Base.Timer and Max LiveAPI contexts. Direct bridge/control-surface callbacks retain the documented extra Custom Action undo limitation.",
+    "Zone engine meters measure static gating and attenuation trends, not exact gain laws or held-note/overlapping-chain behavior.",
+    "UI-launched scenes advanced after one beat and two loops; global disable prevented a jump for over 99 beats. Editing and all seven zone states survived save/reopen in a fresh installed beta process."
+  ],
+  "library_sha256": "a475b3759ad7ef6e65f5b9e2715ee601907a379c55a86725d1b6c938f0c3364c"
+}

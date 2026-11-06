@@ -2,7 +2,7 @@
 //! Both sides of a comparison must measure successfully before either becomes a registered artifact.
 
 use super::artifacts::StagedArtifact;
-use super::ctx::{reads, Call, Ctx, OpError, OpFuture, Operation};
+use super::ctx::{Call, Ctx, OpError, OpFuture, Operation};
 use kumi_common::abort::Signal;
 use kumi_media::audio::{self, Analysis, AnalyzeOptions, DecodeOptions};
 use serde_json::{json, Value};
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 
 pub const LISTEN: Operation = Operation {
     name: "listen",
-    description: "Measure approved audio by file, revision-scoped sound, or retained artifact. Optionally compare it with a reference. Returns measured loudness, spectrum, dynamics and retained audio; changes nothing in the DAW.",
-    schema: file_schema,
-    effect: reads,
+    description: "Measure approved audio by file, revision-scoped sound, retained artifact, or an explicitly approved bounded track window. Optionally compare it with a reference. Track captures restore their temporary DAW state before returning measurements.",
+    schema: super::listen_track::schema,
+    effect: super::listen_track::effect,
     run,
 };
 
@@ -92,6 +92,9 @@ pub async fn stage_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<S
 }
 
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    if super::listen_track::is_track(&call.args) {
+        return super::listen_track::run(ctx, call);
+    }
     Box::pin(async move {
         check(&call.signal)?;
         if call.args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to")) {
@@ -117,7 +120,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             (Some(staged), Some(path)) => Some(measure(ctx, staged, &path, &call.signal).await?),
             _ => None,
         };
-        retain(ctx, source, reference, &call.signal).await
+        retain(ctx, source, reference, &call.signal, None).await
     })
 }
 
@@ -176,7 +179,13 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
 
 /// Retain measured audio and its optional reference together, then produce the C1 result.
 /// Differences always mean current minus reference; MEDIA always names the retained current audio.
-pub async fn retain(ctx: &Ctx, source: MeasuredAudio, reference: Option<MeasuredAudio>, signal: &Signal) -> Result<Value, OpError> {
+pub async fn retain(
+    ctx: &Ctx,
+    source: MeasuredAudio,
+    reference: Option<MeasuredAudio>,
+    signal: &Signal,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<Value, OpError> {
     check(signal)?;
     let differences = reference.as_ref().map(|reference| audio::compare(&source.metrics, &reference.metrics));
     let mut verdict_text = audio::tools::summary(&source.metrics);
@@ -190,7 +199,7 @@ pub async fn retain(ctx: &Ctx, source: MeasuredAudio, reference: Option<Measured
         Some(reference) => (Some((reference.file, reference.mime)), Some(reference.metrics)),
         None => (None, None),
     };
-    let (saved, saved_reference) = ctx.artifacts().publish_pair(ctx, source.file, source.mime, reference_file, "listen", signal).await?;
+    let (saved, saved_reference) = ctx.artifacts().publish_pair(ctx, source.file, source.mime, reference_file, signal, deadline).await?;
     let mut result = json!({
         "metrics": source.metrics,
         "artifact_id": saved.id,
@@ -388,7 +397,7 @@ mod tests {
         let replacement = pcm(3000.0, 0.8);
         std::fs::write(&path, &replacement).unwrap();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
-        let result = retain(&fixture.ctx, measured, None, &signal).await.unwrap();
+        let result = retain(&fixture.ctx, measured, None, &signal, None).await.unwrap();
         assert!((result["metrics"]["loudness"]["samplePeakDbfs"].as_f64().unwrap() + 14.0).abs() < 0.2);
         assert_eq!(result["metrics"]["file"], "immutable.wav");
         assert!(result.get("compare").is_none());
@@ -486,7 +495,7 @@ mod tests {
         let staged_path = staged.path().to_owned();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
         signal.cancel();
-        assert_eq!(retain(&fixture.ctx, measured, None, &signal).await.unwrap_err().code(), "cancelled");
+        assert_eq!(retain(&fixture.ctx, measured, None, &signal, None).await.unwrap_err().code(), "cancelled");
         assert!(!staged_path.exists());
         assert_eq!(fixture.artifact_files(), before);
         assert_eq!(std::fs::read(path).unwrap(), original);

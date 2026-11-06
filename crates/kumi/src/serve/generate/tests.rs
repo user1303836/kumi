@@ -201,6 +201,7 @@ impl Fixture {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
+        std::fs::create_dir_all(args.state_dir.parent().unwrap()).unwrap();
         let answers = kumi_daw::io::Answers::default().with(FixtureEndpoint(server.url.clone()));
         Ctx::new(args, Env::new(), answers).unwrap()
     }

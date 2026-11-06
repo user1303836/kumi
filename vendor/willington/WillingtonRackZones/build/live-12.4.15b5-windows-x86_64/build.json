@@ -16,7 +16,7 @@
     "Device Tools was validated from the device-tools candidate profile with byte-identical addresses; Max LiveAPI calls, persistence and Kumi transactions are not claimed.",
     "Stopped-transport property and transaction tests do not verify musical scheduling or arbitrary Sets."
   ],
-  "library_sha256": "8670726e1251288edddd77ac7526bc2805f24c198bc56005e7122ce8be75dce3",
+  "library_sha256": "7db46b685cef8fe981ceb72292c6e54885a5fe52f075df3fdd32d7849c6116fb",
   "shared_source_sha256": "b8063d27d55e346cfe43f18a88a704498130bbf21d18ebd9be52565ec6d96087",
   "python_imports": [
     "PyErr_SetString",

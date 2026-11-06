@@ -28,8 +28,8 @@ M.MAX_SOURCES = 18
 M.MAX_SECONDS = 3600
 M.RATES = { [44100] = true, [48000] = true, [88200] = true, [96000] = true }
 M.DEFAULT_RATE = 48000
--- How long a render may read as ended with no callback before it counts as stopped (the callback comes as `rendering` turns
--- false: measured).
+-- How long a render may read as ended with no callback before it counts as stopped. Callback ordering relative to
+-- `song.rendering` is not assumed for deadline-carrying guarded callbacks: they wait for the next idle/request pulse.
 M.STOPPED_GRACE_MS = 1000
 -- Ended jobs kept for listen_status, and the files a job rendered, kept for audition (where each came from).
 M.KEEP_ENDED = 16
@@ -68,14 +68,26 @@ function M.folder(cfg)
 end
 
 -- The folder, made owner-only when it isn't there yet; nil and why when it can't be.
-function M.ensure_folder(cfg)
+function M.ensure_folder(cfg, restricted)
   local folder = M.folder(cfg)
   if not folder then return nil, "the bridge isn't set up (no reference)" end
+  local created = false
   if not io.exists(folder) then
     local ok = os.mkdir(folder)
     if not ok and not io.exists(folder) then return nil, "Kumi's listening folder can't be made: " .. folder end
+    created = ok == true
   end
-  if not windows() and io.chmod then pcall(io.chmod, folder, 700) end
+  if restricted and not created then
+    -- The adapter checks ownership; native code can check mode but must never repair an existing root.
+    if not windows() then
+      local stat = io.stat and io.stat(folder)
+      if not stat or import("config").group_or_other_access(stat.mode) ~= false then
+        return nil, "Kumi's existing listening folder is not verifiably private"
+      end
+    end
+  elseif not windows() and io.chmod then
+    pcall(io.chmod, folder, 700)
+  end
   return folder
 end
 
@@ -300,7 +312,7 @@ end
 -- timing: then the lines' times are Renoise's own and only said, not checked.
 -- Read a slice at a time: inside a read job (a coroutine) it waits for the job's next turn every YIELD_MS; a request answers busy
 -- past SCAN_MS (what was read is kept, so asking again goes on from there).
-function M.timeline(song, mark_of)
+function M.timeline(song, mark_of, atomic)
   local transport = song.transport
   local speed = transport.timing_model == renoise.Transport.TIMING_MODEL_SPEED
   local lpb, bpm, tpl = transport.lpb, transport.bpm, transport.tpl
@@ -311,7 +323,7 @@ function M.timeline(song, mark_of)
   local patterns = #song.patterns
   if S then S.warm_wanted = true end
   local over
-  if coroutine.running() then
+  if coroutine.running() and not atomic then
     local slice_end = clock_ms() + M.YIELD_MS
     over = function()
       if clock_ms() < slice_end then return false end
@@ -658,6 +670,10 @@ end
 
 local function now_ms() return os.clock() * 1000 end
 
+local function deadline_expired(job)
+  return job.deadline_ms and now_ms() >= job.deadline_ms
+end
+
 local function ended(job)
   return job.state == "done" or job.state == "failed" or job.state == "cancelled"
 end
@@ -786,9 +802,58 @@ local function note_tempo(job, env, song)
     beat_text(transport.bpm), transport.lpb, beat_text(before.bpm), before.lpb)
 end
 
+-- Guarded completion is one native compare-and-restore on every outcome, never a later adapter write.
+-- Deferred completion checks before *any* cleanup writes, including mute/solo; legacy requests retain their cleanup path.
+local function guarded_restore_problem(job, env, song)
+  if not job.max_seconds or not job.tempo_before then return end
+  if job.document_closed or not song or env.document() ~= job.document or env.epoch() ~= job.epoch then
+    return "tempo_restore_state_changed", "Renoise's document or epoch changed; guarded restoration was not attempted. Observe again."
+  end
+  if deadline_expired(job) then
+    return "tempo_restore_state_changed", "The approved native deadline expired before Renoise's guarded restoration; no cleanup writes were attempted. Observe again."
+  end
+  if song.rendering or song.transport.playing or song.transport.edit_mode then
+    return "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded restoration requires a stopped transport. Observe again."
+  end
+end
+
+-- The approved end pair is the only known render-owned pair, even for a failed or cancelled render.
+-- A partial render may stop at another pair; without exact ownership evidence that pair must survive.
+-- An identical producer-chosen pair is indistinguishable; any different pair is never overwritten.
+-- Called synchronously after guarded_restore_problem, with no yield between comparison, setters and readback.
+local function restore_guarded_tempo(job, env, song)
+  if not job.max_seconds or not job.tempo_before then return true end
+  local transport, before, expected = song.transport, job.tempo_before, job.tempo_expected
+  if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
+  if not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then
+    return false, "tempo_restore_ownership_uncertain",
+      "Renoise's BPM/LPB pair is neither the launch pair nor the known render-end pair; ownership is unknown, so it was left unchanged. Observe again."
+  end
+  local restored = pcall(env.quiet, function()
+    if transport.bpm ~= before.bpm then transport.bpm = before.bpm end
+    if transport.lpb ~= before.lpb then transport.lpb = before.lpb end
+  end)
+  if not restored or transport.bpm ~= before.bpm or transport.lpb ~= before.lpb then
+    return false, "tempo_restore_failed", "Renoise's guarded BPM/LPB restoration failed or did not read back as the launch pair. Observe again."
+  end
+  return true
+end
+
 local function finish(job, env, state, code, message)
   local song = renoise.song()
-  restore(job, env, song)
+  if not job.deadline_ms then restore(job, env, song) end
+  local restore_code, restore_message = guarded_restore_problem(job, env, song)
+  local restored = restore_code == nil
+  if restored then
+    if job.deadline_ms then restore(job, env, song) end
+    restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+  elseif job.deadline_ms then
+    job.restored = false
+  end
+  if job.max_seconds then job.tempo_restored = restored end
+  if not restored then
+    state, code, message = "failed", restore_code, restore_message
+  end
   note_tempo(job, env, song)
   job.state = state
   job.rendering = nil
@@ -875,11 +940,26 @@ local function rendered(job, env, k)
   start_render(job, env, k + 1)
 end
 
+local function complete_render(job, env, k)
+  local fine, problem = xpcall(rendered, debug.traceback, job, env, k)
+  if not fine then
+    log.write("error", "listening: " .. tostring(problem))
+    if not ended(job) then finish(job, env, "failed", "failed", "Kumi's tool failed after the render: " .. tostring(problem):match("^[^\n]*")) end
+  end
+end
+
 -- Starts the render of source `k`. A failure ends the job (everything put back, files deleted).
 start_render = function(job, env, k)
   local song = renoise.song()
   if not song or env.document() ~= job.document then
     return finish(job, env, "failed", "stale", "the song was closed during the render")
+  end
+  if k > 1 and job.max_seconds then
+    local checked, problem = pcall(M.refresh_restricted, job, env, song)
+    if not checked then
+      return finish(job, env, "failed", type(problem) == "table" and problem.code or "failed",
+        type(problem) == "table" and problem.message or tostring(problem))
+    end
   end
   local source = job.sources[job.order[k]]
   local ok, err = pcall(set_up, job, env, song, source)
@@ -895,12 +975,14 @@ start_render = function(job, env, k)
   job.current, job.rendering = k, { started_ms = now_ms() }
   local this_job = job
   local started, result, why = pcall(song.render, song, options, source.file, function()
-    -- (a callback of Renoise's: nothing raises past here)
-    local fine, problem = xpcall(rendered, debug.traceback, this_job, env, k)
-    if not fine then
-      log.write("error", "listening: " .. tostring(problem))
-      if not ended(this_job) then finish(this_job, env, "failed", "failed", "Kumi's tool failed after the render: " .. tostring(problem):match("^[^\n]*")) end
+    -- Updated clients provide the existing native deadline. Their callbacks do not assume rendering=false:
+    -- check() validates files, restores state and publishes audio only on a later stopped pulse.
+    if this_job.deadline_ms and not ended(this_job) and not this_job.dead then
+      this_job.rendering.completed = k
+      return
     end
+    -- (a callback of Renoise's: nothing raises past here)
+    complete_render(this_job, env, k)
   end)
   if not started or result == false then
     local text = not started and tostring(result) or tostring(why)
@@ -917,7 +999,7 @@ function M.check_room(free, needed, what)
     math.ceil(needed / 1000000)))
 end
 
--- render_start {jobId, sources, range, preRollBeats, sampleRate, epoch, layout?, freeBytes?}
+-- render_start {jobId, sources, range, preRollBeats, sampleRate, epoch, layout?, freeBytes?, maxSeconds?, deadlineUnixMs?}
 
 local function need_id(value, name, prefix)
   if type(value) ~= "string" or not value:match("^" .. prefix .. "[0-9a-z]+$") or #value > 32 then
@@ -930,6 +1012,83 @@ M.need_id = need_id
 local function number(value, name)
   if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then bad(name .. " must be a number") end
   return value
+end
+
+local function requested_range(value)
+  if type(value) ~= "table" then bad("range is {fromBeat, beats}") end
+  local from_beat, beats = number(value.fromBeat, "range.fromBeat"), number(value.beats, "range.beats")
+  if from_beat < 0 then bad("range.fromBeat must be 0 or more") end
+  if beats <= 0 then bad("range.beats must be more than 0") end
+  number(from_beat + beats, "range end")
+  return { fromBeat = from_beat, beats = beats }
+end
+
+local function aligned(timeline, requested)
+  local function boundary(beat)
+    if math.abs(beat - timeline.beats) <= 1e-9 then return true end
+    local s, _, start = M.line_at(timeline, beat)
+    return s ~= nil and math.abs(beat - start) <= 1e-9
+  end
+  return boundary(requested.fromBeat) and boundary(requested.fromBeat + requested.beats)
+end
+
+local function stopped(song)
+  if song.rendering or song.transport.playing or song.transport.edit_mode then
+    fail("busy", "guarded listening requires stopped playback and rendering with Edit Mode off; nothing changed")
+  end
+end
+
+local function restricted_range(song, requested, cap, mark_of)
+  stopped(song)
+  local timeline = M.timeline(song, mark_of, true)
+  local range = M.plan_range(timeline, requested.fromBeat, requested.beats, 0)
+  if timeline.irregular or range.clipped or not aligned(timeline, requested) or range.offset > 0 then
+    bad("guarded listening requires regular timing and an unclipped range aligned at both line boundaries")
+  end
+  number(range.seconds, "render seconds")
+  if range.seconds <= 0 then bad("render duration must be positive") end
+  if range.seconds > cap then fail("stale", "the approved render exceeds maxSeconds; nothing changed") end
+  return timeline, range
+end
+
+-- A fixed, read-only snapshot: no job, folder preparation, room check or undo scope.
+function M.preflight(song, value, epoch, mark_of)
+  local requested = requested_range(value)
+  stopped(song)
+  local timeline = M.timeline(song, mark_of, true)
+  local range = M.plan_range(timeline, requested.fromBeat, requested.beats, 0)
+  local tracks = {}
+  for t = 1, rows.track_count(song) do
+    local track = song:track(t)
+    if track.type ~= MASTER() then
+      tracks[#tracks + 1] = { ref = refs.make(epoch, "track", t), mute = track.mute_state, solo = track.solo_state }
+    end
+  end
+  return {
+    schema = 1, seconds = number(range.seconds, "render seconds"), offset = number(range.offset, "render offset"),
+    aligned = aligned(timeline, requested), irregular = timeline.irregular == true, clipped = range.clipped == true,
+    render_state = { bpm = song.transport.bpm, lpb = song.transport.lpb, tracks = json.array(tracks) },
+  }
+end
+
+-- Read timing commands afresh at execution, including edits not yet seen by the bridge's pattern cache.
+function M.refresh_restricted(job, env, song)
+  if not job.max_seconds then return end
+  if env.document() ~= job.document or env.epoch() ~= job.epoch or env.layout() ~= job.layout then
+    fail("stale", "the song changed before guarded listening started; nothing changed")
+  end
+  local timeline, range = restricted_range(song, job.requested_range, job.max_seconds, nil)
+  if job.done > 0 and (range.seconds ~= job.range.seconds or range.start[1] ~= job.range.start[1]
+      or range.start[2] ~= job.range.start[2] or range["end"][1] ~= job.range["end"][1]
+      or range["end"][2] ~= job.range["end"][2]) then
+    fail("changed", "the render timing changed between guarded sources")
+  end
+  job.range, job.irregular = range, timeline.irregular
+  job.line_seconds = M.line_seconds(timeline, range.state.bpm, range.state.lpb)
+  job.tempo_expected = M.render_state(timeline, range["end"][1], range["end"][2])
+  for _, source in ipairs(job.sources) do
+    if not source.frames then source.seconds = range.seconds end
+  end
 end
 
 -- The sources asked for, checked: {id, what, track?, label?, id_of?}.
@@ -976,31 +1135,51 @@ local function plan(params, env, kind)
   local rate = params.sampleRate
   if rate == nil or rate == json.null then rate = M.DEFAULT_RATE end
   if not M.RATES[rate] then bad("sampleRate is 44100, 48000, 88200 or 96000") end
-  local folder, why = M.ensure_folder(env.cfg())
-  if not folder then fail("failed", why) end
-  local _, sep = M.folder(env.cfg())
+  local cap = params.maxSeconds
+  local deadline_ms
+  if cap ~= nil then
+    cap = number(cap, "maxSeconds")
+    if cap <= 0 or cap > 60 then bad("maxSeconds must be more than 0 and at most 60") end
+    if params.epoch ~= env.epoch() then fail("stale", "guarded listening needs the current epoch: read focus again") end
+    if params.range == nil then bad("maxSeconds needs range") end
+    stopped(song)
+    if params.deadlineUnixMs ~= nil then
+      local deadline_unix_ms = number(params.deadlineUnixMs, "deadlineUnixMs")
+      -- This private, additive field carries the host's existing native deadline, never a fresh allowance.
+      -- Translate os.time's conservative upper bound once; later wall-clock corrections must not change the budget.
+      local now = now_ms()
+      local remaining = deadline_unix_ms - (os.time() + 1) * 1000
+      if remaining <= 0 then fail("stale", "the approved native deadline expired before guarded listening started; nothing changed") end
+      deadline_ms = now + remaining
+    end
+  end
   local sources = params.sources
   if kind == "render" then sources = read_sources(song, env, params.sources) end
-  local timeline = M.timeline(song, env.pattern_mark)
-  local range
+  local timeline, range, requested
   if params.range then
-    local r = params.range
-    if type(r) ~= "table" then bad("range is {fromBeat, beats}") end
-    local from_beat, beats = number(r.fromBeat, "range.fromBeat"), number(r.beats, "range.beats")
-    if from_beat < 0 then bad("range.fromBeat must be 0 or more") end
-    if beats <= 0 then bad("range.beats must be more than 0") end
+    requested = requested_range(params.range)
     local pre_roll = params.preRollBeats
     if pre_roll == nil or pre_roll == json.null then pre_roll = 0 end
     pre_roll = number(pre_roll, "preRollBeats")
     if pre_roll < 0 then bad("preRollBeats must be 0 or more") end
-    range = M.plan_range(timeline, from_beat, beats, pre_roll)
+    if cap then
+      if pre_roll ~= 0 then bad("guarded listening requires zero preRollBeats") end
+      timeline, range = restricted_range(song, requested, cap, env.pattern_mark)
+    else
+      timeline = M.timeline(song, env.pattern_mark)
+      range = M.plan_range(timeline, requested.fromBeat, requested.beats, pre_roll)
+    end
   else
+    timeline = M.timeline(song, env.pattern_mark)
     range = params.planned
   end
   if range.seconds > M.MAX_SECONDS then
     bad(string.format("that is %d minutes of music; Kumi renders at most %d at a time", math.ceil(range.seconds / 60), M.MAX_SECONDS / 60))
   end
   M.check_room(params.freeBytes, range.seconds * rate * 8 * #sources * 1.5, "this render")
+  local folder, why = M.ensure_folder(env.cfg(), cap ~= nil)
+  if not folder then fail("failed", why) end
+  local _, sep = M.folder(env.cfg())
   for _, source in ipairs(sources) do
     source.file = folder .. sep .. job_id .. "-" .. source.id .. ".wav"
     if io.exists(source.file) then bad("a file of job " .. job_id .. " is in Kumi's folder already") end
@@ -1010,6 +1189,7 @@ local function plan(params, env, kind)
     id = job_id, kind = "render", state = "running", sources = sources, order = render_order(sources), range = range,
     rate = rate, epoch = env.epoch(), layout = env.layout(), document = env.document(), notes = {}, done = 0, others = {},
     irregular = timeline.irregular, line_seconds = M.line_seconds(timeline, range.state.bpm, range.state.lpb), started_ms = now_ms(),
+    requested_range = requested, max_seconds = cap, deadline_ms = deadline_ms,
   }
 end
 M.plan = plan
@@ -1017,6 +1197,8 @@ M.plan = plan
 -- Starts a planned job: the snapshot, then the first render, in this callback.
 function M.launch(job, env)
   local song = rows.the_song()
+  M.refresh_restricted(job, env, song)
+  if deadline_expired(job) then fail("stale", "the approved native deadline expired before guarded listening started; nothing changed") end
   if job.range.clipped then job.notes[#job.notes + 1] = "The song ends before the end of the part: the render stops there." end
   if job.irregular then job.notes[#job.notes + 1] = "The part has pattern breaks or delays (ZB, ZD), or the song keeps Renoise's old speed timing: its times are Renoise's." end
   if song.transport.playing then
@@ -1073,9 +1255,20 @@ function M.check(env)
     job.dead = true
     return finish(job, env, "failed", "stale", "the song was closed during the render")
   end
+  if job.deadline_ms and env.epoch() ~= job.epoch then
+    job.dead = true
+    return finish(job, env, "failed", "stale", "the epoch changed during the render")
+  end
+  if deadline_expired(job) then
+    job.dead = true
+    return finish(job, env, "failed", "tempo_restore_state_changed", "The approved native deadline expired before guarded restoration. Observe again.")
+  end
   if song.rendering then
     job.rendering.quiet_since = nil
     return
+  end
+  if job.rendering.completed then
+    return complete_render(job, env, job.rendering.completed)
   end
   local since = job.rendering.quiet_since
   if not since then
@@ -1114,6 +1307,7 @@ function M.status(params, env)
   if job.error then answer.error, answer.code = job.error, job.code end
   if #job.notes > 0 then answer.notes = json.array(job.notes) end
   if job.tempo then answer.tempo = job.tempo end
+  if job.max_seconds and ended(job) then answer.restored = job.tempo_restored end
   return answer
 end
 
@@ -1130,7 +1324,7 @@ function M.cancel(params, env)
   end
   job.dead = true
   finish(job, env, "cancelled")
-  return { jobId = job.id, state = "cancelled" }
+  return { jobId = job.id, state = job.deadline_ms and job.state or "cancelled" }
 end
 
 -- The tool is stopped or reloaded during a job: what it changed goes back now, its files go, and a render still in flight is
@@ -1147,6 +1341,7 @@ function M.song_closed(env)
   local job = M.active()
   if not job then return end
   job.dead = true
+  job.document_closed = job.deadline_ms ~= nil
   job.restored = true
   finish(job, env, "failed", "stale", "the song was closed during the render")
 end
@@ -1291,7 +1486,7 @@ function M.flags(cfg, audition)
   local folder = M.folder(cfg) ~= nil
   return {
     render = not demo and folder, capture = false, audition = not demo and folder and audition ~= false, grid = false,
-    scratch = folder, version = M.PROTOCOL,
+    scratch = folder, version = M.PROTOCOL, render_preflight = true,
   }
 end
 

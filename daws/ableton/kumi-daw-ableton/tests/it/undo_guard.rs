@@ -358,7 +358,8 @@ async fn live_on(set: &Rc<Set>, policy: HostPolicy, fast: bool) -> Rc<Ableton> {
 }
 
 fn plugin() -> HostPolicy {
-    HostPolicy::plugin(std::env::temp_dir().join("kumi-undo-guard-listen"))
+    let temporary = std::env::temp_dir();
+    HostPolicy::plugin(temporary.join("kumi-undo-guard-listen"), temporary.join("kumi-undo-guard-quarantine"))
 }
 
 /// Makes one change through the integration's plan: its id.

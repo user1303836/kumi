@@ -1211,7 +1211,7 @@ mod tests {
         let mut config = script.config(secret, "/lab/REAPER");
         config.discovery_dir = Some(paths.discovery());
         let _simulator = crate::simulator::Simulator::start(config).await.unwrap();
-        let host = crate::host::Host::new(daw_bridge::Daw::Reaper, home.path());
+        let host = crate::host::Host::new(daw_bridge::Daw::Reaper, home.path(), crate::host::ListeningMode::Standalone);
         for label in [json!(7), json!(""), json!("Warm\0pad"), json!("Warm\npad"), json!("Warm\u{7f}pad")] {
             let (begun, failed) = host.undo_step("undo_step_begin", &json!({"label":"Warm pad"})).await;
             assert!(!failed, "{begun}");

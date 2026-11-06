@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn advertised_policy_switches_are_accepted_independently_and_unlisted_keys_are_refused() {
-        let descriptor = super::super::mcp::tool_descriptor(&super::super::generate::GENERATE);
+        let descriptor = super::super::mcp::tool_descriptor(&super::super::generate::GENERATE, kumi_types::daw::DawId::Reaper);
         let keys: Vec<&str> =
             descriptor["_meta"]["kumi/ledger_policy_keys"].as_array().unwrap().iter().map(|key| key.as_str().unwrap()).collect();
         let fixture = Fixture::new();

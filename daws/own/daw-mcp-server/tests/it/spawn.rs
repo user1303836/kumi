@@ -171,7 +171,7 @@ impl Lab {
                 })
             },
         );
-        Host::new(Daw::Renoise, self.home.path()).with_spawn(spawn.with_times(times))
+        Host::new(Daw::Renoise, self.home.path(), daw_mcp_server::host::ListeningMode::Standalone).with_spawn(spawn.with_times(times))
     }
 
     fn discovery_files(&self) -> Vec<PathBuf> {
@@ -391,7 +391,7 @@ async fn a_bridge_program_that_ends_before_it_serves_is_quoted() {
     let home = tempfile::tempdir().unwrap();
     let (program, args) = this_test("spawn::a_bridge_that_ends_saying_why");
     let starts = Spawn::new(|| true, spawn::program(program, args)).with_times(Times { call: Duration::from_secs(20), ..Times::default() });
-    let host = Host::new(Daw::Renoise, home.path()).with_spawn(starts);
+    let host = Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone).with_spawn(starts);
     let status = host.status(&anyone()).await;
     assert_eq!(reason(&status), "Kumi's Renoise bridge ended before it served: Renoise is open without its control channel");
 }
@@ -468,7 +468,8 @@ async fn a_host_that_starts_its_bridge_and_waits() {
     let home = PathBuf::from(std::env::var_os("KUMI_SPAWN_TEST_HOME").unwrap());
     let (program, args) = this_test("spawn::a_bridge_that_serves_until_its_stdin_ends");
     let times = Times { call: Duration::from_secs(30), serve: Duration::from_secs(30), ..Times::default() };
-    let host = Host::new(Daw::Renoise, &home).with_spawn(Spawn::new(|| true, spawn::program(program, args)).with_times(times));
+    let host = Host::new(Daw::Renoise, &home, daw_mcp_server::host::ListeningMode::Standalone)
+        .with_spawn(Spawn::new(|| true, spawn::program(program, args)).with_times(times));
     let status = host.status(&anyone()).await;
     assert_eq!(status["connected"], true, "{status}");
     println!("\nthe host is connected");
