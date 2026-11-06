@@ -624,8 +624,10 @@ fn describe(names: &HashMap<String, String>, volumes: &HashMap<String, String>, 
     let mut targets = Vec::new();
     let mut settings = Vec::new();
     if let Value::Object(fields) = input {
-        // The fader this step's track had at the last look, when the look showed it.
-        let before = fields.values().filter_map(Value::as_str).find_map(|text| volumes.get(text));
+        // The fader this step's own track (its trackRef, or ref) had at the last look, when the look showed it: never
+        // another ref the step names (a return it sends to, say).
+        let before =
+            ["trackRef", "ref"].iter().find_map(|key| fields.get(*key).and_then(Value::as_str)).and_then(|track| volumes.get(track));
         for (field, value) in fields {
             match value {
                 Value::String(text) if target(names, text).is_some() => targets.extend(target(names, text)),
@@ -1372,6 +1374,12 @@ mod tests {
         assert_eq!(drums["text"], "Set mixer: volumeDb from -6.0 dB to -4 dB — on \"Drums\"");
         let bass = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "track:3", "volumeDb": -4}));
         assert_eq!(bass["text"], "Set mixer: volumeDb -4 — on \"Bass\"", "no fader in the look, no before value");
+        // A write moves the epoch on: the faders the last look showed no longer hold, so a second change before the next
+        // look says no before value rather than a stale one.
+        let link = crate::serve::connection::Link::new(0);
+        link.keep_volumes(volumes);
+        link.advance();
+        assert!(link.ref_volumes().is_empty());
     }
 
     #[test]

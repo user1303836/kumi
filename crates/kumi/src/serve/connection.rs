@@ -351,12 +351,14 @@ impl Link {
         self.epoch.get()
     }
 
-    /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
+    /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold, and neither do the faders
+    /// the last look showed, which a fader change's preview would otherwise say it changes from.
     pub fn advance(&self) {
         self.epoch.set(self.epoch.get() + 1);
         if let Some(project) = self.project.borrow_mut().as_mut() {
             project.epoch = self.epoch.get();
         }
+        self.ref_volumes.borrow_mut().clear();
     }
 
     /// The write's plan was made on `key` at `epoch`: refused unless that's the project and epoch now, the DAW answers,
