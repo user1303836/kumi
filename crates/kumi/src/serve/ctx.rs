@@ -373,6 +373,7 @@ pub struct Ctx {
     library: super::library::LibraryState,
     generation: super::generate::Generation,
     devices: super::device::Previews,
+    presets: super::device::Previews,
     snapshots: Snapshots,
     jobs: Jobs,
     shutdown: Signal,
@@ -443,6 +444,7 @@ impl Ctx {
             library: super::library::LibraryState::default(),
             generation: super::generate::Generation::default(),
             devices: super::device::Previews::default(),
+            presets: super::device::Previews::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(library_roots),
@@ -571,6 +573,11 @@ impl Ctx {
     /// The files this runtime's device previews named, by their spec's SHA-256: what a build writes.
     pub fn device_previews(&self) -> &super::device::Previews {
         &self.devices
+    }
+
+    /// The files this runtime's preset previews named, by the preset's digest: what a place writes (CC-26 26-r1).
+    pub fn preset_previews(&self) -> &super::device::Previews {
+        &self.presets
     }
 
     pub(crate) fn library_state(&self) -> &super::library::LibraryState {
