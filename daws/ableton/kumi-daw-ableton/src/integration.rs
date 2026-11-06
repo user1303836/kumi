@@ -790,7 +790,6 @@ impl Integration for Ableton {
             return Err(RuntimeError::plain("Background candidate planning isn't available in this session."));
         }
         let _held = self.rendering.hold(&signal).await?;
-        self.observer.observe(self, signal.clone(), None).await?;
         let prepared = self.candidate_variations.prepare_make(input, &signal).await.map_err(RuntimeError::plain)?;
         Ok(Rc::new(PreparedLiveCandidates { variations: self.candidate_variations.clone(), prepared }))
     }
