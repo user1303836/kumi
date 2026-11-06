@@ -31,7 +31,7 @@ use futures::{
     FutureExt,
 };
 use kumi_agent::{
-    core::{contracts::*, variations::tool::Variations},
+    core::{context::ListeningPolicy, contracts::*, variations::tool::Variations},
     integrations::shared::steps,
     mcp::allowed_tools::CallOptions,
 };
@@ -73,6 +73,35 @@ pub struct Ableton {
     made: Rc<RefCell<Made>>,
     /// Core's variations tool, with Live's backend: Session clips' takes.
     variations: Rc<dyn KernelTool>,
+    candidate_variations: Rc<Variations<LiveVariations>>,
+}
+
+struct PreparedLiveCandidates {
+    variations: Rc<Variations<LiveVariations>>,
+    prepared: kumi_agent::core::variations::tool::PreparedMake<LiveVariations>,
+}
+
+#[async_trait(?Send)]
+impl BackgroundTakes for PreparedLiveCandidates {
+    fn board_id(&self) -> &str {
+        &self.prepared.board_id
+    }
+    fn request_key(&self) -> &str {
+        &self.prepared.request_key
+    }
+    async fn run(&self, signal: Signal, progress: Rc<dyn Fn(&str)>) -> Result<ToolResult, RuntimeError> {
+        // The integration is not consulted after preparation: this path only draws and persists candidates.
+        Ok(match self.variations.run_prepared(&self.prepared, &signal, progress.as_ref()).await {
+            Ok(board) => ToolResult {
+                is_error: !board["stopped"].is_null(),
+                ..ToolResult::text(format!("Candidate board {}\n{}", self.prepared.board_id, stringify(&board)))
+            },
+            Err(why) => ToolResult::error(format!(
+                "Candidate board {} stopped: {why}; inspect that board before a new request.",
+                self.prepared.board_id
+            )),
+        })
+    }
 }
 pub fn create_ableton_integration(options: AbletonOptions) -> Rc<dyn Integration> {
     Ableton::new(options)
@@ -167,9 +196,9 @@ impl Ableton {
                 }),
             );
             let watch = Watch::new(mutations.clone());
-            let variations =
-                Variations::new(LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone()), kumi_home())
-                    .tool();
+            let candidate_variations =
+                Variations::new(LiveVariations::new(connection.clone(), mutations.clone(), history.clone(), observer.clone()), kumi_home());
+            let variations = candidate_variations.tool();
             Self {
                 weak: weak.clone(),
                 connection,
@@ -183,6 +212,7 @@ impl Ableton {
                 closing: RefCell::new(None),
                 made,
                 variations,
+                candidate_variations,
             }
         })
     }
@@ -742,7 +772,28 @@ impl Integration for Ableton {
         })]
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+        let _held = self.rendering.hold(&signal).await?;
         self.observer.observe(self, signal, hints).await
+    }
+    fn background_takes_schema(&self) -> Option<JsonObject> {
+        if !matches!(self.options.policy.listening, ListeningPolicy::Standalone) || !self.connection.has("live_discover") {
+            return None;
+        }
+        let mut schema = self.variations.input_schema();
+        let properties = schema.get_mut("properties")?.as_object_mut()?;
+        properties
+            .retain(|name, _| ["action", "source", "anchors", "count", "takes", "seed", "novelty", "minDistance"].contains(&name.as_str()));
+        properties.get_mut("action")?["enum"] = json!(["make"]);
+        Some(schema)
+    }
+    async fn prepare_background_takes(&self, input: JsonObject, signal: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+        if self.background_takes_schema().is_none() {
+            return Err(RuntimeError::plain("Background candidate planning isn't available in this session."));
+        }
+        let _held = self.rendering.hold(&signal).await?;
+        self.observer.observe(self, signal.clone(), None).await?;
+        let prepared = self.candidate_variations.prepare_make(input, &signal).await.map_err(RuntimeError::plain)?;
+        Ok(Rc::new(PreparedLiveCandidates { variations: self.candidate_variations.clone(), prepared }))
     }
     async fn reference_candidates(&self, _: Signal) -> Result<Vec<kumi_agent::core::references::Candidate>, RuntimeError> {
         // From the Set's model as the last look built it: no read of its own.

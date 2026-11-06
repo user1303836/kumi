@@ -49,6 +49,77 @@ pub static WORDS: Words = Words {
 /// Clips read for their names and notes at once (read_notes takes 16).
 const CLIPS_AT_ONCE: usize = 16;
 
+/// A notes-only digest cannot authorize a board apply. Unknown clip/envelope facts fail closed; this feature does
+/// not copy clip automation or groove processing into its new MIDI candidates.
+fn validate_source_authority(snapshot: &Value) -> Result<(), String> {
+    let known = [
+        "objectIdentity",
+        "name",
+        "kind",
+        "length",
+        "notes",
+        "notesRevision",
+        "muted",
+        "colorIndex",
+        "looping",
+        "loopStart",
+        "loopEnd",
+        "startMarker",
+        "endMarker",
+        "signatureNumerator",
+        "signatureDenominator",
+        "launchMode",
+        "launchQuantization",
+        "legato",
+        "velocityAmount",
+        "hasGroove",
+        "isRecording",
+        "isOverdubbing",
+        "hasEnvelopes",
+        "envelopesPresent",
+        "envelopesRevision",
+    ];
+    if known.iter().any(|field| snapshot.get(field).is_none_or(Value::is_null))
+        || !snapshot["objectIdentity"].as_str().is_some_and(|id| !id.is_empty())
+        || !["name", "kind", "notesRevision", "envelopesRevision"].iter().all(|field| snapshot[*field].is_string())
+        || !["muted", "looping", "legato"].iter().all(|field| snapshot[*field].is_boolean())
+        || ![
+            "length",
+            "loopStart",
+            "loopEnd",
+            "startMarker",
+            "endMarker",
+            "signatureNumerator",
+            "signatureDenominator",
+            "colorIndex",
+            "launchMode",
+            "launchQuantization",
+            "velocityAmount",
+        ]
+        .iter()
+        .all(|field| snapshot[*field].as_f64().is_some_and(f64::is_finite))
+        || snapshot["hasEnvelopes"] != false
+        || snapshot["envelopesPresent"] != 0
+        || snapshot["hasGroove"] != false
+        || !snapshot["groove"].is_null()
+        || snapshot["isRecording"] != false
+        || snapshot["isOverdubbing"] != false
+    {
+        return Err(
+            "Live cannot prove a complete, idle source clip without envelopes or groove processing; this board cannot be applied.".into()
+        );
+    }
+    let notes = snapshot["notes"].as_array().ok_or("The source note snapshot is unavailable.")?;
+    if notes.iter().any(|note| {
+        ["id", "pitch", "start", "duration", "velocity", "mute", "probability", "velocityDeviation", "releaseVelocity", "channel"]
+            .iter()
+            .any(|key| note.get(key).is_none_or(Value::is_null))
+    }) {
+        return Err("The source note snapshot omits expressive note state; this board cannot be applied.".into());
+    }
+    Ok(())
+}
+
 /// A take: the notes its clip plays (beats from the start of what it plays), how long that is, and the notes every take
 /// keeps (the anchors).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -79,6 +150,8 @@ pub struct LiveData {
     track_name: String,
     scene: u64,
     clip_name: String,
+    /// Native source authority captured for a candidate board. Old foreground sets have none.
+    authority: Option<Value>,
 }
 
 pub type LiveSet = TakeSet<Source<ClipTake, LiveData>, Value, ClipTake>;
@@ -236,6 +309,70 @@ impl LiveVariations {
         self.rows("track", json!({"fields": fields}), signal).await
     }
 
+    async fn source_authority(&self, data: &LiveData, signal: &Signal) -> Result<Value, String> {
+        signal.check().map_err(|error| error.to_string())?;
+        let sets = self.rows("set", json!({"fields":["objectIdentity"]}), signal).await?;
+        let set = sets
+            .first()
+            .and_then(|set| set.get("objectIdentity"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or("Live hasn't supplied the Set's native identity.")?;
+        let track = self.strict_track(data, signal).await?;
+        let reference = clip_at(&self.lengthen(&track), data.scene).ok_or("The source slot is unavailable.")?;
+        let fields = [
+            "objectIdentity",
+            "name",
+            "kind",
+            "length",
+            "notes",
+            "notesRevision",
+            "muted",
+            "colorIndex",
+            "looping",
+            "loopStart",
+            "loopEnd",
+            "startMarker",
+            "endMarker",
+            "signatureNumerator",
+            "signatureDenominator",
+            "launchMode",
+            "launchQuantization",
+            "legato",
+            "ramMode",
+            "velocityAmount",
+            "hasGroove",
+            "groove",
+            "isRecording",
+            "isOverdubbing",
+            "hasEnvelopes",
+            "envelopesPresent",
+            "envelopesRevision",
+        ];
+        let rows = self.rows("clip", json!({"parent":track,"filters":{"ref":reference},"fields":fields}), signal).await?;
+        let [row] = rows.as_slice() else {
+            return Err("The source clip is missing or ambiguous.".into());
+        };
+        let mut snapshot = Value::Object(row.clone());
+        validate_source_authority(&snapshot)?;
+        if let Some(row) = snapshot.as_object_mut() {
+            row.remove("ref");
+            row.remove("parentRef");
+        }
+        Ok(json!({"set":set,"track":data.track_id,"scene":data.scene,"clip":snapshot}))
+    }
+
+    async fn strict_track(&self, data: &LiveData, signal: &Signal) -> Result<String, String> {
+        let id =
+            data.track_id.as_deref().filter(|id| !id.is_empty()).ok_or("The source track has no stable Kumi identity; observe again.")?;
+        let tracks = self.tracks(signal).await?;
+        let matched: Vec<_> = tracks.iter().filter(|row| row.get("kumiTrack").and_then(Value::as_str) == Some(id)).collect();
+        let [track] = matched.as_slice() else {
+            return Err("The source track's identity is missing or ambiguous.".into());
+        };
+        track.get("ref").and_then(Value::as_str).map(str::to_owned).ok_or("The source track has no current reference.".into())
+    }
+
     /// One change by its kind's name: its id and what it answered (`ref`: what it made), or why it wasn't made and whether
     /// the request must stop there.
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
@@ -255,6 +392,9 @@ impl LiveVariations {
 
     /// The source's track now: by Kumi's own id, else its name (one track of that name): its short ref.
     async fn track_now(&self, data: &LiveData, signal: &Signal) -> Result<String, String> {
+        if data.authority.is_some() {
+            return self.strict_track(data, signal).await;
+        }
         let tracks = self.tracks(signal).await?;
         let by_id =
             data.track_id.as_deref().and_then(|id| tracks.iter().find(|row| row.get("kumiTrack").and_then(Value::as_str) == Some(id)));
@@ -357,8 +497,48 @@ impl VariationsBackend for LiveVariations {
             short: clip_name.clone(),
             key: format!("clip:{}:{scene}", track_id.clone().unwrap_or_else(|| track_name.clone())),
             material: Some(material),
-            data: LiveData { track, track_id, track_name, scene, clip_name },
+            data: LiveData { track, track_id, track_name, scene, clip_name, authority: None },
         })
+    }
+
+    async fn prepare_source(&self, input: &JsonObject, signal: &Signal) -> Result<Source<ClipTake, LiveData>, String> {
+        let mut source = self.source(input, signal).await?;
+        // Planning is still useful when a bridge cannot supply authority; only the later apply is refused.
+        source.data.authority = self.source_authority(&source.data, signal).await.ok();
+        if let Some(authority) = &source.data.authority {
+            let clip = &authority["clip"];
+            let material = take_of(
+                &json!({"notes":clip["notes"],"loop":{"looping":clip["looping"],"loopStart":clip["loopStart"],"loopEnd":clip["loopEnd"],"startMarker":clip["startMarker"],"endMarker":clip["endMarker"],"length":clip["length"]}}),
+            )?;
+            if source.material.as_ref().is_none_or(|captured| self.digest(captured) != self.digest(&material)) {
+                source.data.authority = None;
+            }
+        }
+        Ok(source)
+    }
+
+    async fn verify_source(&self, source: &Source<ClipTake, LiveData>, signal: &Signal) -> Result<(), String> {
+        let expected = source
+            .data
+            .authority
+            .as_ref()
+            .ok_or("This board has no complete native source authority. Observe and request a new board; nothing was applied.")?;
+        let current = self.source_authority(&source.data, signal).await?;
+        if &current != expected {
+            return Err("The source Set, track or clip changed since this board was requested. Observe and request a new board; no further candidate was applied.".into());
+        }
+        Ok(())
+    }
+
+    async fn write_candidate(
+        &self,
+        set: &LiveSet,
+        number: usize,
+        material: &ClipTake,
+        signal: &Signal,
+    ) -> Result<(String, Value, String), (String, bool)> {
+        self.verify_source(&set.source, signal).await.map_err(|why| (why, true))?;
+        self.write_new(set, number, material, signal).await
     }
 
     fn direction_ops(&self, _source: &Source<ClipTake, LiveData>, direction: &str) -> Vec<Value> {
@@ -424,6 +604,9 @@ impl VariationsBackend for LiveVariations {
         material: &ClipTake,
         signal: &Signal,
     ) -> Result<(String, Value, String), (String, bool)> {
+        if set.source.data.authority.is_some() {
+            self.verify_source(&set.source, signal).await.map_err(|why| (why, true))?;
+        }
         let name = names(number, &set.source.short)[0].clone();
         let mut track = self.track_now(&set.source.data, signal).await.map_err(|why| (why, true))?;
         // (the first slot below the source in a scene of its own; a scene at the end when none is free, named after the take)
@@ -438,6 +621,10 @@ impl VariationsBackend for LiveVariations {
             free = slots.last().filter(|(_, clip)| clip.is_none()).map(|(scene, _)| *scene);
         }
         let scene = free.ok_or(("Live made the scene, but its slot on the track isn't free".to_string(), true))?;
+        signal.check().map_err(|error| (error.to_string(), true))?;
+        if set.source.data.authority.is_some() {
+            self.verify_source(&set.source, signal).await.map_err(|why| (why, true))?;
+        }
         let input =
             json!({"trackRef": track, "sceneIndex": scene, "name": name, "length": round(material.length), "notes": notes_json(material)});
         let (id, answer) = self.change("write_midi_clip", input, signal).await?;
@@ -640,7 +827,7 @@ impl VariationsBackend for LiveVariations {
     }
 
     fn data_json(&self, data: &LiveData) -> Value {
-        json!({"track": data.track, "trackId": data.track_id, "trackName": data.track_name, "scene": data.scene, "clipName": data.clip_name})
+        json!({"track": data.track, "trackId": data.track_id, "trackName": data.track_name, "scene": data.scene, "clipName": data.clip_name,"authority":data.authority})
     }
 
     fn data_of(&self, value: &Value) -> Option<LiveData> {
@@ -650,6 +837,7 @@ impl VariationsBackend for LiveVariations {
             track_name: value.get("trackName")?.as_str()?.to_string(),
             scene: value.get("scene")?.as_u64()?,
             clip_name: value.get("clipName")?.as_str()?.to_string(),
+            authority: value.get("authority").filter(|authority| authority.is_object()).cloned(),
         })
     }
 }
@@ -657,6 +845,26 @@ impl VariationsBackend for LiveVariations {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_source_authority_rejects_unknown_envelopes_and_incomplete_note_state() {
+        let mut source = json!({"objectIdentity":"clip-id","name":"Source","kind":"midi","length":4,"notesRevision":"notes-hash",
+            "muted":false,"colorIndex":1,"looping":true,"loopStart":0,"loopEnd":4,"startMarker":0,"endMarker":4,
+            "signatureNumerator":4,"signatureDenominator":4,"launchMode":0,"launchQuantization":0,"legato":false,"velocityAmount":100,
+            "hasGroove":false,"groove":null,"isRecording":false,"isOverdubbing":false,"hasEnvelopes":false,"envelopesPresent":0,"envelopesRevision":"envelope-hash",
+            "notes":[{"id":1,"pitch":60,"start":0,"duration":1,"velocity":100,"channel":1,"mute":false,"probability":1,"velocityDeviation":0,"releaseVelocity":64}]});
+        assert!(validate_source_authority(&source).is_ok());
+        for field in ["objectIdentity", "muted", "loopStart", "launchMode", "hasEnvelopes", "envelopesPresent", "envelopesRevision"] {
+            let mut missing = source.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(validate_source_authority(&missing).is_err(), "missing {field} must not authorize apply");
+        }
+        source["hasEnvelopes"] = json!(true);
+        assert!(validate_source_authority(&source).is_err());
+        source["hasEnvelopes"] = json!(false);
+        source["notes"][0]["probability"] = Value::Null;
+        assert!(validate_source_authority(&source).is_err(), "notes-only material is insufficient source authority");
+    }
 
     fn clip(notes: Value, looped: Value) -> Value {
         json!({"clip": "clip:1", "name": "Arp", "notes": notes, "loop": looped})

@@ -276,7 +276,7 @@ impl Session {
         if self.0.jobs.is_none() {
             return vec![];
         }
-        vec![
+        let mut tools = vec![
             Rc::new(StartJobTool {
                 session: Rc::downgrade(&self.0),
                 description: if self.reads_only() {
@@ -287,7 +287,14 @@ impl Session {
                 schema: start_job_schema(&self.0.options.profile),
             }) as Rc<dyn KernelTool>,
             Rc::new(JobsTool { session: Rc::downgrade(&self.0) }),
-        ]
+        ];
+        if !self.reads_only() {
+            let schema = self.0.state.borrow().integration.as_ref().and_then(|integration| integration.background_takes_schema());
+            if let Some(schema) = schema {
+                tools.push(Rc::new(BackgroundTakesTool { session: Rc::downgrade(&self.0), schema }));
+            }
+        }
+        tools
     }
 
     /// The tools a job gets: its own copies of those away from the DAW, whose events are the job's.
@@ -358,6 +365,11 @@ impl Session {
             }
             JobKind::Tool => {
                 let Some(tool) = spec.tool.clone() else { return Err("Give a task for a worker, or a tool and its args.".into()) };
+                if tool == "background_takes" {
+                    return Err(
+                        "Take jobs aren't replayed: inspect their durable board, observe, then request new background_takes.".into()
+                    );
+                }
                 let names: Vec<String> = self.worker_tools(&JobHandle::detached()).iter().map(|t| t.name().to_string()).collect();
                 if !names.contains(&tool) {
                     return Err(format!("A job can't use {tool}: only tools away from the DAW, here {}.", names.join(", ")));
@@ -592,6 +604,90 @@ impl Session {
                 jobs.undeliver(*id);
             }
         }
+    }
+}
+
+/// Only the owning integration can prepare this typed job. It never appears in worker_tools and does not grant a
+/// generic worker DAW access. Preparing under the endpoint's tool call captures authority before the queue wait.
+struct BackgroundTakesTool {
+    session: std::rc::Weak<Inner>,
+    schema: JsonObject,
+}
+
+#[async_trait(?Send)]
+impl KernelTool for BackgroundTakesTool {
+    fn name(&self) -> &str {
+        "background_takes"
+    }
+    fn description(&self) -> &str {
+        "Generate a durable candidate board in the background from a read-only source snapshot: action make and the same source/recipes as variations. No DAW reads, writes, playback or audio capture occur after preparation. Use proactively when the producer asks for alternate takes; identical running requests share one job. Keep/drop selects or discards unwritten candidates locally. After review, variations action apply with the board id and explicit names writes those candidates in the foreground only if the source still matches. Jobs stop when Kumi quits; boards survive, and no native write is replayed on restart."
+    }
+    fn input_schema(&self) -> JsonObject {
+        self.schema.clone()
+    }
+    fn reach(&self) -> Reach {
+        Reach::DawWrite
+    }
+    async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let Some(inner) = self.session.upgrade() else { return Ok(ToolResult::error("Kumi is closing.")) };
+        let session = Session(inner);
+        if session.reads_only() {
+            return Ok(ToolResult::error("This session doesn't make takes in the DAW."));
+        }
+        let integration = session.0.state.borrow().integration.clone().ok_or_else(|| RuntimeError::plain("Observe the project first."))?;
+        let jobs = session.0.jobs.clone().ok_or_else(|| RuntimeError::plain("No background jobs here."))?;
+        let prepared = integration.prepare_background_takes(input.clone(), signal.clone()).await?;
+        signal.check()?;
+        let request_key = prepared.request_key();
+        if let Some(job) = jobs.list().into_iter().find(|job| {
+            job.state == JobState::Running
+                && jobs.spec(job.id).is_some_and(|spec| {
+                    spec.tool.as_deref() == Some("background_takes")
+                        && spec.args.as_ref().and_then(|args| args.get("_candidateRequestKey")).and_then(serde_json::Value::as_str)
+                            == Some(request_key)
+                })
+        }) {
+            return Ok(ToolResult::text(format!(
+                "Job {} is already generating those candidates from the same captured source; inspect that job instead of duplicating it.",
+                job.id
+            )));
+        }
+        if jobs.running() >= jobs.max() {
+            return Ok(ToolResult::error("The background jobs are full; wait for a job to finish."));
+        }
+        let board = prepared.board_id().to_owned();
+        let mut args = input;
+        args.insert("_candidateRequestKey".into(), serde_json::Value::String(request_key.into()));
+        let spec = JobSpec {
+            title: format!("Take board {}", board.chars().take(8).collect::<String>()),
+            task: None,
+            tool: Some("background_takes".into()),
+            args: Some(args),
+            when_done: WhenDone::Tell,
+            request: None,
+        };
+        let id = jobs
+            .start(spec, false, JOB_MS, move |handle| {
+                async move {
+                    let progress = {
+                        let handle = handle.clone();
+                        Rc::new(move |text: &str| handle.doing(text)) as Rc<dyn Fn(&str)>
+                    };
+                    handle.step_started("background_takes");
+                    let result = prepared.run(handle.signal(), progress).await;
+                    handle.step_ended(!result.as_ref().is_ok_and(|result| !result.is_error));
+                    let result = result?;
+                    Ok(JobOutcome {
+                        failed: result.is_error.then(|| first_line(&result.text)),
+                        report: result.text,
+                        whole: true,
+                        ..Default::default()
+                    })
+                }
+                .boxed_local()
+            })
+            .map_err(RuntimeError::plain)?;
+        Ok(ToolResult::text(format!("Job {id} is generating candidate board {board}, without changing or playing the DAW. Inspect its report, then explicitly apply named candidates in the foreground. Completed candidates stay on the board if the job stops.")))
     }
 }
 

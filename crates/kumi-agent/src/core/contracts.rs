@@ -572,6 +572,15 @@ pub struct UndoPreview {
     pub refusal: Option<UndoRefusal>,
 }
 
+/// One pure candidate request, captured read-only before queueing. Running generates and persists material only:
+/// it must never read, write, play or capture the DAW. Applying a board is a separate, explicit foreground tool call.
+#[async_trait(?Send)]
+pub trait BackgroundTakes {
+    fn board_id(&self) -> &str;
+    fn request_key(&self) -> &str;
+    async fn run(&self, signal: Signal, progress: Rc<dyn Fn(&str)>) -> Result<ToolResult, RuntimeError>;
+}
+
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.
 #[async_trait(?Send)]
 pub trait Integration {
@@ -609,6 +618,15 @@ pub trait Integration {
     /// Live's Browser to list it).
     fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {
         Vec::new()
+    }
+    /// Pure candidate planning after read-only source preparation, never a worker's DAW tool. Its input is the
+    /// integration's variations make schema; native audio and background writes are not implied.
+    fn background_takes_schema(&self) -> Option<JsonObject> {
+        None
+    }
+    async fn prepare_background_takes(&self, input: JsonObject, signal: Signal) -> Result<Rc<dyn BackgroundTakes>, RuntimeError> {
+        let _ = (input, signal);
+        Err(absent())
     }
     fn has_undo(&self) -> bool {
         self.profile().caps.undo

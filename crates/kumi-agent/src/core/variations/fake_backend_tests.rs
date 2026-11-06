@@ -59,6 +59,12 @@ struct Daw {
     undroppable: RefCell<BTreeMap<u64, Undroppable>>,
     /// Why Kumi can't tell a take that holds other than it was kept from an edited one (the DAW moves what Kumi writes).
     unsure: RefCell<Option<String>>,
+    source_revision: Cell<u64>,
+    source_reads: Cell<usize>,
+    project: RefCell<Option<String>>,
+    edit_after_write: Cell<bool>,
+    uncertain_write: Cell<bool>,
+    stale_board: RefCell<Option<std::path::PathBuf>>,
 }
 
 impl Daw {
@@ -110,15 +116,51 @@ impl VariationsBackend for Fake {
     }
 
     async fn project_key(&self, _: &Signal) -> Option<String> {
-        Some("song 1".into())
+        Some(self.0.project.borrow().clone().unwrap_or_else(|| "song 1".into()))
     }
 
     async fn source(&self, input: &JsonObject, _: &Signal) -> Result<Source<Steps, ()>, String> {
+        self.0.source_reads.set(self.0.source_reads.get() + 1);
         let source = input.get("source").cloned().unwrap_or(Value::Null);
         let material = source["steps"].as_array().map(|steps| Steps(steps.iter().map(|level| level.as_u64().unwrap_or(0) as u8).collect()));
         let name = source["name"].as_str().unwrap_or("Beat");
         let key = source["key"].as_str().map_or_else(|| name.to_lowercase(), str::to_owned);
         Ok(Source { label: format!("steps of “{name}”"), short: name.into(), key, material, data: () })
+    }
+
+    async fn prepare_source(&self, input: &JsonObject, signal: &Signal) -> Result<Source<Steps, ()>, String> {
+        let mut source = self.source(input, signal).await?;
+        source.key = format!("{}#{}", source.key, self.0.source_revision.get());
+        Ok(source)
+    }
+
+    async fn verify_source(&self, source: &Source<Steps, ()>, signal: &Signal) -> Result<(), String> {
+        signal.check().map_err(|error| error.to_string())?;
+        if let Some(path) = self.0.stale_board.borrow_mut().take() {
+            kumi_store::Connection::open(path).unwrap().execute("UPDATE board SET revision=revision+1 WHERE id=1", []).unwrap();
+        }
+        if !source.key.ends_with(&format!("#{}", self.0.source_revision.get())) {
+            return Err("The producer edited the source.".into());
+        }
+        Ok(())
+    }
+
+    async fn write_candidate(
+        &self,
+        set: &Set<Self>,
+        number: usize,
+        material: &Steps,
+        signal: &Signal,
+    ) -> Result<(String, Value, String), (String, bool)> {
+        self.verify_source(&set.source, signal).await.map_err(|why| (why, true))?;
+        let written = self.write_new(set, number, material, signal).await?;
+        if self.0.edit_after_write.get() {
+            self.0.source_revision.set(self.0.source_revision.get() + 1);
+        }
+        if self.0.uncertain_write.get() {
+            return Err(("Native reply was lost after writing.".into(), true));
+        }
+        Ok(written)
     }
 
     async fn key_now(&self, source: &Source<Steps, ()>, _: &Signal) -> Option<String> {
@@ -770,4 +812,181 @@ async fn a_take_that_cant_be_read_in_a_change_is_left_and_the_others_stay_told()
     daw.unreadable.set(None);
     let dropped = run(&tool, json!({"action": "drop"})).await.unwrap();
     assert_eq!(dropped["dropped"], json!(["V1", "V2", "V3", "V4"]), "none of them taken for edited: {dropped}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn background_candidates_are_pure_distinct_durable_and_identified_independently_of_the_track() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    run(&owner.tool(), json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":30,"listen":false})).await.unwrap();
+    let input = json!({"action":"make","source":{"steps":BEAT},"count":3,"seed":31}).as_object().unwrap().clone();
+    let prepared = owner.prepare_make(input.clone(), &Signal::new()).await.unwrap();
+    let duplicate = owner.prepare_make(input.clone(), &Signal::new()).await.unwrap();
+    assert_eq!(prepared.request_key, duplicate.request_key);
+    assert_ne!(prepared.board_id, duplicate.board_id);
+    let reads = daw.source_reads.get();
+    daw.source_revision.set(1); // The producer works while generation uses its captured material.
+    let newer = owner.prepare_make(input, &Signal::new()).await.unwrap();
+    assert_ne!(prepared.request_key, newer.request_key, "dedup includes source authority, not just tool args");
+    let reads = reads + 1;
+    let progress = RefCell::new(Vec::new());
+    let other_job = Cell::new(false);
+    let signal = Signal::new();
+    let report = |line: &str| progress.borrow_mut().push(line.to_owned());
+    let (made, ()) = tokio::join!(owner.run_prepared(&prepared, &signal, &report), async {
+        tokio::task::yield_now().await;
+        assert!(progress.borrow().len() < 3, "another job can run before planning ends");
+        other_job.set(true);
+    });
+    let made = made.unwrap();
+    assert!(other_job.get());
+    assert_eq!(progress.borrow().len(), 3);
+    assert_eq!(daw.source_reads.get(), reads, "the worker must never read the DAW");
+    assert_eq!((daw.changes.get(), daw.renders.get()), (1, 0), "planning adds no writes, playback or capture");
+    let takes = made["takes"].as_array().unwrap();
+    assert_eq!(takes.len(), 3);
+    assert_ne!(takes[0]["id"], takes[1]["id"]);
+    assert_ne!(takes[0]["digest"], takes[1]["digest"], "same-source candidates carry distinct material");
+    assert!(takes.iter().all(|take| take["state"] == "planned" && take["change"].is_null()));
+    assert!(made["audio"].is_null(), "no file or native listening proof is invented");
+    assert!(owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap_err().contains("already ran"));
+    drop(owner);
+    let listed = run(&kumi(&daw, home.path()), json!({"action":"list","board":prepared.board_id})).await.unwrap();
+    assert_eq!(listed, made, "immutable IDs and full candidate material survive a restart");
+    let more =
+        run(&kumi(&daw, home.path()), json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":36,"listen":false})).await.unwrap();
+    assert_eq!(more["takes"][0]["take"], "V5", "an existing foreground set must skip the board's reserved numbers");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_board_applies_only_named_fresh_candidates_and_stops_after_a_source_edit() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":3,"seed":32}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap();
+    let tool = owner.tool();
+    assert!(run(&tool, json!({"action":"apply","board":prepared.board_id,"names":["rest"]})).await.unwrap_err().contains("explicitly"));
+    daw.source_revision.set(1);
+    assert!(run(&tool, json!({"action":"apply","board":prepared.board_id,"names":["V1"]})).await.unwrap_err().contains("edited"));
+    assert_eq!(daw.changes.get(), 0);
+    daw.source_revision.set(0);
+    let cancelled = Signal::new();
+    cancelled.cancel();
+    let answer = tool
+        .execute(json!({"action":"apply","board":prepared.board_id,"names":["V1"]}).as_object().unwrap().clone(), cancelled)
+        .await
+        .unwrap();
+    assert!(answer.is_error);
+    assert_eq!(daw.changes.get(), 0, "cancelled foreground apply cannot start a native write");
+    daw.edit_after_write.set(true);
+    let stopped = run(&tool, json!({"action":"apply","board":prepared.board_id,"names":["V1","V2","V3"]})).await.unwrap_err();
+    let stopped: Value = serde_json::from_str(&stopped).unwrap();
+    assert!(stopped["stopped"].as_str().unwrap().contains("before V2"));
+    assert_eq!(stopped["takes"][0]["state"], "applied");
+    assert_eq!(stopped["takes"][1]["state"], "planned");
+    assert_eq!(stopped["takes"][2]["state"], "planned");
+    assert_eq!(daw.changes.get(), 1, "later candidates never reach the DAW");
+    assert!(run(&tool, json!({"action":"drop","board":prepared.board_id,"names":["V1"]}))
+        .await
+        .unwrap_err()
+        .contains("never replayed or deleted"));
+    assert_eq!(daw.changes.get(), 1);
+    let listed = run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap();
+    assert_eq!(listed, stopped, "inspection preserves the truthful partial result");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_board_never_replays_an_uncertain_or_crash_interrupted_apply() {
+    use sha2::{Digest, Sha256};
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":2,"seed":33}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap();
+    daw.uncertain_write.set(true);
+    let error = run(&owner.tool(), json!({"action":"apply","board":prepared.board_id,"names":["V1","V2"]})).await.unwrap_err();
+    assert!(error.contains("Native reply was lost"));
+    assert_eq!(daw.changes.get(), 1, "an uncertain write is never retried");
+    drop(owner);
+    let path = home
+        .path()
+        .join("variations/boards/fake")
+        .join(hex::encode(Sha256::digest(b"song 1")))
+        .join(format!("{}.sqlite3", prepared.board_id));
+    let db = kumi_store::Connection::open(&path).unwrap();
+    let payload: String = db.query_row("SELECT payload FROM board WHERE id=1", [], |row| row.get(0)).unwrap();
+    let mut saved: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(saved["states"]["1"], "unsure");
+    saved["states"]["2"] = json!("applying"); // Crash after the durable pending marker, before any reply.
+    db.execute("UPDATE board SET payload=?1,revision=revision+1 WHERE id=1", kumi_store::params![saved.to_string()]).unwrap();
+    drop(db);
+    let again = kumi(&daw, home.path());
+    let listed = run(&again, json!({"action":"list","board":prepared.board_id})).await.unwrap();
+    assert!(listed["takes"].as_array().unwrap().iter().all(|take| take["state"] == "unsure"));
+    for name in ["V1", "V2"] {
+        assert!(run(&again, json!({"action":"apply","board":prepared.board_id,"names":[name]}))
+            .await
+            .unwrap_err()
+            .contains("never replayed"));
+    }
+    assert_eq!(daw.changes.get(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_planning_keeps_completed_candidates_without_any_native_work() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":3,"seed":34}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    let signal = Signal::new();
+    let made = owner.run_prepared(&prepared, &signal, &|_| signal.cancel()).await.unwrap();
+    assert_eq!(made["takes"].as_array().unwrap().len(), 1);
+    assert!(made["stopped"].as_str().unwrap().contains("no DAW writes"));
+    assert_eq!((daw.changes.get(), daw.renders.get()), (0, 0));
+    let tool = owner.tool();
+    let kept = run(&tool, json!({"action":"keep","board":prepared.board_id,"names":["V1"]})).await.unwrap();
+    assert_eq!(kept["takes"][0]["state"], "kept");
+    let dropped = run(&tool, json!({"action":"drop","board":prepared.board_id,"names":["V1"]})).await.unwrap();
+    assert_eq!(dropped["takes"][0]["state"], "dropped");
+    assert_eq!(daw.changes.get(), 0, "selection/discard only changes the local board");
+    *daw.project.borrow_mut() = Some("song 2".into());
+    assert!(run(&tool, json!({"action":"list","board":prepared.board_id})).await.unwrap_err().contains("isn't in this project"));
+    assert!(run(&tool, json!({"action":"apply","board":prepared.board_id,"names":["V1"]}))
+        .await
+        .unwrap_err()
+        .contains("isn't in this project"));
+    assert_eq!(daw.changes.get(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stale_board_writer_cannot_replace_the_durable_pending_marker() {
+    use sha2::{Digest, Sha256};
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let owner = Variations::new(Fake(daw.clone()), home.path().into());
+    let prepared = owner
+        .prepare_make(json!({"action":"make","source":{"steps":BEAT},"count":1,"seed":35}).as_object().unwrap().clone(), &Signal::new())
+        .await
+        .unwrap();
+    owner.run_prepared(&prepared, &Signal::new(), &|_| {}).await.unwrap();
+    let path = home
+        .path()
+        .join("variations/boards/fake")
+        .join(hex::encode(Sha256::digest(b"song 1")))
+        .join(format!("{}.sqlite3", prepared.board_id));
+    *daw.stale_board.borrow_mut() = Some(path);
+    let error = run(&owner.tool(), json!({"action":"apply","board":prepared.board_id,"names":["V1"]})).await.unwrap_err();
+    assert!(error.contains("board changed"), "{error}");
+    assert_eq!(daw.changes.get(), 0, "the pending CAS must commit before a native write");
 }

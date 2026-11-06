@@ -18,6 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+mod boards;
+pub use boards::PreparedMake;
+
 /// The most takes one request makes or changes, and the sets Kumi keeps for a project.
 const MOST_TAKES: usize = 16;
 const SETS_KEPT: usize = 8;
@@ -45,6 +48,7 @@ pub struct Variations<B: VariationsBackend> {
     loaded: RefCell<Option<String>>,
     description: String,
     schema: JsonObject,
+    busy: tokio::sync::Mutex<()>,
 }
 
 impl<B: VariationsBackend + 'static> Variations<B> {
@@ -58,6 +62,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             sets: RefCell::default(),
             numbered: RefCell::default(),
             loaded: RefCell::default(),
+            busy: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -66,10 +71,14 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     }
 
     async fn run(&self, input: JsonObject, signal: Signal) -> Result<Value, String> {
+        let _held = self.busy.lock().await;
         let action = input.get("action").and_then(Value::as_str).unwrap_or("");
         // (the project's sets, as Kumi kept them: a restart of Kumi forgets nothing kept)
         let project = self.backend.project_key(&signal).await;
         self.load(project.as_deref());
+        if input.contains_key("board") {
+            return self.board_action(&input, &signal).await;
+        }
         let answer = match action {
             "make" => self.make(&input, &signal).await,
             "change" => self.change(&input, &signal).await,
@@ -79,7 +88,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             "list" => return self.list(&input),
             _ => return Err(format!("action is {}", actions(self.backend.words()).join(", "))),
         };
-        self.save();
+        self.save()?;
         answer
     }
 
@@ -124,17 +133,16 @@ impl<B: VariationsBackend + 'static> Variations<B> {
     }
 
     /// The project's sets in Kumi's folder, written whole and then moved into place.
-    fn save(&self) {
-        let Some(project) = self.loaded.borrow().clone() else { return };
+    fn save(&self) -> Result<(), String> {
+        let Some(project) = self.loaded.borrow().clone() else { return Ok(()) };
         let path = self.store_path(&project);
         let text = stringify(&self.json_of());
         if let Some(folder) = path.parent() {
-            let _ = std::fs::create_dir_all(folder);
+            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         }
         let partial = path.with_extension("json.partial");
-        if std::fs::write(&partial, text).is_ok() {
-            let _ = std::fs::rename(&partial, &path);
-        }
+        std::fs::write(&partial, text).map_err(|error| error.to_string())?;
+        std::fs::rename(&partial, &path).map_err(|error| error.to_string())
     }
 
     fn json_of(&self) -> Value {
@@ -240,6 +248,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 Some(mut set) => {
                     // (the source as it is now, its lines, anchors and settings; its takes and their places stay)
                     set.source = source;
+                    set.floor = set.floor.max(self.numbered.borrow().get(&set.source.short).copied().unwrap_or(0));
                     (set, true)
                 }
                 None => {
@@ -914,7 +923,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
 }
 
 fn actions(words: &Words) -> Vec<&'static str> {
-    let mut actions = vec!["make", "change", "keep", "drop", "list"];
+    let mut actions = vec!["make", "change", "keep", "drop", "list", "apply"];
     if words.extract.is_some() {
         actions.push("extract");
     }
@@ -955,7 +964,7 @@ Kumi wrote it, one named goes all the same. list: the set's takes.",
         text.push_str(" extract: ");
         text.push_str(extract);
     }
-    text.push(' ');
+    text.push_str(" Background candidate boards are separate: board names an immutable id. list inspects candidates; keep/drop select or discard unwritten candidates locally. apply writes only explicitly named planned/kept candidates in the foreground after fresh source validation. Applied/uncertain candidates are never replayed or automatically deleted; no board audio is implied. ");
     text.push_str(words.idioms);
     text
 }
@@ -966,6 +975,7 @@ pub fn schema(words: &Words) -> JsonObject {
     let value = json!({"type": "object", "additionalProperties": false, "required": ["action"], "properties": {
         "action": {"type": "string", "enum": actions(words)},
         "set": {"type": ["integer", "string"], "description": "Which set of takes: its number, or its source's name (the latest by default)"},
+        "board": {"type":"string","description":"Immutable background candidate board id; list, keep/drop locally, or explicitly apply named candidates in the foreground"},
         "source": part(words.source_schema),
         "anchors": {"type": "array", "maxItems": 512, "items": {"type": "integer", "minimum": 0}, "description": words.anchors},
         "place": {"type": "string", "enum": words.place_names},
@@ -1139,8 +1149,12 @@ impl<B: VariationsBackend + 'static> KernelTool for VariationsTool<B> {
     }
 
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let applying = input.get("action").and_then(Value::as_str) == Some("apply");
         Ok(match self.owner.run(input, signal).await {
-            Ok(answer) => ToolResult::text(stringify(&answer)),
+            Ok(answer) => ToolResult {
+                is_error: applying && answer.get("stopped").is_some_and(|reason| !reason.is_null()),
+                ..ToolResult::text(stringify(&answer))
+            },
             Err(why) => ToolResult::error(why),
         })
     }
