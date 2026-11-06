@@ -10,13 +10,16 @@ use kumi_library::plugins::{
         Edit, WriteOptions,
     },
 };
+use kumi_types::daw::DawId;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+pub(super) const LIVE_ONLY: &str = "Plug-in presets are Live-only for now: Kumi builds and places them only in Ableton Live.";
+
 pub static PRESET_BUILD: Operation = Operation {
     name: "preset_build",
-    description: "Build a private preset artifact from a verified initialized Serum 2, Pro-Q 4 or Ozone 12 template and typed edits. Reads installed VST3 version metadata in standard plug-in folders without executing a plug-in. No input file, bytes, download or requested-version override. This does not place a file in the User Library or change the DAW; those are separate approved steps. Values are stored preset values, not necessarily the plug-in's displayed units.",
+    description: "Build a private preset artifact for Ableton Live from a verified initialized Serum 2, Pro-Q 4 or Ozone 12 template and typed edits. Reads installed VST3 version metadata in standard plug-in folders without executing a plug-in. No input file, bytes, download or requested-version override. This does not place a file in the User Library or change the DAW; those are separate approved steps. Values are stored preset values, not necessarily the plug-in's displayed units. Generated presets are Live-only for now.",
     schema,
     effect: |_| Effect::Read,
     run,
@@ -51,6 +54,9 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 }
 
 async fn build(ctx: &Ctx, call: Call, roots: Vec<PathBuf>) -> Result<Value, OpError> {
+    if ctx.daw() != DawId::Ableton {
+        return Err(refused("unsupported", LIVE_ONLY));
+    }
     let request = serde_json::from_value(Value::Object(call.args)).map_err(|_| OpError::Invalid {
         reason: "Use plugin, name and typed edits from the plug-in catalog; no file, bytes or version override.".into(),
     })?;
@@ -117,7 +123,7 @@ mod tests {
         ctx::{Host, Progress},
         Args,
     };
-    use kumi_types::{daw::DawId, system::Env};
+    use kumi_types::system::Env;
     use std::{collections::BTreeMap, rc::Rc};
 
     struct Fixture {
@@ -126,7 +132,7 @@ mod tests {
         _dir: tempfile::TempDir,
     }
     impl Fixture {
-        fn new() -> Self {
+        fn new(daw: DawId) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path().join("VST3");
             std::fs::create_dir(&root).unwrap();
@@ -136,7 +142,7 @@ mod tests {
                     kumi_home: dir.path().join("home"),
                     hermes_home: None,
                     hermes_root: None,
-                    daw: DawId::Ableton,
+                    daw,
                     library_roots: vec![],
                     media_roots: vec![],
                     tools: BTreeMap::new(),
@@ -180,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_installed_verified_version_builds_a_private_receipt_without_a_daw() {
-        let fixture = Fixture::new();
+        let fixture = Fixture::new(DawId::Ableton);
         let version = &structure::builtin("serum-2").unwrap().verified.writes[0].version;
         fixture.installed(version);
         let result = fixture.call(request(), Signal::new()).await.unwrap();
@@ -198,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_unknown_and_model_asserted_versions_never_publish_a_preset() {
-        let fixture = Fixture::new();
+        let fixture = Fixture::new(DawId::Ableton);
         assert_eq!(fixture.call(request(), Signal::new()).await.unwrap_err().code(), "not_installed");
         fixture.installed("999.0");
         assert_eq!(fixture.call(request(), Signal::new()).await.unwrap_err().code(), "unverified_version");
@@ -210,7 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_and_unverified_controls_leave_no_artifact() {
-        let fixture = Fixture::new();
+        let fixture = Fixture::new(DawId::Ableton);
         fixture.installed(&structure::builtin("serum-2").unwrap().verified.writes[0].version);
         let signal = Signal::new();
         signal.cancel();
@@ -220,5 +226,15 @@ mod tests {
         invalid["edits"][0]["value"] = json!("file:///outside/sample.wav");
         assert_eq!(fixture.call(invalid, Signal::new()).await.unwrap_err().code(), "invalid_preset");
         assert_eq!(std::fs::read_dir(fixture.ctx.paths().state_dir.join("artifacts")).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn other_daws_refuse_before_inventory_lookup_or_artifact_publication() {
+        for daw in [DawId::Reaper, DawId::Renoise] {
+            let fixture = Fixture::new(daw);
+            // No installed version exists: this must refuse the DAW, not start discovery and report not_installed.
+            assert_eq!(fixture.call(request(), Signal::new()).await.unwrap_err().code(), "unsupported");
+            assert_eq!(std::fs::read_dir(fixture.ctx.paths().state_dir.join("artifacts")).unwrap().count(), 0);
+        }
     }
 }
