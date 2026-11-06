@@ -147,7 +147,9 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         };
         let refs = connection::refs(&connection, call.signal.clone()).await;
         ctx.link().keep_refs(&refs, names);
-        ctx.link().keep_volumes(volumes);
+        // A step may name a track by its `refs` entry (Live's long ref) as well as by the look's: either finds its fader.
+        let short = |reference: &str| connection.integration.model_ref(reference);
+        ctx.link().keep_volumes(connection::volumes_by_refs_too(volumes, &refs, &short));
         connection::publish_focus(&ctx.handle());
         publish_status(ctx, false).await;
         Ok(json!({

@@ -778,6 +778,12 @@ pub trait Integration {
     fn model_focus(&self, focus: &DawFocus) -> DawFocus {
         focus.clone()
     }
+    /// A ref as the look names it: Live's long ref (`E:track:6`) by the short name this turn's look gave it (`track:7`), so
+    /// what the look showed of it is found by either. A ref the look never named, or a DAW whose refs are the ones its
+    /// steps take, stays as it is.
+    fn model_ref(&self, reference: &str) -> String {
+        reference.to_string()
+    }
     /// A body for FOCUS, read by the DAW; None when it can't say. Live's integration reads its views.
     async fn focus_body(&self, request: &BodyRequest, signal: Signal) -> Result<Option<FocusBody>, RuntimeError> {
         Ok(match request {

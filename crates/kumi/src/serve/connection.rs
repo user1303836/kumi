@@ -75,6 +75,23 @@ pub(super) fn look_volumes(context: &JsonObject) -> HashMap<String, String> {
     volumes
 }
 
+/// The look's faders found by the refs a model may also name them by: a ref candidate's (`refs`, Live's long ref
+/// `E:track:N`, as the plugin's steps take it) gets the fader of the look's row it is (`short`: the name the look gave it).
+/// Without this a fader change by a long ref said no before value, though its name was found (row 12 on 1.24.72).
+pub(super) fn volumes_by_refs_too(
+    mut volumes: HashMap<String, String>,
+    refs: &[Value],
+    short: &dyn Fn(&str) -> String,
+) -> HashMap<String, String> {
+    for candidate in refs {
+        let Some(reference) = candidate["reference"]["node"]["ref"].as_str() else { continue };
+        if let Some(volume) = volumes.get(&short(reference)).cloned() {
+            volumes.entry(reference.to_string()).or_insert(volume);
+        }
+    }
+    volumes
+}
+
 /// The project as the runtime last saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
