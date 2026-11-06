@@ -430,7 +430,7 @@ KUMI_PRESET_BUILD = _tool(
     "control paths, with values as the preset file stores them. Kumi keeps the result as a private copy and changes "
     "nothing in Live or the User Library; it answers each setting before and after, and an artifact_id for "
     "kumi_preset, which the producer approves. A plug-in that isn't installed, or whose installed version Kumi hasn't "
-    "verified, is refused.",
+    "verified, is refused. Live only for now.",
     {"plugin": {"type": "string", "enum": PRESET_PLUGINS},
      "class": {"type": "string", "pattern": "^[0-9A-Fa-f]{32}$",
                "description": "The catalog's VST3 processor class; left out, the product's initialized default."},

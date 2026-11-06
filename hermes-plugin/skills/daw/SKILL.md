@@ -258,7 +258,7 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Move it only if it belongs elsewhere** ("before the Saturator"): observe again, then a second `kumi_change` with `move_device` alone. Kumi can't undo a move on Live: only Live's own Undo takes it back, and its approval and HISTORY row say so.
 
 ## Presets (Live)
-- **For a plug-in's patch as a whole** (Serum 2, Pro-Q 4, Ozone 12), when setting the instance's parameters one at a time doesn't fit: three steps, the last two each approved.
+- **For a plug-in's patch as a whole** (Serum 2, Pro-Q 4, Ozone 12), when setting the instance's parameters one at a time doesn't fit: three steps, the last two each approved. Live only for now: in REAPER and Renoise, Kumi builds no presets (their own named presets still load as before).
 - **Build it with `kumi_preset_build`:** read `kumi_plugin_knowledge` first and edit only its writable control paths: `{plugin, name, edits: [{path, value}]}`. It changes nothing in Live or the User Library: Kumi keeps a private copy and answers each setting before and after, and an `artifact_id`. A plug-in that isn't installed, or whose installed version Kumi hasn't verified, is refused: say so, never guess a version.
 - **Values are what the file stores:** report them with the unit the answer gives ("stored value" when there's no proven unit), never as a percentage or a unit it didn't give. A setting the template didn't store says so.
 - **Then put it in the User Library with `kumi_preset {artifact_id}`:** the producer approves the new `.vstpreset` file in the Kumi folder, reading every setting. The file stays after an undo.

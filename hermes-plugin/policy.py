@@ -232,7 +232,7 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
     if tool == "kumi_device":
         return _device(host, args, kwargs)
     if tool == "kumi_preset_build":  # Kumi's private copy only: the producer approves at kumi_preset (26-w1)
-        return None, {}
+        return (block(PRESET_BUILD_ONLY_LIVE) if host.daw() != "ableton" else None), {}
     if tool == "kumi_preset":
         return _preset(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
@@ -1095,6 +1095,9 @@ def _device_message(spec: dict, facts: dict, surface: str) -> str | None:
 # file's digest (26-w3). No code class: it's a verified writer's output (26c). The file stays after an undo (26e).
 PRESET = "Kumi didn't put the preset in your User Library: "
 PRESET_ONLY_LIVE = PRESET + "Kumi puts plug-in presets only into Ableton Live's User Library."
+# The owner's call for the hackathon: presets are Live's only for now, so a build elsewhere would make nothing it
+# could place.
+PRESET_BUILD_ONLY_LIVE = "Kumi didn't build the preset: Kumi builds plug-in presets only for Ableton Live for now."
 PRESET_WARNING = "Writes a new preset file into your User Library (Kumi folder). It stays there after an undo."
 PRESET_VALUES = "Values as the preset file stores them; the plug-in may show them differently."
 PRESET_UNEDITED = "• No settings changed: Kumi's initialized template as it is."

@@ -118,6 +118,11 @@ class Presets(unittest.TestCase):
         self.use(daw="renoise")
         self.assertEqual(self.hook(), policy.block(policy.PRESET_ONLY_LIVE))
         self.assertEqual(self.sent("preview"), [])
+        build = {"plugin": "serum-2", "name": "Night Bass", "edits": []}
+        self.assertEqual(support.call(self.host, "kumi_preset_build", build, session_id="s1"),
+                         {"blocked": policy.PRESET_BUILD_ONLY_LIVE}, "presets are Live's only for now")
+        self.assertEqual([m for m in support.requests(self.data / "state")
+                          if m.get("params", {}).get("name") == "preset_build"], [], "and nothing is built")
 
 
 if __name__ == "__main__":
