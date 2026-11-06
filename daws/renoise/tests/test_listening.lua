@@ -1091,7 +1091,7 @@ end)
 -- Exercise the real plan/launch boundary without the bridge dispatch running launch immediately after plan.
 local function queued_plan(peer, range, cap, deadline)
   local listening = T.load_payload_module("listening")
-  local state = { pulse = 0 }
+  local state = {}
   listening.init(state)
   local epoch, layout = place(peer)
   local env = {
@@ -1099,7 +1099,6 @@ local function queued_plan(peer, range, cap, deadline)
     epoch = function() return epoch end, layout = function() return layout end,
     document = function() return bridge().document end,
     busy = function() return nil end, quiet = function(fn) return fn() end,
-    pulse = function() return state.pulse end,
     shifted = function(t) return t end,
     -- Deliberately stale: actual launch must not trust a cached pattern mark.
     pattern_mark = function() return 1 end,
@@ -1371,7 +1370,7 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
       start_line = 2, end_line = 5, start_track = 2, end_track = 3, start_column = 1, end_column = 2,
     }
     local focus_before = result(call(peer, "focus"))
-    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     local before = states()
     listening.launch(job, env)
@@ -1412,18 +1411,36 @@ test("listening: guarded callback waits for stopped idle before restoring on eve
     eq(mock.api_writes, writes, "waiting never repeats the cursor write")
     eq(mock.data.transport_fields.bpm, 60, "tempo restoration waits for the cursor's delayed seek")
     eq(mock.data.transport_fields.lpb, 8)
-    mock.finish_edit_position(60, 8)
+    mock.finish_edit_position(120, 4)
+    listening.check(env, true) -- First actual app_idle with the launch cursor.
+    -- Native row23: the seek's tempo chase can land after that first idle read.
+    mock.data.transport_fields.bpm, mock.data.transport_fields.lpb = 60, 8
+    writes = mock.api_writes
+    listening.check(env) -- A timer/request callback is not another app_idle.
     local settling = listening.status({ jobId = job.id }, env)
-    eq(settling.state, "running", "tempo restoration waits for a later native pulse")
+    eq(settling.state, "running", "the late seek chase precedes final tempo restoration")
     eq(settling.files, nil)
     eq(settling.restored, nil)
+    eq(mock.api_writes, writes, "only a real app_idle can advance cursor settlement")
+    eq(mock.data.transport_fields.bpm, 60)
+    eq(mock.data.transport_fields.lpb, 8)
+    listening.check(env, true) -- Cursor held on a second idle; restore tempo once.
+    eq(listening.status({ jobId = job.id }, env).state, "running")
+    eq(mock.data.transport_fields.bpm, 120)
+    eq(mock.data.transport_fields.lpb, 4)
     writes = mock.api_writes
-    eq(listening.status({ jobId = job.id }, env).state, "running", "another request in this callback is not a pulse")
-    state.pulse = state.pulse + 1
+    listening.check(env, true) -- First read-only idle after the final write.
+    settling = listening.status({ jobId = job.id }, env)
+    eq(settling.state, "running", "one post-write idle is not enough to rule out late chase")
+    eq(settling.files, nil)
+    eq(settling.restored, nil)
+    listening.check(env)
+    eq(listening.status({ jobId = job.id }, env).state, "running", "requests cannot count as idle verification")
+    listening.check(env, true) -- Second consecutive read-only idle.
     local done = listening.status({ jobId = job.id }, env)
     eq(done.state, outcome == "done" and "done" or outcome == "cancelled" and "cancelled" or "failed", outcome)
     eq(done.restored, true, outcome)
-    eq(mock.api_writes, writes, "the settling pulse only reads")
+    eq(mock.api_writes, writes, "both settling idles only read")
     eq(mock.data.transport_fields.bpm, 120)
     eq(mock.data.transport_fields.lpb, 4)
     eq(states(), before, "mute/solo restoration waits for the same stopped pulse")
@@ -1530,6 +1547,10 @@ test("listening: guarded cursor write and readback failures publish no audio", f
       mock.finish_edit_position(60, 8)
       listening.check(env)
       eq(mock.api_writes, writes, "late native settling cannot revive cleanup")
+    elseif fault == "selection" then
+      listening.check(env)
+      listening.check(env, true)
+      listening.check(env, true)
     end
     local failed = listening.status({ jobId = job.id }, env)
     eq(failed.state, "failed", fault)
@@ -1552,7 +1573,7 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
     tf.follow_player = true
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
-    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     listening.launch(job, env)
     mock.finish_render()
@@ -1574,7 +1595,7 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
     local done = listening.status({ jobId = job.id }, env)
     if not aborting then
       eq(done.state, "running")
-      state.pulse = state.pulse + 1
+      for _ = 1, 4 do listening.check(env, true) end
       done = listening.status({ jobId = job.id }, env)
     end
     eq(done.state, aborting and "failed" or "cancelled")
@@ -1591,14 +1612,14 @@ test("listening: cancellation waits for cursor readback but tool abort finishes 
 end)
 
 test("listening: a settling pulse refuses late tempo, cursor or selection drift without repairing it", function()
-  for _, changed in ipairs({ "tempo", "producer", "cursor", "selection", "deadline", "abort" }) do
+  for _, changed in ipairs({ "tempo", "tempo-next-idle", "producer", "cursor", "selection", "deadline", "abort" }) do
     local setup_env, peer = setup()
     local song, tf = mock.data.song, mock.data.transport_fields
     song.transport.edit_pos = renoise.SongPos(3, 7)
     tf.follow_player = true
     mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
     mock.ops.set_effect(1, 2, 1, 1, timing_command("ZL"), 8)
-    local listening, job, env, state = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60, (os.time() + 60) * 1000)
     env.before_render = nil
     listening.launch(job, env)
     mock.finish_render()
@@ -1606,10 +1627,16 @@ test("listening: a settling pulse refuses late tempo, cursor or selection drift 
     eq(pending.state, "running")
     eq(pending.restored, nil)
     eq(pending.files, nil)
+    listening.check(env, true)
+    listening.check(env, true)
     eq(tf.bpm, 120)
     eq(tf.lpb, 4)
+    if changed == "tempo-next-idle" then
+      listening.check(env, true)
+      eq(listening.status({ jobId = job.id }, env).state, "running", "one read-only idle cannot publish audio")
+    end
     local expected = "tempo_restore_state_changed"
-    if changed == "tempo" then
+    if changed == "tempo" or changed == "tempo-next-idle" then
       tf.bpm, tf.lpb = 60, 8
       expected = "tempo_restore_failed"
     elseif changed == "producer" then
@@ -1628,7 +1655,7 @@ test("listening: a settling pulse refuses late tempo, cursor or selection drift 
     if changed == "abort" then
       listening.abort(env, "the tool stopped before the settling pulse")
     else
-      state.pulse = state.pulse + 1
+      listening.check(env, true)
     end
     local failed = listening.status({ jobId = job.id }, env)
     eq(failed.state, "failed", changed)

@@ -942,41 +942,51 @@ local function defer_finish(job, state, code, message)
   job.finalizing = pending
 end
 
-local function finish(job, env, state, code, message)
+local function finish(job, env, state, code, message, on_idle)
   local song = renoise.song()
   if not job.deadline_ms then restore(job, env, song) end
   local restore_code, restore_message = guarded_restore_problem(job, env, song)
   if not restore_code then restore_code, restore_message = guarded_tempo_problem(job, song) end
   local restored = restore_code == nil
   if restored then
-    if job.settle_pulse then
-      -- Read-only: two status checks in one callback are not a native settling pulse.
+    if job.settle_idles then
+      -- Native row23: a timer can run before a seek's tempo chase. Only actual app_idle callbacks count.
       if not song or not edit_restored(job, song) then
         restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
       elseif song.transport.bpm ~= job.tempo_before.bpm or song.transport.lpb ~= job.tempo_before.lpb then
         restored, restore_code, restore_message = false, "tempo_restore_failed",
           "Renoise's BPM/LPB pair changed after restoration; no further writes were requested. Observe again."
-      elseif env.pulse() == job.settle_pulse then
-        if not job.aborting then return defer_finish(job, state, code, message) end
+      elseif job.aborting then
         restored, restore_code, restore_message = false, "tempo_restore_state_changed",
-          "Kumi's tool stopped before the native settling pulse could verify restoration. Observe again."
+          "Kumi's tool stopped before native idle verification could finish. Observe again."
+      else
+        if on_idle then job.settle_idles = job.settle_idles + 1 end
+        if job.settle_idles < 2 then return defer_finish(job, state, code, message) end
       end
     else
       if job.deadline_ms then restore(job, env, song) end
       local ready, edit_code, edit_message = restore_guarded_edit(job, env, song)
-      if ready == nil then return defer_finish(job, state, code, message) end
+      if ready == nil then
+        job.cursor_idle = nil
+        return defer_finish(job, state, code, message)
+      end
       restored, restore_code, restore_message = ready, edit_code, edit_message
+      if restored and job.deadline_ms then
+        if job.aborting then
+          restored, restore_code, restore_message = false, "tempo_restore_state_changed",
+            "Kumi's tool stopped before native idle verification could finish. Observe again."
+        elseif not on_idle or not job.cursor_idle then
+          if on_idle then job.cursor_idle = true end
+          return defer_finish(job, state, code, message)
+        end
+      end
       if restored then restored, restore_code, restore_message = restore_guarded_tempo(job, env, song) end
       if restored and not edit_restored(job, song) then
         restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
       end
       if restored and job.deadline_ms then
-        if not job.aborting then
-          job.settle_pulse = env.pulse()
-          return defer_finish(job, state, code, message)
-        end
-        restored, restore_code, restore_message = false, "tempo_restore_state_changed",
-          "Kumi's tool stopped before the native settling pulse could verify restoration. Observe again."
+        job.settle_idles = 0
+        return defer_finish(job, state, code, message)
       end
     end
   elseif job.deadline_ms then
@@ -1376,7 +1386,7 @@ function M.render_start(params, env)
 end
 
 -- A job's state now. A render that reads as ended with no callback for a while stopped (cancelled in Renoise, or failed).
-function M.check(env)
+function M.check(env, on_idle)
   local job = M.active()
   if not job then
     -- (never raises: this runs before every request)
@@ -1385,7 +1395,7 @@ function M.check(env)
   end
   if job and job.finalizing then
     local pending = job.finalizing
-    return finish(job, env, pending.state, pending.code, pending.message)
+    return finish(job, env, pending.state, pending.code, pending.message, on_idle)
   end
   if not job or not job.rendering then return end
   local song = renoise.song()
