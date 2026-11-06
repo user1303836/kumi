@@ -390,8 +390,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.70 with REAPER extension 0.1.13, 1.24.65 to 1.24.69 with 0.1.12, 1.24.64 with 0.1.11, 1.24.50 to 1.24.63 with 0.1.10, 1.24.45 to 1.24.49 with 0.1.9, 1.24.35 to 1.24.44 with 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.70 with Renoise tool 1.0.20, 1.24.65 to 1.24.69 with 1.0.19, 1.24.61 to 1.24.64 with 1.0.18, 1.24.60 with 1.0.17, 1.24.54 to 1.24.59 with 1.0.16, 1.24.53 with 1.0.15, 1.24.51 to 1.24.52 with 1.0.14, 1.24.50 with 1.0.13, 1.24.49 with 1.0.12, 1.24.47 to 1.24.48 with 1.0.11, 1.24.46 with 1.0.10, 1.24.44 to 1.24.45 with 1.0.9, 1.24.43 with 1.0.8, 1.24.35 to 1.24.42 with 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.70 to 1.24.71 with REAPER extension 0.1.13, 1.24.65 to 1.24.69 with 0.1.12, 1.24.64 with 0.1.11, 1.24.50 to 1.24.63 with 0.1.10, 1.24.45 to 1.24.49 with 0.1.9, 1.24.35 to 1.24.44 with 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.70 to 1.24.71 with Renoise tool 1.0.20, 1.24.65 to 1.24.69 with 1.0.19, 1.24.61 to 1.24.64 with 1.0.18, 1.24.60 with 1.0.17, 1.24.54 to 1.24.59 with 1.0.16, 1.24.53 with 1.0.15, 1.24.51 to 1.24.52 with 1.0.14, 1.24.50 with 1.0.13, 1.24.49 with 1.0.12, 1.24.47 to 1.24.48 with 1.0.11, 1.24.46 with 1.0.10, 1.24.44 to 1.24.45 with 1.0.9, 1.24.43 with 1.0.8, 1.24.35 to 1.24.42 with 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
