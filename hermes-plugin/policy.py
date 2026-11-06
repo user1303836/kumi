@@ -921,7 +921,7 @@ def _script_settled(host: Any, tool: str, result: Any, *, session_id: Any, tool_
 
 
 # CC-22: Max for Live devices, asked as CC-19's scripts are, by the chat's provenance, under the spec's own key.
-DEVICE = "Kumi didn't build the device: "
+DEVICE = "Kumi didn't build the device"  # a refusal's head: refused() joins its reason
 DEVICE_SUBAGENT = ("Kumi builds devices only in the producer's own chat, never in a delegated subagent, so this didn't "
                    "run.")
 DEVICE_MESSAGING = ("Kumi doesn't build devices from a messaging chat unless the producer turns on \"Run scripts from "
@@ -931,7 +931,7 @@ DEVICE_UNREVIEWED = ("Kumi asks before each device in this chat ({why}), and Her
                      "it.")
 DEVICE_UNKNOWN_APPROVALS = ("Kumi asks before each device in this chat ({why}), and Kumi can't tell whether Hermes's "
                             "approvals are on here, so it wasn't built.")
-DEVICE_ONLY_LIVE = DEVICE + "Kumi builds Max for Live devices only in Ableton Live."
+DEVICE_ONLY_LIVE = refused(DEVICE, "Kumi builds Max for Live devices only in Ableton Live.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
 # length, how many of the code's first lines and how wide, the controls (None: one line each, with its default; a
 # number: one summary line of at most that length), and the facts' length. The warning and the file are in every one:
@@ -949,7 +949,7 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     spec = args.get("spec")
     problem = devices.problem(spec)
     if problem is not None:
-        return block(DEVICE + problem), {}
+        return block(refused(DEVICE, problem)), {}
     if host.daw() != "ableton":
         return block(DEVICE_ONLY_LIVE), {}
     session = kwargs.get("session_id")
@@ -966,19 +966,19 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     digest = scripts.sha256(spec_json)
     try:
         answer = _ask(host, "device", {"action": "preview", "spec_json": spec_json}, kwargs)
-    except runtime.Refused as refused:
-        return block(DEVICE + _with_findings(refused.reason, refused.findings)), {}
+    except runtime.Refused as refusal:
+        return block(refused(DEVICE, _with_findings(refusal.reason, refusal.findings))), {}
     except runtime.Unavailable as failure:
-        return block(DEVICE + _reason(failure)), {}
+        return block(refused(DEVICE, _reason(failure))), {}
     if answer.get("state") != "preview":
-        return block(DEVICE + _with_findings(answer.get("reason") or "its runtime refused it.",
-                                              answer.get("findings"))), {}
+        return block(refused(DEVICE, _with_findings(answer.get("reason") or "its runtime refused it.",
+                                                    answer.get("findings")))), {}
     if answer.get("sha256") != digest:
-        return block(DEVICE + "its runtime read a different spec than this one."), {}
+        return block(refused(DEVICE, "its runtime read a different spec than this one.")), {}
     file = answer.get("file")
     if not (isinstance(file, str) and file.startswith(devices.FOLDER) and file.endswith(".amxd")
             and "/" not in file[len(devices.FOLDER):] and file.isprintable()):
-        return block(DEVICE + "its runtime didn't name a new file in the User Library's Kumi folder."), {}
+        return block(refused(DEVICE, "its runtime didn't name a new file in the User Library's Kumi folder.")), {}
     tainted = state != scripts.CLEAN
     if tainted:
         bypassed = tools.approvals_bypassed(host)
@@ -989,7 +989,7 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
         scripts.save(Path(host.data_dir()).joinpath(*scripts.CODE_FOLDER), spec_json, devices.LANGUAGE)
     except OSError:
         log.exception("Kumi couldn't keep the device's spec")
-        return block(DEVICE + "it couldn't keep a copy of the spec to show you."), {}
+        return block(refused(DEVICE, "it couldn't keep a copy of the spec to show you.")), {}
     lines = answer.get("lines") if isinstance(answer.get("lines"), int) else scripts.lines_of(spec["code"])
     facts = {"about": spec["about"], "why": why if tainted else "", "digest": digest, "lines": lines,
              "bytes": len(spec["code"].encode("utf-8")), "file": file}

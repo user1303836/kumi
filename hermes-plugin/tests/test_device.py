@@ -84,7 +84,7 @@ class Devices(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(saved.stat().st_mode), 0o600)
         self.assertEqual(self.hook()["action"], "approve", "asking again finds the same file and keeps it")
         saved.write_text("{}", encoding="utf-8")
-        self.assertEqual(self.hook()["message"], policy.DEVICE + "it couldn't keep a copy of the spec to show you.",
+        self.assertEqual(self.hook()["message"], policy.refused(policy.DEVICE, "it couldn't keep a copy of the spec to show you."),
                          "a file that isn't the spec it's named for is never used")
 
     def test_the_approval_is_keyed_by_the_spec_and_shows_the_warning_file_controls_and_code(self):
@@ -158,7 +158,7 @@ class Devices(unittest.TestCase):
         self.use("--device-wrong-sha")
         self.start()
         self.assertEqual(self.hook(), {"action": "block",
-                                       "message": policy.DEVICE + "its runtime read a different spec than this one."})
+                                       "message": policy.refused(policy.DEVICE, "its runtime read a different spec than this one.")})
         self.assertFalse(self.saved().exists(), "nothing is kept for a spec that wasn't asked")
         self.assertEqual(self.sent("preview")[0]["spec_json"], devices.canonical(SPEC))
 
