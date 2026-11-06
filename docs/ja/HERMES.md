@@ -149,7 +149,7 @@ Kumi の呼び出しをこのセッションの間または常に許可すると
 
 ![Web ダッシュボードの Kumi タブ: HISTORY、状態、マップ。](../assets/hermes/screenshots/hermes-dashboard.png)
 
-スクリーンショット: 実際の Ableton Live 12 で動く Kumi <V>。チャットの Hermes 側は、台本どおりに答える代わりのモデルによるもので、言葉は例です。Kumi 側は本物です。
+スクリーンショット: 実際の Ableton Live 12 で動く Kumi 1.24.73。チャットの Hermes 側は、台本どおりに答える代わりのモデルによるもので、言葉は例です。Kumi 側は本物です。
 
 ## 設定
 

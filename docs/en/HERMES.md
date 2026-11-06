@@ -299,7 +299,7 @@ run without asking there, and Kumi can't tell it from a chat.
 
 ![The web dashboard's Kumi tab: HISTORY, status and the map.](../assets/hermes/screenshots/hermes-dashboard.png)
 
-Screenshots: Kumi <V> on real Ableton Live 12. Hermes's side of the chat came from a scripted stand-in model, so the
+Screenshots: Kumi 1.24.73 on real Ableton Live 12. Hermes's side of the chat came from a scripted stand-in model, so the
 words are illustrative; Kumi's side is real.
 
 ## Settings

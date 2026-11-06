@@ -149,7 +149,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 
 ![网页仪表盘中的 Kumi 标签页：HISTORY、状态和地图。](../assets/hermes/screenshots/hermes-dashboard.png)
 
-截图：真实 Ableton Live 12 上的 Kumi <V>。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
+截图：真实 Ableton Live 12 上的 Kumi 1.24.73。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
 
 ## 设置项
 
