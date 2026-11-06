@@ -1602,17 +1602,44 @@ case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_mov
     // response and the single unsure audit row; UndoResult's separate text is not available on this path.
     let diagnostic = "Live didn't confirm the undo; inspect the Set before another change. Bridge: device move was not confirmed";
     *live.unsure.borrow_mut() = Some(diagnostic.into());
-    let made = json!({"id": "c2", "family": "device", "title": "Move SoftClip", "state": "applied", "at": 3});
-    let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
-    let before_rows = ctx.history().rows(100).len();
-    let (unsure, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-3")).await;
-    assert_eq!((unsure["state"].clone(), live.undos.get()), (json!("unsure"), 2), "{unsure}");
-    assert_eq!(unsure["reason"], diagnostic);
-    assert_eq!(ctx.history().rows(100).len(), before_rows + 1);
-    let audit = ctx.history().row(unsure["history_ids"][0].as_str().unwrap()).unwrap();
-    assert_eq!(audit.note.as_deref(), Some(diagnostic));
-    assert_eq!(audit.tool_call_id.as_deref(), Some("tc-undo-3"));
-    assert!(!audit.undo_available);
+    for (id, whole_change, call_id) in [("c2", false, "tc-undo-3"), ("c3", true, "tc-undo-whole")] {
+        let older = whole_change.then(|| {
+            let made = json!({"id": "c3-older", "family": "mixer", "title": "Drums volume", "state": "applied", "at": 2});
+            ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots())
+        });
+        let made = json!({"id": id, "family": "device", "title": "Move SoftClip", "state": "applied", "at": 3});
+        let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
+        let mut args = json!({"history_id": row.id});
+        if let Some(older) = &older {
+            ctx.history().one_change(&[older.id.clone(), row.id.clone()], ctx.snapshots());
+            let (preview, error) = wire.call("undo", json!({"history_id": row.id, "whole_change": true, "preview": true}), None).await;
+            assert!(!error, "{preview}");
+            assert_eq!(preview["rows"].as_array().unwrap().len(), 2, "{preview}");
+            args["whole_change"] = json!(true);
+            args["expect_rows"] = preview["rows_digest"].clone();
+        }
+        let (before_rows, before_undos, before_epoch) = (ctx.history().rows(100).len(), live.undos.get(), ctx.link().epoch());
+        let older_before = older.as_ref().map(|older| serde_json::to_value(ctx.history().row(&older.id).unwrap()).unwrap());
+        let (unsure, error) = wire.call("undo", args, Some(call_id)).await;
+        assert!(!error, "{unsure}");
+        assert_eq!((unsure["state"].clone(), live.undos.get()), (json!("unsure"), before_undos + 1), "{unsure}");
+        assert_eq!(unsure["reason"], diagnostic);
+        assert_eq!(ctx.history().rows(100).len(), before_rows + 1);
+        assert_eq!(ctx.link().epoch(), before_epoch + 1, "an unconfirmed undo may have written");
+        assert_eq!(ctx.history().row(&row.id).unwrap().note.as_deref(), Some(diagnostic));
+        assert_eq!(unsure["history_ids"].as_array().unwrap().len(), 1, "one audit: {unsure}");
+        let audit = ctx.history().row(unsure["history_ids"][0].as_str().unwrap()).unwrap();
+        assert_eq!(audit.note.as_deref(), Some(diagnostic));
+        assert_eq!(audit.tool_call_id.as_deref(), Some(call_id));
+        assert!(!audit.undo_available);
+        if let Some(older) = &older {
+            assert_eq!(unsure["rows"][0]["history_id"], row.id);
+            assert_eq!(unsure["rows"][0]["state"], "unsure");
+            assert_eq!(unsure["rows"][0]["reason"], diagnostic);
+            assert_eq!(unsure["rows"][1], json!({"history_id": older.id, "state": "not_tried"}));
+            assert_eq!(Some(serde_json::to_value(ctx.history().row(&older.id).unwrap()).unwrap()), older_before);
+        }
+    }
     wire.end().await;
 });
 
@@ -1723,8 +1750,15 @@ impl kumi_agent::core::contracts::Integration for GroupedPadLive {
 
 case!(serve_preserves_grouped_pad_refusals_and_reports_only_completed_undos, async {
     use kumi_types::contracts::ChangeState;
-    for (count, refused, expected_asked) in [(1, "pad-1", vec!["pad-1"]), (3, "pad-3", vec!["pad-3"]), (3, "pad-2", vec!["pad-3", "pad-2"])]
-    {
+    for (whole_change, count, refused, previously_unsure) in [
+        (false, 1, "pad-1", false),
+        (false, 3, "pad-3", false),
+        (false, 3, "pad-2", false),
+        (true, 1, "pad-1", false),
+        (true, 3, "pad-3", false),
+        (true, 3, "pad-2", false),
+        (true, 3, "pad-2", true),
+    ] {
         let home = tempfile::tempdir().unwrap();
         let transport = home.path().join("kumi-home");
         let config = transport.join("bridge/state/bridge-config.json");
@@ -1740,9 +1774,13 @@ case!(serve_preserves_grouped_pad_refusals_and_reports_only_completed_undos, asy
             ("KUMI_PROCESSES".into(), "none".into()),
         ]);
         let ids: Vec<String> = (1..=count).map(|index| format!("pad-{index}")).collect();
+        let mut remaining = ids.clone();
+        if whole_change {
+            remaining.insert(0, "older-row".into());
+        }
         let bridge = Rc::new(GroupedPadBridge {
             refuse: refused.into(),
-            remaining: std::cell::RefCell::new(ids.clone()),
+            remaining: std::cell::RefCell::new(remaining.clone()),
             asked: Default::default(),
         });
         let integration = Rc::new(std::cell::RefCell::new(None));
@@ -1781,6 +1819,14 @@ case!(serve_preserves_grouped_pad_refusals_and_reports_only_completed_undos, asy
         assert!(!error, "{connected}");
         wire.call("observe", json!({"scope":"focus"}), None).await;
         let live = integration.borrow().as_ref().unwrap().clone();
+        let older = whole_change.then(|| {
+            let record =
+                serde_json::from_value(json!({"id":"older-row","family":"device","title":"Load older sample","state":"applied","at":0}))
+                    .unwrap();
+            live.history.remember(record, "older-row".into(), None);
+            live.history.entries.borrow()["older-row"].borrow_mut().tool = Some("load_sample_to_pad".into());
+            ctx.history().rows(20).into_iter().find(|row| row.label == "older-row").unwrap()
+        });
         let mut made = vec![];
         live.history
             .quietly(Some(&mut made), async {
@@ -1792,40 +1838,111 @@ case!(serve_preserves_grouped_pad_refusals_and_reports_only_completed_undos, asy
                     live.history.remember(record, id.clone(), None);
                     live.history.entries.borrow()[id].borrow_mut().tool = Some("load_sample_to_pad".into());
                 }
+                if previously_unsure {
+                    let entries = live.history.entries.borrow();
+                    let mut entry = entries[refused].borrow_mut();
+                    entry.record.state = ChangeState::Unsure;
+                    entry.record.note = Some("An earlier pad undo wasn't confirmed.".into());
+                }
             })
             .await;
         let group = live.history.grouped("Load drum samples", &made, &[]).unwrap();
         let row = ctx.history().rows(20).into_iter().find(|row| row.label == group).unwrap();
+        let mut args = json!({"history_id":row.id});
+        if let Some(older) = &older {
+            ctx.history().one_change(&[older.id.clone(), row.id.clone()], ctx.snapshots());
+        }
+        // DAW-only history exposes whether this undo is counted as another write: a refusal must leave this latest
+        // step "next", while a partial or unconfirmed undo buries it. It isn't part of the change being undone.
+        let history = ctx.history();
+        history.begin_call();
+        history.daw_undo_call("Live's own Undo takes this separate change back.".into());
+        let marker =
+            serde_json::from_value(json!({"id":"latest-manual","family":"mixer","title":"Latest manual change","state":"applied","at":2}))
+                .unwrap();
+        let marker = history.record(&marker, &row.project_key, ctx.snapshots());
+        let identity =
+            kumi::serve::history::CallIdentity { profile_id: None, session_id: None, tool_call_id: None, digest: "latest-manual" };
+        history.end_call(identity, ctx.snapshots());
+        assert_eq!(history.daw_undo_place(&marker), Some("next"));
+        if let Some(older) = &older {
+            let (preview, error) = wire.call("undo", json!({"history_id":row.id,"whole_change":true,"preview":true}), None).await;
+            assert!(!error, "{preview}");
+            assert_eq!(preview["rows"][0]["history_id"], row.id, "{preview}");
+            assert_eq!(preview["rows"][1]["history_id"], older.id, "{preview}");
+            args["whole_change"] = json!(true);
+            args["expect_rows"] = preview["rows_digest"].clone();
+        }
         let (rows_before, epoch_before) = (ctx.history().rows(20).len(), ctx.link().epoch());
-        let (answer, error) = wire.call("undo", json!({"history_id":row.id}), Some("tc-pad-group-undo")).await;
+        let before_history = wire.call("history", json!({}), None).await.0;
+        let before_records: Vec<_> = ids.iter().map(|id| live.history.entries.borrow()[id].borrow().record.clone()).collect();
+        let group_before = live.history.entries.borrow()[&group].borrow().record.clone();
+        let older_before = older.as_ref().map(|older| serde_json::to_value(history.row(&older.id).unwrap()).unwrap());
+        let older_core_before = older.as_ref().map(|_| live.history.entries.borrow()["older-row"].borrow().record.clone());
+        let (answer, error) = wire.call("undo", args, Some("tc-pad-group-undo")).await;
         assert!(!error, "{answer}");
+        let expected_asked = if refused == "pad-2" { vec!["pad-3", "pad-2"] } else { vec![refused] };
         assert_eq!(bridge.asked.borrow().iter().map(String::as_str).collect::<Vec<_>>(), expected_asked);
-        assert_eq!(ctx.history().rows(20).len(), rows_before, "no unsure audit row: {answer}");
-        assert!(ctx.history().rows(20).iter().all(|row| row.family != "unsure"));
+        assert_eq!(ctx.history().rows(20).len(), rows_before + usize::from(previously_unsure), "{answer}");
         let partial = refused == "pad-2";
         let entries = live.history.entries.borrow();
-        for id in &ids {
+        for (id, before) in ids.iter().zip(&before_records) {
             assert_eq!(
                 entries[id].borrow().record.state,
-                if partial && id == "pad-3" { ChangeState::Undone } else { ChangeState::Applied },
+                if partial && id == "pad-3" { ChangeState::Undone } else { before.state },
                 "{id}: {answer}"
             );
+            if !partial || id != "pad-3" {
+                assert_eq!(&entries[id].borrow().record, before, "untouched child {id}: {answer}");
+            }
         }
         if partial {
-            assert_eq!((answer["state"].clone(), entries[&group].borrow().record.state), (json!("kept"), ChangeState::Kept));
+            let state = if previously_unsure { ChangeState::Unsure } else { ChangeState::Kept };
+            assert_eq!(
+                (answer["state"].clone(), entries[&group].borrow().record.state),
+                (json!(if previously_unsure { "unsure" } else { "kept" }), state)
+            );
             let reason = answer["reason"].as_str().unwrap();
             assert!(reason.contains("took back 1 of its 3 changes") && reason.contains("pad sample changed"), "{reason}");
             assert!(!reason.to_ascii_lowercase().contains("nothing changed"), "{reason}");
-            assert_eq!(*bridge.remaining.borrow(), vec!["pad-1", "pad-2"], "the completed undo stays completed");
+            assert_eq!(entries[&group].borrow().record.note.as_deref(), Some(reason));
+            remaining.retain(|id| id != "pad-3");
+            assert_eq!(*bridge.remaining.borrow(), remaining, "the completed undo stays completed");
             assert_eq!(ctx.link().epoch(), epoch_before + 1);
+            assert_eq!(history.daw_undo_place(&marker), Some("buried"));
+            if previously_unsure {
+                assert!(reason.contains("an earlier undo wasn't confirmed"), "{reason}");
+                assert_eq!(answer["history_ids"].as_array().unwrap().len(), 1, "{answer}");
+                let audit = history.row(answer["history_ids"][0].as_str().unwrap()).unwrap();
+                assert_eq!(audit.note.as_deref(), Some(reason));
+                assert_eq!(audit.tool_call_id.as_deref(), Some("tc-pad-group-undo"));
+                assert_eq!(audit.state, "unsure");
+                assert!(!audit.undo_available);
+            } else {
+                assert!(answer.get("history_ids").is_none(), "a confirmed partial undo needs no unsure audit: {answer}");
+            }
         } else {
-            assert_eq!((answer["state"].clone(), answer["code"].clone()), (json!("refused"), json!("changed_since")), "{answer}");
-            assert_eq!(entries[&group].borrow().record.state, ChangeState::Applied);
-            assert_eq!(*bridge.remaining.borrow(), ids, "the refusal removed nothing");
+            assert_eq!(answer["state"], "refused", "{answer}");
+            let refused_row = if whole_change { &answer["rows"][0] } else { &answer };
+            assert_eq!(refused_row["code"], "changed_since", "{answer}");
+            assert_eq!(entries[&group].borrow().record, group_before);
+            assert_eq!(*bridge.remaining.borrow(), remaining, "the refusal removed nothing");
             assert_eq!(ctx.link().epoch(), epoch_before, "a no-write refusal leaves the epoch alone");
+            assert_eq!(history.daw_undo_place(&marker), Some("next"), "a no-write refusal isn't a later write");
             assert!(answer.get("history_ids").is_none());
         }
+        if let Some(older) = &older {
+            assert_eq!(answer["rows"][0]["history_id"], row.id, "{answer}");
+            assert_eq!(answer["rows"][0]["state"], answer["state"], "{answer}");
+            assert_eq!(answer["rows"][0]["reason"], answer["reason"], "{answer}");
+            assert_eq!(answer["rows"][1], json!({"history_id":older.id,"state":"not_tried"}), "{answer}");
+            assert_eq!(Some(serde_json::to_value(history.row(&older.id).unwrap()).unwrap()), older_before);
+            assert_eq!(Some(entries["older-row"].borrow().record.clone()), older_core_before);
+        }
         drop(entries);
+        if !partial {
+            assert_eq!(wire.call("history", json!({}), None).await.0, before_history, "no records or audit changed");
+        }
         wire.end().await;
     }
 });
