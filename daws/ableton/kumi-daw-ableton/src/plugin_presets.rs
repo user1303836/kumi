@@ -136,8 +136,11 @@ pub struct Browser {
 }
 
 /// What placing `bytes` as the preset `name` would write in `library`: nothing is written. The findings refuse it.
+/// The library's path is checked as text first (local, not a network or device path), then its Kumi folders as plain
+/// folders inside it, and only then is the file's place read (agent-m's review of #1180).
 pub fn preview(library: &Path, bytes: &[u8], name: &str) -> Result<PresetPreview, Vec<String>> {
     let plan = plan(bytes, name).map_err(|why| vec![why])?;
+    check_library(library).map_err(|why| vec![why])?;
     plain_folders(library, plan.folder).map_err(|why| vec![why])?;
     if taken(&plan, bytes, library) {
         return Err(vec![format!("{} is already in your User Library with other contents: name the preset differently.", plan.file())]);
@@ -170,11 +173,15 @@ pub async fn place_approved(
         Err(why) => return refusal("refused", why),
     };
     let changed = || format!("{file} isn't the file this preset would be written as now: preview it again.");
-    if plan.file() != file || taken(&plan, &bytes, &library) {
+    if plan.file() != file {
         return refusal("changed", changed());
     }
+    // The folders before the file: nothing is read through a link (or a junction to a network share) it would refuse.
     if let Err(why) = plain_folders(&library, plan.folder) {
         return refusal("refused", why);
+    }
+    if taken(&plan, &bytes, &library) {
+        return refusal("changed", changed());
     }
     let names = (browser.plugins)(plan.plugin.clone(), signal.clone()).await?;
     if !names.iter().any(|listed| listed.trim().eq_ignore_ascii_case(&plan.plugin)) {
@@ -549,6 +556,9 @@ mod tests {
     #[tokio::test]
     async fn a_kumi_folder_that_links_elsewhere_is_refused_and_nothing_is_written_outside() {
         // agent-m's review of #1180: the approval names only User Library/Kumi, so a link there never takes a write.
+        // A User Library on a network share is refused from its path's text, before anything is read there.
+        let shared = preview(Path::new("//host/share/User Library"), SERUM, "Night Bass").unwrap_err();
+        assert!(shared[0].contains("network"), "{shared:?}");
         for linked in ["Kumi", "Kumi/Instruments"] {
             let (temp, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
             let library = temp.path().join("User Library");
