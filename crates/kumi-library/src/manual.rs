@@ -379,3 +379,62 @@ impl Keeper {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_stale_pages_cannot_overwrite_a_new_contents_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("guide.json");
+        let fetch: Fetch = Rc::new(|_, _, _| async { panic!("the queued-publication fixture never fetches a guide") }.boxed_local());
+        let keeper = Keeper::new(
+            ManualOptions { dir: dir.path().to_string_lossy().into_owned(), ..Default::default() },
+            "guide.json",
+            1,
+            "reading",
+            fetch,
+        );
+        let copy = |fetched_at, number: &str| {
+            Rc::new(Kept {
+                version: 1,
+                fetched_at,
+                sections: vec![ManualSection {
+                    number: number.into(),
+                    title: format!("Generation {number}"),
+                    within: None,
+                    chapter: String::new(),
+                    url: format!("https://guide.test/{number}"),
+                    text: String::new(),
+                }],
+                pages: RefCell::default(),
+                prepared: OnceCell::new(),
+            })
+        };
+        let old = copy(1, "old");
+        keeper.state.borrow_mut().held = Some(Rc::clone(&old));
+        write_json(&file, old.as_ref()).await.unwrap();
+        old.pages.borrow_mut().insert("old-page".into(), old.sections.clone());
+
+        // Queue an old answer before publication changes its held generation.
+        // It must check that generation after acquiring the publication fence.
+        let fence = keeper.publication.lock().await;
+        let stale_write = keeper.keep(old.as_ref());
+        futures::pin_mut!(stale_write);
+        assert!(futures::poll!(stale_write.as_mut()).is_pending());
+
+        // The refresh publishes its new generation and complete cache while it
+        // owns this same fence. The queued old writer resumes only afterward.
+        let fresh = copy(2, "fresh");
+        fresh.pages.borrow_mut().insert("fresh-page".into(), fresh.sections.clone());
+        keeper.state.borrow_mut().held = Some(Rc::clone(&fresh));
+        write_json(&file, fresh.as_ref()).await.unwrap();
+        drop(fence);
+        stale_write.await;
+
+        let persisted: Kept = read_json(&file).await.unwrap();
+        assert_eq!(serde_json::to_value(&persisted).unwrap(), serde_json::to_value(fresh.as_ref()).unwrap());
+        assert!(!persisted.pages.borrow().contains_key("old-page"));
+    }
+}
