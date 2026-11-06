@@ -22,6 +22,7 @@ import collections
 import itertools
 import json
 import logging
+import math
 from pathlib import Path
 import re
 import textwrap
@@ -58,7 +59,9 @@ EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job",
         "kumi_plugin_knowledge"}
 # What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
-ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device"}
+ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset"}
+# Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
+UNASKED_WRITERS = {"kumi_preset_build"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
@@ -160,7 +163,7 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(tools.SCHEDULED), {}
     if tool not in PASS and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
         return block(FORKED), {}
-    if unattended and tool in ASKED:
+    if unattended and (tool in ASKED or tool in UNASKED_WRITERS):
         return block(UNATTENDED), {}
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
         return block(UNATTENDED_CANCEL), {}
@@ -200,8 +203,9 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 
 # A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
 # a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A device's
-# names its spec (CC-22): it outlives the chat, so even a clean chat's "Always" covers only that spec.
-ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:")
+# names its spec (CC-22), and a preset's its file's digest (CC-26's 26-w3): they outlive the chat, so even a clean
+# chat's "Always" covers only that one.
+ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:")
 
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -227,6 +231,10 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _variations(host, args, kwargs)
     if tool == "kumi_device":
         return _device(host, args, kwargs)
+    if tool == "kumi_preset_build":  # Kumi's private copy only: the producer approves at kumi_preset (26-w1)
+        return (block(PRESET_BUILD_ONLY_LIVE) if host.daw() != "ableton" else None), {}
+    if tool == "kumi_preset":
+        return _preset(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -1081,6 +1089,138 @@ def _device_message(spec: dict, facts: dict, surface: str) -> str | None:
         if shows_whole(message, surface):
             return message
     return None
+
+
+# CC-26: a verified plug-in preset into Live's User Library, asked in the words of serve's preview (26-w2), under its
+# file's digest (26-w3). No code class: it's a verified writer's output (26c). The file stays after an undo (26e).
+PRESET = "Kumi didn't put the preset in your User Library"  # a refusal's head: refused() joins its reason
+PRESET_ONLY_LIVE = refused(PRESET, "Kumi puts plug-in presets only into Ableton Live's User Library.")
+# The owner's call for the hackathon: presets are Live's only for now, so a build elsewhere would make nothing it
+# could place.
+PRESET_BUILD_ONLY_LIVE = refused("Kumi didn't build the preset",
+                                 "Kumi builds plug-in presets only for Ableton Live for now.")
+PRESET_WARNING = "Writes a new preset file into your User Library (Kumi folder). It stays there after an undo."
+PRESET_VALUES = "Values as the preset file stores them; the plug-in may show them differently."
+PRESET_UNEDITED = "• No settings changed: Kumi's initialized template as it is."
+PRESET_STAYS = "The file stays after an undo."  # the short form's warning: its first line says what's written
+PRESET_UNSHOWN = refused(PRESET, "its runtime's preview has something Kumi can't show as it is, so it isn't asked.")
+PRESET_TOO_LONG = refused(PRESET, "its approval doesn't fit this window with every setting in view, and Kumi asks "
+                                  "only with all of them shown. Build the preset with fewer changes, or ask in "
+                                  "Hermes Desktop.")
+PRESET_FOLDERS = ("User Library/Kumi/Instruments/", "User Library/Kumi/Audio Effects/")
+MOST_PRESET_SETTINGS = 32  # W3's cap: the writer refuses more, never cuts them
+PRESET_PRODUCTS = {"serum-2": "Serum 2", "fabfilter-pro-q-4": "Pro-Q 4", "ozone-12": "Ozone 12"}  # catalog ids
+
+
+def _preset(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
+    """CC-26: a preset kumi_preset_build made goes into the User Library only as the producer approved it, reading
+    serve's preview: the plug-in and its version, every setting as the file stores it, and the file. The approval binds
+    the preview's digest and file (26-r1), which the handler sends, so serve writes exactly that or nothing."""
+    artifact = args.get("artifact_id")
+    if not isinstance(artifact, str) or not artifact.strip():
+        return block(refused(PRESET, "it needs the artifact_id kumi_preset_build gave.")), {}
+    if host.daw() != "ableton":
+        return block(PRESET_ONLY_LIVE), {}
+    try:
+        answer = _ask(host, "preset", {"action": "preview", "artifact_id": artifact}, kwargs)
+    except runtime.Refused as refusal:
+        return block(refused(PRESET, _with_findings(refusal.reason, refusal.findings))), {}
+    except runtime.Unavailable as failure:
+        return block(refused(PRESET, _reason(failure))), {}
+    if answer.get("state") != "preview":
+        return block(refused(PRESET, _with_findings(answer.get("reason") or "its runtime refused it.",
+                                                    answer.get("findings")))), {}
+    facts = _preset_facts(answer)
+    if facts is None:
+        return block(PRESET_UNSHOWN), {}
+    message = _preset_message(facts, host.session_surface())
+    if message is None:
+        return block(PRESET_TOO_LONG), {}
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:preset:{answer['digest']}"}
+    return decision, {"artifact_id": artifact, "digest": answer["digest"], "file": answer["file"]}
+
+
+def _preset_facts(answer: dict) -> dict | None:
+    """What the approval shows of serve's preview, every value as it came (26-s1), or None when it can't be shown as
+    it is (26-w4): a field missing or of another kind, a file outside the User Library's Kumi folders, more settings
+    than the writer allows, a setting line longer than an approval line, or text with a character a person reading it
+    couldn't see. Nothing is cut or cleaned: what's shown is what's written."""
+    plugin, version, checked = answer.get("plugin"), answer.get("version"), answer.get("version_checked")
+    digest, file, name = answer.get("digest"), answer.get("file"), answer.get("name")
+    settings, note = answer.get("settings"), answer.get("values_note", PRESET_VALUES)
+    texts = (plugin, version, file, name, note)
+    if not (all(isinstance(text, str) and _as_is(text) for text in texts) and isinstance(checked, bool)
+            and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+            and isinstance(settings, list) and len(settings) <= MOST_PRESET_SETTINGS):
+        return None
+    folder = next((folder for folder in PRESET_FOLDERS if file.startswith(folder)), None)
+    if folder is None or "/" in file[len(folder):] or not file.endswith(".vstpreset"):
+        return None
+    shown = [_preset_setting(setting) for setting in settings]
+    if None in shown or any(len(line) + 2 > STEP_LINE for line in shown) or len(note) > STEP_LINE:
+        return None
+    return {"plugin": PRESET_PRODUCTS.get(plugin, plugin), "version": version, "checked": checked, "file": file,
+            "settings": shown, "note": note}
+
+
+def _preset_message(facts: dict, surface: str) -> str | None:
+    """The preset's approval in the richest form that shows whole on `surface`, or None when even the short one
+    doesn't. Both carry every setting, the whole file, the values note verbatim and that the file stays after an undo;
+    the short one says the rest in fewer words."""
+    plugin, version, file = facts["plugin"], facts["version"], facts["file"]
+    settings = [f"• {line}" for line in facts["settings"]] or [PRESET_UNEDITED]
+    long = [f"Kumi: put a {plugin} preset in your User Library", f"File: {file}",
+            (f"{plugin} {version}, the version installed" if facts["checked"]
+             else f"Verified with {plugin} {version} (Kumi couldn't read the installed version)"),
+            *settings, facts["note"], PRESET_WARNING]
+    short = [f"Kumi: write {file}", f"{plugin} {version}" if facts["checked"] else f"Verified with {plugin} {version}",
+             *settings, facts["note"], PRESET_STAYS]
+    return next((message for message in ("\n".join(long), "\n".join(short)) if shows_whole(message, surface)), None)
+
+
+def _preset_setting(setting: Any) -> str | None:
+    """One setting as its line, "Volume: 0.3 → 0.45, stored value, 0–1": the record's own name, values and unit, a
+    number as given (never rounded or converted), the range only when the record has one. None when it can't be shown
+    as it is."""
+    if not isinstance(setting, dict):
+        return None
+    name, unit = setting.get("name"), setting.get("unit")
+    before, after = _preset_value(setting.get("before")), _preset_value(setting.get("after"))
+    labels = all(isinstance(text, str) and _as_is(text) for text in (name, unit))
+    if not labels or before is None or after is None:
+        return None
+    line = f"{name}: {before} → {after}, {unit}"
+    if "range" not in setting:
+        return line
+    bounds = setting["range"]  # W3: exactly two finite numbers
+    if not (isinstance(bounds, list) and len(bounds) == 2 and all(_preset_number(bound) for bound in bounds)):
+        return None
+    return f"{line}, {_preset_value(bounds[0])}–{_preset_value(bounds[1])}"
+
+
+def _preset_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _preset_value(value: Any) -> str | None:
+    """A stored value as the approval shows it, as W3's record holds it: a number exactly as it came (never rounded:
+    Pro-Q 4 stores 0.12345679104328156 for a requested 0.123456789), true or false, a label (or "not stored in
+    template"), or a list of labels (an Ozone module chain, Serum's effects); None for anything else."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if _preset_number(value):
+        return repr(value)
+    if isinstance(value, str):
+        return value if _as_is(value) else None
+    if isinstance(value, list) and value and all(isinstance(item, str) and _as_is(item) for item in value):
+        return "[" + ", ".join(value) + "]"
+    return None
+
+
+def _as_is(text: str) -> bool:
+    """Whether `text` shows as it is in one line: not empty, and nothing `one_line` would take out (a line break, a
+    control or invisible format character) or squeeze (doubled or edge spaces)."""
+    return bool(text) and one_line(text, len(text) + 1) == text
 
 
 def _broadcast(event: str, payload: dict) -> None:

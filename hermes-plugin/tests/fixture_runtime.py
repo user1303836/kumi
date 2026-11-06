@@ -73,6 +73,7 @@ class Fixture:
         self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
         self.devices: set[str] = set()  # the .amxd names in the User Library's Kumi folder (CC-22)
         self.device_files: dict[str, str] = {}  # a preview's file, by its spec's SHA-256 (W1-B)
+        self.preset_files: set[str] = set()  # the .vstpreset labels Kumi wrote in its User Library folders (CC-26)
         self.seq = 0
         self.connected = False
         self.playing = False  # whether transport's play started it (CC-17)
@@ -688,6 +689,93 @@ def device(fixture: Fixture, args: dict, host: dict) -> dict:
             "artifact_id": f"a-device-{len(fixture.devices)}", "sha256": digest, "listed": True}
 
 
+# CC-26's preset op, as agent-s's serve answers it (W2-CC26-PLUGIN.md), on one preset agent-m's writer built: a preview
+# is pure and names a free file; a place writes exactly that file of exactly those bytes, or refuses `changed`.
+PRESET_ARTIFACT = "a-preset-1"
+PRESET_NOTE = "Values as the preset file stores them; the plug-in may show them differently."
+
+
+def preset_record(options: argparse.Namespace) -> dict:
+    """The writer's record of the fixture's one preset. By default a genuine receipt, as agent-m's native writer built
+    it for Serum 2 2.1.5 (one edit, Oscillator1's volume). --preset-shapes swaps in a renderer-shape fixture, NOT a real
+    receipt: each kind of value the record can hold in one list (a switch the template didn't store, a stored value
+    with its range, a decimal exactly as stored under Pro-Q 4's catalog unit, a module chain). --preset-settings N makes
+    N macro changes and --preset-unedited none, both shapes too."""
+    settings = [{"path": "Oscillator1/plainParams/kParamVolume", "name": "B Level", "before": "not stored in template",
+                 "after": 0.45, "unit": "stored value", "range": [0, 1]}]
+    if options.preset_shapes:
+        settings = [{"path": "osc/b/enable", "name": "Osc B", "before": "not stored in template", "after": True,
+                     "unit": "stored value"},
+                    {"path": "global/volume", "name": "Volume", "before": 0.3, "after": 0.45, "unit": "stored value",
+                     "range": [0, 1]},
+                    {"path": "band/1/gain", "name": "Gain", "before": 0, "after": 0.12345679104328156,
+                     "unit": "stored VST3 plain value"},
+                    {"path": "fx/order", "name": "FX Order", "before": ["Reverb"], "after": ["Distortion", "Reverb"],
+                     "unit": "chain"}]
+    if options.preset_settings:
+        settings = [{"path": f"macro/{n}", "name": f"Macro {n}", "before": 0.0, "after": 0.5, "unit": "stored value"}
+                    for n in range(1, options.preset_settings + 1)]
+    if options.preset_unedited:
+        settings = []
+    name = "Night Bass\u202e" if options.preset_hidden else "Night Bass"
+    return {"plugin": "serum-2", "class": "56534558667350736572756D20320000", "version": "2.1.5",
+            "format": "vstpreset", "digest": hashlib.sha256(name.encode("utf-8")).hexdigest(), "name": name,
+            "folder": "User Library/Kumi/Instruments", "settings": settings, "values_note": PRESET_NOTE}
+
+
+def preset_build(fixture: Fixture, args: dict, host: dict) -> dict:
+    """agent-m's preset_build: the verified writer's built preset, kept as an artifact, answered as W3's DTO."""
+    if args.get("plugin") not in ("serum-2", "fabfilter-pro-q-4", "ozone-12"):
+        return error("unsupported", "Use a verified Serum 2, Pro-Q 4 or Ozone 12 writer; Vital isn't supported.")
+    if not isinstance(args.get("edits"), list) or len(args["edits"]) > 32:
+        return error("invalid", "Use plugin, name and typed edits from the plug-in catalog; no file, bytes or version "
+                                "override.")
+    record = preset_record(fixture.options)
+    return {"state": "built", "artifact_id": PRESET_ARTIFACT,
+            **{key: record[key] for key in ("plugin", "class", "version", "format", "digest", "name", "settings",
+                                            "values_note")}}
+
+
+# The refusals serve's preset op gives that --preset-refusal names (#1180): the code and its words, with findings.
+PRESET_REFUSALS = {
+    "not_installed": ("Serum 2's VST3 isn't in Live's plug-ins. Install or enable it, then ask again.", None),
+    "refused": ("Kumi won't write this preset as it is.",
+                ["User Library/Kumi/Instruments isn't a plain folder (a link or a file is there)."]),
+    "missing_artifact": ("The preset Kumi built is no longer in its store: build it again.", None),
+}
+
+
+def preset(fixture: Fixture, args: dict, host: dict) -> dict:
+    """As #1180's preset op: the file's name is the preset's name and the first 12 hex of its digest, so the same
+    bytes always name the same file, and placing them again answers that file without writing another."""
+    if fixture.daw != "ableton":
+        return error("unsupported", "Kumi puts plug-in presets only into Ableton Live's User Library.")
+    if args.get("artifact_id") != PRESET_ARTIFACT:
+        return error("invalid_source", "That artifact isn't a preset Kumi's verified writer made.")
+    if fixture.options.preset_refusal:
+        reason, findings = PRESET_REFUSALS[fixture.options.preset_refusal]
+        refused = error(fixture.options.preset_refusal, reason)
+        if findings:
+            refused["error"]["findings"] = findings
+        return refused
+    record = preset_record(fixture.options)
+    label = f"{record['name']} {record['digest'][:12]}"
+    file = f"{record['folder']}/{label}.vstpreset"
+    facts = {key: record[key] for key in ("plugin", "class", "version")}
+    if args.get("action") == "preview":
+        return {"state": "preview", **facts, "version_checked": not fixture.options.preset_unchecked,
+                "format": record["format"], "digest": record["digest"], "settings": record["settings"], "file": file,
+                "name": label, "values_note": record["values_note"]}
+    if args.get("action") != "place" or not args.get("digest") or not args.get("file"):
+        return error("invalid", "place takes the previewed digest and file.")
+    if fixture.options.preset_changed or args["digest"] != record["digest"] or args["file"] != file:
+        return error("changed", "The preset or its file changed since the preview, so Kumi wrote nothing: preview it "
+                                "again.")
+    fixture.preset_files.add(label)
+    return {"name": label, "item": f"user_library/{file.removeprefix('User Library/')}", "file": file,
+            "indexed": True, **facts, "next": "Observe, then load it with one kumi_change: load_device with this item."}
+
+
 # Each with the file's path, which a map has (CC-4) and the plugin must never pass to the model.
 SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", "class": "drum", "folder": "Drums",
            "duration": 0.42, "path": "/Samples/Drums/Dusty Snare 04.wav"},
@@ -1118,7 +1206,8 @@ def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
-         "variations": variations, "device": device}
+         "variations": variations, "device": device, "preset_build": preset_build,
+         "preset": preset}
 
 
 def main() -> None:
@@ -1173,6 +1262,18 @@ def main() -> None:
                         help="a device preview answers another SHA-256, as a serve that re-encoded the spec would")
     parser.add_argument("--device-file-appears", action="store_true",
                         help="a file takes the previewed device's name before its build")
+    parser.add_argument("--preset-unchecked", action="store_true",
+                        help="a preset preview couldn't read the installed plug-in's version (version_checked false)")
+    parser.add_argument("--preset-changed", action="store_true",
+                        help="a preset place finds its preview's digest or file no longer holds (26-r1)")
+    parser.add_argument("--preset-settings", type=int, default=0, help="the preset has this many volume changes")
+    parser.add_argument("--preset-hidden", action="store_true",
+                        help="the preset's name carries a direction-changing character")
+    parser.add_argument("--preset-refusal", choices=sorted(PRESET_REFUSALS),
+                        help="a preset preview refuses with this code, as serve's preset op can")
+    parser.add_argument("--preset-unedited", action="store_true", help="the preset changes nothing in its template")
+    parser.add_argument("--preset-shapes", action="store_true",
+                        help="a renderer-shape record (each kind of value at once), not a real writer receipt")
     Fixture(parser.parse_args()).serve()
 
 

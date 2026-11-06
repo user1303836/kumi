@@ -819,6 +819,49 @@ def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
     return built
 
 
+# What a build takes, as serve's preset_build schema does: anything else is refused before serve is asked (agent-m's
+# composition smoke: a version the model added was dropped, and the build went ahead).
+PRESET_BUILD_FIELDS = frozenset({"plugin", "class", "name", "edits"})
+PRESET_BUILD_FIELDS_ONLY = ("Kumi didn't build the preset: it takes only plugin, class, name and edits, never a file, "
+                            "bytes or a version of its own.")
+
+
+def kumi_preset_build(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-26: a preset built from the verified writer's initialized template and the model's typed edits, kept only as
+    Kumi's private copy (an artifact): nothing reaches Live or the User Library until kumi_preset is approved. It runs
+    unasked in the producer's own turn, never unattended, forked or scheduled (policy, 26-w1)."""
+    if not set(args) <= PRESET_BUILD_FIELDS:  # never filtered away: a version, file or bytes the model adds is refused
+        return {"error": {"code": "invalid", "reason": PRESET_BUILD_FIELDS_ONLY}}
+    return host.live().call("preset_build", dict(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
+
+
+# A place whose answer never came: the file may be in the User Library. The same preset always names the same file, and
+# placing it again answers that file without writing another (#1180), so asking again is safe.
+PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Ask for it again with kumi_preset: placing the same "
+                      "preset never writes a second file, it answers the one already there.")
+
+
+def kumi_preset(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-26: the preset the producer approved, placed as serve's preview named it: the approval's digest and file go
+    with it, so serve writes exactly that file of exactly those bytes, or refuses `changed` and writes nothing (26-r1).
+    A written file is this chat's newest write, which "undo that" never undoes (26-w5)."""
+    call = kwargs.get("kumi_call")
+    approved = call.extra if isinstance(call, calls.Entry) else {}
+    artifact = args.get("artifact_id")
+    if (approved.get("artifact_id") != artifact or not isinstance(approved.get("digest"), str)
+            or not isinstance(approved.get("file"), str)):
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't put the preset in your User Library: it isn't "
+                                                            "the one the producer approved."}}
+    placed = _write(host, "preset", {"action": "place", "artifact_id": artifact, "digest": approved["digest"],
+                                     "file": approved["file"]}, kwargs)
+    if placed.get("state") == "unsure":
+        return {**placed, "hint": PRESET_UNSURE_HINT}
+    if isinstance(placed.get("file"), str) and "error" not in placed:
+        host.remember_library_write(kwargs, placed["file"])
+    return placed
+
+
+
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
@@ -1408,6 +1451,8 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
     ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
     ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
+    ("kumi_preset_build", schemas.KUMI_PRESET_BUILD, kumi_preset_build, "🎚️"),
+    ("kumi_preset", schemas.KUMI_PRESET, kumi_preset, "🎛️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1416,7 +1461,7 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset")
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))

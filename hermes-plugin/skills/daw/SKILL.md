@@ -257,10 +257,17 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Then load it:** observe first (`kumi_observe`: the track's ref, the project key and epoch), then one `kumi_change` with only `load_device` (`itemId`: the build's `item`, `trackRef`). It goes at the end of the chain, and Kumi can undo it; the file stays in the User Library after an undo.
 - **Move it only if it belongs elsewhere** ("before the Saturator"): observe again, then a second `kumi_change` with `move_device` alone. Kumi can't undo a move on Live: only Live's own Undo takes it back, and its approval and HISTORY row say so.
 
+## Presets (Live)
+- **For a plug-in's patch as a whole** (Serum 2, Pro-Q 4, Ozone 12), when setting the instance's parameters one at a time doesn't fit: three steps, the last two each approved. Live only for now: in REAPER and Renoise, Kumi builds no presets (their own named presets still load as before).
+- **Build it with `kumi_preset_build`:** read `kumi_plugin_knowledge` first and edit only its writable control paths: `{plugin, name, edits: [{path, value}]}`. It changes nothing in Live or the User Library: Kumi keeps a private copy and answers each setting before and after, and an `artifact_id`. A plug-in that isn't installed, or whose installed version Kumi hasn't verified, is refused: say so, never guess a version.
+- **Values are what the file stores:** report them with the unit the answer gives ("stored value" when there's no proven unit), never as a percentage or a unit it didn't give. A setting the template didn't store says so.
+- **Then put it in the User Library with `kumi_preset {artifact_id}`:** the producer approves the new `.vstpreset` file in the Kumi folder, reading every setting. The file stays after an undo.
+- **Then load it:** observe first, then one `kumi_change` with only `load_device` (`itemId`: the place's `item`, `trackRef`), asked again. When the answer says Live hasn't listed the file yet, follow its next step: never load it by path, and never place it again.
+
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.
 - **Grouping tracks in Live:** Live's API can't group tracks without Kumi's native editing, which this plugin doesn't use. Ask the producer to select the tracks and press Cmd+G (Ctrl+G on Windows), then route and name the group with steps.
-- **Files:** it doesn't delete files, or drive the DAW's menus. Code runs only as a script or a device the producer approves (Scripts and Devices, above).
+- **Files:** it doesn't delete files, or drive the DAW's menus. Code runs only as a script or a device the producer approves (Scripts and Devices, above); files it writes into the User Library (devices, presets) stay there.
 - **Setup:** it doesn't change the DAW's settings.
 
 Say so plainly when asked; don't try another route.

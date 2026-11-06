@@ -417,3 +417,41 @@ KUMI_DEVICE = _tool(
         "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS, "description": "GenExpr."}},
         "required": ["name", "about", "controls", "code"], "additionalProperties": False}},
     ("spec",))
+
+
+# CC-26: a preset from a verified writer's initialized template and typed edits, kept as Kumi's private copy (serve's
+# preset_build op, agent-m's W3). Nothing reaches Live or the User Library until kumi_preset is approved.
+PRESET_PLUGINS = ["serum-2", "fabfilter-pro-q-4", "ozone-12"]
+
+KUMI_PRESET_BUILD = _tool(
+    "kumi_preset_build",
+    "Build a plug-in preset (Serum 2, Pro-Q 4 or Ozone 12) from Kumi's verified initialized template and typed edits, "
+    "for a patch as a whole (skill kumi:daw, Presets). Read kumi_plugin_knowledge first: edit only its writable "
+    "control paths, with values as the preset file stores them. Kumi keeps the result as a private copy and changes "
+    "nothing in Live or the User Library; it answers each setting before and after, and an artifact_id for "
+    "kumi_preset, which the producer approves. A plug-in that isn't installed, or whose installed version Kumi hasn't "
+    "verified, is refused. Live only for now.",
+    {"plugin": {"type": "string", "enum": PRESET_PLUGINS},
+     "class": {"type": "string", "pattern": "^[0-9A-Fa-f]{32}$",
+               "description": "The catalog's VST3 processor class; left out, the product's initialized default."},
+     "name": {"type": "string", "minLength": 1, "maxLength": 80, "description": "The preset's name."},
+     "edits": {"type": "array", "maxItems": 32, "items": {
+         "type": "object", "additionalProperties": False, "required": ["path", "value"], "properties": {
+             "path": {"type": "string", "minLength": 1, "maxLength": 256,
+                      "description": "A writable control path from kumi_plugin_knowledge."},
+             "value": {"oneOf": [{"type": "number"}, {"type": "boolean"}, {"type": "string", "maxLength": 80},
+                                 {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 40}}]}}}}},
+    ("plugin", "name", "edits"))
+
+
+# CC-26: a verified preset from kumi_preset_build into Live's User Library (serve's preset op, preview then place).
+KUMI_PRESET = _tool(
+    "kumi_preset",
+    "Put a plug-in preset that kumi_preset_build made into Live's User Library (Kumi folder) as a new .vstpreset file. "
+    "The producer approves it first, reading the plug-in, its verified version, every setting as the file stores it, "
+    "and the file. The file stays after an undo: Kumi never removes it. Returns the file and its Browser item; "
+    "loading it is a kumi_change of its own (observe first, then load_device with that item), asked again. When the "
+    "answer says Live hasn't listed the file yet, follow its next step: never load it by path, never place it again. "
+    "Live only.",
+    {"artifact_id": {"type": "string", "minLength": 1, "description": "kumi_preset_build's artifact_id."}},
+    ("artifact_id",))
