@@ -2235,7 +2235,11 @@ async fn restricted_reaper_refuses_old_bridges_without_rendering_or_auditioning(
             let simulator = reaper_lab(&script, home.path(), |_| {}).await;
             let scratch_root = home.path().join("scratch").join("listen");
             let (reaper, _) = integration_with(Daw::Reaper, home.path(), create_reaper_integration, |context| {
-                context.policy = kumi_agent::core::context::HostPolicy::plugin(scratch_root.clone(), home.path().join("quarantine"));
+                context.policy = kumi_agent::core::context::HostPolicy::plugin(
+                    scratch_root.clone(),
+                    home.path().join("quarantine"),
+                    home.path().to_path_buf(),
+                );
             });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
@@ -2288,7 +2292,11 @@ async fn restricted_renoise_refuses_old_bridges_without_exact_duration_preflight
             let simulator = renoise_lab(&script, home.path()).await;
             let scratch_root = home.path().join("scratch").join("listen");
             let (renoise, _) = integration_with(Daw::Renoise, home.path(), create_renoise_integration, |context| {
-                context.policy = kumi_agent::core::context::HostPolicy::plugin(scratch_root.clone(), home.path().join("quarantine"));
+                context.policy = kumi_agent::core::context::HostPolicy::plugin(
+                    scratch_root.clone(),
+                    home.path().join("quarantine"),
+                    home.path().to_path_buf(),
+                );
             });
             renoise.start(Signal::new()).await.unwrap();
             let observed = renoise.observe(Signal::new(), None).await.unwrap();
@@ -2342,7 +2350,8 @@ impl RestrictedFixture {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
         let (integration, _) = integration_with(daw, home, create, |context| {
-            context.policy = kumi_agent::core::context::HostPolicy::plugin(scratch_root.path().into(), quarantine.path().into());
+            context.policy =
+                kumi_agent::core::context::HostPolicy::plugin(scratch_root.path().into(), quarantine.path().into(), home.to_path_buf());
         });
         Self { integration, scratch_root, quarantine, scratch }
     }

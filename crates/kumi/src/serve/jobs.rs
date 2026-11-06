@@ -316,6 +316,11 @@ impl Jobs {
     pub(crate) fn running(&self) -> usize {
         self.running.get()
     }
+
+    /// Whether a job of one of these kinds runs here now.
+    pub fn running_of(&self, kinds: &[&str]) -> bool {
+        self.jobs.borrow().values().any(|job| kinds.contains(&job.kind) && job.state.get() == State::Running)
+    }
 }
 
 /// What a job's work is given: its signal, and its progress to report.

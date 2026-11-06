@@ -802,33 +802,130 @@ local function note_tempo(job, env, song)
     beat_text(transport.bpm), transport.lpb, beat_text(before.bpm), before.lpb)
 end
 
--- Guarded completion is one native compare-and-restore on every outcome, never a later adapter write.
--- Deferred completion checks before *any* cleanup writes, including mute/solo; legacy requests retain their cleanup path.
+local EDIT_SELECTION = {
+  "selected_track_index", "selected_instrument_index", "selected_sample_index", "selected_phrase_index",
+  "selected_track_device_index", "selected_note_column_index", "selected_effect_column_index",
+}
+local BLOCK_SELECTION = { "start_line", "end_line", "start_track", "end_track", "start_column", "end_column" }
+
+local function edit_snapshot(song, range)
+  local position = song.transport.edit_pos
+  local saved = {
+    edit = { position.sequence, position.line },
+    selected = { song.selected_sequence_index, song.selected_line_index },
+    pattern = song.selected_pattern_index, follow = song.transport.follow_player,
+    render_pattern = song.sequencer.pattern_sequence[range.start[1]],
+  }
+  for _, key in ipairs(EDIT_SELECTION) do saved[key] = song[key] end
+  local block = song.selection_in_pattern
+  if block then
+    saved.block = {}
+    for _, key in ipairs(BLOCK_SELECTION) do saved.block[key] = block[key] end
+  end
+  return saved
+end
+
+local function same_edit_selection(song, saved)
+  if song.transport.follow_player ~= saved.follow then return false end
+  for _, key in ipairs(EDIT_SELECTION) do
+    if song[key] ~= saved[key] then return false end
+  end
+  local block = song.selection_in_pattern
+  if (block == nil) ~= (saved.block == nil) then return false end
+  if block then
+    for _, key in ipairs(BLOCK_SELECTION) do
+      if block[key] ~= saved.block[key] then return false end
+    end
+  end
+  return true
+end
+
+local function edit_at(song, edit, selected, pattern)
+  local position = song.transport.edit_pos
+  return position.sequence == edit[1] and position.line == edit[2]
+    and song.selected_sequence_index == selected[1] and song.selected_line_index == selected[2]
+    and song.selected_pattern_index == pattern
+end
+
+local function edit_restored(job, song)
+  local saved = job.edit_before
+  return not saved or (edit_at(song, saved.edit, saved.selected, saved.pattern) and same_edit_selection(song, saved))
+end
+
+local function guarded_edit_problem(job, env, song)
+  local saved = job.edit_before
+  if not saved then return end
+  if env.layout() ~= job.layout or not same_edit_selection(song, saved) then
+    return "cursor_restore_state_changed",
+      "Renoise's selection, follow-player setting, or track layout changed; no further restoration writes were requested. Observe again."
+  end
+  -- Row 13: native follow-player left the cursor at the render start. No nearby-line tolerance:
+  -- a different producer position is theirs, just as a different BPM/LPB pair is theirs.
+  if not edit_at(song, saved.edit, saved.selected, saved.pattern)
+    and not edit_at(song, job.range.start, job.range.start, saved.render_pattern) then
+    return "cursor_restore_ownership_uncertain",
+      "Renoise's edit position is neither the launch position nor the render start; ownership is unknown, so no further cursor write was requested. Observe again."
+  end
+end
+
+local CURSOR_RESTORE_FAILED = "Renoise's edit position and selection did not read back as the launch snapshot. Observe again."
+
+local function restore_guarded_edit(job, env, song)
+  local saved = job.edit_before
+  if not saved then return true end
+  -- Row 20: the seek and its tempo commands can settle after the setter returns. Request it once,
+  -- then wait within the existing deadline; only a verified cursor permits final tempo restoration.
+  if not edit_at(song, saved.edit, saved.selected, saved.pattern) and not job.cursor_requested then
+    job.cursor_requested = true
+    local restored = pcall(env.quiet, function()
+      song.transport.edit_pos = renoise.SongPos(saved.edit[1], saved.edit[2])
+    end)
+    if not restored then return false, "cursor_restore_failed", CURSOR_RESTORE_FAILED end
+  end
+  if not same_edit_selection(song, saved) then return false, "cursor_restore_failed", CURSOR_RESTORE_FAILED end
+  if not edit_restored(job, song) then
+    if job.deadline_ms and not job.aborting then return nil end
+    return false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+  end
+  return true
+end
+
+-- Every pulse fences cleanup before any new write. Cursor readback may defer finalization, but
+-- the final tempo compare, restore and readback remain one synchronous step.
 local function guarded_restore_problem(job, env, song)
   if not job.max_seconds or not job.tempo_before then return end
   if job.document_closed or not song or env.document() ~= job.document or env.epoch() ~= job.epoch then
-    return "tempo_restore_state_changed", "Renoise's document or epoch changed; guarded restoration was not attempted. Observe again."
+    return "tempo_restore_state_changed", "Renoise's document or epoch changed; no further restoration writes were requested. Observe again."
   end
   if deadline_expired(job) then
-    return "tempo_restore_state_changed", "The approved native deadline expired before Renoise's guarded restoration; no cleanup writes were attempted. Observe again."
+    return "tempo_restore_state_changed", "The approved native deadline expired before restoration could be verified; no further cleanup writes were attempted. Observe again."
   end
   if song.rendering or song.transport.playing or song.transport.edit_mode then
     return "tempo_restore_state_changed", "Renoise is rendering, playing, or in Edit Mode; guarded restoration requires a stopped transport. Observe again."
   end
+  return guarded_edit_problem(job, env, song)
 end
 
 -- The approved end pair is the only known render-owned pair, even for a failed or cancelled render.
 -- A partial render may stop at another pair; without exact ownership evidence that pair must survive.
 -- An identical producer-chosen pair is indistinguishable; any different pair is never overwritten.
--- Called synchronously after guarded_restore_problem, with no yield between comparison, setters and readback.
-local function restore_guarded_tempo(job, env, song)
-  if not job.max_seconds or not job.tempo_before then return true end
+local function guarded_tempo_problem(job, song)
+  if not job.max_seconds or not job.tempo_before then return end
   local transport, before, expected = song.transport, job.tempo_before, job.tempo_expected
-  if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
+  if transport.bpm == before.bpm and transport.lpb == before.lpb then return end
   if not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then
-    return false, "tempo_restore_ownership_uncertain",
+    return "tempo_restore_ownership_uncertain",
       "Renoise's BPM/LPB pair is neither the launch pair nor the known render-end pair; ownership is unknown, so it was left unchanged. Observe again."
   end
+end
+
+-- No yield between this final comparison, setters and readback. The cursor seek has already settled.
+local function restore_guarded_tempo(job, env, song)
+  if not job.max_seconds or not job.tempo_before then return true end
+  local code, message = guarded_tempo_problem(job, song)
+  if code then return false, code, message end
+  local transport, before = song.transport, job.tempo_before
+  if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
   local restored = pcall(env.quiet, function()
     if transport.bpm ~= before.bpm then transport.bpm = before.bpm end
     if transport.lpb ~= before.lpb then transport.lpb = before.lpb end
@@ -839,23 +936,69 @@ local function restore_guarded_tempo(job, env, song)
   return true
 end
 
-local function finish(job, env, state, code, message)
+local function defer_finish(job, state, code, message)
+  local pending = job.finalizing or {}
+  pending.state, pending.code, pending.message = state, code, message
+  job.finalizing = pending
+end
+
+local function finish(job, env, state, code, message, on_idle)
   local song = renoise.song()
   if not job.deadline_ms then restore(job, env, song) end
   local restore_code, restore_message = guarded_restore_problem(job, env, song)
+  if not restore_code then restore_code, restore_message = guarded_tempo_problem(job, song) end
   local restored = restore_code == nil
   if restored then
-    if job.deadline_ms then restore(job, env, song) end
-    restored, restore_code, restore_message = restore_guarded_tempo(job, env, song)
+    if job.settle_idles then
+      -- Native row23: a timer can run before a seek's tempo chase. Only actual app_idle callbacks count.
+      if not song or not edit_restored(job, song) then
+        restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+      elseif song.transport.bpm ~= job.tempo_before.bpm or song.transport.lpb ~= job.tempo_before.lpb then
+        restored, restore_code, restore_message = false, "tempo_restore_failed",
+          "Renoise's BPM/LPB pair changed after restoration; no further writes were requested. Observe again."
+      elseif job.aborting then
+        restored, restore_code, restore_message = false, "tempo_restore_state_changed",
+          "Kumi's tool stopped before native idle verification could finish. Observe again."
+      else
+        if on_idle then job.settle_idles = job.settle_idles + 1 end
+        if job.settle_idles < 2 then return defer_finish(job, state, code, message) end
+      end
+    else
+      if job.deadline_ms then restore(job, env, song) end
+      local ready, edit_code, edit_message = restore_guarded_edit(job, env, song)
+      if ready == nil then
+        job.cursor_idle = nil
+        return defer_finish(job, state, code, message)
+      end
+      restored, restore_code, restore_message = ready, edit_code, edit_message
+      if restored and job.deadline_ms then
+        if job.aborting then
+          restored, restore_code, restore_message = false, "tempo_restore_state_changed",
+            "Kumi's tool stopped before native idle verification could finish. Observe again."
+        elseif not on_idle or not job.cursor_idle then
+          if on_idle then job.cursor_idle = true end
+          return defer_finish(job, state, code, message)
+        end
+      end
+      if restored then restored, restore_code, restore_message = restore_guarded_tempo(job, env, song) end
+      if restored and not edit_restored(job, song) then
+        restored, restore_code, restore_message = false, "cursor_restore_failed", CURSOR_RESTORE_FAILED
+      end
+      if restored and job.deadline_ms then
+        job.settle_idles = 0
+        return defer_finish(job, state, code, message)
+      end
+    end
   elseif job.deadline_ms then
     job.restored = false
   end
-  if job.max_seconds then job.tempo_restored = restored end
+  if job.max_seconds then job.guarded_restored = restored end
   if not restored then
     state, code, message = "failed", restore_code, restore_message
   end
   note_tempo(job, env, song)
   job.state = state
+  job.finalizing = nil
   job.rendering = nil
   if state ~= "done" then
     delete_files(job)
@@ -1210,6 +1353,7 @@ function M.launch(job, env)
       beat_text(state.bpm), state.lpb, beat_text(played.bpm), played.lpb)
   end
   job.tempo_before = { bpm = song.transport.bpm, lpb = song.transport.lpb }
+  if job.max_seconds then job.edit_before = edit_snapshot(song, job.range) end
   for _, source in ipairs(job.sources) do
     if source.what == "track" then job.snapshot = job.snapshot or snapshot(song) end
   end
@@ -1242,12 +1386,16 @@ function M.render_start(params, env)
 end
 
 -- A job's state now. A render that reads as ended with no callback for a while stopped (cancelled in Renoise, or failed).
-function M.check(env)
+function M.check(env, on_idle)
   local job = M.active()
   if not job then
     -- (never raises: this runs before every request)
     local ok, err = pcall(M.warm, env.pattern_mark)
     if not ok then log.write("error", "listening: reading the tempo commands ahead: " .. tostring(err)) end
+  end
+  if job and job.finalizing then
+    local pending = job.finalizing
+    return finish(job, env, pending.state, pending.code, pending.message, on_idle)
   end
   if not job or not job.rendering then return end
   local song = renoise.song()
@@ -1307,7 +1455,7 @@ function M.status(params, env)
   if job.error then answer.error, answer.code = job.error, job.code end
   if #job.notes > 0 then answer.notes = json.array(job.notes) end
   if job.tempo then answer.tempo = job.tempo end
-  if job.max_seconds and ended(job) then answer.restored = job.tempo_restored end
+  if job.max_seconds and ended(job) then answer.restored = job.guarded_restored end
   return answer
 end
 
@@ -1323,8 +1471,9 @@ function M.cancel(params, env)
     return { jobId = job.id, state = "running", stopping = true }
   end
   job.dead = true
+  job.stopping = true
   finish(job, env, "cancelled")
-  return { jobId = job.id, state = job.deadline_ms and job.state or "cancelled" }
+  return { jobId = job.id, state = job.deadline_ms and job.state or "cancelled", stopping = job.state == "running" or nil }
 end
 
 -- The tool is stopped or reloaded during a job: what it changed goes back now, its files go, and a render still in flight is
@@ -1333,6 +1482,7 @@ function M.abort(env, why)
   local job = M.active()
   if not job then return end
   job.dead = true
+  job.aborting = true
   finish(job, env, "failed", "failed", why)
 end
 

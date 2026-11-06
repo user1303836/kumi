@@ -216,6 +216,36 @@ fn serve_answers_status_on_stdio_without_reading_or_writing_the_producers_kumi()
 }
 
 #[test]
+fn bundled_plugin_knowledge_reads_verified_format_evidence_without_connecting_to_a_daw() {
+    let folders = Folders::new();
+    for home in [&folders.producers_kumi, &folders.user.join(".kumi"), &folders.transport] {
+        poison(home);
+    }
+    let mut serve = Running::start(folders.command("renoise"));
+    serve.initialize();
+    serve.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+        "name": "plugin_knowledge",
+        "arguments": {"action": "catalog", "plugin": "vital", "query": "master_volume", "limit": 1, "max_chars": 20000}
+    }}));
+    let called = serve.answer(2);
+    assert_eq!(called["result"]["isError"], false, "{called}");
+    let answer = &called["result"]["structuredContent"];
+    let catalog: Value = serde_json::from_str(answer["text"].as_str().unwrap()).unwrap();
+    assert_eq!(catalog["plugin"]["plugin"], "vital");
+    assert_eq!(catalog["verified"]["writes"], json!([]), "observed fields do not invent a verified writer");
+    assert!(catalog["plugin"].get("presets").is_none() && catalog["plugin"].get("binaries").is_none());
+    serve.send(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "status", "arguments": {}}}));
+    let status = serve.answer(3);
+    assert_eq!(status["result"]["structuredContent"]["connected"], false);
+    assert_eq!(status["result"]["structuredContent"]["project"], Value::Null);
+    assert_eq!(serve.end(), 0);
+    for home in [&folders.producers_kumi, &folders.user.join(".kumi"), &folders.transport] {
+        assert!(poisoned(home), "{} untouched", home.display());
+        assert_eq!(listing(home), ["auth.json", "settings.json"], "nothing written in {}", home.display());
+    }
+}
+
+#[test]
 fn listen_sources_advertise_only_available_guarded_capture() {
     for daw in ["ableton", "reaper", "renoise"] {
         let folders = Folders::new();

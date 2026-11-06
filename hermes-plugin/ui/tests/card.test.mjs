@@ -82,6 +82,14 @@ test('a mastering round says how far each comparison so far was from the referen
   // A comparison this window didn't see arrive (a chat opened later) isn't numbered, and the first one has no trend.
   assert.ok(!render({ result: pass(-9.0, 'a-9') }, store).includes(english('listen.round', 3)))
   assert.ok(!render({ result: pass(-12.7, 'a-1') }, store).includes(english('listen.round', 1)))
+  // From round 2 the skill compares against the copy Kumi kept (`compare_to: {"artifact_id"}`), measured under the
+  // copy's own name: still this reference's next round, shown under the reference's name.
+  const third = pass(-9.4, 'a-3')
+  const againstCopy = { ...third, compare: { ...third.compare, artifact_id: 'r-a-1', metrics: { ...third.compare.metrics, file: 'r-a-1.wav' } } }
+  store.noteListen(againstCopy)
+  const html3 = render({ result: againstCopy }, store)
+  assert.ok(html3.includes(english('listen.round', 3)), html3)
+  assert.ok(html3.includes('vs Ref.wav') && !html3.includes('r-a-1.wav'), html3)
 })
 
 test("a model's reading sits under a plain heading with its model, its own opening line said once", () => {
@@ -286,6 +294,61 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
 })
 
+test("the pad picker lays out Live's first sixteen pads as Live's Drum Rack does, and another DAW's by note", async () => {
+  const { PadPicker } = await load('src/desktop/map.tsx', { react: 'real' })
+  const labels = daw => [...renderToStaticMarkup(createElement(PadPicker, { daw, onPick() {}, onClose() {} })).matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(match => match[1])
+  // Top row first, as on screen: D#2 top right, C1 bottom left.
+  assert.deepEqual(labels('ableton'), ['C2', 'C#2', 'D2', 'D#2', 'G#1', 'A1', 'A#1', 'B1', 'E1', 'F1', 'F#1', 'G1', 'C1', 'C#1', 'D1', 'D#1'])
+  assert.deepEqual(labels('renoise').slice(-4), ['36', '37', '38', '39'])
+})
+
+test("a pending script (CC-19) shows Hermes's claim as one, its facts, the approval's warning and every numbered line", async () => {
+  const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const sha = 'f'.repeat(64)
+  const pending = { tool_call_id: 'call-7', language: 'lua', sha256: sha, purpose: 'Rename every pattern', lines: 3, warning: "Runs with the DAW's access to your computer; Kumi can't undo it" }
+  // A right-to-left override (Trojan Source) that got past serve is drawn where it is, never applied.
+  const code = 'for i = 1, #song.patterns do\n  song.patterns[i].name = "Part " .. i -- \u202E edit\nend\n'
+  const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: { sha256: sha, language: 'lua', code, lines: 3 } } }))
+  for (const text of [english('script.says', 'Rename every pattern'), 'Lua in Renoise', '3 lines', 'SHA-256 ffffffffffff', 'Kumi can&#x27;t undo it', 'for i = 1, #song.patterns do', '>3<', 'U+202E']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  assert.ok(!html.includes('\u202E'), 'the override character itself never reaches the page')
+  // While its code is read, and when it can't be, the section says so rather than showing anything else.
+  const reading = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: null } }))
+  assert.ok(reading.includes(english('script.reading')) && !reading.includes('<pre'))
+  const unreadable = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'renoise', script: { pending, code: false } }))
+  assert.ok(unreadable.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !unreadable.includes('<pre'))
+})
+
+test('a pending device (CC-22) shows its file and its controls, each with its range and default as the approval writes them, beside its GenExpr code', async () => {
+  const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const { pendingScriptOf } = await load('src/shared/store.ts', { react: 'real' })
+  const spec = {
+    name: 'Soft Clip',
+    about: 'Gentle saturation',
+    controls: [
+      { name: 'Tone', type: 'number', min: 200, max: 8000, default: 1000, unit: 'Hz' },
+      { name: 'Shape', type: 'choice', options: ['Soft', 'Hard'], default: 'Soft' },
+      { name: 'Bypass', type: 'switch', default: false }
+    ],
+    code: 'out1 = tanh(in1 * (1 + Drive * 4));\nout2 = tanh(in2 * (1 + Drive * 4));\n'
+  }
+  const sha = 'd'.repeat(64)
+  const file = 'User Library/Kumi/Audio Effects/Soft Clip.amxd'
+  // The event as the plugin sends it: the pane keeps the file the approval names.
+  const pending = pendingScriptOf({ tool_call_id: 'call-9', language: 'device', sha256: sha, purpose: 'Gentle saturation', warning: 'Writes a new Max for Live device into your User Library (Kumi folder)', file })
+  const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: JSON.stringify(spec), lines: 2 } } }))
+  const switched = `${english('script.on')}/${english('script.off')}`
+  for (const text of ['Soft Clip', english('script.device'), english('script.file', file), '200–8000 Hz', '>1000 Hz<', '>Soft/Hard<', '>Soft<', `>${switched}<`, `>${english('script.off')}<`, 'out1 = tanh(in1 * (1 + Drive * 4));', '>2<', 'User Library (Kumi folder)']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  // A file with a hidden character (here a right-to-left override) isn't shown.
+  assert.equal(pendingScriptOf({ tool_call_id: 'call-9', language: 'device', sha256: sha, file: 'Soft\u202eClip.amxd' }).file, undefined)
+  // A file that isn't a device's spec (no code) shows no code, only that it can't be read.
+  const broken = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: '{"name":"x"}', lines: 0 } } }))
+  assert.ok(broken.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !broken.includes('<pre'))
+})
+
 test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
   const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
@@ -384,6 +447,7 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     items: [
       { id: 'h-g2-u1', label: '', title: 'Raise the Drums fader', family: 'unsure', state: 'unsure', undo_available: false, note: 'Live stopped answering mid-change.', runtime_generation: 'g2' },
       { id: 'h-g2-c3', label: 'c3', title: 'Bass muted', family: 'mixer', state: 'kept', undo_available: false, track: 'Bass', note: 'Bass was changed by hand since, so Kumi kept it.', runtime_generation: 'g2' },
+      { id: 'h-g2-c2', label: 'c2', title: 'Script: Name the tracks', family: 'script', state: 'applied', undo_available: false, script: { sha256: 'a'.repeat(64), language: 'python' }, runtime_generation: 'g2' },
       { id: 'h-g1-c9', label: 'c9', title: 'Tempo 120 → 124', family: 'tempo', state: 'applied', undo_available: false, runtime_generation: 'g1' }
     ]
   }
@@ -397,6 +461,10 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
   const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
   assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
   assert.ok(!html.includes(restarted))
+  // A script's row has no undo from the start (Kumi never undoes one, CC-19): applied, saying so, never "restarted".
+  assert.equal(live.split(restarted).length - 1, 1, live)
+  assert.ok(live.includes(english('history.scriptUndo', 'Live').replaceAll("'", '&#x27;')), live)
+  assert.ok(live.includes(`aria-label="${english('history.applied')}"`), live)
 })
 
 test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their own names', async () => {

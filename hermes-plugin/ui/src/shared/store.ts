@@ -2,8 +2,8 @@
 // reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
 import { plainId } from './format.ts'
-import { gapsOf, parseListen, referenceKey, type Gaps } from './listen.ts'
-import type { Focus, History, Job, SetupStatus, SoundMap, Status } from './types.ts'
+import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
+import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
 export type Fetch = <T>(path: string) => Promise<T>
 
@@ -27,9 +27,11 @@ export interface KumiState {
    *  is null when the event left it out for its size. */
   measured: { tool_call_id: string; result: unknown; at: number } | null
   /** Comparisons against each reference this window saw arrive (a mastering pass's rounds), oldest first, by
-   *  `referenceKey`: each one's own audio id and its gaps. Only what arrived while the window was open, so a round is
-   *  never numbered from a partial past. */
-  rounds: Record<string, { id: string; gaps: Gaps }[]>
+   *  `roundKey`. Only what arrived while the window was open, so a round is never numbered from a partial past. */
+  rounds: Record<string, Round[]>
+  /** The script whose approval waits in the chat in front (CC-19), and its saved code once read: null while it's being
+   *  read, `false` when it couldn't be (missing, or no longer what the approval named). One at a time: approvals are. */
+  script: { pending: PendingScript; code: ScriptCode | null | false } | null
 }
 
 export interface TrackedJob extends Job {
@@ -46,7 +48,23 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null }
+
+const SHA256 = /^[0-9a-f]{64}$/
+
+/** A `script.pending` payload as the pane can use it, or null: a plain call id, an exact SHA-256 and a known language. */
+export function pendingScriptOf(payload: unknown): PendingScript | null {
+  if (!payload || typeof payload !== 'object') return null
+  const value = payload as Record<string, unknown>
+  const id = plainId(value.tool_call_id)
+  const language = value.language === 'python' || value.language === 'lua' || value.language === 'device' ? value.language : null
+  if (!id || !language || typeof value.sha256 !== 'string' || !SHA256.test(value.sha256)) return null
+  const text = (key: string) => (typeof value[key] === 'string' ? (value[key] as string) : undefined)
+  const lines = typeof value.lines === 'number' && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : undefined
+  // A device's file is a path the approval names; one printable line, or nothing.
+  const file = language === 'device' && typeof value.file === 'string' && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : undefined
+  return { tool_call_id: id, language, sha256: value.sha256, purpose: text('purpose'), daw: text('daw'), lines, warning: text('warning'), file }
+}
 
 function finished(job: Job): boolean {
   return typeof job.state === 'string' && job.state !== 'running'
@@ -204,19 +222,52 @@ export class KumiStore {
   }
 
   /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
-   *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+   *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+   *  twice (both signals for one call) counts once. */
   noteListen(result: unknown): void {
     const parsed = parseListen(result)
-    const key = parsed ? referenceKey(parsed) : null
+    const key = parsed ? roundKey(parsed, this.state.rounds) : null
     const id = typeof parsed?.artifact_id === 'string' ? parsed.artifact_id : null
     if (!parsed || !key || !id) return
     const before = this.state.rounds[key] ?? []
     if (before.some(round => round.id === id)) return
     // A few references, each with a few rounds: a pass is three at most, and older ones drop off.
-    const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) }
+    const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) }
     const keys = Object.keys(rounds)
     if (keys.length > MOST_REFERENCES) delete rounds[keys[0]]
     this.set({ rounds })
+  }
+
+  /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
+   *  no plain call id, exact SHA-256 or known language shows nothing. */
+  scriptPending(payload: unknown): void {
+    const pending = pendingScriptOf(payload)
+    if (!pending) return
+    this.set({ script: { pending, code: null } })
+    const generation = this.generation
+    void this.readScript(pending.sha256, pending.language).then(code => {
+      // Only for the same pending script: it may have settled, or another taken its place, meanwhile.
+      if (generation !== this.generation || this.state.script?.pending !== pending) return
+      this.set({ script: { pending, code: code ?? false } })
+    })
+  }
+
+  /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
+  scriptSettled(toolCallId: unknown): void {
+    const id = plainId(toolCallId)
+    if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null })
+  }
+
+  /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
+   *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
+  async readScript(sha256: string, language: ScriptLanguage): Promise<ScriptCode | null> {
+    if (!SHA256.test(sha256)) return null
+    try {
+      const read = await this.fetch<ScriptCode>(`/script?sha=${sha256}&language=${language}`)
+      return read && read.sha256 === sha256 && typeof read.code === 'string' ? read : null
+    } catch {
+      return null
+    }
   }
 
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when

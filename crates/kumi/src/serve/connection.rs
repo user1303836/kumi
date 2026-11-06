@@ -202,6 +202,15 @@ impl Link {
         self.project.borrow().clone()
     }
 
+    /// A connection to `integration` that answers: a test's own DAW.
+    #[cfg(test)]
+    pub(crate) fn connect_for_test(&self, integration: Rc<dyn Integration>) {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+    }
+
     /// The DAW's plan tool, as the last look offered it (`make_changes`).
     pub fn plan_tool(&self) -> Option<Rc<dyn KernelTool>> {
         self.tools.borrow().iter().find(|tool| tool.role() == Some(ToolRole::Plan)).cloned()
@@ -378,6 +387,13 @@ pub fn owned_elsewhere(daw: kumi_types::daw::DawId) -> String {
     }
 }
 
+/// The plugin's host policy for a runtime whose state is `state_dir`: listening keeps to its scratch and quarantine
+/// (#1035), and the variations tool keeps its sets under its state (`<state>/variations/`), never the Kumi home, so the
+/// plugin's V-numbering and kept takes never mix with standalone Kumi's on the same project (CC-24's W1-e).
+pub fn policy(state_dir: &Path) -> HostPolicy {
+    HostPolicy::plugin(state_dir.join("scratch").join("listen"), state_dir.join("quarantine"), state_dir.to_path_buf())
+}
+
 /// Connects to the DAW: its integration made with the plugin's host policy and started. One start at a time: a second
 /// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, when the part in
 /// the DAW is another Kumi's (its home isn't `--kumi-home`), and, for REAPER and Renoise, when `--kumi-home` is a home
@@ -437,7 +453,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     };
     let mut context = IntegrationContext::new(on_connection);
-    context.policy = HostPolicy::plugin(ctx.paths().state_dir.join("scratch").join("listen"), ctx.paths().state_dir.join("quarantine"));
+    context.policy = policy(ctx.paths().state_dir.as_path());
     // Polled about once a second: nothing draws it as it moves.
     context.focus_drawn = false;
     context.on_focus = Some({

@@ -97,7 +97,8 @@ const en = {
       `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
     byHand: (daw: string) => `Remove it by hand in ${daw}, or undo the later changes first.`,
     byHandTitle: (daw: string) =>
-      `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
+      `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
+    scriptUndo: (daw: string) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
   },
   job: {
     scanning: 'Scanning',
@@ -142,6 +143,10 @@ const en = {
     useTitle: 'Put a request to use this sound in the chat, to finish and send',
     moreLike: 'More like this',
     moreLikeTitle: 'Put a request for sounds like this one in the chat, to send when you like',
+    useOnPad: 'Use on pad…',
+    useOnPadTitle: 'Pick a drum pad, an empty one included: the request goes in the chat, to send when you like',
+    pads: 'Drum pads',
+    pad: (name: string, note: number) => (name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`),
     playFailed: (error: string) => `Kumi couldn't play that sound: ${error}`
   },
   measurements: {
@@ -150,6 +155,35 @@ const en = {
     tooMuch: "Kumi measured it, but there's too much to show here: the numbers are in its reply in the chat.",
     inReply: 'Kumi measured it: the numbers are in its reply in the chat.',
     measured: (ago: string) => `Measured ${ago}`
+  },
+  script: {
+    waiting: 'Script waiting for your approval',
+    deviceWaiting: 'Device waiting for your approval',
+    says: (purpose: string) => `Hermes says: ${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    device: 'A Max for Live device (GenExpr)',
+    controls: 'The device’s controls',
+    noControls: 'No controls.',
+    control: 'Control',
+    range: 'Range',
+    default: 'Default',
+    on: 'on',
+    off: 'off',
+    file: (file: string) => `New file: ${file}`,
+    in: (language: string, daw: string) => `${language} in ${daw}`,
+    lines: (count: number) => (count === 1 ? '1 line' : `${count} lines`),
+    sha: (short: string) => `SHA-256 ${short}…`,
+    shaTitle: (sha: string) => `SHA-256 ${sha}: the hash of the code the approval names`,
+    code: 'The script’s code',
+    deviceCode: 'The device’s GenExpr code',
+    codeTitle: 'Every line of the code as it will run. Nothing runs from here.',
+    reading: 'Reading the code Kumi saved…',
+    unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
+    unreadableSaved: "Kumi couldn't read the code this script ran: its saved copy is gone, or no longer matches the hash Kumi kept.",
+    show: 'Show code',
+    hide: 'Hide code',
+    showTitle: 'The code this script ran, as Kumi saved it when its approval asked'
   },
   listen: {
     measured: 'measured',
@@ -396,7 +430,8 @@ const ja: Shape<typeof en> = {
     dawUndo: daw => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
     dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
     byHand: daw => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
-    byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
+    byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
+    scriptUndo: daw => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
   },
   job: {
     scanning: 'スキャン中',
@@ -441,6 +476,10 @@ const ja: Shape<typeof en> = {
     useTitle: 'このサウンドを使う依頼をチャットに入れます。仕上げて送信してください',
     moreLike: '似たサウンド',
     moreLikeTitle: 'これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で',
+    useOnPad: 'パッドに使う…',
+    useOnPadTitle: 'ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で',
+    pads: 'ドラムパッド',
+    pad: (name, note) => (name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`),
     playFailed: error => `Kumi はそのサウンドを再生できませんでした: ${error}`
   },
   measurements: {
@@ -449,6 +488,35 @@ const ja: Shape<typeof en> = {
     tooMuch: 'Kumi は測定しましたが、ここに表示するには多すぎます。数値はチャットの返答にあります。',
     inReply: 'Kumi は測定しました。数値はチャットの返答にあります。',
     measured: ago => `測定: ${ago}`
+  },
+  script: {
+    waiting: '承認待ちのスクリプト',
+    deviceWaiting: '承認待ちのデバイス',
+    says: purpose => `Hermes の説明: ${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    device: 'Max for Live デバイス（GenExpr）',
+    controls: 'デバイスのコントロール',
+    noControls: 'コントロールはありません。',
+    control: 'コントロール',
+    range: '範囲',
+    default: '初期値',
+    on: 'オン',
+    off: 'オフ',
+    file: file => `新しいファイル: ${file}`,
+    in: (language, daw) => `${daw} の ${language}`,
+    lines: count => `${count} 行`,
+    sha: short => `SHA-256 ${short}…`,
+    shaTitle: sha => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
+    code: 'スクリプトのコード',
+    deviceCode: 'デバイスの GenExpr コード',
+    codeTitle: '実行されるとおりのコードの全行です。ここからは何も実行されません。',
+    reading: 'Kumi が保存したコードを読み込み中…',
+    unreadable: '保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。',
+    unreadableSaved: 'このスクリプトが実行したコードを読めませんでした。保存したコピーがないか、Kumi が控えたハッシュと一致しません。',
+    show: 'コードを表示',
+    hide: 'コードを隠す',
+    showTitle: 'このスクリプトが実行したコード（承認を求めたときに Kumi が保存したもの）'
   },
   listen: {
     measured: '測定値',
@@ -691,7 +759,8 @@ const zh: Shape<typeof en> = {
     dawUndo: daw => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
     dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
     byHand: daw => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
-    byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
+    byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
+    scriptUndo: daw => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
   },
   job: {
     scanning: '正在扫描',
@@ -736,6 +805,10 @@ const zh: Shape<typeof en> = {
     useTitle: '把使用这个声音的请求放进对话，补充完整后发送',
     moreLike: '更多类似的',
     moreLikeTitle: '把寻找类似声音的请求放进对话，由你决定何时发送',
+    useOnPad: '用在打击垫上…',
+    useOnPadTitle: '选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送',
+    pads: '打击垫',
+    pad: (name, note) => (name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`),
     playFailed: error => `Kumi 无法播放这个声音：${error}`
   },
   measurements: {
@@ -744,6 +817,35 @@ const zh: Shape<typeof en> = {
     tooMuch: 'Kumi 已完成测量，但内容太多无法在此显示：数值在它在对话中的回复里。',
     inReply: 'Kumi 已完成测量：数值在它在对话中的回复里。',
     measured: ago => `测量于 ${ago}`
+  },
+  script: {
+    waiting: '等待你批准的脚本',
+    deviceWaiting: '等待你批准的设备',
+    says: purpose => `Hermes 说：${purpose}`,
+    python: 'Python',
+    lua: 'Lua',
+    device: 'Max for Live 设备（GenExpr）',
+    controls: '设备的控件',
+    noControls: '没有控件。',
+    control: '控件',
+    range: '范围',
+    default: '默认值',
+    on: '开',
+    off: '关',
+    file: file => `新文件：${file}`,
+    in: (language, daw) => `${daw} 中的 ${language}`,
+    lines: count => `${count} 行`,
+    sha: short => `SHA-256 ${short}…`,
+    shaTitle: sha => `SHA-256 ${sha}：批准所指代码的哈希`,
+    code: '脚本代码',
+    deviceCode: '设备的 GenExpr 代码',
+    codeTitle: '将要运行的完整代码。这里不会运行任何东西。',
+    reading: '正在读取 Kumi 保存的代码…',
+    unreadable: 'Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。',
+    unreadableSaved: '无法读取这个脚本运行的代码：保存的副本已不存在，或与 Kumi 记下的哈希不再一致。',
+    show: '显示代码',
+    hide: '隐藏代码',
+    showTitle: '这个脚本运行的代码（在请求批准时由 Kumi 保存）'
   },
   listen: {
     measured: '实测',

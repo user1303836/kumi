@@ -8,12 +8,13 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, Callable
 import uuid
 
-from . import calls, generate, listening, runtime, schemas, setup, snapshots
+from . import calls, devices, generate, listening, runtime, schemas, scripts, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class Host:
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
+        self.turns = calls.Turns()  # the producer's own turns, so a turn Hermes forks in the background is told apart
         self._data_dir = data_dir
         self._pinned = pinned
         self._hook_timeout = hook_timeout
@@ -56,6 +58,43 @@ class Host:
         self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
+        # A chat's session id → the HISTORY ids of each change its kumi_change made, oldest first, in this Hermes
+        # process: what kumi_undo with no id undoes, whole (CC-3 amendment A2), never another chat's. With the rows
+        # this process saw undone, a second "undo that" reaches the change before (rgzm, #1088).
+        self._changes: dict[str, list[list[str]]] = {}
+        self._undone: set[str] = set()
+        self._changes_lock = threading.Lock()
+        self._trusts: dict[Path, scripts.Trust] = {}  # each profile's record of which chats read outside content
+        self._trusts_lock = threading.Lock()
+
+    def remember_change(self, kwargs: dict, answer: Any) -> None:
+        """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
+        make of takes) as its newest change, so "undo that" means it, never one before it."""
+        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial", "ran", "failed"):
+            return
+        session, ids = kwargs.get("session_id"), answer.get("history_ids")
+        if (isinstance(session, str) and session and isinstance(ids, list) and ids
+                and all(isinstance(each, str) and each for each in ids)):
+            with self._changes_lock:
+                self._changes[session] = [*self._changes.get(session, [])[1 - CHANGES_KEPT:], list(ids)]
+
+    def remember_undo(self, asked: dict, answer: Any) -> None:
+        """Note the rows an undo took back: the one row it named, or each row of a whole change its answer says."""
+        if not isinstance(answer, dict):
+            return
+        rows = answer.get("rows") if isinstance(answer.get("rows"), list) else []
+        undone = {row.get("history_id") for row in rows if isinstance(row, dict) and row.get("state") == "undone"}
+        if not rows and answer.get("state") == "undone":
+            undone = {asked.get("history_id")}
+        with self._changes_lock:
+            self._undone |= {each for each in undone if isinstance(each, str)}
+
+    def latest_change(self, kwargs: dict) -> str | None:
+        """A HISTORY id of this chat's newest change not yet undone (its last row), or None when it has none here."""
+        session = kwargs.get("session_id")
+        with self._changes_lock:
+            changes = self._changes.get(session, []) if isinstance(session, str) else []
+            return next((ids[-1] for ids in reversed(changes) if not set(ids) <= self._undone), None)
 
     def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
         """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
@@ -202,6 +241,16 @@ class Host:
 
     def listen_interpretation(self) -> bool:
         return self._ctx.get_config("listen_interpretation", False) is True
+
+    def scripts_in_messaging(self) -> bool:
+        """CC-19's 19d: the producer let messaging chats (Discord, Slack, Telegram…) run scripts, each one asked."""
+        return self._ctx.get_config("scripts_in_messaging", False) is True
+
+    def trust(self) -> scripts.Trust:
+        """This profile's record of which chats read outside content (CC-19 r1), in its plugin data."""
+        path = self.data_dir() / scripts.TRUST_FILE
+        with self._trusts_lock:
+            return self._trusts.setdefault(path, scripts.Trust(path))
 
     def llm(self) -> Any:
         """Hermes's model facade for this plugin (CC-1), read per call: never while registering."""
@@ -363,11 +412,11 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         return
     base = {"profile": host.profile(), "session_id": session_id, "tool_call_id": tool_call_id}
     if tool == "kumi_sounds":
-        ids = [item["sound_id"] for item in data.get("items") or []
-               if isinstance(item, dict) and isinstance(item.get("sound_id"), str)][:SOUNDS_FOUND]
-        if not ids:
+        hits = [item for item in data.get("items") or []
+                if isinstance(item, dict) and isinstance(item.get("sound_id"), str)][:SOUNDS_FOUND]
+        if not hits:
             return
-        event, payload = "sounds.found", {**base, "map_revision": data.get("map_revision"), "sound_ids": ids}
+        event, payload = "sounds.found", found(base, data, hits)
     elif tool in ("kumi_generate", "kumi_job"):
         if tool == "kumi_job" and not generation_job:
             return
@@ -383,6 +432,23 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         broadcast(event, payload)
     except Exception:
         log.exception("Kumi couldn't tell Desktop about %s", tool)
+
+
+def found(base: dict, data: dict, hits: list[dict]) -> dict:
+    """CC-23's `sounds.found`: CC-9's ids for the map, and per hit `{sound_id, why, closeness?}` under `matches`, with
+    `indexed` and the `near` seed. Never a name or a path. Past 256 KiB the reasons go first; the ids always stay."""
+    payload = {**base, "map_revision": data.get("map_revision"), "sound_ids": [hit["sound_id"] for hit in hits]}
+    for key in ("indexed", "near"):
+        if key in data:
+            payload[key] = data[key]
+    for with_why in (True, False):
+        matches = [{"sound_id": hit["sound_id"],
+                    **({"why": hit["why"]} if with_why and isinstance(hit.get("why"), list) else {}),
+                    **({"closeness": hit["closeness"]} if isinstance(hit.get("closeness"), int) else {})}
+                   for hit in hits]
+        if len(json.dumps({**payload, "matches": matches}, ensure_ascii=False).encode("utf-8")) <= LISTEN_EVENT_BYTES:
+            return {**payload, "matches": matches}
+    return payload
 
 
 # What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
@@ -589,6 +655,52 @@ def _forward(tool: str, timeout: float) -> Callable[..., dict]:
     return handler
 
 
+def plugin_knowledge_refusal(args: dict) -> str | None:
+    """Keep this read separate from the mixed plug-in/preset/wavetable dispatchers."""
+    action = args.get("action")
+    if action not in ("guide", "catalog"):
+        return "kumi_plugin_knowledge's action is guide or catalog."
+    allowed = {"action", "max_chars", "device_ref"} if action == "guide" else {"action", "max_chars", "plugin", "query", "limit"}
+    if args.keys() - allowed:
+        return "guide takes only device_ref; catalog takes only plugin, query and limit; either may take max_chars. No file or writer fields."
+    if action == "guide":
+        device = args.get("device_ref")
+        if not isinstance(device, str) or not device.strip() or len(device) > 256:
+            return "guide needs the Live plug-in's device_ref from the current look."
+    else:
+        for field, minimum, maximum in (("plugin", 1, 128), ("query", 0, 1000)):
+            if field in args and (not isinstance(args[field], str) or not minimum <= len(args[field]) <= maximum):
+                return f"{field} must be text of {minimum}–{maximum} characters."
+        if "limit" in args and (type(args["limit"]) is not int or not 1 <= args["limit"] <= 40):
+            return "limit is an integer from 1 to 40."
+    if "max_chars" in args and (type(args["max_chars"]) is not int or not 500 <= args["max_chars"] <= 20000):
+        return "max_chars is an integer from 500 to 20000."
+    return None
+
+
+def kumi_plugin_knowledge(host: Host, args: dict, **kwargs: Any) -> dict:
+    refusal = plugin_knowledge_refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    if args["action"] == "guide":
+        live = host.live()
+        if live.daw != "ableton":
+            return {"error": {"code": "unsupported", "reason": (
+                "Instance guides are available in Live; use catalog for bundled format knowledge and kumi_read "
+                "for this DAW's actual parameters.")}}
+        sent = {"action": "guide", "device_ref": args["device_ref"]}
+        if "max_chars" in args:
+            sent["max_chars"] = args["max_chars"]
+    else:
+        data_dir = host.data_dir()
+        install = host.install(data_dir)
+        live = host.runtimes.get(data_dir) or host.runtimes.start(
+            data_dir, install, host.daw(), kwargs.get("session_id"),
+            library_roots=host.library_folders(), media_roots=host.media_roots(), profile=host.profile())
+        sent = {"action": "catalog", **{key: args[key] for key in ("plugin", "query", "limit", "max_chars") if key in args}}
+    return live.call("plugin_knowledge", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
+
+
 def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     """A write (C2): sent once. An answer that never came, or can't be read, means the outcome is unknown: reported as
     unsure, never resent, and never called unchanged. The producer's Stop cancels it while it waits (`notifications/
@@ -596,11 +708,50 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     item 7); that's unsure too."""
     live = host.live()
     try:
-        return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
+        answer = live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
+    if tool != "undo":  # every other write that made rows is the chat's newest change (CC-3 A2)
+        host.remember_change(kwargs, answer)
+    return answer
+
+
+def kumi_script(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-19: a script, run once as the producer approved it. The hook's record holds only the arguments it was asked
+    about (CC-5), so the code here is the approved code, and its SHA-256 tells the runtime so: a runtime that would
+    run anything else refuses it (`stale`)."""
+    script = {key: args[key] for key in ("language", "purpose", "code", "expected_project_key") if key in args}
+    code = script.get("code")
+    if isinstance(code, str):
+        script["expected_sha256"] = scripts.sha256(code)
+    return _write(host, "script", script, kwargs)
+
+
+# A device build whose answer never came: a file may be in the User Library, and building again would write another.
+DEVICE_UNSURE_HINT = ("Whether the device was written is unknown. Don't build it again: ask the producer to look in "
+                      "User Library/Kumi/Audio Effects in Live's Browser.")
+
+
+def kumi_device(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-22: a Max for Live audio effect, built once as the producer approved it. The spec is written in its one
+    canonical form, the bytes the approval hashed: serve hashes what it receives and refuses a build whose spec isn't
+    the approved SHA-256 (`stale`), or whose file isn't the one the approval named. A refusal or a stale answer goes
+    back as serve gave it; a built device comes with the next step, loading and placing it in a change of its own."""
+    call = kwargs.get("kumi_call")
+    approved = call.extra.get("sha256") if isinstance(call, calls.Entry) else None
+    spec = args.get("spec")
+    spec_json = devices.canonical(spec) if devices.problem(spec) is None else None
+    if spec_json is None or not isinstance(approved, str) or scripts.sha256(spec_json) != approved:
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't build the device: it isn't the spec the "
+                                                            "producer approved."}}
+    built = _write(host, "device", {"action": "build", "spec_json": spec_json, "sha256": approved}, kwargs)
+    if built.get("state") == "unsure":
+        return {**built, "hint": DEVICE_UNSURE_HINT}
+    if isinstance(built.get("item"), str):
+        return {**built, "next": devices.next_step(built)}
+    return built
 
 
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -610,8 +761,59 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "change", change, kwargs)
 
 
+# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), and how many of a chat's
+# changes Kumi keeps for it.
+NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started, or it "
+                   "undid them all. kumi_history lists Kumi's changes; undo one by its id.")
+CHANGES_KEPT = 20
+
+
+def undo_target(host: Host, args: dict, kwargs: dict) -> tuple[dict | None, str | None]:
+    """What a kumi_undo call undoes: with a history_id, that row (or its whole change, with whole_change: true);
+    without one, this chat's newest change, whole (CC-3 amendment A2). The runtime's undo arguments, or a refusal."""
+    asked = {key: value for key, value in args.items() if key in ("history_id", "whole_change")}
+    if "history_id" in asked:
+        return asked, None
+    target = host.latest_change(kwargs)
+    if target is None:
+        return None, NOTHING_TO_UNDO
+    return {"history_id": target, "whole_change": True}, None
+
+
 def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
-    return _write(host, "undo", {key: value for key, value in args.items() if key != "preview"}, kwargs)
+    """An undo, as the producer approved it (CC-3, A2): the row or change the hook previewed. A whole change is sent with
+    the preview's rows digest (`expect_rows`), so the runtime refuses a set that changed since; and kumi_undo with no
+    id is refused when this chat's newest change is no longer the one approved."""
+    asked, refusal = undo_target(host, args, kwargs)
+    if refusal is not None:
+        return {"error": {"code": "nothing_to_undo", "reason": refusal}}
+    if asked.get("whole_change") is True:
+        call = kwargs.get("kumi_call")
+        approved = call.extra if isinstance(call, calls.Entry) else {}
+        if approved.get("history_id") != asked["history_id"] or not isinstance(approved.get("rows_digest"), str):
+            return {"state": "refused", "code": "stale",
+                    "reason": "Kumi didn't undo anything: what this chat would undo isn't what was approved (a newer "
+                              "change came since). Ask again."}
+        asked = {**asked, "expect_rows": approved["rows_digest"]}
+    answer = _write(host, "undo", asked, kwargs)
+    host.remember_undo(asked, answer)
+    return answer
+
+
+def kumi_variations(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-24: list reads the set. make and change run the takes the producer approved: the hook's preview drew them
+    from a seed, and the dispatch sends that seed with the preview's takes digest, so the runtime writes those takes or
+    nothing (`stale`). keep renames as approved."""
+    asked = {key: value for key, value in args.items() if key != "preview"}
+    if args.get("action") == "list":
+        return host.live().call("variations", asked, host.identity(kwargs), timeout=READ_TIMEOUT)
+    if args.get("action") in ("make", "change"):
+        call = kwargs.get("kumi_call")
+        drawn = call.extra if isinstance(call, calls.Entry) else {}
+        if not isinstance(drawn.get("seed"), int) or not isinstance(drawn.get("takes_digest"), str):
+            return {"error": {"code": "not_approved", "reason": "Kumi didn't make any takes: no approval saw them."}}
+        asked |= {"seed": drawn["seed"], "expect_takes": drawn["takes_digest"]}
+    return _write(host, "variations", asked, kwargs)
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
@@ -680,12 +882,28 @@ def is_track_listen(args: dict) -> bool:
     return isinstance(source, dict) and "track" in source
 
 
-def track_deadline(value: Any) -> int | None:
-    """A track listen preview's `deadline_seconds` (CC-2's A2: the runtime's whole bound for the real call) when it's a
-    whole number of seconds from 1 to 360; None otherwise, and then the listen isn't approved."""
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= runtime.TRACK_DEADLINE_MAX:
+def track_bounds(answer: Any, args: dict) -> dict | None:
+    """A track listen's bounds (CC-2's A2 and its clarification), as its preview gave them, when each is what the
+    runtime may give: `estimated_seconds`, the window (finite, over 0, at most 60); `prepare_seconds`, getting
+    `compare_to` ready before anything plays (0 without one, else a whole number up to 120); `deadline_seconds`, the
+    native call (a whole number from 1 to 360). None otherwise, and then the listen isn't approved: nothing is guessed.
+    The approval keeps them, the handler waits for the two bounds and a margin, and the runtime gets them as `_listen`."""
+    if not isinstance(answer, dict):
         return None
-    return value
+    seconds, prepare, deadline = (answer.get(name) for name in ("estimated_seconds", "prepare_seconds",
+                                                               "deadline_seconds"))
+
+    def whole(value: Any, most: int) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= most
+
+    if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds)
+            or not 0 < seconds <= runtime.TRACK_SECONDS_MAX):
+        return None
+    if not whole(prepare, runtime.TRACK_PREPARE_MAX if args.get("compare_to") is not None else 0):
+        return None
+    if not whole(deadline, runtime.TRACK_DEADLINE_MAX) or deadline < 1:
+        return None
+    return {"estimated_seconds": seconds, "prepare_seconds": prepare, "deadline_seconds": deadline}
 
 
 def listen_refusal(args: dict) -> str | None:
@@ -795,14 +1013,14 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         return interpreted(host, kept_media(host, result))
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
-    deadline = track_deadline(call.extra.get("deadline")) if isinstance(call, calls.Entry) else None
-    if deadline is None:  # approved_only let it through, so the hook approved it with its deadline; never guess one
+    bounds = track_bounds(call.extra.get("listen"), args) if isinstance(call, calls.Entry) else None
+    if bounds is None:  # approved_only let it through, so the hook approved it with its bounds; never guess them
         return {"error": {"code": "not_approved", "reason": "Kumi didn't play anything: this listen came without "
                                                             "its runtime's deadline."}}
-    timeout = deadline + runtime.TRACK_MARGIN
+    timeout = bounds["prepare_seconds"] + bounds["deadline_seconds"] + runtime.TRACK_MARGIN
     try:
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
-                                  interrupted=host.stop_watch())
+                                  interrupted=host.stop_watch(), private={"_listen": bounds})
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
@@ -852,14 +1070,26 @@ def interpreted(host: Host, result: dict) -> dict:
 
 
 def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
-    """The runtime's sound search, as the model may see it: sound ids and what the map says of each, never a file's
-    path (CC-4: a path is the media route's alone)."""
+    """The runtime's sound search, as the model may see it: sound ids, what the map says of each and why each matched
+    (CC-23), never a file's path (CC-4: a path is the media route's alone)."""
     result = host.live().call("sounds", args, host.identity(kwargs), timeout=READ_TIMEOUT)
     items = result.get("items")
     if isinstance(items, list):
-        result["items"] = [{key: value for key, value in item.items() if key != "path"} if isinstance(item, dict)
-                           else item for item in items]
+        result["items"] = [_sound(item) if isinstance(item, dict) else item for item in items]
     return result
+
+
+# A reason that names a file or folder: an absolute or home path, a backslash, a drive, or two slashes in a word. Serve
+# keeps paths out of its reasons (CC-23's 23b and 23-r1); this is the plugin's second guard.
+_PATHLIKE = re.compile(r"(?:^|\s)~?/|\\|\b[A-Za-z]:/|\S/\S*/")
+
+
+def _sound(item: dict) -> dict:
+    sound = {key: value for key, value in item.items() if key != "path"}
+    if "why" in sound:
+        why = sound["why"] if isinstance(sound["why"], list) else []
+        sound["why"] = [reason for reason in why if isinstance(reason, str) and not _PATHLIKE.search(reason)]
+    return sound
 
 
 LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")
@@ -935,6 +1165,46 @@ def kumi_job(host: Host, args: dict, **kwargs: Any) -> dict:
     return found
 
 
+# Where play can start, per DAW (CC-17, its W5-a: a static table that refuses, never over-offers; Live's from_bar and
+# from_beat join it in the release that ships #1074's start-time seam, with its re-pin).
+TRANSPORT_FIELDS = {"ableton": frozenset({"clip_ref", "scene_index"}), "reaper": frozenset({"from_bar", "from_beat"}),
+                    "renoise": frozenset({"from_slot", "from_line"})}
+_TRANSPORT_WHERE = {"ableton": ("Live plays the Arrangement from its own start marker here: launch a Session clip "
+                                "(clip_ref) or a scene (scene_index) instead"),
+                    "reaper": "REAPER plays from a bar (from_bar) or a beat (from_beat)",
+                    "renoise": "Renoise plays from a sequence slot (from_slot) and its line (from_line)"}
+
+
+def transport_refusal(host: Host, args: dict) -> str | None:
+    """Why kumi_transport can't take these arguments in the producer's DAW, or None; the hook checks this, and the
+    handler again. stop takes nothing else; play takes at most one place to start (Renoise's slot and line are one)."""
+    action = args.get("action")
+    given = set(args) - {"action", "expected_project_key"}
+    if action == "stop":
+        return "stop takes nothing else." if given or "expected_project_key" in args else None
+    if action != "play":
+        return "action is play or stop."
+    daw = host.daw()
+    unknown = sorted(given - TRANSPORT_FIELDS.get(daw, frozenset()))
+    if unknown:
+        return f"{', '.join(unknown)} isn't how play starts here: {_TRANSPORT_WHERE.get(daw, 'play from the playhead')}."
+    if len(given - {"from_line"}) > 1:
+        return "play starts from one place."
+    if not isinstance(args.get("expected_project_key"), str) or not args["expected_project_key"]:
+        return "play takes kumi_observe's project_key, as expected_project_key."
+    return None
+
+
+def kumi_transport(host: Host, args: dict, **kwargs: Any) -> dict:
+    """Start or stop playback (CC-17): a playback-class action the producer approves (play only), with no HISTORY."""
+    refusal = transport_refusal(host, args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    return host.live().call("transport", {key: value for key, value in args.items() if key != "preview"},
+                            host.identity(kwargs), timeout=READ_TIMEOUT)
+
+
+
 # name, schema, handler, emoji: every one registered every time (catalog rule 6).
 TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_status", schemas.KUMI_STATUS, kumi_status, "🎛️"),
@@ -942,6 +1212,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_connect", schemas.KUMI_CONNECT, kumi_connect, "🔌"),
     ("kumi_observe", schemas.KUMI_OBSERVE, _forward("observe", READ_TIMEOUT), "👀"),
     ("kumi_read", schemas.KUMI_READ, _forward("read", READ_TIMEOUT), "📖"),
+    ("kumi_plugin_knowledge", schemas.KUMI_PLUGIN_KNOWLEDGE, kumi_plugin_knowledge, ""),
     ("kumi_change", schemas.KUMI_CHANGE, kumi_change, "🎚️"),
     ("kumi_undo", schemas.KUMI_UNDO, kumi_undo, "↩️"),
     ("kumi_history", schemas.KUMI_HISTORY, kumi_history, "🕘"),
@@ -950,6 +1221,10 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
     ("kumi_job", schemas.KUMI_JOB, kumi_job, "⏳"),
     ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
+    ("kumi_transport", schemas.KUMI_TRANSPORT, kumi_transport, "▶️"),
+    ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
+    ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
+    ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -958,12 +1233,14 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device")
+            or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
             or (name == "kumi_setup" and args.get("action") in ("install", "adopt"))
             or (name == "kumi_generate" and (args.get("action") == "create"
-                                             or (args.get("action") == "quote" and args.get("kind") == "audio_to_midi"))))
+                                             or (args.get("action") == "quote" and args.get("kind") == "audio_to_midi")))
+            or (name == "kumi_transport" and args.get("action") == "play"))
 
 
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:

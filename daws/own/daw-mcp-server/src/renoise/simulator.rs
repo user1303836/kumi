@@ -34,6 +34,8 @@ const KEPT_BY_DEVICES: [&str; 9] = ["song", "track", "ptrack", "slot", "seq", "p
 const CHANGE_METHODS: [&str; 4] = ["change_preview", "change_apply", "change_restore", "project_save"];
 /// Where the song is saved (`project_save`).
 const SAVED_TO: &str = "/lab/Renoise/Sim.xrns";
+/// Its transport: play (from a sequence slot and line) and stop.
+const TRANSPORT_METHODS: [&str; 2] = ["transport_stop", "transport_play"];
 
 struct Case {
     method: String,
@@ -728,12 +730,25 @@ impl RenoiseScript {
             let State { chains, undo, .. } = state;
             return chains.change(epoch, method, params, undo);
         }
-        // Lua run in the song: one step of Renoise's undo, which only Renoise's own undo takes back.
+        // Lua run in the song: one step of Renoise's undo, which only Renoise's own undo takes back. Code that only reads, or
+        // is stopped at its time before it wrote, keeps nothing (`unchanged`, no undo step) and still says something, as the
+        // tool does: its value, or the error it stopped at; nothing printed is Lua's empty table, `{}`.
         if kind == "run-lua" {
-            let title = "Ran Lua: song.transport.bpm = 140";
+            let code = params["input"]["code"].as_str().unwrap_or_default().to_string();
+            let title = format!("Ran Lua: {}", code.lines().next().unwrap_or_default());
+            let reads = code.starts_with("return ") || code.starts_with("while true do");
             let mut value = match method {
                 "change_preview" => {
                     json!({"target": {"ref": format!("{epoch}:song:1"), "kind": "song"}, "prior": {}, "fence": {}, "display": {"title": title}})
+                }
+                "change_apply" if reads => {
+                    let note = "Only Renoise's own undo can take back what it did (Edit > Undo); Kumi can't.";
+                    let applied = if code.starts_with("while true do") {
+                        json!({"changed": false, "printed": {}, "writes": "none", "failed": {"message": "Kumi stopped it: it ran longer than 800 ms"}})
+                    } else {
+                        json!({"changed": false, "printed": {}, "writes": "none", "result": state.song["bpm"].clone()})
+                    };
+                    json!({"applied": applied, "display": {"title": title, "note": note, "unchanged": true}, "undo": {"desc": params["desc"], "entry": false}})
                 }
                 "change_apply" => {
                     let desc = params["desc"].as_str().unwrap_or_default().to_string();
@@ -1051,7 +1066,9 @@ impl RenoiseScript {
 
     /// The simulator's config for Renoise with this song behind it.
     pub fn config(&self, secret: Secret, resource: &str) -> SimulatorConfig {
-        let mut config = SimulatorConfig::renoise(secret, resource).with_methods(&METHODS, self.respond());
+        let mut config = SimulatorConfig::renoise(secret, resource)
+            .with_methods(&METHODS, self.respond())
+            .with_methods(&TRANSPORT_METHODS, self.respond());
         config.offer.methods.extend(LISTENING_METHODS.iter().map(|m| m.to_string()));
         let listening = self.listening.clone();
         config.status_more = Some(Arc::new(move || {
@@ -1185,7 +1202,7 @@ impl RenoiseScript {
             }
             return result;
         }
-        if !METHODS.contains(&method) && !CHANGE_METHODS.contains(&method) {
+        if !METHODS.contains(&method) && !CHANGE_METHODS.contains(&method) && !TRANSPORT_METHODS.contains(&method) {
             return None;
         }
         let mut state = self.state.lock().unwrap();
@@ -1262,6 +1279,17 @@ impl RenoiseScript {
                 }
                 None => Err(("bad-params".into(), "text: one line to show, at most 512 bytes".into())),
             });
+        }
+        // The transport: play from a sequence slot and line (from where it is when neither is given), and stop.
+        if method == "transport_play" || method == "transport_stop" {
+            let playing = method == "transport_play";
+            let recorded = !playing && state.transport_playing && state.song["editMode"] == true;
+            state.transport_playing = playing;
+            return Some(Ok(if playing {
+                json!({"epoch": state.epoch.to_string(), "started": true, "playing": true, "sequence": params.get("sequence").cloned().unwrap_or(json!(1)), "line": params.get("line").cloned().unwrap_or(json!(0))})
+            } else {
+                json!({"stopped": true, "wasRecording": recorded})
+            }));
         }
         // (r-tracks) Saving the song: the tool's `project_save`, refused from another epoch; Renoise has no versions.
         if method == "project_save" {
@@ -1351,11 +1379,15 @@ impl RenoiseScript {
                 return Some(Ok(restarted(retag(&page, VECTORS_EPOCH, epoch, None), restarts)));
             }
         }
-        if method == "focus" && state.transport_playing {
+        if method == "focus" && (state.transport_playing || state.song["editMode"] == true) {
             if let Some(Ok(mut page)) =
                 state.cases.iter().find(|case| case.method == method && case.params == wanted).map(|case| case.response.clone())
             {
-                page["transport"]["playing"] = true.into();
+                page["transport"]["playing"] = state.transport_playing.into();
+                if state.song["editMode"] == true {
+                    page["transport"]["editMode"] = true.into();
+                    page["transport"]["recording"] = true.into();
+                }
                 return Some(Ok(retag(&page, VECTORS_EPOCH, epoch, None)));
             }
         }

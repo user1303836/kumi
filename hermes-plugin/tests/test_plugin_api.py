@@ -60,7 +60,7 @@ class Routes(unittest.TestCase):
 
     def test_every_route_is_a_get(self) -> None:
         methods = {route.path: route.methods for route in self.api.router.routes}
-        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job"})
+        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script"})
         self.assertTrue(all(found == {"GET"} for found in methods.values()), methods)
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
@@ -105,6 +105,74 @@ class Routes(unittest.TestCase):
         self.api._library_folders = lambda: []
         with self.assertRaises(HTTPException):
             self.api.audio(id="s-r7-0091")
+
+    def test_a_saved_script_is_served_whole_only_while_it_is_the_code_the_approval_named(self) -> None:
+        import hashlib
+        import os
+
+        from fastapi import HTTPException
+
+        code = b"import Live\nsong = Live.Application.get_application().get_document()\nsong.tempo = 120\n"
+        sha = hashlib.sha256(code).hexdigest()
+        folder = self.state / "scripts"
+        folder.mkdir()
+        (folder / f"{sha}.py").write_bytes(code)
+        self.assertEqual(self.api.script(sha=sha, language="python"), {"sha256": sha, "language": "python", "code": code.decode(), "lines": 3})
+
+        def refused(name: str, language: str) -> None:
+            with self.assertRaises(HTTPException) as caught:
+                self.api.script(sha=name, language=language)
+            self.assertEqual(caught.exception.status_code, 404)
+
+        # The language fixes the extension, and only an exact lowercase SHA-256 names a file.
+        refused(sha, "lua")
+        refused(sha.upper(), "python")
+        refused(f"../{sha[3:]}", "python")
+        # Code that no longer hashes to its name (changed after the ask) is never shown as the approved code.
+        (folder / f"{sha}.py").write_bytes(code + b"song.tempo = 90\n")
+        refused(sha, "python")
+        # A link isn't followed, even to the right bytes; nor is a scripts folder that's a link.
+        elsewhere = Path(self.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / f"{sha}.py").write_bytes(code)
+        (folder / f"{sha}.py").unlink()
+        os.symlink(elsewhere / f"{sha}.py", folder / f"{sha}.py")
+        refused(sha, "python")
+        (folder / f"{sha}.py").unlink()
+        folder.rmdir()
+        os.symlink(elsewhere, folder)
+        refused(sha, "python")
+        # Over CC-19's cap of 400 lines, even when it hashes right.
+        folder.unlink()
+        folder.mkdir()
+        long = b"x = 1\n" * 401
+        (folder / f"{hashlib.sha256(long).hexdigest()}.py").write_bytes(long)
+        refused(hashlib.sha256(long).hexdigest(), "python")
+
+    def test_a_devices_saved_spec_is_served_by_the_hash_its_approval_keyed_on(self) -> None:
+        import hashlib
+        import json as json_module
+
+        from fastapi import HTTPException
+
+        spec = {"name": "Soft Clip", "about": "Gentle saturation", "controls": [{"name": "Drive", "type": "number", "min": 0, "max": 1, "default": 0.3}],
+                "code": "out1 = tanh(in1 * (1 + Drive * 4));\nout2 = tanh(in2 * (1 + Drive * 4));\n"}
+        # CC-22: the plugin's canonical bytes, named by their own hash.
+        data = json_module.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        sha = hashlib.sha256(data).hexdigest()
+        folder = self.state / "scripts"
+        folder.mkdir()
+        (folder / f"{sha}.device.json").write_bytes(data)
+        served = self.api.script(sha=sha, language="device")
+        self.assertEqual((served["sha256"], served["language"], served["lines"]), (sha, "device", 2))
+        self.assertEqual(json_module.loads(served["code"]), spec)
+        # The same file isn't a Python script, and JSON without code isn't a device's spec.
+        with self.assertRaises(HTTPException):
+            self.api.script(sha=sha, language="python")
+        bare = json_module.dumps({"name": "x"}).encode("utf-8")
+        (folder / f"{hashlib.sha256(bare).hexdigest()}.device.json").write_bytes(bare)
+        with self.assertRaises(HTTPException):
+            self.api.script(sha=hashlib.sha256(bare).hexdigest(), language="device")
 
     def test_only_audio_or_png_is_served_and_sound_says_what_can_play_the_same_way(self) -> None:
         from fastapi import HTTPException

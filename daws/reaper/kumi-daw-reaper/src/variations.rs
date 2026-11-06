@@ -408,6 +408,18 @@ fn free_after(spans: &[(f64, f64)], from: f64, length: f64, gap: f64) -> f64 {
     at
 }
 
+/// Whether `from` to `from + length` on a track is clear of every item there but the take itself (`take`): spans by
+/// `keys` (seconds, `position` and `length`, or `positionBeats` and `lengthBeats`). An item whose span isn't known isn't
+/// taken for clear.
+fn clear_span(items: &[Value], take: Option<&str>, from: f64, length: f64, (start, span): (&str, &str)) -> bool {
+    items.iter().filter(|item| item.get("ref").and_then(Value::as_str) != take).all(|item| {
+        match (item.get(start).and_then(Value::as_f64), item.get(span).and_then(Value::as_f64)) {
+            (Some(begins), Some(lasts)) => begins + lasts <= from + 1e-9 || from + length <= begins + 1e-9,
+            _ => false,
+        }
+    })
+}
+
 /// One operator applied to the take so far, `factor` times as much: what it did, in a few words.
 fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rng: &mut Rng) -> Result<String, String> {
     let name = op.get("op").and_then(Value::as_str).unwrap_or("");
@@ -736,6 +748,28 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         Ok(json!({"change": change}))
     }
 
+    /// A kept take moves only into a span of its track (or `toRef`) that no other item covers (CC-24's 24-r2).
+    async fn at_is_empty(&self, _set: &ReaperSet, _number: usize, row: &Value, at: &JsonObject, signal: &Signal) -> Result<(), String> {
+        let track = at
+            .get("toRef")
+            .and_then(Value::as_str)
+            .or_else(|| row.get("trackRef").and_then(Value::as_str))
+            .ok_or("the take's track isn't known")?;
+        let keys = match (at.get("position"), at.get("positionBeats")) {
+            (Some(_), _) => ("position", "length"),
+            (None, Some(_)) => ("positionBeats", "lengthBeats"),
+            (None, None) => return Err("at: position (seconds) or positionBeats".into()),
+        };
+        let from = at.get(keys.0).and_then(Value::as_f64).ok_or("at's position isn't a number")?;
+        let length = row.get(keys.1).and_then(Value::as_f64).ok_or("the take's length isn't known")?;
+        let items = self.items_on(track, signal).await?;
+        if clear_span(&items, row.get("ref").and_then(Value::as_str), from, length, keys) {
+            Ok(())
+        } else {
+            Err("another item is there on that track".into())
+        }
+    }
+
     async fn undroppable(&self, _set: &ReaperSet, _number: usize, _row: &Value, _signal: &Signal) -> Option<Undroppable> {
         None
     }
@@ -891,6 +925,24 @@ mod tests {
             apply_one(op, 1.0, &mut take, &source, &mut rng).unwrap();
         }
         assert!(take.length < source.length / take.playrate + 1e-9, "never longer than its sound at the new rate: {take:?}");
+    }
+
+    /// (CC-24's 24-r2) A plugin host's keep moves a take only into a span no other item covers; the take's own span is no
+    /// obstacle. (A make always has room: its takes go after the last item on the source's track.)
+    #[test]
+    fn a_kept_take_moves_only_into_a_span_no_other_item_covers() {
+        let items = [
+            json!({"ref": "a", "position": 0.0, "length": 2.0, "positionBeats": 0.0, "lengthBeats": 4.0}),
+            json!({"ref": "take", "position": 5.0, "length": 1.0}),
+            json!({"ref": "b", "position": 8.0, "length": 2.0}),
+        ];
+        let seconds = ("position", "length");
+        assert!(clear_span(&items, Some("take"), 2.0, 1.0, seconds), "right after a");
+        assert!(clear_span(&items, Some("take"), 4.5, 1.0, seconds), "over its own span");
+        assert!(!clear_span(&items, Some("take"), 1.5, 1.0, seconds), "over a's end");
+        assert!(!clear_span(&items, Some("take"), 7.5, 1.0, seconds), "into b");
+        assert!(!clear_span(&items, Some("take"), 2.0, 1.0, ("positionBeats", "lengthBeats")), "spans in beats not known: not clear");
+        assert_eq!(free_after(&[(0.0, 2.0)], 2.0, 1.0, 0.5), 2.5, "a make's takes always have room after the last item");
     }
 
     /// (#407) What REAPER's reads give back of an audio take Kumi wrote (reaper-kumi's item and take rows: times, pitch and rate

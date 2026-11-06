@@ -78,9 +78,14 @@ struct State {
     project: Option<Value>,
     /// Whether REAPER is playing (its transport, and what a capture needs).
     playing: bool,
+    /// Whether REAPER's record is on (a test's `set_recording`), as the transport says.
     recording: bool,
     /// The project's actual fixed render settings, independent of the transient listening jobs.
     render_state: Value,
+    /// The edit cursor, in quarter notes from the start (`cursor_set`).
+    cursor: f64,
+    /// REAPER's time signature where the cursor is, once a test sets it (`set_time_signature`): focus then says it.
+    signature: Option<[u32; 2]>,
     /// Each track's FX chain, by the track's ref ("r:track:master" is the first row's): M5's listening reads and sets them.
     fx: std::collections::HashMap<String, Vec<SimFx>>,
     next_fx: u32,
@@ -312,6 +317,8 @@ impl ReaperScript {
                     "texts": RENDER_TEXTS.into_iter().map(|key| (key.to_string(), json!(""))).collect::<serde_json::Map<_, _>>(),
                     "projrenderlimit": 0, "master_fx": 1.0, "time_selection": [0.0, 0.0], "dirty": false,
                 }),
+                cursor: 0.0,
+                signature: None,
                 fx: std::collections::HashMap::new(),
                 next_fx: 0,
                 page_rows: None,
@@ -532,6 +539,11 @@ impl ReaperScript {
         self.listening.set_playing(playing || state.recording);
     }
 
+    /// REAPER's time signature, as focus says it from now on.
+    pub fn set_time_signature(&self, beats: u32, unit: u32) {
+        self.state.lock().unwrap().signature = Some([beats, unit]);
+    }
+
     /// The project switched tabs: refs and cursors from before are stale.
     pub fn switch_tab(&self) {
         let mut state = self.state.lock().unwrap();
@@ -600,6 +612,9 @@ impl ReaperScript {
                 "change_preview",
                 "change_apply",
                 "change_restore",
+                "transport_stop",
+                "transport_play",
+                "cursor_set",
                 "undo_step_begin",
                 "undo_step_end",
                 "digest",
@@ -1379,6 +1394,26 @@ impl ReaperScript {
             "script_remove" => {
                 Ok(json!({"removed": format!("/lab/REAPER/Scripts/Kumi/{}.lua", params["slug"].as_str().unwrap_or("script"))}))
             }
+            // The transport: the edit cursor (playback follows it while it plays), play and stop.
+            "cursor_set" => match params["positionBeats"].as_f64() {
+                Some(beats) => {
+                    state.cursor = beats;
+                    let seconds = beats * 60.0 / state.settings["bpm"].as_f64().unwrap_or(120.0);
+                    Ok(json!({"epoch": epoch, "position": seconds, "positionBeats": beats, "playing": state.playing}))
+                }
+                None => Err(("bad-params".into(), "pass positionBeats (quarter notes from the start) or position (seconds)".into())),
+            },
+            "transport_play" => {
+                state.playing = true;
+                self.listening.set_playing(true);
+                Ok(json!({"started": true, "playing": true}))
+            }
+            "transport_stop" => {
+                let recorded = state.playing && std::mem::take(&mut state.recording);
+                state.playing = false;
+                self.listening.set_playing(false);
+                Ok(json!({"stopped": true, "wasRecording": recorded}))
+            }
             "read" => Self::read(&state, &epoch, params),
             "digest" => Self::digest(&state, &epoch, params),
             "snapshot" => {
@@ -1403,7 +1438,7 @@ impl ReaperScript {
                     "epoch": epoch,
                     "view": "arrange",
                     "selection": {"trackRef": "r:track:{T0001}", "cursor": 0.0},
-                    "transport": {"playing": state.playing, "recording": state.recording, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0},
+                    "transport": {"playing": state.playing, "recording": state.recording, "beat": state.cursor, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0},
                     "changed": state.changed,
                     "ageMs": 12,
                 });
@@ -1411,6 +1446,9 @@ impl ReaperScript {
                     focus["transport"]["loop"] = json!({
                         "on": state.settings["repeat"], "start": state.settings["loop"]["start"], "end": state.settings["loop"]["end"]
                     });
+                }
+                if let Some(signature) = state.signature {
+                    focus["transport"]["timeSignature"] = json!(signature);
                 }
                 Ok(focus)
             }

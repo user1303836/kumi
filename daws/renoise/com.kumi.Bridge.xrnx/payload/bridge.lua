@@ -1821,6 +1821,11 @@ local function tick_listening()
   sweep_scratch()
 end
 
+function M.on_idle()
+  local job = listening.active()
+  if job and job.deadline_ms then listening.check(listen_env(), true) end
+end
+
 function M.tick()
   b.ticks, b.renumbering = (b.ticks or 0) + 1, nil
   b.alive_ms = M.now_ms()

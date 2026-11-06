@@ -10,6 +10,7 @@ with a resource update after each. Standard library only.
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
         [--listen-outcome measured|refused|cancelled|unsure|unsure-with-media] [--listen-deadline SECONDS]
+        [--listen-prepare SECONDS] [--listen-estimated SECONDS]
         [--component-state missing|same|older|newer|other_owner] [--component-owner DIR]
 
 The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
@@ -27,6 +28,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -42,7 +44,9 @@ RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo
 RESOURCES = ("kumi://status", "kumi://focus", "kumi://history", "kumi://map")  # C2's, as #1047's kumi serve offers
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
 # the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
-STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
+STEPS = {"set_track_volume": "mixer", "replace_sample": "device", "edit_rack": "device"}
+# CC-20's 20c, as serve words it on macOS: the approval's first line, a row's note and every refusal of its undo.
+DAW_UNDO = "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
 SET = {
     "name": "Night Drive", "key": "live:night-drive", "tempo": 124.0,
     "tracks": [
@@ -67,9 +71,13 @@ class Fixture:
         self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
         self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
         self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
+        self.devices: set[str] = set()  # the .amxd names in the User Library's Kumi folder (CC-22)
+        self.device_files: dict[str, str] = {}  # a preview's file, by its spec's SHA-256 (W1-B)
         self.seq = 0
         self.connected = False
+        self.playing = False  # whether transport's play started it (CC-17)
         self.daw = options.daw
+        self.takes = 0  # the highest take number given (CC-24: numbering goes on, V3 after V2)
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
         # As kumi serve's History::new: an earlier runtime's rows stay for the record, none of them undoable from here.
@@ -239,6 +247,11 @@ class Fixture:
         return next(((track, pad) for track in self.set["tracks"] for device in track["devices"]
                      for pad in device.get("pads", []) if pad["ref"] == ref), None)
 
+    def rack(self, ref: str) -> tuple[dict, dict] | None:
+        """The track and the rack device with ref `ref` (CC-20's add-chain target)."""
+        return next(((track, device) for track in self.set["tracks"] for device in track["devices"]
+                     if device["ref"] == ref and device["name"].endswith("Rack")), None)
+
 
 def now() -> int:
     return int(time.time() * 1000)
@@ -312,7 +325,7 @@ def observe(fixture: Fixture, args: dict, host: dict) -> dict:
     fixture.seen_at = now()
     fixture.publish("focus")  # written on each look (CC-7)
     published = fixture.focus()
-    return {"text": text[:int(args.get("max_chars") or 4000)], "project_key": fixture.set["key"], "epoch": fixture.epoch,
+    return {"text": text[:int(args.get("max_chars") or 12000)], "project_key": fixture.set["key"], "epoch": fixture.epoch,
             "project": published["project"], "focus": published["focus"], "transport": published["transport"],
             "catch_up": [], "age_ms": 0,
             "refs": [{"label": track["name"], "kind": "track", "detail": f"{track['volume_db']:g} dB",
@@ -340,6 +353,10 @@ def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
     unknown = [step.get("tool") for step in steps if step.get("tool") not in STEPS]
     if not steps or len(steps) > 20 or unknown:
         return "unknown_step", f"Kumi doesn't take these steps here: {unknown or 'none given'}"
+    kinds = {step.get("tool") == "edit_rack" for step in steps}
+    if len(kinds) > 1:  # as #1137 refuses: Live's own Undo would take a mixed change back in parts
+        return "not_allowed", ("A step only Live's own Undo takes back (edit_rack's add-chain) goes in a change of its "
+                               "own, so that Live's Undo takes the whole change back.")
     for step in steps:
         target = step.get("input") or {}
         if step["tool"] == "set_track_volume":
@@ -347,6 +364,9 @@ def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
                 return "invalid", f"no track {target.get('track_ref')!r} in the project"
             if not isinstance(target.get("volume_db"), (int, float)):
                 return "invalid", "set_track_volume needs volume_db, a number"
+        elif step["tool"] == "edit_rack":
+            if target.get("action") != "add-chain" or fixture.rack(target.get("deviceRef", "")) is None:
+                return "invalid", "edit_rack here adds a chain to a rack in the project"
         elif step["tool"] == "replace_sample":
             if fixture.simpler(target.get("deviceRef", "")) is None:
                 return "invalid", f"no Simpler {target.get('deviceRef')!r} in the project"
@@ -395,6 +415,11 @@ def describe(fixture: Fixture, step: dict) -> dict:
     if step["tool"] == "set_track_volume":
         name = fixture.track(target["track_ref"])["name"]
         text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
+    elif step["tool"] == "edit_rack":
+        track, rack = fixture.rack(target["deviceRef"])
+        name = f"{rack['name']} ({track['name']})"
+        text = f"Edit rack: action add-chain — on {quoted(name)}"
+        return {"tool": step["tool"], "family": STEPS[step["tool"]], "effect": "write", "text": text, "undo": "daw"}
     else:
         track, pad = fixture.simpler(target["deviceRef"])
         name = f"{pad['device']} ({track['name']} > {track['devices'][0]['name']} pad {pad['pad']})"
@@ -414,60 +439,243 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     if refusal is not None:
         return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
     if args.get("preview"):
+        described = [describe(fixture, step) for step in args["steps"]]
+        daw_undo = {"undo": "daw", "undo_note": DAW_UNDO} if any(step.get("undo") for step in described) else {}
         return {"state": "preview", "title": args.get("title"),
-                "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
-                "steps": [describe(fixture, step) for step in args["steps"]]}
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "steps": described, **daw_undo}
     steps = args["steps"]
-    before = copy.deepcopy(fixture.set)
-    for step in steps:
-        target = step["input"]
-        if step["tool"] == "set_track_volume":
-            fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
-        else:
-            fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
+
     first = steps[0]["input"]
-    track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
-    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
-    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note), CC-5's
-    # (tool_call_id, digest, call_outcome) and CC-3 A2's change_id, which the plugin never passes on.
-    fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
-                            "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
-                            "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
-                            "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
-                            "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                            "call_outcome": "applied", "change_id": f"x-{fixture.generation}-{len(fixture.history) + 1}",
-                            "before": before})
+    track = (fixture.track(first["track_ref"]) if "track_ref" in first
+             else fixture.rack(first["deviceRef"])[0] if steps[0]["tool"] == "edit_rack"
+             else fixture.simpler(first["deviceRef"])[0])
+    # As kumi serve records a change: a HISTORY row per family its steps touch, in plan order, each with the state
+    # before it, and one serve-made change_id on all of them (CC-3 amendment A2). A rack's add-chain row is one only
+    # Live's own Undo takes back (CC-20), so Kumi's undo isn't offered on it.
+    change_id = f"ch-{len(fixture.history) + 1}"
+    ids = []
+    for family in dict.fromkeys(STEPS[step["tool"]] for step in steps):
+        before = copy.deepcopy(fixture.set)
+        mine = [step for step in steps if STEPS[step["tool"]] == family]
+        for step in mine:
+            target = step["input"]
+            if step["tool"] == "set_track_volume":
+                fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
+            elif step["tool"] == "edit_rack":
+                fixture.rack(target["deviceRef"])[1]["chains"] = fixture.rack(target["deviceRef"])[1].get("chains", 1) + 1
+            else:
+                fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
+        daw_undo = any(step["tool"] == "edit_rack" for step in mine)
+        ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+        # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note, change_id)
+        # and CC-5's (tool_call_id, digest, call_outcome), which the plugin never passes on.
+        fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                                "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
+                                "family": family, "at": now(), "state": "applied",
+                                "undo_available": not daw_undo, "track": track["name"], "daw_undo": daw_undo,
+                                "note": DAW_UNDO if daw_undo else "kept at /Users/someone/Set.als",
+                                "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
+                                "call_outcome": "applied", "before": before, "change_id": change_id})
+        ids.append(ident)
     fixture.publish("history", "focus")
     done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
-    return {"state": "applied", "history_ids": [ident],
+    return {"state": "applied", "history_ids": ids,
             "steps": {"done": done, "refused": [], "held_back": [], "stopped": None, "skipped": 0},
             "summary": args.get("title") or "Applied.", "undo_available": True, "project_key": fixture.set["key"],
             "epoch": fixture.epoch}
 
 
+def why_not(fixture: Fixture, row: dict) -> tuple[str, str, str] | None:
+    """Why a row can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words."""
+    if row["runtime_generation"] != fixture.generation:
+        return "restarted", "expired", RESTARTED
+    if not row["undo_available"] and row["state"] != "undone":
+        return "expired", "expired", "It can't be undone any more."
+    return None
+
+
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
-    # Why it can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words.
-    why_not = (("restarted", "expired", RESTARTED) if row and row["runtime_generation"] != fixture.generation
-               else ("expired", "expired", "It can't be undone any more.") if row and not row["undo_available"]
-               else None)
-    if args.get("preview"):
-        if row is None:
-            return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
-        return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-    if why_not:
-        return {"state": why_not[1], "reason": why_not[2].format(daw=DAW_NAMES[fixture.daw])}
+    # As serve orders it: a script's row first (CC-19: Kumi never undoes one), then CC-20's, then the whole change.
+    if row.get("family") == "script":
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Undo {row['title']}", "undo_available": False,
+                    "reason": "not_undoable", "note": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw])}
+        return {"state": "refused", "code": "not_undoable", "reason": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw])}
+    if row.get("daw_undo"):  # CC-20's 20e: refused in 20c's words, before the DAW is asked anything, whole or not
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": False,
+                    "reason": "daw_undo", "note": DAW_UNDO}
+        return {"state": "refused", "code": "daw_undo", "reason": DAW_UNDO}
+    if args.get("whole_change") is True:
+        return undo_whole(fixture, args, row)
+    refused = why_not(fixture, row) if row["state"] != "undone" else ("expired", "expired", "It can't be undone any more.")
+    if args.get("preview"):
+        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not refused}
+        return {**preview, "reason": refused[0]} if refused else preview
+    if refused:
+        return {"state": refused[1], "reason": refused[2].format(daw=DAW_NAMES[fixture.daw])}
     fixture.set = row.pop("before")
     row.update(state="undone", undo_available=False)
     fixture.publish("history", "focus")
     return {"state": "undone", "reason": f"Undid {row['title']}."}
 
 
+def undo_whole(fixture: Fixture, args: dict, row: dict) -> dict:
+    """CC-3 amendment A2: every row of that row's change, newest first. Its preview lists them with their families and
+    a digest of the set; the real call needs that digest back (`expect_rows`), undoes under one lease, and stops at
+    the first row it can't undo."""
+    rows = [each for each in reversed(fixture.history)
+            if each is row or (row.get("change_id") and each.get("change_id") == row["change_id"])]
+    # A2 (3): lower-case hex SHA-256 of the lines "<history_id>:<state>", newest first, joined by \n, none trailing.
+    digest = hashlib.sha256("\n".join(f"{each['id']}:{each['state']}" for each in rows).encode()).hexdigest()
+    if args.get("preview"):
+        listed = [{"history_id": each["id"], "title": each["title"], "family": each["family"], "state": each["state"],
+                   "text": f"Undo {each['title']} ({each['family']}) on {each['track']}",
+                   "undo_available": each["state"] == "undone" or why_not(fixture, each) is None} for each in rows]
+        text = listed[0]["text"] if len(listed) == 1 else \
+            f"Undo {len(listed)} steps: " + "; ".join(each["text"] for each in listed)
+        pending = [each for each in listed if each["state"] != "undone"]
+        return {"state": "preview", "rows": listed, "rows_digest": digest,
+                "undo_available": bool(pending) and all(each["undo_available"] for each in pending), "text": text[:600]}
+    if args.get("expect_rows") != digest:
+        return error("stale", "That change's steps aren't the ones approved: preview it again.")
+    answered, stopped = [], None
+    for each in rows:
+        if stopped is not None:
+            answered.append({"history_id": each["id"], "state": "not_tried"})
+        elif each["state"] == "undone":
+            answered.append({"history_id": each["id"], "state": "undone"})
+        elif (refused := why_not(fixture, each)) is not None:
+            stopped = refused[1]
+            answered.append({"history_id": each["id"], "state": refused[1], "reason": refused[2]})
+        else:
+            fixture.set = each.pop("before")
+            each.update(state="undone", undo_available=False)
+            answered.append({"history_id": each["id"], "state": "undone"})
+    fixture.publish("history", "focus")
+    done = [each for each in answered if each["state"] == "undone"]
+    state = "undone" if stopped is None else ("partly_undone" if done else stopped)
+    return {"state": state, "rows": answered}
+
+
 def history(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"items": fixture.history_snapshot()["items"][:int(args.get("limit") or 20)]}
+
+
+# CC-19's script op, as the lead's interface in CONTRACT-CHANGES has serve check and answer it.
+SCRIPT_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
+SCRIPT_UNDO = "Kumi can't undo a script: {daw}'s own Undo may, if its step is still the latest there."
+SCRIPT_DENIED = {"lua": ("os.execute", "io.popen", "socket"),
+                 "python": ("subprocess", "os.system", "socket", "urllib", "ctypes")}
+SCRIPT_HIDDEN = ({*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C, 0x200B, 0x200C, 0x200D,
+                  0x2060, 0xFEFF, 0x2028, 0x2029, 0x7F, *range(0x80, 0xA0)}
+                 | ({*range(0x20)} - {0x09, 0x0A, 0x0D}))
+
+
+def script_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
+    code, language = args.get("code"), args.get("language")
+    if not isinstance(code, str) or not code.strip():
+        return "invalid", "The script has no code."
+    if language != SCRIPT_LANGUAGE[fixture.daw]:
+        return "invalid", (f"Live runs Python scripts, and REAPER and Renoise run Lua: this one is "
+                           f"{'Lua' if language == 'lua' else 'Python'}.")
+    lines = len(code[:-1].split("\n")) if code.endswith("\n") else len(code.split("\n"))
+    if lines > 400 or len(code.encode("utf-8")) > 32 * 1024:
+        return "too_long", "The script is over 400 lines or 32 KB, so Kumi won't run it: split it, or use a typed step."
+    for number, line in enumerate(code.split("\n"), 1):
+        hidden = next((char for char in line if ord(char) in SCRIPT_HIDDEN), None)
+        if hidden is not None:
+            return "hidden_characters", (f"The script has a hidden or direction-changing character (U+{ord(hidden):04X} "
+                                         f"on line {number}), which can make code read differently than it runs, so "
+                                         "Kumi won't run it.")
+    for entry in SCRIPT_DENIED[language]:
+        if re.search(rf"(?<![\w.]){re.escape(entry)}(?![\w])", code):
+            return "not_allowed", (f"Kumi refuses scripts that use `{entry}`: it reaches outside the DAW. (This check is "
+                                   "a safeguard, not a guarantee.)")
+    if not fixture.connected:
+        return "not_connected", "Kumi isn't connected to the DAW: connect first."
+    if args.get("expected_project_key") != fixture.set["key"]:
+        return "stale", "The project changed since it was read: read it again."
+    return None
+
+
+def script(fixture: Fixture, args: dict, host: dict) -> dict:
+    refusal = script_refusal(fixture, args)
+    if refusal is not None:
+        return {"state": "refused", "code": refusal[0], "reason": refusal[1]}
+    code = args["code"]
+    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    if args.get("preview"):
+        return {"state": "preview", "daw": fixture.daw, "language": args["language"], "purpose": args.get("purpose"),
+                "sha256": digest, "lines": len(code.rstrip("\n").split("\n")), "bytes": len(code.encode("utf-8")),
+                "deadline_seconds": 0.8 if fixture.daw == "renoise" else 10,
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
+    if args.get("expected_sha256") != digest:
+        return {"state": "refused", "code": "stale", "reason": "The script changed since it was approved."}
+    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+    fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                            "runtime_generation": fixture.generation, "title": f"Script: {args.get('purpose')}",
+                            "family": "script", "at": now(), "state": "applied", "undo_available": False,
+                            "note": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw]),
+                            "track": None, "script": {"sha256": digest, "language": args["language"]},
+                            "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied"})
+    fixture.publish("history", "focus")
+    return {"state": "ran", "history_id": ident, "output": {"result": "ok", "stdout": "printed\n"},
+            "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
+
+
+# CC-22's device op, as the P9 interface has serve answer it: `spec_json` is hashed as received and parsed, never
+# re-encoded; a preview is pure and names a free file; a build refuses another spec (`stale`) or a file that's no
+# longer free (W1-B), and writes under a new name only.
+DEVICE_FOLDER = "User Library/Kumi/Audio Effects"
+
+
+def device_findings(spec: dict) -> list[str]:
+    """A few of the builder's refusals (22b, 22-r1, 22-r2), each worded as `check_gen_code` words a finding."""
+    code, found = spec.get("code") or "", []
+    if re.search(r"\b(while|do)\b", code):
+        found.append("code: `while` and `do` aren't allowed: a loop on Live's audio thread must end (a `for` with "
+                     "literal bounds, at most 64).")
+    if re.search(r"\bBuffer\b", code):
+        found.append("code: Buffer reads a buffer~ anything in the Set can fill: use Data.")
+    for control in spec.get("controls") or []:
+        if control.get("type") in ("number", "integer") and not control.get("min", 0) < control.get("max", 1):
+            found.append(f"{control.get('name')}: min isn't below max.")
+    return found
+
+
+def device(fixture: Fixture, args: dict, host: dict) -> dict:
+    spec_json = args["spec_json"]
+    digest = hashlib.sha256(spec_json.encode("utf-8")).hexdigest()
+    spec = json.loads(spec_json)
+    findings = device_findings(spec)
+    if findings:
+        return {"error": {"code": "refused", "reason": "Kumi won't build this device as it is: fix what's listed and "
+                                                       "ask again.", "findings": findings}}
+    free = next(name for name in (spec["name"], *(f"{spec['name']} {n}" for n in range(2, 100)))
+                if name not in fixture.devices)
+    file = f"{DEVICE_FOLDER}/{free}.amxd"
+    code = spec["code"]
+    lines = len(code[:-1].split("\n")) if code.endswith("\n") else len(code.split("\n"))
+    if args["action"] == "preview":
+        fixture.device_files[digest] = file
+        shown = "0" * 64 if fixture.options.device_wrong_sha else digest
+        return {"state": "preview", "name": free, "file": file, "controls": spec["controls"], "code": code,
+                "lines": lines, "sha256": shown}
+    if args["action"] != "build":
+        return error("invalid", "action is preview or build")
+    if args.get("sha256") != digest:
+        return error("stale", "The device's spec changed since it was approved, so Kumi didn't build it.")
+    if fixture.options.device_file_appears:  # a file with the previewed name appeared since
+        fixture.devices.add(free)
+    if fixture.device_files.get(digest) != f"{DEVICE_FOLDER}/{free}.amxd" or free in fixture.devices:
+        return error("stale", "A file took the name the approval showed, so Kumi didn't build it: ask again.")
+    fixture.devices.add(free)
+    return {"name": free, "item": f"query:UserLibrary#Kumi:Audio%20Effects:{free}.amxd", "file": file,
+            "artifact_id": f"a-device-{len(fixture.devices)}", "sha256": digest, "listed": True}
 
 
 # Each with the file's path, which a map has (CC-4) and the plugin must never pass to the model.
@@ -501,9 +709,22 @@ def library(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
+    """CC-23's search: the index's values and why each hit matched (the query's words, never a name's other text), and
+    on a near search the seed apart and each hit's closeness. One reason here names a path, as a runtime must never:
+    the plugin's second guard drops it."""
     words = str(args.get("query") or "").lower().split()
-    found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)]
-    return {"map_revision": "r1", "items": found[:int(args.get("limit") or 20)]}
+    found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)
+             and float(args.get("min_seconds") or 0) <= sound["duration"] <= float(args.get("max_seconds") or 1e9)
+             and sound["sound_id"] != args.get("near")]
+    hits = []
+    for sound in found[:int(args.get("limit") or 20)]:
+        why = [f"name matches '{word}'" for word in words][:3]
+        if sound["sound_id"] == "s-r1-1":
+            why.append("found in /Samples/Drums")
+        hits.append({**sound, "bpm": None, "key": None, "note": "D2", "why": why,
+                     **({"closeness": 87} if args.get("near") else {})})
+    return {"map_revision": "r1", "indexed": True, **({"near": args["near"]} if args.get("near") else {}),
+            "items": hits}
 
 
 def listen(fixture: Fixture, args: dict, host: dict) -> dict:
@@ -609,9 +830,19 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
     text = (f"play {what} of {fixture.set['name']} from beat {start:g} to beat {start + beats:g} (Arrangement) "
             "through Kumi Ears and measure it; routing and the transport change for a moment and are put back")
     if args.get("preview"):
-        return {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
-                "estimated_seconds": round(seconds, 2), "method": "ears",
-                "deadline_seconds": fixture.options.listen_deadline}
+        preview = {"state": "preview", "project": {"key": fixture.set["key"], "epoch": fixture.epoch}, "text": text,
+                   "method": "ears"}
+        for name, given, default in (("estimated_seconds", fixture.options.listen_estimated, round(seconds, 2)),
+                                     ("prepare_seconds", fixture.options.listen_prepare,
+                                      120 if args.get("compare_to") else 0),
+                                     ("deadline_seconds", fixture.options.listen_deadline, 75)):
+            if given != "missing":  # a runtime that doesn't give this bound at all
+                preview[name] = default if given is None else json.loads(given)
+        return preview
+    bounds = args.get("_listen")
+    if not isinstance(host, dict) or not host or not isinstance(bounds, dict) or sorted(bounds) != [
+            "deadline_seconds", "estimated_seconds", "prepare_seconds"]:
+        return error("invalid", "_listen")  # the runtime's own refusal (CC-2's A2): only the host's approved bounds play
     with open(fixture.state / "fixture-listens.jsonl", "a", encoding="utf-8") as log:
         log.write(json.dumps({"args": args, "host": host}) + "\n")
     measured = {"metrics": analysis(lufs=-11.8, peak=-0.6, centroid=2210.0, seconds=round(seconds, 2)),
@@ -767,12 +998,124 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
                        "credit_unit": "mirelo_credits"}}
 
 
+def transport(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Playback as serve's `transport` (CC-17, #1143): a pure preview in serve's words; play refused while the DAW
+    records (the fixture's --recording) or the project changed; stop always. No HISTORY row either way."""
+    project = fixture.set["name"]
+    if args.get("action") == "stop":
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Stop {project}"}
+        fixture.playing = False
+        return {"state": "stopped", "position_beats": 0}
+    if args.get("from_slot", 1) < 1:
+        return error("invalid", "from_slot counts from 1.")
+    if fixture.options.recording:
+        return error("recording", f"{DAW_NAMES[fixture.daw]} is recording, or record is armed: Kumi never starts "
+                                  "playback that would record.")
+    if args.get("expected_project_key") != fixture.set["key"]:
+        return error("stale", "That isn't the project open now: observe it again.")
+    if "from_bar" in args:
+        text = f"Play {project} from bar {args['from_bar']}"
+    elif "from_beat" in args:
+        text = f"Play {project} from beat {args['from_beat']:g}"
+    elif "from_slot" in args:
+        line = f", line {args['from_line']}" if "from_line" in args else ""
+        text = f"Play {project} from sequence slot {args['from_slot']}{line}"
+    elif "from_line" in args:
+        text = f"Play {project} from line {args['from_line']} of the pattern being edited"
+    elif "clip_ref" in args:
+        text = f"Launch a Session clip in {project}"
+    elif "scene_index" in args:
+        text = f"Fire scene {args['scene_index'] + 1} in {project}"
+    else:
+        text = f"Play {project}"
+    if args.get("preview"):
+        return {"state": "preview", "text": text}
+    fixture.playing = True
+    return {"state": "playing", "position_beats": 0}
+
+
+# CC-24's variations op, as serve's (#1154) routes the DAW's own variations tool.
+VARIATIONS_ROOM = 6  # the empty places the fixture's Set has for takes
+
+
+def drawn_takes(fixture: Fixture, args: dict) -> list[dict]:
+    """The takes a make would draw now: numbered on from the set, so a make in between changes them (W1-a). Each line
+    in serve's words: the take, its direction, then what was done."""
+    recipes = args.get("takes") or [{"direction": f"take {index + 1}"} for index in range(int(args.get("count") or 2))]
+    drawn = []
+    for index, recipe in enumerate(recipes):
+        take, direction = f"V{fixture.takes + index + 1}", recipe.get("direction") or "a take"
+        drawn.append({"take": take, "direction": direction, "line": f"{take} ({direction}): 8 bars, 31 notes"})
+    return drawn
+
+
+def takes_digest(takes: list[dict], seed: int) -> str:
+    return hashlib.sha256(json.dumps([seed, takes], sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def variations(fixture: Fixture, args: dict, host: dict) -> dict:
+    action = args.get("action")
+    if action in ("drop", "extract") or "force" in args or "listen" in args:
+        return {"state": "refused", "code": "not_allowed", "reason": "Kumi for Hermes doesn't do that with takes.",
+                "history_ids": []}
+    if action == "list":
+        return {"set": 1, "source": "Bassline", "takes": [{"take": f"V{number}"} for number in range(1, fixture.takes + 1)]}
+    project = {"key": fixture.set["key"], "epoch": fixture.epoch}
+    if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
+        return {"state": "refused", "code": "stale", "reason": "The project or its epoch changed since it was read.",
+                "history_ids": []}
+    if action == "keep":
+        names = [name for name in args.get("names") or [] if isinstance(name, str)]
+        if args.get("preview"):
+            return {"state": "preview", "takes": [{"take": name, "name_after": f"{name} · Bassline · kept"}
+                                                  for name in names], "skipped": [], "project": project}
+        return {"state": "applied", "set": 1, "kept": names, "history_ids": variation_rows(fixture, names, host),
+                "undo_available": True, "project": project}
+    takes, seed = drawn_takes(fixture, args), int(args.get("seed") or 7)
+    if len(takes) > VARIATIONS_ROOM:
+        return {"state": "refused", "code": "no_room", "fits": VARIATIONS_ROOM, "history_ids": [],
+                "reason": f"Only {VARIATIONS_ROOM} of the {len(takes)} takes fit: the Set has {VARIATIONS_ROOM} empty "
+                          f"slots. Ask for {VARIATIONS_ROOM}, or make room in Live first."}
+    if args.get("preview"):
+        return {"state": "preview", "seed": seed, "source": "“Bassline” on Bass", "takes": takes, "skipped": [],
+                "takes_digest": takes_digest(takes, seed), "fits": len(takes), "project": project}
+    if args.get("expect_takes") != takes_digest(takes, seed):
+        return {"state": "refused", "code": "stale", "reason": "The takes would come out differently now: preview them again.",
+                "history_ids": []}
+    ids = variation_rows(fixture, [take["take"] for take in takes], host)
+    fixture.takes += len(takes)
+    return {"state": "applied", "set": 1, "source": "“Bassline” on Bass",
+            "takes": [{**take, "ref": f"t2/s{index + 1}"} for index, take in enumerate(takes)], "skipped": [],
+            "history_ids": ids, "undo_available": True, "project": project}
+
+
+def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
+    """A HISTORY row for each take a call wrote, all of one change (W1-d: "undo that" takes the whole call back)."""
+    change_id, ids = f"x-{fixture.generation}-v{len(fixture.history) + 1}", []
+    for name in names:
+        ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+        fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                                "runtime_generation": fixture.generation, "title": f"Variation {name}",
+                                "family": "clip", "at": now(), "state": "applied", "undo_available": True,
+                                "track": "Bass", "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied",
+                                "change_id": change_id, "before": copy.deepcopy(fixture.set)})
+        ids.append(ident)
+    fixture.publish("history", "focus")
+    return ids
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate}
+         "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
+         "variations": variations, "device": device}
 
 
 def main() -> None:
+    # Serve's stdio is UTF-8 everywhere; a pipe's default here is the locale's (cp1252 on Windows), which would read a
+    # script's U+202E as other characters and hash different code than the plugin sent.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["serve"])
     parser.add_argument("--stdio", action="store_true", required=True)
@@ -784,6 +1127,7 @@ def main() -> None:
     parser.add_argument("--exit-on")
     parser.add_argument("--slow", action="append", default=[])
     parser.add_argument("--leased-by", help="refuse changes as another chat's lease would")
+    parser.add_argument("--recording", action="store_true", help="the DAW records, so transport refuses play")
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
@@ -798,9 +1142,12 @@ def main() -> None:
     parser.add_argument("--media-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
-    parser.add_argument("--listen-deadline", type=int, default=75,
-                        help="the preview's deadline_seconds (whole seconds): the capture's 65 s cap, restoring and "
-                             "measuring")
+    parser.add_argument("--listen-deadline", help="the preview's deadline_seconds, as JSON, or missing (default: 75, "
+                                                  "the capture's 65 s cap, restoring and measuring)")
+    parser.add_argument("--listen-prepare", help="the preview's prepare_seconds, as JSON, or missing (default: 0, or "
+                                                 "120 with compare_to)")
+    parser.add_argument("--listen-estimated", help="the preview's estimated_seconds, as JSON, or missing (default: "
+                                                   "the window's)")
     parser.add_argument("--component-state", default="missing",
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")
@@ -810,6 +1157,10 @@ def main() -> None:
     parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
     parser.add_argument("--generate-expires-ms", type=int, default=300_000,
                         help="how long a quote lasts from now, in milliseconds (negative: already expired)")
+    parser.add_argument("--device-wrong-sha", action="store_true",
+                        help="a device preview answers another SHA-256, as a serve that re-encoded the spec would")
+    parser.add_argument("--device-file-appears", action="store_true",
+                        help="a file takes the previewed device's name before its build")
     Fixture(parser.parse_args()).serve()
 
 

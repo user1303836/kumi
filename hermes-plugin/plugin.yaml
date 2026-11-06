@@ -1,6 +1,6 @@
 name: kumi
 # The Kumi release the plugin pins (kumi_release.json): the pin pull request sets both.
-version: "1.24.69"
+version: "1.24.70"
 description: >-
   Kumi for Hermes: Hermes reads your Ableton Live, REAPER or Renoise project and makes the changes you approve,
   each kept in Kumi's HISTORY and undoable while Kumi runs. Kumi measures audio on your computer and maps the
@@ -11,9 +11,11 @@ homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
 license: MIT
 requires_hermes: ">=0.22.7"
 provides_tools: [kumi_status, kumi_setup, kumi_connect, kumi_observe, kumi_read, kumi_change, kumi_undo,
-                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate]
+                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate, kumi_transport,
+                 kumi_script, kumi_variations, kumi_device,
+                 kumi_plugin_knowledge]
 provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
-                 on_session_finalize, agent_loop_stopped]
+                 on_session_finalize, agent_loop_stopped, subagent_start]
 config_schema:
   inject_focus:
     type: bool
@@ -36,6 +38,11 @@ config_schema:
     default: false
     label: Interpret measurements with a model
     description: "After Kumi measures audio, the model set for Kumi listening interpretation in Hermes's model settings (it follows Vision unless you change it, and must accept images) reads the numbers and a coarse band-energy image, never the audio. Its reading is added beside the measurements, which stay either way. The model or Hermes's fallback providers for that task may cost tokens."
+  scripts_in_messaging:
+    type: bool
+    default: false
+    label: Run scripts from messaging chats
+    description: "Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, and none runs while Hermes's approvals are off. A script runs with your DAW's access to your computer, and Kumi can't undo it."
   mirelo_acknowledged:
     type: bool
     default: false

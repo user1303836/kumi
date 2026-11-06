@@ -1,63 +1,63 @@
 {
   "schema": 1,
-  "kumi": "1.24.69",
+  "kumi": "1.24.70",
   "repository": "user1303836/kumi",
-  "tag": "v1.24.69",
-  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.69",
+  "tag": "v1.24.70",
+  "release": "https://github.com/user1303836/kumi/releases/tag/v1.24.70",
   "targets": {
     "aarch64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-aarch64-apple-darwin.tar.xz",
-      "sha256": "706651e82fdf8f97dc621951924ea14816128684b016275fd2a966fe23b938cd",
-      "size": 28032340,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 88143721
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-apple-darwin.tar.xz",
+      "sha256": "d8bd3b2d9499a1cc41a56fad9a38ed73a5b0aadca96cd9505cda3788446c59cf",
+      "size": 28403992,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 89380878
     },
     "x86_64-apple-darwin": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-x86_64-apple-darwin.tar.xz",
-      "sha256": "a7cf9561efed6d7b62d0fd0117a45de73f4575eee88d45a121ffeac1186fdbe6",
-      "size": 31474848,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 95341883
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-apple-darwin.tar.xz",
+      "sha256": "aa0b902a9e44124a48515eb613c09355291d36ea89758016b1a39db03eeb9394",
+      "size": 31929276,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 96727344
     },
     "aarch64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-aarch64-pc-windows-msvc.tar.xz",
-      "sha256": "3e92e7c427884cf5a869b23e152bdf8289a115fd5084a212e1ede09f36c0db24",
-      "size": 28851352,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 103416814
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-pc-windows-msvc.tar.xz",
+      "sha256": "588162cfc79b4f9c652c9091fbd9ce947554025edacf610aeb61ee8300cd3401",
+      "size": 29193332,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 104928648
     },
     "x86_64-pc-windows-msvc": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-x86_64-pc-windows-msvc.tar.xz",
-      "sha256": "e48ea1b400f17cb3fbc9d0e45a470d8f459903a4c25b2f8ecc4b965d27f86cba",
-      "size": 33724148,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 122479159
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-pc-windows-msvc.tar.xz",
+      "sha256": "44b185ba44820df1cd40775bf42a3edb21b909ac1ba12192b4a35737d242fd1f",
+      "size": 34180800,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 124531322
     },
     "aarch64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-aarch64-unknown-linux-gnu.tar.xz",
-      "sha256": "49704d70fcb809c6053947bd0b5b2264e4ae7127d5b91a29734ec9a29bfd46e5",
-      "size": 26385320,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 83087817
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "339624ca37bce71069529743f4899582ef0a1390d60b04380d24cf023aaa9f20",
+      "size": 26709472,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 84298410
     },
     "x86_64-unknown-linux-gnu": {
-      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.69/kumi-x86_64-unknown-linux-gnu.tar.xz",
-      "sha256": "df49cea5379a7ed97508763d8dc29a1d20eac05e1a39f2103723ee15dff1bee7",
-      "size": 30299600,
-      "bridge": "1.0.105",
-      "reaper": "0.1.12",
-      "renoise": "1.0.19",
-      "unpacked_bytes": 96295688
+      "url": "https://github.com/user1303836/kumi/releases/download/v1.24.70/kumi-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "f14a3d0ee7ed60d7986f84fdd67c28dde8b768b2e892be83090933f1d7535c75",
+      "size": 30678080,
+      "bridge": "1.0.106",
+      "reaper": "0.1.13",
+      "renoise": "1.0.20",
+      "unpacked_bytes": 97734308
     }
   },
   "serve_options": [
@@ -74,17 +74,22 @@
   "serve_operations": [
     "change",
     "connect",
+    "device",
     "generate",
     "history",
     "job",
     "library",
     "listen",
     "observe",
+    "plugin_knowledge",
     "read",
+    "script",
     "setup_daw",
     "sounds",
     "status",
-    "undo"
+    "transport",
+    "undo",
+    "variations"
   ],
   "generate_kinds": [
     "audio_to_midi",
@@ -103,12 +108,14 @@
     "reaper": [
       "artifact",
       "file",
-      "sound"
+      "sound",
+      "track"
     ],
     "renoise": [
       "artifact",
       "file",
-      "sound"
+      "sound",
+      "track"
     ]
   }
 }

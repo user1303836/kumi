@@ -21,11 +21,14 @@ pub mod library;
 pub mod listen;
 pub mod map;
 pub mod mcp;
+pub mod plugin_knowledge;
 pub mod read;
 pub mod registry;
 pub mod script;
 pub mod setup;
 pub mod snapshots;
+pub mod transport;
+pub mod variations;
 
 mod core;
 mod generate;

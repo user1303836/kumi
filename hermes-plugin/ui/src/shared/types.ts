@@ -114,6 +114,45 @@ export interface HistoryItem {
   /** A row only the DAW's own undo can take back (#1101's device loads, whose undo Kumi refuses): `next` while it's
    *  the DAW's next undo, `buried` once later work sits above it there, so the DAW's undo would take that back first. */
   daw_undo?: 'next' | 'buried'
+  /** A script's row (CC-19, `Script: <purpose>`): which saved code it ran, so the pane can show it, after a restart
+   *  too, through `/script`. */
+  script?: { sha256?: string; language?: string }
+}
+
+/** A pending code-class approval's language: a script's (CC-19), or `device`, a Max for Live device's whole spec as
+ *  JSON (CC-22), its GenExpr code and controls together under one hash. */
+export type ScriptLanguage = 'python' | 'lua' | 'device'
+
+/** A device's spec as the plugin saved it (CC-22 22b): what its approval named, controls and code together. */
+export interface DeviceSpec {
+  name?: string
+  about?: string
+  controls?: { name?: string; type?: string; min?: number; max?: number; default?: number | string | boolean; unit?: string; options?: string[] }[]
+  code: string
+}
+
+/** `plugin.kumi.script.pending` (CC-19): a script whose approval waits. The code never travels in an event: the pane
+ *  reads it through `/script` by its SHA-256, from the file the plugin saved when it asked. */
+export interface PendingScript {
+  tool_call_id: string
+  language: ScriptLanguage
+  sha256: string
+  /** What Hermes's model says the script does: its claim, shown as one. The code is the truth. */
+  purpose?: string
+  daw?: string
+  lines?: number
+  /** The approval's own warning, word for word. */
+  warning?: string
+  /** A device's new file in the User Library, as the approval names it (CC-22). */
+  file?: string
+}
+
+/** `/script`'s answer: the saved code, re-hashed against its name before it was sent. */
+export interface ScriptCode {
+  sha256: string
+  language: ScriptLanguage
+  code: string
+  lines: number
 }
 
 export interface History extends Liveness {

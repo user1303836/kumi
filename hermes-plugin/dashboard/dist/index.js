@@ -126,7 +126,8 @@
       dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
       dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
       byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
-      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
+      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
+      scriptUndo: (daw) => `Kumi can't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
     },
     job: {
       scanning: "Scanning",
@@ -171,6 +172,10 @@
       useTitle: "Put a request to use this sound in the chat, to finish and send",
       moreLike: "More like this",
       moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
+      useOnPad: "Use on pad…",
+      useOnPadTitle: "Pick a drum pad, an empty one included: the request goes in the chat, to send when you like",
+      pads: "Drum pads",
+      pad: (name, note) => name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`,
       playFailed: (error) => `Kumi couldn't play that sound: ${error}`
     },
     measurements: {
@@ -179,6 +184,35 @@
       tooMuch: "Kumi measured it, but there's too much to show here: the numbers are in its reply in the chat.",
       inReply: "Kumi measured it: the numbers are in its reply in the chat.",
       measured: (ago2) => `Measured ${ago2}`
+    },
+    script: {
+      waiting: "Script waiting for your approval",
+      deviceWaiting: "Device waiting for your approval",
+      says: (purpose) => `Hermes says: ${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      device: "A Max for Live device (GenExpr)",
+      controls: "The device’s controls",
+      noControls: "No controls.",
+      control: "Control",
+      range: "Range",
+      default: "Default",
+      on: "on",
+      off: "off",
+      file: (file) => `New file: ${file}`,
+      in: (language, daw) => `${language} in ${daw}`,
+      lines: (count) => count === 1 ? "1 line" : `${count} lines`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}: the hash of the code the approval names`,
+      code: "The script’s code",
+      deviceCode: "The device’s GenExpr code",
+      codeTitle: "Every line of the code as it will run. Nothing runs from here.",
+      reading: "Reading the code Kumi saved…",
+      unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
+      unreadableSaved: "Kumi couldn't read the code this script ran: its saved copy is gone, or no longer matches the hash Kumi kept.",
+      show: "Show code",
+      hide: "Hide code",
+      showTitle: "The code this script ran, as Kumi saved it when its approval asked"
     },
     listen: {
       measured: "measured",
@@ -419,7 +453,8 @@
       dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
       dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
       byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
-      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
+      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
+      scriptUndo: (daw) => `Kumi はスクリプトを取り消せません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
     },
     job: {
       scanning: "スキャン中",
@@ -464,6 +499,10 @@
       useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
       moreLike: "似たサウンド",
       moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
+      useOnPad: "パッドに使う…",
+      useOnPadTitle: "ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で",
+      pads: "ドラムパッド",
+      pad: (name, note) => name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`,
       playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
     },
     measurements: {
@@ -472,6 +511,35 @@
       tooMuch: "Kumi は測定しましたが、ここに表示するには多すぎます。数値はチャットの返答にあります。",
       inReply: "Kumi は測定しました。数値はチャットの返答にあります。",
       measured: (ago2) => `測定: ${ago2}`
+    },
+    script: {
+      waiting: "承認待ちのスクリプト",
+      deviceWaiting: "承認待ちのデバイス",
+      says: (purpose) => `Hermes の説明: ${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      device: "Max for Live デバイス（GenExpr）",
+      controls: "デバイスのコントロール",
+      noControls: "コントロールはありません。",
+      control: "コントロール",
+      range: "範囲",
+      default: "初期値",
+      on: "オン",
+      off: "オフ",
+      file: (file) => `新しいファイル: ${file}`,
+      in: (language, daw) => `${daw} の ${language}`,
+      lines: (count) => `${count} 行`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
+      code: "スクリプトのコード",
+      deviceCode: "デバイスの GenExpr コード",
+      codeTitle: "実行されるとおりのコードの全行です。ここからは何も実行されません。",
+      reading: "Kumi が保存したコードを読み込み中…",
+      unreadable: "保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。",
+      unreadableSaved: "このスクリプトが実行したコードを読めませんでした。保存したコピーがないか、Kumi が控えたハッシュと一致しません。",
+      show: "コードを表示",
+      hide: "コードを隠す",
+      showTitle: "このスクリプトが実行したコード（承認を求めたときに Kumi が保存したもの）"
     },
     listen: {
       measured: "測定値",
@@ -711,7 +779,8 @@
       dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
       dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
       byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
-      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
+      scriptUndo: (daw) => `Kumi 无法撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
     },
     job: {
       scanning: "正在扫描",
@@ -756,6 +825,10 @@
       useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
       moreLike: "更多类似的",
       moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
+      useOnPad: "用在打击垫上…",
+      useOnPadTitle: "选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送",
+      pads: "打击垫",
+      pad: (name, note) => name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`,
       playFailed: (error) => `Kumi 无法播放这个声音：${error}`
     },
     measurements: {
@@ -764,6 +837,35 @@
       tooMuch: "Kumi 已完成测量，但内容太多无法在此显示：数值在它在对话中的回复里。",
       inReply: "Kumi 已完成测量：数值在它在对话中的回复里。",
       measured: (ago2) => `测量于 ${ago2}`
+    },
+    script: {
+      waiting: "等待你批准的脚本",
+      deviceWaiting: "等待你批准的设备",
+      says: (purpose) => `Hermes 说：${purpose}`,
+      python: "Python",
+      lua: "Lua",
+      device: "Max for Live 设备（GenExpr）",
+      controls: "设备的控件",
+      noControls: "没有控件。",
+      control: "控件",
+      range: "范围",
+      default: "默认值",
+      on: "开",
+      off: "关",
+      file: (file) => `新文件：${file}`,
+      in: (language, daw) => `${daw} 中的 ${language}`,
+      lines: (count) => `${count} 行`,
+      sha: (short) => `SHA-256 ${short}…`,
+      shaTitle: (sha) => `SHA-256 ${sha}：批准所指代码的哈希`,
+      code: "脚本代码",
+      deviceCode: "设备的 GenExpr 代码",
+      codeTitle: "将要运行的完整代码。这里不会运行任何东西。",
+      reading: "正在读取 Kumi 保存的代码…",
+      unreadable: "Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。",
+      unreadableSaved: "无法读取这个脚本运行的代码：保存的副本已不存在，或与 Kumi 记下的哈希不再一致。",
+      show: "显示代码",
+      hide: "隐藏代码",
+      showTitle: "这个脚本运行的代码（在请求批准时由 Kumi 保存）"
     },
     listen: {
       measured: "实测",
@@ -1269,7 +1371,7 @@
     failed: { mark: "✕", tone: "bad", word: "history.failed" }
   };
   function restartedSince(item, live) {
-    if (item.note) return false;
+    if (item.note || item.family === "script") return false;
     return item.state === "expired" || live && item.state === "applied" && item.undo_available === false;
   }
   function stateOf(item, t = english, live = false) {
@@ -1328,6 +1430,7 @@
     history,
     now,
     action,
+    detail,
     live = false,
     daw,
     target
@@ -1350,10 +1453,12 @@
             /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
           ] }),
           item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
-            // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
-            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
+            // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
+            // never undoes one, CC-19), or why a restart's can't.
+            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : item.family === "script" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.scriptUndo", dawName(daw, t)) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
           ),
-          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) })
+          dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
+          detail?.(item)
         ] }),
         dawUndo ? null : action?.(item)
       ] }, item.id);
@@ -1904,11 +2009,34 @@
     return value;
   }
   var finite = (value) => typeof value === "number" && Number.isFinite(value);
+  function fileName(analysis, fallback) {
+    const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+    return clean(file || fallback, 60);
+  }
   function referenceKey(result) {
     const reference = result.compare?.metrics;
     if (!reference) return null;
     const lufs = reference.loudness?.integratedLufs;
     return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+  }
+  function keptBy(result, rounds) {
+    const kept = result.compare?.artifact_id;
+    if (typeof kept !== "string" || !kept) return null;
+    for (const [key, each] of Object.entries(rounds)) {
+      const round = each.find((other) => other.kept === kept);
+      if (round) return [key, round];
+    }
+    return null;
+  }
+  function roundKey(result, rounds) {
+    return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+  }
+  function referenceName(result, rounds) {
+    return keptBy(result, rounds)?.[1].name || void 0;
+  }
+  function roundOf(result, id, rounds) {
+    const kept = result.compare?.artifact_id;
+    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
   }
   function gapsOf(result) {
     const mine = result.metrics ?? {};
@@ -1930,7 +2058,19 @@
   var MOST_JOBS = 20;
   var MOST_ROUNDS = 6;
   var MOST_REFERENCES = 8;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null };
+  var SHA256 = /^[0-9a-f]{64}$/;
+  function pendingScriptOf(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const value = payload;
+    const id = plainId(value.tool_call_id);
+    const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
+    if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
+    const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
+    const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
+    const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
+    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
+  }
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
   }
@@ -2069,18 +2209,47 @@
       this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
     }
     /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
-     *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+     *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+     *  twice (both signals for one call) counts once. */
     noteListen(result) {
       const parsed = parseListen(result);
-      const key = parsed ? referenceKey(parsed) : null;
+      const key = parsed ? roundKey(parsed, this.state.rounds) : null;
       const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
       if (!parsed || !key || !id) return;
       const before = this.state.rounds[key] ?? [];
       if (before.some((round) => round.id === id)) return;
-      const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) };
+      const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
       const keys = Object.keys(rounds);
       if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
       this.set({ rounds });
+    }
+    /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
+     *  no plain call id, exact SHA-256 or known language shows nothing. */
+    scriptPending(payload) {
+      const pending = pendingScriptOf(payload);
+      if (!pending) return;
+      this.set({ script: { pending, code: null } });
+      const generation = this.generation;
+      void this.readScript(pending.sha256, pending.language).then((code) => {
+        if (generation !== this.generation || this.state.script?.pending !== pending) return;
+        this.set({ script: { pending, code: code ?? false } });
+      });
+    }
+    /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
+    scriptSettled(toolCallId) {
+      const id = plainId(toolCallId);
+      if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null });
+    }
+    /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
+     *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
+    async readScript(sha256, language) {
+      if (!SHA256.test(sha256)) return null;
+      try {
+        const read = await this.fetch(`/script?sha=${sha256}&language=${language}`);
+        return read && read.sha256 === sha256 && typeof read.code === "string" ? read : null;
+      } catch {
+        return null;
+      }
     }
     /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
      *  the source says it was running: a call that started it, or an event that reported it running. */

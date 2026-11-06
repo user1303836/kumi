@@ -8,9 +8,9 @@ import { useEffect, useState } from 'react'
 
 import { num, signed } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
-import { listenView, parseListen, referenceKey, roundWords, type ListenView } from '../shared/listen.ts'
+import { listenView, parseListen, referenceName, roundKey, roundWords, type ListenView } from '../shared/listen.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
 async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
@@ -80,29 +80,33 @@ function Rows({ view }: { view: ListenView }) {
   return (
     // The card sits in the chat's markdown, whose prose styles reach any table in it: a 2em margin above and below,
     // a taller line, and a bright line under each row and the header. The table sets its own, so only its rows' quiet
-    // lines show.
-    <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, width: '100%', margin: 0 }}>
-      {compared && (
-        <thead style={{ border: 'none' }}>
-          <tr style={{ color: T.muted, fontSize: 11, border: 'none' }}>
-            <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
-            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
-            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
-            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.difference')}</th>
-          </tr>
-        </thead>
-      )}
-      <tbody>
-        {view.rows.map(row => (
-          <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.border}` }}>
-            <td style={{ ...cell, textAlign: 'left', color: T.muted }}>{row.label}</td>
-            <td style={cell}>{row.mine}</td>
-            {compared && <td style={{ ...cell, color: T.muted }}>{row.reference ?? '—'}</td>}
-            {compared && <td style={{ ...cell, color: row.direction === 0 ? T.muted : T.text, fontWeight: 600 }}>{row.delta ?? '—'}</td>}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    // lines show. In a narrow chat (the map docked beside it) the columns don't fit: the table scrolls sideways in its
+    // own region, focusable so the keyboard can scroll it, rather than spilling past the card, where the chat cut off
+    // the reference and the differences.
+    <div aria-label={t('measurements.tab')} className={FOCUSABLE} role="region" style={{ overflowX: 'auto', maxWidth: '100%' }} tabIndex={0}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, width: '100%', margin: 0 }}>
+        {compared && (
+          <thead style={{ border: 'none' }}>
+            <tr style={{ color: T.muted, fontSize: 11, border: 'none' }}>
+              <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
+              <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
+              <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
+              <th style={{ ...cell, fontWeight: 400 }}>{t('listen.difference')}</th>
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {view.rows.map(row => (
+            <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.border}` }}>
+              <td style={{ ...cell, textAlign: 'left', color: T.muted }}>{row.label}</td>
+              <td style={cell}>{row.mine}</td>
+              {compared && <td style={{ ...cell, color: T.muted }}>{row.reference ?? '—'}</td>}
+              {compared && <td style={{ ...cell, color: row.direction === 0 ? T.muted : T.text, fontWeight: 600 }}>{row.delta ?? '—'}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -218,10 +222,10 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
   const { rounds } = useKumi(store)
   const parsed = parseListen(result)
   if (!parsed) return fallback
-  const view = listenView(parsed, t)
+  const view = listenView(parsed, t, referenceName(parsed, rounds))
   // Which comparison with this reference this is, among those that arrived while the window was open: a mastering
   // pass's rounds, with how far each was from the reference. Nothing for one the window didn't see arrive.
-  const key = referenceKey(parsed)
+  const key = roundKey(parsed, rounds)
   const seen = key ? (rounds[key] ?? []) : []
   const index = seen.findIndex(round => round.id === parsed.artifact_id)
   const round = index < 0 ? undefined : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map(each => each.gaps), t)

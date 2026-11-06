@@ -31,10 +31,26 @@ class Announce(unittest.TestCase):
         function = next(function for name, _, function, _ in tools.TOOLS if name == tool)
         return tools.handler(tool, function, self.host)(args, session_id="s1")
 
-    def test_a_search_that_found_sounds_sends_their_ids_for_that_profile_chat_and_call(self):
+    def test_a_search_that_found_sounds_sends_their_ids_reasons_and_closeness_never_a_name_or_path(self):
         self.ended("kumi_sounds", self.handled("kumi_sounds", {"query": "snare"}))
-        self.assertEqual(self.sent, [("sounds.found", {"profile": "studio", "session_id": "s1", "tool_call_id": "c1",
-                                                       "map_revision": "r1", "sound_ids": ["s-r1-1", "s-r1-2"]})])
+        why = ["name matches 'snare'"]
+        self.assertEqual(self.sent, [("sounds.found", {
+            "profile": "studio", "session_id": "s1", "tool_call_id": "c1", "map_revision": "r1",
+            "sound_ids": ["s-r1-1", "s-r1-2"], "indexed": True,
+            "matches": [{"sound_id": "s-r1-1", "why": why}, {"sound_id": "s-r1-2", "why": why}]})])
+        self.sent.clear()
+        self.ended("kumi_sounds", self.handled("kumi_sounds", {"query": "snare", "near": "s-r1-2"}))
+        [(_, near)] = self.sent
+        self.assertEqual((near["near"], near["matches"]), ("s-r1-2", [{"sound_id": "s-r1-1", "why": why,
+                                                                       "closeness": 87}]), "the seed apart")
+        self.sent.clear()
+        # (reasons past serve's bounds, 4 of at most 60 characters: they go first, the ids and closeness stay)
+        hits = [{"sound_id": f"s-r1-{n}", "why": ["x" * 2000] * 4, "closeness": 50} for n in range(250)]
+        self.ended("kumi_sounds", json.dumps({"map_revision": "r1", "indexed": True, "items": hits}))
+        [(_, big)] = self.sent
+        self.assertEqual((len(big["sound_ids"]), big["matches"][0]), (tools.SOUNDS_FOUND,
+                                                                     {"sound_id": "s-r1-0", "closeness": 50}))
+        self.assertLessEqual(len(json.dumps(big).encode("utf-8")), tools.LISTEN_EVENT_BYTES)
 
     def test_a_measured_listen_sends_the_result_the_model_got(self):
         result = self.handled("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}})

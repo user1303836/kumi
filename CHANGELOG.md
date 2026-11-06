@@ -3,6 +3,84 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.70 — 2026-11-05
+
+Ships with bridge 1.0.106, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.13 and Renoise tool 1.0.20, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- In Hermes, a change of several steps shows as one change in HISTORY.
+- Kumi for Hermes can build from a YouTube tutorial: Hermes reads its transcript and looks at the
+  moments its values are shown, without downloading the video.
+- In Hermes, when Kumi won't make a change in your DAW, it says why; asked to group tracks in Live, it
+  says to select them and press Cmd+G.
+- Kumi for Hermes has its own guide, in English, Japanese and Chinese.
+- FOCUS shows a REAPER plug-in parameter's value as the plug-in prints it, not as a raw number.
+- In Hermes, Kumi can route a Live track's output to a group, a bus or another track; it never changes
+  a track's input, arms it, or changes its monitoring.
+- In Hermes, one look at your project now puts what's selected, what Kumi changed and what changed
+  since first, with the steps Kumi can take, so an ordinary request takes fewer calls.
+- In Hermes, when the DAW isn't answering (a dialog open, say), Kumi says so at once instead of naming
+  a pretend project.
+- In Hermes, Kumi can add a chain to a Live rack. It says before you approve that only Live's own Undo
+  (Cmd+Z) takes the change back.
+- Sound searches can combine indexed tempo, key, duration, instrument class and loop or one-shot
+  filters, with short reasons distinguishing name/folder matches from measured descriptors.
+- Similar-sound results show closeness relative to the current sound map, alongside indexed tempo, key
+  and note values.
+- Kumi for Hermes can render an approved, bounded REAPER or Renoise track or mix and compare its
+  measurements with a reference, reporting whether temporary rendering state was restored. Live
+  continues to measure audio files; Live track listening is not yet available.
+- Kumi for Hermes can start when Hermes is launched as administrator on Windows.
+- In Hermes, moving a device on Live is its own change, approved knowing only Live's Undo takes it
+  back, instead of an undo that came back unsure and left the device moved.
+- In Hermes, an approval on Live names what each step works on ("on Main", "on EQ Eight (on Main)")
+  instead of a bare ref.
+- Kumi for Hermes explains how to ask for a new rack chain when a plan uses Live's other name for the
+  action.
+- In Hermes, Kumi never acts from Hermes's background review of a chat: only from your own turns,
+  whatever you allowed for the session.
+- In Hermes, Kumi starts and stops playback in your DAW, and never starts a play that would record.
+- A Lua script in Renoise or REAPER that only reads, or that Kumi stops at its time limit, now gives
+  its value or says it was stopped, instead of looking as if it ran with nothing to say.
+- Hermes library scans read only audio files in approved folders, leaving presets, projects and
+  existing learned nonaudio records untouched.
+- In Hermes, place an approved sound in a new Simpler or an empty Drum Rack pad; pad loads explain how
+  to take them back with Live's own Undo.
+- Kumi can read a plug-in's guide, configured controls and verified format knowledge before planning a
+  patch.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.106
+
+- Support Live 12.4.25b1 on Apple silicon with Willington Follow Actions, device tools, rack zones and
+  native editing.
+- After Kumi undoes placing a sample, Live's own Undo brings the clip or Simpler back with its sample,
+  no longer offline.
+
+### REAPER extension 0.1.13
+
+- Kumi's REAPER extension exposes an exact, read-only render preflight and refuses a guarded render
+  whose tempo-map duration exceeds its approved window.
+- Kumi's REAPER extension keeps a project's Kumi id only while a connected standalone Kumi asks it to.
+  Kumi for Hermes never asks; a standalone Kumi connected beside it can still keep the id. Older Kumi
+  versions never ask, so the newer extension names their projects by path.
+
+### Renoise tool 1.0.20
+
+- A script Kumi runs can't turn off its own time limit.
+- Kumi's Renoise tool exposes an exact, read-only render preflight, refuses extra, clipped or
+  irregular guarded windows, and restores a render-owned tempo only after rendering stops within the
+  approved deadline; a different producer tempo is left unchanged and reported.
+- Kumi's Renoise tool keeps a song's Kumi id in its tool_data on save only while a connected
+  standalone Kumi asks it to. Kumi for Hermes never asks; a standalone Kumi connected beside it can
+  still keep the id. Older Kumi versions never ask, so the newer tool names their songs by path.
+- Guarded track listening restores the edit cursor after rendering without changing follow-player or
+  overwriting a producer's changed selection.
+
 ## 1.24.69 — 2026-11-05
 
 Ships with bridge 1.0.105, as 1.24.68 did.
