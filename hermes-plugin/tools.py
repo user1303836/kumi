@@ -655,6 +655,52 @@ def _forward(tool: str, timeout: float) -> Callable[..., dict]:
     return handler
 
 
+def plugin_knowledge_refusal(args: dict) -> str | None:
+    """Keep this read separate from the mixed plug-in/preset/wavetable dispatchers."""
+    action = args.get("action")
+    if action not in ("guide", "catalog"):
+        return "kumi_plugin_knowledge's action is guide or catalog."
+    allowed = {"action", "max_chars", "device_ref"} if action == "guide" else {"action", "max_chars", "plugin", "query", "limit"}
+    if args.keys() - allowed:
+        return "guide takes only device_ref; catalog takes only plugin, query and limit; either may take max_chars. No file or writer fields."
+    if action == "guide":
+        device = args.get("device_ref")
+        if not isinstance(device, str) or not device.strip() or len(device) > 256:
+            return "guide needs the Live plug-in's device_ref from the current look."
+    else:
+        for field, minimum, maximum in (("plugin", 1, 128), ("query", 0, 1000)):
+            if field in args and (not isinstance(args[field], str) or not minimum <= len(args[field]) <= maximum):
+                return f"{field} must be text of {minimum}–{maximum} characters."
+        if "limit" in args and (type(args["limit"]) is not int or not 1 <= args["limit"] <= 40):
+            return "limit is an integer from 1 to 40."
+    if "max_chars" in args and (type(args["max_chars"]) is not int or not 500 <= args["max_chars"] <= 20000):
+        return "max_chars is an integer from 500 to 20000."
+    return None
+
+
+def kumi_plugin_knowledge(host: Host, args: dict, **kwargs: Any) -> dict:
+    refusal = plugin_knowledge_refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    if args["action"] == "guide":
+        live = host.live()
+        if live.daw != "ableton":
+            return {"error": {"code": "unsupported", "reason": (
+                "Instance guides are available in Live; use catalog for bundled format knowledge and kumi_read "
+                "for this DAW's actual parameters.")}}
+        sent = {"action": "guide", "device_ref": args["device_ref"]}
+        if "max_chars" in args:
+            sent["max_chars"] = args["max_chars"]
+    else:
+        data_dir = host.data_dir()
+        install = host.install(data_dir)
+        live = host.runtimes.get(data_dir) or host.runtimes.start(
+            data_dir, install, host.daw(), kwargs.get("session_id"),
+            library_roots=host.library_folders(), media_roots=host.media_roots(), profile=host.profile())
+        sent = {"action": "catalog", **{key: args[key] for key in ("plugin", "query", "limit", "max_chars") if key in args}}
+    return live.call("plugin_knowledge", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
+
+
 def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     """A write (C2): sent once. An answer that never came, or can't be read, means the outcome is unknown: reported as
     unsure, never resent, and never called unchanged. The producer's Stop cancels it while it waits (`notifications/
@@ -1166,6 +1212,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_connect", schemas.KUMI_CONNECT, kumi_connect, "🔌"),
     ("kumi_observe", schemas.KUMI_OBSERVE, _forward("observe", READ_TIMEOUT), "👀"),
     ("kumi_read", schemas.KUMI_READ, _forward("read", READ_TIMEOUT), "📖"),
+    ("kumi_plugin_knowledge", schemas.KUMI_PLUGIN_KNOWLEDGE, kumi_plugin_knowledge, ""),
     ("kumi_change", schemas.KUMI_CHANGE, kumi_change, "🎚️"),
     ("kumi_undo", schemas.KUMI_UNDO, kumi_undo, "↩️"),
     ("kumi_history", schemas.KUMI_HISTORY, kumi_history, "🕘"),
