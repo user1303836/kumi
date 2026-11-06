@@ -13,6 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::plugins::adapter::OsPaths;
 pub use crate::plugins::adapter::PluginAdapter;
 use crate::plugins::adapters::ADAPTERS;
+use crate::plugins::formats::structure;
 
 /// The adapter for a plug-in device, by the name Live shows for it; `adapters` defaults to Kumi's own.
 pub fn adapter_for<'a>(device_name: &str, adapters: Option<&[&'a PluginAdapter]>) -> Option<&'a PluginAdapter> {
@@ -156,6 +157,42 @@ pub fn plugin_guide(device: &str, adapter: Option<&PluginAdapter>, all: &[String
         );
     }
     guide
+}
+
+/// The bundled format catalog, without discovering installed plug-ins or reading any preset file.
+/// Shared with standalone's `vst3 catalog`; callers bound `limit` to 1–40.
+pub fn format_catalog(plugin: Option<&str>, query: Option<&str>, limit: usize) -> Result<Value, String> {
+    if let Some(plugin) = plugin {
+        let p = structure::builtin(plugin).ok_or_else(|| format!("No built-in format for {plugin}"))?;
+        let words: Vec<_> = query.unwrap_or_default().to_lowercase().split_whitespace().map(str::to_string).collect();
+        let matches = |path: &str| words.iter().all(|w| path.to_lowercase().contains(w));
+        let fields: Vec<_> = p
+            .structure
+            .fields
+            .iter()
+            .filter(|(path, field)| matches(&format!("{path} {}", field.about.as_deref().unwrap_or_default())))
+            .collect();
+        let parameters: Vec<_> = p.structure.parameters.iter().filter(|(name, link)| matches(&format!("{name} {}", link.field))).collect();
+        Ok(
+            json!({"plugin":p.info, "verified":p.verified, "fields":fields.iter().take(limit).map(|(path,field)|json!({"path":path,"field":field})).collect::<Vec<_>>(),
+            "parameters":parameters.iter().take(limit).map(|(name,link)|json!({"name":name,"path":structure::Structure::location(link),"link":link})).collect::<Vec<_>>(),
+            "more_fields":fields.len().saturating_sub(limit), "more_parameters":parameters.len().saturating_sub(limit),
+            "operations":match plugin {
+                "ozone-12" => json!({"$chain":{"value":"ordered array of module names; suite only","modules":crate::plugins::formats::ozone12::MODULES}}),
+                "serum-2" => json!({"$add_distortion":{"value":"effects chain number: 0 for main, 1 or 2 for buses"}}),
+                _ => json!({}),
+            },
+            "note":"Paths with {n} or [] describe repeated sections; inspect gives concrete paths. 'seen' is an observed range, not an allowed range. Write only verified versions. $chain replaces an Ozone module order; $add_distortion adds a Serum initialized Distortion slot (value selects effects chain 0–2)."}),
+        )
+    } else {
+        let matched: Vec<_> = structure::builtins()
+            .iter()
+            .filter(|p| query.is_none_or(|q| format!("{} {}", p.info.plugin, p.info.name).to_lowercase().contains(&q.to_lowercase())))
+            .collect();
+        Ok(
+            json!({"plugins":matched.iter().take(limit.min(20)).map(|p|json!({"plugin":p.info.plugin,"name":p.info.name})).collect::<Vec<_>>(),"more":matched.len().saturating_sub(limit.min(20)),"next":"Narrow by query, or give plugin for exact controls."}),
+        )
+    }
 }
 
 /// A folder from an adapter's "~/…" path, for this computer; None when the adapter has none for this OS.
