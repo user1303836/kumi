@@ -10,7 +10,6 @@ import logging
 import os
 from pathlib import Path
 import signal
-import time
 import unittest
 from unittest import mock
 
@@ -46,8 +45,19 @@ class Generation(unittest.TestCase):
     def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY, ledger: type | None = None):
         host, ctx, data = support.host(self, dict(ON if settings is None else settings), *fixture_args,
                                        ledger=ledger, mirelo_key=key)
-        support.call(host, "kumi_connect", {}, session_id="s1")
+        self.connect(host)
         return host, ctx, data
+
+    def connect(self, host) -> None:
+        connected = support.call(host, "kumi_connect", {}, session_id="s1")
+        self.assertIs(connected.get("connected"), True, connected)
+
+    def quoted(self, host, args: dict = SFX) -> dict:
+        quoted = support.call(host, "kumi_generate", args, session_id="s1")
+        self.assertEqual(quoted.get("state"), "quoted", quoted)
+        self.assertIsInstance(quoted.get("quote_id"), str, quoted)
+        self.assertTrue(quoted["quote_id"], quoted)
+        return quoted
 
     def sent(self, data: Path, action: str) -> list[dict]:
         """The runtime's `generate` calls of `action`, the approval hook's previews left out."""
@@ -65,7 +75,7 @@ class Generation(unittest.TestCase):
 
     def generation(self, host) -> dict:
         """A sound effect quoted, created as approved and followed to its end: its job's answer."""
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         running = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         return support.call(host, "kumi_job", {"job_id": running["job_id"]}, session_id="s1")
 
@@ -93,7 +103,7 @@ class Generation(unittest.TestCase):
     def test_a_sound_effect_is_quoted_unasked_then_created_only_as_approved_from_its_stored_quote(self):
         host, _, data = self.host()
         self.assertIsNone(self.hook(host, SFX), "an estimate costs nothing: no approval")
-        quoted = support.call(host, "kumi_generate", SFX, session_id="s1")
+        quoted = self.quoted(host)
         self.assertEqual((quoted["state"], quoted["ledger"]["left"]), ("quoted", 100), quoted)
         create = {"action": "create", "quote_id": quoted["quote_id"]}
         asked = self.hook(host, create, "c2")
@@ -114,7 +124,7 @@ class Generation(unittest.TestCase):
 
     def test_a_create_runs_only_the_quote_approved_as_approved_and_only_once(self):
         host, _, data = self.host()
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         create = {"action": "create", "quote_id": quote_id}
         self.assertEqual(self.hook(host, {**create, "prompt": "louder"})["action"], "block",
                          "a create can't carry other words than the quote's")
@@ -132,17 +142,24 @@ class Generation(unittest.TestCase):
         self.assertEqual(self.hook(host, create, "c4")["action"], "block", "a used quote is never asked again")
 
     def test_a_quote_that_expired_or_a_kind_switched_off_is_refused_at_the_hook_and_at_dispatch(self):
-        host, ctx, data = self.host(None, "--generate-expires-ms", "3000")
-        first = support.call(host, "kumi_generate", SFX, session_id="s1")
+        host, ctx, data = self.host()
+        first = self.quoted(host)
         create = {"action": "create", "quote_id": first["quote_id"]}
-        self.approved(host, create, "c2")
-        self.assertTrue(support.eventually(lambda: time.time() * 1000 > first["expires_at"]),
-                        "the quote expires between its approval and its dispatch")
-        late = support.handle(host, "kumi_generate", create, session_id="s1")
-        self.assertEqual((late["error"]["code"], late["ledger"]["reserved"]), ("expired_quote", 0))
-        self.assertEqual(self.hook(host, create, "c3")["action"], "block", "an expired quote is never asked")
+        expired = generate.expired
+        # Only quote policy and ledger time advance; RPC deadlines keep their real monotonic clock.
+        with (
+            mock.patch.object(ledger, "_now", return_value=first["expires_at"] - 1) as clock,
+            mock.patch.object(generate, "expired",
+                              side_effect=lambda record: expired(record, now_ms=clock.return_value)),
+        ):
+            self.approved(host, create, "c2")
+            clock.return_value = first["expires_at"]
+            self.assertTrue(generate.expired(first), "the quote expires between its approval and its dispatch")
+            late = support.handle(host, "kumi_generate", create, session_id="s1")
+            self.assertEqual((late["error"]["code"], late["ledger"]["reserved"]), ("expired_quote", 0))
+            self.assertEqual(self.hook(host, create, "c3")["action"], "block", "an expired quote is never asked")
 
-        second = support.call(host, "kumi_generate", SFX, session_id="s1")
+        second = self.quoted(host)
         create = {"action": "create", "quote_id": second["quote_id"]}
         self.approved(host, create, "c4")
         ctx.settings["mirelo_sfx_enabled"] = False  # the producer switched sound effects off after approving
@@ -155,11 +172,11 @@ class Generation(unittest.TestCase):
         for cap, estimate in ((0, "15"), (0, "0"), (10, "15")):  # a cap of 0 refuses even a zero estimate
             with self.subTest(cap=cap, estimate=estimate):
                 host, _, _ = self.host({**ON, "mirelo_credit_cap": cap}, "--generate-estimate", estimate)
-                quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+                quote_id = self.quoted(host)["quote_id"]
                 self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id})["action"], "block")
         host, ctx, data = self.host(None, "--generate-actual", "20")  # a charge above its estimate (15)
         self.assertTrue(self.generation(host)["result"]["ledger"]["frozen"])
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         self.assertEqual(self.hook(host, {"action": "create", "quote_id": quote_id})["action"], "block", "frozen")
         for surface in ("webhook", "api_server"):
             with self.subTest(surface=surface):
@@ -175,23 +192,23 @@ class Generation(unittest.TestCase):
 
     def test_only_a_native_not_submitted_frees_the_reservation_and_a_lost_answer_keeps_it(self):
         host, _, _ = self.host(None, "--generate-create", "not_submitted")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         refused = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((refused["error"]["code"], refused["ledger"]["reserved"]), ("not_submitted", 0), refused)
         host, _, _ = self.host(None, "--slow", "generate=2")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         with mock.patch.object(generate, "TIMEOUT", 0.3):
             unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((unsure["state"], unsure["ledger"]["reserved"]), ("unsure", 15), "kept, never sent again")
         host, _, _ = self.host(None, "--generate-create", "not_submitted", ledger=Unfreeable)
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         stuck = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual((stuck["error"]["code"], stuck["ledger"]["reserved"]), ("not_submitted", 15), stuck)
         self.assertIn("hint", stuck, "not freed: the model is told its credits stay reserved, and how they can go")
 
     def test_a_generation_whose_create_answer_was_lost_is_found_by_its_quote_and_settled(self):
         host, _, data = self.host(None, "--slow", "generate=2")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         with mock.patch.object(generate, "TIMEOUT", 0.3):  # the answer is lost; the runtime goes on and makes the job
             unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual(unsure["state"], "unsure")
@@ -209,7 +226,7 @@ class Generation(unittest.TestCase):
 
     def test_a_job_already_made_is_still_fetched_with_the_key_after_new_generations_are_switched_off(self):
         host, ctx, data = self.host()
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         running = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         ctx.settings.update(mirelo_acknowledged=False, mirelo_sfx_enabled=False)  # no new paid generations
         done = support.call(host, "kumi_job", {"job_id": running["job_id"]}, session_id="s1")
@@ -222,7 +239,7 @@ class Generation(unittest.TestCase):
 
     def test_a_create_a_busy_ledger_refused_goes_again_as_the_same_call_with_the_same_reservation(self):
         def created(host) -> dict:
-            quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+            quote_id = self.quoted(host)["quote_id"]
             return support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
 
         with mock.patch.object(generate, "LEDGER_RETRY_PAUSE", 0):
@@ -241,15 +258,15 @@ class Generation(unittest.TestCase):
 
     def test_a_create_kumi_can_not_send_holds_no_credits(self):
         host, _, data = self.host()
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         create = {"action": "create", "quote_id": quote_id}
         self.approved(host, create, "c2")
         host.runtimes.stop_all()  # Kumi's runtime stopped after the approval
         stopped = support.handle(host, "kumi_generate", create, session_id="s1")
         self.assertEqual((sorted(stopped), stopped["ledger"]["reserved"]), (["error", "ledger"], 0), stopped)
 
-        support.call(host, "kumi_connect", {}, session_id="s1")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        self.connect(host)
+        quote_id = self.quoted(host)["quote_id"]
         create = {"action": "create", "quote_id": quote_id}
         self.approved(host, create, "c3")
         held = host.live()
@@ -269,7 +286,7 @@ class Generation(unittest.TestCase):
         self.assertIn("480 KB", asked["message"], "a file under a megabyte isn't shown as 0.5 MB, or 0.0")
         self.assertTrue((data / generate.LEDGER_FILE).is_file(), "the producer's policy is in the ledger first")
         self.assertEqual(self.sent(data, "quote"), [], "only the local preview so far")
-        quoted = support.call(host, "kumi_generate", MIDI, session_id="s1")
+        quoted = self.quoted(host, MIDI)
         self.assertEqual((quoted["state"], quoted["upload"], quoted["file"]), ("quoted", True, "Dusty Snare 04.wav"),
                          "the quote of the call whose preview was approved")
         unpinned = generate.quote(host, MIDI, host.identity({"session_id": "s1", "tool_call_id": "never-asked"}), {})
@@ -287,11 +304,11 @@ class Generation(unittest.TestCase):
         self.addCleanup(root.removeHandler, catcher)
         with mock.patch.object(tools, "broadcast", side_effect=lambda event, payload: events.append(payload)):
             host, _, data = self.host()
-            answers = [support.call(host, "kumi_generate", SFX, session_id="s1")]
+            answers = [self.quoted(host)]
             answers.append(support.call(host, "kumi_generate", {"action": "create", "quote_id": answers[0]["quote_id"]},
                                         session_id="s1"))
             answers.append(support.call(host, "kumi_job", {"job_id": answers[1]["job_id"]}, session_id="s1"))
-            answers.append(support.call(host, "kumi_generate", MIDI, session_id="s1"))
+            answers.append(self.quoted(host, MIDI))
             answers.append(support.call(host, "kumi_generate", {"action": "create", "quote_id": answers[3]["quote_id"]},
                                         session_id="s1"))
             for tool, answer in zip(("kumi_generate", "kumi_generate", "kumi_job", "kumi_generate", "kumi_generate"),
@@ -312,7 +329,7 @@ class Generation(unittest.TestCase):
 
     def test_hermes_kumi_credits_lists_whats_held_and_changes_it_only_after_a_yes_in_a_terminal(self):
         host, _, _ = self.host(None, "--slow", "generate=2")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         with mock.patch.object(generate, "TIMEOUT", 0.3):  # whether Mirelo got it is unknown: release's only case
             support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         [held] = host.ledger().reservations()
@@ -342,7 +359,7 @@ class Generation(unittest.TestCase):
 
     def test_a_charge_mirelo_reports_after_the_producer_released_its_reservation_still_counts(self):
         host, _, data = self.host(None, "--slow", "generate=2")
-        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        quote_id = self.quoted(host)["quote_id"]
         with mock.patch.object(generate, "TIMEOUT", 0.3):  # the answer is lost; the runtime goes on and makes the job
             unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         self.assertEqual(unsure["state"], "unsure")
@@ -371,7 +388,7 @@ class Generation(unittest.TestCase):
         sent: list = []
         with mock.patch.object(tools, "broadcast", side_effect=lambda event, payload: sent.append((event, payload))):
             host, _, _ = self.host()
-            quoted = support.call(host, "kumi_generate", SFX, session_id="s1")
+            quoted = self.quoted(host)
             for status in ("blocked", "error"):
                 policy.post_tool_call(host, tool_name="kumi_generate", tool_call_id="c1", result=json.dumps(quoted),
                                       status=status, session_id="s1")
