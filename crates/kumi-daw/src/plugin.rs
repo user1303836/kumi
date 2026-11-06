@@ -37,9 +37,15 @@ pub struct PluginStep {
     pub noting: Option<&'static str>,
     /// Whether it's a change only the DAW's own Undo takes back (CC-20).
     pub daw_undo: DawUndo,
+    /// How the DAW's own Undo holds such a step, as a real trace of it showed (CC-20's 20g).
+    pub daw_undo_steps: DawUndoCount,
     /// Why Kumi doesn't undo such a change, when the step has its own reason: said after CC-20's words
-    /// ([`DAW_UNDO_NOTE`]), as "Kumi can't yet tell whether the pad was changed since."
+    /// ([`daw_undo_note`]), as "Kumi can't yet tell whether the pad was changed since."
     pub daw_undo_because: Option<&'static str>,
+    /// What Kumi says of such a change in place of CC-20's words while it isn't known how many presses take it back
+    /// (its approval, before a pad's route is), with `{app}` and `{key}`: "Kumi can't undo this change. {app}'s own
+    /// Undo ({key}) usually takes it back in two steps: press it one at a time, and stop as soon as the pad is empty."
+    pub daw_undo_uncounted: Option<&'static str>,
 }
 
 /// When a step is a change only the DAW's own Undo takes back (CC-20): it runs though the DAW keeps no undo Kumi can
@@ -55,16 +61,99 @@ pub enum DawUndo {
     When(&'static [(&'static str, &'static str)]),
 }
 
-/// What Kumi says of a change only the DAW's own Undo takes back, the same in its approval, its rows and the refusal of
-/// its undo (CC-20's words): `{app}` is the DAW's name, `{key}` its Undo key on the machine Kumi runs on.
-pub const DAW_UNDO_NOTE: &str =
-    "Kumi can't undo this change. {app}'s own Undo ({key}) takes all of it back while it's still {app}'s latest step.";
+/// How the DAW's own Undo holds a step only it takes back (CC-20), as a real trace of the step showed: whether it writes
+/// inside the plan's own undo step in the DAW, which is one step however many of a plan's steps write there, and how
+/// many undo steps of its own it makes besides.
+///
+/// Live, as traced: a rack's new chain is inside the plan's step ("Custom Action") and makes none of its own. A sample
+/// on a Drum Rack pad is one "Hot-Swap Chain" of its own, and its loop is written inside the plan's step ("Change Sample
+/// Loop On"), so one pad takes 2 presses, two take 3, and twelve take 13.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DawUndoSteps {
+    /// It writes inside the plan's own undo step.
+    pub in_plan: bool,
+    /// The undo steps of its own it makes, outside the plan's.
+    pub own: u8,
+}
 
-/// CC-20's words, or a step's reason, for `app` on the system `os` names (`std::env::consts::OS`), whose Undo key is
-/// Cmd+Z on macOS and Ctrl+Z elsewhere.
+impl DawUndoSteps {
+    /// Inside the plan's own undo step, and no step of its own.
+    pub const PLAN: DawUndoSteps = DawUndoSteps { in_plan: true, own: 0 };
+}
+
+/// How a step tells how the DAW's own Undo holds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DawUndoCount {
+    /// The same whatever it did.
+    Fixed(DawUndoSteps),
+    /// By what the plan reported for the step: the value of this field of its done entry (`("route", …)`, when a
+    /// sample's route onto a pad decides its own steps), each as traced. Unknown for any other value.
+    By(&'static str, &'static [(&'static str, DawUndoSteps)]),
+}
+
+impl DawUndoCount {
+    /// How the DAW's own Undo holds the step that `done` reports (None before it ran), when that's known.
+    pub fn steps(&self, done: Option<&Value>) -> Option<DawUndoSteps> {
+        match *self {
+            DawUndoCount::Fixed(steps) => Some(steps),
+            DawUndoCount::By(field, table) => {
+                let said = done?.get(field)?.as_str()?;
+                table.iter().find(|(value, _)| *value == said).map(|(_, steps)| *steps)
+            }
+        }
+    }
+
+    /// The field of the step's done entry that decides its count, when one does.
+    pub fn field(&self) -> Option<&'static str> {
+        match *self {
+            DawUndoCount::Fixed(_) => None,
+            DawUndoCount::By(field, _) => Some(field),
+        }
+    }
+}
+
+/// How many presses of the DAW's Undo take back a change whose steps only it takes back are held as `steps`: one for
+/// the plan's own step when any of them writes there, and each one's own steps.
+pub fn daw_undo_presses(steps: impl IntoIterator<Item = DawUndoSteps>) -> u32 {
+    let (mut in_plan, mut own) = (false, 0u32);
+    for step in steps {
+        in_plan |= step.in_plan;
+        own += u32::from(step.own);
+    }
+    u32::from(in_plan) + own
+}
+
+/// What Kumi says of a change only the DAW's own Undo takes back (CC-20's words), the same in its approval, its rows
+/// and the refusal of its undo: how `app`'s Undo takes it back in `presses` presses of its key on the system `os` names
+/// (`std::env::consts::OS`), Cmd+Z on macOS and Ctrl+Z elsewhere. "All of it" only when one press does; no number
+/// when it isn't known (before a step's route is, or after a run that stopped part way).
+pub fn daw_undo_note(presses: Option<u32>, app: &str, os: &str) -> String {
+    let key = undo_key(os);
+    match presses {
+        None => format!(
+            "Kumi can't undo this change. {app}'s own Undo ({key}) takes it back step by step while they're {app}'s latest: check {app}'s Edit menu before each press."
+        ),
+        Some(0 | 1) => {
+            format!("Kumi can't undo this change. {app}'s own Undo ({key}) takes all of it back while it's still {app}'s latest step.")
+        }
+        Some(n) => {
+            let times = if n == 2 { "twice".to_string() } else { format!("{n} times") };
+            format!("Kumi can't undo this change. {app}'s own Undo ({key}) takes it back in {n} steps while they're {app}'s latest: press {key} {times}, right away.")
+        }
+    }
+}
+
+/// A step's reason, for `app` on the system `os` names, with its `{app}` and `{key}` said.
 pub fn daw_undo_said(note: &str, app: &str, os: &str) -> String {
-    let key = if os == "macos" { "Cmd+Z" } else { "Ctrl+Z" };
-    note.replace("{app}", app).replace("{key}", key)
+    note.replace("{app}", app).replace("{key}", undo_key(os))
+}
+
+fn undo_key(os: &str) -> &'static str {
+    if os == "macos" {
+        "Cmd+Z"
+    } else {
+        "Ctrl+Z"
+    }
 }
 
 impl PluginStep {
@@ -79,7 +168,9 @@ impl PluginStep {
             because: &[],
             noting: None,
             daw_undo: DawUndo::Never,
+            daw_undo_steps: DawUndoCount::Fixed(DawUndoSteps::PLAN),
             daw_undo_because: None,
+            daw_undo_uncounted: None,
         }
     }
 
@@ -137,6 +228,24 @@ impl PluginStep {
     /// Kumi says `why` after CC-20's words of such a change it's in.
     pub const fn daw_undo_because(self, why: &'static str) -> PluginStep {
         PluginStep { daw_undo_because: Some(why), ..self }
+    }
+
+    /// The DAW's own Undo holds such a step as `steps` says whatever it did, as a trace of it showed;
+    /// [`DawUndoSteps::PLAN`] otherwise.
+    pub const fn daw_undo_steps(self, steps: DawUndoSteps) -> PluginStep {
+        assert!(steps.in_plan || steps.own > 0, "a step the DAW's Undo takes back is at least one of its steps");
+        PluginStep { daw_undo_steps: DawUndoCount::Fixed(steps), ..self }
+    }
+
+    /// The DAW's own Undo holds such a step as the value of `field` in what the plan reported for it says, each as a
+    /// trace showed (a pad's `route`); how many presses take the change back isn't said for any other value.
+    pub const fn daw_undo_steps_by(self, field: &'static str, table: &'static [(&'static str, DawUndoSteps)]) -> PluginStep {
+        PluginStep { daw_undo_steps: DawUndoCount::By(field, table), ..self }
+    }
+
+    /// Kumi says `words` of such a change in place of CC-20's words while it isn't known how many presses take it back.
+    pub const fn daw_undo_uncounted(self, words: &'static str) -> PluginStep {
+        PluginStep { daw_undo_uncounted: Some(words), ..self }
     }
 
     /// Whether `input` makes it a change only the DAW's own Undo takes back.
@@ -397,14 +506,39 @@ mod tests {
         assert!(!rack.daw_undo_only(&json!({"action": "insert-chain"})));
         assert!(check(std::slice::from_ref(&rack), "edit_rack", &json!({"action": "insert-chain"})).is_err());
         assert!(!PluginStep::new("set_mixer", "mixer").daw_undo_only(&json!({"action": "add-chain"})), "a step marks only its own");
-        // A step marked whatever its input is marked so for any input, and may give its reason.
-        let pad = PluginStep::new("load_sample_to_pad", "device").daw_undo_always().daw_undo_because("Kumi can't tell.");
+        // A step marked whatever its input is marked so for any input.
+        let pad = PluginStep::new("load_sample_to_pad", "device").daw_undo_always();
         assert!(pad.daw_undo_only(&json!({})) && pad.daw_undo_only(&json!({"padRef": "p1"})));
+    }
+
+    #[test]
+    fn the_words_say_how_many_presses_of_the_daws_undo_take_a_change_back() {
+        // Live, as traced: chains write only inside the plan's step; a pad also makes one "Hot-Swap Chain" of its own.
+        let (chain, pad) = (DawUndoSteps::PLAN, DawUndoSteps { in_plan: true, own: 1 });
+        assert_eq!(daw_undo_presses([chain, chain, chain]), 1, "the plan's step, once");
+        assert_eq!(daw_undo_presses([pad]), 2);
+        assert_eq!(daw_undo_presses([pad, pad]), 3);
+        assert_eq!(daw_undo_presses([pad; 12]), 13, "twelve pads, as measured");
+        assert_eq!(daw_undo_presses([DawUndoSteps { in_plan: false, own: 1 }]), 1, "a step of its own only");
+        // "All of it" only when one press takes it all back; no number when it isn't known.
         assert_eq!(
-            daw_undo_said(DAW_UNDO_NOTE, "Live", "macos"),
+            daw_undo_note(Some(1), "Live", "macos"),
             "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
         );
-        assert!(daw_undo_said(DAW_UNDO_NOTE, "Live", "windows").contains("Live's own Undo (Ctrl+Z)"));
+        assert_eq!(
+            daw_undo_note(Some(2), "Live", "windows"),
+            "Kumi can't undo this change. Live's own Undo (Ctrl+Z) takes it back in 2 steps while they're Live's latest: press Ctrl+Z twice, right away."
+        );
+        assert!(daw_undo_note(Some(5), "Live", "macos").ends_with("press Cmd+Z 5 times, right away."));
+        let unknown = daw_undo_note(None, "Live", "macos");
+        assert!(!unknown.contains("all of it") && !unknown.chars().any(|c| c.is_ascii_digit()), "{unknown}");
+        // A step whose route decides its steps is known only once the plan reports the route, and only for a traced one.
+        const BY_ROUTE: DawUndoCount =
+            DawUndoCount::By("route", &[("hotswap", DawUndoSteps { in_plan: true, own: 1 }), ("chain", DawUndoSteps::PLAN)]);
+        assert_eq!(BY_ROUTE.steps(None), None, "before it ran");
+        assert_eq!(BY_ROUTE.steps(Some(&json!({"step": 1, "route": "chain"}))), Some(DawUndoSteps::PLAN));
+        assert_eq!(BY_ROUTE.steps(Some(&json!({"step": 1, "route": "elsewhere"}))), None, "an untraced route");
+        assert_eq!(DawUndoCount::Fixed(pad).steps(None), Some(pad));
     }
 
     #[test]

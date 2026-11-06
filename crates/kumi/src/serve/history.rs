@@ -59,6 +59,10 @@ pub struct Row {
     /// included; opaque. None for a row anything else recorded, which is a change of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_id: Option<String>,
+    /// What decided how many presses of the DAW's own Undo take its change back, as the plan reported it for the
+    /// row's step (`{"route": "hotswap"}`, a pad's), when a step's count goes by that (CC-20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daw_undo_by: Option<Value>,
     /// The files the call placed (CC-11): each source as it named the file, the file's name and the identity of the
     /// file the DAW got.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -199,6 +203,7 @@ impl History {
             digest: None,
             call_outcome: None,
             change_id: None,
+            daw_undo_by: None,
             sources: None,
             script: None,
         };
@@ -219,7 +224,8 @@ impl History {
                         row.sources.clone(),
                         row.at,
                     );
-                    let daw_undo = (row.reason.as_deref() == Some(DAW_UNDO)).then(|| (row.reason.clone(), row.note.clone()));
+                    let daw_undo =
+                        (row.reason.as_deref() == Some(DAW_UNDO)).then(|| (row.reason.clone(), row.note.clone(), row.daw_undo_by.clone()));
                     // A script's row stays the script's (CC-19): its title, family and code, never Kumi's to undo, and
                     // its note when the executor's word on it brings none.
                     let script = row.script.clone().map(|script| (row.title.clone(), row.family.clone(), row.note.clone(), script));
@@ -229,8 +235,8 @@ impl History {
                         row.note = row.note.take().or(note);
                     }
                     // A change only the DAW's own Undo takes back stays one, with its words, whatever its state since.
-                    if let Some((reason, note)) = daw_undo {
-                        (row.reason, row.note, row.undo_available) = (reason, note, false);
+                    if let Some((reason, note, by)) = daw_undo {
+                        (row.reason, row.note, row.daw_undo_by, row.undo_available) = (reason, note, by, false);
                     }
                     row.clone()
                 }
@@ -385,6 +391,7 @@ impl History {
                         digest: None,
                         call_outcome: None,
                         change_id: None,
+                        daw_undo_by: None,
                         sources: None,
                         script: Some(script),
                     };
@@ -445,6 +452,18 @@ impl History {
         }
     }
 
+    /// What decided how many presses of the DAW's own Undo take back the change row `id` is part of (CC-20), kept on it.
+    pub fn daw_undo_by(&self, id: &str, by: Value, snapshots: &Snapshots) {
+        let mut marked = false;
+        if let Some(row) = self.rows.borrow_mut().iter_mut().find(|row| row.id == id) {
+            row.daw_undo_by = Some(by);
+            marked = true;
+        }
+        if marked {
+            self.publish(snapshots);
+        }
+    }
+
     /// An audit row for a call that ended unsure (CC-2's W1-b): what was asked, by which host call, that it may have
     /// changed the DAW, and that it can't be undone from here.
     pub fn audit(&self, title: &str, project_key: &str, reason: &str, identity: CallIdentity, snapshots: &Snapshots) -> Row {
@@ -483,6 +502,7 @@ impl History {
             digest: Some(identity.digest.to_string()),
             call_outcome: None,
             change_id: None,
+            daw_undo_by: None,
             sources: None,
             script: None,
         };
@@ -681,8 +701,10 @@ mod tests {
             assert_eq!((row.undo_available, row.reason.as_deref()), (false, Some(DAW_UNDO)), "{}", row.id);
             assert_eq!(row.note.as_deref(), Some("Live's own Undo takes it back."));
         }
+        history.daw_undo_by("h-g1-c2", json!({"route": "hotswap"}), &snapshots);
         let since = history.record(&change("c2", ChangeState::Applied), "p-1", &snapshots);
         assert_eq!((since.undo_available, since.reason.as_deref()), (false, Some(DAW_UNDO)), "a state since keeps it");
+        assert_eq!(since.daw_undo_by, Some(json!({"route": "hotswap"})), "and what decided its count");
         let place = |id: &str| history.daw_undo_place(&history.row(id).unwrap());
         assert_eq!(place("h-g1-c1"), Some("next"));
         // Kumi writing in another project leaves it the latest step in its own; writing in its project buries it.
