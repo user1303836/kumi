@@ -231,9 +231,8 @@ run without asking there, and Kumi can't tell it from a chat.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
 - **A copy of your project:** before some changes, Kumi copies your project as last saved beside it, once for each
-  saved version. An unsaved project gets no copy, and Kumi never saves the project itself. A copy stays until you
-  delete it.
-  - Live: when a change reaches its third step (`<Set>.backup-<date>.als`).
+  saved version. An unsaved project gets no copy, and Kumi never saves the project itself.
+  - Live: when a change reaches its third step (`<Set>.backup-<date>.als`). The copy stays until you delete it.
   - Renoise: before a change that loads a sample, such as a sound from your library put in an instrument
     (`<Song> (Kumi copy <date>).xrns`). Kumi keeps a song's five newest copies and deletes older ones. A song over
     512 MB isn't copied.
