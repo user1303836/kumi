@@ -130,7 +130,7 @@ impl Fixture {
             Rc::new(Bridge { calls: RefCell::new(vec![]), name: name.into(), native: Cell::new(false), advance: RefCell::new(None) });
         let endpoint = bridge.clone();
         let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
-        options.policy = HostPolicy::plugin(dir.path().join("scratch"), dir.path().join("quarantine"));
+        options.policy = HostPolicy::plugin(dir.path().join("scratch"), dir.path().join("quarantine"), dir.path().join("variations"));
         options.connect = Some(Rc::new(move |_| {
             let endpoint: Rc<dyn McpEndpoint> = endpoint.clone();
             async move { Ok(endpoint) }.boxed_local()
