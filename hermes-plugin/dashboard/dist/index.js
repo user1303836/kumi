@@ -187,14 +187,25 @@
     },
     script: {
       waiting: "Script waiting for your approval",
+      deviceWaiting: "Device waiting for your approval",
       says: (purpose) => `Hermes says: ${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "A Max for Live device (GenExpr)",
+      controls: "The device’s controls",
+      noControls: "No controls.",
+      control: "Control",
+      range: "Range",
+      default: "Default",
+      on: "on",
+      off: "off",
+      file: (file) => `New file: ${file}`,
       in: (language, daw) => `${language} in ${daw}`,
       lines: (count) => count === 1 ? "1 line" : `${count} lines`,
       sha: (short) => `SHA-256 ${short}…`,
       shaTitle: (sha) => `SHA-256 ${sha}: the hash of the code the approval names`,
       code: "The script’s code",
+      deviceCode: "The device’s GenExpr code",
       codeTitle: "Every line of the code as it will run. Nothing runs from here.",
       reading: "Reading the code Kumi saved…",
       unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
@@ -503,14 +514,25 @@
     },
     script: {
       waiting: "承認待ちのスクリプト",
+      deviceWaiting: "承認待ちのデバイス",
       says: (purpose) => `Hermes の説明: ${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "Max for Live デバイス（GenExpr）",
+      controls: "デバイスのコントロール",
+      noControls: "コントロールはありません。",
+      control: "コントロール",
+      range: "範囲",
+      default: "初期値",
+      on: "オン",
+      off: "オフ",
+      file: (file) => `新しいファイル: ${file}`,
       in: (language, daw) => `${daw} の ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
       shaTitle: (sha) => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
       code: "スクリプトのコード",
+      deviceCode: "デバイスの GenExpr コード",
       codeTitle: "実行されるとおりのコードの全行です。ここからは何も実行されません。",
       reading: "Kumi が保存したコードを読み込み中…",
       unreadable: "保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。",
@@ -818,14 +840,25 @@
     },
     script: {
       waiting: "等待你批准的脚本",
+      deviceWaiting: "等待你批准的设备",
       says: (purpose) => `Hermes 说：${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "Max for Live 设备（GenExpr）",
+      controls: "设备的控件",
+      noControls: "没有控件。",
+      control: "控件",
+      range: "范围",
+      default: "默认值",
+      on: "开",
+      off: "关",
+      file: (file) => `新文件：${file}`,
       in: (language, daw) => `${daw} 中的 ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
       shaTitle: (sha) => `SHA-256 ${sha}：批准所指代码的哈希`,
       code: "脚本代码",
+      deviceCode: "设备的 GenExpr 代码",
       codeTitle: "将要运行的完整代码。这里不会运行任何东西。",
       reading: "正在读取 Kumi 保存的代码…",
       unreadable: "Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。",
@@ -2031,11 +2064,12 @@
     if (!payload || typeof payload !== "object") return null;
     const value = payload;
     const id = plainId(value.tool_call_id);
-    const language = value.language === "python" || value.language === "lua" ? value.language : null;
+    const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
     if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
     const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
     const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
-    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning") };
+    const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
+    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
   }
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
