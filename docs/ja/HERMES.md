@@ -145,6 +145,12 @@ Kumi の呼び出しをこのセッションの間または常に許可すると
 - **Hermes Desktop:** ステータスチップ、FOCUS と HISTORY のサイドペイン、専用タブのサウンドマップ（その下にパレット）、測定した音声のカード、Hermes のコマンドパレットのコマンド。スクリプトやデバイスが承認を待っているあいだ、ペインにはそのコード全体（デバイスならコントロールも）が表示されます。スクリプトの HISTORY の行には **Show code** があります。ボタンはチャットに依頼を入れるだけで、ボタンだけでプロジェクトが変わることはありません。
 - **Web ダッシュボード:** HISTORY、状態、マップ、パレットのある Kumi タブ。
 
+![Hermes Desktop と Kumi のペイン: Drums トラックの FOCUS と、変更ごとに Undo のある HISTORY。](../assets/hermes/screenshots/catalog-1-pane.png)
+
+![Web ダッシュボードの Kumi タブ: HISTORY、状態、マップ。](../assets/hermes/screenshots/hermes-dashboard.png)
+
+スクリーンショット: 実際の Ableton Live 12 で動く Kumi <V>。チャットの Hermes 側は、台本どおりに答える代わりのモデルによるもので、言葉は例です。Kumi 側は本物です。
+
 ## 設定
 
 | 設定 | 既定 | 内容 |

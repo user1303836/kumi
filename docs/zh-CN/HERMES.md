@@ -145,6 +145,12 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **Hermes Desktop：** 状态标签、显示 FOCUS 和 HISTORY 的侧边栏、单独标签页中的声音地图（下方是你的调色板）、测量结果卡片和 Hermes 命令面板中的命令。脚本或设备等待你批准时，侧边栏会显示它的全部代码（以及设备的控件）；脚本在 HISTORY 中的那一条有 **Show code**。按钮只会把请求放进对话，不会自己修改你的工程。
 - **网页仪表盘：** 一个包含 HISTORY、状态、地图和调色板的 Kumi 标签页。
 
+![Hermes Desktop 中 Kumi 的侧边栏：FOCUS 显示 Drums 音轨，HISTORY 中每次修改都有 Undo。](../assets/hermes/screenshots/catalog-1-pane.png)
+
+![网页仪表盘中的 Kumi 标签页：HISTORY、状态和地图。](../assets/hermes/screenshots/hermes-dashboard.png)
+
+截图：真实 Ableton Live 12 上的 Kumi <V>。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
+
 ## 设置项
 
 | 设置 | 默认 | 作用 |

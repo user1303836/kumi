@@ -40,6 +40,28 @@ a DAW to work in.
 - **Measured, not imagined.** Loudness, true peak, loudness range, spectrum and tempo are measured on your
   computer. Kumi never claims to have heard what it hasn't measured.
 
+## What it looks like
+
+![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../docs/assets/hermes/screenshots/catalog-1-pane.png)
+
+*Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.*
+
+![Every change asks first: Hermes shows exactly what Kumi will change in Live.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
+
+*Every change asks first: Hermes shows exactly what Kumi will change in Live.*
+
+![Listening in REAPER: the mix measured beside the reference, round by round.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
+
+*Listening in REAPER: the mix measured beside the reference, round by round.*
+
+![The sound map: your own samples, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
+
+*The sound map: your own samples, with the found snares circled and why each matched.*
+
+Screenshots: Kumi <V> on real Ableton Live 12 and REAPER 7. Hermes's side of the chat came from a scripted stand-in
+model, so the words are illustrative; Kumi's side (the pane, the map, the approvals and the measurements) is real. The
+mastering shot measures a synthetic test tone.
+
 ## Tools
 
 | Tool | What it does | Asks first |

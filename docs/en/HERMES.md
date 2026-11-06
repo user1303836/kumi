@@ -295,6 +295,13 @@ run without asking there, and Kumi can't tell it from a chat.
   code**. Buttons put a request into the chat; they never change your project by themselves.
 - **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
 
+![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
+
+![The web dashboard's Kumi tab: HISTORY, status and the map.](../assets/hermes/screenshots/hermes-dashboard.png)
+
+Screenshots: Kumi <V> on real Ableton Live 12. Hermes's side of the chat came from a scripted stand-in model, so the
+words are illustrative; Kumi's side is real.
+
 ## Settings
 
 | Setting | Default | What it does |
