@@ -62,6 +62,10 @@ pub fn standard_roots() -> Vec<PathBuf> {
 }
 
 pub fn scan(roots: &[PathBuf]) -> Inventory {
+    scan_class(roots, None)
+}
+
+fn scan_class(roots: &[PathBuf], class_filter: Option<&str>) -> Inventory {
     let mut out = Inventory::default();
     let mut pending: Vec<_> = roots.iter().cloned().map(|p| (p, 0)).collect();
     let mut visited = BTreeSet::new();
@@ -88,7 +92,7 @@ pub fn scan(roots: &[PathBuf]) -> Inventory {
             continue;
         }
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("vst3")) {
-            out.plugins.extend(describe(&path));
+            out.plugins.extend(describe(&path, class_filter));
             continue; // A bundle's architecture-specific binary is the same installation.
         }
         if !path.is_dir() {
@@ -120,6 +124,35 @@ pub fn scan(roots: &[PathBuf]) -> Inventory {
         out.warnings.push("Further discovery warnings omitted".into());
     }
     out
+}
+
+/// Read one VST3 processor's installed version without loading its binary. Both preset creation and placement
+/// use this projection; callers supply standard roots in production and isolated roots in tests.
+/// Missing metadata remains `None`, never the version requested by a model or the newest bundled writer.
+/// Other bundles' class metadata is still enumerated to detect renamed or conflicting installations, but their
+/// version resources and binary fingerprints are not read. Discovery keeps `scan`'s entry and depth limits.
+pub fn installed_vst3(roots: &[PathBuf], plugin: &str, class_id: &str) -> std::io::Result<Option<InstalledPlugin>> {
+    let known = builtins()
+        .iter()
+        .any(|format| format.info.plugin == plugin && format.info.ids.vst3.iter().any(|class| class.id.eq_ignore_ascii_case(class_id)));
+    if !known {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Choose a VST3 processor from Kumi's plug-in catalog."));
+    }
+    let inventory = scan_class(roots, Some(class_id));
+    if !inventory.warnings.is_empty() {
+        return Err(std::io::Error::other("Kumi couldn't read the VST3 folders completely; check their permissions, then ask again."));
+    }
+    let mut matching = inventory.plugins.into_iter().filter(|entry| {
+        entry.plugin.as_deref() == Some(plugin) && entry.class_id.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(class_id))
+    });
+    let Some(first) = matching.next() else { return Ok(None) };
+    if matching.any(|entry| entry.version != first.version || entry.installed_version_verified != first.installed_version_verified) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "More than one installed VST3 version matches; keep one version enabled before building or placing a preset.",
+        ));
+    }
+    Ok(Some(first))
 }
 
 // Walk prefixes before canonicalizing: canonicalize itself would already follow
@@ -497,13 +530,12 @@ fn windows_version(path: &Path) -> Option<String> {
     }
 }
 
-fn describe(path: &Path) -> Vec<InstalledPlugin> {
+fn describe(path: &Path, class_filter: Option<&str>) -> Vec<InstalledPlugin> {
     let info: Option<Value> = ["Contents/Resources/moduleinfo.json", "Contents/moduleinfo.json"]
         .iter()
         .find_map(|name| read_metadata(&path.join(name)).and_then(|text| module_info(&text)));
     let version = info.as_ref().and_then(|v| v.get("Version")).and_then(Value::as_str);
-    let binary_version = bundle_version(path);
-    let classes: Vec<_> = info
+    let mut classes = info
         .as_ref()
         .and_then(|v| v.get("Classes"))
         .and_then(Value::as_array)
@@ -511,10 +543,14 @@ fn describe(path: &Path) -> Vec<InstalledPlugin> {
         .flatten()
         .filter(|c| c.get("Category").and_then(Value::as_str) == Some("Audio Module Class"))
         .filter_map(|c| Some((c.get("Name")?.as_str()?, c.get("CID")?.as_str()?, c.get("Version").and_then(Value::as_str))))
-        .collect();
-    if !classes.is_empty() {
-        return classes
-            .into_iter()
+        .peekable();
+    if classes.peek().is_some() {
+        let mut selected = classes.filter(|(_, id, _)| class_filter.is_none_or(|wanted| id.eq_ignore_ascii_case(wanted))).peekable();
+        if selected.peek().is_none() {
+            return Vec::new();
+        }
+        let binary_version = bundle_version(path);
+        return selected
             .map(|(name, id, class_version)| {
                 let found = builtins().iter().find(|p| p.info.ids.vst3.iter().any(|known| known.id.eq_ignore_ascii_case(id)));
                 described(
@@ -538,6 +574,10 @@ fn describe(path: &Path) -> Vec<InstalledPlugin> {
     let class = found.and_then(|p| {
         p.info.ids.vst3.iter().find(|id| key(&id.name) == key(stem)).or_else(|| (p.info.ids.vst3.len() == 1).then(|| &p.info.ids.vst3[0]))
     });
+    if class_filter.is_some_and(|wanted| !class.is_some_and(|class| class.id.eq_ignore_ascii_case(wanted))) {
+        return Vec::new();
+    }
+    let binary_version = bundle_version(path);
     vec![described(
         path,
         class.map(|id| id.name.as_str()).unwrap_or(stem),
@@ -745,6 +785,70 @@ mod tests {
         let conflict = scan(&[temp.path().into()]);
         assert_eq!(conflict.plugins[0].version, None);
         assert!(!conflict.plugins[0].create_preset);
+    }
+
+    #[test]
+    fn preset_version_lookup_preserves_missing_unverified_and_conflicting_installations() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = [temp.path().to_path_buf()];
+        let plugin = "fabfilter-pro-q-4";
+        let format = super::super::formats::structure::builtin(plugin).unwrap();
+        let class = &format.info.ids.vst3[0].id;
+        assert!(installed_vst3(&roots, plugin, class).unwrap().is_none());
+        let bundle = |name: &str, version: &str| {
+            let directory = temp.path().join(name).join("Contents/Resources");
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("moduleinfo.json"),
+                serde_json::to_vec(&serde_json::json!({"Classes":[{
+                    "Name":"Pro-Q 4", "CID":class, "Version":version, "Category":"Audio Module Class"
+                }]}))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        bundle("A.vst3", "4.1.3.0");
+        let found = installed_vst3(&roots, plugin, class).unwrap().unwrap();
+        assert_eq!(found.version.as_deref(), Some("4.1.3.0"));
+        assert_eq!(found.installed_version_verified, Some(true));
+        bundle("A.vst3", "99.0");
+        let found = installed_vst3(&roots, plugin, class).unwrap().unwrap();
+        assert_eq!(found.version.as_deref(), Some("99.0"));
+        assert_eq!(found.installed_version_verified, Some(false));
+        bundle("B.vst3", "4.1.3.0");
+        assert_eq!(installed_vst3(&roots, plugin, class).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(installed_vst3(&roots, plugin, "not-a-class").unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn preset_version_lookup_selects_the_requested_processor_in_a_renamed_multi_class_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = dir.path().join("Renamed.vst3/Contents/Resources");
+        fs::create_dir_all(&metadata).unwrap();
+        let format = super::super::formats::structure::builtin("ozone-12").unwrap();
+        let first = &format.info.ids.vst3[0];
+        let second = &format.info.ids.vst3[1];
+        fs::write(
+            metadata.join("moduleinfo.json"),
+            serde_json::to_vec(&serde_json::json!({"Classes":[
+                {"Name":first.name, "CID":first.id, "Version":"99.0", "Category":"Audio Module Class"},
+                {"Name":second.name, "CID":second.id, "Version":"12.1.0", "Category":"Audio Module Class"}
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let roots = [dir.path().to_path_buf()];
+        let found = installed_vst3(&roots, "ozone-12", &second.id).unwrap().unwrap();
+        assert_eq!(found.class_id.as_deref(), Some(second.id.as_str()));
+        assert_eq!(found.version.as_deref(), Some("12.1.0"));
+        assert_eq!(found.installed_version_verified, Some(true));
+        assert!(installed_vst3(&roots, "serum-2", &builtins().iter().find(|p| p.info.plugin == "serum-2").unwrap().info.ids.vst3[0].id)
+            .unwrap()
+            .is_none());
+        let all = scan(&roots);
+        assert_eq!(all.plugins.len(), 2);
+        assert!(all.plugins.iter().any(|p| p.class_id.as_deref() == Some(first.id.as_str()) && p.version.as_deref() == Some("99.0")));
+        assert!(all.plugins.iter().any(|p| p.class_id.as_deref() == Some(second.id.as_str()) && p.version.as_deref() == Some("12.1.0")));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{device, generate, library, listen, map, plugin_knowledge, read, script, setup, transport, variations};
+use super::{device, generate, library, listen, map, plugin_knowledge, preset_build, read, script, setup, transport, variations};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
@@ -24,6 +24,7 @@ pub static OPERATIONS: &[&Operation] = &[
     &listen::LISTEN,
     &generate::GENERATE,
     &device::DEVICE,
+    &preset_build::PRESET_BUILD,
     &script::SCRIPT,
     &variations::VARIATIONS,
 ];

@@ -2,6 +2,8 @@
 
 use super::ctx::{Ctx, OpError, Scratch};
 use kumi_common::{abort::Signal, time::now_ms};
+use kumi_library::plugins::preset::review::ReviewError;
+pub use kumi_library::plugins::preset::review::{PresetMetadata, ReviewedPreset as VerifiedPreset};
 use kumi_library::sources::canonical_local_path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -134,6 +136,10 @@ struct Record {
     at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     audio_origin: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preset: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity: Option<Value>,
 }
 type Records = BTreeMap<String, Record>;
 
@@ -392,6 +398,99 @@ impl Artifacts {
         self.publish(ctx, self.stage(ctx, source, expected, signal).await?, kind, mime, tool, signal).await
     }
 
+    /// Only the initialized, verified writer uses this publication path. Ordinary media cannot attach preset metadata.
+    pub async fn publish_preset(
+        &self,
+        ctx: &Ctx,
+        preset: VerifiedPreset,
+        signal: &Signal,
+    ) -> Result<(SavedArtifact, PresetMetadata), OpError> {
+        check(signal)?;
+        if preset.bytes.len() as u64 > MAX_BYTES {
+            return Err(refused("too_large", "The preset exceeds the 50 MiB artifact limit."));
+        }
+        let root = self.checked_root()?;
+        let own_signal = signal.clone();
+        let (staged, metadata) = tokio::task::spawn_blocking(move || {
+            check(&own_signal)?;
+            preset.metadata.verify(&preset.bytes).map_err(preset_error)?;
+            let mut file = tempfile::Builder::new()
+                .prefix("a-")
+                .rand_bytes(24)
+                .suffix(".vstpreset")
+                .make_in(root, private_preset_file)
+                .map_err(failed)?;
+            file.write_all(&preset.bytes).map_err(failed)?;
+            file.as_file().sync_all().map_err(failed)?;
+            check(&own_signal)?;
+            let id = file.path().file_stem().and_then(|name| name.to_str()).ok_or_else(|| failed("invalid artifact name"))?.to_owned();
+            let identity = FileIdentity::of(file.as_file()).map_err(failed)?;
+            Ok::<_, OpError>((
+                StagedArtifact { file: StagedFile::Owned(file), id, identity, source_identity: identity, audio_origin: None },
+                preset.metadata,
+            ))
+        })
+        .await
+        .map_err(failed)??;
+        let receipt = serde_json::to_value(&metadata).map_err(failed)?;
+        let [saved] =
+            self.publish_files(ctx, [(staged, "preset", "application/x-vstpreset", Some(receipt))], "preset_build", signal, None).await?;
+        Ok((saved, metadata))
+    }
+
+    /// Return the exact verified bytes, never a path that a later caller would reopen.
+    pub async fn verified_preset(&self, ctx: &Ctx, id: &str, signal: &Signal) -> Result<VerifiedPreset, OpError> {
+        check(signal)?;
+        let path = self.resolve(ctx, id)?;
+        let (metadata, expected) = {
+            let records = self.records.borrow();
+            let record = records.get(id).ok_or_else(|| refused("missing_artifact", "The preset artifact is no longer registered."))?;
+            if record.kind != "preset" || record.tool != "preset_build" || record.mime != "application/x-vstpreset" {
+                return Err(refused("invalid_source", "Use a preset artifact made by Kumi's verified preset writer."));
+            }
+            let metadata =
+                record.preset.as_ref().ok_or_else(|| refused("invalid_source", "This artifact has no verified preset receipt."))?;
+            let metadata =
+                PresetMetadata::deserialize(metadata).map_err(|_| refused("invalid_source", "The preset receipt is invalid."))?;
+            let expected = record.identity.clone().ok_or_else(|| refused("invalid_source", "The preset has no retained file identity."))?;
+            (metadata, expected)
+        };
+        let signal = signal.clone();
+        tokio::task::spawn_blocking(move || {
+            check(&signal)?;
+            let mut file = open_regular(&path).map_err(|_| refused("changed", "The preset file changed; build it again."))?;
+            check_private_preset(&file)?;
+            let identity = FileIdentity::of(&file).map_err(failed)?;
+            if !identity.matches(&expected) || identity.size > MAX_BYTES {
+                return Err(refused("changed", "The preset file changed; build it again."));
+            }
+            let mut bytes = Vec::with_capacity(identity.size as usize);
+            let mut left = identity.size;
+            let mut buffer = [0u8; 64 * 1024];
+            while left > 0 {
+                check(&signal)?;
+                let wanted = left.min(buffer.len() as u64) as usize;
+                let got = file.read(&mut buffer[..wanted]).map_err(failed)?;
+                if got == 0 {
+                    return Err(refused("changed", "The preset changed while Kumi read it; build it again."));
+                }
+                bytes.extend_from_slice(&buffer[..got]);
+                left -= got as u64;
+            }
+            if FileIdentity::of(&file).map_err(failed)? != identity || FileIdentity::at(&path).map_err(failed)? != identity {
+                return Err(refused("changed", "The preset changed while Kumi read it; build it again."));
+            }
+            metadata.verify(&bytes).map_err(|error| match error {
+                ReviewError::TooLong => preset_error(error),
+                _ => refused("changed", "The preset bytes or their receipt changed; build it again."),
+            })?;
+            check(&signal)?;
+            Ok(VerifiedPreset { metadata, bytes })
+        })
+        .await
+        .map_err(failed)?
+    }
+
     pub async fn publish(
         &self,
         ctx: &Ctx,
@@ -401,7 +500,7 @@ impl Artifacts {
         tool: &str,
         signal: &Signal,
     ) -> Result<SavedArtifact, OpError> {
-        let [saved] = self.publish_files(ctx, [(file, kind, mime)], tool, signal, None).await?;
+        let [saved] = self.publish_files(ctx, [(file, kind, mime, None)], tool, signal, None).await?;
         Ok(saved)
     }
 
@@ -418,12 +517,18 @@ impl Artifacts {
         match reference {
             Some((reference, reference_mime)) => {
                 let [source, reference] = self
-                    .publish_files(ctx, [(source, "audio", source_mime), (reference, "audio", reference_mime)], "listen", signal, deadline)
+                    .publish_files(
+                        ctx,
+                        [(source, "audio", source_mime, None), (reference, "audio", reference_mime, None)],
+                        "listen",
+                        signal,
+                        deadline,
+                    )
                     .await?;
                 Ok((source, Some(reference)))
             }
             None => {
-                let [source] = self.publish_files(ctx, [(source, "audio", source_mime)], "listen", signal, deadline).await?;
+                let [source] = self.publish_files(ctx, [(source, "audio", source_mime, None)], "listen", signal, deadline).await?;
                 Ok((source, None))
             }
         }
@@ -441,7 +546,8 @@ impl Artifacts {
         macro_rules! publish {
             ($count:literal) => {{
                 let files: [(StagedArtifact, &str); $count] = files.try_into().map_err(|_| failed("invalid audio group"))?;
-                let saved = self.publish_files(ctx, files.map(|(file, mime)| (file, "audio", mime)), "listen", signal, deadline).await?;
+                let saved =
+                    self.publish_files(ctx, files.map(|(file, mime)| (file, "audio", mime, None)), "listen", signal, deadline).await?;
                 Ok(saved.into_iter().collect())
             }};
         }
@@ -459,7 +565,7 @@ impl Artifacts {
     async fn publish_files<const N: usize>(
         &self,
         ctx: &Ctx,
-        mut files: [(StagedArtifact, &str, &str); N],
+        mut files: [(StagedArtifact, &str, &str, Option<Value>); N],
         tool: &str,
         signal: &Signal,
         deadline: Option<tokio::time::Instant>,
@@ -473,7 +579,7 @@ impl Artifacts {
             let root = self.checked_root()?;
             let at = now_ms();
             let mut added = Vec::with_capacity(N);
-            for (file, kind, mime) in &mut files {
+            for (file, kind, mime, preset) in &mut files {
                 if file.path().parent() != Some(root.as_path()) {
                     return Err(refused("outside_root", "This staged file does not belong to this artifact store."));
                 }
@@ -483,6 +589,7 @@ impl Artifacts {
                         if self.records.borrow().contains_key(&file.id) {
                             return Err(refused("artifact_exists", "An artifact already has this id."));
                         }
+                        let identity = preset.as_ref().map(|_| file.identity.value());
                         added.push((
                             file.id.clone(),
                             Record {
@@ -492,6 +599,8 @@ impl Artifacts {
                                 tool: tool.into(),
                                 at,
                                 audio_origin: file.audio_origin.take(),
+                                preset: preset.take(),
+                                identity,
                             },
                         ));
                     }
@@ -531,7 +640,7 @@ impl Artifacts {
         let Some((document, added)) = prepared else { return Ok(saved) };
         // `keep` happens before the manifest can refer to a file. A failed commit drops only these owned copies.
         let mut retained = Vec::with_capacity(N);
-        for (file, _, _) in files {
+        for (file, _, _, _) in files {
             if let StagedFile::Owned(file) = file.file {
                 let (handle, path) = file.keep().map_err(|error| failed(error.error))?;
                 retained.push(PendingFile { handle: Some(handle), path, committed: false });
@@ -670,6 +779,51 @@ pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
     }
     Ok(file)
 }
+
+fn preset_error(error: ReviewError) -> OpError {
+    let code = if matches!(error, ReviewError::TooLong) { "too_long" } else { "invalid_preset" };
+    OpError::Refused { code, reason: error.to_string(), owner: None }
+}
+
+fn private_preset_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Generic read/write plus WRITE_DAC, so the newly created handle can protect its own ACL without a path reopen.
+        options.access_mode(0xc004_0000).share_mode(windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ);
+    }
+    let file = options.open(path)?;
+    #[cfg(windows)]
+    if let Err(error) = daw_bridge::lifecycle::native_acl::protect_created_file(&file, &file) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(io::Error::other(error));
+    }
+    Ok(file)
+}
+
+fn check_private_preset(file: &File) -> Result<(), OpError> {
+    #[cfg(unix)]
+    let private = {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = file.metadata().map_err(failed)?;
+        metadata.mode() & 0o7777 == 0o600 && metadata.uid() == unsafe { libc::geteuid() } && metadata.nlink() == 1
+    };
+    #[cfg(windows)]
+    let private =
+        daw_bridge::lifecycle::native_acl::is_kumis_shape_handle(file, false) && handle_info(file).map_err(failed)?.nNumberOfLinks == 1;
+    if !private {
+        return Err(refused("changed", "The preset isn't an owner-only, unlinked artifact anymore; build it again."));
+    }
+    Ok(())
+}
 fn refused(code: &'static str, reason: &str) -> OpError {
     OpError::Refused { code, reason: reason.into(), owner: None }
 }
@@ -744,6 +898,116 @@ mod tests {
             files.push((file, "audio/wav"));
         }
         (files, copies, originals)
+    }
+
+    fn reviewed() -> VerifiedPreset {
+        use kumi_library::plugins::{
+            formats::structure,
+            preset::{review, Edit, WriteOptions},
+        };
+        let plugin = "serum-2";
+        let version = structure::builtin(plugin).unwrap().verified.writes[0].version.clone();
+        review::build(
+            plugin,
+            &WriteOptions { version, class_id: None, name: Some("Private patch".into()) },
+            &[Edit { path: "Oscillator1/plainParams/kParamVolume".into(), value: serde_json::json!(0.45) }],
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_reference_group_preserves_verified_presets_and_cannot_claim_their_receipts() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let signal = Signal::new();
+        let (preset, receipt) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        let bytes = std::fs::read(&preset.path).unwrap();
+        let (mut files, _, _) = staged_group(&fixture).await;
+        let origin = serde_json::json!({
+            "source": {"kind": "file", "name": "Reference.wav"},
+            "window": {"start_frame": 48000, "frame_count": 48000, "sample_rate": 48000, "channels": 2, "replay_from": 0}
+        });
+        files[0].0.audio_origin = Some(origin.clone());
+        let audio = ctx.artifacts().publish_audio_group(ctx, files, &signal, None).await.unwrap();
+        let reopened = Artifacts::new(&ctx.paths().state_dir).unwrap();
+        let verified = reopened.verified_preset(ctx, &preset.id, &signal).await.unwrap();
+        assert_eq!(verified.metadata, receipt);
+        assert_eq!(verified.bytes, bytes);
+        let records: Value = serde_json::from_slice(&std::fs::read(ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
+        for (index, saved) in audio.iter().enumerate() {
+            let record = &records[&saved.id];
+            assert!(record.get("preset").is_none());
+            assert!(record.get("identity").is_none());
+            assert_eq!(record.get("audio_origin"), (index == 0).then_some(&origin));
+            assert_eq!(reopened.verified_preset(ctx, &saved.id, &signal).await.unwrap_err().code(), "invalid_source");
+        }
+        let replay = reopened.stage_registered(ctx, &audio[0].id, &signal).unwrap();
+        assert_eq!(replay.audio_origin, Some(origin));
+        assert!(records[&preset.id].get("audio_origin").is_none());
+    }
+
+    #[tokio::test]
+    async fn verified_presets_survive_reload_but_an_import_cannot_claim_the_writer() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let signal = Signal::new();
+        let (saved, receipt) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        let reopened = Artifacts::new(&ctx.paths().state_dir).unwrap();
+        let verified = reopened.verified_preset(ctx, &saved.id, &signal).await.unwrap();
+        assert_eq!(verified.metadata, receipt);
+        assert_eq!(verified.bytes, std::fs::read(&saved.path).unwrap());
+        assert_eq!(verified.metadata.settings[0].after, serde_json::json!(0.45));
+        let source = fixture.root.join("foreign.vstpreset");
+        std::fs::write(&source, &verified.bytes).unwrap();
+        let fake = ctx.artifacts().add(ctx, &source, None, "preset", "application/x-vstpreset", "preset_build", &signal).await.unwrap();
+        assert_eq!(ctx.artifacts().verified_preset(ctx, &fake.id, &signal).await.unwrap_err().code(), "invalid_source");
+        assert_eq!(std::fs::read(source).unwrap(), verified.bytes);
+    }
+
+    #[tokio::test]
+    async fn preset_consumers_refuse_replaced_modified_or_multiply_linked_files() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let signal = Signal::new();
+        let (saved, _) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        let original = std::fs::read(&saved.path).unwrap();
+        let stamp = File::open(&saved.path).unwrap().metadata().unwrap().modified().unwrap();
+        let replacement = ctx.artifacts().root.join("replacement");
+        std::fs::write(&replacement, &original).unwrap();
+        File::options().write(true).open(&replacement).unwrap().set_times(std::fs::FileTimes::new().set_modified(stamp)).unwrap();
+        std::fs::remove_file(&saved.path).unwrap();
+        std::fs::rename(replacement, &saved.path).unwrap();
+        assert_eq!(ctx.artifacts().verified_preset(ctx, &saved.id, &signal).await.unwrap_err().code(), "changed");
+
+        let (saved, _) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        OpenOptions::new().append(true).open(&saved.path).unwrap().write_all(b"changed").unwrap();
+        assert_eq!(ctx.artifacts().verified_preset(ctx, &saved.id, &signal).await.unwrap_err().code(), "changed");
+
+        let (saved, _) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        std::fs::hard_link(&saved.path, fixture.root.join("linked.vstpreset")).unwrap();
+        assert_eq!(ctx.artifacts().verified_preset(ctx, &saved.id, &signal).await.unwrap_err().code(), "changed");
+    }
+
+    #[tokio::test]
+    async fn preset_publication_failure_leaves_no_unregistered_file() {
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        std::fs::create_dir(ctx.paths().state_dir.join("artifacts.json")).unwrap();
+        assert!(matches!(ctx.artifacts().publish_preset(ctx, reviewed(), &Signal::new()).await, Err(OpError::Failed { .. })));
+        assert!(ctx.artifacts().records.borrow().is_empty());
+        assert_eq!(std::fs::read_dir(&ctx.artifacts().root).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_preset_with_public_permissions_is_not_a_verified_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let ctx = &fixture.ctx;
+        let signal = Signal::new();
+        let (saved, _) = ctx.artifacts().publish_preset(ctx, reviewed(), &signal).await.unwrap();
+        std::fs::set_permissions(&saved.path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(ctx.artifacts().verified_preset(ctx, &saved.id, &signal).await.unwrap_err().code(), "changed");
     }
 
     #[tokio::test]
