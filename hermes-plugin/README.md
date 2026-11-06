@@ -50,17 +50,18 @@ a DAW to work in.
 
 *Every change asks first: Hermes shows exactly what Kumi will change in Live.*
 
-![Listening in REAPER: the mix measured beside the reference, round by round.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
+![Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
 
-*Listening in REAPER: the mix measured beside the reference, round by round.*
+*Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
 
 ![The sound map: your own samples, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
 
 *The sound map: your own samples, with the found snares circled and why each matched.*
 
-Screenshots: Kumi <V> on real Ableton Live 12 and REAPER 7. Hermes's side of the chat came from a scripted stand-in
-model, so the words are illustrative; Kumi's side (the pane, the map, the approvals and the measurements) is real. The
-mastering shot measures a synthetic test tone.
+Screenshots: Kumi <V> on real Ableton Live 12, and Kumi 1.24.71 on real REAPER 7 (the listening shot). Hermes's side
+of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side (the pane, the map, the
+approvals and the measurements) is real. The listening shot measures a synthetic test tone against a reference made
+3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step.
 
 ## Tools
 
