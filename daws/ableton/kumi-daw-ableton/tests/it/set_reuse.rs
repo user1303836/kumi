@@ -197,6 +197,8 @@ impl McpEndpoint for Live {
                     None => page("device", rows),
                 }
             }
+            // The look reads the returns and Main beside the tracks; this Set's are none (Main's devices aren't its subject).
+            ("live_discover", Some(kind @ ("return-track" | "main-track"))) => page(kind, vec![]),
             ("live_discover", Some("selection")) => {
                 page("selection", vec![json!({"selectedTrackRef":format!("7:track:{}", self.selected.get())})])
             }

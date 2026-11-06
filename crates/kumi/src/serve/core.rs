@@ -4,6 +4,7 @@
 use super::connection::{self, Project};
 use super::ctx::{reads, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::PROTOCOL;
+use kumi_agent::core::contracts::ObserveHints;
 use kumi_types::daw::DawId;
 use serde_json::{json, Value};
 
@@ -57,7 +58,7 @@ fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         let connection = connection::connect(ctx, call.signal.clone()).await?;
         // A first look, for the project's key and epoch: a DAW that doesn't answer yet, or a look that couldn't read the
         // project, leaves it for observe.
-        if let Some(observation) = connection.integration.observe(call.signal.clone(), None).await.ok().filter(read_the_project) {
+        if let Some(observation) = connection.integration.observe(call.signal.clone(), every_track()).await.ok().filter(read_the_project) {
             ctx.link().saw(&observation);
             connection::publish_focus(&ctx.handle());
         }
@@ -88,12 +89,18 @@ fn observe_schema() -> Value {
     }})
 }
 
+/// What serve asks of a look: every track the DAW has, Live's returns and Main after its tracks, so an approval names
+/// Main and FOCUS's Main is one the look shows (Kumi's own look leaves them out).
+fn every_track() -> Option<ObserveHints> {
+    Some(ObserveHints { every_track: true, ..ObserveHints::default() })
+}
+
 fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         let connection = ctx.connection()?;
         let observation = connection
             .integration
-            .observe(call.signal.clone(), None)
+            .observe(call.signal.clone(), every_track())
             .await
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
         // A look that couldn't read the project (the DAW gone, busy or not answering) is no project: it's said in the

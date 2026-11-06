@@ -221,6 +221,9 @@ impl Integration for FallbackIntegration {
     fn pin_for_recipe(&self, pin: &PinnedNode) -> Option<PinnedNode> {
         self.current().pin_for_recipe(pin)
     }
+    fn model_focus(&self, focus: &DawFocus) -> DawFocus {
+        self.current().model_focus(focus)
+    }
     async fn focus_body(&self, request: &BodyRequest, signal: Signal) -> Result<Option<FocusBody>, RuntimeError> {
         let c = self.current();
         if c.can_show(request.kind()) {

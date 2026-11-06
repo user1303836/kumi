@@ -2355,6 +2355,7 @@ impl Session {
             pinned,
             continuing: continuing.then_some(true),
             references,
+            every_track: false,
         });
         let snapshot = integration.observe(op.signal.clone(), hints).await?;
         self.assert_current(op)?;

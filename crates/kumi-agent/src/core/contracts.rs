@@ -554,6 +554,9 @@ pub struct ObserveHints {
     /// What the message names with `@` in the project, in its order: each is checked and described as the pin is, and
     /// one the project no longer has is said to be gone.
     pub references: Vec<PinnedNode>,
+    /// The look lists the DAW's other tracks too (Live's returns and Main), after its tracks: Kumi for Hermes's look, so
+    /// an approval names Main and FOCUS's Main is one the look shows. Off for Kumi's own look, whose reads stay as they are.
+    pub every_track: bool,
 }
 
 /// Why a guarded undo ([`Integration::guarded_undo`]) wasn't asked of the DAW: `changed_since` (a value changed since
@@ -768,6 +771,12 @@ pub trait Integration {
     /// are places moves them with its tracks); None when Kumi can't tell. Live's and REAPER's refs hold: as the pin was made.
     fn pin_for_recipe(&self, pin: &PinnedNode) -> Option<PinnedNode> {
         Some(pin.clone())
+    }
+    /// The focus as a model is shown it beside a look: its refs in the turn's short form, the one a look and a plan's
+    /// steps use (Live's long refs become `track:7`, `clip_slot:3`), so FOCUS and the look number a track alike. A DAW
+    /// whose refs are already the ones its steps take shows it as it is.
+    fn model_focus(&self, focus: &DawFocus) -> DawFocus {
+        focus.clone()
     }
     /// A body for FOCUS, read by the DAW; None when it can't say. Live's integration reads its views.
     async fn focus_body(&self, request: &BodyRequest, signal: Signal) -> Result<Option<FocusBody>, RuntimeError> {
