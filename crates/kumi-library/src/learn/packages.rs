@@ -107,7 +107,8 @@ pub(super) async fn signature(path: &str, signal: &Signal) -> io::Result<Signatu
                 }
                 let mut bytes = 0u64;
                 let mut hash = Sha256::new();
-                let mut buffer = [0u8; 64 * 1024];
+                // This buffer lives across reads: keep its bytes out of the enclosing learn/walk futures' stack.
+                let mut buffer = vec![0u8; 64 * 1024];
                 loop {
                     stopped(signal)?;
                     let read = input.read(&mut buffer).await?;
