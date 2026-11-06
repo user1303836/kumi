@@ -202,6 +202,8 @@ class Scripts(unittest.TestCase):
                                     api_request_id="r1", middleware_trace=[])
         self.assertEqual(undo["message"], "Kumi didn't undo anything: Kumi can't undo a script: Live's own Undo may, "
                                           "if its step is still the latest there.")
+        self.assertEqual(support.call(self.host, "kumi_undo", {}, session_id="s1"), {"blocked": undo["message"]},
+                         "\"undo that\" right after a script means the script, and meets the same refusal")
         self.assertEqual(support.handle(self.host, "kumi_script", script(), session_id="s1")["error"]["code"],
                          "not_approved", "a call no approval saw never runs")
 

@@ -623,7 +623,8 @@ def script(fixture: Fixture, args: dict, host: dict) -> dict:
                             "track": None, "script": {"sha256": digest, "language": args["language"]},
                             "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied"})
     fixture.publish("history", "focus")
-    return {"state": "ran", "history_id": ident, "output": {"result": "ok", "stdout": "printed\n"},
+    return {"state": "ran", "history_id": ident, "history_ids": [ident],  # serve answers both
+            "output": {"result": "ok", "stdout": "printed\n"},
             "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
 
 
