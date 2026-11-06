@@ -729,6 +729,22 @@ def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
     return answer
 
 
+def kumi_variations(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-24: list reads the set. make and change run the takes the producer approved: the hook's preview drew them
+    from a seed, and the dispatch sends that seed with the preview's takes digest, so the runtime writes those takes or
+    nothing (`stale`). keep renames as approved."""
+    asked = {key: value for key, value in args.items() if key != "preview"}
+    if args.get("action") == "list":
+        return host.live().call("variations", asked, host.identity(kwargs), timeout=READ_TIMEOUT)
+    if args.get("action") in ("make", "change"):
+        call = kwargs.get("kumi_call")
+        drawn = call.extra if isinstance(call, calls.Entry) else {}
+        if not isinstance(drawn.get("seed"), int) or not isinstance(drawn.get("takes_digest"), str):
+            return {"error": {"code": "not_approved", "reason": "Kumi didn't make any takes: no approval saw them."}}
+        asked |= {"seed": drawn["seed"], "expect_takes": drawn["takes_digest"]}
+    return _write(host, "variations", asked, kwargs)
+
+
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
 # own fields, and no `note`, whose error text can name a path (12f).
 HISTORY_FIELDS = ("id", "title", "family", "at", "state", "undo_available", "track")
@@ -1135,6 +1151,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
     ("kumi_transport", schemas.KUMI_TRANSPORT, kumi_transport, "▶️"),
     ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
+    ("kumi_variations", schemas.KUMI_VARIATIONS, kumi_variations, "🔀"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1144,6 +1161,7 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
     return (name in ("kumi_change", "kumi_undo", "kumi_script")
+            or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
             or (name == "kumi_setup" and args.get("action") in ("install", "adopt"))

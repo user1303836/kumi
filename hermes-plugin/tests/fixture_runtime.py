@@ -75,6 +75,7 @@ class Fixture:
         self.connected = False
         self.playing = False  # whether transport's play started it (CC-17)
         self.daw = options.daw
+        self.takes = 0  # the highest take number given (CC-24: numbering goes on, V3 after V2)
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
         # As kumi serve's History::new: an earlier runtime's rows stay for the record, none of them undoable from here.
@@ -981,9 +982,80 @@ def transport(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"state": "playing", "position_beats": 0}
 
 
+# CC-24's variations op, as serve's (#1154) routes the DAW's own variations tool.
+VARIATIONS_ROOM = 6  # the empty places the fixture's Set has for takes
+
+
+def drawn_takes(fixture: Fixture, args: dict) -> list[dict]:
+    """The takes a make would draw now: numbered on from the set, so a make in between changes them (W1-a). Each line
+    in serve's words: the take, its direction, then what was done."""
+    recipes = args.get("takes") or [{"direction": f"take {index + 1}"} for index in range(int(args.get("count") or 2))]
+    drawn = []
+    for index, recipe in enumerate(recipes):
+        take, direction = f"V{fixture.takes + index + 1}", recipe.get("direction") or "a take"
+        drawn.append({"take": take, "direction": direction, "line": f"{take} ({direction}): 8 bars, 31 notes"})
+    return drawn
+
+
+def takes_digest(takes: list[dict], seed: int) -> str:
+    return hashlib.sha256(json.dumps([seed, takes], sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def variations(fixture: Fixture, args: dict, host: dict) -> dict:
+    action = args.get("action")
+    if action in ("drop", "extract") or "force" in args or "listen" in args:
+        return {"state": "refused", "code": "not_allowed", "reason": "Kumi for Hermes doesn't do that with takes.",
+                "history_ids": []}
+    if action == "list":
+        return {"set": 1, "source": "Bassline", "takes": [{"take": f"V{number}"} for number in range(1, fixture.takes + 1)]}
+    project = {"key": fixture.set["key"], "epoch": fixture.epoch}
+    if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
+        return {"state": "refused", "code": "stale", "reason": "The project or its epoch changed since it was read.",
+                "history_ids": []}
+    if action == "keep":
+        names = [name for name in args.get("names") or [] if isinstance(name, str)]
+        if args.get("preview"):
+            return {"state": "preview", "takes": [{"take": name, "name_after": f"{name} · Bassline · kept"}
+                                                  for name in names], "skipped": [], "project": project}
+        return {"state": "applied", "set": 1, "kept": names, "history_ids": variation_rows(fixture, names, host),
+                "undo_available": True, "project": project}
+    takes, seed = drawn_takes(fixture, args), int(args.get("seed") or 7)
+    if len(takes) > VARIATIONS_ROOM:
+        return {"state": "refused", "code": "no_room", "fits": VARIATIONS_ROOM, "history_ids": [],
+                "reason": f"Only {VARIATIONS_ROOM} of the {len(takes)} takes fit: the Set has {VARIATIONS_ROOM} empty "
+                          f"slots. Ask for {VARIATIONS_ROOM}, or make room in Live first."}
+    if args.get("preview"):
+        return {"state": "preview", "seed": seed, "source": "“Bassline” on Bass", "takes": takes, "skipped": [],
+                "takes_digest": takes_digest(takes, seed), "fits": len(takes), "project": project}
+    if args.get("expect_takes") != takes_digest(takes, seed):
+        return {"state": "refused", "code": "stale", "reason": "The takes would come out differently now: preview them again.",
+                "history_ids": []}
+    ids = variation_rows(fixture, [take["take"] for take in takes], host)
+    fixture.takes += len(takes)
+    return {"state": "applied", "set": 1, "source": "“Bassline” on Bass",
+            "takes": [{**take, "ref": f"t2/s{index + 1}"} for index, take in enumerate(takes)], "skipped": [],
+            "history_ids": ids, "undo_available": True, "project": project}
+
+
+def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
+    """A HISTORY row for each take a call wrote, all of one change (W1-d: "undo that" takes the whole call back)."""
+    change_id, ids = f"x-{fixture.generation}-v{len(fixture.history) + 1}", []
+    for name in names:
+        ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+        fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                                "runtime_generation": fixture.generation, "title": f"Variation {name}",
+                                "family": "clip", "at": now(), "state": "applied", "undo_available": True,
+                                "track": "Bass", "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied",
+                                "change_id": change_id, "before": copy.deepcopy(fixture.set)})
+        ids.append(ident)
+    fixture.publish("history", "focus")
+    return ids
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script}
+         "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
+         "variations": variations}
 
 
 def main() -> None:

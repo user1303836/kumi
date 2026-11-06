@@ -221,6 +221,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _transport(host, args, kwargs), {}
     if tool == "kumi_script":
         return _script(host, args, kwargs)
+    if tool == "kumi_variations":
+        return _variations(host, args, kwargs)
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -241,6 +243,60 @@ def _transport(host: Any, args: dict, kwargs: dict) -> dict | None:
     if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
         return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused to play.'}")
     return approve([f"Kumi: {one_line(text, LINE)}"], "kumi:playback:transport")
+
+
+# CC-24: what the plugin never does with takes, in words.
+VARIATIONS_REFUSED = {
+    "drop": "Kumi for Hermes doesn't drop takes: undo the ones you don't want with kumi_undo and their HISTORY ids.",
+    "extract": "Kumi for Hermes doesn't extract takes.",
+}
+
+
+def _variations(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    """CC-24: list is a read. make and change are asked with every take the runtime's preview drew, in its own words,
+    and the handler sends that draw's seed and digest, so the producer approves exactly the takes that are written.
+    keep is asked with each take's new name. drop and extract are never run here."""
+    action = args.get("action")
+    if action == "list":
+        return None, {}
+    if action in VARIATIONS_REFUSED:
+        return block(VARIATIONS_REFUSED[action]), {}
+    if action not in ("make", "change", "keep"):
+        return block("Kumi didn't run this: kumi_variations takes make, change, keep or list."), {}
+    asked = {key: value for key, value in args.items() if key != "preview"}
+    try:
+        answer = _ask(host, "variations", {**asked, "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't make any takes: {_reason(failure)}"), {}
+    if answer.get("state") != "preview":
+        return block(f"Kumi didn't make any takes: {answer.get('reason') or 'its runtime refused them.'}"), {}
+    takes = [take for take in answer.get("takes") or [] if isinstance(take, dict) and isinstance(take.get("take"), str)]
+    if not takes:
+        return block("Kumi didn't make any takes: its runtime drew none."), {}
+    named = answer.get("source")  # serve's label, its name already quoted ("“Bassline” on Bass")
+    source = one_line(named, 60) if isinstance(named, str) and named.strip() else "the source"
+    if action == "keep":
+        lines = [f"Kumi: keep {len(takes)} take{'s' if len(takes) != 1 else ''} of {source}, renamed",
+                 *(f"• {one_line(take['take'], 10)} → {quoted(take.get('name_after'), 80)}" for take in takes)]
+        return approve(lines, "kumi:write:clip", footer=FOOTER), {}
+    if not isinstance(answer.get("seed"), int) or not isinstance(answer.get("takes_digest"), str):
+        return block("Kumi didn't make any takes: its runtime didn't say how it drew them."), {}
+    verb = "make" if action == "make" else "rewrite"
+    lines = [f"Kumi: {verb} {len(takes)} take{'s' if len(takes) != 1 else ''} of {source}, each its own, never over it",
+             *(f"• {one_line(_take_line(take), STEP_LINE - 2)}" for take in takes)]
+    decision = approve(lines, "kumi:write:clip", footer=FOOTER)
+    if decision["action"] == "approve":
+        decision[_COMPACT] = [lines[0], "• " + "; ".join(
+            f"{one_line(take['take'], 10)} {one_line(take.get('direction') or 'a take', 80)}" for take in takes)]
+    return decision, {"seed": answer["seed"], "takes_digest": answer["takes_digest"]}
+
+
+def _take_line(take: dict) -> str:
+    """A drawn take in the runtime's words ("V3 (busier): …", its name and direction first), or by its name and
+    direction when the runtime gave no line."""
+    line = take.get("line")
+    return line if isinstance(line, str) and line.strip() else f"{take['take']} ({take.get('direction') or 'a take'})"
+
 
 
 def preview_timeout(hook_timeout: float | None) -> float:
