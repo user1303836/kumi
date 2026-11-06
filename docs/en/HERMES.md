@@ -90,8 +90,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - Kumi writes the notes as one change Hermes asks about.
 - "Play it" starts playback, and asks first; "Stop" stops it and never asks. Neither changes anything in the project
   but where play starts. REAPER plays from a bar or a beat, and Renoise from a sequence slot and line. In Live, Kumi
-  launches the Session clip it wrote or a scene, or plays the Arrangement from Live's own start marker. Kumi never
-  starts a play that would record.
+  launches a Session clip, such as the one it wrote or the one you've selected, or a scene, or plays the Arrangement
+  from Live's own start marker. Kumi never starts a play that would record.
 - "Make three variations of it: busier, sparser, and one with more swing." Hermes shows each take before you approve;
   each is written as a new clip (an item in REAPER, a pattern in Renoise), never over the original. At most 8 takes.
   Where there's no empty place for every take, Kumi refuses rather than make fewer. To drop a take, undo it.
@@ -236,6 +236,8 @@ run without asking there, and Kumi can't tell it from a chat.
   - Renoise: before a change that loads a sample, such as a sound from your library put in an instrument
     (`<Song> (Kumi copy <date>).xrns`). Kumi keeps a song's five newest copies and deletes older ones. A song over
     512 MB isn't copied.
+  - The change that kept a copy says so, with the copy's name. In Hermes Desktop, its HISTORY row reads "Before this,
+    Kumi kept a copy of the project as last saved, next to it: <file>".
 - **Mirelo,** only if you set it up: see [Integrations](#integrations-optional).
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
   track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by
