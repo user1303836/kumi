@@ -21,7 +21,7 @@ Hermes Desktop では、**スキルとツール → プラグイン** で Kumi �
 
 Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renoise でも）と頼むか、ターミナルで `hermes kumi setup --daw reaper` を実行します（`--daw` に指定できるのは `ableton`、`reaper`、`renoise` です。省略すると Kumi の設定の DAW 用で、変えていなければ Live です）。セットアップは 2 段階と任意の 3 段階目で、それぞれの前に Hermes が確認します。
 
-1. **Kumi のランタイム:** お使いのコンピューター向けの Kumi 公式リリース（26〜33 MB）を Kumi の GitHub リリースからダウンロードします。プラグインが固定している SHA-256 と照合し、このプロファイル用の Hermes のデータ内に展開します（82〜121 MB）。
+1. **Kumi のランタイム:** お使いのコンピューター向けの Kumi 公式リリース（27〜34 MB）を Kumi の GitHub リリースからダウンロードします。プラグインが固定している SHA-256 と照合し、このプロファイル用の Hermes のデータ内に展開します（85〜125 MB）。
 2. **DAW 用の Kumi の部品:** Live の Remote Script（Kumi Ears デバイスを含む）、REAPER の拡張機能、または Renoise のツールを、セットアップが示す正確な場所にインストールします。Live は先に終了してください。Live の起動中は Remote Script をインストールできません。REAPER と Renoise は開いたままでかまいません。終わったら再起動してください（Windows で REAPER の拡張機能を更新するときは、REAPER を終了してください）。
 3. **任意の ffmpeg:** すでにコンピューターに ffmpeg がある場合、MP3、FLAC などの圧縮音声を読むために Kumi がそれを使ってよいかを確認します。どちらを選んでもセットアップは完了します。使わない場合、Kumi が読めるのは WAV と AIFF だけです。
 
