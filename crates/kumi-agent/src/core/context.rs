@@ -28,6 +28,12 @@ pub struct HostPolicy {
     /// May drive the DAW's own menus and dialogs (Live's Hands). A plugin host never does: no step reaches them, and the
     /// integration doesn't offer them either.
     pub menus: bool,
+    /// The folder whose `variations/` keeps the variations tool's sets, and with it the plugin host's rules for takes
+    /// (CC-24): a preview that draws without writing, a dispatch held to the takes its preview drew, no take rewritten
+    /// after the producer edited it, and no place made for a take. None: standalone Kumi's sets, in its home, and its
+    /// own rules. A plugin host's is under its own state, so its takes' numbering and kept takes never mix with
+    /// standalone Kumi's on the same project (W1-e).
+    pub variations_home: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -85,15 +91,16 @@ impl ListeningPolicy {
 
 impl HostPolicy {
     pub fn standalone() -> Self {
-        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone, menus: true }
+        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone, menus: true, variations_home: None }
     }
 
-    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf) -> Self {
+    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf, variations_home: PathBuf) -> Self {
         Self {
             persist_identity: false,
             guards_undo: true,
             listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root },
             menus: false,
+            variations_home: Some(variations_home),
         }
     }
 }
