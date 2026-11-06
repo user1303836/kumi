@@ -32,6 +32,17 @@ impl Bridge {
         let doc = &self.document.as_ref().ok_or_else(|| Error::new(code::INTERNAL, "Document cache is absent"))?.value;
         let patterns = list(doc, "patterns")?;
         let beats = integer(doc, "beatsPerBar")?;
+        if session["overviewUnavailable"] == true {
+            session["patterns"] = patterns
+                .iter()
+                .enumerate()
+                .map(|(index, pattern)| {
+                    let uid = pattern["uid"].as_str().ok_or_else(|| Error::bad("Native document pattern identity is absent"))?;
+                    Ok(json!({"index":index,"patternId":uid,"name":pattern["name"],"noteCount":list(pattern,"notes")?.len()}))
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into();
+        }
         let rows = session["patterns"].as_array_mut().ok_or_else(|| Error::bad("Native pattern overview is malformed"))?;
         if rows.len() != patterns.len() {
             return Err(Error::new(code::CHANGED, "Native document and pattern overview differ; read again"));

@@ -22,6 +22,7 @@ pub struct State {
     pub gui_value: f64,
     pub opaque_device_state: String,
     pub drop_mutation_response: bool,
+    pub overview_unavailable: bool,
     pattern_notes: HashMap<String, Vec<Value>>,
     pub pattern_documents: HashMap<String, Value>,
     pub document_extra: Value,
@@ -56,6 +57,7 @@ impl Fake {
             gui_value: 0.5,
             opaque_device_state: "fixture-state".into(),
             drop_mutation_response: false,
+            overview_unavailable: false,
             pattern_notes: HashMap::new(),
             pattern_documents: HashMap::from([("03".into(), json!({"colour":"000009"}))]),
             document_extra: json!({}),
@@ -138,6 +140,9 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
         json!({"ok":true,"result":result})
     };
     match op {
+        "session.inspect" if state.overview_unavailable => {
+            json!({"ok":false,"code":"limit","error":"Project overview exceeds its bound","uncertain":false})
+        }
         "session.inspect" | "status" => json!({"ok":true,"result":state.session}),
         "api.describe" => metadata(state, json!({"protocol":PROTOCOL,"operations":["project.read","project.edit"]})),
         "device.state" => metadata(state, json!({"deviceStateHash":device_hash(state)})),

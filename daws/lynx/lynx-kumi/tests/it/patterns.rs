@@ -82,7 +82,12 @@ async fn new_pattern_notes_clone_and_metadata_are_owned_steps_with_revision_boun
     let patterns = bridge.read(&json!({"kind":"pattern"})).await.unwrap();
     assert_eq!(patterns["items"][1]["lengthTicks"], 1920);
     assert_eq!(session["patterns"][1]["noteCount"], 1);
-    apply(&mut bridge, "pattern.set", json!({"index":2,"lengthTicks":7680}), &mut records).await;
+    fake.state.lock().unwrap().overview_unavailable = true;
+    let patterns = bridge.read(&json!({"kind":"pattern","limit":1})).await.unwrap();
+    assert_eq!(patterns["total"], 3, "complete document supplies patterns when the overview is oversized");
+    assert_eq!(patterns["items"][0]["patternId"], document(&fake.state.lock().unwrap())["patterns"][0]["uid"]);
+    let set = apply(&mut bridge, "pattern.set", json!({"index":2,"lengthTicks":7680}), &mut records).await;
+    assert_eq!(set["applied"]["patternId"], baseline["patterns"][0]["patternId"]);
     let doc = document(&fake.state.lock().unwrap());
     assert_eq!(doc["playlist"][0][3], 7680);
     assert_eq!(doc["arrangements"][1]["clips"][0][3], 7680);

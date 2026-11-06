@@ -103,7 +103,9 @@ impl Bridge {
         if !(1..=200).contains(&limit) {
             return Err(Error::bad("limit must be from 1 to 200"));
         }
-        if session["overviewUnavailable"] == true && matches!(kind, "track" | "mixer" | "pattern") {
+        if session["overviewUnavailable"] == true
+            && (matches!(kind, "track" | "mixer") || (kind == "pattern" && (session["playing"] == true || session["recording"] == true)))
+        {
             return Err(Error::new(
                 code::FAILED,
                 "This project exceeds the bounded overview. Read kind document with args.path to inspect every native project field",

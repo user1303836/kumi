@@ -89,7 +89,7 @@ impl Bridge {
                 return Err(Error::bad("Project identity and native credentials are owned by the bridge"));
             }
         }
-        let session = self.session().await?;
+        let mut session = self.session().await?;
         check_epoch(params, &session)?;
         if params["epoch"].as_str().is_none() {
             return Err(Error::bad("A persistent change must name the epoch of its read"));
@@ -99,6 +99,9 @@ impl Bridge {
         }
         if session["playing"] == true || session["recording"] == true {
             return Err(Error::new(code::BUSY, "Stop playback and recording before editing through the native adapter"));
+        }
+        if crate::patterns::is_kind(&kind) && session["overviewUnavailable"] == true {
+            self.pattern_metadata(&mut session).await?;
         }
         validate_target(&kind, &input, &session)?;
         if kind == "pattern.replace_notes" {
@@ -239,7 +242,10 @@ impl Bridge {
         // disables targeted undo; it must not turn a known successful apply into an uncertain write.
         let fingerprint = if changed {
             match self.session().await {
-                Ok(inspected) if epoch(&inspected) == epoch_after => {
+                Ok(mut inspected) if epoch(&inspected) == epoch_after => {
+                    if self.journal.entries[index].pattern_index.is_some() && inspected["overviewUnavailable"] == true {
+                        let _ = self.pattern_metadata(&mut inspected).await;
+                    }
                     if let Some(pattern) = self.journal.entries[index].pattern_index {
                         native["index"] = pattern.into();
                         native["patternId"] = inspected["patterns"][pattern]["patternId"].clone();
