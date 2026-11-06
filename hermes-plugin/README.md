@@ -178,6 +178,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Writes outside its data:** setup may install Live's Remote Script with its Kumi Ears device, a REAPER extension or
   a Renoise tool, only at the locations you approve. Each Max for Live device you approve is written as a new file in
   Live's User Library (`User Library/Kumi/Audio Effects`); it stays there after an undo, and in any Set that uses it.
+  When a change in Live reaches its third step, or has a step that can lose material (a delete, clearing a range, or
+  moving a clip onto what's there), Kumi copies the Set as last saved beside it (`<Set>.backup-<date>.als`), once for
+  each saved version; an unsaved Set gets no copy.
 - **Processes:** Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on
   loopback only. They stop when the chat ends, when the plugin unloads or Hermes exits, or after 15 minutes idle (2
   hours while connected to your DAW for a chat); a job still running, such as a scan or a Mirelo generation, keeps
