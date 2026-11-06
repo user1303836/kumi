@@ -58,6 +58,41 @@ class Host:
         self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
+        # A chat's session id → the HISTORY ids of each change its kumi_change made, oldest first, in this Hermes
+        # process: what kumi_undo with no id undoes, whole (CC-3 amendment A2), never another chat's. With the rows
+        # this process saw undone, a second "undo that" reaches the change before (rgzm, #1088).
+        self._changes: dict[str, list[list[str]]] = {}
+        self._undone: set[str] = set()
+        self._changes_lock = threading.Lock()
+
+    def remember_change(self, kwargs: dict, answer: Any) -> None:
+        """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
+        make of takes) as its newest change, so "undo that" means it, never one before it."""
+        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial", "ran", "failed"):
+            return
+        session, ids = kwargs.get("session_id"), answer.get("history_ids")
+        if (isinstance(session, str) and session and isinstance(ids, list) and ids
+                and all(isinstance(each, str) and each for each in ids)):
+            with self._changes_lock:
+                self._changes[session] = [*self._changes.get(session, [])[1 - CHANGES_KEPT:], list(ids)]
+
+    def remember_undo(self, asked: dict, answer: Any) -> None:
+        """Note the rows an undo took back: the one row it named, or each row of a whole change its answer says."""
+        if not isinstance(answer, dict):
+            return
+        rows = answer.get("rows") if isinstance(answer.get("rows"), list) else []
+        undone = {row.get("history_id") for row in rows if isinstance(row, dict) and row.get("state") == "undone"}
+        if not rows and answer.get("state") == "undone":
+            undone = {asked.get("history_id")}
+        with self._changes_lock:
+            self._undone |= {each for each in undone if isinstance(each, str)}
+
+    def latest_change(self, kwargs: dict) -> str | None:
+        """A HISTORY id of this chat's newest change not yet undone (its last row), or None when it has none here."""
+        session = kwargs.get("session_id")
+        with self._changes_lock:
+            changes = self._changes.get(session, []) if isinstance(session, str) else []
+            return next((ids[-1] for ids in reversed(changes) if not set(ids) <= self._undone), None)
 
     def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
         """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
@@ -615,11 +650,14 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     item 7); that's unsure too."""
     live = host.live()
     try:
-        return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
+        answer = live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
+    if tool != "undo":  # every other write that made rows is the chat's newest change (CC-3 A2)
+        host.remember_change(kwargs, answer)
+    return answer
 
 
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -629,8 +667,43 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "change", change, kwargs)
 
 
+# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), and how many of a chat's
+# changes Kumi keeps for it.
+NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started, or it "
+                   "undid them all. kumi_history lists Kumi's changes; undo one by its id.")
+CHANGES_KEPT = 20
+
+
+def undo_target(host: Host, args: dict, kwargs: dict) -> tuple[dict | None, str | None]:
+    """What a kumi_undo call undoes: with a history_id, that row (or its whole change, with whole_change: true);
+    without one, this chat's newest change, whole (CC-3 amendment A2). The runtime's undo arguments, or a refusal."""
+    asked = {key: value for key, value in args.items() if key in ("history_id", "whole_change")}
+    if "history_id" in asked:
+        return asked, None
+    target = host.latest_change(kwargs)
+    if target is None:
+        return None, NOTHING_TO_UNDO
+    return {"history_id": target, "whole_change": True}, None
+
+
 def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
-    return _write(host, "undo", {key: value for key, value in args.items() if key != "preview"}, kwargs)
+    """An undo, as the producer approved it (CC-3, A2): the row or change the hook previewed. A whole change is sent with
+    the preview's rows digest (`expect_rows`), so the runtime refuses a set that changed since; and kumi_undo with no
+    id is refused when this chat's newest change is no longer the one approved."""
+    asked, refusal = undo_target(host, args, kwargs)
+    if refusal is not None:
+        return {"error": {"code": "nothing_to_undo", "reason": refusal}}
+    if asked.get("whole_change") is True:
+        call = kwargs.get("kumi_call")
+        approved = call.extra if isinstance(call, calls.Entry) else {}
+        if approved.get("history_id") != asked["history_id"] or not isinstance(approved.get("rows_digest"), str):
+            return {"state": "refused", "code": "stale",
+                    "reason": "Kumi didn't undo anything: what this chat would undo isn't what was approved (a newer "
+                              "change came since). Ask again."}
+        asked = {**asked, "expect_rows": approved["rows_digest"]}
+    answer = _write(host, "undo", asked, kwargs)
+    host.remember_undo(asked, answer)
+    return answer
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
