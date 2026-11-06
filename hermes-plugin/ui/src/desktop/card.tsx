@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 
 import { num, signed } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
-import { listenView, parseListen, referenceKey, roundWords, type ListenView } from '../shared/listen.ts'
+import { listenView, parseListen, referenceName, roundKey, roundWords, type ListenView } from '../shared/listen.ts'
 import type { KumiStore } from '../shared/store.ts'
 import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
 
@@ -218,10 +218,10 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
   const { rounds } = useKumi(store)
   const parsed = parseListen(result)
   if (!parsed) return fallback
-  const view = listenView(parsed, t)
+  const view = listenView(parsed, t, referenceName(parsed, rounds))
   // Which comparison with this reference this is, among those that arrived while the window was open: a mastering
   // pass's rounds, with how far each was from the reference. Nothing for one the window didn't see arrive.
-  const key = referenceKey(parsed)
+  const key = roundKey(parsed, rounds)
   const seen = key ? (rounds[key] ?? []) : []
   const index = seen.findIndex(round => round.id === parsed.artifact_id)
   const round = index < 0 ? undefined : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map(each => each.gaps), t)

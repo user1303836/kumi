@@ -181,6 +181,21 @@ test('each comparison with the same reference is its next round, counted once, a
     'Round 3 · loudness −4.1 → −1.6 → −0.4 LU · tilt −0.8 → −0.3 → −0.1 dB/oct · width −0.09 → −0.04 → −0.01'
   )
   assert.equal(listen.roundWords(1, [rounds[0].gaps]), undefined)
+  // From round 2 the listening skill compares against the copy Kumi kept of the reference (`compare_to:
+  // {"artifact_id"}`), which Kumi measures under the copy's own name (serve's artifact store: `<id>.wav`). Still this
+  // reference's rounds, under its own name; a kept copy this window never saw returned isn't.
+  const againstCopy = (lufs, artifact, copy) => {
+    const each = mix(lufs, -3.1, 0.3, artifact)
+    return { ...each, compare: { ...each.compare, artifact_id: copy, metrics: { ...each.compare.metrics, file: `${copy}.wav` } } }
+  }
+  kumi.noteListen(againstCopy(-8.7, 'a-4', 'r-a-1'))
+  kumi.noteListen(againstCopy(-8.7, 'z-1', 'r-unseen'))
+  const key = listen.referenceKey(mix(-12.7, -3.9, 0.22, 'a-1'))
+  const seen = kumi.get().rounds
+  assert.deepEqual(seen[key].map(round => round.id), ['a-1', 'a-2', 'a-3', 'a-4'])
+  assert.equal(listen.roundKey(againstCopy(-8.7, 'a-4', 'r-a-1'), seen), key)
+  assert.equal(listen.listenView(againstCopy(-8.7, 'a-4', 'r-a-1'), undefined, listen.referenceName(againstCopy(-8.7, 'a-4', 'r-a-1'), seen)).referenceTitle, 'Reference.wav')
+  assert.deepEqual(seen[listen.roundKey(againstCopy(-8.7, 'z-1', 'r-unseen'), seen)].map(round => round.id), ['z-1'])
 })
 
 test("a model's reading shows only when given, under a plain heading with the model it reports", () => {

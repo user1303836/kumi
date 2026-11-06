@@ -1904,11 +1904,34 @@
     return value;
   }
   var finite = (value) => typeof value === "number" && Number.isFinite(value);
+  function fileName(analysis, fallback) {
+    const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+    return clean(file || fallback, 60);
+  }
   function referenceKey(result) {
     const reference = result.compare?.metrics;
     if (!reference) return null;
     const lufs = reference.loudness?.integratedLufs;
     return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+  }
+  function keptBy(result, rounds) {
+    const kept = result.compare?.artifact_id;
+    if (typeof kept !== "string" || !kept) return null;
+    for (const [key, each] of Object.entries(rounds)) {
+      const round = each.find((other) => other.kept === kept);
+      if (round) return [key, round];
+    }
+    return null;
+  }
+  function roundKey(result, rounds) {
+    return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+  }
+  function referenceName(result, rounds) {
+    return keptBy(result, rounds)?.[1].name || void 0;
+  }
+  function roundOf(result, id, rounds) {
+    const kept = result.compare?.artifact_id;
+    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
   }
   function gapsOf(result) {
     const mine = result.metrics ?? {};
@@ -2069,15 +2092,16 @@
       this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
     }
     /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
-     *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+     *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+     *  twice (both signals for one call) counts once. */
     noteListen(result) {
       const parsed = parseListen(result);
-      const key = parsed ? referenceKey(parsed) : null;
+      const key = parsed ? roundKey(parsed, this.state.rounds) : null;
       const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
       if (!parsed || !key || !id) return;
       const before = this.state.rounds[key] ?? [];
       if (before.some((round) => round.id === id)) return;
-      const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) };
+      const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
       const keys = Object.keys(rounds);
       if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
       this.set({ rounds });

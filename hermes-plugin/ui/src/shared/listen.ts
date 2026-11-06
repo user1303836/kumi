@@ -102,7 +102,9 @@ function row(label: string, mine: unknown, reference: unknown, show: (value: num
   return out
 }
 
-export function listenView(result: ListenResult, t: Translate = english): ListenView {
+/** `referenceName`: the name the reference shows under when this window knows a better one than the result gives
+ *  (`referenceName()`: a kept copy's, which Kumi measures under its own `<id>.wav`). */
+export function listenView(result: ListenResult, t: Translate = english, referenceName?: string): ListenView {
   const mine = result.metrics ?? {}
   const compare = result.compare
   const reference = compare?.metrics
@@ -151,7 +153,7 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
     captureNote: typeof result.capture?.note === 'string' && result.capture.note.trim() ? clean(result.capture.note, 200) : undefined
   }
   if (compare) {
-    view.referenceTitle = fileName(reference, t('listen.reference'))
+    view.referenceTitle = referenceName ? clean(referenceName, 60) : fileName(reference, t('listen.reference'))
     view.referenceId = typeof compare.artifact_id === 'string' ? compare.artifact_id : undefined
   }
   const interpretation = result.interpretation
@@ -193,6 +195,46 @@ export function referenceKey(result: ListenResult): string | null {
   if (!reference) return null
   const lufs = reference.loudness?.integratedLufs
   return [reference.file ?? '', finite(lufs) ? lufs.toFixed(1) : '', finite(reference.seconds) ? reference.seconds.toFixed(1) : ''].join('|')
+}
+
+/** One comparison of a mastering pass's rounds: its own audio's id, its gaps, the copy of the reference Kumi kept for
+ *  it (`compare.artifact_id`), and the name that reference shows under. */
+export interface Round {
+  id: string
+  gaps: Gaps
+  kept: string | null
+  name: string
+}
+
+// From round 2 on, the listening skill compares against the reference's kept copy (`compare_to: {"artifact_id"}`),
+// which Kumi measures under the copy's own name (`<id>.wav`) and returns under the same id: the earlier round that kept
+// that copy, with the key its rounds go under.
+function keptBy(result: ListenResult, rounds: Record<string, Round[]>): [string, Round] | null {
+  const kept = result.compare?.artifact_id
+  if (typeof kept !== 'string' || !kept) return null
+  for (const [key, each] of Object.entries(rounds)) {
+    const round = each.find(other => other.kept === kept)
+    if (round) return [key, round]
+  }
+  return null
+}
+
+/** The key a comparison's rounds go under: that of the round which kept its reference's copy, when this window saw
+ *  it, else `referenceKey`. Null without a reference. */
+export function roundKey(result: ListenResult, rounds: Record<string, Round[]>): string | null {
+  return keptBy(result, rounds)?.[0] ?? referenceKey(result)
+}
+
+/** The name a comparison's reference shows under when it was compared by its kept copy: the name the round that kept
+ *  the copy showed. Undefined when this window saw no such round. */
+export function referenceName(result: ListenResult, rounds: Record<string, Round[]>): string | undefined {
+  return keptBy(result, rounds)?.[1].name || undefined
+}
+
+/** A comparison as a round, `rounds` being those this window saw before it. */
+export function roundOf(result: ListenResult, id: string, rounds: Record<string, Round[]>): Round {
+  const kept = result.compare?.artifact_id
+  return { id, gaps: gapsOf(result), kept: typeof kept === 'string' && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, '') }
 }
 
 /** A comparison's gaps to its reference. */

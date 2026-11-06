@@ -1252,7 +1252,7 @@ function row(label, mine, reference, show, delta, deltaShow) {
   }
   return out;
 }
-function listenView(result, t = english) {
+function listenView(result, t = english, referenceName2) {
   const mine = result.metrics ?? {};
   const compare = result.compare;
   const reference = compare?.metrics;
@@ -1297,7 +1297,7 @@ function listenView(result, t = english) {
     captureNote: typeof result.capture?.note === "string" && result.capture.note.trim() ? clean(result.capture.note, 200) : void 0
   };
   if (compare) {
-    view.referenceTitle = fileName(reference, t("listen.reference"));
+    view.referenceTitle = referenceName2 ? clean(referenceName2, 60) : fileName(reference, t("listen.reference"));
     view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
   }
   const interpretation = result.interpretation;
@@ -1331,6 +1331,25 @@ function referenceKey(result) {
   if (!reference) return null;
   const lufs = reference.loudness?.integratedLufs;
   return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+}
+function keptBy(result, rounds) {
+  const kept = result.compare?.artifact_id;
+  if (typeof kept !== "string" || !kept) return null;
+  for (const [key, each] of Object.entries(rounds)) {
+    const round = each.find((other) => other.kept === kept);
+    if (round) return [key, round];
+  }
+  return null;
+}
+function roundKey(result, rounds) {
+  return keptBy(result, rounds)?.[0] ?? referenceKey(result);
+}
+function referenceName(result, rounds) {
+  return keptBy(result, rounds)?.[1].name || void 0;
+}
+function roundOf(result, id, rounds) {
+  const kept = result.compare?.artifact_id;
+  return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
 }
 function gapsOf(result) {
   const mine = result.metrics ?? {};
@@ -1505,15 +1524,16 @@ var KumiStore = class {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
   }
   /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
-   *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+   *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+   *  twice (both signals for one call) counts once. */
   noteListen(result) {
     const parsed = parseListen(result);
-    const key = parsed ? referenceKey(parsed) : null;
+    const key = parsed ? roundKey(parsed, this.state.rounds) : null;
     const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
     if (!parsed || !key || !id) return;
     const before = this.state.rounds[key] ?? [];
     if (before.some((round) => round.id === id)) return;
-    const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) };
+    const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
     const keys = Object.keys(rounds);
     if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
     this.set({ rounds });
@@ -1936,8 +1956,8 @@ function ListenResultCard({ result, audition, fallback, store }) {
   const { rounds } = useKumi(store);
   const parsed = parseListen(result);
   if (!parsed) return fallback;
-  const view = listenView(parsed, t);
-  const key = referenceKey(parsed);
+  const view = listenView(parsed, t, referenceName(parsed, rounds));
+  const key = roundKey(parsed, rounds);
   const seen = key ? rounds[key] ?? [] : [];
   const index = seen.findIndex((round2) => round2.id === parsed.artifact_id);
   const round = index < 0 ? void 0 : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map((each) => each.gaps), t);
