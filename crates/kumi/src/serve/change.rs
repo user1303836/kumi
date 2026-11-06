@@ -1198,20 +1198,22 @@ mod tests {
     #[test]
     fn every_source_of_a_twelve_pad_batch_stays_with_its_own_history_row() {
         let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        super::super::ctx::make_private_dir(&state).unwrap();
         let rows = [
             row("kept"),
             Row { id: "h-g-c2".into(), label: "c2".into(), ..row("applied") },
             Row { id: "h-g-audit".into(), label: "audit".into(), ..row("unsure") },
         ];
-        std::fs::write(dir.path().join("history.json"), serde_json::to_vec(&json!({"items": &rows})).unwrap()).unwrap();
-        let history = History::new(dir.path(), "g".into());
-        let snapshots = super::super::snapshots::Snapshots::new(dir.path().to_path_buf());
+        std::fs::write(state.join("history.json"), serde_json::to_vec(&json!({"items": &rows})).unwrap()).unwrap();
+        let history = History::new(&state, "g".into());
+        let snapshots = super::super::snapshots::Snapshots::new(state.clone());
         let sources: Vec<Value> =
             (1..=13).map(|step| json!({"step":step, "file":format!("Pad {}.wav", step + 35), "artifact_id":format!("a-{step}")})).collect();
         let done: Vec<Value> = (1..=13).map(|step| json!({"step":step, "change":if step <= 12 { "c1" } else { "c2" }})).collect();
         record_sources(&history, &rows, &json!(done), &sources, &snapshots);
         snapshots.flush();
-        let saved = History::new(dir.path(), "next".into());
+        let saved = History::new(&state, "next".into());
         assert_eq!(saved.row("h-g-c1").unwrap().sources.as_deref(), Some(&sources[..12]), "no pad's source is overwritten by a later pad");
         assert_eq!(saved.row("h-g-c2").unwrap().sources.as_deref(), Some(&sources[12..]), "another change keeps only its own source");
         assert_eq!(
