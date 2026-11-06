@@ -20,7 +20,8 @@ same code. Under Hermes's YOLO or `approvals.mode: off`, a clean chat's scripts 
 tainted chat's are refused, since nobody reviews them.
 
 The code is saved before anyone is asked, to `<plugin data>/state/scripts/<sha256>.py|.lua` (0600, never
-overwritten), where the approval names it and Desktop's pane reads it (agent-i's route re-hashes it).
+overwritten), where the approval names it and Desktop's pane reads it (agent-i's route re-hashes it). A Max for Live
+device's canonical spec is kept the same way, as `<sha256>.device.json` (CC-22, `devices.py`).
 """
 from __future__ import annotations
 
@@ -39,7 +40,8 @@ log = logging.getLogger(__name__)
 # CC-19 r4/r8: one cap everywhere (serve's preview refuses past it too).
 MOST_LINES = 400
 MOST_BYTES = 32 * 1024
-LANGUAGES = {"python": ".py", "lua": ".lua"}
+# A device's saved file is its canonical spec (CC-22's 22-r3), named by that spec's SHA-256 like a script's code.
+LANGUAGES = {"python": ".py", "lua": ".lua", "device": ".device.json"}
 LANGUAGE_NAMES = {"python": "Python", "lua": "Lua"}
 # What each DAW runs: Live, Python in its Remote Script; REAPER and Renoise, Lua.
 DAW_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
@@ -68,13 +70,13 @@ TRUST_FILE = "script-trust.json"
 CODE_FOLDER = ("state", "scripts")
 
 
-def asked_because(why: str) -> str:
-    """The approval's line saying why every script in this chat is asked (r5)."""
+def asked_because(why: str, what: str = "script") -> str:
+    """The approval's line saying why every script (or device, CC-22) in this chat is asked (r5)."""
     if why == MESSAGING:
-        return "This is a messaging chat, so each script is asked."
+        return f"This is a messaging chat, so each {what} is asked."
     if why in (NO_RECORD, UNNAMED):
-        return f"{why}, so each script is asked."
-    return f"This chat read outside content ({why}), so each script is asked."
+        return f"{why}, so each {what} is asked."
+    return f"This chat read outside content ({why}), so each {what} is asked."
 
 
 def refused_because(why: str) -> str:

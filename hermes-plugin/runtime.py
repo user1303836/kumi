@@ -39,7 +39,8 @@ RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history
 # The runtime's tools the plugin calls (C2), and the only ones Runtime.call sends: the pinned release must serve each
 # (`serve_operations` in kumi_release.json, read from that runtime when it's pinned), or a call fails for every producer.
 OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "change", "undo", "history", "listen",
-                        "sounds", "library", "job", "generate", "transport", "script", "variations"})
+                        "sounds", "library", "job", "generate", "transport", "script", "variations",
+                        "device"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -99,18 +100,22 @@ class NotSent(Unavailable):
 
 
 class Refused(Exception):
-    """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`)."""
+    """A tool call `kumi serve` answered with an error: it never reached the DAW (W1-REGISTRY: `OpError`). A device
+    spec's refusal (CC-22) also lists the builder's findings, which the model needs to fix it."""
 
-    def __init__(self, code: str, reason: str, owner: dict | None = None):
+    def __init__(self, code: str, reason: str, owner: dict | None = None, findings: list | None = None):
         super().__init__(reason)
         self.code = code
         self.reason = reason
         self.owner = owner
+        self.findings = findings
 
     def as_json(self) -> dict:
         error = {"code": self.code, "reason": self.reason}
         if self.owner:
             error["owner"] = self.owner
+        if self.findings:
+            error["findings"] = self.findings
         return {"error": error}
 
 
@@ -653,7 +658,8 @@ class Runtime:
         if result.get("isError"):
             error = content.get("error") if isinstance(content.get("error"), dict) else {}
             raise Refused(str(error.get("code") or "failed"), str(error.get("reason") or f"Kumi's {tool} failed."),
-                          error.get("owner") if isinstance(error.get("owner"), dict) else None)
+                          error.get("owner") if isinstance(error.get("owner"), dict) else None,
+                          error.get("findings") if isinstance(error.get("findings"), list) else None)
         return content
 
     def close_if_idle(self, idle_after: float, now: float) -> bool:
