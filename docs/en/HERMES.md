@@ -64,15 +64,25 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 ### Master your mix like a reference track
 
 "Listen to my mix and master it like this reference track."
-- **Listen:** in REAPER and Renoise, Kumi renders the part of your mix you approve and measures it; each listen asks
-  first. In Live, bounce your mix to a file in one of the sample folders you listed and name it: Kumi doesn't listen
-  to Live's tracks yet.
+- **Listen:** in Live, REAPER and Renoise, Kumi listens to the part of your mix you approve and measures it; each
+  listen asks first. In Live it hears each track after its devices and before its fader, through the Kumi Ears device
+  setup installs (it needs Max for Live): Main's devices, its limiter included, are heard; Main's fader isn't, so Kumi
+  reaches a target with Main's devices, never its fader.
 - **Compare:** Kumi measures your mix beside the reference file: loudness, true peak, spectral balance, stereo width
-  and dynamics.
+  and dynamics. Wide and opposite-polarity stereo are measured accurately, spectral balance and crest factor included.
+  A mono or silent file has no stereo width, and short audio may have no loudness or loudness range: Kumi shows them
+  as unavailable rather than guess.
+- **Part of a reference, or several:** "Compare it with the reference from 1:00 for 30 seconds" (60 seconds at most,
+  inside the file), or with up to five references at once. Kumi measures them, weighted equally, into one target with
+  its spread, and says how many of the references each measure comes from. A measure a reference can't give is left
+  out of that measure, with the reason: a band above what its sample rate holds, say, or stereo width from a mono
+  file. The spread includes minimum tolerances; it isn't a confidence. There's no single "better" score, no averaged
+  audio and no true-peak target, and Kumi still proposes the mastering moves for you to approve. An excerpt Kumi keeps
+  plays from its own start.
 - **Master:** it proposes mastering moves on the master track (EQ, glue compression, a limiter) as one change Hermes
   asks about.
-- **Repeat:** it listens again (in Live, bounce again) and compares, for at most three rounds. Each round's change is
-  in HISTORY, and you can undo it.
+- **Repeat:** it listens again and compares, for at most three rounds. Each round's change is in HISTORY, and you can
+  undo it.
 
 ### Write a beat or a bassline
 
@@ -97,7 +107,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   "punchy"). A tempo matches that tempo or half or double time, and a key the same key, its relative major or minor,
   or a one-shot's root note; the answer says which, and nothing is transposed. A sound with no indexed tempo or key
   isn't found by that filter. Artist and genre words match only names and folders: Kumi doesn't recognise genres or
-  artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage.
+  artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage. In Hermes
+  Desktop, the map's list shows each sound's indexed values and why it matched.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change Hermes asks about. "Put it on a new track" puts it in a new Simpler
   in Live.
@@ -202,15 +213,19 @@ run without asking there, and Kumi can't tell it from a chat.
   the fallback providers Hermes is set to try for that task. Retries and fallbacks can add time and token cost.
 - **Audio stays here:** Kumi measures audio on your computer and sends none of it to a model. In a messaging app
   (Telegram, Discord…), a sound you ask Hermes to send you arrives there as an attachment, through that app.
-- **Listening in REAPER and Renoise:**
-  - **Approval and window:** it asks first and renders only the window you approve, 60 seconds at most, with the DAW
-    stopped. Kumi won't stop playback for you.
+- **Listening to a track or the mix:**
+  - **Approval and window:** it asks first and listens only to the window you approve, 60 seconds at most (in Live,
+    256 beats at most, in the Arrangement), with the DAW stopped. Kumi won't stop playback for you.
   - **Your project:** the render's temporary transport, routing and device settings are put back after. REAPER may
     show the project as modified after a listen, since only saving clears that flag; Kumi never saves.
   - **Renoise's tempo:** rendering can change its BPM and lines per beat. Kumi puts them back only if they're still
     what the render left; if they're different, it leaves both as they are and says it couldn't restore the tempo.
   - **The audio:** the DAW renders into the listening folder of Kumi's part in that DAW; Kumi copies that one file into
     its own data and measures it there.
+  - **Live:** Kumi captures the window through Kumi Ears, with Live stopped and not recording, and removes the device
+    after; Detail View then shows the clip you had open again. Live may show the Set as modified, and its own Undo
+    history holds the listen's temporary device steps: pressing Undo in Live can bring Kumi Ears back. Those steps
+    aren't changes in Kumi's HISTORY.
 - **Scripts** run with your DAW's access to your computer: what one reads, writes or sends follows its code, which you
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
@@ -226,11 +241,10 @@ run without asking there, and Kumi can't tell it from a chat.
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
-- In Live, Kumi doesn't listen to a track or the mix yet: asked to, it says so and plays nothing. In REAPER and
-  Renoise it listens to the window you approve, up to 60 seconds. In every DAW it measures audio files, library
-  sounds and Kumi's own results.
-- Kumi reads only the open project, the audio files in the sample folders you list, its renders of the windows you
-  approve, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
+- Kumi listens to the window you approve, up to 60 seconds (in Live, 256 beats at most, in the Arrangement). In every
+  DAW it measures audio files, library sounds and Kumi's own results.
+- Kumi reads only the open project, the audio files in the sample folders you list, its renders and captures of the
+  windows you approve, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
   (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
@@ -326,8 +340,11 @@ those samples.
 - REAPER isn't answering (a change comes back "unsure", or Kumi's status says a dialog is probably open): a REAPER
   window is waiting for you, such as the evaluation reminder or the audio device question. Close it in REAPER, then
   ask again.
-- A listen in REAPER or Renoise is refused because Kumi's part there is older: run setup again, which updates it,
-  then restart the DAW.
+- A listen is refused because Kumi's part in your DAW is older: run setup again, which updates it, then restart the
+  DAW.
+- A listen in Live says Kumi Ears is missing or unavailable: it needs Max for Live. Run setup again; listening never
+  installs it.
+- A listen in Live says "Live is not following the Arrangement": press Back to Arrangement in Live, then ask again.
 - A listen asks you to stop playback, or Renoise "is not ready to render": stop playback and recording, turn off
   Renoise's Edit Mode, and wait for its tempo scan to finish. Kumi won't stop playback or recording for you.
 - "Play it" is refused while your DAW records or its record is on: Kumi never starts a play that would record. Turn
