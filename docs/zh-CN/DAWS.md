@@ -199,5 +199,5 @@ M4 的首个预览只在 M3 的16种修改之外添加 loop_range。startBeats �
 
 另外只添加 Region Rename（region_rename {ref,name}）和 Region Loop（region_loop {ref,loop}），共19种修改。必须事先只选中目标区域并显示 Inspector 与 Mixer。Kumi 完整检查工程、轨道、区域和 Inspector 事实后，只写入名称或 Loop 复选框；不会改变选择、发送按键、操作 Logic 原生撤销或切换面板。未知、重复、替换或已被制作者更改的事实都会拒绝写入或恢复，discard 不能绕过检查。重命名后须重新读取引用；普通区域读取的 looped 不能证明 Inspector Loop 的值。完整原始证据只保留在主机日志中，公开响应仅含名称、Loop 值和严格验证的恢复能力。证据缺失的已确认修改保留为 Kept 并提供手动操作说明，默认撤销不会跳到更早修改；不确定写入不会重发。界面观测完全相同的替换仍是身份限制。这不代表其他 M4 修改、工程保存或新的实机验收。
 
-- macOS 上可读取现有用户和系统 Logic／GarageBand 音色文件夹，以及明确批准的文件夹。支持 CAF、插件／通道条设置、EXS 和作为单个预设的 `.patch` 包；包内文件变更会使缓存失效。指定批准文件夹白名单后，不进行自动发现。
+- macOS 上可读取现有用户和系统 Logic／Audio 音色文件夹，以及明确批准的文件夹。支持 CAF、插件／通道条设置、EXS 和作为单个预设的 `.patch` 包；包内文件变更会使缓存失效。指定批准文件夹白名单后，不进行自动发现。
 - `find_sounds` 和 `find_presets` 无需打开 Logic 即可返回本地路径；不向工程加载预设、不操作原生 Loop Browser，也不解析最近工程偏好设置。
