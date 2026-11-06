@@ -72,7 +72,7 @@ fn after_restoration(mut error: RuntimeError, marked_modified: bool) -> RuntimeE
     match &mut error {
         RuntimeError::Hear(HearFailure::Unsure { code, restored, marked_modified: marked, .. }) => {
             // A later matching snapshot cannot erase the native restorer's explicit failure.
-            *restored = native_tempo_failure(*code, Some(DawId::Renoise)).is_none();
+            *restored = native_restore_failure(*code, Some(DawId::Renoise)).is_none();
             *marked = marked_modified;
         }
         RuntimeError::Hear(HearFailure::Refused { marked_modified: marked, .. }) => *marked = marked_modified,
@@ -82,7 +82,7 @@ fn after_restoration(mut error: RuntimeError, marked_modified: bool) -> RuntimeE
     error
 }
 
-fn native_tempo_failure(code: Option<&str>, daw: Option<DawId>) -> Option<(&'static str, &'static str)> {
+fn native_restore_failure(code: Option<&str>, daw: Option<DawId>) -> Option<(&'static str, &'static str)> {
     if daw != Some(DawId::Renoise) {
         return None;
     }
@@ -96,15 +96,26 @@ fn native_tempo_failure(code: Option<&str>, daw: Option<DawId>) -> Option<(&'sta
             "Renoise's BPM/LPB pair could not be attributed to this render and was left unchanged. Observe again.",
         )),
         Some("tempo_restore_failed") => Some(("tempo_restore_failed", "Renoise could not verify its BPM/LPB restoration. Observe again.")),
+        Some("cursor_restore_state_changed") => Some((
+            "cursor_restore_state_changed",
+            "Renoise's selection, follow-player setting, or track layout changed; restoration was not attempted. Observe again.",
+        )),
+        Some("cursor_restore_ownership_uncertain") => Some((
+            "cursor_restore_ownership_uncertain",
+            "Renoise's edit position could not be attributed to this render and was left unchanged. Observe again.",
+        )),
+        Some("cursor_restore_failed") => {
+            Some(("cursor_restore_failed", "Renoise could not verify its edit position and selection restoration. Observe again."))
+        }
         _ => None,
     }
 }
 
 /// Keep the native cause even when the independent full-state comparison also fails.
 /// Native prose and unrecognized codes never cross this boundary.
-fn keep_native_tempo_failure(mut error: RuntimeError, native: Option<&str>, daw: Option<DawId>) -> RuntimeError {
+fn keep_native_restore_failure(mut error: RuntimeError, native: Option<&str>, daw: Option<DawId>) -> RuntimeError {
     if let RuntimeError::Hear(HearFailure::Unsure { code, reason, restored, .. }) = &mut error {
-        if let Some((known, message)) = native_tempo_failure(native, daw) {
+        if let Some((known, message)) = native_restore_failure(native, daw) {
             *code = Some(known);
             *restored = false;
             reason.clear();
@@ -117,7 +128,7 @@ fn keep_native_tempo_failure(mut error: RuntimeError, native: Option<&str>, daw:
 /// Native error text can contain cache paths and producer-controlled strings. Only its typed
 /// code crosses the restricted boundary; standalone keeps its detailed bridge diagnostics.
 fn native_hear_refused(code: Option<&str>, fallback: &'static str, daw: Option<DawId>) -> RuntimeError {
-    if let Some((code, reason)) = native_tempo_failure(code, daw) {
+    if let Some((code, reason)) = native_restore_failure(code, daw) {
         return HearFailure::Unsure { code: Some(code), reason: reason.into(), restored: false, marked_modified: false }.into();
     }
     if code == Some("uncertain") {
@@ -2933,7 +2944,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     Ok(Err(refused)) => refused.code.as_deref(),
                     _ => None,
                 };
-                return Err(keep_native_tempo_failure(
+                return Err(keep_native_restore_failure(
                     HearFailure::Unsure {
                         code: None,
                         reason: "The render start could not be resolved; its effects and restoration are unknown. Its staging file may remain in the owning Kumi listening cache. Observe again.".into(),
@@ -2964,7 +2975,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 if let Some(done) = observed.filter(|done| matches!(done["state"].as_str(), Some("done" | "failed" | "cancelled"))) {
                     self.restricted_discard(&done, &scratch, quarantine_root).await;
                     if let Ok(marked_modified) = self.restricted_restore(&before).await {
-                        return Err(keep_native_tempo_failure(
+                        return Err(keep_native_restore_failure(
                             HearFailure::Unsure {
                                 code: None,
                                 reason: "The render could not be observed normally; a later read-back confirmed restoration.".into(),
@@ -2976,7 +2987,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                             self.renderer.profile().id,
                         ));
                     }
-                    error = keep_native_tempo_failure(error, done["code"].as_str(), self.renderer.profile().id);
+                    error = keep_native_restore_failure(error, done["code"].as_str(), self.renderer.profile().id);
                 } else {
                     self.renderer.tell_app("The render's terminal state remains unknown. Its per-call staging file may remain in the owning Kumi listening cache; no cache sweep was performed.");
                     if let RuntimeError::Hear(HearFailure::Unsure { reason, .. }) = &mut error {
@@ -3015,7 +3026,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             .restricted_restore(&before)
             .await
             .and_then(|marked_modified| {
-                if native_tempo_failure(done["code"].as_str(), self.renderer.profile().id).is_some() {
+                if native_restore_failure(done["code"].as_str(), self.renderer.profile().id).is_some() {
                     Err(after_restoration(
                         native_hear_refused(done["code"].as_str(), "render_failed", self.renderer.profile().id),
                         marked_modified,
@@ -3024,7 +3035,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     Ok(marked_modified)
                 }
             })
-            .map_err(|error| keep_native_tempo_failure(error, done["code"].as_str(), self.renderer.profile().id));
+            .map_err(|error| keep_native_restore_failure(error, done["code"].as_str(), self.renderer.profile().id));
         if restoration.is_err() || cancelled || original.is_cancelled() || done["state"] == "cancelled" {
             self.restricted_discard(&done, &scratch, quarantine_root).await;
             let marked_modified = restoration?;
@@ -3458,11 +3469,15 @@ mod tests {
     #[test]
     fn a_matching_later_snapshot_does_not_override_native_restoration_failure() {
         use super::{after_restoration, native_hear_refused, DawId, HearFailure, RuntimeError};
-        let error = native_hear_refused(Some("tempo_restore_failed"), "render_failed", Some(DawId::Renoise));
-        assert!(matches!(
-            after_restoration(error, false),
-            RuntimeError::Hear(HearFailure::Unsure { code: Some("tempo_restore_failed"), restored: false, .. })
-        ));
+        for native in
+            ["tempo_restore_failed", "cursor_restore_failed", "cursor_restore_ownership_uncertain", "cursor_restore_state_changed"]
+        {
+            let error = native_hear_refused(Some(native), "render_failed", Some(DawId::Renoise));
+            assert!(matches!(
+                after_restoration(error, false),
+                RuntimeError::Hear(HearFailure::Unsure { code: Some(code), restored: false, .. }) if code == native
+            ));
+        }
     }
 
     #[test]
@@ -3496,13 +3511,20 @@ mod tests {
             }
         }
         assert!(!start_refused_before_mutation(Some(DawId::Renoise), Some("failed")));
-        for code in ["tempo_restore_state_changed", "tempo_restore_ownership_uncertain", "tempo_restore_failed"] {
+        for code in [
+            "tempo_restore_state_changed",
+            "tempo_restore_ownership_uncertain",
+            "tempo_restore_failed",
+            "cursor_restore_state_changed",
+            "cursor_restore_ownership_uncertain",
+            "cursor_restore_failed",
+        ] {
             assert!(
                 matches!(
                     native_hear_refused(Some(code), "render_failed", Some(DawId::Renoise)),
                     RuntimeError::Hear(HearFailure::Unsure { code: Some(known), restored: false, .. }) if known == code
                 ),
-                "a tempo restoration failure is uncertainty, not a safe refusal"
+                "a native restoration failure is uncertainty, not a safe refusal"
             );
             assert!(
                 matches!(

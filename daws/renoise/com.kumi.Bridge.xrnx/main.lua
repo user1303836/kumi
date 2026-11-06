@@ -216,6 +216,7 @@ end)
 hook(tool.app_release_document_observable, "release_document", function() call_payload("on_release_document") end)
 hook(tool.app_will_save_document_observable, "will_save", function() call_payload("on_will_save") end)
 hook(tool.app_saved_document_observable, "saved", function() call_payload("on_saved") end)
+hook(tool.app_idle_observable, "idle", function() call_payload("on_idle") end)
 
 if not tool:has_timer(tick) then tool:add_timer(tick, TICK_MS) end
 guard("start", start)()
