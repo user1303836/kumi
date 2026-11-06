@@ -10,9 +10,10 @@ use serde_json::{json, Value};
 
 use super::gen::MAX_VOICES;
 use super::patch::catalog::catalog;
-use super::patch::notation::MOST_BOXES;
+use super::patch::notation::{parse, Notation, What, MOST_BOXES};
 use super::patch::reference::atoms;
 use super::patch::{NoFiles, Patcher};
+use super::spec::PatchSpec;
 
 const MOST_CORDS: usize = 16_384;
 const MOST_WORK: usize = 4 * 1024 * 1024;
@@ -22,8 +23,39 @@ fn error(reason: &str) -> String {
     format!("voices: {reason}; use voices: 1 or keep the voice graph local to its MIDI input and audio output.")
 }
 
+/// Names the notation builder itself assigned, identified by their exact path,
+/// box ID and source name. This entry is for freshly generated patches only;
+/// arbitrary scripting names and Live parameters remain unsupported.
+pub(crate) fn instrument_from_patch(document: Value, voices: u32, spec: &PatchSpec) -> Result<Value, String> {
+    if voices == 1 {
+        return Ok(document);
+    }
+    fn names(notation: &Notation, path: &str, controls: &[&str], owned: &mut HashMap<String, String>) {
+        for (index, item) in notation.boxes.iter().enumerate() {
+            let path = format!("{path}obj-{}", index + 1);
+            if let Some(name) = item.name.as_ref().filter(|name| !controls.contains(&name.as_str())) {
+                owned.insert(path.clone(), name.clone());
+            }
+            if let What::Patcher { inner, .. } = &item.what {
+                // A nested patcher's notation has no outside face controls.
+                names(inner, &format!("{path}/"), &[], owned);
+            }
+        }
+    }
+    let (notation, _) = parse(&spec.patch);
+    let mut owned = HashMap::new();
+    let controls = spec.controls.iter().map(|control| control.name()).collect::<Vec<_>>();
+    names(&notation, "", &controls, &mut owned);
+    instrument_with_names(document, voices, &owned)
+}
+
+#[cfg(test)]
+fn instrument(document: Value, voices: u32) -> Result<Value, String> {
+    instrument_with_names(document, voices, &HashMap::new())
+}
+
 /// One voice is exactly the original document. More voices share the face and guarded output, but no user state.
-pub(crate) fn instrument(mut document: Value, voices: u32) -> Result<Value, String> {
+fn instrument_with_names(mut document: Value, voices: u32, owned: &HashMap<String, String>) -> Result<Value, String> {
     if voices == 1 {
         return Ok(document);
     }
@@ -51,7 +83,7 @@ pub(crate) fn instrument(mut document: Value, voices: u32) -> Result<Value, Stri
         }
         let cost = size(item, 0)?;
         if numeric_id(id) {
-            local_box(item, false)?;
+            local_box(item, false, id, owned)?;
             user.insert(id);
             totals.0 += voices as usize * cost.0;
             totals.1 += voices as usize * cost.1;
@@ -104,6 +136,7 @@ pub(crate) fn instrument(mut document: Value, voices: u32) -> Result<Value, Stri
     for voice in 1..=voices {
         for entry in boxes.iter().filter(|entry| user.contains(entry["box"]["id"].as_str().unwrap())) {
             let mut copy = entry.clone();
+            namespace_names(&mut copy["box"], voice, entry["box"]["id"].as_str().unwrap(), owned);
             copy["box"]["id"] = json!(rename(entry["box"]["id"].as_str().unwrap(), voice));
             expanded_boxes.push(copy);
         }
@@ -161,6 +194,27 @@ fn numeric_id(id: &str) -> bool {
 
 fn control_id(id: &str) -> bool {
     id.strip_prefix("obj-control-").is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_digit()))
+}
+
+fn namespace_names(item: &mut Value, voice: u32, path: &str, owned: &HashMap<String, String>) {
+    if let Some(name) = owned.get(path).filter(|name| item["varname"].as_str() == Some(name.as_str())) {
+        item["varname"] = json!(format!("{PREFIX}{voice}-{name}"));
+    }
+    fn within(patcher: &mut Value, voice: u32, path: &str, owned: &HashMap<String, String>) {
+        if let Some(boxes) = patcher["boxes"].as_array_mut() {
+            for entry in boxes {
+                if let Some(id) = entry["box"]["id"].as_str().map(str::to_owned) {
+                    namespace_names(&mut entry["box"], voice, &format!("{path}/{id}"), owned);
+                }
+            }
+        }
+    }
+    if let Some(patcher) = item.get_mut("patcher") {
+        within(patcher, voice, path, owned);
+    }
+    if let Some(patcher) = item.get_mut("data").and_then(|data| data.get_mut("patcher")) {
+        within(patcher, voice, path, owned);
+    }
 }
 
 fn end<'a>(entry: &'a Value, which: &str) -> Result<(&'a str, u64), String> {
@@ -222,10 +276,13 @@ fn size(item: &Value, depth: usize) -> Result<(usize, usize), String> {
 
 /// This allowlist is intentionally narrower than Max's object reference. An unknown object may be an abstraction
 /// with shared state or side effects; absence from the named-object catalog alone does not prove it is local.
-fn local_box(item: &Value, gen: bool) -> Result<(), String> {
-    if item.get("varname").and_then(Value::as_str).is_some_and(|name| !name.is_empty())
-        || item.get("parameter_enable").and_then(Value::as_i64).is_some_and(|enabled| enabled != 0)
-    {
+fn local_box(item: &Value, gen: bool, path: &str, owned: &HashMap<String, String>) -> Result<(), String> {
+    let name_is_foreign = match item.get("varname") {
+        None => false,
+        Some(Value::String(name)) => !name.is_empty() && owned.get(path) != Some(name),
+        Some(_) => true,
+    };
+    if name_is_foreign || item.get("parameter_enable").is_some_and(|enabled| enabled.as_f64() != Some(0.0)) {
         return Err(error("a voice has a scripting name or its own Live parameter"));
     }
     let maxclass = item["maxclass"].as_str().unwrap_or_default();
@@ -269,7 +326,8 @@ fn local_box(item: &Value, gen: bool) -> Result<(), String> {
             .ok_or_else(|| error("a voice names an external patcher or Gen abstraction"))?;
         let inner_gen = class != "patcher";
         for entry in inner["boxes"].as_array().ok_or_else(|| error("an embedded voice has no boxes"))? {
-            local_box(&entry["box"], inner_gen)?;
+            let id = entry["box"]["id"].as_str().ok_or_else(|| error("an embedded voice has no box ID"))?;
+            local_box(&entry["box"], inner_gen, &format!("{path}/{id}"), owned)?;
         }
         return Ok(());
     }
@@ -407,6 +465,44 @@ fn router(boxes: &mut Vec<Value>, lines: &mut Vec<Value>, voices: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_names_assigned_by_the_fresh_notation_builder_are_accepted_and_scoped_per_voice() {
+        use super::super::{
+            patched::patched_device,
+            spec::{check_spec, DeviceSpec},
+        };
+        let patch = "in -> [midiparse] -> pair = [unpack 0 0]\npair -> (note $1) -> sound = [gen~] { Param note(60); Param velocity(0); out1 = cycle(mtof(note)) * velocity / 127; out2 = out1; }\npair.1 -> (velocity $1) -> sound\nsound -> out\nsound.1 -> out.1\n";
+        let (DeviceSpec::Patch(spec), _) = check_spec(
+            json!({ "type": "instrument", "name": "Named voice", "about": "One local voice.", "patch": patch, "voices": 2 })
+                .as_object()
+                .unwrap(),
+        ) else {
+            panic!("a patched instrument")
+        };
+        let (document, _) = patched_device(&spec, None);
+        assert!(instrument(document.clone(), 2).is_err(), "an arbitrary named document stays refused without builder provenance");
+        let poly = instrument_from_patch(document.clone(), 2, &spec).unwrap();
+        for voice in 1..=2 {
+            for name in ["pair", "sound"] {
+                assert!(poly["patcher"]["boxes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["box"]["varname"] == format!("{PREFIX}{voice}-{name}")));
+            }
+        }
+        for (field, value) in
+            [("varname", json!("foreign-name")), ("parameter_enable", json!(1.0)), ("text", json!("unpack 0 0 @varname foreign-name"))]
+        {
+            let mut foreign = document.clone();
+            let pair =
+                foreign["patcher"]["boxes"].as_array_mut().unwrap().iter_mut().find(|entry| entry["box"]["varname"] == "pair").unwrap();
+            pair["box"][field] = value;
+            assert!(instrument_from_patch(foreign, 2, &spec).is_err(), "{field} must remain refused");
+        }
+        assert_eq!(instrument_from_patch(document.clone(), 1, &spec).unwrap(), document, "mono remains an exact identity");
+    }
 
     fn box_(id: &str, text: &str) -> Value {
         json!({"box": {"id": id, "maxclass": "newobj", "text": text, "numinlets": 2,

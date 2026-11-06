@@ -794,7 +794,7 @@ impl KernelTool for DeviceTool {
                         let made = beside(&signal, move || {
                             let (patcher, mut findings) = patched_device(&s, reference);
                             let patcher = if s.kind == DeviceType::Instrument {
-                                voices::instrument(patcher, s.voices)?
+                                voices::instrument_from_patch(patcher, s.voices, &s)?
                             } else { patcher };
                             let verified = (!s.tests.is_empty()).then(|| message::check(&s, &patcher));
                             if let Some(verified) = &verified {
