@@ -230,6 +230,9 @@ run without asking there, and Kumi can't tell it from a chat.
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
+- **A copy of your Live Set:** when a change in Live reaches its third step, or a step that deletes something, Kumi
+  copies your Set as last saved beside it (`<Set>.backup-<date>.als`), once for each saved version. An unsaved Set gets
+  no copy, and Kumi never saves the Set itself. The copy stays until you delete it.
 - **Mirelo,** only if you set it up: see [Integrations](#integrations-optional).
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
   track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by
