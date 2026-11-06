@@ -428,6 +428,7 @@ mod tests {
                 let root = dir.path().join("Mixed");
                 std::fs::create_dir(&root).unwrap();
                 wav(&root.join("Tone.wav"), 220.);
+                let audio_before = std::fs::read(root.join("Tone.wav")).unwrap();
                 // Both parsers reject these if the scan ever reaches them.
                 let mut invalid = [b'x'; 256];
                 invalid[..2].copy_from_slice(&[0x1f, 0x8b]);
@@ -441,8 +442,13 @@ mod tests {
                 let library = get(&ctx).await.unwrap();
                 assert_eq!((library.status().presets, library.status().sets), (0, 0));
                 let logs = kumi_library::learn::library_logs(ctx.paths().state_dir.join("library").to_str().unwrap());
+                let sounds = logs.sounds.load().await;
+                assert_eq!(sounds.len(), 1);
+                assert!(sounds.values().all(|sound| sound.vector.is_some() && sound.error.is_none()));
                 assert!(logs.presets.load().await.is_empty());
                 assert!(logs.sets.load().await.is_empty());
+                assert!(!ctx.paths().state_dir.join("library/taste.json").exists());
+                assert_eq!(std::fs::read(root.join("Tone.wav")).unwrap(), audio_before);
                 assert_eq!(std::fs::read(root.join("Broken.adv")).unwrap(), invalid);
                 assert_eq!(std::fs::read(root.join("Broken.als")).unwrap(), invalid);
             })
