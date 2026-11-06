@@ -877,7 +877,16 @@ mod tests {
 
     fn patched(kind: DeviceType, patch: &str, sources: usize) -> (Patcher, crate::devices::findings::Findings) {
         let map = MapSpec { sources: (1..=sources).map(|n| format!("Mod {n}")).collect(), ..MapSpec::default() };
-        let spec = PatchSpec { kind, name: "Pins".into(), about: "A [p].".into(), controls: vec![], patch: patch.into(), map };
+        let spec = PatchSpec {
+            kind,
+            name: "Pins".into(),
+            about: "A [p].".into(),
+            controls: vec![],
+            patch: patch.into(),
+            voices: 1,
+            tests: vec![],
+            map,
+        };
         let (document, found) = patched_device(&spec, None);
         (Patcher::read(&document, &NoFiles), found)
     }

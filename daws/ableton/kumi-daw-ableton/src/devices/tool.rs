@@ -7,9 +7,10 @@ use super::{
     gen::{audio_effect_patcher, instrument_patcher, GenSpec, MIX, OUTPUT},
     harness::{check_midi_device_isolated, IsolatedOptions},
     midi::midi_device_patcher,
-    patch::{page, reference},
+    patch::{message, page, reference},
     patched::patched_device,
     spec::{check_spec, kept_unrun, Control, DeviceSpec},
+    voices,
 };
 use crate::ears::device::EARS_NAME;
 use async_trait::async_trait;
@@ -720,7 +721,7 @@ impl KernelTool for DeviceTool {
         }
         // Code Kumi's check found never stops would hold Max (and Live) up: it's kept in the device without running.
         let mut runaway = false;
-        let checked = match &spec {
+        let mut checked = match &spec {
             DeviceSpec::Patch(_) if reference.is_some() => {
                 "Kumi checked every object against this machine's Max, every cord against the ports it meets, and the order its messages go in, and laid it out top to bottom".to_string()
             }
@@ -765,30 +766,50 @@ impl KernelTool for DeviceTool {
             reserved: Vec::new(),
             never: None,
         };
+        let patch_verified = Rc::new(RefCell::new(None::<super::harness::Checked>));
         let make = |name: &str| {
-            std::future::ready(match &spec {
-                DeviceSpec::MidiEffect(s) => {
-                    let mut s = s.clone();
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(&s)), Findings::default()))
+            let mut spec = spec.clone();
+            let name = name.to_string();
+            let signal = signal.clone();
+            let patch_verified = Rc::clone(&patch_verified);
+            async move {
+                match &mut spec {
+                    DeviceSpec::MidiEffect(s) => {
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(s)), Findings::default()))
+                    }
+                    DeviceSpec::AudioEffect(s) => {
+                        let mut s = GenSpec::from(&*s);
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
+                    }
+                    DeviceSpec::Instrument(s) => {
+                        let mut s = GenSpec::from(&*s);
+                        s.name = name;
+                        Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
+                    }
+                    DeviceSpec::Patch(s) => {
+                        s.name = name;
+                        let s = s.clone();
+                        let made = beside(&signal, move || {
+                            let (patcher, mut findings) = patched_device(&s, reference);
+                            let patcher = if s.kind == DeviceType::Instrument {
+                                voices::instrument(patcher, s.voices)?
+                            } else { patcher };
+                            let verified = (!s.tests.is_empty()).then(|| message::check(&s, &patcher));
+                            if let Some(verified) = &verified {
+                                if verified.runaway {
+                                    return Err("Kumi didn't write the device: its message check reached a work or resource limit; fix the patch before loading it.".to_string());
+                                }
+                                findings.wrong.extend(verified.problems.iter().cloned());
+                            }
+                            Ok((encode_amxd(s.kind, &patcher), findings, verified))
+                        }).await.map_err(|error| error.to_string())?.ok_or_else(|| "Kumi couldn't finish checking the patch, so nothing was written.".to_string())??;
+                        *patch_verified.borrow_mut() = made.2;
+                        Ok((made.0, made.1))
+                    }
                 }
-                DeviceSpec::AudioEffect(s) => {
-                    let mut s = GenSpec::from(s);
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
-                }
-                DeviceSpec::Instrument(s) => {
-                    let mut s = GenSpec::from(s);
-                    s.name = name.to_string();
-                    Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
-                }
-                DeviceSpec::Patch(s) => {
-                    let mut s = s.clone();
-                    s.name = name.to_string();
-                    let (patcher, patched) = patched_device(&s, reference);
-                    Ok((encode_amxd(s.kind, &patcher), patched))
-                }
-            })
+            }
         };
         let Saved { name, file, item_id, ours, kept } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
@@ -815,6 +836,15 @@ impl KernelTool for DeviceTool {
         }
         if let DeviceSpec::Instrument(s) = &spec {
             fields.insert("voices".into(), json!(s.voices));
+        }
+        if let DeviceSpec::Patch(s) = &spec {
+            if s.kind == DeviceType::Instrument && given("voices") {
+                fields.insert("voices".into(), json!(s.voices));
+            }
+            if let Some(verified) = patch_verified.borrow().as_ref().filter(|_| !s.tests.is_empty()) {
+                checked.push_str(&format!("; {} of {} supplied message tests passed", verified.passed, verified.of));
+                fields.insert("tests".into(), json!({ "passed": verified.passed, "of": verified.of, "simulation": "offline-message" }));
+            }
         }
         fields.insert("checks".into(), json!(checked));
         for (key, said) in [("wrong", &found.wrong), ("changed", &found.changed), ("notes", &found.notes)] {

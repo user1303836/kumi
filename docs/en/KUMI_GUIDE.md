@@ -972,6 +972,20 @@ and Output knobs; instruments play 8 notes at once, or up to 32. Both end in
 Kumi's output stage, which keeps their output safe (no NaN, denormals or DC,
 held under +6 dBFS). Kumi listens to what it made and fixes what it hears.
 
+Devices can also be patches of Max's objects. A patched instrument can ask for
+2–32 voices: Kumi allocates notes to independent copies of its voice patch and
+sums them through one output stage. Leaving voices out keeps the existing
+whole-instrument patch. Allocation follows pitch, like code instruments; it is
+not MPE or separate ownership of the same pitch on different MIDI channels.
+Multiple voices support channel messages, not arbitrary SysEx or realtime
+bytes; unsupported shared state or side effects are refused.
+
+For a patched MIDI effect, Kumi can run its tests through supported message
+objects before writing the device, with control values and a virtual clock.
+An unsupported object or message is reported as a test that could not run,
+never as passing. This checks MIDI behavior, not audio rendering or Live's
+actual scheduler timing; sound still needs listening in Live.
+
 A face styled beyond the knobs (panels, words, colours) is drawn by Max, which
 Kumi can't see. When a device from your User Library loads, Kumi reads its face
 and is told what a panel hides there (a backdrop listed before the rest covers

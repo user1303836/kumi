@@ -1181,6 +1181,29 @@ async fn make_device_makes_audio_effect_and_instrument_with_kumis_knobs() {
         decode_amxd(&std::fs::read(folder.path().join("Kumi/Instruments/Pluck.amxd")).unwrap()).unwrap().kind,
         DeviceType::Instrument
     );
+    // A patched voice receives allocated MIDI, with independent Gen state;
+    // every voice still ends at the one guarded output stage.
+    let voice = json!({ "type": "instrument", "name": "Patched voice", "about": "A simple voice.", "voices": 2,
+        "patch": "in -> [midiparse] -> pair = [unpack 0 0]\npair -> (note $1) -> sound = [gen~] { Param note(60); Param velocity(0); out1 = cycle(mtof(note)) * velocity / 127; out2 = out1; }\npair.1 -> (velocity $1) -> sound\nsound -> out\nsound.1 -> out.1\n" });
+    let patched = call(&tool, voice.clone()).await;
+    assert_eq!(patched["voices"], 2, "{patched}");
+    let bytes = std::fs::read(patched["file"].as_str().unwrap()).unwrap();
+    let voiced = decode_amxd(&bytes).unwrap();
+    assert_eq!(voiced.kind, DeviceType::Instrument);
+    assert_eq!(voiced.patcher.to_string().matches("Param note(60)").count(), 2, "two independent voice code boxes");
+    assert_eq!(voiced.patcher.to_string().matches("\"id\":\"obj-out\"").count(), 1, "one output stage");
+    let refused = tool
+        .execute(
+            with(
+                voice.as_object().unwrap().clone(),
+                json!({ "name": "Shared voice", "patch": "in -> [s ---shared]\n[r ---shared] -> out" }),
+            ),
+            Signal::new(),
+        )
+        .await
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(!folder.path().join("Kumi/Instruments/Shared voice.amxd").exists());
 }
 
 // Each test runs in a process of its own: the KUMI_MAX this one sets is its own.
@@ -1232,9 +1255,36 @@ async fn make_device_makes_a_device_from_a_patch_of_max_objects_and_says_whats_w
     let made = tool.execute(unwired.as_object().unwrap().clone(), Signal::new()).await.unwrap();
     assert!(!made.is_error, "{}", made.text);
     let made: Value = serde_json::from_str(&made.text).unwrap();
-    assert!(made["changed"][0].as_str().unwrap().contains("tests: they run a MIDI effect's code"), "{made}");
-    assert!(made["wrong"][0].as_str().unwrap().contains("\"Gain\" isn't wired"), "{made}");
+    assert_eq!(made["tests"]["passed"], 0, "audio expectations are retained but not claimed to run");
+    assert_eq!(made["tests"]["of"], 1);
+    assert!(made["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("\"Gain\" isn't wired")), "{made}");
+    assert!(made["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("wasn't run")), "{made}");
     assert_eq!(made["itemId"], "user_library/Kumi/Audio Effects/Gain", "made again under its name, in place of the first");
+
+    let patch = "in -> parse = [midiparse]\nparse -> pair = [unpack 0 0]\npair.1 -> both.1\npair -> shift = [+ 0] -> both = [pack 0 0] -> format = [midiformat] -> out\nparse.6 -> format.6\n\"Transpose\" -> shift.1\n";
+    let midi = json!({ "type": "midi_effect", "name": "Patched transpose", "about": "An octave up.", "patch": patch,
+        "controls": [{ "name": "Transpose", "type": "number", "min": -24, "max": 24, "default": 12 }],
+        "tests": [{ "name": "moves the note and release", "input": [{ "type": "noteon", "pitch": 60, "at": 0 }, { "type": "noteoff", "pitch": 60, "at": 100 }], "expect": [{ "type": "noteon", "pitch": 72, "at": 0 }, { "type": "noteoff", "pitch": 72, "at": 100 }] }] });
+    let made = call(&tool, midi.clone()).await;
+    assert_eq!(made["tests"], json!({ "passed": 1, "of": 1, "simulation": "offline-message" }), "{made}");
+    let mut wrong = midi.clone();
+    wrong["tests"][0]["expect"][1]["pitch"] = json!(60);
+    let wrong = call(&tool, wrong).await;
+    assert_eq!(wrong["tests"]["passed"], 0, "{wrong}");
+    assert!(wrong["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("moves the note and release")));
+    let mut unsupported = midi;
+    unsupported["patch"] = json!("in -> [v8 identity] { function msg_int(value) { outlet(0, value); } } -> out");
+    unsupported["tests"][0]["expect"] = json!([]);
+    let unsupported = call(&tool, unsupported).await;
+    assert_eq!(unsupported["tests"]["passed"], 0);
+    assert_eq!(unsupported["tests"]["of"], 1);
+    assert!(unsupported["wrong"].as_array().unwrap().iter().any(|why| why.as_str().unwrap().contains("wasn't run")));
+    let exhausted = json!({ "type": "midi_effect", "name": "Bounded feedback", "about": "Must not be written.",
+        "patch": "in -> loop = [t i]\nloop -> loop\n",
+        "tests": [{ "name": "does not finish", "input": [{ "type": "noteon", "pitch": 60 }], "expect": [] }] });
+    let refused = tool.execute(exhausted.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    assert!(refused.is_error && refused.text.contains("resource limit"), "{}", refused.text);
+    assert!(!folder.path().join("Kumi/MIDI Effects/Bounded feedback.amxd").exists());
 }
 
 #[test]

@@ -14,6 +14,7 @@ pub mod frozen;
 pub mod geometry;
 pub mod layout;
 pub mod measure;
+pub mod message;
 pub mod notation;
 pub mod page;
 pub mod reference;

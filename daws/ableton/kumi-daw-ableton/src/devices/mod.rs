@@ -17,3 +17,4 @@ pub mod patch;
 pub mod patched;
 pub mod spec;
 pub mod tool;
+pub mod voices;
