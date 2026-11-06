@@ -1190,6 +1190,30 @@ mod tests {
         assert_eq!(made["@blank"], "what step 4 makes");
     }
 
+    /// Live gives its `refs` in its long form, while its steps take the short refs its look shows: what a step is on is
+    /// named by what the look showed, Main by its name and a device with the track it's on.
+    #[test]
+    fn a_live_approval_names_what_its_steps_are_on_by_the_refs_the_look_showed() {
+        let context = json!({
+            "selectedInLive": {"device": {"ref": "device:61", "name": "EQ Eight"}},
+            "tracks": [{"ref": "track:7", "name": "Main", "type": "main", "devices": [{"ref": "device:61", "name": "EQ Eight", "chains": []}]}],
+        });
+        let Value::Object(context) = context else { unreachable!() };
+        let names = shown_names(&crate::serve::connection::look_names(&context), &[]);
+        let load = describe(&names, "load_device", "device", &json!({"trackRef": "track:7", "itemId": "audio_effects/Glue Compressor"}));
+        assert_eq!(load["text"], "Load device: itemId \"audio_effects/Glue Compressor\" — on \"Main\"");
+        let set = describe(
+            &names,
+            "set_device_parameter",
+            "parameter",
+            &json!({"deviceRef": "device:61", "parameter": "Gain", "value": "-3 dB"}),
+        );
+        assert_eq!(
+            set["text"], "Set device parameter: parameter \"Gain\", value \"-3 dB\" — on \"EQ Eight (on Main)\"",
+            "with its track, though the selection showed it alone first"
+        );
+    }
+
     #[test]
     fn a_preview_marks_only_the_steps_only_the_daws_undo_takes_back() {
         let steps = [
