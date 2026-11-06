@@ -14,7 +14,7 @@ import time
 from typing import Any, Callable
 import uuid
 
-from . import calls, generate, listening, runtime, schemas, setup, snapshots
+from . import calls, generate, listening, runtime, schemas, scripts, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ class Host:
         self._changes: dict[str, list[list[str]]] = {}
         self._undone: set[str] = set()
         self._changes_lock = threading.Lock()
+        self._trusts: dict[Path, scripts.Trust] = {}  # each profile's record of which chats read outside content
+        self._trusts_lock = threading.Lock()
 
     def remember_change(self, kwargs: dict, answer: Any) -> None:
         """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
@@ -239,6 +241,16 @@ class Host:
 
     def listen_interpretation(self) -> bool:
         return self._ctx.get_config("listen_interpretation", False) is True
+
+    def scripts_in_messaging(self) -> bool:
+        """CC-19's 19d: the producer let messaging chats (Discord, Slack, Telegram…) run scripts, each one asked."""
+        return self._ctx.get_config("scripts_in_messaging", False) is True
+
+    def trust(self) -> scripts.Trust:
+        """This profile's record of which chats read outside content (CC-19 r1), in its plugin data."""
+        path = self.data_dir() / scripts.TRUST_FILE
+        with self._trusts_lock:
+            return self._trusts.setdefault(path, scripts.Trust(path))
 
     def llm(self) -> Any:
         """Hermes's model facade for this plugin (CC-1), read per call: never while registering."""
@@ -658,6 +670,17 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     if tool != "undo":  # every other write that made rows is the chat's newest change (CC-3 A2)
         host.remember_change(kwargs, answer)
     return answer
+
+
+def kumi_script(host: Host, args: dict, **kwargs: Any) -> dict:
+    """CC-19: a script, run once as the producer approved it. The hook's record holds only the arguments it was asked
+    about (CC-5), so the code here is the approved code, and its SHA-256 tells the runtime so: a runtime that would
+    run anything else refuses it (`stale`)."""
+    script = {key: args[key] for key in ("language", "purpose", "code", "expected_project_key") if key in args}
+    code = script.get("code")
+    if isinstance(code, str):
+        script["expected_sha256"] = scripts.sha256(code)
+    return _write(host, "script", script, kwargs)
 
 
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -1111,6 +1134,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_job", schemas.KUMI_JOB, kumi_job, "⏳"),
     ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
     ("kumi_transport", schemas.KUMI_TRANSPORT, kumi_transport, "▶️"),
+    ("kumi_script", schemas.KUMI_SCRIPT, kumi_script, "📜"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1119,7 +1143,7 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script")
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
             or (name == "kumi_setup" and args.get("action") in ("install", "adopt"))
