@@ -813,6 +813,11 @@ impl Integration for Ableton {
         let short = references.shorten(&value);
         serde_json::from_value(short).unwrap_or_else(|_| focus.clone())
     }
+    /// A long ref by the short name this turn gave it, read only: a ref the look never named stays as it is, and asking
+    /// names nothing new (the next look's numbers stay the look's).
+    fn model_ref(&self, reference: &str) -> String {
+        self.connection.references.borrow().short.get(reference).cloned().unwrap_or_else(|| reference.to_string())
+    }
     /// Willington's words, as its switch stands now (read again for each new model session).
     fn instructions_addendum(&self, offered: &dyn Fn(&str) -> bool) -> String {
         super::willington::willington_instructions(self.options.willington.as_ref().and_then(|on| on()), offered).to_string()

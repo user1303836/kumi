@@ -1387,7 +1387,8 @@ mod tests {
     }
 
     /// A fader's dB change says what it changes from when the last look showed that track's fader (Live's track rows
-    /// carry `volume` while the Set has few enough tracks), and says only the new value when it didn't.
+    /// carry `volume` while the Set has few enough tracks), by the look's ref or by its `refs` entry (Live's long ref, as
+    /// the plugin's steps take it), and says only the new value when the look didn't show it.
     #[test]
     fn a_fader_change_says_from_what_to_what_when_the_look_showed_the_fader() {
         let context = json!({"tracks": [
@@ -1402,9 +1403,23 @@ mod tests {
         assert_eq!(drums["text"], "Set mixer: volumeDb from -6.0 dB to -4 dB — on \"Drums\"");
         let bass = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "track:3", "volumeDb": -4}));
         assert_eq!(bass["text"], "Set mixer: volumeDb -4 — on \"Bass\"", "no fader in the look, no before value");
+        // The plugin names a track by its `refs` entry, Live's long ref, which the look shows by its short name (row 12
+        // on 1.24.72 named Drums but said no before value): the long ref finds the same fader.
+        let refs = [
+            json!({"label": "Drums", "reference": {"kind": "daw", "node": {"node": "track", "ref": "7:track:1"}}}),
+            json!({"label": "Bass", "reference": {"kind": "daw", "node": {"node": "track", "ref": "7:track:2"}}}),
+        ];
+        let short = |reference: &str| reference.replace("7:track:1", "track:2").replace("7:track:2", "track:3");
+        let volumes = crate::serve::connection::volumes_by_refs_too(volumes, &refs, &short);
+        let link = crate::serve::connection::Link::new(0);
+        link.keep_refs(&refs, look);
+        let names = shown_names(&link.ref_names(), &[]);
+        let long = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volumeDb": -4}));
+        assert_eq!(long["text"], "Set mixer: volumeDb from -6.0 dB to -4 dB — on \"Drums\"");
+        let long_bass = describe(&names, &volumes, "set_mixer", "mixer", &json!({"trackRef": "7:track:2", "volumeDb": -4}));
+        assert_eq!(long_bass["text"], "Set mixer: volumeDb -4 — on \"Bass\"");
         // A write moves the epoch on: the faders the last look showed no longer hold, so a second change before the next
         // look says no before value rather than a stale one.
-        let link = crate::serve::connection::Link::new(0);
         link.keep_volumes(volumes);
         link.advance();
         assert!(link.ref_volumes().is_empty());

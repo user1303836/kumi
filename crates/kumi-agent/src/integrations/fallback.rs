@@ -224,6 +224,9 @@ impl Integration for FallbackIntegration {
     fn model_focus(&self, focus: &DawFocus) -> DawFocus {
         self.current().model_focus(focus)
     }
+    fn model_ref(&self, reference: &str) -> String {
+        self.current().model_ref(reference)
+    }
     async fn focus_body(&self, request: &BodyRequest, signal: Signal) -> Result<Option<FocusBody>, RuntimeError> {
         let c = self.current();
         if c.can_show(request.kind()) {
