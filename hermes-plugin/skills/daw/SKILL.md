@@ -66,6 +66,13 @@ These are the steps for everyday changes. The project look lists each with its f
   - Every DAW's parameter step also takes a value as the device shows it: "800 Hz", "-6 dB" (Renoise's as `valueString`).
   - A Renoise `#Send` device's own `amount` is 0–1, not dB, so set it by `valueString`.
 - **Read a device's or plug-in's parameters before you set them by name** (`kumi_read`), and use the names as read. A name the device doesn't have is refused ("that FX has no parameter named …"). The plan then stops there as `partial`, and its earlier steps stay: report them, read the parameters, and set the rest in a new change.
+- **REAPER, a patch by parameter name** ("set the cutoff to 800 Hz and the drive to -6 dB"):
+  1. Read the FX's parameters: `reaper_read` with `kind: "param"` and the FX as `parent`. Note each name exactly as read, and the value text it shows.
+  2. One `fx_params` step: `{"ref": <the FX>, "values": [{"param": "Cutoff", "value": "800 Hz"}, {"param": "Drive", "value": "-6 dB"}]}`, with the names as read. A single one is `fx_param` (`ref`: the FX, `param`, `value`).
+  3. `value` is the text the plug-in shows; `units` takes a number in the parameter's own units (ReaEQ's Hz, dB, octaves), and `normalized` 0–1 when neither fits. The answer says where each landed: report that, not what you asked for.
+- **Grouping and routing:**
+  - REAPER: a folder is `track_add` with `folderOfRefs` (tracks next to each other, which it then holds). `track_main_send` turns a track's send to its folder or the master on or off. A send is `send_add` (`ref` the sending track, `toRef` the receiving one, `volumeDb`, `pan`, `mode` "post-fader", "pre-fader" or "pre-fx"); `receive_add` (`ref`, `fromRef`) makes the same route from the receiving side. Change it with `send_volume`, `send_pan`, `send_mute`. `send_remove` is refused.
+  - Renoise: a group is `track_add` with `type: "group"`; a new track goes in it with `groupRef`, and an existing track just before the group with `track_group` (`groupRef: null` takes it out). A send track is `track_add` with `type: "send"`, fed by a `#Send` device (`device_add`, with `receiverRef` the send track). `track_output` (`ref`, `routing`) routes a track's output by name, as the track rows' `outputRouting` reads.
 
 ## Notes (MIDI)
 - **Read first,** and keep the producer's meter and key unless they ask otherwise:
@@ -152,6 +159,24 @@ These are the steps for everyday changes. The project look lists each with its f
 
   - **REAPER:** `track_add`, then `fx_add` with a drum plug-in the producer has (as REAPER's FX browser names it), then `item_add` and `notes_add`. Use General MIDI keys (36 kick, 38 snare, 42 hat), or the plug-in's own map. REAPER's `drum_kit` step is refused.
   - **Renoise:** an existing kit instrument, or `instrument_add`, then `sample_load` for each sound, then `keyzone_drumkit`. Then `notes_write` on an existing pattern, with keys from `C-4`. Renoise's `instrument_kit` step is refused.
+- **Drum styles,** on a 16th grid unless said (a bar is 16 steps; step 1 is beat 1):
+
+  | Style | BPM | Kick | Snare/clap | Hats |
+  |---|---|---|---|---|
+  | House, four-on-the-floor | 120–128 | every beat (1, 5, 9, 13) | 5 and 13 | open hat on the offbeats (3, 7, 11, 15), closed 16ths optional |
+  | Boom bap | 85–95 | 1, the "and" of 2 (7) or 11, often 16 | 5 and 13 | 8ths, swung; ghost snares (`o`) around the backbeat |
+  | Trap | 130–150 (felt at half) | 1, sparse syncopation (e.g. 11, 12) | 9 only (half-time backbeat) | 8ths or 16ths with rolls: ratchets `3`/`4` or a `/32` run before the snare |
+  | Drum and bass | 170–176 | 1 and 11 (two-step) | 5 and 13 | 8ths; ghost snares between |
+
+  - Live writes them as lanes; REAPER as `notes_add` objects in quarter notes (step n starts at `(n-1)/4`; a roll is notes 0.125 or less apart); Renoise as `notes_write` lines.
+  - Renoise: read the song's LPB first (the look's transport gives it): a 16th is LPB/4 lines, so at LPB 4 step n is line n-1. A roll goes inside a line: a note's `delay` (0–255, 128 is half a line), or an effect cell `{"col": 1, "number": "0R", "amount": …}` (retrigger, every y ticks for `0y`). Never change the LPB (`song_lpb`) for a roll: it's song-wide, so going from 4 to 8 doubles the speed of every pattern already written.
+  - Swing: Live's `transform_midi`; REAPER's `notes_quantize` (`swing` 0–100); Renoise's `song_groove`.
+- **Chords:** Live writes `[C3 E3 G3]`, `{Cm7}` or `{IV}` (above). REAPER stacks a chord's notes at the same `start` with the same `length` in one `notes_add`. Renoise puts each chord tone in its own note column on the same line (`col` 1, 2, 3…), with an `OFF` in each column to end it.
+  - Stay in the producer's key. Voice each chord close to the one before (an inversion rather than a jump), roughly within an octave around middle C, and leave the lowest note to the bass.
+- **Fitting a drum break to the song's tempo:** the break's own BPM must be known (the producer says it, or the file's name does): Kumi doesn't detect it.
+  - Live: a warped clip follows the Set's tempo only when its warp grid is right. Read its markers first (`live_warp_marker_read`, the clip's `ref`), then add or move markers with `set_warp_markers` to put known hits on their beats (add takes `beatTime`; move takes `beatTime` and `distance`). Turning `warping` on with `set_audio_clip` alone doesn't give Live the break's BPM or put its hits on the grid. Markers aren't deleted here.
+  - REAPER: `take_props` `playrate` (song BPM ÷ the break's BPM) with `preservePitch`. The item keeps its length, so then `item_trim` it to the bars. Or `stretch_markers_add` to pin hits.
+  - Renoise: `sample_set` with `beatSync` on and `beatSyncLines` the break's length in beats × the song's current LPB (a whole number, 1–512), and `beatSyncMode` "percussion" for drums.
 
 ## Tutorials
 When the producer names a video tutorial ("make the bass from this video"):
