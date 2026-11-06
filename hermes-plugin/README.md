@@ -22,6 +22,9 @@ a DAW to work in.
   for values only on screen, views those moments in its browser; Kumi builds it. No video is downloaded.
 - **When no change fits, a script or a device.** Hermes can run a script you approve (Python in Live, Lua in REAPER
   and Renoise), or build a Max for Live audio effect from GenExpr code; each shows its code before you decide.
+- **A preset for a plug-in you have (Live).** "Make a Pro-Q 4 preset that cuts the mud around 300 Hz." Kumi builds it
+  for the version installed (Serum 2, Pro-Q 4 or Ozone 12), shows every setting, and puts it in your User Library only
+  when you approve.
 - **Ask in plain words, from any Hermes surface.** The TUI, Hermes Desktop, the web dashboard and messaging all use the
   same tools.
 - **Every change is approved by Hermes (unless its approvals are off), and most are undoable while Kumi runs.** Hermes
@@ -53,6 +56,8 @@ a DAW to work in.
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | yes |
 | `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | yes, with its code |
 | `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | yes, with its code |
+| `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy; changes nothing in Live (Live only) | no |
+| `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | yes, with every setting |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
@@ -178,6 +183,8 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Writes outside its data:** setup may install Live's Remote Script with its Kumi Ears device, a REAPER extension or
   a Renoise tool, only at the locations you approve. Each Max for Live device you approve is written as a new file in
   Live's User Library (`User Library/Kumi/Audio Effects`); it stays there after an undo, and in any Set that uses it.
+  Each preset you approve is a new `.vstpreset` file there too (`User Library/Kumi/Instruments` or `Audio Effects`),
+  and it stays after an undo.
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest
@@ -189,8 +196,10 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Reads:** the open project; the audio files in the sample folders you list (never a whole drive or volume, your
   home folder or above, or inside or above HERMES_HOME; links never lead it outside them); its renders of the windows
   you approve (REAPER and Renoise); and finished audio other Hermes plugins saved in
-  `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
-- **Approvals:** changes, undos, listens, play, scripts and devices go through Hermes's approval; stop never asks.
+  `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it. To tell which version of
+  Serum 2, Pro-Q 4 or Ozone 12 you have, the VST3 metadata in your standard plug-in folders (it never loads a plug-in).
+- **Approvals:** changes, undos, listens, play, scripts, devices and presets go through Hermes's approval; stop never
+  asks.
   - **Allowing for the session or always** covers that kind of call (changes, undos, listens, play, sample-folder adds
     and scans) in this chat only, including a one-shot run that resumes it (`hermes chat -q --resume`). Another chat,
     a new one-shot run or a scheduled job asks again or is refused.
