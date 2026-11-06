@@ -232,6 +232,25 @@ impl Ableton {
             }),
         }
     }
+    /// What a preset placed for Hermes (CC-26) asks Live's Browser: the device options' wait for a file, and the
+    /// plug-ins Live lists by a name.
+    fn preset_browser(&self) -> crate::plugin_presets::Browser {
+        let owner = self.weak.upgrade().unwrap();
+        crate::plugin_presets::Browser {
+            options: self.device_options(),
+            plugins: Rc::new(move |name, signal| {
+                let owner = owner.clone();
+                async move {
+                    let tools = owner.connection.tools().ok_or_else(|| RuntimeError::plain("Live's bridge isn't connected."))?;
+                    let args = object(&json!({"category": "plugins", "query": name, "limit": 50}))?;
+                    let found = payload(&tools.call("live_browser_search", args, signal, CallOptions::default()).await?)?;
+                    let rows = found.get("items").and_then(Value::as_array).into_iter().flatten();
+                    Ok(rows.filter_map(|row| Some(row.get("name")?.as_str()?.to_owned())).collect())
+                }
+                .boxed_local()
+            }),
+        }
+    }
     fn user_library(&self) -> String {
         self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None))
     }
@@ -1103,6 +1122,21 @@ impl Integration for Ableton {
         signal: Signal,
     ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
         crate::devices::build::build(&self.device_options(), spec, file, &self.combined(signal)).await
+    }
+    fn has_preset_place(&self) -> bool {
+        true
+    }
+    async fn preset_preview(&self, bytes: &[u8], name: &str) -> Result<Result<PresetPreview, Vec<String>>, RuntimeError> {
+        Ok(crate::plugin_presets::preview(std::path::Path::new(&self.user_library()), bytes, name))
+    }
+    async fn preset_place(
+        &self,
+        bytes: Vec<u8>,
+        name: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<PlacedPreset, PresetRefusal>, RuntimeError> {
+        crate::plugin_presets::place_approved(&self.preset_browser(), bytes, name, file, &self.combined(signal)).await
     }
 }
 

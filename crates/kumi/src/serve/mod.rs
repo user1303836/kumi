@@ -22,6 +22,7 @@ pub mod listen;
 pub mod map;
 pub mod mcp;
 pub mod plugin_knowledge;
+pub mod preset;
 pub mod preset_build;
 pub mod read;
 pub mod registry;

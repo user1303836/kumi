@@ -850,6 +850,33 @@ pub trait Integration {
         let _ = (spec, sha256, file, signal);
         Err(absent())
     }
+    /// Whether the DAW places a verified plug-in preset in its library ([`Integration::preset_preview`],
+    /// [`Integration::preset_place`]): Live's VST3 presets (CC-26).
+    fn has_preset_place(&self) -> bool {
+        false
+    }
+    /// What placing `bytes` as the preset `name` would write, reading only the library's folder: the file, the plug-in
+    /// and its class. `Err` inside carries the findings that refuse it (bytes that aren't a preset of a catalogued
+    /// plug-in, a name that can't be a file's, or a file of that name with other bytes); nothing is ever written.
+    async fn preset_preview(&self, bytes: &[u8], name: &str) -> Result<Result<PresetPreview, Vec<String>>, RuntimeError> {
+        let _ = (bytes, name);
+        Err(absent())
+    }
+    /// Places `bytes` as the preview named them (`file`). First the DAW's browser must list the plug-in itself, in the
+    /// format the preset loads (`not_installed`). Then it writes a new file, never over another (`changed` when `file`
+    /// is no longer what these bytes would be written as), and waits for the browser to list it. The bytes are the
+    /// caller's to have verified (serve checks the artifact's digest, writer and version); the integration checks only
+    /// what it reads itself.
+    async fn preset_place(
+        &self,
+        bytes: Vec<u8>,
+        name: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<PlacedPreset, PresetRefusal>, RuntimeError> {
+        let _ = (bytes, name, file, signal);
+        Err(absent())
+    }
 }
 
 /// What building a device would write ([`Integration::device_preview`]).
@@ -876,6 +903,43 @@ pub struct BuiltDevice {
     pub path: std::path::PathBuf,
     /// Whether the DAW's browser listed it before the wait was over.
     pub listed: bool,
+}
+
+/// What placing a preset would write ([`Integration::preset_preview`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PresetPreview {
+    /// The file's name without its extension, as the browser will list it.
+    pub name: String,
+    /// The file from the library's root: "User Library/Kumi/<Instruments|Audio Effects>/<name>.vstpreset".
+    pub file: String,
+    /// The plug-in's name as the built-in catalog has it.
+    pub plugin: String,
+    pub class_id: String,
+    /// "instrument" or "effect", as the catalog has it.
+    pub kind: String,
+}
+
+/// A preset placed in the DAW's library ([`Integration::preset_place`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlacedPreset {
+    pub name: String,
+    /// The browser's item id, which loading the preset takes; until `indexed`, the load waits for the browser to list it.
+    pub item: String,
+    /// The file, labelled as in the preview.
+    pub file: String,
+    /// Whether the DAW's browser listed it before the wait was over.
+    pub indexed: bool,
+    pub plugin: String,
+    pub class_id: String,
+}
+
+/// Why a preset wasn't placed ([`Integration::preset_place`]); nothing was written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetRefusal {
+    /// `not_installed` (the browser doesn't list the plug-in in the format the preset loads), `changed` (the file the
+    /// preview named is no longer these bytes' file) or `refused` (the bytes or the name).
+    pub code: &'static str,
+    pub reason: String,
 }
 
 /// A goal's candidate chain in Live: its track, what it is, and the knobs a search may move.

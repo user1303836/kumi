@@ -60,12 +60,13 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(device(ctx, call))
 }
 
-/// The files this runtime's previews named, by their spec's SHA-256, the newest [`REMEMBERED`].
+/// The files this runtime's previews named, by the SHA-256 of what was previewed (a device's spec, a preset's bytes),
+/// the newest [`REMEMBERED`]: what an approved write may write.
 #[derive(Default)]
 pub struct Previews(RefCell<VecDeque<(String, String)>>);
 
 impl Previews {
-    fn remember(&self, sha256: &str, file: &str) {
+    pub(super) fn remember(&self, sha256: &str, file: &str) {
         let mut previews = self.0.borrow_mut();
         previews.retain(|(known, _)| known != sha256);
         previews.push_back((sha256.to_string(), file.to_string()));
@@ -74,7 +75,7 @@ impl Previews {
         }
     }
 
-    fn file(&self, sha256: &str) -> Option<String> {
+    pub(super) fn file(&self, sha256: &str) -> Option<String> {
         self.0.borrow().iter().find(|(known, _)| known == sha256).map(|(_, file)| file.clone())
     }
 }
