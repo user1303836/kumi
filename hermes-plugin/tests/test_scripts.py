@@ -100,6 +100,13 @@ class Scripts(unittest.TestCase):
         self.assertEqual(again.state("clean"), (scripts.CLEAN, ""))
         self.finished("web_search", {}, "clean")  # in this process: another one (`again`) has the chat as clean
         self.assertEqual(again.state("clean"), (scripts.TAINTED, "web_search"), "another process's taint is read again")
+        # Windows stamps a file's time by its clock's tick, so another process's write can carry the time of the one
+        # `again` read last: it's still read, as the file is a new one.
+        trust = self.data / scripts.TRUST_FILE
+        seen = trust.stat()
+        self.start("later")
+        os.utime(trust, ns=(seen.st_atime_ns, seen.st_mtime_ns))
+        self.assertEqual(again.state("later"), (scripts.CLEAN, ""), "a write within the same tick is read again")
 
     def test_with_approvals_off_a_clean_chats_script_goes_to_hermes_and_a_tainted_chats_is_refused(self):
         self.start()

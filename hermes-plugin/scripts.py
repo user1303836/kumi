@@ -111,13 +111,19 @@ class Trust:
         self._path = path
         self._lock = threading.Lock()
         self._sessions: dict[str, dict] | None = None
-        self._read_at: int | None = None  # the file's modification time when it was last read
+        self._read_at: tuple[int, ...] | None = None  # the file as it was when it was last read: see `_stamp`
+
+    def _stamp(self) -> tuple[int, ...] | None:
+        """Which file is there, and its size and time. Windows stamps a file's time by its clock's tick, so two writes
+        can share one; each write replaces the file with a new one (`_save`), which the file's id tells apart."""
+        try:
+            stat = self._path.stat()
+        except OSError:
+            return None
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
     def _load(self) -> dict[str, dict]:
-        try:
-            changed: int | None = self._path.stat().st_mtime_ns
-        except OSError:
-            changed = None
+        changed = self._stamp()
         if self._sessions is None or changed != self._read_at:
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
