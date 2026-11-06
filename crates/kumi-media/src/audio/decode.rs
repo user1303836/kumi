@@ -28,6 +28,12 @@ impl DecodeOptions {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PreparationPolicy<'a> {
+    decode: &'a DecodeOptions,
+    native_range: bool,
+}
+
 /// Restricted decoding accepts self-contained audio containers, never playlists or secondary-file demuxers.
 pub(crate) const LOCAL_AUDIO_INPUT: [&str; 4] =
     ["-protocol_whitelist", "file,pipe", "-format_whitelist", "wav,aiff,mp3,flac,aac,mov,ogg,caf"];
@@ -161,7 +167,7 @@ pub async fn prepare_audio_to_with_options(
     until: Option<f64>,
     options: &DecodeOptions,
 ) -> Result<PreparedAudio, AudioError> {
-    prepare(path.as_ref(), signal, until, None, None, options).await
+    prepare(path.as_ref(), signal, until, None, None, PreparationPolicy { decode: options, native_range: false }).await
 }
 /// `known`: the file's length in seconds when it's known already (a song's tags say it), read again from the file only
 /// when it isn't.
@@ -171,8 +177,9 @@ async fn prepare(
     until: Option<f64>,
     from: Option<f64>,
     known: Option<f64>,
-    options: &DecodeOptions,
+    policy: PreparationPolicy<'_>,
 ) -> Result<PreparedAudio, AudioError> {
+    let PreparationPolicy { decode: options, native_range } = policy;
     let extension = extension(path);
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
         return Err(AudioError(format!(
@@ -193,7 +200,11 @@ async fn prepare(
     }
     // Restricted conversion is always an excerpt, even when the caller requests
     // an unbounded file. Its measured end is the decoded EOF, not the probed length.
-    let until = if options.installed_only { Some(until.unwrap_or(MAX_RESTRICTED_SECONDS).min(MAX_RESTRICTED_SECONDS)) } else { until };
+    let until = if options.installed_only && !native_range {
+        Some(until.unwrap_or(MAX_RESTRICTED_SECONDS).min(MAX_RESTRICTED_SECONDS))
+    } else {
+        until
+    };
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
     kumi_types::private::create_dir_all(&folder)?;
     let mut prepared = PreparedAudio {
@@ -205,9 +216,10 @@ async fn prepare(
         length_known: false,
         folder: Some(folder),
     };
-    match convert(path, &prepared.path, signal, until, from, known, options).await {
+    match convert(path, &prepared.path, signal, until, from, known, policy).await {
         Ok((length, start, whole)) => {
-            (prepared.seconds, prepared.start, prepared.whole) = (length_past(until, length), start, whole);
+            (prepared.seconds, prepared.start, prepared.whole) =
+                (if native_range { length } else { length_past(until, length) }, start, whole);
             // A copy that stops at a reach tells the file's length only when it was read.
             prepared.length_known = whole || until.is_none() || length.is_some();
         }
@@ -244,9 +256,54 @@ pub async fn prepare_audio_range_of(
         Some(from.max(0.) + seconds.max(0.)),
         Some(from.max(0.)).filter(|from| *from > 0.),
         length,
-        &DecodeOptions::default(),
+        PreparationPolicy { decode: &DecodeOptions::default(), native_range: false },
     )
     .await
+}
+
+/// A bounded, native-rate/channel decode for approved reference measurement. Unlike
+/// ordinary restricted listening, this never negotiates a downmix or sample rate.
+/// The copy starts on an integral second before the requested window; callers then
+/// select exact sample frames, without depending on a converter's fractional seek.
+pub async fn open_audio_range_with_options(
+    path: impl AsRef<Path>,
+    signal: Option<Signal>,
+    from: f64,
+    seconds: f64,
+    options: &DecodeOptions,
+) -> Result<AudioRange, AudioError> {
+    if !options.installed_only {
+        return Err(AudioError("Reference measurement needs the installed-only decoder policy.".into()));
+    }
+    if !from.is_finite() || from < 0. || !seconds.is_finite() || seconds <= 0. || !(from + seconds).is_finite() {
+        return Err(AudioError("Choose a finite, non-negative start and a positive finite duration.".into()));
+    }
+    let copy_start = (from.floor() - 1.).max(0.);
+    let end = from + seconds + 1.;
+    let prepared = prepare(
+        path.as_ref(), signal, Some(end), Some(copy_start), None, PreparationPolicy { decode: options, native_range: true },
+    ).await?;
+    let handle = File::open(&prepared.path).await?;
+    let mut source = open_pcm(handle).await?;
+    let native_pcm = prepared.format.is_none();
+    let original_frames = native_pcm.then_some(source.frames);
+    let original_seconds = if native_pcm { Some(source.frames as f64 / source.sample_rate) } else { prepared.seconds };
+    let start = if native_pcm { 0. } else { prepared.start };
+    if let Some(format) = &prepared.format {
+        source.format = format.clone();
+    }
+    source.prepared = Some(prepared);
+    Ok(AudioRange { source, start, original_frames, original_seconds })
+}
+
+/// Source identity remains the original file. `source` contains a possibly bounded
+/// decoded copy whose sample zero corresponds to `start` in that original.
+pub struct AudioRange {
+    pub source: AudioSource,
+    pub start: f64,
+    pub original_frames: Option<usize>,
+    /// Container duration when available; compressed containers may only estimate it.
+    pub original_seconds: Option<f64>,
 }
 fn extension(path: &Path) -> String {
     path.extension().map(|v| format!(".{}", v.to_string_lossy().to_lowercase())).unwrap_or_default()
@@ -308,8 +365,9 @@ async fn convert(
     until: Option<f64>,
     from: Option<f64>,
     known: Option<f64>,
-    options: &DecodeOptions,
+    policy: PreparationPolicy<'_>,
 ) -> Result<(Option<f64>, f64, bool), AudioError> {
+    let PreparationPolicy { decode: options, native_range } = policy;
     let mac = cfg!(target_os = "macos") && !options.installed_only;
     let ffmpeg = if let Some(path) = &options.ffmpeg {
         let named = path.to_str().ok_or_else(|| AudioError("The approved ffmpeg dependency path isn't valid UTF-8.".into()))?;
@@ -364,7 +422,7 @@ async fn convert(
     // (so for one stopping sooner too), and the reach's conversion has the same time whatever the reading. ffmpeg then
     // says the file's length as it opens it to convert (its Duration line: the reading the probe makes), and a file
     // ending well before the reach keeps the copy's length whatever the probe would say: the probe runs only for the rest.
-    let later = match until {
+    let later = native_range || match until {
         Some(until) if from.is_none() && known.is_none() && until <= READ_LATER_UP_TO => {
             kumi_types::disk::low_disk(&folder, until * BYTES_A_SECOND, "Kumi reads audio on").await.is_none()
         }
@@ -380,12 +438,12 @@ async fn convert(
     };
     // From a seek, ffmpeg's -t is the stretch's length.
     let reach = until.map(|until| until - from.unwrap_or(0.));
-    let until_text = reach.map(|reach| to_fixed(reach, 3));
-    let from_text = from.map(|from| to_fixed(from, 3));
+    let until_text = reach.map(|reach| if native_range { reach.to_string() } else { to_fixed(reach, 3) });
+    let from_text = from.map(|from| if native_range { from.to_string() } else { to_fixed(from, 3) });
     // How big the file is: how long converting it may take when its length isn't known.
     let bytes = tokio::fs::metadata(input).await.map_or(0, |metadata| metadata.len());
     let (mut no_room, mut timed_out) = (None, None);
-    for Attempt { command, args, mut writes } in attempts(
+    let mut attempts = attempts(
         mac,
         &ffmpeg,
         &input_s,
@@ -395,7 +453,15 @@ async fn convert(
         from_text.as_deref(),
         later,
         output_limit.as_deref(),
-    ) {
+    );
+    if native_range {
+        for attempt in &mut attempts {
+            if let Some(at) = attempt.args.iter().position(|arg| *arg == "-af") {
+                attempt.args.drain(at..at + 2);
+            }
+        }
+    }
+    for Attempt { command, args, mut writes } in attempts {
         if let Some(s) = &signal {
             s.check()?;
         }
@@ -446,6 +512,7 @@ async fn convert(
         }
         match result {
             Ok(_) if command == "afconvert" => return Ok((None, 0., true)),
+            Ok(output) if native_range => return Ok((crate::frames::duration_in(&output.stderr), from.unwrap_or(0.), false)),
             Ok(output) if later => {
                 let length = match (crate::frames::duration_in(&output.stderr), until) {
                     // Whole in its copy: read by the probe, it would be as long as the copy (not past the reach).

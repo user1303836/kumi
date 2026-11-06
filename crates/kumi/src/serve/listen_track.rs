@@ -2,7 +2,7 @@
 //! The MCP adapter holds the endpoint lease through capture, restoration, staging and publication.
 use super::change::one_line;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture};
-use super::listen;
+use super::{listen, listen_reference};
 use kumi_common::abort::{self, Signal};
 use kumi_types::contracts::{HearApproval, HearMethod, HearPreview, HearRequest};
 use kumi_types::daw::DawId;
@@ -25,11 +25,12 @@ pub fn schema() -> Value {
                         "from_beat":{"type":"number","minimum":0},
                         "beats":{"type":"number","exclusiveMinimum":0,"maximum":256}
                     }},
-                "compare_to":listen::source_schema(),
+                "compare_to":listen_reference::reference_schema(),
+                "references":listen_reference::references_schema(),
                 "expected_project_key":{"type":"string","minLength":1,"maxLength":64},
                 "expected_epoch":epoch_schema(),
                 "preview":{"type":"boolean","description":"Host-only: describe the approved capture without starting it."}
-            }}
+            }, "not":{"required":["compare_to","references"]}}
     ]})
 }
 
@@ -50,7 +51,7 @@ fn invalid() -> OpError {
 }
 
 fn request(args: &JsonObject) -> Result<HearRequest, OpError> {
-    if args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to" | "expected_project_key" | "expected_epoch" | "preview"))
+    if args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to" | "references" | "expected_project_key" | "expected_epoch" | "preview"))
         || args.get("preview").is_some_and(|value| !value.is_boolean())
     {
         return Err(invalid());
@@ -97,14 +98,14 @@ fn approval(call: &Call) -> Result<(HearApproval, u64), OpError> {
     let prepare = given
         .get("prepare_seconds")
         .and_then(Value::as_u64)
-        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || *prepare == 0))
+        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || call.args.contains_key("references") || *prepare == 0))
         .ok_or_else(invalid)?;
     Ok((HearApproval { seconds, deadline_seconds: deadline as u16 }, prepare))
 }
 
 /// Preparation cannot spend any of the approved native phase. Its cancellation reaches both
 /// the converter and the DSP worker before the unpublished stage is dropped.
-async fn prepare_reference(ctx: &Ctx, source: &Value, original: &Signal, seconds: u64) -> Result<listen::MeasuredAudio, OpError> {
+async fn prepare_reference(ctx: &Ctx, source: &listen::Source<'_>, original: &Signal, seconds: u64) -> Result<listen::MeasuredAudio, OpError> {
     if seconds == 0 {
         return Err(OpError::Refused {
             code: "prepare_timeout",
@@ -189,6 +190,9 @@ pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut request = request(&call.args)?;
+    let requested_references = listen_reference::is_new_request(&call.args)
+        .then(|| listen_reference::ReferenceSet::parse(&call.args)).transpose()?;
+    let profile_mode = requested_references.as_ref().is_some_and(|references| references.profile);
     if !crate::daw::registry::supports_restricted_listening(ctx.daw()) {
         return Ok(outcome(
             "refused",
@@ -216,7 +220,17 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     if !preview_only {
         request.approval = approved.map(|(native, _)| native);
     }
-    let reference = match call.args.get("compare_to") {
+    // New reference windows are measured even before preview: a bad last reference costs zero DAW calls.
+    // The full set shares the existing preparation allowance, never one allowance per member.
+    let prepared_references = match &requested_references {
+        Some(references) => Some(references.prepare(ctx, &call.signal,
+            if preview_only { listen_reference::PREPARE_SECONDS } else { approved.expect("actual capture requires approval").1 }).await?),
+        None => None,
+    };
+    let legacy_reference = if requested_references.is_none() {
+        call.args.get("compare_to").map(listen::Source::parse).transpose()?
+    } else { None };
+    let reference = match legacy_reference.as_ref() {
         Some(source) if preview_only => {
             listen::resolve_source(ctx, source, &call.signal).await?;
             None
@@ -238,10 +252,14 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 owner: None,
             });
         }
-        return Ok(json!({"state":"preview","project":{"key":project.key,"epoch":project.epoch.to_string()},
+        let mut reply = json!({"state":"preview","project":{"key":project.key,"epoch":project.epoch.to_string()},
             "text":preview_text(&request, &preview),"estimated_seconds":preview.seconds,
             "method":preview.method,"deadline_seconds":preview.deadline_seconds,
-            "prepare_seconds":if call.args.contains_key("compare_to") {120} else {0}}));
+            "prepare_seconds":if call.args.contains_key("compare_to") || call.args.contains_key("references") {120} else {0}});
+        if let Some(references) = prepared_references {
+            reply["reference_windows"] = references.preview();
+        }
+        return Ok(reply);
     }
     let native = approved.expect("actual capture requires approval").0;
     // Each adapter runs the same pure preflight again inside `hear`, checking this approval
@@ -318,7 +336,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let signal = abort::any([call.signal.clone(), stop.clone()]);
     let measured = async {
         let staged = ctx.artifacts().stage_scratch(ctx, &scratch, Path::new(&take.file), &signal).await?;
-        listen::measure(ctx, staged, Path::new("track-capture.wav"), &signal).await
+        listen_reference::measure_current(ctx, staged, Path::new("track-capture.wav"), profile_mode, &signal).await
     };
     let measured = match tokio::time::timeout_at(deadline, measured).await {
         Ok(Ok(measured)) => measured,
@@ -342,9 +360,13 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             ));
         }
     };
-    let seconds = measured.metrics.seconds;
+    let seconds = measured.audio.metrics.seconds;
     call.progress.report(2., Some(3.), Some("Measurements complete; retaining the approved capture."));
-    let mut result = match listen::retain(ctx, measured, reference, &call.signal, Some(deadline)).await {
+    let retained = match prepared_references {
+        Some(references) => listen_reference::retain(ctx, measured, references, &call.signal, Some(deadline)).await,
+        None => listen::retain(ctx, measured.audio, reference, &call.signal, Some(deadline)).await,
+    };
+    let mut result = match retained {
         Ok(result) => result,
         Err(error) => {
             return Ok(outcome(

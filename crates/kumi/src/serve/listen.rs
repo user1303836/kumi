@@ -36,21 +36,27 @@ pub fn source_schema() -> Value {
 pub fn file_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false, "required": ["source"],
-        "properties": {"source": source_schema(), "compare_to": source_schema()}
+        "properties": {"source": source_schema(), "compare_to": super::listen_reference::reference_schema(),
+            "references": super::listen_reference::references_schema()},
+        "not": {"required": ["compare_to", "references"]}
     })
 }
 
-enum Source<'a> {
+pub(super) enum Source<'a> {
     File(&'a str),
     Sound { id: &'a str, revision: &'a str },
     Artifact(&'a str),
 }
 
 impl<'a> Source<'a> {
-    fn parse(value: &'a Value) -> Result<Self, OpError> {
+    pub(super) fn parse(value: &'a Value) -> Result<Self, OpError> {
+        Self::parse_with_extra(value, 0)
+    }
+
+    pub(super) fn parse_with_extra(value: &'a Value, extra: usize) -> Result<Self, OpError> {
         let fields = value.as_object().ok_or_else(|| OpError::Invalid { reason: "An audio source must be an object.".into() })?;
         let string = |key| fields.get(key).and_then(Value::as_str).filter(|value| !value.trim().is_empty());
-        match (fields.len(), string("file"), string("sound_id"), string("map_revision"), string("artifact_id")) {
+        match (fields.len().saturating_sub(extra), string("file"), string("sound_id"), string("map_revision"), string("artifact_id")) {
             (1, Some(file), None, None, None) => Ok(Self::File(file)),
             (2, None, Some(id), Some(revision), None) => Ok(Self::Sound { id, revision }),
             (1, None, None, None, Some(id)) => Ok(Self::Artifact(id)),
@@ -81,19 +87,22 @@ impl<'a> Source<'a> {
 }
 
 /// Authorize a file, current map sound or registered artifact without staging it or running DSP.
-pub async fn resolve_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<PathBuf, OpError> {
-    Source::parse(value)?.resolve(ctx, signal).await
+pub(super) async fn resolve_source(ctx: &Ctx, source: &Source<'_>, signal: &Signal) -> Result<PathBuf, OpError> {
+    source.resolve(ctx, signal).await
 }
 
 /// Stage a structured source, retaining map identity checks and reusing registered files.
 /// Guarded capture uses this for its authorized comparison before touching the DAW.
-pub async fn stage_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<StagedArtifact, OpError> {
-    Source::parse(value)?.stage(ctx, signal).await
+pub(super) async fn stage_source(ctx: &Ctx, source: &Source<'_>, signal: &Signal) -> Result<StagedArtifact, OpError> {
+    source.stage(ctx, signal).await
 }
 
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     if super::listen_track::is_track(&call.args) {
         return super::listen_track::run(ctx, call);
+    }
+    if super::listen_reference::is_new_request(&call.args) {
+        return super::listen_reference::run_file(ctx, call);
     }
     Box::pin(async move {
         check(&call.signal)?;
@@ -105,14 +114,14 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         )?;
         let reference = call.args.get("compare_to").map(Source::parse).transpose()?;
         // Resolve both before making any copy or starting any DSP.
-        let source_path = source.resolve(ctx, &call.signal).await?;
+        let source_path = resolve_source(ctx, &source, &call.signal).await?;
         let reference_path = match &reference {
-            Some(reference) => Some(reference.resolve(ctx, &call.signal).await?),
+            Some(reference) => Some(resolve_source(ctx, reference, &call.signal).await?),
             None => None,
         };
-        let staged = source.stage(ctx, &call.signal).await?;
+        let staged = stage_source(ctx, &source, &call.signal).await?;
         let staged_reference = match &reference {
-            Some(reference) => Some(reference.stage(ctx, &call.signal).await?),
+            Some(reference) => Some(stage_source(ctx, reference, &call.signal).await?),
             None => None,
         };
         let source = measure(ctx, staged, &source_path, &call.signal).await?;
@@ -124,7 +133,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     })
 }
 
-fn check(signal: &Signal) -> Result<(), OpError> {
+pub(super) fn check(signal: &Signal) -> Result<(), OpError> {
     if signal.is_cancelled() {
         Err(OpError::Refused { code: "cancelled", reason: "Listening was cancelled.".into(), owner: None })
     } else {
@@ -135,9 +144,9 @@ fn check(signal: &Signal) -> Result<(), OpError> {
 /// A successful measurement owns the still-unpublished audio it describes. Dropping it cleans the copy.
 /// Capture callers can use this same path after staging their approved scratch audio.
 pub struct MeasuredAudio {
-    file: StagedArtifact,
+    pub(super) file: StagedArtifact,
     pub metrics: Analysis,
-    mime: &'static str,
+    pub(super) mime: &'static str,
 }
 
 /// Measure an owned immutable stage with the installed-only decoder policy. No model or DAW is involved.
@@ -163,7 +172,12 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
         .ok_or_else(|| OpError::Invalid { reason: "Audio must have a file name.".into() })?
         .to_string_lossy()
         .into_owned();
-    let mime = match metrics.format.as_str() {
+    let mime = audio_mime(&metrics.format)?;
+    Ok(MeasuredAudio { file, metrics, mime })
+}
+
+pub(super) fn audio_mime(format: &str) -> Result<&'static str, OpError> {
+    Ok(match format {
         "wav" | "wave" => "audio/wav",
         "aif" | "aiff" | "aifc" => "audio/aiff",
         "mp3" => "audio/mpeg",
@@ -173,8 +187,7 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
         "ogg" | "oga" | "opus" => "audio/ogg",
         "caf" => "audio/x-caf",
         format => return Err(OpError::Failed { reason: format!("No retained audio MIME type for validated format {format}.") }),
-    };
-    Ok(MeasuredAudio { file, metrics, mime })
+    })
 }
 
 /// Retain measured audio and its optional reference together, then produce the C1 result.
@@ -602,5 +615,183 @@ mod tests {
         assert_eq!(std::fs::read(retained).unwrap(), bytes);
         assert_eq!(std::fs::read(source).unwrap(), bytes);
         ctx.snapshots().flush();
+    }
+    #[tokio::test]
+    async fn an_excerpt_retains_its_measured_float_samples_and_replays_once_at_zero() {
+        let fixture = Fixture::new();
+        let (source, _) = fixture.tone("current.wav", 1800., 0.2);
+        let (reference, _) = fixture.tone("reference.wav", 110., 0.1);
+        let mut bytes = std::fs::read(&reference).unwrap();
+        bytes[44 + 96_000..].copy_from_slice(&pcm(1800., 0.2)[44..44 + 96_000]);
+        std::fs::write(&reference, &bytes).unwrap();
+        let heard = fixture.listen(json!({"source":{"file":source},"compare_to":{"file":reference,"from":1.,"seconds":0.75}})).await.unwrap();
+        let compared = &heard["compare"];
+        assert_eq!(compared["name"], "reference.wav");
+        assert_eq!(compared["window"]["requested"], json!({"from":1.,"seconds":0.75}));
+        assert_eq!(compared["window"]["start_frame"], 48_000);
+        assert_eq!(compared["window"]["frame_count"], 36_000);
+        assert_eq!(compared["window"]["replay_from"], 0.);
+        assert!(!compared.to_string().contains(fixture.root.to_str().unwrap()));
+        let id = compared["artifact_id"].as_str().unwrap();
+        let kept = fixture.ctx.artifacts().resolve(&fixture.ctx, id).unwrap();
+        let kept_bytes = std::fs::read(&kept).unwrap();
+        assert_eq!(u16::from_le_bytes(kept_bytes[20..22].try_into().unwrap()), 3, "float32, not post-measure PCM16");
+        assert_eq!(kept_bytes.len(), 44 + 36_000 * 4);
+        let before: Value = serde_json::from_slice(&std::fs::read(fixture.ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
+        let replay = fixture.listen(json!({"source":{"file":source},"compare_to":{"artifact_id":id}})).await.unwrap();
+        assert_eq!(replay["compare"]["artifact_id"], id);
+        assert_eq!(replay["compare"]["metrics"]["seconds"], 0.75);
+        let first = compared["metrics"]["loudness"]["integratedLufs"].as_f64().unwrap();
+        let again = replay["compare"]["metrics"]["loudness"]["integratedLufs"].as_f64().unwrap();
+        assert!((first - again).abs() < 0.01, "{first} vs {again}");
+        let after: Value = serde_json::from_slice(&std::fs::read(fixture.ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
+        assert_eq!(before[id], after[id], "replay must not rewrite the excerpt's origin or registration");
+        assert_eq!(std::fs::read(reference).unwrap(), bytes);
+        assert_eq!(std::fs::read(kept).unwrap(), kept_bytes);
+    }
+
+    #[tokio::test]
+    async fn three_reference_targets_use_real_profile_values_and_report_mono_coverage() {
+        let fixture = Fixture::new();
+        let (source, _) = fixture.tone("current.wav", 750., 0.2);
+        let (quiet, _) = fixture.tone("quiet.wav", 750., 0.1);
+        let (middle, _) = fixture.tone("middle.wav", 750., 0.2);
+        let (loud, _) = fixture.tone("loud.wav", 750., 0.4);
+        let mut mixed_rate = std::fs::read(&quiet).unwrap();
+        mixed_rate[24..28].copy_from_slice(&24_000u32.to_le_bytes());
+        mixed_rate[28..32].copy_from_slice(&48_000u32.to_le_bytes());
+        std::fs::write(&quiet, mixed_rate).unwrap();
+        let heard = fixture.listen(json!({"source":{"file":source},"references":[{"file":quiet},{"file":middle},{"file":loud}]})).await.unwrap();
+        assert_eq!(heard["references"][0]["window"]["sample_rate"], 24_000.);
+        assert_eq!(heard["references"][1]["window"]["sample_rate"], 48_000.);
+        assert_eq!(heard["reference_profile"]["usable_references"], 3);
+        let quantities = heard["reference_profile"]["quantities"].as_array().unwrap();
+        let loudness = quantities.iter().find(|row| row["quantity"] == "integrated").unwrap();
+        assert_eq!((loudness["contributors"].as_u64(), loudness["references"].as_u64()), (Some(3), Some(3)));
+        assert!(loudness["deviation"].as_f64().unwrap().abs() < 0.1, "{loudness}");
+        assert!(loudness["target"]["high"].as_f64().unwrap() - loudness["target"]["low"].as_f64().unwrap() > 10.);
+        assert!(loudness["basis"].as_str().unwrap().contains("Heard"));
+        let width = quantities.iter().find(|row| row["quantity"] == "low_width").unwrap();
+        assert_eq!(width["contributors"], 0);
+        assert!(width["source"].is_null() && width["target"].is_null() && width["deviation"].is_null(), "{width}");
+        assert_eq!(width["source_reason"], "mono");
+        assert_eq!(width["target_reason"], "no_reference_measurement");
+        assert!(!quantities.iter().any(|row| row["quantity"] == "true_peak"), "a Profile has no peak target");
+        assert!(!heard["references"].to_string().contains(fixture.root.to_str().unwrap()));
+        assert!(fixture.ctx.history().rows(10).is_empty());
+        let manifest: Value = serde_json::from_slice(&std::fs::read(fixture.ctx.paths().state_dir.join("artifacts.json")).unwrap()).unwrap();
+        assert_eq!(manifest.as_object().unwrap().keys().filter(|key| key.starts_with("a-")).count(), 4);
+    }
+
+    #[tokio::test]
+    async fn silent_references_never_form_floor_only_targets() {
+        let fixture = Fixture::new();
+        let (source, _) = fixture.tone("current.wav", 750., 0.2);
+        let (silent, _) = fixture.tone("silent.wav", 750., 0.);
+        let heard = fixture.listen(json!({"source":{"file":source},"references":[{"file":silent}]})).await.unwrap();
+        assert_eq!(heard["references"][0]["availability"]["energy_zero"], true);
+        assert_eq!(heard["references"][0]["availability"]["profile_reason"], "zero_energy");
+        assert_eq!(heard["reference_profile"]["usable_references"], 0);
+        for quantity in heard["reference_profile"]["quantities"].as_array().unwrap() {
+            assert!(quantity["target"].is_null() && quantity["deviation"].is_null(), "{quantity}");
+            assert_eq!(quantity["contributors"], 0);
+            assert_eq!(quantity["target_reason"], "no_reference_measurement");
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_or_failed_last_references_leave_no_artifact_prefix() {
+        let fixture = Fixture::new();
+        let (source, original) = fixture.tone("current.wav", 750., 0.2);
+        let (reference, reference_bytes) = fixture.tone("reference.wav", 750., 0.1);
+        let broken = fixture.root.join("broken.wav");
+        std::fs::write(&broken, b"not audio").unwrap();
+        let before = fixture.artifact_files();
+        for args in [
+            json!({"source":{"file":source},"references":[]}),
+            json!({"source":{"file":source},"references":[{"file":reference}],"compare_to":{"file":reference}}),
+            json!({"source":{"file":source},"references":[{"file":reference},{"file":reference}]}),
+            json!({"source":{"file":source},"references":[{"file":reference},{"file":reference,"from":0.,"seconds":2.}]}),
+            json!({"source":{"file":source},"references":[{"file":reference,"from":0.000001,"seconds":0.5},{"file":reference,"from":0.000002,"seconds":0.5}]}),
+            json!({"source":{"file":source},"references":[{"file":reference,"from":0.}]}),
+            json!({"source":{"file":source},"references":[{"file":reference,"from":0.,"seconds":60.001}]}),
+            json!({"source":{"file":source},"references":[{"file":reference},{"file":reference,"from":1.5,"seconds":1.}]}),
+            json!({"source":{"file":source},"references":[{"file":reference},{"file":broken}]}),
+        ] {
+            assert!(fixture.listen(args.clone()).await.is_err(), "{args}");
+            assert_eq!(fixture.artifact_files(), before, "{args}");
+            assert!(!fixture.ctx.paths().state_dir.join("artifacts.json").exists(), "{args}");
+        }
+        assert_eq!(std::fs::read(source).unwrap(), original);
+        assert_eq!(std::fs::read(reference).unwrap(), reference_bytes);
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_the_last_reference_discards_every_measured_stage() {
+        let fixture = Fixture::new();
+        let (source, original) = fixture.tone("current.wav", 750., 0.2);
+        let (first, _) = fixture.tone("first.wav", 250., 0.1);
+        let (last, _) = fixture.tone("last.wav", 750., 0.2);
+        let signal = Signal::new();
+        let args = json!({"references":[{"file":first},{"file":last}]});
+        let selected = super::super::listen_reference::ReferenceSet::parse(args.as_object().unwrap()).unwrap();
+        let references = selected.prepare(&fixture.ctx, &signal, 120).await.unwrap();
+        let file = fixture.ctx.artifacts().stage(&fixture.ctx, &source, None, &signal).await.unwrap();
+        let current = super::super::listen_reference::measure_current(&fixture.ctx, file, &source, true, &signal).await.unwrap();
+        signal.cancel();
+        let refused = super::super::listen_reference::retain(&fixture.ctx, current, references, &signal, None).await.unwrap_err();
+        assert_eq!(refused.code(), "cancelled");
+        assert!(fixture.artifact_files().is_empty());
+        assert!(!fixture.ctx.paths().state_dir.join("artifacts.json").exists());
+        assert_eq!(std::fs::read(source).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn low_rate_references_never_widen_air_targets_with_nyquist_floors() {
+        let fixture = Fixture::new();
+        let make = |name: &str, rate: u32, air_db: Option<f64>| {
+            let high = air_db.map(|db| {
+                let share = 10f64.powf(db / 10.);
+                0.25 * (share / (1. - share)).sqrt()
+            }).unwrap_or(0.);
+            let samples: Vec<f32> = (0..rate).map(|frame| {
+                let time = frame as f64 / rate as f64 * std::f64::consts::TAU;
+                (0.25 * (750. * time).sin() + high * (16_000. * time).sin()) as f32
+            }).collect();
+            let path = fixture.root.join(name);
+            std::fs::write(&path, audio::decode::float_wav(&[samples], rate)).unwrap();
+            path
+        };
+        let current = make("dull-current.wav", 48_000, Some(-40.));
+        let low = make("low-rate.wav", 22_050, None);
+        let first = make("first-full.wav", 48_000, Some(-22.));
+        let second = make("second-full.wav", 48_000, Some(-24.));
+        let heard = fixture.listen(json!({"source":{"file":current},
+            "references":[{"file":low},{"file":first},{"file":second}]})).await.unwrap();
+        let quantities = heard["reference_profile"]["quantities"].as_array().unwrap();
+        let air = quantities.iter().find(|row| row["quantity"] == "region/air").unwrap();
+        assert_eq!((air["contributors"].as_u64(), air["references"].as_u64()), (Some(2), Some(3)));
+        assert!(air["target"]["low"].as_f64().unwrap() > -30., "{air}");
+        assert!(air["source"].as_f64().unwrap() < -35., "{air}");
+        assert_eq!(air["inside_spread"], false, "the unavailable low-rate floor must not make a dull source fit");
+        let low_quantities = heard["references"][0]["profile_quantities"].as_array().unwrap();
+        let unavailable_air = low_quantities.iter().find(|row| row["quantity"] == "region/air").unwrap();
+        assert!(unavailable_air["value"].is_null());
+        assert_eq!(unavailable_air["reason_code"], "above_nyquist");
+        assert_eq!(unavailable_air["nyquist_hz"], 11_025.);
+        let partial = low_quantities.iter().find(|row| row["quantity"] == "region/brilliance").unwrap();
+        assert!(partial["value"].is_null());
+        assert_eq!(partial["reason_code"], "partial_frequency_coverage");
+        assert!(low_quantities.iter().find(|row| row["quantity"] == "region/bass").unwrap()["value"].is_number());
+        let heard = fixture.listen(json!({"source":{"file":low},"references":[{"file":first},{"file":second}]})).await.unwrap();
+        let air = heard["reference_profile"]["quantities"].as_array().unwrap().iter().find(|row| row["quantity"] == "region/air").unwrap();
+        assert!(air["source"].is_null() && air["deviation"].is_null() && air["inside_spread"].is_null());
+        assert_eq!(air["source_reason"], "above_nyquist");
+        assert_eq!(air["source_nyquist_hz"], 11_025.);
+        let heard = fixture.listen(json!({"source":{"file":current},"references":[{"file":low}]})).await.unwrap();
+        let air = heard["reference_profile"]["quantities"].as_array().unwrap().iter().find(|row| row["quantity"] == "region/air").unwrap();
+        assert!(air["target"].is_null() && air["deviation"].is_null());
+        assert_eq!(air["contributors"], 0);
+        assert_eq!(air["target_reason"], "no_reference_measurement");
     }
 }
