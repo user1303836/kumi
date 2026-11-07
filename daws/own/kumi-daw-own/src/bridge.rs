@@ -106,6 +106,9 @@ pub struct OwnDaw {
     pub descriptor: BridgeDescriptor,
     /// What `daw-mcp-server --daw` takes: "reaper", "renoise".
     pub host_flag: &'static str,
+    /// Bound for host calls, including vendor plug-in creation. Ordinary bridges
+    /// keep CALL_MS; a companion with a longer native deadline can allow for it.
+    pub call_ms: u64,
     /// Its bridge, as Kumi brings it up to date: what the producer is told when it lacks something.
     pub bridge: OwnBridge,
     pub instructions: &'static str,
@@ -794,7 +797,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     signal,
                     args,
                     env: host_environment(keep_identity),
-                    timeout_ms: Some(CALL_MS),
+                    timeout_ms: Some(self.daw.call_ms),
                     bridge: Some(self.daw.descriptor),
                     ..Default::default()
                 };
@@ -915,7 +918,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     async fn call(&self, tool: &str, args: Value, signal: Signal) -> Result<Result<Value, Refused>, RuntimeError> {
         let endpoint = self.endpoint(signal.clone()).await?;
         let args = args.as_object().cloned().unwrap_or_default();
-        let bounded = abort::any([signal, abort::timeout(CALL_MS)]);
+        let bounded = abort::any([signal, abort::timeout(self.daw.call_ms)]);
         stopped_or(endpoint.call(tool, args, bounded.clone()).await.map(answer_of), &bounded)
     }
 
@@ -1358,7 +1361,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let mut tools = vec![self.read_tool()];
         tools.extend(self.changes.tools());
         // M6: learning a routine the producer does by hand, for a recipe in the DAW's change kinds.
-        if !self.daw.changes.changes_nothing() {
+        if !self.daw.changes.changes_nothing() && !self.daw.catch_up.watch_description.is_empty() {
             tools.push(Rc::new(WatchTool {
                 endpoint: self.endpoint.clone(),
                 words: self.daw.catch_up,
@@ -2464,13 +2467,14 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 "ref": {"type": "string", "description": "One object's ref, from this turn: reads it alone, as it is now"},
                 "parent": {"type": "string", "description": "The ref of what it's in (a track's items, an FX's parameters…), from this turn"},
                 "cursor": {"type": "string", "description": "The cursor an earlier page gave, for the next page"},
+                "epoch": {"type":"string", "description":"The state epoch returned by the read that supplied these refs or this cursor"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": MOST_ROWS, "description": "How many rows (50 by default)"},
             },
         });
-        // A REAPER API function that only reads, by name, with its arguments.
+        // An operation that this DAW exposes for read-only calls.
         if self.daw.read_kinds.contains(&"call") {
-            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)"});
-            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs"});
+            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: an exact read-only operation exposed by this DAW; see its integration instructions"});
+            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "The read operation's arguments; use current refs wherever it accepts them"});
         }
         // A tracker's lines are read one track at a time.
         if self.daw.read_kinds.contains(&"line") {

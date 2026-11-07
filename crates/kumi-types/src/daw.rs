@@ -11,10 +11,11 @@ pub enum DawId {
     Reaper,
     Renoise,
     SoundCraft,
+    Lynx,
 }
 
 impl DawId {
-    pub const ALL: [DawId; 4] = [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft];
+    pub const ALL: [DawId; 5] = [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft, DawId::Lynx];
 
     /// Its profile.
     pub fn profile(self) -> &'static DawProfile {
@@ -23,6 +24,7 @@ impl DawId {
             DawId::Reaper => &DawProfile::REAPER,
             DawId::Renoise => &DawProfile::RENOISE,
             DawId::SoundCraft => &DawProfile::SOUNDCRAFT,
+            DawId::Lynx => &DawProfile::LYNX,
         }
     }
 
@@ -33,6 +35,7 @@ impl DawId {
             DawId::Reaper => "reaper",
             DawId::Renoise => "renoise",
             DawId::SoundCraft => "soundcraft",
+            DawId::Lynx => "lynx",
         }
     }
 
@@ -1156,6 +1159,54 @@ impl DawProfile {
         },
     };
 
+    /// Experimental LYNX SHARE through Kumi's own bridge and a native-control companion.
+    pub const LYNX: DawProfile = DawProfile {
+        id: Some(DawId::Lynx),
+        words: DawWords { app: "LYNX SHARE", place: "project", places: "projects", master: "Master", timeline: "Playlist" },
+        caps: Capabilities { stop_transport: true, ..Capabilities::NONE },
+        vocab: PromptVocab {
+            cant_reach: "Open a compatible LYNX Remote Control API build, enable Remote Control in General settings, then run kumi --daw lynx bridge. The API remains unreleased; ordinary LYNX 0.1.24 is not sufficient.",
+            ref_example: "l:track:0:0123456789abcdef:1",
+            recipe_step_example: "a parameter set on an instrument that an earlier step inserted",
+            missing_example: "rendering the project to an audio file",
+            goal_instruments: "native generators or scanned hosted instruments",
+            build_chains: "insert instruments and mixer effects from LYNX's catalog",
+            goal_needs: "Goal-driven audio evaluation is not implemented for LYNX yet.",
+            safety_limiter: "a native mixer limiter",
+            voice_project: "LYNX SHARE project",
+            voice_devices: "native generators, scanned hosted instruments and mixer effects",
+            project_parts: "channels, mixer inserts, patterns and Playlist clips",
+            own_undo: "LYNX's own undo history",
+            listen_method: "This adapter does not capture live audio yet.",
+            tutorial_words: "LYNX SHARE: Channel Rack, Piano Roll, Playlist and Mixer",
+            write_notes_tool: "lynx_pattern_replace_notes",
+            refs_retired: "LYNX's project or revision changed: read fresh references before editing.",
+            structure: "channels",
+            gain_stage: "the Master insert's limiter",
+            eq_name: "native EQ",
+            drum_kit: "native drum generator channels",
+            launcher_clip: "a Playlist clip",
+            clip: "clip",
+            clips: "clips",
+            clip_ref: "a Playlist clipId",
+            audio_clip: "an audio Playlist clip",
+            midi_clip: "a pattern Playlist clip",
+            clip_field: "clipId",
+            eq_fit_settings: "native effect parameters",
+            part_ref: "a pattern ref",
+            reference_part: "the reference pattern's ref",
+            stem_audio: "an existing audio-channel source",
+            stem_as_audio: "an existing audio-channel Playlist clip",
+            note_tools: "LYNX's pattern-note tools",
+            move_notes_tool: "lynx_pattern_replace_notes",
+            swing_tool: "lynx_pattern_replace_notes",
+            midi_file_import: "MIDI file import is not exposed by this adapter",
+            preset_sources: "plug-in presets inspected from existing files; loading presets into LYNX is not exposed",
+            preset_loading: "LYNX preset loading is not exposed",
+            ..Self::UNKNOWN.vocab
+        },
+    };
+
     /// The same DAW with nothing it can do now: its words stay (the producer still calls it by its name).
     pub const fn without_caps(self) -> DawProfile {
         DawProfile { caps: Capabilities::NONE, ..self }
@@ -1405,7 +1456,7 @@ mod tests {
     fn daw_ids_keep_their_names() {
         assert_eq!(
             serde_json::to_string(&DawId::ALL).unwrap(),
-            r#"["ableton","reaper","renoise","soundcraft"]"#,
+            r#"["ableton","reaper","renoise","soundcraft","lynx"]"#,
             "what files and settings keep"
         );
         assert!(DawId::ALL.iter().all(|daw| DawId::parse(daw.as_str()) == Some(*daw)), "and --daw reads back");

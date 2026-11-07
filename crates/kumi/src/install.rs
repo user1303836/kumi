@@ -723,7 +723,7 @@ impl Unpacking {
 /// they answer is ignored.
 async fn first_launches(fresh: &str) {
     let mut children = Vec::new();
-    for name in ["daw-mcp-server", "soundcraft-kumi"] {
+    for name in std::iter::once("daw-mcp-server").chain(daw_bridge::Daw::ALL.into_iter().filter_map(daw_bridge::Daw::companion_program)) {
         let program = join(fresh, &executable_name(name));
         if !Path::new(&program).is_file() {
             continue;

@@ -47,6 +47,7 @@ pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::SOUNDCRAFT,
     descriptor: DESCRIPTOR,
     host_flag: "soundcraft",
+    call_ms: kumi_daw_own::bridge::CALL_MS,
     bridge: OwnBridge::Beside,
     instructions: INSTRUCTIONS,
     mechanical: "a muted or inactive track in the path, an insert bypassed, a send to a bus nothing returns, two equal sends to one bus",

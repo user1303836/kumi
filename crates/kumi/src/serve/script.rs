@@ -121,7 +121,7 @@ pub fn check(code: &str, language: &str, daw: DawId) -> Result<Checked, Refused>
     let takes = match daw {
         DawId::Ableton => "python",
         DawId::Reaper | DawId::Renoise => "lua",
-        DawId::SoundCraft => return Err(refuse("unsupported", "Kumi runs scripts only in Live, REAPER and Renoise.")),
+        DawId::SoundCraft | DawId::Lynx => return Err(refuse("unsupported", "Kumi runs scripts only in Live, REAPER and Renoise.")),
     };
     if code.trim().is_empty() {
         return Err(refuse("invalid", "The script has no code."));
@@ -586,6 +586,7 @@ mod tests {
         assert_eq!(refused_as("", "python", DawId::Ableton), refuse("invalid", "The script has no code."));
         assert_eq!(refused_as(" \n\t\r\n ", "lua", DawId::Reaper), refuse("invalid", "The script has no code."));
         assert_eq!(refused_as("x = 1", "python", DawId::SoundCraft).code, "unsupported");
+        assert_eq!(refused_as("x = 1", "python", DawId::Lynx).code, "unsupported");
         // Each class of hidden character, with the first one named and its line.
         for (hidden, class) in [
             ('\u{202E}', "bidi override"),

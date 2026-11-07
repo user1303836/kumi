@@ -56,6 +56,7 @@ pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::RENOISE,
     descriptor: BridgeDescriptor::RENOISE,
     host_flag: "renoise",
+    call_ms: kumi_daw_own::bridge::CALL_MS,
     bridge: kumi_daw_own::bridge::OwnBridge::Loaded("tool"),
     instructions: INSTRUCTIONS,
     mechanical: "a stray effect command, two equal routes to the master, a duplicated #Send, a muted column",

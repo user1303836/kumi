@@ -247,7 +247,7 @@ async fn a_worker_that_cant_start_says_nothing_about_the_file() {
     pool.close().await;
 }
 #[cfg(unix)]
-#[tokio::test]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
@@ -256,7 +256,7 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
     put(
         &worker,
         format!(
-            "#!/bin/sh\nmkdir \"$TMPDIR/kumi-audio-1\" && : > \"$TMPDIR/kumi-audio-1/converted.wav\"\nprintf '%s' \"$TMPDIR\" > '{0}/temp'\nsleep 30 &\nprintf '%s' $! > '{0}/child'\nwait\n",
+            "#!/bin/sh\nIFS= read -r job || exit 1\nmkdir \"$TMPDIR/kumi-audio-1\" && : > \"$TMPDIR/kumi-audio-1/converted.wav\"\nprintf '%s' \"$TMPDIR\" > '{0}/temp.pending'\nmv '{0}/temp.pending' '{0}/temp'\nsleep 30 &\nprintf '%s' $! > '{0}/child.pending'\nmv '{0}/child.pending' '{0}/child'\nwait\n",
             root.path().display()
         ),
     );
@@ -272,7 +272,29 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
         seconds: None,
         decode: Default::default(),
     };
-    assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
+    let mut measuring = Box::pin(pool.run(0, job));
+    // The timeout tests cleanup of a working converter, rather than how quickly a
+    // busy runner starts the shell. Keep virtual time paused until both resources exist.
+    let ready = async {
+        loop {
+            let temp = std::fs::read_to_string(root.path().join("temp")).ok().filter(|path| !path.is_empty());
+            let child = std::fs::read_to_string(root.path().join("child")).ok().and_then(|pid| pid.parse::<libc::pid_t>().ok());
+            if let (Some(temp), Some(child)) = (temp, child) {
+                if child > 0 && std::path::Path::new(&temp).join("kumi-audio-1/converted.wav").is_file() {
+                    break;
+                }
+            }
+            // A ready task prevents Tokio from advancing its paused clock while
+            // the external process is still starting in real time.
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::select! {
+        () = ready => {},
+        result = &mut measuring => panic!("the worker ended before creating its child and converted copy: {result:?}"),
+    }
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(measuring.await.unwrap().error.as_deref(), Some("it took too long to read"));
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
     assert!(!std::path::Path::new(&temp).exists(), "{temp} is still there");
     let child: libc::pid_t = std::fs::read_to_string(root.path().join("child")).unwrap().parse().unwrap();

@@ -1,0 +1,30 @@
+[package]
+name = "kumi-daw-lynx"
+version = "0.1.0"
+description = "LYNX SHARE through Kumi's own host and companion bridge"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-daw.workspace = true
+kumi-daw-own.workspace = true
+kumi-library.workspace = true
+kumi-agent.workspace = true
+kumi-types.workspace = true
+daw-bridge.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+futures.workspace = true
+kumi-common.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

@@ -76,6 +76,12 @@ fn tool_list(daw: Daw) -> Value {
             "The ref of what the rows are in: a track for its items or sends, an FX for its parameters.",
             "the take or track it is about",
         ),
+        Daw::Lynx => (
+            "project",
+            "channels, mixer inserts, patterns, notes, devices and Playlist clips",
+            "The revision-bearing ref of a pattern for its notes, or a device for its parameters.",
+            "the pattern, channel or mixer insert it is about",
+        ),
         Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     // Renoise plays from a slot and line; REAPER from where it is (cursor_set moves it).
@@ -85,6 +91,7 @@ fn tool_list(daw: Daw) -> Value {
             json!({"sequence": {"type": "integer", "minimum": 1}, "line": {"type": "integer", "minimum": 0}, "epoch": {"type": "string"}}),
         ),
         Daw::Reaper => ("Starts REAPER's playback from where it is (cursor_set moves it first).", json!({"epoch": {"type": "string"}})),
+        Daw::Lynx => ("Starts LYNX's playback in its current Song/Pattern mode.", json!({"epoch": {"type": "string"}})),
         Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     let [status, discover] = finding(daw, place, &pick);
@@ -192,6 +199,8 @@ fn tool_list(daw: Daw) -> Value {
     let (save_title, save) = match daw {
         Daw::Reaper => ("Save the REAPER project", "Saves the open REAPER project where it is, or as its next version (version: true). A project never saved is saved only under path, a .rpp inside the folder REAPER saves projects in, and never over a file."),
         Daw::Renoise => ("Save the Renoise song", "Saves the open Renoise song where it is, or as path (a whole path to a .xrns file that isn't there yet; the song is that file from then on). A song never saved is saved only under path, and never over a file. (version is REAPER's: Renoise refuses it.)"),
+        // Removed from LYNX's offered tools below: its endpoint cannot save.
+        Daw::Lynx => ("", ""),
         Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     if let Some(tools) = list.as_array_mut() {
@@ -435,7 +444,11 @@ fn tool_list(daw: Daw) -> Value {
         }
     ]);
     list.as_array_mut().expect("a list").extend(catchup.as_array().cloned().unwrap_or_default());
-    list
+    if daw == Daw::Lynx {
+        crate::lynx::offered_tools(list)
+    } else {
+        list
+    }
 }
 
 /// The `read` tool, in the DAW's words: what it opens, what a read's parent holds and the words for `parent`; the kinds it
