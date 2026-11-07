@@ -170,7 +170,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `daws/ableton/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。
 
-**一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。等 `main` 上对要发布的提交运行的 CI 在 Linux、macOS 和 Windows 上都通过后再运行：拉取请求只在 Linux 上测试，所以 `main` 的运行是另外两个系统上的第一次运行，在它通过之前 `--go` 会拒绝发布：
+**一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。等 `main` 上对要发布的提交运行的 CI 通过后再运行：拉取请求不运行测试，所以 `main` 的运行是对改动的第一次测试，在它通过之前 `--go` 会拒绝发布：
 
 ```sh
 python3 scripts/release.py          # 试运行：显示版本、CHANGELOG 条目、发布说明和各项检查
@@ -194,7 +194,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-使用本机的 Rust 目标三元组；在 Apple Silicon 的 Mac 上，`--target x86_64-apple-darwin` 可以交叉构建 Intel 的发行包。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。CI 在拉取请求和 `main` 上使用的 `--profile ci-release` 省去 release 配置的全程序优化，以便更快地构建；发布的发行包始终使用默认的 `release`。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他发行包不包含它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
+使用本机的 Rust 目标三元组；在 Apple Silicon 的 Mac 上，`--target x86_64-apple-darwin` 可以交叉构建 Intel 的发行包。构建器会运行锁定的 release 构建，并把桥接产物绑定到提交、Cargo 锁文件、构建方法和精确的文件哈希。`--profile ci-release` 省去 release 配置的全程序优化，以便更快地构建，从不用于发布；发布的发行包始终使用默认的 `release`。Mac 发行包需要 `target/hands/` 中当前的辅助程序；其他发行包不包含它。服务器和分析工作进程必须一起发布。`--binaries-dir` 选项会打包已有的二进制文件，但不能证明它们是用 release 优化构建的。
 
 聚合步骤会保留现有 Node 24 安装所使用的清单：
 
