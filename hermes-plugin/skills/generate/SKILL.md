@@ -22,7 +22,7 @@ Kumi can ask Mirelo for a sound effect from a prompt, or for MIDI notes from an 
 - **The generation is a job.** Follow it with `kumi_job` and its `job_id`. A finished one has its file as `artifact_id` (and a `MEDIA:` line for audio).
 - **An `unsure` create is never created again:** whether Mirelo got it is unknown, and its credits stay reserved. Check the job with `kumi_job`, and tell the producer they can check Mirelo.
 - **Placing a sound effect** is a change, as in skill `kumi:sounds`: the DAW's own file step, with `{"artifact_id"}`.
-- **MIDI notes are never placed through an audio file step.** They're a separate change the producer approves, and their times are seconds into the source audio (`timing: "seconds"`), not beats. Before you plan one, ask or confirm three things:
+- **MIDI notes are never placed through an audio file step.** They're a separate change (asked when `ask_before_changes` is true), and their times are seconds into the source audio (`timing: "seconds"`), not beats. Before you plan one, ask or confirm three things:
   - where the source's 0 s falls in the project (which bar and beat);
   - which track or clip the notes go to;
   - how seconds become beats.

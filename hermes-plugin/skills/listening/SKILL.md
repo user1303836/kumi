@@ -4,7 +4,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 ---
 # Measuring audio with Kumi
 
-`kumi_listen` measures an audio file on this computer and, in the DAWs its description names, a track or the mix of the open project over a beat window (that plays the window in the DAW while it's stopped, so the producer approves it first). Nothing is heard, by Kumi or by you: report measurements as measurements.
+`kumi_listen` measures an audio file on this computer and, in the DAWs its description names, a track or the mix of the open project over a beat window (that plays the window in the DAW while it's stopped: say what will play in one line first; it's asked when `kumi_status` says `ask_before_changes: true`). Nothing is heard, by Kumi or by you: report measurements as measurements.
 
 ## What it measures
 - **Loudness:** integrated LUFS. Higher is louder, and streaming services normalise around −14 LUFS.
@@ -22,7 +22,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Which files Kumi can measure:** a file inside one of the producer's approved sample folders or this profile's media, a map sound, or a file Kumi made. A mixdown exported anywhere else is refused: ask the producer to export it into an approved folder, or to add its folder (`kumi_library` `add_folder`).
 - **How far from a loudness target** (−14 LUFS for streaming, or the producer's figure): measure the file, then report its integrated LUFS against the target, and its true peak against −1 dBTP.
   - This recipe only measures: say what's off, and by how much. To bring the mix to a reference, see "Mastering against a reference" below.
-  - Where a level change is the fix, offer one, as an approved `kumi_change`.
+  - Where a level change is the fix, offer one, as a `kumi_change`.
   - Measuring the same file again can't show that change: it measures as before. To check it, the producer exports or bounces again into an approved folder, and you measure the new file. Otherwise say Kumi can't check the result itself.
 
 
@@ -48,8 +48,8 @@ description: What Kumi's audio measurements mean and how to report them honestly
 
 ## Listening to a track or the mix
 - **Only in the DAWs `kumi_listen`'s description names.** Kumi's runtime says which it can listen to, and a version may name none. Elsewhere, Kumi refuses a track or mix listen before anything plays: say so, and offer to measure a file instead (a bounce of the part, or the sample it plays).
-- **It plays the project.** `kumi_listen` with `source: {"track": {"ref": "…"} or {"mix": true}, "from_beat", "beats"}`, plus the project key and epoch from `kumi_observe`, plays exactly that window (60 s at most) while the DAW is stopped, and measures it. The producer approves it first, in the runtime's own words.
-- **In Live, a listen leaves traces Kumi can't remove.** Live may show the Set as modified, and Live's own Undo history holds the listen's temporary device steps, so pressing Undo in Live can bring Kumi Ears back. The approval says so; say it again if the producer asks what changed. A listen isn't a change in Kumi's HISTORY.
+- **It plays the project.** `kumi_listen` with `source: {"track": {"ref": "…"} or {"mix": true}, "from_beat", "beats"}`, plus the project key and epoch from `kumi_observe`, plays exactly that window (60 s at most) while the DAW is stopped, and measures it. By default it runs without a prompt: say in one line what will play first. With `ask_before_changes: true` the producer approves it first, in the runtime's own words.
+- **In Live, a listen leaves traces Kumi can't remove.** Live may show the Set as modified, and Live's own Undo history holds the listen's temporary device steps, so pressing Undo in Live can bring Kumi Ears back. Kumi's answer says so; say it again if the producer asks what changed. A listen isn't a change in Kumi's HISTORY.
 - **A listen that didn't measure** (`refused`, `cancelled` or `unsure`) has no measurements. Say what happened; after `unsure`, observe again (`kumi_observe`) before anything else, and never send it again.
 
 ## Rounds: comparing candidate changes
@@ -61,26 +61,26 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - how many candidates: four, unless the producer says otherwise. Never add one yourself; ask before another round.
 - **Level or tone, said up front.**
   - A level round reports the loudness difference itself. Never match it away.
-  - A tone round needs an agreed loudness match first. A gain correction is an ordinary approved candidate, counted like the rest.
+  - A tone round needs an agreed loudness match first. A gain correction is an ordinary candidate, counted like the rest.
   - Without matched levels, report that limitation, not a tonal winner.
-- **The baseline:** observe, then capture it through the normal `kumi_listen` approval, and keep its `artifact_id`.
+- **The baseline:** observe, then capture it with `kumi_listen` as usual, and keep its `artifact_id`.
   - A refused, cancelled or unsure listen isn't a baseline, and neither is one without an artifact.
   - Every candidate uses the same source, the same window, and that `artifact_id` as `compare_to`.
   - For a fader or level change, measure the mix: some DAWs capture a track before its fader, where the capture can't show the change.
   - In Live, where `kumi_listen` captures the mix, it hears the end of Main's chain: after Main's devices (its Limiter too), before Main's fader. A change to Main's fader isn't in that capture: never report one as measured there.
-- **One candidate at a time.** Apply it with `kumi_change`, approved like any change, and keep every `history_id` it returns: together they are this candidate. Never batch candidates, or ask for several at once.
-- **Your own change moves the epoch.** A done change returns the new epoch: adopt that one only, then observe again and check that it's the same project and source. Every capture and every undo is approved as usual.
+- **One candidate at a time.** Apply it with `kumi_change` like any change, and keep every `history_id` it returns: together they are this candidate. Never batch candidates, or ask for several at once.
+- **Your own change moves the epoch.** A done change returns the new epoch: adopt that one only, then observe again and check that it's the same project and source. Every capture and every undo is asked as usual when `ask_before_changes` is true.
 - **Measure each candidate the same way.**
   - Capture with the same window and `compare_to`, then check the window, length and state that come back.
   - Report each difference with its direction: the candidate minus the reference.
   - An interpretation is the model's reading of the numbers, not a listen. Never say a candidate sounds better.
 - **Rejecting a candidate is undoing it exactly.**
-  - `kumi_undo` each of its HISTORY ids, newest first, each one approved. Confirm they're undone before the next candidate.
+  - `kumi_undo` each of its HISTORY ids, newest first. Confirm they're undone before the next candidate.
   - Never use an inverse change, the DAW's own Undo, or anything forced.
   - A candidate that can't be undone stays unresolved: say so. An undo that comes back `kept` means the producer changed it in the DAW since: that's a stop too.
 - **Stop** on any of these: `stale`, `changed_since`, an undo that comes back `kept`, `unsure`, a lost answer, a denial, a project or epoch change that isn't your own, or a tempo change.
   - Don't work around it, and don't take a new baseline yourself. Tell the producer what's left and ask.
-  - A changed tempo, or someone else's change, needs a new baseline the producer approves, and a new round.
+  - A changed tempo, or someone else's change, needs a new baseline, and a new round.
 - **End** at the agreed count or when the goal is met, with one line: the chosen candidate's HISTORY ids (or none), any left unresolved, and what each candidate measured. Choosing a candidate isn't saving the project.
 
 ## Mastering against a reference
@@ -91,7 +91,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - the target: the single reference's measurements, or the set's per-quantity Profile target/spread; keep each canonical true peak and the producer's ceiling separate, never invent a combined peak target.
 - **The extents differ.** Without an explicit reference excerpt, `kumi_listen` measures up to the reference file's first 12 minutes, versus only the captured/bounced mix section. When excerpt fields are offered, choose the matching reference section with `from`/`seconds`; otherwise use an already cut reference. Report exact returned `window` provenance where supplied, else the rounded `analyzed` span; never take a window's loudness range for the whole song's.
 - **Measuring the mix:** by capture where `kumi_listen` offers the mix in this DAW. Otherwise, and that's every DAW until its description says so, by bounce:
-  - the producer bounces the same range, after each approved round, into an approved folder (`kumi_library` `add_folder` if needed);
+  - the producer bounces the same range, after each round, into an approved folder (`kumi_library` `add_folder` if needed);
   - Kumi can't tell a file from before a round from one after it, so the producer confirms which round each file is;
   - measure it as `{"file": …}`, reusing the chosen reference artifact or reference set as below;
   - window, epoch and length checks are for captures; they don't apply to a file.
@@ -103,7 +103,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - the stereo width and correlation;
   - the dynamics: the crest factor, and the loudness range over what was measured.
   - For a set, report the returned Profile source/target/deviations and contributor counts instead; keep each reference's canonical measurements separate. Never calculate a gap between canonical Analysis and a Profile target.
-- **A round is one plan on the master track, approved once.**
+- **A round is one plan on the master track, one change.**
   - **The master:** Live's main track as `kumi_observe` gives it; REAPER's `r:track:master`; Renoise's master track, as read.
   - **The processors the producer chose come first:** iZotope Ozone when the producer asks for it or it's already on the master as read, set by the parameter names Kumi reads on it, in its own units.
   - **Otherwise, native devices:**
@@ -121,7 +121,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), reusing `compare.artifact_id` as `compare_to`, or each `references[].artifact_id` as the same reference set. Never reapply their original file offsets. Report what moved on the same measurement basis.
   - **Rounds add up.** A round that made things better stays applied, and the next one builds on it. Keep the HISTORY ids of every round still applied.
   - **A round that made nothing better ends the rounds:** stop there, without another try.
-  - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first, each approved. That returns the mix to the last round that stays. Stop at the first undo that doesn't come back undone.
+  - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first. That returns the mix to the last round that stays. Stop at the first undo that doesn't come back undone.
   - **Stop when the gaps are within what the producer agreed,** or after the third round. Any more rounds are the producer's new decision.
 - **The rounds section's stops apply here too,** and so does a plan that came back `partial`, `refused` or `unsure`.
 - **End with the measurements, not a match:**

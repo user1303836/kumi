@@ -216,12 +216,15 @@ def requests(state_dir: Path) -> list[dict]:
 
 def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0,
          daw_component: bool = True, hermes_config: dict | None = None, session_key: str = "",
-         media_roots: list[str] | None = None, ledger=None, mirelo_key: str | None = None):
+         media_roots: list[str] | None = None, ledger=None, mirelo_key: str | None = None,
+         ask_before_changes: bool | None = True):
     """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
     `installed` is false), a plugin folder whose kumi_release.json pins it, `hermes_config` as Hermes's own settings,
     `media_roots` as its media folders (none, unless a test names them), `session_key` as the calling session's key,
     and `ledger` and `mirelo_key` as the credit ledger and Hermes's Mirelo secret: never this machine's or this
-    process's. Returns (host, context, data folder); everything is cleaned up after `test`."""
+    process's. "Ask before each change" is on (`ask_before_changes`), so the approval tests see every change asked,
+    unless the settings say otherwise; None leaves it unset, as a fresh install has it (off). Returns (host, context,
+    data folder); everything is cleaned up after `test`."""
     import tempfile
     folder, plugin = tempfile.TemporaryDirectory(), tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
@@ -231,6 +234,8 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
     if installed:
         install(data, *fixture_args, daw_component=daw_component)
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
+    if ask_before_changes is not None:
+        ctx.settings.setdefault("ask_before_changes", ask_before_changes)
     runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10,
                                           hermes=lambda: (None, None))  # never this machine's Hermes homes
     test.addCleanup(stopped, runtimes, data)

@@ -2,7 +2,7 @@ name: kumi
 # The Kumi release the plugin pins (kumi_release.json): the pin pull request sets both.
 version: "1.24.74"
 description: >-
-  Kumi for Hermes: Hermes reads your Ableton Live, REAPER or Renoise project and makes the changes you approve,
+  Kumi for Hermes: Hermes reads your Ableton Live, REAPER or Renoise project and makes the changes you ask for,
   each kept in Kumi's HISTORY and undoable while Kumi runs. Kumi measures audio on your computer and maps the
   sample folders you choose, to find, audition and place sounds. It also reads finished audio other Hermes plugins
   saved in this profile's generated audio folder, to place or measure it.
@@ -29,6 +29,11 @@ config_schema:
     default: ableton
     label: DAW
     description: "The DAW Kumi connects to: Ableton Live (ableton), REAPER (reaper) or Renoise (renoise)."
+  ask_before_changes:
+    type: bool
+    default: false
+    label: Ask before each change
+    description: "Off: Kumi makes the changes you ask for in your DAW without asking; each one goes into HISTORY and most can be undone. On: Hermes asks before each change. Scripts, setup steps, sample folders and Mirelo jobs are asked either way."
   library_folders:
     type: list
     default: []

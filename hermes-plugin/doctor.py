@@ -100,7 +100,9 @@ def _approvals(host: tools.Host, config: dict, *, chat: bool) -> dict:
     smart = isinstance(mode, str) and mode.strip().lower() == "smart"
     how = ("approvals.mode: smart, whose guardian reviews commands and code, never Kumi's changes" if smart
            else "approvals.mode: manual")
-    return _item(name, OK, f"Hermes asks before each Kumi change ({how}).{seen}")
+    if not host.ask_before_changes():
+        return _item(name, OK, f"{tools.CHANGES_UNASKED}, through Hermes ({how}).{seen}")
+    return _item(name, OK, f"Hermes asks before each Kumi change (Ask before each change: on; {how}).{seen}")
 
 
 def _isolation(config: dict) -> dict:

@@ -3,9 +3,9 @@
 English · [简体中文](../zh-CN/HERMES.md) · [日本語](../ja/HERMES.md)
 
 Kumi is also a plugin for [Hermes Agent](https://hermes-agent.nousresearch.com). Hermes stays your agent, in its
-terminal, Hermes Desktop, the web dashboard or a chat app; Kumi gives it your DAW. Hermes asks before every change
-(unless you've turned its approvals off), Kumi records each one in its HISTORY and can undo most of them while it runs,
-and both run on your computer.
+terminal, Hermes Desktop, the web dashboard or a chat app; Kumi gives it your DAW. Kumi makes the changes you ask for
+(Hermes asks before each one only if you turn on **Ask before each change**), records each one in its HISTORY and can
+undo most of them while it runs, and both run on your computer.
 
 A standalone Kumi (the `kumi` app in a terminal) and Kumi for Hermes are separate installations. You don't need one to
 use the other.
@@ -64,10 +64,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 ### Master your mix like a reference track
 
 "Listen to my mix and master it like this reference track."
-- **Listen:** in Live, REAPER and Renoise, Kumi listens to the part of your mix you approve and measures it; each
-  listen asks first. In Live it hears each track after its devices and before its fader, through the Kumi Ears device
-  setup installs (it needs Max for Live): Main's devices, its limiter included, are heard; Main's fader isn't, so Kumi
-  reaches a target with Main's devices, never its fader.
+- **Listen:** in Live, REAPER and Renoise, Kumi listens to the part of your mix you ask for and measures it (asked
+  first with Ask before each change on). In Live it hears each track after its devices and before its fader, through
+  the Kumi Ears device setup installs (it needs Max for Live): Main's devices, its limiter included, are heard; Main's
+  fader isn't, so Kumi reaches a target with Main's devices, never its fader.
 - **Compare:** Kumi measures your mix beside the reference file: loudness, true peak, spectral balance, stereo width
   and dynamics. Wide and opposite-polarity stereo are measured accurately, spectral balance and crest factor included.
   A mono or silent file has no stereo width, and short audio may have no loudness or loudness range: Kumi shows them
@@ -77,22 +77,21 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   its spread, and says how many of the references each measure comes from. A measure a reference can't give is left
   out of that measure, with the reason: a band above what its sample rate holds, say, or stereo width from a mono
   file. The spread includes minimum tolerances; it isn't a confidence. There's no single "better" score, no averaged
-  audio and no true-peak target, and Kumi still proposes the mastering moves for you to approve. An excerpt Kumi keeps
+  audio and no true-peak target, and Kumi still proposes the mastering moves for you to decide on. An excerpt Kumi keeps
   plays from its own start.
-- **Master:** it proposes mastering moves on the master track (EQ, glue compression, a limiter) as one change Hermes
-  asks about.
+- **Master:** it proposes mastering moves on the master track (EQ, glue compression, a limiter) as one change.
 - **Repeat:** it listens again and compares, for at most three rounds. Each round's change is in HISTORY, and you can
   undo it.
 
 ### Write a beat or a bassline
 
 "Write a four-on-the-floor kick with offbeat hats on a new track", then "now a bassline in A minor under it."
-- Kumi writes the notes as one change Hermes asks about.
-- "Play it" starts playback, and asks first; "Stop" stops it and never asks. Neither changes anything in the project
+- Kumi writes the notes as one change.
+- "Play it" starts playback; "Stop" stops it. Neither changes anything in the project
   but where play starts. REAPER plays from a bar or a beat, and Renoise from a sequence slot and line. In Live, Kumi
   launches a Session clip, such as the one it wrote or the one you've selected, or a scene, or plays the Arrangement
   from Live's own start marker. Kumi never starts a play that would record.
-- "Make three variations of it: busier, sparser, and one with more swing." Hermes shows each take before you approve;
+- "Make three variations of it: busier, sparser, and one with more swing." Hermes shows each take before you keep one;
   each is written as a new clip (an item in REAPER, a pattern in Renoise), never over the original. At most 8 takes.
   Where there's no empty place for every take, Kumi refuses rather than make fewer. To drop a take, undo it.
 
@@ -110,10 +109,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage. In Hermes
   Desktop, the map's list shows each sound's indexed values and why it matched.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
-  or in a new instrument in Renoise, as one change Hermes asks about. "Put it on a new track" puts it in a new Simpler
+  or in a new instrument in Renoise, as one change. "Put it on a new track" puts it in a new Simpler
   in Live.
 - "Put it on pad 2" puts it on that Drum Rack pad in Live: into the pad's Simpler, or onto an empty pad in a new
-  Simpler, one pad a change. Kumi can't undo a load onto an empty pad, and says so before you approve: Live's Undo
+  Simpler, one pad a change. Kumi can't undo a load onto an empty pad, and says so: Live's Undo
   usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
   empty. Live's Redo won't bring the sample back: ask Kumi to load it again. Kumi never clears a pad to make room. In
   Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
@@ -125,8 +124,7 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   configured for it; in any DAW, its catalog of plug-in formats and which controls it has verified. It only reads: it
   doesn't scan your installed plug-ins, open a plug-in's editor, press Configure, or write presets, tunings or
   wavetables. A range of values Kumi has only seen isn't one it promises.
-- "Make the bass 3 dB quieter." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to
-  HISTORY.
+- "Make the bass 3 dB quieter." Kumi makes the change, tells you exactly what changed, and adds it to HISTORY.
 - "Send the bass's output to the Drum Bus." Kumi routes where a track's output goes. In Live it doesn't change a
   track's input, arm it or change its monitoring: those are for recording.
 - "Add a chain to the Instrument Rack on the keys track." In Live, adding a chain to a rack is a change only Live's own
@@ -134,11 +132,11 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Compare these two bounces." Kumi measures both files: loudness, true peak, spectrum.
 - "Stop the scan." A long scan of your sample folders stops when you ask. You keep the sound map you had, unless the
   scan had already begun saving its new one.
-- "Undo that." Kumi undoes your newest change in this chat, every step of it, in one approval that lists them.
+- "Undo that." Kumi undoes your newest change in this chat, every step of it, and lists them.
   "Undo the snare change" undoes that entry while it can still be undone.
 - "Make the bass from this tutorial: <a YouTube link>." Hermes reads the video's transcript and, where values are
-  only on screen, views those moments in its browser or asks you for a screenshot. Then Kumi builds it with changes
-  Hermes asks about. Kumi downloads no video.
+  only on screen, views those moments in its browser or asks you for a screenshot. Then Kumi builds it with typed
+  changes. Kumi downloads no video.
 
 Kumi also works with sounds from ElevenLabs and Mirelo: see [Integrations](#integrations-optional).
 
@@ -153,14 +151,14 @@ When no change Kumi knows fits, Hermes can write code for it.
 - **A Max for Live audio effect:** "Build a Max for Live soft clipper with drive and tone, and put it after the bass's
   EQ." Kumi writes a new device from GenExpr code into `User Library/Kumi/Audio Effects`, with up to 16 controls of
   its own, plus Mix and Output. What it adds is held under −0.3 dBFS; the track's own signal passes through
-  untouched. Hermes Desktop shows its controls and code while you decide. Putting it in your Set is a second change
-  Hermes asks about: Kumi loads it at the end of the track's chain, and can undo that. Moving it from there is a third
+  untouched. Hermes Desktop shows its controls and code when it's asked. Putting it in your Set is a second change:
+  Kumi loads it at the end of the track's chain, and can undo that. Moving it from there is a third
   change, which only Live's own Undo takes back. The file stays in your User Library after an undo.
 - **Asked every time, once a chat has read outside content:** web pages, transcripts, files Hermes fetched from the
   internet, another plugin's results, or any terminal command or code run. Files already on your disk, installed
   skills, and the names in your library and projects don't count. In such a chat, each script and device is asked
   with its code, and none runs while Hermes's approvals are off. In a chat that hasn't, allowing a script for the
-  session covers that chat's scripts; each new device is still asked.
+  session covers that chat's scripts, and a device is built without asking unless Ask before each change is on.
 - **Refused before anyone is asked:** a script, or a device's code, over 400 lines or 32 KB; a script with a hidden or
   direction-changing character, or one that runs processes or reaches the network (`os.execute`, `io.popen`,
   `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`). That check is a safeguard, not a sandbox.
@@ -172,22 +170,32 @@ Pro-Q 4 (4.1.3.0) or Ozone 12 (12.1.0), only for the version you have installed,
 initialized settings and changing only controls Kumi has verified.
 - **Building it changes nothing:** Kumi keeps a private copy and says each setting before and after, as the preset file
   stores it.
-- **Putting it in your User Library is asked:** the approval shows the plug-in and the version installed, every
-  setting, "Values as the preset file stores them; the plug-in may show them differently.", and the new file in
+- **Putting it in your User Library** (asked first with Ask before each change on): Kumi shows the plug-in and the
+  version installed, every setting, "Values as the preset file stores them; the plug-in may show them differently.",
+  and the new file in
   `User Library/Kumi/Instruments` or `User Library/Kumi/Audio Effects`. The file stays there after an undo. Allowing
   one preset, for the session or always, covers that file only: each new preset is asked.
-- **Loading it on a track is another change Hermes asks about.**
+- **Loading it on a track is another change.**
 - Kumi never opens your own presets, runs the plug-in or downloads anything to build one. A plug-in that isn't
   installed, or whose installed version Kumi hasn't verified, is refused.
 
-Hermes asks before each change, undo, listen and play because its approvals are on. Allowing a Kumi call for the
-session or always covers that kind of call (changes, undos, listens, play, sample-folder adds and scans) in this chat
-only, including a one-shot run that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a
-scheduled job asks again or is refused. Kumi acts only in your own turns: when Hermes works on the chat in the
-background (its review after a turn) or answers a side question (`/btw`), Kumi only reads, whatever you allowed. A
-change only your DAW's own Undo takes back asks under its own kind, so allowing other changes doesn't cover it. A
-setup step's approval covers its own plan. Choosing **Always** leaves an entry in Hermes's `command_allowlist` (your
-profile's config.yaml) that Kumi never edits: to remove it, delete the `plugin_rule:kumi:` entries there.
+**What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes, presets, and
+devices in a chat that hasn't read outside content without asking: each goes into HISTORY, and most can be undone.
+Scripts, setup steps, sample-folder adds and scans, Mirelo uploads and paid generations, and a device in a chat that
+has read outside content always ask. Turn on **Ask before each change** in Kumi's settings in Hermes
+(`ask_before_changes` in the plugin config) and Hermes asks before each of them, per kind of change and per chat. Kumi
+never approves anything in Hermes itself. `/kumi`, `hermes kumi status` and `hermes kumi doctor` say which applies,
+for example "Approvals: Kumi makes your changes without asking (Ask before each change: off); scripts, setup steps,
+sample folders and Mirelo jobs still ask".
+
+Allowing a Kumi call for the session or always covers that kind of call in this chat only, including a one-shot run
+that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
+refused. Scheduled jobs and webhooks never change anything. Kumi acts only in your own turns: when Hermes works on the
+chat in the background (its review after a turn) or answers a side question (`/btw`), Kumi only reads, whatever you
+allowed. With Ask before each change on, a change only your DAW's own Undo takes back asks under its own kind, so
+allowing other changes doesn't cover it. A setup step's approval covers its own plan. Choosing **Always** leaves an
+entry in Hermes's `command_allowlist` (your profile's config.yaml) that Kumi never edits: to remove it, delete the
+`plugin_rule:kumi:` entries there.
 
 With `--yolo`, a chat's `/yolo` or `approvals.mode: off`, Hermes runs Kumi's changes, undos, listens, play,
 sample-folder adds and scans, setup steps, and, with Mirelo set up, its paid generations and uploads (up to your credit
@@ -214,6 +222,7 @@ run without asking there, and Kumi can't tell it from a chat.
 | DAW | Live | Which DAW Kumi connects to. The first DAW you set up becomes it; switch with `hermes kumi setup --daw <daw> --use` (`ableton`, `reaper` or `renoise`) |
 | Sample folders | none | The folders Kumi may read for your sound map: a scan reads only the audio files in them, and nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | When what you're looking at changes, adds a short note to the chat connected to Kumi: what you're on (FOCUS), and what changed in the project while Kumi was away |
+| Ask before each change | off | Hermes asks before each Kumi change, undo, track or mix listen, play, take, preset and device, per kind of change and per chat. Off, Kumi makes them without asking and records each in HISTORY; scripts, setup steps, sample folders and Mirelo jobs ask either way, and so does a device in a chat that has read outside content |
 | Run scripts from messaging chats | off | Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, and none runs while Hermes's approvals are off |
 | Interpret measurements with a model | off | Also sends measurements and a small band-energy image for a plain-words reading to the model set for Kumi's listening task in Hermes (Vision's, unless you change it), which must accept images |
 
@@ -229,8 +238,8 @@ run without asking there, and Kumi can't tell it from a chat.
 - **Audio stays here:** Kumi measures audio on your computer and sends none of it to a model. In a messaging app
   (Telegram, Discord…), a sound you ask Hermes to send you arrives there as an attachment, through that app.
 - **Listening to a track or the mix:**
-  - **Approval and window:** it asks first and listens only to the window you approve, 60 seconds at most (in Live,
-    256 beats at most, in the Arrangement), with the DAW stopped. Kumi won't stop playback for you.
+  - **Window:** it listens only to the window you ask for, 60 seconds at most (in Live, 256 beats at most, in the
+    Arrangement), with the DAW stopped; it asks first with Ask before each change on. Kumi won't stop playback for you.
   - **Your project:** the render's temporary transport, routing and device settings are put back after. REAPER may
     show the project as modified after a listen, since only saving clears that flag; Kumi never saves.
   - **Renoise's tempo:** rendering can change its BPM and lines per beat. Kumi puts them back only if they're still
@@ -245,7 +254,7 @@ run without asking there, and Kumi can't tell it from a chat.
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
-- **Plug-in presets** you approve are new `.vstpreset` files Kumi writes into Live's User Library
+- **Plug-in presets** you put in your User Library are new `.vstpreset` files Kumi writes into Live's User Library
   (`User Library/Kumi/Instruments` or `User Library/Kumi/Audio Effects`), outside Kumi's own data. They stay there
   until you delete them. To tell which version of Serum 2, Pro-Q 4 or Ozone 12 you have, Kumi reads the VST3
   metadata in your standard plug-in folders; it never loads a plug-in.
@@ -268,10 +277,10 @@ run without asking there, and Kumi can't tell it from a chat.
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
-- Kumi listens to the window you approve, up to 60 seconds (in Live, 256 beats at most, in the Arrangement). In every
+- Kumi listens to the window you ask for, up to 60 seconds (in Live, 256 beats at most, in the Arrangement). In every
   DAW it measures audio files, library sounds and Kumi's own results.
 - Kumi reads only the open project, the audio files in the sample folders you list, its renders and captures of the
-  windows you approve, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
+  windows you ask for, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
   (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
@@ -291,12 +300,12 @@ run without asking there, and Kumi can't tell it from a chat.
   to your DAW for a chat). A job it's running, such as a library scan, keeps it going for up to 6 hours.
   After it stops, the change stays in HISTORY, and your DAW's own Undo is the way back.
 - In Live, a few changes only Live's own Undo takes back: adding a chain to a rack, moving a device, and loading a
-  sample onto a pad. Kumi says so before you approve, with how Cmd+Z (Ctrl+Z on Windows) takes the change back, and
+  sample onto a pad. Kumi says so first, with how Cmd+Z (Ctrl+Z on Windows) takes the change back, and
   HISTORY marks the row. Undo right away: if you've done anything in Live since, Cmd+Z takes that back first. Such a
-  change holds nothing else: Kumi asks for any other steps separately. A script is the same in every DAW: Kumi can't
+  change holds nothing else: Kumi makes any other steps separately. A script is the same in every DAW: Kumi can't
   undo it, and the DAW's own Undo may.
 - In Live, Kumi won't undo a change to a track's mixer, the tempo or a device's parameters if you've changed that
-  value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
+  value by hand since: the undo says so and changes nothing. An undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand
   since.
 - In REAPER and Renoise, an edit you make by hand while Kumi is connected isn't listed when you ask what changed;
@@ -315,7 +324,7 @@ Core Kumi needs neither of these.
 "Make a riser with ElevenLabs and put it on the FX track." When another Hermes plugin has made a sound, Kumi can
 measure it or put it in your project. It reads only finished audio in Hermes's generated-audio folder
 (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates) and copies the file into its own data first; placing
-it is a change Hermes asks about.
+it is a change like any other.
 
 ### Mirelo (paid)
 
@@ -341,7 +350,7 @@ can ask Mirelo for a sound effect from a prompt or for MIDI notes from an audio 
   the upload and download links Mirelo's API gives for each job, on hosts Mirelo chooses (its storage or delivery
   network), so they aren't a fixed list. Whether Mirelo trains on what you send follows your Mirelo account's
   settings; Kumi has no setting of its own for it.
-- **What comes back** is kept in Kumi's data. Placing it is a separate change Hermes asks about, and MIDI notes come
+- **What comes back** is kept in Kumi's data. Placing it is a separate change, and MIDI notes come
   timed in seconds. An audio file for MIDI must fit Mirelo's limits (30 minutes, 50 MiB); MP3 and other compressed
   audio need the ffmpeg allowed at setup. Switching a kind off stops new generations of it (one already running is
   still fetched while your key is set); removing the key stops Kumi contacting Mirelo.
@@ -356,8 +365,8 @@ those samples.
 ## If something isn't working
 
 - `hermes kumi doctor` (or `/kumi doctor` in a chat) checks what Kumi needs in this Hermes profile: Hermes's approval
-  settings, setup, the connection, the open project and the sound map. For each problem it says what to do. It changes
-  nothing.
+  settings and whether Kumi asks before each change, setup, the connection, the open project and the sound map. For
+  each problem it says what to do. It changes nothing.
 - `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs, and whether Kumi can read compressed
   audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
   chat in Hermes Desktop instead.

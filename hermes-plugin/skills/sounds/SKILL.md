@@ -1,6 +1,6 @@
 ---
 name: sounds
-description: Find, audition and place sounds from the producer's own sample folders with Kumi's sound map, or a file another Hermes plugin made (ElevenLabs) - approved folders only, revision-scoped sound ids, placing as an approved change.
+description: Find, audition and place sounds from the producer's own sample folders with Kumi's sound map, or a file another Hermes plugin made (ElevenLabs) - approved folders only, revision-scoped sound ids, placing as a typed change.
 ---
 # The producer's sounds, with Kumi
 
@@ -64,8 +64,8 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
      - If the pad holds anything else (another instrument, or several devices), say so and ask. Never clear a pad to make room.
 
      Then report the pad, the sound and the HISTORY id, and for a pad load, Kumi's words on taking it back with Live's Undo: one step at a time, right away, until the pad is empty.
-- **The producer approves the exact placement.** HISTORY lets them undo a replaced sample; a pad load is taken back with Live's own Undo, one step at a time, right away, until the pad is empty.
-- **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
+- **Place exactly what the producer picked; say in one line what went where** (asked when `ask_before_changes` is true). HISTORY lets them undo a replaced sample; a pad load is taken back with Live's own Undo, one step at a time, right away, until the pad is empty.
+- **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make the change.
 - **"Put “<name>” (sound <id> from map <rev>) on the Drum Rack pad C1 (note 36) on the selected track"** is Desktop's request from the map's "Use on pad…". Its sound and map revision are the source, and its note is the pad.
   - **Live:** look (`kumi_observe` with `scope: focus`) for the selected track's Drum Rack, and the pad with that note. Then:
     - an empty pad: `load_sample_to_pad`, with the rack's `deviceRef` and that `note`;
@@ -88,10 +88,10 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
   - REAPER `item_import`: `path` holds the source; `ref` and `positionBeats` say where.
   - Renoise `sample_load`: `path` holds the source; `ref` names the instrument or sample, as its schema says.
 
-  The source is `{"file": "<the MEDIA path>", "provenance": {"host_tool": "<the tool that made it>", "tool_call_id": "<that call's id, when you have it>"}}`, never a path string. Never invent a call id: provenance is a record, never a permission. A new track, where the DAW has one, is an earlier approved step in the same plan, named with `as` and referred to as `@name`.
+  The source is `{"file": "<the MEDIA path>", "provenance": {"host_tool": "<the tool that made it>", "tool_call_id": "<that call's id, when you have it>"}}`, never a path string. Never invent a call id: provenance is a record, never a permission. A new track, where the DAW has one, is an earlier step in the same plan, named with `as` and referred to as `@name`.
 - **Kumi reads files only from approved places:** the producer's sample folders, Kumi's own results, and this profile's generated audio folder (`cache/generated/audio` in the Hermes home), where those plugins write. A `MEDIA:` line alone allows nothing else: a file anywhere else, through a link, or from another profile is refused. Ask the producer for an approved place; never widen a folder or move the file to get around the check.
 - **Kumi keeps its own copy.** Before the DAW imports it, Kumi copies the file into its own kept results and pins that copy, never moving or deleting the original, because Hermes may clean its generated audio. The project then refers to Kumi's copy until the producer collects the project's media (Live's "Collect All and Save", REAPER's consolidate).
-- **A file that changed after the approval is refused `stale`.** Preview it again for a fresh approval; never send the old one again.
-- **The producer approves the exact file and destination;** never place it straight from a media card or around `kumi_change`. Afterwards, report the HISTORY id and what happened; `kumi_undo` with that id takes it out again while it can. An `unsure` import is checked with `kumi_history` and an observe, never sent again.
+- **A file that changed after the preview is refused `stale`.** Preview it again for a fresh placement; never send the old one again.
+- **Place the exact file and destination the producer asked for** (approved first when `ask_before_changes` is true); never place it straight from a media card or around `kumi_change`. Afterwards, report the HISTORY id and what happened; `kumi_undo` with that id takes it out again while it can. An `unsure` import is checked with `kumi_history` and an observe, never sent again.
 - **Importing and measuring are separate.** The DAW's file step takes only the formats that DAW imports. Music usually comes as MP3 or Opus, and a file step may refuse Opus even when Kumi has an ffmpeg. Measuring an MP3 or Opus needs the ffmpeg the producer allowed at setup (`kumi_status` says so). When either can't, say what's missing. Never download a decoder, convert it through the other plugin, change its format setting, or make the music again; a conversion is the producer's separate, approved choice.
 - **Measuring it** with `kumi_listen` (`{"source": {"file": "<the MEDIA path>"}}`, or the kept copy's `{"artifact_id"}`) stays on this computer. When the producer turned interpretation on, the measurements and a coarse band-energy image go to Hermes's listening model or its fallbacks, never to ElevenLabs. The model has not heard the audio itself.

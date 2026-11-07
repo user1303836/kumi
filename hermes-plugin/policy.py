@@ -1,12 +1,14 @@
 """Kumi's approval policy (RESEARCH.md C6, CONTRACT-CHANGES CC-3 and CC-5): which Kumi tool calls the producer
 approves first, in what words, and under which rule key. Hermes's own approval gate asks (once, this session, always,
-deny) and fails closed with no one there; Kumi's HISTORY makes an approved change reversible, but never replaces the
-approval.
+deny) and fails closed with no one there; Kumi's HISTORY makes a change reversible, but never replaces an approval
+Kumi asks for.
 
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
-current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. A folder the
-producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt in the
-words of the plan they carry out (C8). Anything else of Kumi's is blocked.
+current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. By default
+the changes the producer asks for in the DAW then run without an approval (UNASKED_BY_DEFAULT); the plugin's "Ask
+before each change" asks before each, as these words describe. A folder the producer adds, and a scan of the folders
+the runtime reads, are approved by name; setup's install and adopt in the words of the plan they carry out (C8).
+Anything else of Kumi's is blocked.
 
 Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
 approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
@@ -58,8 +60,17 @@ PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job",
         "kumi_plugin_knowledge"}
-# What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
+# What the producer approves first: always for setup and scripts, and for the rest while "Ask before each change" is on.
+# What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset"}
+# The owner's decision: by default Kumi makes the changes the producer asks for in the DAW without asking, each in
+# HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
+# (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
+# refusal still refuses, unattended and forked turns still don't write, and setup, scripts, sample folders and
+# Mirelo's uploads and paid jobs are asked either way, as is a device in a chat that read outside content (CC-19).
+UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_listen", "kumi_transport",
+                      "kumi_variations"}
+_ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
@@ -82,7 +93,8 @@ _TELEGRAM_ESCAPED = set(r"_*[]()~`>#+-=|{}.!\\")
 def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: Any) -> dict | None:
     """Hermes's `pre_tool_call` for Kumi's tools: None (no approval needed), `approve` with the message and rule key
     the producer sees, or `block` with the reason. Other plugins' tools are left alone. A failure blocks. A call that
-    isn't blocked is recorded for its handler (CC-5), with whether it was put to the producer."""
+    isn't blocked is recorded for its handler (CC-5), with whether it was cleared to run: put to the producer, or a
+    change Kumi makes without asking (`unasked`, UNASKED_BY_DEFAULT)."""
     if not isinstance(tool_name, str) or not tool_name.startswith("kumi_"):
         return None
     args = args if isinstance(args, dict) else {}
@@ -93,7 +105,8 @@ def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: An
         return block("Kumi couldn't check this call, so it didn't run. Hermes's log says why.")
     event = decision.pop(_SCRIPT_EVENT, None) if isinstance(decision, dict) else None
     if decision is None or decision["action"] == "approve":
-        host.calls.record(tool_name, args, kwargs, {"approved": decision is not None, **extra})
+        host.calls.record(tool_name, args, kwargs,
+                          {"approved": decision is not None or extra.get("unasked") is True, **extra})
     if event is not None and decision is not None and decision["action"] == "approve":
         _broadcast("script.pending", event)
     return decision
@@ -157,7 +170,8 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     """The decision for one Kumi call. In a scheduled job, only a published read passes, before anything else is
     looked at. A turn Hermes forked in the background gets reads only. Where nobody can answer an approval, a call that
     needs one is blocked whatever Hermes's settings or an earlier "Always" say: before the runtime is asked when it
-    always needs one, else after its decision."""
+    always needs one, else after its decision. A change the producer isn't asked about (UNASKED_BY_DEFAULT, with "Ask
+    before each change" off) passes after every refusal, with `unasked` and what its approval would have bound."""
     unattended = host.unattended()
     if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
         return block(tools.SCHEDULED), {}
@@ -169,8 +183,11 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
     compact = decision.pop(_COMPACT, None) if isinstance(decision, dict) else None
+    always = decision.pop(_ALWAYS_ASKED, False) if isinstance(decision, dict) else False
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
+    if decision is not None and decision["action"] == "approve" and asks_first(host, tool, always) is False:
+        return None, {**extra, "unasked": True}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
         scoped = not decision["rule_key"].startswith(ONE_THING)
         if scoped:
@@ -182,6 +199,13 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
                 return block(TOO_LONG), {}
             decision = {**decision, "message": tight}
     return decision, extra
+
+
+def asks_first(host: Any, tool: str, always: bool = False) -> bool:
+    """Whether the producer is asked before `tool`'s call: always outside UNASKED_BY_DEFAULT, or for a call its
+    decision marks always asked (a device in a chat that read outside content); else only with "Ask before each
+    change" on."""
+    return tool not in UNASKED_BY_DEFAULT or always or host.ask_before_changes()
 
 
 # kumi-adv's decision: "this session" and "always" cover a kind of Kumi change within one chat, the convenience quick
@@ -1043,9 +1067,11 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     facts = {"about": spec["about"], "why": why if tainted else "", "digest": digest, "lines": lines,
              "bytes": len(spec["code"].encode("utf-8")), "file": file}
     message = _device_message(spec, facts, surface)
-    if message is None:
+    if message is None and asks_first(host, "kumi_device", tainted):  # unasked, there's no window to fit
         return block(TOO_LONG), {}
-    decision = {"action": "approve", "message": message, "rule_key": f"kumi:device:{digest}"}
+    decision = {"action": "approve", "message": message or "", "rule_key": f"kumi:device:{digest}"}
+    if tainted:
+        decision[_ALWAYS_ASKED] = True  # asked by provenance, as a script is (CC-19), whatever the setting
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": devices.LANGUAGE,
                                "daw": setup.DAWS.get("ableton", "Live"), "name": answer.get("name"), "file": file,
@@ -1134,9 +1160,9 @@ def _preset(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     if facts is None:
         return block(PRESET_UNSHOWN), {}
     message = _preset_message(facts, host.session_surface())
-    if message is None:
+    if message is None and asks_first(host, "kumi_preset"):  # unasked, there's no window to fit
         return block(PRESET_TOO_LONG), {}
-    decision = {"action": "approve", "message": message, "rule_key": f"kumi:preset:{answer['digest']}"}
+    decision = {"action": "approve", "message": message or "", "rule_key": f"kumi:preset:{answer['digest']}"}
     return decision, {"artifact_id": artifact, "digest": answer["digest"], "file": answer["file"]}
 
 

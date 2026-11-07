@@ -30,7 +30,7 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
         return f"Kumi: its runtime didn't answer ({_said(failure.reason)})"
     daw = _said(schemas.DAW_NAMES.get(status.get("daw"), status.get("daw")), 40)
     state = status.get("setup") or {}
-    warning = [status["approvals"]] if status.get("approvals") else []
+    warning = [f"Approvals: {tools.changes_mode(host)}.", *([status["approvals"]] if status.get("approvals") else [])]
     if state.get("state") != "ready":
         how = ("Ask Hermes to set Kumi up." if _commands_left_out(host)
                else "Ask Hermes to set Kumi up, or run `hermes kumi setup` in a terminal.")
@@ -91,7 +91,8 @@ def status_text(host: tools.Host) -> str:
     lines.append(setup.compressed_audio(data)["message"])
     lines.append(f"Approvals: off in Hermes (approvals.mode: off or --yolo), so {tools.UNASKED} run without asking first."
                  if tools.approvals_bypassed(host, chat=False)
-                 else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
+                 else f"Approvals: {tools.CHANGES_UNASKED}." if not host.ask_before_changes()
+                 else f"Approvals: {tools.CHANGES_ASKED}; a chat's /yolo skips that.")
     lines.extend(f"Approvals: {gap}" for gap in tools.approval_gaps(host))
     return "\n".join(lines)
 
