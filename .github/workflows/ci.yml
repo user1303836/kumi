@@ -1,8 +1,9 @@
 name: CI
 
-# Kumi's minimal CI (AGENTS.md, "Minimal CI"). A pull request runs one gate, on Linux, of what it changes: Required CI
-# waits on these jobs and nothing else. macOS and Windows run after a merge, on main, and on any branch by hand
-# (Actions > CI > Run workflow, or `gh workflow run CI --ref <branch>`). The rest of the tests run weekly, in Extended.
+# Kumi's CI is the bare minimum (AGENTS.md, "Minimal CI"). A pull request runs one job, Required CI, on Linux: the
+# repository's own checks and, for a change to Rust, formatting and the build. No tests. They run after the merge, on
+# main, on Linux, and on any branch by hand (Actions > CI > Run workflow, or `gh workflow run CI --ref <branch>`), and a
+# release waits for main's run. Nothing here runs on macOS or Windows: the Installer's nightly and tag builds do.
 
 on:
   push:
@@ -15,7 +16,7 @@ permissions:
 
 concurrency:
   # A newer push replaces a run still under way: a pull request's, or a branch's run by hand. Each push to main keeps its
-  # own: its macOS and Windows jobs are the only test of that commit on those systems, and a release waits for them.
+  # own: a release waits for main's run on the commit it releases.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
@@ -23,22 +24,82 @@ env:
   # Tests need no debug info or incremental artifacts: linking and the build cache stay small.
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
-  # What a pull request changes: its merge commit against main, its first parent (each job checks out both, fetch-depth 2),
-  # as `scripts/dev.py affected` reads it. A push or a run by hand tests everything.
+  # What a pull request changes: its merge commit against main, its first parent (Required CI checks out both,
+  # fetch-depth 2), as `scripts/dev.py affected` reads it. A push or a run by hand checks everything.
   KUMI_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
 
 jobs:
-  rust-linux:
-    # The `ci` tests (.config/nextest.toml) of the packages a change affects, in three parts at once by crate, so no part
-    # builds every test binary: the app; Kumi's other crates (every package the other two don't name, so a new crate is
-    # tested there); the bridges. A part the change gives nothing to test passes at once.
-    name: Rust / ${{ matrix.label }}
+  required:
+    # The check a pull request waits on, with Willington files, and the only job it runs: the change's whitespace; every
+    # file belongs to a package or an area and the crates keep their layers; dev.py's, the release scripts' and the
+    # models catalog's tests; the installers' syntax. Then, for a change that builds Rust (dev.py's rust_lint: not docs,
+    # the Renoise tool's Lua or the Hermes plugin alone), `cargo fmt --check` and the build with the one Clippy lint that
+    # gates. On main it builds every time, which keeps the caches pull requests restore.
+    name: Required CI
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       # The workspace's crates, which rust-cache never keeps, come from sccache's store in the Actions cache: main's pushes
-      # write it and pull requests read it (as rust-cache's), so a pull request compiles only the crates it changed. The
-      # steps that compile set RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables, so a job-wide one misses main's.
+      # write it and pull requests read it, so a pull request compiles only the crates it changed. The step that compiles
+      # sets RUSTC_WRAPPER: rust-cache keys its cache on RUST* variables, so a job-wide one misses main's.
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.13"
+      - id: affected
+        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
+      - name: The change's whitespace
+        run: |
+          if [ -n "$KUMI_BASE" ]; then git diff --check "$KUMI_BASE" HEAD; else git diff-tree --check --no-commit-id -r HEAD; fi
+      - name: Every tracked file belongs to a package or an area, the crates keep their layers, and the scripts' tests
+        run: |
+          python3 scripts/dev.py affected --check
+          python3 scripts/dev.py deps --check
+          python3 -m unittest discover -s scripts/tests -p test_dev.py
+          python3 -m unittest discover -s scripts/tests -p test_native_release.py
+          python3 -m unittest discover -s scripts/tests -p test_release.py
+          python3 -m unittest discover -s scripts/tests -p test_models_catalog.py
+      - name: The installers are POSIX sh, and PowerShell that parses and is ASCII
+        run: sh scripts/check-installers.sh .
+      - if: steps.affected.outputs.rust_lint == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          components: rustfmt, clippy
+      - if: steps.affected.outputs.rust_lint == 'true'
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
+      # Saved from main only: a pull request restores main's. By name, the one the lint's cache has always had.
+      - if: steps.affected.outputs.rust_lint == 'true'
+        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          shared-key: rust-lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: steps.affected.outputs.rust_lint == 'true'
+        run: cargo fmt --all --check
+      # Everything runs on one thread with Rc<RefCell<…>>: a borrow held across an await panics when another task borrows
+      # the same cell meanwhile. That one lint gates; the rest of Clippy is the author's to run.
+      - name: It builds, and no RefCell borrow is held across an await
+        if: steps.affected.outputs.rust_lint == 'true'
+        env:
+          RUSTC_WRAPPER: sccache
+        run: cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
+
+  rust-linux:
+    # The `ci` tests (.config/nextest.toml) of every package, after a merge and by hand, never on a pull request: in three
+    # parts at once by crate, so no part builds every test binary: the app; Kumi's other crates (every package the other
+    # two don't name, so a new crate is tested there); the bridges. A release waits for them (scripts/release.py).
+    name: Rust / ${{ matrix.label }}
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # The workspace's crates from sccache (see Required CI; the step that compiles sets RUSTC_WRAPPER).
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     strategy:
@@ -50,44 +111,25 @@ jobs:
           - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
-      - id: affected
-        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
-      # This part's affected packages, as `dev.py check` picks them. None skips the rest.
-      - id: part
-        env:
-          AFFECTED: ${{ steps.affected.outputs.packages }}
-        # (assigned first: a failing dev.py fails the step instead of picking nothing)
-        run: |
-          picked="$(python3 scripts/dev.py select "$AFFECTED" ${{ matrix.crates }})"
-          echo "picked=$picked" | tee -a "$GITHUB_OUTPUT"
-      - if: steps.part.outputs.picked != ''
-        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - if: steps.part.outputs.picked != ''
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
-      # Saved from main only. A pull request restores main's; caches saved from pull requests (about 300 MB a job)
-      # pushed main's out of the repository's 10 GB. The app's and Kumi's crates' parts build the same crates from
-      # crates.io, so they share one cache (the first to finish on main saves it); the bridges build others. Each cache
-      # has a name of its own, not the job's: Extended's jobs restore them by name.
-      - if: steps.part.outputs.picked != ''
-        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      # Saved from main only. The app's and Kumi's crates' parts build the same crates from crates.io, so they share one
+      # cache (the first to finish on main saves it); the bridges build others. Each cache has a name of its own, not the
+      # job's: Extended's Linux build restores it by name.
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           shared-key: ${{ matrix.cache }}-rust-linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - if: steps.part.outputs.picked != ''
-        uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
           tool: nextest
       # A few tests run Node (the Live extension's fake peer); none needs the SDKs from npm.
-      - if: steps.part.outputs.picked != ''
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: The tests, in a home of their own (no test reaches this machine's Live folders or ~/.kumi)
-        if: steps.part.outputs.picked != ''
         env:
           RUSTC_WRAPPER: sccache
           KUMI_NEXTEST: "1"
@@ -95,115 +137,49 @@ jobs:
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
           # runner's disk makes several times slower.
           TMPDIR: /dev/shm
-        # (word splitting on purpose: the -p options)
-        run: sh scripts/test-isolated.sh --profile ci ${{ steps.part.outputs.picked }}
+        # (word splitting on purpose: the -p and --exclude options)
+        run: sh scripts/test-isolated.sh --profile ci ${{ matrix.crates }}
       # The tests this part selected (`cargo nextest list`), to compare one run's tests with another's.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() && steps.part.outputs.picked != '' }}
+        if: ${{ !cancelled() }}
         with:
           name: nextest-list-ci-${{ matrix.part }}
           path: ${{ runner.temp }}/nextest-list.json
           if-no-files-found: ignore
           retention-days: 14
 
-  rust-lint:
-    name: Rust / Lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      # The workspace's crates from sccache (see Rust / Linux; the steps that compile set RUSTC_WRAPPER).
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
-      - id: affected
-        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
-      - if: steps.affected.outputs.rust_lint == 'true'
-        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          components: rustfmt, clippy
-      - if: steps.affected.outputs.rust_lint == 'true'
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-      - if: steps.affected.outputs.rust_lint == 'true'
-        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - if: steps.affected.outputs.rust_lint == 'true'
-        run: cargo fmt --all --check
-      # Everything runs on one thread with Rc<RefCell<…>>: a borrow held across an await panics when another task borrows
-      # the same cell meanwhile. That one lint gates; the rest of Clippy is the author's to run.
-      - name: No RefCell borrow held across an await
-        if: steps.affected.outputs.rust_lint == 'true'
-        env:
-          RUSTC_WRAPPER: sccache
-        run: cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
-
-  checks:
-    # Everything else a pull request is held to, in one job: the change's whitespace; the repository's own checks (every
-    # file belongs to a package or an area, the crates keep their layers, dev.py's and the release scripts' tests, the
-    # installers' syntax); the Remote Script's and the Live extension's tests for any change but to docs; the Renoise
-    # tool's tests and type check when it (or this workflow) changes.
-    name: Checks
+  daw-scripts:
+    # What runs inside the DAWs, after a merge and by hand: the Remote Script's tests on Live's Python (3.11); the Live
+    # extension's tests against its committed build (its type check needs the Ableton Extensions SDK, which can't be
+    # redistributed; the tests run Live fakes); the Renoise tool's Lua tests (LuaJIT, against a mock of Renoise's API,
+    # replaying the wire's conformance vectors) and lua-language-server's check against Renoise's own API definitions.
+    # Every tool is pinned: a LuaJIT built from the commit the tests were written on, lua-language-server's release (by
+    # checksum) and the API 6.2 tag of github.com/renoise/definitions.
+    name: Remote Script, Live extension, Renoise tool
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-        with:
-          fetch-depth: 2
-      # The scripts' Python, and Live's own (3.11) for the Remote Script. The last is `python3`.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
-          python-version: |
-            3.11
-            3.13
-      - id: affected
-        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
-      - name: The change's whitespace
-        run: |
-          if [ -n "$KUMI_BASE" ]; then git diff --check "$KUMI_BASE" HEAD; else git diff-tree --check --no-commit-id -r HEAD; fi
-      # CI picks what it tests by what a change affects (scripts/dev.py): every file has to belong to a package or an area.
-      # And the crates keep their layers: dependencies point down, and the DAWs' crates don't use each other's.
-      - name: Every tracked file belongs to a package or an area, the crates keep their layers, and dev.py's tests
-        run: |
-          python3 scripts/dev.py affected --check
-          python3 scripts/dev.py deps --check
-          python3 -m unittest discover -s scripts/tests -p test_dev.py
-      - name: The release scripts, the packaging (and every packaged document's links), and the models catalog
-        run: |
-          python3 -m unittest discover -s scripts/tests -p test_native_release.py
-          python3 -m unittest discover -s scripts/tests -p test_release.py
-          python3 -m unittest discover -s scripts/tests -p test_models_catalog.py
-      - name: The installers are POSIX sh, and PowerShell that parses and is ASCII
-        run: sh scripts/check-installers.sh .
+          python-version: "3.11"
       - name: The Remote Script's tests, on Live's Python
-        if: steps.affected.outputs.remote_script == 'true'
         working-directory: daws/ableton/remote-script
         run: |
           python3.11 -m unittest discover -s . -p 'test_*.py'
           python3.11 -m compileall -q AbletonMcpBridge
-      # Its type check needs the Ableton Extensions SDK, which can't be redistributed; the tests run Live fakes.
-      - if: steps.affected.outputs.live_extension == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: daws/ableton/live-extension/package-lock.json
       - name: The Live extension's tests
-        if: steps.affected.outputs.live_extension == 'true'
         working-directory: daws/ableton/live-extension
         run: |
           npm ci --ignore-scripts
           npm test
-      # The Renoise tool's Lua: its tests (LuaJIT, against a mock of Renoise's API, replaying the wire's conformance
-      # vectors) and lua-language-server's check against Renoise's own API definitions. Every tool is pinned: a LuaJIT
-      # built from the commit the tests were written on, lua-language-server's release (by checksum) and the API 6.2 tag
-      # of github.com/renoise/definitions.
       - name: The Renoise tool's LuaJIT, built from a pinned commit
-        if: steps.affected.outputs.renoise_tool == 'true'
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/luajit"
@@ -216,7 +192,6 @@ jobs:
           make install PREFIX="$prefix" > /dev/null
           echo "$prefix/bin" >> "$GITHUB_PATH"
       - name: lua-language-server 3.19.2, and Renoise's API 6.2 definitions
-        if: steps.affected.outputs.renoise_tool == 'true'
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
@@ -232,19 +207,18 @@ jobs:
           echo "$RUNNER_TEMP/luals/bin" >> "$GITHUB_PATH"
           echo "RENOISE_DEFINITIONS=$RUNNER_TEMP/definitions/library" >> "$GITHUB_ENV"
       - name: The Renoise tool's tests and the type check (a missing lua-language-server fails)
-        if: steps.affected.outputs.renoise_tool == 'true'
         env:
           KUMI_REQUIRE_LUALS: "1"
         run: sh daws/renoise/tests/run.sh
 
   hermes-plugin:
-    # Kumi's Hermes Agent plugin (hermes-plugin/), when it or this workflow changes: its tests on Hermes's own Python, and
-    # the Hermes plugin catalog's admission checks with the Hermes it requires (v0.22.7, pinned by the tag's commit):
+    # Kumi's Hermes Agent plugin (hermes-plugin/), after a merge and by hand: its tests on Hermes's own Python, and the
+    # Hermes plugin catalog's admission checks with the Hermes it requires (v0.22.7, pinned by the tag's commit):
     # `hermes plugins validate --install-deps` (the catalog CI's own command), `hermes plugins doctor --ci`, the catalog's
     # payload scan (no compiled code in the plugin: its rule 17) and its self-updater check (rule 3). Hermes is prepared
-    # as its plugin-validate action prepares it, in a folder of its own. Then the Desktop and dashboard halves' tests,
-    # once the plugin has them.
+    # as its plugin-validate action prepares it, in a folder of its own. Then the Desktop and dashboard halves' tests.
     name: Hermes plugin
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -253,19 +227,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
-          fetch-depth: 2
           # The job runs Hermes's plugin checks, which load the plugin's code: no token in .git/config.
           persist-credentials: false
-      - id: affected
-        run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
       # The plugin's own floor, Python 3.11 (Hermes's v0.22.7 environment is newer).
-      - if: steps.affected.outputs.hermes_plugin == 'true'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
           python-version: "3.11"
       - name: Hermes v0.22.7 and its locked Python, in a folder of their own
         id: hermes
-        if: steps.affected.outputs.hermes_plugin == 'true'
         run: |
           set -euo pipefail
           source="$RUNNER_TEMP/hermes-agent"
@@ -277,7 +246,6 @@ jobs:
           echo "source=$source" >> "$GITHUB_OUTPUT"
       - name: Hermes's own environment, the one its plugin validator runs in
         id: runtime
-        if: steps.affected.outputs.hermes_plugin == 'true'
         working-directory: ${{ steps.hermes.outputs.source }}
         env:
           SOURCE: ${{ steps.hermes.outputs.source }}
@@ -292,7 +260,6 @@ jobs:
               output.write(f"python={python}\n")
           PY
       - name: The plugin's tests, on Python 3.11 and on Hermes's own Python
-        if: steps.affected.outputs.hermes_plugin == 'true'
         env:
           PYTHON: ${{ steps.runtime.outputs.python }}
           PYTHONDONTWRITEBYTECODE: "1"
@@ -301,7 +268,6 @@ jobs:
           "$PYTHON" --version
           "$PYTHON" -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
       - name: The Hermes catalog's checks (validate --install-deps, doctor --ci, the payload scan, the self-updater check)
-        if: steps.affected.outputs.hermes_plugin == 'true'
         env:
           PYTHON: ${{ steps.runtime.outputs.python }}
           SOURCE: ${{ steps.hermes.outputs.source }}
@@ -323,14 +289,12 @@ jobs:
           fi
       # The UI halves' sources and build live in hermes-plugin/ui/ (a package.json at the plugin's root would make Hermes
       # offer to install Node dependencies); their committed bundles are desktop/plugin.js and dashboard/dist/index.js.
-      - if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: hermes-plugin/ui/package-lock.json
       - name: The Desktop and dashboard halves' types and tests (on stub SDKs), and their committed builds match
-        if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
         working-directory: hermes-plugin/ui
         run: |
           npm ci --ignore-scripts
@@ -338,297 +302,11 @@ jobs:
           npm test
           npm run check
 
-  reaper-extension:
-    # The extension as it ships: the release build, unstripped by rustc (a rustc strip can misalign its LINKEDIT string
-    # pool on macOS 27, and dyld then refuses it), then the platform's own strip; checked as the release script checks
-    # what a bundle carries, and loaded by the system's loader with REAPER's entry point found. A pull request that changes
-    # it builds it on Linux, on the Ubuntu the bundles build on (whose glibc is the one the extension may need); main and a
-    # run by hand build it on each system.
-    name: REAPER extension loads / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-22.04"]' || '["macos-15", "ubuntu-22.04", "windows-2025"]') }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Stop Windows Defender scanning the workspace
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
-      # (Ubuntu 22.04's own Python is older than dev.py's 3.11)
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
-        with:
-          python-version: "3.13"
-      - id: affected
-        run: python scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
-      - if: steps.affected.outputs.reaper_extension == 'true'
-        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - if: steps.affected.outputs.reaper_extension == 'true'
-        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-        with:
-          key: reaper-extension
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build it as it ships, and strip it with the platform's strip
-        if: steps.affected.outputs.reaper_extension == 'true'
-        run: |
-          # Windows links the C runtime statically, so REAPER needs no VC++ runtime installed.
-          if [[ "$RUNNER_OS" == "Windows" ]]; then export RUSTFLAGS="-C target-feature=+crt-static"; fi
-          cargo build -p reaper-kumi --release --locked
-          case "$RUNNER_OS" in
-            macOS) file=target/release/libreaper_kumi.dylib; strip -x "$file" ;;
-            Linux) file=target/release/libreaper_kumi.so; strip --strip-unneeded "$file" ;;
-            Windows) file=target/release/reaper_kumi.dll ;;
-          esac
-          echo "REAPER_KUMI_ARTIFACT=$PWD/$file" >> "$GITHUB_ENV"
-      - name: It's what a bundle may carry (REAPER's entry point; signed and named for itself on macOS; the C runtime linked in on Windows; no newer glibc than Kumi's on Linux; the identity mark setup reads)
-        if: steps.affected.outputs.reaper_extension == 'true'
-        run: |
-          python scripts/build-native-release.py --check-extension "$REAPER_KUMI_ARTIFACT" --target "$(rustc -vV | sed -n 's/^host: //p')" --thin
-      - name: It loads, with REAPER's entry point
-        if: steps.affected.outputs.reaper_extension == 'true'
-        run: cargo test -p reaper-kumi --locked --test it -- "loads::"
-      # REAPER calls the extension through the C++ shim's vtable, laid out by each platform's C++ ABI.
-      - name: REAPER's calls through the shim's vtable reach Rust
-        if: steps.affected.outputs.reaper_extension == 'true'
-        run: cargo test -p reaper-kumi --locked --lib csurf::tests
-
-  required:
-    # The check a pull request waits on, with Willington files. On a pull request: the Linux jobs above passed (each passes
-    # at once when the change gives it nothing to test), and the other systems' jobs below were skipped. Everywhere else
-    # (main after a merge, a run by hand): every job passed, on every system, so a by-hand run's Required CI means the
-    # branch passed on Linux, macOS and Windows.
-    name: Required CI
-    if: always()
-    needs: [rust-linux, rust-lint, checks, hermes-plugin, reaper-extension, rust-macos, rust-windows, remote-script-platforms,
-            hermes-plugin-platforms]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Every job passed
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          set -eu
-          for result in "${{ needs.rust-linux.result }}" "${{ needs.rust-lint.result }}" "${{ needs.checks.result }}" \
-            "${{ needs.hermes-plugin.result }}" "${{ needs.reaper-extension.result }}"; do
-            test "$result" = success
-          done
-          for result in "${{ needs.rust-macos.result }}" "${{ needs.rust-windows.result }}" \
-            "${{ needs.remote-script-platforms.result }}" "${{ needs.hermes-plugin-platforms.result }}"; do
-            if [ "$EVENT" = pull_request ]; then test "$result" = skipped; else test "$result" = success; fi
-          done
-
-  rust-macos:
-    # What differs by platform (the `ci-os` set in .config/nextest.toml): installing, launching and updating; the terminal
-    # and stdin; Hands; paths, files and child processes; the store. Built only for the test binaries the set takes in.
-    name: Rust / macOS
-    if: github.event_name != 'pull_request'
-    runs-on: macos-15
-    # A release's version bump recompiles every crate, which a cold cache can't fit in 10 minutes (1.24.69's run
-    # stopped at 10:22); a warm run takes 5 to 6. A hang is still caught.
-    timeout-minutes: 15
-    env:
-      # The workspace's crates from sccache (see Rust / Linux; the steps that compile set RUSTC_WRAPPER).
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - id: affected
-        run: python3 scripts/dev.py affected --github-output
-      - id: part
-        env:
-          AFFECTED: ${{ steps.affected.outputs.packages }}
-        run: |
-          picked="$(python3 scripts/dev.py select --tested-by ci-os "$AFFECTED")"
-          echo "picked=$picked" | tee -a "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-      # Saved from main only, by name (see Rust / Linux).
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-        with:
-          shared-key: rust-platforms
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
-        with:
-          tool: nextest
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-      - name: The tests, in a home of their own
-        env:
-          RUSTC_WRAPPER: sccache
-          KUMI_NEXTEST: "1"
-          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
-          # Only the test binaries the profile names are built.
-          KUMI_NEXTEST_BUILD_PROFILE: ci-os
-        # (word splitting on purpose: the -p options)
-        run: sh scripts/test-isolated.sh --profile ci-os ${{ steps.part.outputs.picked }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() }}
-        with:
-          name: nextest-list-ci-os-macOS
-          path: ${{ runner.temp }}/nextest-list*.json  # with the library tests' list (test-isolated.sh's .lib.json)
-          if-no-files-found: ignore
-          retention-days: 14
-
-  rust-windows:
-    # The `ci-os` set on Windows, in two parts at once of about the same test time: the app's tests, and the rest. The
-    # slowest there (9 to 16 s each: the bridges' update and rollback, the library worker, Willington's receipt) are
-    # Extended's (KUMI_WINDOWS_EXTENDED_ONLY).
-    name: Rust / ${{ matrix.label }}
-    if: github.event_name != 'pull_request'
-    runs-on: windows-2025
-    # A change to many crates (a release's version bump, a bridge's rework) compiles cold in more than 10 minutes
-    # (#1035's run stopped at 10:05, after its 373 tests had passed); a warm run takes 6 to 8. A hang is still caught.
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { label: Windows, part: app, crates: "-p kumi" }
-          - { label: "Windows (Kumi's crates and bridges)", part: rest, crates: "--exclude kumi" }
-    env:
-      # Rust's own linker: Microsoft's is a large part of linking the test binaries.
-      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
-      # The workspace's crates from sccache (see Rust / Linux; the steps that compile set RUSTC_WRAPPER).
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
-      KUMI_WINDOWS_EXTENDED_ONLY: >-
-        (binary_id(kumi::it) & test(=own_providers::an_update_keeps_the_bridges_in_place_and_a_rollback_takes_each_to_the_copy_its_kumi_carries))
-        | (binary_id(kumi::it) & test(=own_providers::reapers_and_renoises_bridge_messages_never_speak_lives_words))
-        | (binary_id(kumi::it) & test(=own_providers::an_update_follows_each_copy_and_never_puts_back_a_bridge_taken_out_or_moves_it_to_another_reaper))
-        | (binary_id(kumi::it) & test(=own_providers::a_kumi_an_earlier_updater_put_in_place_brings_its_bridge_as_it_starts))
-        | (binary_id(kumi::it) & test(=library_learn::a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_on_windows))
-        | (binary_id(kumi::it) & test(=willington::native_editing_requires_an_owner_only_receipt_for_the_loaded_package))
-    steps:
-      - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
-        continue-on-error: true
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # The set's packages in this part (everything: main's pushes and runs by hand test all of them).
-      - id: part
-        shell: pwsh
-        run: |
-          $affected = (python scripts/dev.py affected --json | ConvertFrom-Json).packages -join ' '
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $picked = python scripts/dev.py select --tested-by ci-os $affected ${{ matrix.crates }}
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "picked=$picked" | Tee-Object -Append -FilePath $env:GITHUB_OUTPUT
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-      # Saved from main only, by name (see Rust / Linux). Each part keeps its own: they build some crates from crates.io
-      # differently (cargo unifies their features over the packages a build selects).
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-        with:
-          shared-key: ${{ matrix.part }}-rust-windows
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
-        with:
-          tool: nextest
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-      - name: The tests, in a home of their own (Windows)
-        shell: pwsh
-        env:
-          RUSTC_WRAPPER: sccache
-          KUMI_NEXTEST: "1"
-          KUMI_NEXTEST_LIST: ${{ runner.temp }}/nextest-list.json
-          KUMI_NEXTEST_BUILD_PROFILE: ci-os
-          RUST_TEST_NOCAPTURE: '1'
-        # (the -p options as separate words: the expression is replaced before PowerShell reads the line)
-        run: ./scripts/test-isolated.ps1 --profile ci-os -E "not ($env:KUMI_WINDOWS_EXTENDED_ONLY)" ${{ steps.part.outputs.picked }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() }}
-        with:
-          name: nextest-list-ci-os-Windows-${{ matrix.part }}
-          path: ${{ runner.temp }}/nextest-list*.json  # with the library tests' list (test-isolated.ps1's .lib.json)
-          if-no-files-found: ignore
-          retention-days: 14
-
-  remote-script-platforms:
-    # The Remote Script's tests on the Python of Live's other systems (Linux's run in Checks).
-    name: Python Remote Script / ${{ matrix.os }}
-    if: github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, windows-2025]
-    defaults:
-      run:
-        shell: bash
-        working-directory: daws/ableton/remote-script
-    steps:
-      - name: Stop Windows Defender scanning the workspace
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        working-directory: ${{ runner.temp }}
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
-        with:
-          python-version: "3.11"
-      - run: python -m unittest discover -s . -p 'test_*.py'
-      - run: python -m compileall -q AbletonMcpBridge
-
-  hermes-plugin-platforms:
-    # The Hermes plugin's tests on macOS and on Windows, where its one-runtime-per-profile lock is msvcrt's and its
-    # runtime starts without a console (Linux's run in Hermes plugin).
-    name: Hermes plugin / ${{ matrix.os }}${{ matrix.python != '3.11' && format(' / Python {0}', matrix.python) || '' }}
-    if: github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, windows-2025]
-        python: ["3.11"]
-        include:
-          # Windows's path handling (`os.path.realpath`, `ntpath`) changes between Pythons, and the media route's
-          # containment rests on it: its tests also run on the newest (#1000).
-          - os: windows-2025
-            python: "3.14"
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Stop Windows Defender scanning the workspace
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
-        with:
-          python-version: ${{ matrix.python }}
-      - name: The plugin's tests
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-        # Verbose: each test's name and outcome in the log, skipped ones included (a Windows-only test that skipped
-        # would otherwise pass unseen).
-        run: python -m unittest discover -v -s hermes-plugin/tests -p 'test_*.py'
-
   main-failed:
-    # macOS and Windows first test a change once it's on main, and a release waits for main's CI on all three systems: a
-    # red run there opens an issue (or comments on the open one), naming the commit, for whoever broke it to fix first.
+    # Pull requests run no tests, so main's run is the first to test a change, and a release waits for it: a red run
+    # there opens an issue (or comments on the open one), naming the commit, for whoever broke it to fix first.
     name: Main's CI failed
-    needs: [required]
+    needs: [required, rust-linux, daw-scripts, hermes-plugin]
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -648,7 +326,7 @@ jobs:
         run: |
           set -euo pipefail
           title="Main's CI failed"
-          body="CI failed on main at $SHA (${MESSAGE%%$'\n'*}): $RUN. macOS and Windows test a change only once it's on main, and no release goes out until main's CI is green on all three systems, so this comes first."
+          body="CI failed on main at $SHA (${MESSAGE%%$'\n'*}): $RUN. Pull requests run no tests, so main's run is the first to test a change, and no release goes out until it's green: this comes first."
           open="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
           if [ -n "$open" ]; then
             gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"

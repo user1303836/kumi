@@ -767,7 +767,7 @@ def main() -> None:
     parser.add_argument("--binaries-dir", type=Path, help="already built binaries; skips cargo build")
     parser.add_argument("--bridge-only", action="store_true", help="build only the receipt-bound bridge artifact")
     parser.add_argument("--profile", default="release",
-                        help="Cargo profile: release (the default, what's published) or ci-release (CI's quicker build)")
+                        help="Cargo profile: release (the default, what's published) or ci-release (a quicker build, never published)")
     for daw in DAW_BRIDGES.values():
         if "library" in daw:
             parser.add_argument(f"--{daw['id']}-extension", type=Path,

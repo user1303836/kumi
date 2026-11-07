@@ -13,10 +13,10 @@ on:
       label:
         type: string
         required: true
-      # The rust-cache CI saves from main for this system, which the build restores.
+      # The rust-cache CI saves from main for this system, which the build restores: Linux's only (empty: none).
       cache:
         type: string
-        required: true
+        default: ""
       linker:
         type: string
         default: ""
@@ -34,15 +34,18 @@ env:
 
 jobs:
   build:
-    # One build of the workspace (5 to 7 minutes; 14 after a release, whose version bump changes every crate), where each
-    # share used to build it whole. The archive holds the test binaries and the workspace's programs and libraries they
-    # run beside them; the shares unpack it into their checkout's target/, as it was here.
+    # One build of the workspace (5 to 7 minutes on Linux, where CI's cache is warm; longer cold on macOS and Windows, and
+    # after a release, whose version bump changes every crate), where each share used to build it whole. The archive holds
+    # the test binaries and the workspace's programs and libraries they run beside them; the shares unpack it into their
+    # checkout's target/, as it was here.
     name: build
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 30
+    # (cold on macOS and Windows: no cache of theirs is kept)
+    timeout-minutes: 45
     env:
-      # Rust's own linker on Windows, as CI's Windows jobs have it, and empty elsewhere: rust-cache keys a cache on the
-      # CARGO* and RUST* variables that are set, so one that CI's Linux and macOS jobs don't set misses their caches.
+      # Rust's own linker on Windows (Microsoft's is a large part of linking the test binaries), and empty elsewhere:
+      # rust-cache keys a cache on the CARGO* and RUST* variables that are set, so one that CI's Linux jobs don't set
+      # would miss their cache.
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: ${{ inputs.linker }}
     steps:
       - name: Stop Windows Defender scanning the workspace (it slows every file the build touches)
@@ -52,10 +55,10 @@ jobs:
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      # Restores the cache CI saves from main for this platform, by its name; saves none of its own, so the repository's
-      # 10 GB keeps main's. On Windows the app's: it builds its crates from crates.io with the features every test gives
-      # them, where the other part builds windows-sys with others, and every crate above it would build again.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      # Restores the cache CI's tests save from main for Linux, by its name; saves none of its own, so the repository's
+      # 10 GB keeps main's.
+      - if: inputs.cache != ''
+        uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           shared-key: ${{ inputs.cache }}
           save-if: false

@@ -1,14 +1,14 @@
-# What CI tests beyond the Rust packages, read by scripts/dev.py. Every tracked file belongs to a Cargo package (the
-# longest manifest folder holding it), to one or more areas here, or to both: `python3 scripts/dev.py affected --check`
-# fails on a file that belongs to neither.
+# What a change touches beyond the Rust packages, read by scripts/dev.py: whether Required CI builds Rust for it, and what
+# `dev.py check --tests` tests. Every tracked file belongs to a Cargo package (the longest manifest folder holding it), to
+# one or more areas here, or to both: `python3 scripts/dev.py affected --check` fails on a file that belongs to neither.
 #
 # - paths: globs from the repository's root. `*` and `?` stay inside a folder; `**` crosses folders.
 # - feeds: the packages that read these files when they build or test ("*": every one). A change here affects them as
 #   if it were their own, and so the packages that depend on them.
 # - except: globs of files the paths match that aren't the area's.
 # - layout: a file added, removed or renamed under these globs counts as one of this area's.
-# - rust: false when a change here tests no Rust package (unless another area holding the same file does): CI's Rust
-#   jobs then pass at once for a change to these files alone.
+# - rust: false when a change here builds no Rust package (unless another area holding the same file does): Required
+#   CI then skips formatting and the build for a change to these files alone.
 
 # Words for people: a change to these alone builds and tests nothing.
 [docs]
@@ -60,15 +60,10 @@ layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]
 feeds = ["kumi-agent", "kumi"]
 
 # Kumi's Hermes Agent plugin (Python, with its Desktop and dashboard halves): the Hermes catalog installs this folder
-# alone, so nothing in it reaches outside it. CI's Hermes plugin job holds it to Hermes's own checks.
+# alone, so nothing in it reaches outside it. Main's CI holds it to Hermes's own checks (the Hermes plugin job).
 [hermes-plugin]
 paths = ["hermes-plugin/**"]
 rust = false
-
-# REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry (with what the
-# DAW list says of the extension).
-[reaper-extension]
-paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py", "scripts/daws.toml"]
 
 # What Kumi reads of REAPER's extension: its change code (Kumi's kinds and their fields are checked against it).
 [reaper-extension-read]
@@ -105,74 +100,6 @@ feeds = ["kumi-agent", "kumi"]
 paths = ["package.json"]
 feeds = ["ableton-mcp-server", "kumi"]
 
-# The install surface: a pull request that changes any of it runs the Installer's builds and installs. The tests and
-# examples beside these files aren't part of it.
-[install]
-paths = [
-  "install.sh",
-  "install.ps1",
-  "crates/kumi/src/install.rs",
-  "crates/kumi/src/install/**",
-  "crates/kumi/src/update.rs",
-  "crates/kumi/src/process.rs",
-  "crates/kumi-daw/src/process.rs",
-  "crates/kumi/src/doctor.rs",
-  "crates/kumi/src/doctor/installation.rs",
-  "daws/ableton/kumi-daw-ableton/src/app/bridge_setup.rs",
-  "daws/ableton/kumi-daw-ableton/src/app/live_extension.rs",
-  "daws/ableton/kumi-daw-ableton/src/app/live_app.rs",
-  "daws/own/kumi-daw-own/src/provider.rs",
-  "daws/own/kumi-daw-own/src/beside.rs",
-  "daws/reaper/kumi-daw-reaper/src/provider.rs",
-  "daws/renoise/kumi-daw-renoise/src/provider.rs",
-  "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs",
-  "crates/kumi-types/src/system.rs",
-  "crates/kumi-ai/src/http.rs",
-  "crates/kumi-library/src/sources.rs",
-  "crates/kumi-net/src/lib.rs",
-  "crates/kumi-net/src/proxy.rs",
-  "crates/kumi-net/src/trust.rs",
-  "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift",
-  "daws/ableton/kumi-daw-ableton/src/hands/mac.rs",
-  "daws/ableton/ableton-mcp-server/src/lifecycle.rs",
-  "daws/ableton/ableton-mcp-server/src/lifecycle/**",
-  "daws/own/daw-bridge/Cargo.toml",
-  "daws/own/daw-bridge/src/lifecycle.rs",
-  "daws/own/daw-bridge/src/install.rs",
-  "daws/own/daw-bridge/src/detect.rs",
-  "daws/own/daw-bridge/src/files.rs",
-  "daws/own/daw-bridge/src/owner.rs",
-  "daws/own/daw-bridge/src/paths.rs",
-  "daws/own/daw-mcp-server/Cargo.toml",
-  "daws/own/daw-mcp-server/src/bin/**",
-  "daws/soundcraft/soundcraft-kumi/Cargo.toml",
-  "daws/soundcraft/soundcraft-kumi/src/main.rs",
-  "daws/reaper/reaper-kumi/build.rs",
-  "daws/reaper/reaper-kumi/Cargo.toml",
-  "daws/reaper/reaper-kumi/shim/**",
-  "daws/reaper/reaper-kumi/sdk/**",
-  "daws/reaper/reaper-kumi/src/lib.rs",
-  "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
-  "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
-  "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
-  "scripts/build-native-release.py",
-  "scripts/build-migration-release.py",
-  "scripts/daws.toml",
-  "scripts/build-hands.py",
-  "scripts/release.py",
-  "scripts/check-installers.sh",
-  "scripts/vendor-willington.py",
-  "scripts/migration/**",
-  "vendor/willington/**",
-  ".github/workflows/installer.yml",
-]
-# The bridge's lifecycle module is install surface, but for its read-only diagnostics.
-except = ["**/tests/**", "**/examples/**", "**/tests.rs", "daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"]
-
-# How Kumi's HTTP clients are made, which the Network workflow checks on each system's own trust store and proxies.
-[network]
-paths = ["crates/kumi-net/src/lib.rs", "crates/kumi-net/src/proxy.rs", "crates/kumi-net/src/trust.rs", "crates/kumi-net/tests/it/network.rs", ".github/workflows/network.yml"]
-
 # The release, packaging and migration scripts and their tests.
 [release-scripts]
 paths = ["scripts/**"]
@@ -180,10 +107,6 @@ paths = ["scripts/**"]
 # CI itself.
 [workflows]
 paths = [".github/**"]
-
-# CI's own workflow: its every job runs for a change to it.
-[ci]
-paths = [".github/workflows/ci.yml"]
 
 # The repository's own settings for git and for search.
 [repo]

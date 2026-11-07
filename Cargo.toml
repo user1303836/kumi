@@ -177,14 +177,13 @@ strip = "none"
 [profile.release.package.reaper-kumi]
 strip = "none"
 
-# The Installer's builds on pull requests and main, which are installed and checked but never published: the
-# release build without whole-program optimization and with parallel code generation, to build faster. Tags, the
-# builds that are published, use `release`.
+# A quicker build for local runs (crates/kumi/examples/loop_live.rs's), never published: the release build without
+# whole-program optimization and with parallel code generation, to build faster. What's published uses `release`.
 [profile.ci-release]
 inherits = "release"
 lto = "off"
 codegen-units = 16
-# Installed and checked, never timed or published: less optimizing, for a build in half the time.
+# Never timed or published: less optimizing, for a build in half the time.
 opt-level = 1
 
 [profile.ci-release.package.reaper-kumi]

@@ -54,12 +54,7 @@ AREAS = [
     dev.Area("renoise-tool", [dev.glob("daws/renoise/**")], rust=False),
     dev.Area("renoise-tool-read", [dev.glob("daws/renoise/tool/version.lua")], feeds=["app"],
              layout=[dev.glob("daws/renoise/tool/**")]),
-    dev.Area("reaper-extension", [dev.glob("crates/extension/**")]),
-    dev.Area("install", [dev.glob("install.sh"), dev.glob("crates/app/src/install/**")],
-             unless=[dev.glob("**/tests.rs")]),
-    dev.Area("network", [dev.glob("crates/runtime/src/net/**")]),
     dev.Area("workflows", [dev.glob(".github/**")]),
-    dev.Area("ci", [dev.glob(".github/workflows/ci.yml")]),
     dev.Area("hermes-plugin", [dev.glob("hermes-plugin/**")], rust=False),
 ]
 
@@ -74,7 +69,6 @@ def jobs(result: "dev.Affected") -> set[str]:
 
 
 RUST = {"rust_lint"}
-CODE = {"remote_script", "live_extension"}
 
 
 class Globs(unittest.TestCase):
@@ -115,49 +109,32 @@ class Affected(unittest.TestCase):
     def test_a_packages_change_affects_it_and_its_dependents(self):
         result = run("M\tcrates/store/src/lib.rs")
         self.assertEqual(result.packages, ["app", "runtime", "store"])
-        self.assertEqual(jobs(result), RUST | CODE)
+        self.assertEqual(jobs(result), RUST)
 
     def test_an_area_feeds_its_packages_and_every_package_for_a_star(self):
         self.assertEqual(run("M\tprotocol/ops.json").packages, ["app", "runtime"])
         self.assertEqual(run("M\tCargo.lock").packages, sorted(WORKSPACE.folders))
-        self.assertIn("reaper_extension", jobs(run("M\tCargo.lock")), "the extension builds with the lockfile")
 
-    def test_the_renoise_tool_runs_rust_only_for_what_kumi_reads_of_it(self):
+    def test_the_renoise_tool_builds_rust_only_for_what_kumi_reads_of_it(self):
         lua = run("M\tdaws/renoise/tool/payload/notes.lua")
-        self.assertEqual(jobs(lua), CODE | {"renoise_tool"})
-        self.assertEqual(lua.packages, [])
+        self.assertEqual((lua.packages, jobs(lua)), ([], set()))
         for change in ("M\tdaws/renoise/tool/version.lua", "A\tdaws/renoise/tool/payload/new.lua",
                        "D\tdaws/renoise/tool/payload/old.lua", "R100\tdaws/renoise/tool/a.lua\tdaws/renoise/tool/b.lua"):
             result = run(change)
-            self.assertEqual(jobs(result), RUST | CODE | {"renoise_tool"}, change)
+            self.assertEqual(jobs(result), RUST, change)
             self.assertEqual(result.packages, ["app"], change)
-        self.assertEqual(jobs(run("M\tdaws/renoise/tests/run.sh")), CODE | {"renoise_tool"})
+        self.assertEqual(jobs(run("M\tdaws/renoise/tests/run.sh")), set())
 
-    def test_reaper_s_extension_runs_for_its_crate_what_it_links_and_ci(self):
-        self.assertIn("reaper_extension", jobs(run("M\tcrates/extension/src/lib.rs")))
-        self.assertIn("reaper_extension", jobs(run("M\tcrates/wire/src/frame.rs")))
-        self.assertNotIn("reaper_extension", jobs(run("M\tcrates/store/src/lib.rs")))
+    def test_the_hermes_plugin_builds_no_rust(self):
+        for change in ("M\thermes-plugin/runtime.py", "A\thermes-plugin/skills/daw/SKILL.md"):
+            result = run(change)
+            self.assertEqual((result.packages, jobs(result)), ([], set()), change)
 
-    def test_ci_s_workflow_runs_every_ci_job_and_another_workflow_the_broad_ones(self):
-        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")),
-                         RUST | CODE | {"reaper_extension", "renoise_tool", "hermes_plugin"})
-        self.assertEqual(jobs(run("M\t.github/workflows/extended.yml")), RUST | CODE)
-
-    def test_the_hermes_plugin_runs_its_own_job_and_no_rust_its_words_included(self):
-        self.assertEqual(jobs(run("M\thermes-plugin/runtime.py")), CODE | {"hermes_plugin"})
-        # Its README is the catalog's page and its skills are what the model reads: they ship, so they're checked.
-        for change in ("M\thermes-plugin/README.md", "A\thermes-plugin/skills/daw/SKILL.md"):
-            self.assertEqual(jobs(run(change)), {"hermes_plugin"}, change)
-        for change in ("M\thermes-plugin/runtime.py", "M\thermes-plugin/README.md"):
-            self.assertEqual(run(change).packages, [], change)
-        self.assertNotIn("hermes_plugin", jobs(run("M\tcrates/store/src/lib.rs")))
-        self.assertNotIn("hermes_plugin", jobs(run("M\t.github/workflows/extended.yml")))
-
-    def test_a_file_runs_rust_when_any_of_its_areas_has_rust(self):
+    def test_a_file_builds_rust_when_any_of_its_areas_has_rust(self):
         areas = AREAS + [dev.Area("shared", [dev.glob("hermes-plugin/shared.json")], feeds=["app"])]
         result = dev.affected(dev.parse_name_status("M\thermes-plugin/shared.json"), WORKSPACE, areas)
         self.assertEqual(result.packages, ["app"])
-        self.assertEqual(jobs(result), RUST | CODE | {"hermes_plugin"})
+        self.assertEqual(jobs(result), RUST)
 
     def test_an_areas_rust_is_true_or_false(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -170,33 +147,14 @@ class Affected(unittest.TestCase):
 
     def test_a_change_no_package_holds_and_no_area_feeds_affects_every_package(self):
         self.assertEqual(run("M\t.github/workflows/extended.yml").packages, sorted(WORKSPACE.folders))
+        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")), RUST)
         self.assertEqual(run("M\tinstall.sh").packages, sorted(WORKSPACE.folders))
         self.assertEqual(run("M\tcrates/store/src/lib.rs", "M\tprotocol/ops.json").packages, ["app", "runtime", "store"])
         self.assertEqual(run("M\tdaws/renoise/tool/payload/notes.lua").packages, [], "the tool's own Lua runs no Rust")
 
-    def test_the_path_filtered_workflows_repeat_their_areas(self):
-        # The Installer and Network run for their areas alone, by their `paths:` (a pull request's, and main's): each
-        # trigger's list is the area's globs, with each `except` as a `!` glob, in the order areas.toml has them.
-        for workflow, area in dev.PATH_FILTERED:
-            triggers = dev.workflow_paths((ROOT / workflow).read_text(encoding="utf-8"))
-            self.assertEqual(sorted(triggers), ["pull_request", "push"], workflow)
-            for trigger, paths in triggers.items():
-                self.assertEqual(paths, dev.area_filter(area),
-                                 f"{workflow} {trigger}: scripts/areas.toml's [{area}] (python3 scripts/dev.py areas --write-workflows)")
-
-    def test_writing_an_areas_paths_replaces_each_triggers_list_and_nothing_else(self):
-        workflow = ('name: W\non:\n  push:\n    branches: [main]\n    paths:\n      - "a"\n      - "b"\n'
-                    '  pull_request:\n    paths:\n      - "c"\n  workflow_dispatch:\n'
-                    'jobs:\n  build:\n    steps:\n      - "not a path"\n')
-        written = dev.with_area_paths(workflow, ["x", "y", "!z"])
-        self.assertEqual(dev.workflow_paths(written), {"push": ["x", "y", "!z"], "pull_request": ["x", "y", "!z"]})
-        self.assertEqual(written.replace('      - "x"\n      - "y"\n      - "!z"\n', ""),
-                         workflow.replace('      - "a"\n      - "b"\n', "").replace('      - "c"\n', ""))
-        self.assertEqual(dev.with_area_paths(written, ["x", "y", "!z"]), written)
-
     def test_a_rename_counts_both_its_paths(self):
         result = run("R090\tcrates/extension/src/old.rs\tcrates/app/src/old.rs")
-        self.assertIn("reaper_extension", jobs(result), "moving a file out of the extension changes it")
+        self.assertEqual(result.packages, ["app", "reaper-kumi"], "moving a file out of the extension changes it")
 
     def test_no_change_runs_nothing_and_no_base_everything(self):
         self.assertEqual(jobs(run()), set())
@@ -210,68 +168,31 @@ class Affected(unittest.TestCase):
             dev.affected(dev.parse_name_status("M\todd/x"), WORKSPACE, areas)
 
 
-class Select(unittest.TestCase):
-    PACKAGES = sorted(WORKSPACE.folders)
-
-    def test_a_part_tests_its_affected_packages_only(self):
-        self.assertEqual(dev.select(["store", "runtime", "app"], ["--exclude", "wire", "--exclude", "host"], self.PACKAGES),
-                         ["-p", "app", "-p", "runtime", "-p", "store"])
-        self.assertEqual(dev.select(["store", "runtime", "app"], ["-p", "wire", "-p", "host"], self.PACKAGES), [])
-        self.assertEqual(dev.select(["wire", "app"], ["-p", "wire", "-p", "host"], self.PACKAGES), ["-p", "wire"])
-
-    def test_a_part_names_this_workspaces_packages_one_way(self):
-        for selection in (["-p", "gone"], ["-p", "wire", "--exclude", "host"], ["-p"], ["--all"]):
-            with self.assertRaises(dev.Refused, msg=selection):
-                dev.select(["wire"], selection, self.PACKAGES)
-
-    def test_no_part_named_is_the_whole_workspace(self):
-        self.assertEqual(dev.select(["wire", "app"], [], self.PACKAGES), ["-p", "app", "-p", "wire"])
-
-    def test_a_part_tested_by_a_profile_is_its_packages_that_profile_builds(self):
-        # The platform jobs' `ci-os` set: the packages whose `it` binary it takes in, not those only its `& not (…)` names.
-        ci_os = """
-(
-    (binary_id(app::it) & test(/^(install|cli)::/))
-  | (binary_id(wire::it) & test(/^system::/))
-) & not (
-    (binary_id(store::it) & test(/^slow::/))
-  | (binary_id(app::it) & test(/^long::/))
-)
-"""
-        self.assertEqual(dev.filter_packages(ci_os), {"app", "wire"})
-        self.assertEqual(dev.filter_packages("binary_id(host::it) | binary_id(wire::it)"), {"host", "wire"})
-        tested = dev.filter_packages(ci_os)
-        self.assertEqual(dev.select(["app", "store", "wire"], ["--exclude", "app"], self.PACKAGES, tested), ["-p", "wire"])
-        self.assertEqual(dev.select(["store", "runtime"], [], self.PACKAGES, tested), [])
-
-    def test_this_checkouts_platform_set_takes_in_the_app_and_not_what_it_leaves_out(self):
-        tested = dev.profile_packages("ci-os")
-        self.assertTrue({"kumi", "ableton-mcp-server", "daw-bridge"} <= tested, tested)
-        self.assertFalse({"kumi-listening", "kumi-web"} & tested, tested)
-        with self.assertRaises(dev.Refused):
-            dev.profile_packages("no-such-profile")
-
-
 class Check(unittest.TestCase):
-    def steps(self, *changes: str, windows: bool = False) -> list[str]:
-        return [" ".join(step.command) for step in dev.check_steps(run(*changes), "origin/main", windows=windows)]
+    def steps(self, *changes: str, windows: bool = False, tests: bool = False) -> list[str]:
+        return [" ".join(step.command) for step in dev.check_steps(run(*changes), "origin/main", windows=windows, tests=tests)]
 
-    def test_a_packages_change_tests_it_and_its_dependents_only(self):
+    def test_a_packages_change_builds_it_and_its_dependents_and_tests_them_when_asked(self):
         steps = self.steps("M\tcrates/store/src/lib.rs")
         self.assertIn("cargo fmt --all --check", steps)
-        self.assertIn("sh scripts/test-isolated.sh --profile ci -p app -p runtime -p store", steps)
         self.assertTrue(any(step.startswith("cargo clippy -p app -p runtime -p store --lib --bins --examples") for step in steps), steps)
-        self.assertFalse(any("remote-script" in step or "renoise" in step for step in steps), steps)
+        self.assertFalse(any("test-isolated" in step for step in steps), "Required CI runs no tests")
+        tested = self.steps("M\tcrates/store/src/lib.rs", tests=True)
+        self.assertIn("sh scripts/test-isolated.sh --profile ci -p app -p runtime -p store", tested)
+        self.assertFalse(any("remote-script" in step or "renoise" in step for step in tested), tested)
 
     def test_docs_alone_run_no_rust(self):
-        steps = self.steps("M\tdocs/en/TESTING.md")
+        steps = self.steps("M\tdocs/en/TESTING.md", tests=True)
         self.assertFalse(any(step.startswith("cargo") or "test-isolated" in step for step in steps), steps)
         self.assertTrue(any("test_*release.py" in step for step in steps), "the release scripts' tests check the docs' links")
 
-    def test_each_area_runs_its_own_checks(self):
-        self.assertTrue(any("daws/renoise/tests/run.sh" in step for step in self.steps("M\tdaws/renoise/tool/payload/notes.lua")))
-        self.assertTrue(any("pwsh" in step and "--profile ci -p" in step for step in self.steps("M\tcrates/store/src/lib.rs", windows=True)))
-        plugin = self.steps("M\thermes-plugin/runtime.py")
+    def test_each_area_runs_its_own_tests_when_asked(self):
+        lua = "M\tdaws/renoise/tool/payload/notes.lua"
+        self.assertTrue(any("daws/renoise/tests/run.sh" in step for step in self.steps(lua, tests=True)))
+        self.assertFalse(any("daws/renoise/tests/run.sh" in step for step in self.steps(lua)))
+        self.assertTrue(any("pwsh" in step and "--profile ci -p" in step
+                            for step in self.steps("M\tcrates/store/src/lib.rs", windows=True, tests=True)))
+        plugin = self.steps("M\thermes-plugin/runtime.py", tests=True)
         self.assertIn(f"{sys.executable} -m unittest discover -s hermes-plugin/tests -p test_*.py", plugin)
         self.assertFalse(any(step.startswith("cargo") or "test-isolated" in step for step in plugin), plugin)
 
@@ -358,16 +279,6 @@ class ThisCheckout(unittest.TestCase):
     def test_every_area_feeds_packages_the_workspace_has(self):
         for area in self.areas:
             self.assertLessEqual(set(area.feeds) - {"*"}, set(self.workspace.folders), area.name)
-
-    def test_the_install_surface_holds_the_installs_files_and_not_their_tests_or_the_cli(self):
-        install = self.area("install")
-        for path in ("install.sh", "crates/kumi/src/install/migration.rs", "daws/ableton/ableton-mcp-server/src/lifecycle/cli.rs",
-                     "daws/reaper/reaper-kumi/shim/csurf.cpp", "vendor/willington/README.md", ".github/workflows/installer.yml"):
-            self.assertTrue(install.holds(path), path)
-        for path in ("crates/kumi/src/cli/native/session.rs", "scripts/tests/daw_bridges.py", "scripts/test-isolated.sh",
-                     "daws/own/daw-bridge/tests/it/system.rs", "daws/ableton/kumi-daw-ableton/src/app/willington.rs", "Cargo.lock",
-                     "daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"):
-            self.assertFalse(install.holds(path), path)
 
     def test_the_moves_map_names_paths_that_moved(self):
         rewrites = dev.load_moves((ROOT / dev.MOVES).read_text(encoding="utf-8"))

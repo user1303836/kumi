@@ -1,4 +1,4 @@
-//! What each system decides for a DAW's bridge, checked on CI's macOS and Windows runs too (the `ci-os` set): whether a
+//! What each system decides for a DAW's bridge, checked on macOS and Windows too by the Extended workflow: whether a
 //! pid is a running process of this user's (whether a bridge's discovery file is stale), and macOS's downloaded mark,
 //! which Kumi's own copy of a bridge never keeps.
 

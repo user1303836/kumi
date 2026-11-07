@@ -23,9 +23,9 @@ binary_id(kumi-ai)
 '''
 retries = 2
 
-# CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request runs `ci` on Linux; main, after a merge, runs
-# `ci` on Linux and `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, each week and by
-# hand. What `ci` leaves out, and why:
+# CI's two sets (.github/workflows/ci.yml and extended.yml). Main runs `ci` on Linux after each merge (pull requests run
+# no tests); the Extended workflow runs `extended`, every test, on Linux, macOS and Windows, by hand. What `ci` leaves
+# out, and why:
 # - the recorded-source oracles (a host workflow replayed against what the TypeScript host did, `…_match_source` and the
 #   like): long replays of behaviour the port froze, which the unit tests beside them check in pieces;
 # - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg), and the music
@@ -71,76 +71,6 @@ not (
 )
 '''
 # A blocking test that runs past 30 s fails, by name: what takes that long belongs in `extended`, or needs making faster.
-slow-timeout = { period = "15s", terminate-after = 2 }
-fail-fast = false
-
-# What differs by platform: installing, launching and updating; the terminal and stdin; Hands; paths, files and child
-# processes; the store; and a few smoke tests. The Ableton bridge's install lifecycle runs in `ci` on Linux (in a
-# moment there) and on every platform in `extended` (minutes on Windows). For REAPER and Renoise: their bridges going
-# into the DAWs' own folders (own_providers), Kumi's host on its loopback sockets to them (bridge, retire, credit), the
-# bridges the host starts itself and how they end with it (spawn), and what each system decides for them (daw-bridge's
-# system: a bridge's process, macOS's downloaded mark).
-# The extension REAPER loads is built, loaded and called through its C++ shim on every platform by CI's REAPER job.
-# Windows' job leaves out the slowest of these there (9 to 16 s each: ci.yml's KUMI_WINDOWS_EXTENDED_ONLY); `extended`
-# runs them.
-# SoundCraft's control channel from Kumi's side: its loopback connections, and what they do at their limits (control),
-# SoundCraft started with it on, a process of its own (launch), and the bridge program, which ends with its stdin or with
-# SoundCraft (server).
-# Kumi's runtime for plugins (`kumi serve`): its own tests (the library's serve::) and the runtime run as a program
-# (serve, serve_daw), whose child processes, file locks, paths and pipes differ on each system. A library's tests named
-# here (`binary_id(<crate>)`) are built and run by test-isolated after the `it` binaries, for the crates a job takes.
-[profile.ci-os]
-default-filter = '''
-(
-    (binary_id(kumi::it) & test(/^(install|cli_binary|cli|update|bridge_setup|doctor)::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^cli::/))
-  | (binary_id(kumi::it) & test(/^(live_extension|report|login|config|history|library)::/))
-  | (binary_id(kumi-store::it) & test(/^history::/))
-  | (binary_id(kumi::it) & test(/^(stdin_handoff|terminal|tui|voice_input)::/))
-  | (binary_id(kumi-daw-ableton::it) & test(/^hands_transport::/))
-  | (binary_id(kumi-ai::it) & test(/^auth::/))
-  | (binary_id(daw-bridge::it) & test(/^system::/))
-  | (binary_id(kumi-agent::it) & test(/^disk::/))
-  | (binary_id(kumi-daw-ableton::it) & test(/^(samples|project_runtime)::/))
-  | (binary_id(kumi-library::it) & test(/^library_files::/))
-  | (binary_id(kumi-types::it) & test(/^system::/))
-  | (binary_id(kumi::it) & test(/^(library_learn|library_search|library_state_plan)::/))
-  | (binary_id(kumi-agent::it) & test(/^local_servers::/))
-  | (binary_id(kumi-media::it) & test(/^voice::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^library_search::/))
-  | (binary_id(kumi::it) & test(/^session::/))
-  | (binary_id(kumi-daw-ableton::it) & test(/^agent::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(lifecycle_release|lifecycle_binary|delivery|delivery_cli)::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(extension_launcher|extension_channel|stdio|fixture_paths|project)::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))
-  | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
-  | (binary_id(kumi-ai::it) & test(/^ai_transport::/))
-  | (binary_id(kumi-net::it) & test(/^network::/))
-  | (binary_id(kumi-store::it) & test(/^store::/))
-  | (binary_id(kumi::it) & test(/^(willington|windows_console_control|windows_stdin|windows_tty)::/))
-  | (binary_id(kumi::it) & test(/^(own_providers|serve_setup)::/))
-  | (binary_id(daw-mcp-server::it) & test(/^(bridge|retire|credit|spawn)::/))
-  | (binary_id(kumi) & test(/^serve::/))
-  | (binary_id(kumi::it) & test(/^(serve|serve_daw)::/))
-) & not (
-    (binary_id(kumi-daw-ableton::it) & test(/^live_rendering::/))
-  | (binary_id(kumi-listening::it) & test(/^form::/))
-  | (binary_id(kumi-web::it) & test(/^video::/))
-  | (binary_id(kumi-daw-ableton::it) & test(/^listening::/))
-  | (binary_id(kumi-listening::it) & test(/^(effects|sound)::/))
-  | (binary_id(kumi-listening::it) & test(/^style_references::/))
-  | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
-  | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
-  | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
-  | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
-      & not ((binary_id(kumi-daw-ableton::it) & test(/^changes::/)) | (binary_id(kumi::it) & test(/^pin_first_request::/))))
-  | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
-  | test(/kit::clock::tests::(steps_start_on_the_sample|a_start_inside_a_step|a_jump_by_whole_beats|a_tempo_rise_just_after|a_division_or_swing_moved)/)
-  | test(/core::layers::fake_backend_tests::(a_late_flipped_layer|glue_hears_the_group)/)
-)
-'''
 slow-timeout = { period = "15s", terminate-after = 2 }
 fail-fast = false
 
