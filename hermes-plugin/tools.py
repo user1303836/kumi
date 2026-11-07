@@ -310,6 +310,12 @@ class Host:
         """CC-19's 19d: the producer let messaging chats (Discord, Slack, Telegram…) run scripts, each one asked."""
         return self._ctx.get_config("scripts_in_messaging", False) is True
 
+    def ask_before_changes(self) -> bool:
+        """The producer's "Ask before each change": on, Hermes asks before each change Kumi makes in the DAW
+        (`policy.UNASKED_BY_DEFAULT`); off, the default, Kumi makes them without asking. Scripts, setup, sample folders,
+        and Mirelo's uploads and paid jobs are asked either way."""
+        return self._ctx.get_config("ask_before_changes", False) is True
+
     def trust(self) -> scripts.Trust:
         """This profile's record of which chats read outside content (CC-19 r1), in its plugin data."""
         path = self.data_dir() / scripts.TRUST_FILE
@@ -524,6 +530,17 @@ NO_APPROVALS = (f"Hermes's approvals are off here (--yolo, /yolo or approvals.mo
                 "asking first.")
 UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
                      f"doesn't say). If it is, {UNASKED} run without asking first.")
+# Whether Kumi asks before its changes ("Ask before each change"), said the same in /kumi, `hermes kumi status` and the
+# doctor.
+CHANGES_UNASKED = ("Kumi makes your changes without asking (Ask before each change: off); scripts, setup steps, sample "
+                   "folders and Mirelo jobs still ask")
+CHANGES_ASKED = "Hermes asks before each Kumi change (Ask before each change: on)"
+
+
+def changes_mode(host: Host) -> str:
+    return CHANGES_ASKED if host.ask_before_changes() else CHANGES_UNASKED
+
+
 # Set in the environment of Hermes's plugin host (`plugins.isolation: host`), whose process holds no chat's /yolo.
 PLUGIN_HOST_ENV = "HERMES_PLUGIN_HOST_PROCESS"
 
@@ -572,13 +589,13 @@ def approvals_bypassed(host: Host, *, chat: bool = True) -> bool | None:
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     """Where Kumi stands, for the model: setup as `setup.for_model` gives it (no path on this computer, LOW 11), the
-    approvals note, and the runtime's own status."""
+    approvals note, whether Kumi asks before its changes (`ask_before_changes`), and the runtime's own status."""
     daw = host.daw()
     data_dir = host.data_dir()
     report: dict[str, Any] = {"setup": setup.for_model(setup.status(daw=daw, data_dir=data_dir,
                                                                     plugin_dir=host.plugin_dir)),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
-                              "capabilities": []}
+                              "capabilities": [], "ask_before_changes": host.ask_before_changes()}
     bypassed = approvals_bypassed(host)
     said = ([] if bypassed is False else [NO_APPROVALS if bypassed else UNKNOWN_APPROVALS]) + approval_gaps(host)
     if said:  # say it to the producer before changing anything
@@ -1460,7 +1477,8 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 
 
 def approved_only(name: str, args: dict) -> bool:
-    """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
+    """The calls policy.py clears, asking the producer or (for a change, by default) not: they run only as cleared,
+    with what the hook's preview bound (CC-5)."""
     return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset")
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
