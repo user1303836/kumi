@@ -1137,7 +1137,7 @@ PRESET_TOO_LONG = refused(PRESET, "its approval doesn't fit this window with eve
                                   "only with all of them shown. Build the preset with fewer changes, or ask in "
                                   "Hermes Desktop.")
 PRESET_FOLDERS = ("User Library/Kumi/Instruments/", "User Library/Kumi/Audio Effects/")
-MOST_PRESET_SETTINGS = 32  # W3's cap: the writer refuses more, never cuts them
+MOST_PRESET_SETTINGS = 512  # serve's cap (kumi_library's preset::MAX_EDITS): the writer refuses more, never cuts them
 PRESET_PRODUCTS = {"serum-2": "Serum 2", "fabfilter-pro-q-4": "Pro-Q 4", "ozone-12": "Ozone 12"}  # catalog ids
 
 

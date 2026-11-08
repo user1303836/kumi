@@ -727,7 +727,7 @@ def preset_build(fixture: Fixture, args: dict, host: dict) -> dict:
     """agent-m's preset_build: the verified writer's built preset, kept as an artifact, answered as W3's DTO."""
     if args.get("plugin") not in ("serum-2", "fabfilter-pro-q-4", "ozone-12"):
         return error("unsupported", "Use a verified Serum 2, Pro-Q 4 or Ozone 12 writer; Vital isn't supported.")
-    if not isinstance(args.get("edits"), list) or len(args["edits"]) > 32:
+    if not isinstance(args.get("edits"), list) or len(args["edits"]) > 512:
         return error("invalid", "Use plugin, name and typed edits from the plug-in catalog; no file, bytes or version "
                                 "override.")
     record = preset_record(fixture.options)

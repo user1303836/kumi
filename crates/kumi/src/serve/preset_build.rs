@@ -7,7 +7,7 @@ use kumi_library::plugins::{
     inventory,
     preset::{
         review::{self, ReviewError, ReviewedPreset},
-        Edit, WriteOptions,
+        Edit, WriteOptions, MAX_EDITS,
     },
 };
 use kumi_types::daw::DawId;
@@ -30,7 +30,7 @@ fn schema() -> Value {
         "plugin":{"type":"string","enum":review::PLUGINS},
         "class":{"type":"string","pattern":"^[0-9A-Fa-f]{32}$","description":"Catalog VST3 processor class; omitted uses the product's initialized default."},
         "name":{"type":"string","minLength":1,"maxLength":80},
-        "edits":{"type":"array","maxItems":review::MAX_SETTINGS,"items":{
+        "edits":{"type":"array","maxItems":MAX_EDITS,"items":{
             "type":"object","additionalProperties":false,"required":["path","value"],"properties":{
                 "path":{"type":"string","minLength":1,"maxLength":256,"description":"A writable catalog control path. Serum $add_distortion takes rack 0, 1 or 2; Ozone $chain takes module names."},
                 "value":{"oneOf":[{"type":"number"},{"type":"boolean"},{"type":"string","maxLength":80},

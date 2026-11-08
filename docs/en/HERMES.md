@@ -122,8 +122,12 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "What am I looking at?" Kumi reads the track, device and clip you have selected.
 - "What does Drive do on this Serum?" In Live, Kumi reads its guide to that plug-in and the parameters you've
   configured for it; in any DAW, its catalog of plug-in formats and which controls it has verified. It only reads: it
-  doesn't scan your installed plug-ins, open a plug-in's editor, press Configure, or write presets, tunings or
-  wavetables. A range of values Kumi has only seen isn't one it promises.
+  doesn't scan your installed plug-ins, press Configure, or write presets, tunings or wavetables. A range of values
+  Kumi has only seen isn't one it promises.
+- "Make a warm Serum 2 pad." In Live, Kumi works as it does on its own: it builds the patch as a preset (below) from
+  the controls Kumi has verified (for Serum 2, its oscillators, unison, filter, envelopes, LFO rate and macros), and
+  turns the plug-in's configured knobs by name, following its recipes. Live lets it turn only knobs configured in the
+  device, so for more it opens the plug-in's window and asks you to click Configure and move them once.
 - "Make the bass 3 dB quieter." Kumi makes the change, tells you exactly what changed, and adds it to HISTORY.
 - "Send the bass's output to the Drum Bus." Kumi routes where a track's output goes. In Live it doesn't change a
   track's input, arm it or change its monitoring: those are for recording.
@@ -168,7 +172,7 @@ When no change Kumi knows fits, Hermes can write code for it.
 
 "Make a Pro-Q 4 preset that cuts the mud around 300 Hz." In Live, Kumi builds a new preset for Serum 2 (2.1.5),
 Pro-Q 4 (4.1.3.0) or Ozone 12 (12.1.0), only for the version you have installed, starting from the plug-in's
-initialized settings and changing only controls Kumi has verified.
+initialized settings and changing up to 512 controls Kumi has verified, with the same preset writer as Kumi itself.
 - **Building it changes nothing:** Kumi keeps a private copy and says each setting before and after, as the preset file
   stores it.
 - **Putting it in your User Library** (asked first with Ask before each change on): Kumi shows the plug-in and the

@@ -1,6 +1,6 @@
 //! A bounded, readable receipt for a new verified preset. Values come back from the codec, not the request.
 
-use super::{create, edit, inspect, Edit, WriteOptions};
+use super::{create, edit, inspect, Edit, WriteOptions, MAX_EDITS};
 use crate::plugins::formats::{
     structure::{self, Field, PluginFormat, Status, Structure},
     tree::PathRule,
@@ -12,15 +12,15 @@ use sha2::{Digest, Sha256};
 
 pub const PLUGINS: &[&str] = &["serum-2", "fabfilter-pro-q-4", "ozone-12"];
 pub const WRITER: &str = "kumi-vstpreset-1";
-pub const MAX_SETTINGS: usize = 32;
-pub const MAX_REVIEW_CHARS: usize = 3_000;
+/// Room for every setting's line at the shared edit cap; a receipt past it is refused, never cut.
+pub const MAX_REVIEW_CHARS: usize = MAX_EDITS * 160;
 pub const VALUE_NOTE: &str = "Values as the preset file stores them; the plug-in may show them differently.";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReviewError {
     #[error("{0}")]
     Invalid(#[from] FormatError),
-    #[error("The complete preset review is too long; use at most 32 changes and ask for fewer settings.")]
+    #[error("The complete preset review is too long; use at most {max} changes and shorter values.", max = MAX_EDITS)]
     TooLong,
 }
 
@@ -60,7 +60,7 @@ pub fn build(plugin: &str, options: &WriteOptions, edits: &[Edit]) -> Result<Rev
     let format = supported(plugin)?;
     let name = options.name.as_deref().ok_or_else(|| fail("Give the preset a name."))?;
     display_name(name)?;
-    if edits.len() > MAX_SETTINGS {
+    if edits.len() > MAX_EDITS {
         return Err(ReviewError::TooLong);
     }
     let mut paths = Vec::with_capacity(edits.len());
@@ -118,7 +118,7 @@ impl PresetMetadata {
         }
         super::writable(format, &self.version)?;
         display_name(&self.name)?;
-        if self.settings.len() > MAX_SETTINGS {
+        if self.settings.len() > MAX_EDITS {
             return Err(ReviewError::TooLong);
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -340,6 +340,21 @@ mod tests {
     }
 
     #[test]
+    fn a_review_takes_as_many_settings_as_the_shared_writer() {
+        let edits: Vec<_> = (1..=24)
+            .flat_map(|band| {
+                [change(&format!("parameters/Band {band} Gain"), json!(2.0)), change(&format!("parameters/Band {band} Q"), json!(0.25))]
+            })
+            .collect();
+        assert_eq!(edits.len(), 48);
+        let reviewed = build("fabfilter-pro-q-4", &options("fabfilter-pro-q-4"), &edits).unwrap();
+        assert_eq!(reviewed.metadata.settings.len(), 48);
+        reviewed.metadata.verify(&reviewed.bytes).unwrap();
+        let native = create("fabfilter-pro-q-4", &options("fabfilter-pro-q-4"), &edits).unwrap();
+        assert_eq!(native.write(), reviewed.bytes, "the same edits make the same file as standalone's vst3 create");
+    }
+
+    #[test]
     fn ozone_aliases_report_one_final_control_and_the_written_module_order() {
         let reviewed = build(
             "ozone-12",
@@ -379,7 +394,7 @@ mod tests {
         for path in ["Oscillator0/SampleOsc0/samplePath", "presetAuthor", "presetName"] {
             assert!(build("serum-2", &opts, &[change(path, json!("not allowed"))]).is_err(), "{path}");
         }
-        let many = vec![change("Oscillator1/plainParams/kParamVolume", json!(0.5)); MAX_SETTINGS + 1];
+        let many = vec![change("Oscillator1/plainParams/kParamVolume", json!(0.5)); MAX_EDITS + 1];
         assert!(matches!(build("serum-2", &opts, &many), Err(ReviewError::TooLong)));
         opts.version = "999.0".into();
         assert!(build("serum-2", &opts, &[]).is_err());

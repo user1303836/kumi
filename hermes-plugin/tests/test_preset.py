@@ -84,6 +84,13 @@ class Presets(unittest.TestCase):
         self.use("--preset-settings", "12")
         self.assertEqual(self.hook()["message"].count("\n• Macro "), 12, "Desktop shows all twelve")
 
+    def test_a_preset_with_more_settings_than_the_old_cap_is_shown_whole_up_to_the_writers(self):
+        self.assertEqual(policy.MOST_PRESET_SETTINGS, 512, "serve's cap, Kumi's own writer's")
+        self.use("--preset-settings", "48")
+        decided = self.hook()
+        self.assertEqual(decided["action"], "approve", "48 settings are shown, not refused as unshowable")
+        self.assertEqual(decided["message"].count("\n• Macro "), 48, "every one in view")
+
     def test_a_preset_that_changes_nothing_says_so_and_is_still_asked(self):
         self.use("--preset-unedited")
         asked = self.hook()
