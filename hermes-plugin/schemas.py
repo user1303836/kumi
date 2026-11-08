@@ -430,8 +430,8 @@ KUMI_PRESET_BUILD = _tool(
     "kumi_preset_build",
     "Build a plug-in preset (Serum 2, Pro-Q 4 or Ozone 12) from Kumi's verified initialized template and up to 512 "
     "typed edits, for a patch as a whole (skill kumi:daw, Presets). It's Kumi's own preset writer, with the same "
-    "limits as in Kumi itself: it writes only controls whose kumi_plugin_knowledge catalog field has range_status "
-    "verified, with values as the preset file stores them. Set a loaded instance's other controls by name with "
+    "limits as in Kumi itself: it writes only the controls kumi_plugin_knowledge's catalog shows verified, with values "
+    "as the preset file stores them. Set a loaded instance's other controls by name with "
     "kumi_change once Live has them configured (skill kumi:daw, Plug-ins). Kumi keeps the result as a private copy and "
     "changes nothing in Live or the User Library; it answers each setting before and after, and an artifact_id for "
     "kumi_preset, which the producer approves. A plug-in that isn't installed, or whose installed version Kumi hasn't "

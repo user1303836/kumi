@@ -124,10 +124,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   configured for it; in any DAW, its catalog of plug-in formats and which controls it has verified. It only reads: it
   doesn't scan your installed plug-ins, press Configure, or write presets, tunings or wavetables. A range of values
   Kumi has only seen isn't one it promises.
-- "Make a warm Serum 2 pad." In Live, Kumi works as it does on its own: it turns the plug-in's configured knobs by
-  name, following its recipes. Live lets it turn only knobs configured in the device, so for more it opens the
-  plug-in's window and asks you to click Configure and move them once. Its presets (below) set only controls Kumi has
-  verified, as Kumi itself does.
+- "Make a warm Serum 2 pad." In Live, Kumi works as it does on its own: it builds the patch as a preset (below) from
+  the controls Kumi has verified (for Serum 2, its oscillators, unison, filter, envelopes, LFO rate and macros), and
+  turns the plug-in's configured knobs by name, following its recipes. Live lets it turn only knobs configured in the
+  device, so for more it opens the plug-in's window and asks you to click Configure and move them once.
 - "Make the bass 3 dB quieter." Kumi makes the change, tells you exactly what changed, and adds it to HISTORY.
 - "Send the bass's output to the Drum Bus." Kumi routes where a track's output goes. In Live it doesn't change a
   track's input, arm it or change its monitoring: those are for recording.
