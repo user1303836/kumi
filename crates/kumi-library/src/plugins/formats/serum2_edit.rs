@@ -109,19 +109,22 @@ impl SerumPreset {
         if !value.is_number() {
             super::write_value::validate_scalar("serum-2", &canonical, value)?;
         }
+        // A "{n}" field's evidence covers only the concrete indices a verified host parameter was measured at.
+        let concrete = || {
+            if canonical.contains("{n}")
+                && !format.structure.parameters.values().any(|link| {
+                    link.status == structure::Status::Verified && link.field == canonical && structure::Structure::location(link) == path
+                })
+            {
+                return Err(FormatError::new(format!("{path} has no verified concrete control mapping")));
+            }
+            Ok(())
+        };
         let replacement = match value {
             Json::Number(n) if field.kind.split('|').any(|k| matches!(k, "int" | "float")) => {
                 let number = n.as_f64().filter(|n| n.is_finite()).ok_or_else(|| FormatError::new("Serum value must be finite"))?;
                 structure::validate_number("serum-2", &canonical, number)?;
-                if canonical.contains("{n}")
-                    && !format.structure.parameters.values().any(|link| {
-                        link.status == structure::Status::Verified
-                            && link.field == canonical
-                            && structure::Structure::location(link) == path
-                    })
-                {
-                    return Err(FormatError::new(format!("{path} has no verified concrete control mapping")));
-                }
+                concrete()?;
                 if field.kind == "int" {
                     let integer = n.as_i64().ok_or_else(|| FormatError::new(format!("{path} requires an integer")))?;
                     if integer >= 0 {
@@ -133,7 +136,12 @@ impl SerumPreset {
                     float(number)
                 }
             }
-            Json::String(text) if field.kind.split('|').any(|k| k == "text") && text.len() <= 4096 => Value::text(text),
+            Json::String(text) if field.kind.split('|').any(|k| k == "text") && text.len() <= 4096 => {
+                if !field.kind.split('|').any(|k| k == "map") {
+                    concrete()?;
+                }
+                Value::text(text)
+            }
             Json::Bool(on) if field.kind == "bool" => Value::Simple(if *on { 21 } else { 20 }, Head::Inline),
             _ => return Err(FormatError::new(format!("{path} requires a {} value", field.kind))),
         };

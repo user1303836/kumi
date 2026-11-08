@@ -114,6 +114,9 @@ plugin-formats/
   every verified numeric range. Shared schemas also record which product supplied each field's evidence,
   with capture records identifying its version and binary hash; a base product's range does not authorize
   writes for a variant without its own evidence. Ozone Boolean evidence is recorded separately in `boolean-verification.json`.
+  Serum 2's `range-verification.json` also keeps `options`: for each verified text enumeration, the stored text and the
+  host's label at every step of its parameter. A Serum `{n}` field, numeric or text, is writable only at the indices
+  whose own parameter was measured.
 - **Text is not a path loader.** Nonnumeric writes require verified semantics or an explicit display-name
   allowlist, and enumerations must match documented options. Resource paths and opaque data stay read-only.
   A `map|text` field accepts only its documented `default` sentinel as text. Preset names use the same

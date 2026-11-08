@@ -97,8 +97,8 @@
         "state",
         "vstpreset"
       ],
-      "checked": "2026-10-27",
-      "how": "Kumi Rust writer created a new named patch from init, enabled oscillator B, set its level to 0.45 and coarse pitch to +12 semitones, and added Distortion. Both VST3 state halves were loaded into a fresh installed 2.1.5 instance using standard host APIs. Parameter readback confirmed enabled B, level sqrt(0.45) on its normalized host curve and +12 semitones; saved processor state retained the Distortion slot. This verifies serialization and these controls, not every DSP parameter."
+      "checked": "2026-11-08",
+      "how": "Kumi Rust writer created a new named patch from init, enabled oscillator B, set its level to 0.45 and coarse pitch to +12 semitones, and added Distortion. Both VST3 state halves were loaded into a fresh installed 2.1.5 instance using standard host APIs. Parameter readback confirmed enabled B, level sqrt(0.45) on its normalized host curve and +12 semitones; saved processor state retained the Distortion slot. This verifies serialization and these controls, not every DSP parameter. On 2026-11-08 a headless VST3 host on macOS (binary sha256 b9ffd5b7…) measured every synth parameter at normalized 0, 1 and 0.25 and reloaded each stored value alone into init: 310 numeric mappings over 116 fields and 15 option lists over 6 text fields reload as measured (range-verification.json)."
     }
   ]
 }

@@ -387,6 +387,44 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
 }
 
 #[test]
+fn serum_option_lists_have_step_by_step_evidence() {
+    let format = structure::builtin("serum-2").unwrap();
+    let evidence = range_evidence("serum-2", 0);
+    let mut lists = 0;
+    for (path, field) in format.structure.fields.iter().filter(|(_, f)| f.kind == "text" && f.status == structure::Status::Verified) {
+        let documented = field.options.as_ref().expect("a verified Serum enumeration documents its options");
+        let links: Vec<_> =
+            format.structure.parameters.values().filter(|l| l.field == *path && l.status == structure::Status::Verified).collect();
+        assert!(!links.is_empty(), "{path}: no verified control");
+        let mut measured = std::collections::BTreeSet::new();
+        for link in links {
+            let record = &evidence["options"][structure::Structure::location(link)];
+            let id = record["parameterId"].as_u64().expect("parameter ID");
+            assert!(link.note.as_ref().unwrap().contains(&format!("parameter {id}")));
+            let steps = record["steps"].as_array().expect("every step's option");
+            assert_eq!(steps.len() as u64, record["stepCount"].as_u64().unwrap() + 1, "{path}: every step");
+            for (index, step) in steps.iter().enumerate() {
+                assert_eq!(step["step"].as_u64(), Some(index as u64));
+                let Some(stored) = step["stored"].as_str() else {
+                    assert_eq!(step["default"], true, "{path}: only the omitted default may lack its stored text");
+                    continue;
+                };
+                assert!(documented.contains_key(stored), "{path}: {stored} is undocumented");
+                if step["default"] != true {
+                    let (readback, normalized) = (step["readback"].as_f64().unwrap(), step["normalized"].as_f64().unwrap());
+                    assert!((readback - normalized).abs() <= 1e-6, "{path}: {stored} reloads at {readback}");
+                    assert_eq!(step["reread"].as_str(), Some(stored));
+                }
+                measured.insert(stored.to_owned());
+            }
+        }
+        assert_eq!(measured.len(), documented.len(), "{path}: every documented option was measured");
+        lists += 1;
+    }
+    assert!(lists >= 6);
+}
+
+#[test]
 fn a_parent_only_range_cannot_authorize_an_inheriting_product() {
     for (parent, child) in [("minimal-current", "minimal-eprom-memory-rites"), ("minimal-evoke", "minimal-lucid")] {
         let mut schema = serde_json::to_value(&structure::builtin(parent).unwrap().structure).unwrap();
