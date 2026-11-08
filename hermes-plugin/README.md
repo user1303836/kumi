@@ -210,7 +210,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
   - **Allowing for the session or always** covers that kind of call (changes, undos, listens, play, sample-folder adds
     and scans) in this chat only, including a one-shot run that resumes it (`hermes chat -q --resume`). Another chat,
     a new one-shot run or a scheduled job asks again or is refused. Scheduled jobs and webhooks never change anything,
-    whatever the setting.
+    whatever the setting. A new one-shot `hermes chat -q` run can: Kumi can't tell it from a chat, since Hermes runs
+    its tools in its gateway, so by default it makes the changes it asks for. With `ask_before_changes` on, Hermes
+    refuses them there, and it refuses scripts, setup steps, sample folders and Mirelo jobs there either way.
   - **Only your own turns:** when Hermes works on a chat in the background (its review after a turn) or answers a
     side question (`/btw`), Kumi only reads, whatever you allowed for the session.
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
