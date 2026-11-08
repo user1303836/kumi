@@ -60,16 +60,16 @@ PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job",
         "kumi_plugin_knowledge"}
-# What the producer approves first: always for setup and scripts, and for the rest while "Ask before each change" is on.
+# What the producer approves first: always for setup, and for the rest while "Ask before each change" is on.
 # What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset"}
 # The owner's decision: by default Kumi makes the changes the producer asks for in the DAW without asking, each in
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
-# refusal still refuses, unattended and forked turns still don't write, and setup, scripts, sample folders and
-# Mirelo's uploads and paid jobs are asked either way, as is a device in a chat that read outside content (CC-19).
-UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_listen", "kumi_transport",
-                      "kumi_variations"}
+# refusal still refuses, unattended and forked turns still don't write, and setup, sample folders and Mirelo's uploads
+# and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
+UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
+                      "kumi_transport", "kumi_variations"}
 _ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build"}
@@ -862,10 +862,11 @@ _SCRIPT_FORMS = ((200, 12, 100, "path", "long"), (120, 6, 80, "path", "long"), (
 
 
 def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
-    """CC-19: a script is always asked, in a chat with the producer in it. While the chat has read nothing from
-    outside, under `kumi:script` (this chat's, so "Allow this session" covers its next scripts); once it has, under
-    the code's SHA-256, with why, and never while nobody reviews it (YOLO or approvals off). The runtime checks the
-    code first (the size cap, hidden characters, the denylist), so refused code never reaches the producer."""
+    """CC-19: a script runs in a chat with the producer in it, by the same rules as a device: unasked by default while
+    the chat has read nothing from outside, else asked under `kumi:script` (this chat's, so "Allow this session" covers
+    its next scripts); once it has read outside content, always asked, under the code's SHA-256, with why, and never
+    while nobody reviews it (YOLO or approvals off). The runtime checks the code first (the size cap, hidden
+    characters, the denylist), so refused code never reaches the producer."""
     language, code, purpose = args.get("language"), args.get("code"), args.get("purpose")
     if language not in scripts.LANGUAGE_NAMES or not isinstance(code, str) or not isinstance(purpose, str):
         return block("Kumi didn't run the script: it needs a language (python or lua), its purpose and its code."), {}
@@ -910,10 +911,12 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
              "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
              "deadline": f"{deadline:g}"}
     message = _script_message(code, facts, surface, chat_line=not tainted)
-    if message is None:
+    if message is None and asks_first(host, "kumi_script", tainted):  # unasked, there's no window to fit
         return block(SCRIPT_TOO_LONG), {}
-    decision = {"action": "approve", "message": message,
+    decision = {"action": "approve", "message": message or "",
                 "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
+    if tainted:
+        decision[_ALWAYS_ASKED] = True  # asked by provenance (CC-19), whatever the setting
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": language, "daw": daw,
                                "purpose": one_line(purpose, 200), "warning": scripts.WARNING, "sha256": digest,
