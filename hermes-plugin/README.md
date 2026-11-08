@@ -58,7 +58,7 @@ a DAW to work in.
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | only with Ask before each change on |
 | `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | in a chat that has read outside content, with its code; otherwise only with Ask before each change on |
 | `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | in a chat that has read outside content, with its code; otherwise only with Ask before each change on |
-| `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy; changes nothing in Live (Live only) | no |
+| `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy, with Kumi's own preset writer and its limits (up to 512 verified controls); changes nothing in Live (Live only) | no |
 | `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | only with Ask before each change on, with every setting |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |

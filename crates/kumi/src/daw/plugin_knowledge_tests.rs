@@ -25,6 +25,8 @@ const PARAMETER: &str = "7:parameter:0:0:1";
 struct Bridge {
     calls: RefCell<Vec<Value>>,
     name: String,
+    /// A Serum 2 instance with one more parameter Live hasn't configured, in place of OTT with only configured ones.
+    serum: Cell<bool>,
     native: Cell<bool>,
     advance: RefCell<Option<Weak<Ctx>>>,
 }
@@ -51,7 +53,8 @@ impl McpEndpoint for Bridge {
         Ok(match name {
             "live_status" => reply(json!({"connected": true, "adapter": "remote-script", "epoch": 7})),
             "live_discover" if args.get("kind") == Some(&json!("device")) => {
-                reply(json!({"items": [{"ref": DEVICE, "name": "OTT", "className": "PluginDevice"}]}))
+                let device = if self.serum.get() { "Serum 2" } else { "OTT" };
+                reply(json!({"items": [{"ref": DEVICE, "name": device, "className": "PluginDevice"}]}))
             }
             "live_discover" if args.get("kind") == Some(&json!("parameter")) => {
                 reply(json!({"items": [{"ref": "7:parameter:0:0:0", "name": "Device On"},
@@ -67,6 +70,8 @@ impl McpEndpoint for Bridge {
                         json!({"isError": true, "content": [{"type": "text", "text": "only a plug-in lists all its parameter names"}]}),
                     )
                     .unwrap()
+                } else if self.serum.get() {
+                    reply(json!({"names": [self.name.as_str(), "A Unison"]}))
                 } else {
                     reply(json!({"names": [self.name]}))
                 }
@@ -126,8 +131,13 @@ impl Fixture {
         let user_library = dir.path().join("User Library");
         std::fs::create_dir(&user_library).unwrap();
         let ctx = runtime(dir.path(), DawId::Ableton);
-        let bridge =
-            Rc::new(Bridge { calls: RefCell::new(vec![]), name: name.into(), native: Cell::new(false), advance: RefCell::new(None) });
+        let bridge = Rc::new(Bridge {
+            calls: RefCell::new(vec![]),
+            name: name.into(),
+            serum: Cell::new(false),
+            native: Cell::new(false),
+            advance: RefCell::new(None),
+        });
         let endpoint = bridge.clone();
         let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
         options.policy = HostPolicy::plugin(dir.path().join("scratch"), dir.path().join("quarantine"), dir.path().join("variations"));
@@ -240,6 +250,29 @@ async fn writer_fields_and_actions_never_reach_the_live_tool() {
                 assert_eq!(call(&fixture.ctx, args).await.unwrap_err().code(), "invalid");
             }
             assert!(fixture.bridge.calls.borrow().is_empty());
+            fixture.unchanged();
+            fixture.close().await;
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_serum_guide_keeps_kumis_recipes_and_the_way_to_turn_more() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new("A Level").await;
+            fixture.bridge.serum.set(true);
+            let answer = fixture.guide(20000).await.unwrap();
+            let guide: Value = serde_json::from_str(answer["text"].as_str().unwrap()).unwrap();
+            assert!(guide["plugin"].as_str().unwrap().starts_with("Serum 2"), "{guide}");
+            let recipes = guide["recipes"].as_array().unwrap();
+            let pad = recipes.iter().find(|recipe| recipe["name"] == "Evolving pad").expect("Kumi's pad recipe");
+            assert!(pad["how"].as_str().unwrap().contains("Unison 4–6"), "{pad}");
+            assert!(guide["toTurnMore"].as_str().unwrap().contains("set_device_details (isEditorOpen)"));
+            assert!(guide["beyond"].as_str().unwrap().starts_with("Not host parameters"));
+            assert_eq!(guide["parameters"]["notConfigured"], 1);
+            assert!(guide.get("byRole").is_none() && guide.get("wavetables").is_none(), "tune and wavetables aren't offered");
+            assert!(answer["note"].as_str().unwrap().contains("set_device_details (family plugin, isEditorOpen)"));
             fixture.unchanged();
             fixture.close().await;
         })

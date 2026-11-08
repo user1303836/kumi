@@ -36,6 +36,9 @@ pub fn input_limit(plugin: &str) -> usize {
     }
 }
 
+/// The most edits one preset takes, from any caller: standalone's vst3 tool and the plugin's reviewed build alike.
+pub const MAX_EDITS: usize = 512;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edit {
     pub path: String,

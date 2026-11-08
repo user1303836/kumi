@@ -33,6 +33,10 @@ pub struct PluginStep {
     /// said when it does: `("arm", "*", "…is for recording…")`, `("action", "insert-chain", "…use add-chain…")`. A value's
     /// own reason comes before its field's; a refused field without either is refused as deleting or not undoable.
     pub because: &'static [(&'static str, &'static str, &'static str)],
+    /// The only fields at the top of its input it takes, when it takes only some, each with the values it may hold
+    /// (`"*"` whatever it holds, a text matched as in `refused`): `("family", &["plugin"])`. Any other field is
+    /// refused, so a field the DAW adds to the step later stays refused, and the plugin's schema offers only these.
+    pub only: Option<&'static [(&'static str, &'static [&'static str])]>,
     /// What the DAW's instructions teach about its input (Live's notation), which a plugin's host reads with the step
     /// since it doesn't have Kumi's instructions.
     pub noting: Option<&'static str>,
@@ -168,6 +172,7 @@ impl PluginStep {
             described: None,
             browser_field: None,
             refused: &[],
+            only: None,
             because: &[],
             noting: None,
             daw_undo: DawUndo::Never,
@@ -207,6 +212,11 @@ impl PluginStep {
     /// It refuses these values of these fields.
     pub const fn refusing(self, refused: &'static [(&'static str, &'static [&'static str])]) -> PluginStep {
         PluginStep { refused, ..self }
+    }
+
+    /// It takes only these fields at the top of its input, each with only these values.
+    pub const fn only(self, only: &'static [(&'static str, &'static [&'static str])]) -> PluginStep {
+        PluginStep { only: Some(only), ..self }
     }
 
     /// Why it refuses these values of these fields, said when it does.
@@ -324,6 +334,9 @@ pub fn check<'a>(steps: &'a [PluginStep], tool: &str, input: &Value) -> Result<&
     };
     let Some(fields) = input.as_object() else { return Ok(step) };
     for (field, value) in fields {
+        if let Some(only) = step.only {
+            taken(step, only, field, value)?;
+        }
         if step.file_field == Some(field.as_str()) {
             if !source(value) {
                 return Err(format!(
@@ -335,6 +348,27 @@ pub fn check<'a>(steps: &'a [PluginStep], tool: &str, input: &Value) -> Result<&
         walk(step, field, value)?;
     }
     Ok(step)
+}
+
+/// Whether `step`, which takes only the fields in `only`, takes `field` holding `value`; why not otherwise.
+fn taken(step: &PluginStep, only: &[(&str, &[&str])], field: &str, value: &Value) -> Result<(), String> {
+    let fields = only.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ");
+    let Some((_, values)) = only.iter().find(|(name, _)| *name == field) else {
+        return Err(format!("{}'s {field} isn't a change Kumi for Hermes makes: it takes only {fields}.", step.tool));
+    };
+    if values.contains(&"*") {
+        return Ok(());
+    }
+    let held = match value {
+        Value::String(text) => text.trim().to_owned(),
+        Value::Bool(_) | Value::Number(_) => value.to_string(),
+        _ => String::new(),
+    };
+    if values.iter().any(|allowed| allowed.eq_ignore_ascii_case(&held)) {
+        Ok(())
+    } else {
+        Err(format!("{}'s {field} takes only {} in Kumi for Hermes.", step.tool, values.join(" or ")))
+    }
 }
 
 /// A source of CC-11's shape, with nothing more: `{sound_id, map_revision}`, `{artifact_id}`, or `{file, provenance:
@@ -429,20 +463,28 @@ pub fn plugin_schema(step: &PluginStep, schema: &Map<String, Value>, source: &Va
 }
 
 /// `schema` without the fields no step may hold, nor those `step` refuses whatever they hold, at every depth (`top`: the
-/// step's own fields, where its file and browser fields are its own to keep).
+/// step's own fields, where its file and browser fields are its own to keep, and where a step that takes only some
+/// fields keeps only those, each offering only its allowed values).
 fn prune(step: &PluginStep, schema: &mut Map<String, Value>, top: bool) {
     let mut gone = Vec::new();
+    let only = step.only.filter(|_| top);
     if let Some(Value::Object(properties)) = schema.get_mut("properties") {
         properties.retain(|field, _| {
             let plain = field.to_ascii_lowercase().replace(['_', '-'], "");
             let own = top && (step.file_field == Some(field.as_str()) || step.browser_field == Some(field.as_str()));
-            let refused = step.refused.iter().any(|(name, values)| *name == field.as_str() && values.contains(&"*"));
+            let refused = step.refused.iter().any(|(name, values)| *name == field.as_str() && values.contains(&"*"))
+                || only.is_some_and(|only| !only.iter().any(|(name, _)| *name == field.as_str()));
             let kept = own || !(NEVER.contains(&plain.as_str()) || refused);
             if !kept {
                 gone.push(field.clone());
             }
             kept
         });
+        for (field, values) in only.unwrap_or_default() {
+            if let Some(Value::Object(property)) = properties.get_mut(*field).filter(|_| !values.contains(&"*")) {
+                property.insert("enum".into(), Value::from(values.to_vec()));
+            }
+        }
         for inner in properties.values_mut().filter_map(Value::as_object_mut) {
             prune(step, inner, false);
         }
@@ -513,6 +555,31 @@ mod tests {
         assert!(why(json!({"monitoring": "in"})).contains("it passes live input."), "a value's reason comes before its field's");
         assert!(why(json!({"monitoring": "auto"})).contains("it's for recording."), "the field's fallback");
         assert!(check(&ROUTING, "set_routing", &json!({"inputType": "Bass"})).is_ok());
+    }
+
+    #[test]
+    fn a_step_that_takes_only_some_fields_refuses_the_rest_and_offers_only_those() {
+        const DETAILS: [PluginStep; 1] = [PluginStep::new("set_device_details", "device").only(&[
+            ("deviceRef", &["*"]),
+            ("family", &["plugin"]),
+            ("isEditorOpen", &["*"]),
+        ])];
+        let check = |input: Value| check(&DETAILS, "set_device_details", &input);
+        assert!(check(json!({"deviceRef": "7:device:3", "family": "plugin", "isEditorOpen": true})).is_ok());
+        assert!(check(json!({"deviceRef": "7:device:3", "family": " Plugin ", "isEditorOpen": false})).is_ok());
+        let why = check(json!({"deviceRef": "7:device:3", "family": "plugin", "presetIndex": 2})).unwrap_err();
+        assert!(why.contains("presetIndex") && why.contains("deviceRef, family, isEditorOpen"), "{why}");
+        assert!(check(json!({"deviceRef": "7:device:3", "family": "wavetable", "unisonMode": 2})).is_err());
+        assert!(check(json!({"deviceRef": "7:device:3", "family": "eq8"})).unwrap_err().contains("takes only plugin"));
+        let schema = json!({"type": "object", "required": ["family", "deviceRef"], "properties": {
+            "family": {"type": "string", "enum": ["drift", "eq8", "plugin"]}, "deviceRef": {"type": "string"},
+            "presetIndex": {"type": "integer"}, "isEditorOpen": {"type": "boolean"}, "gain": {"type": "number"}
+        }});
+        let offered = plugin_schema(&DETAILS[0], schema.as_object().unwrap(), &json!({}));
+        let properties = offered["properties"].as_object().unwrap();
+        assert_eq!(properties.keys().collect::<Vec<_>>(), ["family", "deviceRef", "isEditorOpen"]);
+        assert_eq!(properties["family"]["enum"], json!(["plugin"]));
+        assert_eq!(offered["required"], json!(["family", "deviceRef"]));
     }
 
     #[test]

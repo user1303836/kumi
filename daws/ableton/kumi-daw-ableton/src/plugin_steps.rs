@@ -108,6 +108,16 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     // The action sits inside its edit object.
     PluginStep::new("edit_arrangement_automation", "clip").refusing(&[("action", &["delete"])]),
     PluginStep::new("map_modulator", "device"),
+    // A plug-in's own window, so the producer can click Configure and Kumi can then turn those knobs (the guide's
+    // toTurnMore), as Kumi itself does. Only that: the other settings are whatever the bridge describes per device, so
+    // they can't be checked, and a plug-in's preset index replaces the producer's edited patch.
+    PluginStep::new("set_device_details", "device")
+        .only(&[("deviceRef", &["*"]), ("family", &["plugin"]), ("isEditorOpen", &["*"])])
+        .described(
+            "Open or close a plug-in's own window: deviceRef, family \"plugin\" and isEditorOpen. Open it when the \
+             producer needs to click Configure in its title bar so Kumi can turn more of its knobs, or for what isn't \
+             a knob. Kumi for Hermes doesn't change a device's other settings or a plug-in's preset index.",
+        ),
 ];
 
 /// The other steps `make_changes` can offer, each with why a plugin's plan may not use it.
@@ -121,10 +131,6 @@ pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
     ("capture_scene", "It captures what is playing now."),
     ("delete_device", "It deletes a device, and Kumi's undo can't bring it back."),
     ("capture_midi", "It captures what was played on armed tracks."),
-    (
-        "set_device_details",
-        "Its settings are whatever the bridge describes per device, plug-in specifics included, so they can't be checked.",
-    ),
     ("use_looper", "It records, plays, stops and clears a Looper."),
     ("delete_clip", "It deletes a clip."),
     ("delete_scene", "It deletes a scene and its clips, and Kumi's undo can't bring it back."),

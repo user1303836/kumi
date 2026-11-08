@@ -128,8 +128,8 @@ impl PluginTool {
                 let bytes = read_file(Path::new(required("input")?), required("plugin")?)?;
                 let edits: Vec<preset::Edit> =
                     serde_json::from_value(input.get("edits").cloned().unwrap_or_else(|| json!([]))).map_err(|e| format!("edits: {e}"))?;
-                if edits.len() > 512 {
-                    return Err("At most 512 edits per preset".into());
+                if edits.len() > preset::MAX_EDITS {
+                    return Err(format!("At most {} edits per preset", preset::MAX_EDITS));
                 }
                 let made = if action == "edit-native" {
                     preset::edit_native(required("plugin")?, &bytes, string("name"), &edits)
@@ -195,8 +195,8 @@ impl PluginTool {
                 }
                 let edits: Vec<preset::Edit> =
                     serde_json::from_value(input.get("edits").cloned().unwrap_or_else(|| json!([]))).map_err(|e| format!("edits: {e}"))?;
-                if edits.len() > 512 {
-                    return Err("At most 512 edits per preset".into());
+                if edits.len() > preset::MAX_EDITS {
+                    return Err(format!("At most {} edits per preset", preset::MAX_EDITS));
                 }
                 let mut options = preset::WriteOptions {
                     version: version.into(),
@@ -318,7 +318,7 @@ impl KernelTool for PluginTool {
         "version":{"type":"string","description":"Optional assertion of installed version; cannot override inventory's version gate"},
         "class_id":{"type":"string","description":"Exact VST3 class, required to choose an Ozone individual module"},
         "name":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":40},
-        "edits":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["path","value"],"properties":{"path":{"type":"string"},"value":{}}}}
+        "edits":{"type":"array","maxItems":preset::MAX_EDITS,"items":{"type":"object","additionalProperties":false,"required":["path","value"],"properties":{"path":{"type":"string"},"value":{}}}}
     }}).as_object().cloned().unwrap_or_default()
     }
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
