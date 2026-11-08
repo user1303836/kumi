@@ -4,8 +4,8 @@
     python3 scripts/release.py          # a dry run: the edits and checks in a scratch worktree, which is removed
     python3 scripts/release.py --go     # the release
 
-It first refuses until main's CI on the commit it releases is green on Linux, macOS and Windows: pull requests test on
-Linux alone (AGENTS.md, "Minimal CI"), so main's run is the first on the other two. The dry run says how that run stands.
+It first refuses until main's CI on the commit it releases is green, its Rust tests on Linux among it: pull requests run
+no tests (AGENTS.md, "Minimal CI"), so main's run is the first to test a change. The dry run says how that run stands.
 With --go it commits "Kumi X.Y.Z: the changelog, READMEs and versions" on release/vX.Y.Z, opens the pull request
 "Kumi X.Y.Z" and merges it with the admin bypass as "Kumi X.Y.Z (#PR)" without waiting for its CI (it changes only the
 versions and the notes, and main's CI runs on it too). Then it tags the merge commit vX.Y.Z, pushes the tag and creates
@@ -674,8 +674,8 @@ def publish(args: argparse.Namespace, repo: str, plan: Plan, changes: list[Chang
 
 
 # The systems main's CI tests a commit on (its `Rust / <system>…` jobs), all of which a release waits for: pull requests
-# test on Linux alone, so main's run is the first on macOS and Windows.
-CI_SYSTEMS = ("Linux", "macOS", "Windows")
+# run no tests, so main's run is the first to test a change. macOS and Windows first build in the Installer's nightly run.
+CI_SYSTEMS = ("Linux",)
 
 
 def ci_problems(ci_run: dict | None, jobs: list[dict]) -> list[str]:

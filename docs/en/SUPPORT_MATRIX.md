@@ -110,8 +110,9 @@ makers decide.
 
 ## What CI covers
 
-CI runs on GitHub's hosted macOS, Ubuntu and Windows runners: Rust builds and
-tests, the Remote Script's and the Live extension's tests, REAPER's extension
-loaded on each system, Renoise's tool's tests, six target bundles, and
-installation and migration tests. None has Live, REAPER or Renoise. [Testing](TESTING.md#ci)
+CI runs on GitHub's hosted runners. After each merge, on Ubuntu: Rust tests,
+and the Remote Script's, the Live extension's and Renoise's tool's tests. Each
+night and for each release, on macOS, Ubuntu and Windows: six target bundles,
+installed with REAPER's extension loaded on each system, and for each release
+the migration tests. None has Live, REAPER or Renoise. [Testing](TESTING.md#ci)
 lists every job.

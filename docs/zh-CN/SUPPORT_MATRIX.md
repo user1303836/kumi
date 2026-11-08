@@ -71,4 +71,4 @@ Kumi 及其桥接能在哪些系统上运行、适用于哪些版本的 Live、R
 
 ## CI 覆盖的范围
 
-CI 在 GitHub 托管的 macOS、Ubuntu 和 Windows 运行器上运行 Rust 构建和测试、Remote Script 和 Live 扩展的测试、六个目标平台的发行包，以及安装和迁移测试，还会在每个系统上加载 REAPER 的扩展，并运行 Renoise 工具的测试。这些运行器都没有 Live、REAPER 或 Renoise。[测试](TESTING.md#ci)列出了每个作业。
+CI 在 GitHub 托管的运行器上运行。每次合并后在 Ubuntu 上运行 Rust 测试，以及 Remote Script、Live 扩展和 Renoise 工具的测试。每晚和每次发布时在 macOS、Ubuntu 和 Windows 上构建六个目标平台的发行包，安装它们并在每个系统上加载 REAPER 的扩展；每次发布时还运行迁移测试。这些运行器都没有 Live、REAPER 或 Renoise。[测试](TESTING.md#ci)列出了每个作业。

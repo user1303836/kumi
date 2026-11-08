@@ -20,7 +20,7 @@
 
 以下真实 Live 记录来自较早的 TypeScript 发布版本。原生版的 CI 和迁移测试不能替代新的真实 Live 验收。
 
-- **每个拉取请求：** Linux 上的原生 Rust 构建和测试，以及 Remote Script 和 Live 扩展的测试；每次合并后运行 macOS 和 Windows；修改安装时，构建三个系统的发行包并运行安装测试；每个发布标签构建全部六个目标平台的发行包并运行迁移测试；见 [CI](TESTING.md#ci)。
+- **CI：** 每个拉取请求都在 Linux 上检查和构建；每次合并后在 Linux 上运行原生 Rust 测试以及 Remote Script 和 Live 扩展的测试；每晚和每个发布标签构建全部六个目标平台的发行包并在 macOS、Linux 和 Windows 上安装，标签还会运行迁移测试；见 [CI](TESTING.md#ci)。
 - **macOS 上的真实 Live**（Apple 芯片，Live 12.4.15 beta）：Kumi 做出的每一类修改，且每一项都通过 Kumi 撤销（在桥接 1.0.62 和 1.0.63 上 65 项全部通过，分别在 19 条和 200 条轨道的工程中），播放、并轨（bounce）、聆听和观看，通过 Kumi 扩展进行的离线渲染和右键菜单，以及 Willington 编辑。
 - **Windows 上的真实 Live**（Windows 10，Live 12.4.15 beta，Kumi 1.6.0 配合桥接 1.0.71）：把桥接安装到移动过的 User Library、Remote Script 加载，以及 Kumi 连接。这部分目前还没有记录文件。
 - **macOS 上的 REAPER 和 Renoise**（REAPER 7.82 评估版、便携版；Renoise 3.5.4；2026 年 10 月 20 日）：每项修改通过 Kumi 应用、通过 Kumi 撤销，再用 DAW 自己的撤销和重做，大型工程（REAPER 200 条轨道和 2,000 个对象，Renoise 64 条轨道和 100 个模式），以及聆听。

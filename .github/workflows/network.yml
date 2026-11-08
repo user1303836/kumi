@@ -3,34 +3,18 @@ name: Network
 # Kumi's HTTP as a school's or an office's network has it, on each system, beside reqwest as Kumi made its clients
 # before: a certificate authority installed in the system's own trust store (what a network that inspects secure
 # connections asks for), and a proxy in the system's own settings with an exception (on Linux, which has none, in
-# HTTPS_PROXY and NO_PROXY). The tests are the ignored ones in kumi-net's tests/it/network.rs. Only for changes to
-# how Kumi's HTTP clients are made: the `network` area in scripts/areas.toml, which the paths below repeat and
-# scripts/tests/test_dev.py holds them to (a pull request's, and main's once one merges, which keeps the cache), and by
-# hand on any branch.
+# HTTPS_PROXY and NO_PROXY). The tests are the ignored ones in kumi-net's tests/it/network.rs. By hand only, on any branch
+# (Actions > Network > Run workflow, or `gh workflow run Network --ref <branch>`): for a change to how Kumi's HTTP clients
+# are made (crates/kumi-net's lib.rs, proxy.rs and trust.rs).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "crates/kumi-net/src/lib.rs"
-      - "crates/kumi-net/src/proxy.rs"
-      - "crates/kumi-net/src/trust.rs"
-      - "crates/kumi-net/tests/it/network.rs"
-      - ".github/workflows/network.yml"
-  pull_request:
-    paths:
-      - "crates/kumi-net/src/lib.rs"
-      - "crates/kumi-net/src/proxy.rs"
-      - "crates/kumi-net/src/trust.rs"
-      - "crates/kumi-net/tests/it/network.rs"
-      - ".github/workflows/network.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

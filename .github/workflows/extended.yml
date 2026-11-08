@@ -1,23 +1,21 @@
 name: Extended
 
-# Every test, on every system: what the pull requests' gate (CI's `ci` set in .config/nextest.toml) leaves out, in the
-# `extended` set: the recorded-source oracles, the long listening, form and rendering simulations, the video tests (with
-# ffmpeg), the interoperability tests beside the official MCP and model SDKs (from npm), the migration from the published
-# Kumi 1.7.5, the long sweeps of the timing building blocks, and each system's every test. It blocks nothing and runs on
-# no pull request (AGENTS.md, "Minimal CI"): each week on main, and by hand on any branch (Actions > Extended > Run
-# workflow, or `gh workflow run Extended --ref <branch>`).
+# Every test, on every system: what main's CI (the `ci` set in .config/nextest.toml) leaves out, in the `extended` set:
+# the recorded-source oracles, the long listening, form and rendering simulations, the video tests (with ffmpeg), the
+# interoperability tests beside the official MCP and model SDKs (from npm), the migration from the published Kumi 1.7.5,
+# the long sweeps of the timing building blocks, and each system's every test, macOS's and Windows' among them. It blocks
+# nothing and runs only by hand, on any branch (AGENTS.md, "Minimal CI"): Actions > Extended > Run workflow, or
+# `gh workflow run Extended --ref <branch>`.
 
 on:
-  schedule:
-    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # A run by hand replaces one still under way on its branch; the weekly run keeps its own, so neither cancels the other.
-  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
+  # A run by hand replaces one still under way on its branch.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,9 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux's build restores the cache CI's tests save from main; nothing keeps one for macOS or Windows.
           - { os: ubuntu-24.04, label: Linux, cache: kumi-rust-linux, parts: "[1, 2]" }
-          - { os: macos-15, label: macOS, cache: rust-platforms, parts: "[1, 2]" }
-          - { os: windows-2025, label: Windows, cache: app-rust-windows, linker: rust-lld, parts: "[1, 2, 3]" }
+          - { os: macos-15, label: macOS, cache: "", parts: "[1, 2]" }
+          - { os: windows-2025, label: Windows, cache: "", linker: rust-lld, parts: "[1, 2, 3]" }
     uses: ./.github/workflows/extended-system.yml
     with:
       os: ${{ matrix.os }}

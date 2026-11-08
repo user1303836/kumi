@@ -551,27 +551,25 @@ class DawEdits(unittest.TestCase):
 class MainCI(unittest.TestCase):
     URL = "https://github.com/o/r/actions/runs/1"
     GREEN = [{"name": name, "conclusion": "success"} for name in (
-        "Rust / Linux", "Rust / Linux (Kumi's crates)", "Rust / Linux (bridges)", "Rust / Lint", "Rust / macOS",
-        "Rust / Windows", "Rust / Windows (Kumi's crates and bridges)", "Required CI")]
+        "Required CI", "Rust / Linux", "Rust / Linux (Kumi's crates)", "Rust / Linux (bridges)",
+        "Remote Script, Live extension, Renoise tool", "Hermes plugin")]
 
     def ran(self, status="completed", conclusion="success"):
         return {"databaseId": 1, "status": status, "conclusion": conclusion, "url": self.URL}
 
-    def test_a_release_waits_until_main_is_green_on_linux_macos_and_windows(self):
+    def test_a_release_waits_until_mains_ci_is_green(self):
         self.assertEqual(release.ci_problems(self.ran(), self.GREEN), [])
         self.assertEqual(release.ci_problems(None, []), ["CI hasn't run on it"])
         self.assertEqual(release.ci_problems(self.ran("in_progress", ""), []), [f"CI is still running on it: {self.URL}"])
         self.assertEqual(release.ci_problems(self.ran(conclusion="failure"), self.GREEN), [f"CI's run on it ended failure: {self.URL}"])
 
-    def test_a_system_that_was_skipped_or_missing_holds_it_back_however_the_run_ended(self):
-        skipped = [dict(job, conclusion="skipped") if job["name"] == "Rust / macOS" else job for job in self.GREEN]
-        self.assertEqual(release.ci_problems(self.ran(), skipped), [f"CI's Rust / macOS didn't pass on it: {self.URL}"])
-        one_part = [job for job in self.GREEN if job["name"] != "Rust / Windows"]
-        failed = [dict(job, conclusion="failure") if job["name"].startswith("Rust / Windows") else job for job in self.GREEN]
-        self.assertEqual(release.ci_problems(self.ran(), one_part), [])
-        self.assertEqual(release.ci_problems(self.ran(), failed), [f"CI's Rust / Windows didn't pass on it: {self.URL}"])
-        no_windows = [job for job in self.GREEN if not job["name"].startswith("Rust / Windows")]
-        self.assertEqual(release.ci_problems(self.ran(), no_windows), [f"CI's Rust / Windows didn't pass on it: {self.URL}"])
+    def test_rusts_tests_skipped_failed_or_missing_hold_it_back_however_the_run_ended(self):
+        skipped = [dict(job, conclusion="skipped") if job["name"] == "Rust / Linux (bridges)" else job for job in self.GREEN]
+        self.assertEqual(release.ci_problems(self.ran(), skipped), [f"CI's Rust / Linux didn't pass on it: {self.URL}"])
+        failed = [dict(job, conclusion="failure") if job["name"] == "Rust / Linux" else job for job in self.GREEN]
+        self.assertEqual(release.ci_problems(self.ran(), failed), [f"CI's Rust / Linux didn't pass on it: {self.URL}"])
+        no_tests = [job for job in self.GREEN if not job["name"].startswith("Rust / Linux")]
+        self.assertEqual(release.ci_problems(self.ran(), no_tests), [f"CI's Rust / Linux didn't pass on it: {self.URL}"])
 
     def test_the_gate_reads_the_commits_push_run_and_its_jobs(self):
         calls = []

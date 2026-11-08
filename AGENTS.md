@@ -50,13 +50,13 @@ scripts/                    dev.py, areas.toml, moves.toml; release.py and packa
                             test-isolated.sh/.ps1
 docs/{en,ja,zh-CN}/         user docs in three languages
 install.sh, install.ps1     the installers
-.config/nextest.toml        CI's test sets: ci, ci-os, extended
+.config/nextest.toml        the test sets: ci (main's CI), extended (every test)
 .github/workflows/          CI, Extended, Installer, Network, Willington files, Caches, Release notes to Discord
 ```
 
 Why it's shaped this way (keep it so):
 - **One DAW, one folder.** DAW-specific code lives in `daws/<daw>/` so a DAW's work doesn't spread across the repo. Nothing in `crates/` uses `daws/` but the app (it wires the DAWs in) and tests (`daws/own/` only). A DAW's crates use no other DAW's, only `daws/own/`.
-- **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
+- **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph.
 - **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
 - **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW. The exception is a `program` in `scripts/daws.toml` (SoundCraft's `soundcraft-kumi`): it runs beside the DAW, which loads nothing of it, and takes Kumi's version (section 5).
 - **The Hermes plugin is self-contained.** The Hermes catalog installs `hermes-plugin/` alone, from a pinned commit: nothing in it reaches outside the folder, and it carries no compiled code (setup downloads the Kumi release it pins, checked by SHA-256). It has no Rust and no layer.
@@ -74,14 +74,14 @@ Where new code goes:
 Working:
 - One task, one branch, one PR, in its own worktree: `python3 scripts/dev.py worktree new <name>` makes `../kumi-<name>` from origin/main. Branches are `<topic>/<name>`; `willington/` is the owner's.
 - On long tasks, open the PR early and push regularly. A branch begun before a move: `python3 scripts/dev.py rebase-moves`.
-- Before pushing: `python3 scripts/dev.py check` runs what Required CI runs for your change (whitespace, fmt, the gating lint, layers, the affected tests; `--dry-run` lists them). `python3 scripts/dev.py affected --base origin/main` says what a branch affects.
+- Before pushing: `python3 scripts/dev.py check` runs what Required CI runs for your change (whitespace, layers, the scripts' tests, fmt, the gating lint; `--dry-run` lists them), and `--tests` adds the affected tests main runs after the merge. No PR runs tests: run the ones your change touches yourself. `python3 scripts/dev.py affected --base origin/main` says what a branch affects.
 - Run tests only through the isolated runner (a home of its own; needs cargo-nextest): `sh scripts/test-isolated.sh --profile ci -p <crate>`, one file with `-E 'test(/^<module>::/)'` (Windows: `scripts/test-isolated.ps1`).
 
 Tests:
 - They never need a running DAW, a sign-in, the network or anything from this machine, and never touch `~/.kumi` or a DAW's folders.
 - A crate's integration tests are one binary: `tests/it/<file>.rs`, listed in `tests/it/main.rs`. Shared support goes in `kumi-testkit`.
-- `ci` is the fast set; long simulations, oracle replays and SDK interop belong in Extended (`.config/nextest.toml` says what `ci` leaves out).
-- CI is minimal and stays so: section 6 says what runs and what may be added.
+- `ci` is the set main runs after each merge; long simulations, oracle replays and SDK interop belong in Extended, which runs by hand (`.config/nextest.toml` says what `ci` leaves out).
+- Pull requests run no tests, and CI stays minimal on the way to no PR checks at all: section 6 says what runs. Cutting a test that costs more time than the breaks it catches is welcome.
 - Goldens (`tests/goldens/` in `kumi`, `kumi-agent`, `kumi-daw-ableton`; `daw-mcp-server/tests/golden`; `daw-bridge/tests/vectors`) are byte-exact. `KUMI_BLESS=1` rewrites them: bless only an intended change, and say why in the PR. Oracles are never regenerated or edited.
 - A refactor's proof: goldens unchanged, the same test list, an unchanged release dry run.
 
@@ -89,7 +89,7 @@ Commits and PRs:
 - Subjects are plain English and say what changed ("The Network workflow parses again"). No conventional-commit prefixes.
 - The PR body: what changes, the proof (commands and results), then its `Changelog:` lines (section 5).
 - Squash-merge. The subject must end in `(#N)`: `release.py` finds each PR by it, and refuses to release past a commit on main without it.
-- A PR that moves files: commit 1 is `git mv` only, commit 2 the fix-ups; record the move in `scripts/moves.toml`; run the Installer and Extended on the branch by hand (section 6) and wait for both; merge with a merge commit titled `<PR title> (#N)` so git follows the moves.
+- A PR that moves files: commit 1 is `git mv` only, commit 2 the fix-ups; record the move in `scripts/moves.toml`; merge with a merge commit titled `<PR title> (#N)` so git follows the moves.
 - Only `Required CI` and `Willington files` gate a merge. Wait on the CI run of your pushed commit (`gh pr checks --required --watch` can return early): `gh run watch --exit-status "$(gh run list -c "$(git rev-parse HEAD)" -w CI --json databaseId -q '.[0].databaseId')"`
 
 Docs:
@@ -105,7 +105,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
   - `daw: ableton`, `daw: reaper`, `daw: renoise`, `daw: logic`. A change in `daws/own/` gets each DAW it changes.
   - `area: bridge` (what runs in or beside a DAW), `area: app`, `area: install` (installers, setup, update, rollback), `area: agent` (models, prompts, tools), `area: listening`, `area: library`, `area: memory`, `area: video`, `area: devices` (Max for Live devices, racks, plug-ins), `area: willington`.
   - `platform: macos`, `platform: windows`, `platform: linux`: only when it's specific to that system.
-- **Flags, when true:** `critical` (crashes or hangs a DAW, loses work, blocks a release); `bridge bump` (changes what a DAW loads, section 5); `migration` (changes the form of saved settings or data; update and rollback must keep them). A PR with `bridge bump` or `migration` runs the Installer and Extended by hand before it merges (section 6).
+- **Flags, when true:** `critical` (crashes or hangs a DAW, loses work, blocks a release); `bridge bump` (changes what a DAW loads, section 5); `migration` (changes the form of saved settings or data; update and rollback must keep them).
 - **Status, while true:** `status: stacked` (the body says "Stacked on #N"), `status: blocked`, `status: needs decision` (the body says what's to decide), `status: needs live test`, `status: needs repro` (issues), `status: do not merge`. Never merge a PR with `stacked`, `blocked`, `needs decision` or `do not merge`.
 - **Not for agents:** `release`, `dependencies`, `javascript`, and GitHub's defaults (`duplicate`, `invalid`, `wontfix`, `question`, `good first issue`, `help wanted`).
 - In the body: `Fixes #N` when the PR finishes an issue, `Refs #N` when it's part of one.
@@ -118,30 +118,27 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
   - REAPER and Renoise: what `scripts/daws.toml` says each loads: REAPER's extension (`daws/reaper/reaper-kumi`) and the parts of `daws/own/daw-bridge` it links; Renoise's tool (`daws/renoise/com.kumi.Bridge.xrnx`).
 - SoundCraft's program (`soundcraft-kumi`, beside `kumi` in the bundle) has no version of its own: it takes Kumi's, like `daw-mcp-server`. Its lines are plain `Changelog:` lines; `release.py` refuses `Changelog (soundcraft):`.
 - **In a PR, never bump a version or edit CHANGELOG.md.** Write `Changelog:` lines: they become the release notes and the app's What's new, so each is one thing a producer will notice, most important first. `Changelog: none` for internal work; `Changelog (bridge):`, `Changelog (reaper):` or `Changelog (renoise):` files a line under that heading.
-- Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), once main's CI on the commit to release is green on Linux, macOS and Windows (pull requests test on Linux alone):
+- Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), once main's CI on the commit to release is green (pull requests run no tests, so main's run is the first to test a change):
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks, and how main's CI stands).
-  - `python3 scripts/release.py --go` (`--minor`, `--version X.Y.Z`, `--summary "…"`): refuses until main's CI on that commit is green on all three systems, then bumps the versions, writes CHANGELOG.md and the READMEs, merges "Kumi X.Y.Z (#N)", tags `vX.Y.Z` and creates a draft release.
-- The tag's Installer run builds the six bundles (macOS, Linux, Windows; Intel and ARM) with the `release` profile, tests installing, updating and migrating, attaches them and publishes the release. Nobody gets it before then. Nothing waits for CI on the release's own commit (versions and notes only): this run, on all six systems, is its check.
+  - `python3 scripts/release.py --go` (`--minor`, `--version X.Y.Z`, `--summary "…"`): refuses until main's CI on that commit is green, then bumps the versions, writes CHANGELOG.md and the READMEs, merges "Kumi X.Y.Z (#N)", tags `vX.Y.Z` and creates a draft release.
+- The tag's Installer run builds the six bundles (macOS, Linux, Windows; Intel and ARM) with the `release` profile, tests installing, updating and migrating, attaches them and publishes the release. Nobody gets it before then. Nothing waits for CI on the release's own commit (versions and notes only): this run, on all six systems, is its check, and with the nightly run the only build on macOS and Windows.
 - If that run fails, the release stays a draft: fix main and release the next patch (1.21.1 did this for 1.21.0). Never move, delete or re-push a `v*` tag.
 - More: DEVELOPER_GUIDE.md "Releasing", DISTRIBUTION_POLICY.md.
 
 ## 6. Minimal CI
 
-CI catches what would break for a producer before a release does, and nothing more. It stays this small: the owner decides any addition, in the PR that makes it.
+Kumi is one contributor's repository, worked on by many agents at once, and traditional CI doesn't fit that pace: CI is the bare minimum, on the way to no pull-request checks at all. A pull request waits only for what keeps main building; the tests run after the merge, on Linux; macOS and Windows build in the Installer's nightly and release runs. The owner decides any addition, in the PR that makes it; cutting needs no one's yes.
 
 What runs:
-- **A pull request:** `Required CI`, on Linux only, for what the PR changes (`dev.py affected` from its merge commit): `Rust / Linux` in three parts (the `ci` tests), `Rust / Lint` (fmt, the gating clippy), `Checks` (the repository's scripts, the Remote Script, the Live extension, Renoise's tool), `Hermes plugin` (its tests, and the Hermes catalog's own checks on Hermes v0.22.7) and `REAPER extension loads`. With `Willington files`, nothing else gates a merge.
-- **Main, after each merge:** the same, plus `Rust / macOS`, `Rust / Windows` (the `ci-os` set) and the Remote Script on macOS and Windows, and its `Required CI` passes only when every system did. No newer merge cancels a main run. A red one opens an issue ("Main's CI failed") and is fixed before anything else, by whoever broke it; no release goes out until main is green on all three systems.
-- **By hand, before merging:**
-  - A PR that changes platform-specific code runs `gh workflow run CI --ref <branch>`, and waits for its `Required CI`, which then means every system passed. Platform-specific: `cfg(windows)` or `cfg(target_os = "macos")` code, `install.ps1`, Hands (`hands/`), REAPER's extension (`daws/reaper/reaper-kumi`) or the Remote Script.
-  - A PR with `bridge bump` or `migration`, or one that moves files, runs `gh workflow run Installer --ref <branch>` (all six systems, the update from the last release and the migrations; only a tag publishes) and `gh workflow run Extended --ref <branch>`, and waits for both.
-- **Extended** (every test: oracle replays, long simulations, SDK interop, the eval runner's own tests): each Monday and by hand, never on a pull request.
-- **Installer and Network:** only when their own files change (their workflows' `paths:`, written from `scripts/areas.toml` by `python3 scripts/dev.py areas --write-workflows`); the Installer also on a release tag, and each night, when it builds all six bundles and installs on the three systems.
+- **A pull request:** `Required CI`, one job on Linux: the change's whitespace, every file in a package or an area, the crates' layers, the scripts' tests, the installers' syntax and, for a change that builds Rust (`dev.py affected`'s `rust_lint`), `cargo fmt --check` and the build with the one gating Clippy lint. No tests. With `Willington files`, nothing else gates a merge.
+- **Main, after each merge:** `Required CI` again (it keeps the build caches pull requests restore), and the tests on Linux: `Rust / Linux` in three parts (the `ci` set, every package), the Remote Script's, the Live extension's and Renoise's tool's tests, and the Hermes plugin's (with the Hermes catalog's own checks on Hermes v0.22.7). No newer merge cancels a main run. A red one opens an issue ("Main's CI failed") and is fixed before anything else, by whoever broke it; no release goes out until main's CI on the commit to release is green.
+- **The Installer:** on a release tag, which it publishes (all six bundles, each installed, the update from the last release, the migrations), and each night on main (all six bundles with the `release` profile, which keeps the tag's build cache warm, installed on each system; a failure opens an issue). Nothing else builds on macOS or Windows.
+- **By hand, on any branch, when a change wants it (nothing requires it):** `gh workflow run CI --ref <branch>` (main's set), `gh workflow run Installer --ref <branch>` (a tag's run; only a tag publishes), `gh workflow run Extended --ref <branch>` (every test on Linux, macOS and Windows: oracle replays, long simulations, SDK interop, the eval runner's own tests) and `gh workflow run Network --ref <branch>` (the HTTP clients against each system's own trust store and proxies).
 
 Rules:
-- No new workflow, job, matrix entry, schedule, required check or step in the PR gate without the owner's yes in the PR. A one-off measurement or probe runs locally or through `workflow_dispatch` of a workflow that exists; it's never committed as a workflow of its own.
-- A test earns its place by catching a break a producer would notice, at the lowest level that shows it. Extend a test before adding one. Don't test wiring, forwarding or defaults; test wording only where the words are the product (the goldens, Live's word checks, the eval runner).
+- No new workflow, job, matrix entry, schedule, required check or step without the owner's yes in the PR; cutting one needs none. A one-off measurement or probe runs locally or through `workflow_dispatch` of a workflow that exists; it's never committed as a workflow of its own.
+- A test earns its place by catching a break a producer would notice, at the lowest level that shows it, for less time than it costs. Extend a test before adding one. Don't test wiring, forwarding or defaults; test wording only where the words are the product (the goldens, Live's word checks, the eval runner).
 - A new test asserts no duration and isn't a benchmark: it waits on a state, never on a clock. Older tests that still assert one are debt: make them wait on a state when you next touch them.
-- A `ci` test takes seconds. One that needs longer is made faster or moves to Extended (`.config/nextest.toml`); past 30 s it fails by name.
-- A test that fails on a change it has nothing to do with is fixed in the PR that sees it, if the fix is small and certain; otherwise open an issue (`flaky test`) naming the run. Never delete a test to get green, and add no retries or quarantine.
-- Locally, run only what a change affects (`python3 scripts/dev.py check`), one build at a time.
+- A `ci` test takes seconds. One that needs longer is made faster, cut, or moved to Extended (`.config/nextest.toml`); past 30 s it fails by name.
+- A test that fails on a change it has nothing to do with is fixed in the PR that sees it, if the fix is small and certain; otherwise open an issue (`flaky test`) naming the run. Never delete a test to hide a real break, and add no retries or quarantine.
+- Locally, run only what a change affects (`python3 scripts/dev.py check`, with `--tests` for its tests), one build at a time.

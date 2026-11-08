@@ -170,7 +170,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **コミット**の件名は、プロデューサーにとって何が変わったかを平易な英語で書きます（"Kumi: talk to it while it works"）。ブリッジまたは Remote Script の変更では、`daws/ableton/ableton-mcp-server/Cargo.toml` と `Cargo.lock` のバージョンを上げ、件名を新しいバージョンで始め（"Bridge 1.0.71: …"）、`CHANGELOG.md` の `## Unreleased` の下に `### Bridge x.y.z` ブロックを追加します。拡張機能が変わったら、そのバンドルを再ビルドしてコミットします。作業はブランチで行い、プルリクエストで `main` に入れます。
 
-**Kumi のリリース**は、`gh` にリポジトリの管理者としてサインインした状態で、どのチェックアウトからでも実行できる一つのコマンドです。リリースするコミットの `main` の CI が Linux、macOS、Windows でグリーンになってから実行します。プルリクエストは Linux だけでテストするので、`main` での実行がほかの 2 つでの最初の実行になり、`--go` はグリーンになるまで拒否します：
+**Kumi のリリース**は、`gh` にリポジトリの管理者としてサインインした状態で、どのチェックアウトからでも実行できる一つのコマンドです。リリースするコミットの `main` の CI がグリーンになってから実行します。プルリクエストはテストを実行しないので、`main` での実行が変更をテストする最初の実行になり、`--go` はグリーンになるまで拒否します：
 
 ```sh
 python3 scripts/release.py          # ドライラン：バージョン、CHANGELOG の項目、リリースノート、チェックを表示
@@ -194,7 +194,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 python3 scripts/build-native-release.py --target a
 python3 -m unittest discover -s scripts/tests -p test_native_release.py
 ```
 
-ホストの Rust のターゲットトリプルを使ってください。Apple Silicon の Mac では、`--target x86_64-apple-darwin` で Intel 向けのバンドルをクロスビルドできます。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。CI がプルリクエストと `main` で使う `--profile ci-release` は、ビルドを速くするために、リリースプロファイルのプログラム全体の最適化を省きます。公開するバンドルは常に既定の `release` を使います。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのバンドルはそれを含みません。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
+ホストの Rust のターゲットトリプルを使ってください。Apple Silicon の Mac では、`--target x86_64-apple-darwin` で Intel 向けのバンドルをクロスビルドできます。ビルダーはロックしたリリースビルドを実行し、ブリッジのアーティファクトを、コミット、Cargo のロックファイル、ビルドレシピ、正確なファイルハッシュに結び付けます。`--profile ci-release` は、ビルドを速くするために、リリースプロファイルのプログラム全体の最適化を省きます。公開されることはありません。公開するバンドルは常に既定の `release` を使います。Mac のバンドルには `target/hands/` にある最新のヘルパーが必要で、ほかのバンドルはそれを含みません。サーバーと解析ワーカーは必ず一緒に配布します。`--binaries-dir` は既存のバイナリをパッケージするだけで、それがリリース用の最適化でビルドされたことは保証しません。
 
 集約の手順では、既存の Node 24 インストールが読むマニフェストを保ちます：
 

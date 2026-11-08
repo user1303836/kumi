@@ -415,7 +415,7 @@ async fn a_host_tops_a_bridge_up_to_its_receive_buffer_then_gives_back_what_it_r
     assert!(reaper.transcript().iter().all(|line| !line.from_host || !line.text.contains("\"credit\"")));
 }
 
-/// These production-host Windows boundaries are selected by ci-os as well as Extended.
+/// These production-host Windows boundaries run on Windows in the Extended workflow.
 #[cfg(windows)]
 mod restricted_renoise_staging {
     use super::*;

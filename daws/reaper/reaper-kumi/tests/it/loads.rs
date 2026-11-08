@@ -1,5 +1,5 @@
 //! The extension REAPER loads opens with the system's own loader and has REAPER's entry point: as the tests build it,
-//! or the build named by REAPER_KUMI_ARTIFACT (CI's release build, after the platform's strip). On macOS, dyld_info
+//! or the build named by REAPER_KUMI_ARTIFACT (a release build, after the platform's strip). On macOS, dyld_info
 //! must find its LINKEDIT string pool aligned: rustc's strip can misalign it on macOS 27, and dyld then refuses the
 //! library ("mis-aligned LINKEDIT string pool").
 

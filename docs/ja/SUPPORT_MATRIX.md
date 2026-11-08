@@ -71,4 +71,4 @@ Windows でまだ確認できていないこと：
 
 ## CI がカバーする範囲
 
-CI は GitHub がホストする macOS、Ubuntu、Windows のランナー上で、Rust のビルドとテスト、Remote Script と Live 拡張機能のテスト、6 ターゲットのバンドル、インストールと移行のテスト、各システムでの REAPER の拡張機能の読み込み、Renoise のツールのテストを実行します。どのランナーにも Live、REAPER、Renoise はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。
+CI は GitHub がホストするランナー上で実行します。マージのたびに、Ubuntu で：Rust のテストと、Remote Script、Live 拡張機能、Renoise のツールのテスト。毎晩とリリースごとに、macOS、Ubuntu、Windows で：6 ターゲットのバンドル、それらのインストールと各システムでの REAPER の拡張機能の読み込み、そしてリリースごとに移行のテスト。どのランナーにも Live、REAPER、Renoise はありません。すべてのジョブは[テスト](TESTING.md#ci)に記載しています。

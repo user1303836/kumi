@@ -1,44 +1,34 @@
 #!/usr/bin/env python3
 """Kumi's development tasks (Python 3.11+, standard library only; git, and cargo for the packages).
 
-    python3 scripts/dev.py affected --base origin/main    # what a change affects, and the CI jobs that test it
+    python3 scripts/dev.py affected --base origin/main    # what a change affects, and whether Required CI builds Rust for it
     python3 scripts/dev.py affected --base origin/main --json
-    python3 scripts/dev.py affected --base origin/main --job reaper_extension    # true or false
+    python3 scripts/dev.py affected --base origin/main --job rust_lint    # true or false
     python3 scripts/dev.py affected                       # no base: everything (a push to main)
     python3 scripts/dev.py affected --check               # every tracked file belongs to a package or an area
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
-    python3 scripts/dev.py areas --write-workflows        # the Installer's and Network's paths: from scripts/areas.toml
-    python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
+    python3 scripts/dev.py check [--base origin/main] [--tests]   # Required CI's checks for what this branch changes
     python3 scripts/dev.py deps [--check]                 # each crate's layer and what it uses; --check: the layer rules
-    python3 scripts/dev.py select [--tested-by PROFILE] "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's, as -p options
     python3 scripts/dev.py rebase-moves [--onto origin/main] [--merge] [--no-build]   # a branch from before a move, onto main
     python3 scripts/dev.py worktree new NAME [--branch B] [--base origin/main]   # ../kumi-NAME, a worktree
 
 `affected` reads the changed files from `git diff <base>...HEAD`. A file's package is the Cargo package whose folder
 holds it (the longest such folder); its areas are the ones in scripts/areas.toml whose globs match it. The affected
 packages are those packages and the ones an area feeds, then every package that depends on them (a dev-dependency's
-dependent once, for its tests). A change that would run Rust's jobs but that no package holds and no area feeds (a
+dependent once, for its tests). A change that would build Rust but that no package holds and no area feeds (a
 workflow, a script, git's settings) affects every package: nothing says which it doesn't. A file whose areas all say
-`rust = false` (the Renoise tool's Lua, the Hermes plugin's Python) runs no Rust at all. The jobs are CI's
-(.github/workflows/ci.yml), which each read this on a pull request (its merge commit against main, `--base HEAD^1`):
+`rust = false` (the Renoise tool's Lua, the Hermes plugin's Python) builds no Rust at all. CI reads one job from it, in
+Required CI on a pull request (.github/workflows/ci.yml: its merge commit against main, `--base HEAD^1`):
 
-- rust_lint: any change but to docs, or to an area with `rust = false` alone (the Rust parts, and the other systems'
-  jobs, pick their packages from `packages`);
-- remote_script, live_extension: any change but to docs;
-- reaper_extension: REAPER's extension, a package it builds with, or CI's workflow;
-- renoise_tool: the Renoise tool, or CI's workflow;
-- hermes_plugin: the Hermes plugin (its words included: its README and skills ship in it), or CI's workflow.
+- rust_lint: Rust's formatting and build, for any change but to docs, or to an area with `rust = false` alone.
 
-The Installer and Network workflows run for their own areas (`install`, `network`) by their `paths:`, which repeat those
-areas' globs (an `except` as a `!` glob): `areas --write-workflows` writes them, and scripts/tests/test_dev.py fails when
-they differ.
-
-`check` runs, in CI's order and for what the branch changes since `--base` (origin/main): the change's whitespace and
-the areas' check; then, when it affects Rust packages, `cargo fmt --all --check`, the gating Clippy lint and the `ci`
-tests (cargo-nextest, through scripts/test-isolated) of those packages, the ones CI's Rust jobs test; then the Remote
-Script's, the Live extension's, the Renoise tool's and the Hermes plugin's tests when their areas changed (each skipped,
-and said, without its npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without
-shellcheck and pwsh).
+`check` runs Required CI's checks, in its order, for what the branch changes since `--base` (origin/main): the change's
+whitespace, the areas' check and the layers; dev.py's, the release scripts' and the models catalog's tests; the
+installers' syntax (skipped without shellcheck and pwsh); then, when it affects Rust packages, `cargo fmt --all --check`
+and the gating Clippy lint. With `--tests`, it then runs what main's CI tests after the merge, for what the branch
+changes: the `ci` tests (cargo-nextest, through scripts/test-isolated) of the affected packages, and the Remote Script's,
+the Live extension's, the Renoise tool's and the Hermes plugin's tests when their areas changed (each skipped, and said,
+without its npm or LuaJIT).
 
 `deps` lists each package's layer and what it uses of the workspace; `--check` fails, naming them, on the dependencies
 the layer rules refuse. Crates in crates/ have layers (LAYERS: the app 6, kumi-daw 4, the agent 3, then 2 down to 0), and
@@ -46,12 +36,6 @@ each DAW's integration (daws/<daw>/kumi-daw-<daw>) is 5: a normal dependency poi
 uses daws/ but the app (its DAWs' integrations, ableton-mcp-server and daw-bridge) and tests, which may reach
 daws/own/. A DAW's crates use no other DAW's, only daws/own/. A bridge (the rest of daws/) uses nothing of Kumi's
 crates but kumi-common. kumi-testkit is a dev-dependency only. A new crate in crates/ needs its layer in LAYERS.
-
-`select` takes the affected packages (space-separated, as `affected --github-output` writes them) and a part of the
-workspace as cargo selects it (`-p` each package, `--exclude` the rest's, or nothing: all of them), and prints `-p` for
-each of that part's affected packages: the ones a CI job of that part tests. It prints nothing when none is. With
-`--tested-by PROFILE`, the part is only the packages whose `it` binary that nextest profile's default-filter takes in
-(.config/nextest.toml; what its `& not (…)` leaves out doesn't count): the platform jobs' `ci-os` set builds only those.
 
 `rebase-moves` brings a branch that began before a move in scripts/moves.toml onto `--onto` (origin/main). It rebases
 the branch (or merges `--onto` into it, `--merge`) with git following moved folders, files the branch adds in them
@@ -80,11 +64,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 AREAS = ROOT / "scripts/areas.toml"
-# REAPER's extension, which CI builds as it ships and loads on each system.
-REAPER_EXTENSION = "reaper-kumi"
-JOBS = ("rust_lint", "remote_script", "live_extension", "reaper_extension", "renoise_tool", "hermes_plugin")
-# The workflows that run for an area's paths alone (their `paths:` filters repeat the area): workflow, area.
-PATH_FILTERED = ((".github/workflows/installer.yml", "install"), (".github/workflows/network.yml", "network"))
+JOBS = ("rust_lint",)
 # Where the repository's paths moved, oldest first: `rebase-moves` reads it from the branch it rebases onto.
 MOVES = "scripts/moves.toml"
 # The layers of the crates in crates/ (`deps --check`): a normal dependency points down, or stays in its layer, and Cargo
@@ -249,11 +229,12 @@ def parse_name_status(text: str) -> list[tuple[str, list[str]]]:
 
 
 def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, areas: list[Area]) -> Affected:
-    """What `changes` affect, and the jobs that test it. None: everything (a push to main, or a run by hand)."""
+    """What `changes` affect, and whether Required CI builds Rust for it. None: everything (a push to main, or a run by
+    hand)."""
     if changes is None:
         return Affected(0, sorted(workspace.folders), sorted(area.name for area in areas), {job: True for job in JOBS})
     owners, fed, hit = set(), set(), set()
-    code = rust = renoise = reaper = hermes = unfed = False
+    rust = unfed = False
     files = 0
     for status, paths in changes:
         for path in paths:
@@ -271,72 +252,15 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
                         feeds |= set(workspace.folders) if "*" in area.feeds else set(area.feeds)
             owners |= {owner} if owner else set()
             fed |= feeds
-            # A file only areas without Rust hold (the Renoise tool's own Lua, the Hermes plugin) tests no Rust package.
+            # A file only areas without Rust hold (the Renoise tool's own Lua, the Hermes plugin) builds no Rust package.
             tests_rust = not docs and not (held and not any(area.rust for area in held))
-            code |= not docs
             rust |= tests_rust
             unfed |= tests_rust and not owner and not feeds
-            renoise |= bool(names & {"renoise-tool", "ci"})
-            reaper |= bool(names & {"reaper-extension", "ci"})
-            hermes |= bool(names & {"hermes-plugin", "ci"})
     unknown = fed - set(workspace.folders)
     if unknown:
         raise Refused(f"areas.toml feeds packages the workspace doesn't have: {', '.join(sorted(unknown))}")
-    named = workspace.dependents(owners | fed)
-    packages = set(workspace.folders) if unfed else named
-    # The extension's own jobs follow what it builds with, never the everything above.
-    reaper |= REAPER_EXTENSION in named
-    jobs = {"rust_lint": rust, "remote_script": code, "live_extension": code, "reaper_extension": reaper,
-            "renoise_tool": renoise, "hermes_plugin": hermes}
-    return Affected(files, sorted(packages), sorted(hit), jobs)
-
-
-def workflow_paths(text: str) -> dict[str, list[str]]:
-    """The `paths:` lists a workflow's triggers give (its `on:` block's `push:`, `pull_request:`…), by trigger: each
-    list's quoted entries, one a line, as the path-filtered workflows write them."""
-    found: dict[str, list[str]] = {}
-    inside, trigger, listing = False, None, None
-    for line in text.splitlines():
-        if re.match(r"^\S", line):
-            inside, trigger, listing = line.startswith("on:"), None, None
-        elif not inside:
-            continue
-        elif match := re.match(r"^  ([a-z_]+):", line):
-            trigger, listing = match[1], None
-        elif re.match(r"^    paths:\s*$", line) and trigger:
-            listing = found.setdefault(trigger, [])
-        elif listing is not None and (match := re.match(r'^      - "([^"]+)"\s*$', line)):
-            listing.append(match[1])
-        elif re.match(r"^    \S", line):
-            listing = None
-    return found
-
-
-def area_filter(area: str, path: Path = AREAS) -> list[str]:
-    """An area's globs as a workflow's `paths:` filter: its paths, then each `except` as a `!` glob."""
-    table = tomllib.loads(path.read_text(encoding="utf-8"))[area]
-    return list(table["paths"]) + [f"!{glob}" for glob in table.get("except", [])]
-
-
-def with_area_paths(text: str, globs: list[str]) -> str:
-    """`text`, a workflow, with each `paths:` list in its `on:` block (a trigger's) written as `globs`, one a line."""
-    out: list[str] = []
-    inside, trigger, replacing = False, None, False
-    for line in text.splitlines(keepends=True):
-        if replacing and re.match(r"^      - ", line):
-            continue
-        replacing = False
-        if re.match(r"^\S", line):
-            inside, trigger = line.startswith("on:"), None
-        elif inside and (match := re.match(r"^  ([a-z_]+):", line)):
-            trigger = match[1]
-        elif inside and trigger and re.match(r"^    paths:\s*$", line):
-            out.append(line)
-            out.extend(f'      - "{glob}"\n' for glob in globs)
-            replacing = True
-            continue
-        out.append(line)
-    return "".join(out)
+    packages = set(workspace.folders) if unfed else workspace.dependents(owners | fed)
+    return Affected(files, sorted(packages), sorted(hit), {"rust_lint": rust})
 
 
 def role(name: str, folder: str) -> str:
@@ -428,40 +352,6 @@ def command_affected(args: argparse.Namespace) -> int:
     return 0
 
 
-def select(affected_packages: list[str], selection: list[str], packages: list[str], tested: set[str] | None = None) -> list[str]:
-    """The `-p` options for the affected packages within a part of the workspace that cargo's `-p` or `--exclude`
-    options name (none: the whole workspace), and among `tested` when it's given."""
-    pairs = list(zip(selection[::2], selection[1::2]))
-    named = {value for flag, value in pairs if flag in ("-p", "--package")}
-    excluded = {value for flag, value in pairs if flag == "--exclude"}
-    if (len(selection) % 2 or any(flag not in ("-p", "--package", "--exclude") for flag, _ in pairs)
-            or (named and excluded) or (named | excluded) - set(packages)):
-        raise Refused(f"a part is `-p` packages or `--exclude` packages of this workspace, not `{' '.join(selection)}`")
-    part = (named or set(packages) - excluded) & (set(packages) if tested is None else tested)
-    return [arg for package in sorted(set(affected_packages) & part) for arg in ("-p", package)]
-
-
-def filter_packages(default_filter: str) -> set[str]:
-    """The packages whose `it` binary a nextest filterset takes in: the `binary_id(<package>::it)` it names, less those
-    only its top-level `& not (…)` names."""
-    depth, end = 0, len(default_filter)
-    for at, char in enumerate(default_filter):
-        depth += {"(": 1, ")": -1}.get(char, 0)
-        if depth == 0 and re.match(r"&\s*not\s*\(", default_filter[at:]):
-            end = at
-            break
-    return set(re.findall(r"binary_id\(([a-z0-9_-]+)::it\)", default_filter[:end]))
-
-
-def profile_packages(profile: str) -> set[str]:
-    """The packages whose `it` binary a nextest profile's default-filter takes in (.config/nextest.toml)."""
-    config = tomllib.loads((ROOT / ".config/nextest.toml").read_text(encoding="utf-8"))
-    found = filter_packages(config.get("profile", {}).get(profile, {}).get("default-filter", ""))
-    if not found:
-        raise Refused(f".config/nextest.toml's profile {profile} names no `binary_id(<package>::it)` to take in")
-    return found
-
-
 @dataclass
 class Step:
     what: str
@@ -471,21 +361,29 @@ class Step:
     needs: tuple[str, ...] = ()
 
 
-def check_steps(result: Affected, base: str, windows: bool = sys.platform == "win32") -> list[Step]:
-    """Required CI's checks for what `result` affects, in CI's order."""
+def check_steps(result: Affected, base: str, windows: bool = sys.platform == "win32", tests: bool = False) -> list[Step]:
+    """Required CI's checks for what `result` affects, in its order; with `tests`, then what main's CI tests of it after
+    the merge."""
     python = sys.executable or "python3"
+    scripts = [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p"]
     steps = [Step("the change's whitespace", ["git", "diff", "--check", f"{base}...HEAD"]),
              Step("every tracked file belongs to a package or an area", [python, "scripts/dev.py", "affected", "--check"]),
-             Step("the crates keep their layers", [python, "scripts/dev.py", "deps", "--check"])]
-    if result.packages:
-        picked = [arg for package in result.packages for arg in ("-p", package)]
+             Step("the crates keep their layers", [python, "scripts/dev.py", "deps", "--check"]),
+             Step("dev.py's tests", [*scripts, "test_dev.py"]),
+             Step("the release scripts' tests", [*scripts, "test_*release.py"]),
+             Step("the models catalog's tests", [*scripts, "test_models_catalog.py"])]
+    if not windows:
+        steps.append(Step("the installers' syntax", ["sh", "scripts/check-installers.sh", "."], needs=("shellcheck", "pwsh")))
+    picked = [arg for package in result.packages for arg in ("-p", package)]
+    if picked:
+        steps += [Step("formatting", ["cargo", "fmt", "--all", "--check"]),
+                  Step("no RefCell borrow held across an await", ["cargo", "clippy", *picked, "--lib", "--bins", "--examples",
+                       "--locked", "--", "-A", "clippy::all", "-D", "clippy::await_holding_refcell_ref"])]
+    if not tests:
+        return steps
+    if picked:
         runner = ["pwsh", "-NoProfile", "-File", "scripts/test-isolated.ps1"] if windows else ["sh", "scripts/test-isolated.sh"]
-        steps += [
-            Step("formatting", ["cargo", "fmt", "--all", "--check"]),
-            Step("no RefCell borrow held across an await", ["cargo", "clippy", *picked, "--lib", "--bins", "--examples",
-                 "--locked", "--", "-A", "clippy::all", "-D", "clippy::await_holding_refcell_ref"]),
-            Step(f"the ci tests of {', '.join(result.packages)}", [*runner, "--profile", "ci", *picked], {"KUMI_NEXTEST": "1"}),
-        ]
+        steps.append(Step(f"the ci tests of {', '.join(result.packages)}", [*runner, "--profile", "ci", *picked], {"KUMI_NEXTEST": "1"}))
     if "remote-script" in result.areas:
         steps += [Step("the Remote Script's tests", [python, "-m", "unittest", "discover", "-s", "daws/ableton/remote-script", "-p", "test_*.py"]),
                   Step("the Remote Script compiles", [python, "-m", "compileall", "-q", "daws/ableton/remote-script/AbletonMcpBridge"])]
@@ -495,20 +393,16 @@ def check_steps(result: Affected, base: str, windows: bool = sys.platform == "wi
     if "renoise-tool" in result.areas:
         steps.append(Step("the Renoise tool's tests", ["sh", "daws/renoise/tests/run.sh"], needs=("luajit",)))
     if "hermes-plugin" in result.areas:
-        # CI also runs Hermes's own `plugins validate` and `doctor` on it, against a pinned Hermes (the Hermes plugin job).
+        # Main's CI also runs Hermes's own `plugins validate` and `doctor` on it, against a pinned Hermes (the Hermes plugin job).
         steps.append(Step("the Hermes plugin's tests", [python, "-m", "unittest", "discover", "-s", "hermes-plugin/tests",
                                                          "-p", "test_*.py"], {"PYTHONDONTWRITEBYTECODE": "1"}))
-    steps += [Step("the release scripts' tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*release.py"]),
-              Step("dev.py's tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_dev.py"])]
-    if not windows:
-        steps.append(Step("the installers' syntax", ["sh", "scripts/check-installers.sh", "."], needs=("shellcheck", "pwsh")))
     return steps
 
 
 def command_check(args: argparse.Namespace) -> int:
     result = affected(changes_since(args.base), Workspace.read(), load_areas())
-    steps = check_steps(result, args.base)
-    if result.packages and not args.dry_run:
+    steps = check_steps(result, args.base, tests=args.tests)
+    if args.tests and result.packages and not args.dry_run:
         if subprocess.run(["cargo", "nextest", "--version"], capture_output=True).returncode:
             raise Refused("cargo-nextest isn't installed, and the tests run on it as CI's do: cargo install cargo-nextest --locked")
     print(f"{result.files} changed file{'' if result.files == 1 else 's'} since {args.base}; packages: "
@@ -555,26 +449,7 @@ def command_deps(args: argparse.Namespace) -> int:
     return 1 if breaks else 0
 
 
-def command_select(args: argparse.Namespace) -> int:
-    tested = profile_packages(args.tested_by) if args.tested_by else None
-    picked = select(args.affected.split(), args.selection, sorted(Workspace.read().folders), tested)
-    if picked:
-        print(" ".join(picked))
-    return 0
-
-
 def command_areas(args: argparse.Namespace) -> int:
-    if args.write_workflows:
-        for workflow, area in PATH_FILTERED:
-            path = ROOT / workflow
-            text = path.read_text(encoding="utf-8")
-            written = with_area_paths(text, area_filter(area))
-            if written != text:
-                path.write_text(written, encoding="utf-8")
-                print(f"{workflow}: its paths are scripts/areas.toml's [{area}] again")
-        return 0
-    if not args.paths:
-        raise Refused("areas: name the paths, or --write-workflows")
     areas = load_areas()
     if args.within and args.within not in {area.name for area in areas}:
         raise Refused(f"there's no area {args.within} in scripts/areas.toml")
@@ -797,7 +672,7 @@ def command_rebase_moves(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dev.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    what = commands.add_parser("affected", help="the packages, areas and CI jobs a change affects")
+    what = commands.add_parser("affected", help="the packages, areas and CI job a change affects")
     what.add_argument("--base", help="the ref the change is measured from (its merge base with HEAD); none: everything")
     what.add_argument("--changes", metavar="FILE", help="read `git diff --name-status` lines from FILE (- for stdin)")
     what.add_argument("--json", action="store_true", help="print JSON")
@@ -805,24 +680,18 @@ def main(argv: list[str] | None = None) -> int:
     what.add_argument("--github-output", action="store_true", help="write each job, and the packages and areas, to $GITHUB_OUTPUT")
     what.add_argument("--check", action="store_true", help="fail, naming them, on tracked files no package or area holds")
     what.set_defaults(run=command_affected)
-    where = commands.add_parser("areas", help="the areas each path belongs to; --write-workflows: the paths filters")
+    where = commands.add_parser("areas", help="the areas each path belongs to")
     where.add_argument("--in", dest="within", metavar="AREA", help="fail, naming them, on paths outside AREA")
-    where.add_argument("--write-workflows", action="store_true",
-                       help="write the path-filtered workflows' paths: (Installer, Network) from scripts/areas.toml")
-    where.add_argument("paths", nargs="*")
+    where.add_argument("paths", nargs="+")
     where.set_defaults(run=command_areas)
     check = commands.add_parser("check", help="Required CI's checks for what this branch changes")
     check.add_argument("--base", default="origin/main", help="the ref the branch is measured from (default origin/main)")
+    check.add_argument("--tests", action="store_true", help="then what main's CI tests of the change after the merge")
     check.add_argument("--dry-run", action="store_true", help="say what would run, and run nothing")
     check.set_defaults(run=command_check)
     layers = commands.add_parser("deps", help="each crate's layer and what it uses of the workspace; --check: the layer rules")
     layers.add_argument("--check", action="store_true", help="fail, naming them, on dependencies the layer rules refuse")
     layers.set_defaults(run=command_deps)
-    part = commands.add_parser("select", help="a CI part's affected packages, as -p options")
-    part.add_argument("--tested-by", metavar="PROFILE", help="only the packages whose it binary this nextest profile takes in")
-    part.add_argument("affected", help="the affected packages, space-separated")
-    part.add_argument("selection", nargs=argparse.REMAINDER, help="the part: -p NAME... or --exclude NAME...")
-    part.set_defaults(run=command_select)
     rebase = commands.add_parser("rebase-moves", help="bring a branch from before a move onto main, moved paths rewritten")
     rebase.add_argument("--onto", default="origin/main", help="the ref to rebase onto, whose moves map is read (default origin/main)")
     rebase.add_argument("--merge", action="store_true", help="merge --onto into the branch instead of rebasing it")

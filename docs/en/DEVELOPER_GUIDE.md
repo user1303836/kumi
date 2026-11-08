@@ -293,9 +293,9 @@ extension changed, rebuild and commit its bundle. Work goes on a branch and
 reaches `main` by pull request.
 
 **A Kumi release** is one command, from any checkout, with `gh` signed in as a
-repository admin. Run it once `main`'s CI on the commit to release is green on
-Linux, macOS and Windows: pull requests test on Linux alone, so `main`'s run is
-the first on the other two, and `--go` refuses until it's green:
+repository admin. Run it once `main`'s CI on the commit to release is green:
+pull requests run no tests, so `main`'s run is the first to test a change, and
+`--go` refuses until it's green:
 
 ```sh
 python3 scripts/release.py          # dry run: the version, the CHANGELOG entry, the notes and the checks
@@ -372,9 +372,9 @@ python3 -m unittest discover -s scripts/tests -p test_native_release.py
 Use the host's Rust target triple; on an Apple Silicon Mac,
 `--target x86_64-apple-darwin` cross-builds the Intel bundle. The builder runs a
 locked release build and binds the bridge artifact to the commit, Cargo
-lockfile, build recipe and exact file hashes. `--profile ci-release`, which CI
-uses on pull requests and `main`, skips the release profile's whole-program
-optimization to build faster; a published bundle always uses the default
+lockfile, build recipe and exact file hashes. `--profile ci-release` skips the
+release profile's whole-program optimization for a quicker build, never
+published; a published bundle always uses the default
 `release`. Mac bundles need the current helper in `target/hands/`; other
 bundles don't carry it. The server and analysis worker must be shipped
 together. The `--binaries-dir` override packages existing binaries and
