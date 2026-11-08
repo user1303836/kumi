@@ -467,6 +467,54 @@ fn agent_inspection_is_bounded_and_returns_concrete_edit_paths() {
 }
 
 #[test]
+fn serum_pad_controls_build_through_create_and_review() {
+    let pad = [
+        change("Oscillator0/plainParams/kParamUnison", json!(7)),
+        change("Oscillator0/plainParams/kParamDetune", json!(0.18)),
+        change("Oscillator0/plainParams/kParamDetuneWid", json!(80)),
+        change("Oscillator0/WTOsc0/plainParams/kParamTablePos", json!(96.5)),
+        change("Oscillator1/plainParams/kParamEnable", json!(1)),
+        change("Oscillator1/plainParams/kParamUnison", json!(5)),
+        change("Oscillator1/plainParams/kParamOctave", json!(-1)),
+        change("VoiceFilter0/plainParams/kParamType", json!("MgL24")),
+        change("VoiceFilter0/plainParams/kParamFreq", json!(0.42)),
+        change("VoiceFilter0/plainParams/kParamReso", json!(30)),
+        change("Env0/plainParams/kParamAttack", json!(0.8)),
+        change("Env0/plainParams/kParamSustain", json!(0.7)),
+        change("Env0/plainParams/kParamRelease", json!(2.5)),
+        change("LFO0/plainParams/kParamRate", json!(40)),
+        change("Macro0/plainParams/kParamValue", json!(50)),
+    ];
+    let created = preset::create("serum-2", &options("serum-2"), &pad).unwrap();
+    let state = serum2::SerumState::read(created.component().unwrap(), created.controller()).unwrap();
+    for edit in &pad {
+        let stored = state.processor.body.at(&edit.path).unwrap_or_else(|| panic!("{} missing", edit.path));
+        match &edit.value {
+            Value::String(text) => assert_eq!(stored.as_str(), Some(text.as_str()), "{}", edit.path),
+            number => assert_eq!(stored.as_f64(), number.as_f64(), "{}", edit.path),
+        }
+    }
+    let mut named = options("serum-2");
+    named.name = Some("Wide pad".into());
+    let reviewed = preset::review::build("serum-2", &named, &pad).unwrap();
+    assert_eq!(reviewed.metadata.settings.len(), pad.len());
+    let attack = reviewed.metadata.settings.iter().find(|s| s.path == "Env0/plainParams/kParamAttack").unwrap();
+    assert_eq!((attack.name.as_str(), attack.unit.as_str(), attack.range), ("Env 1 Attack", "s", Some([0.0, 32.0])));
+    reviewed.metadata.validate().unwrap();
+    reviewed.metadata.verify(&reviewed.bytes).unwrap();
+    for refused in [
+        change("Oscillator0/plainParams/kParamUnison", json!(17)),
+        change("Oscillator0/plainParams/kParamUnison", json!(2.5)),
+        change("VoiceFilter0/plainParams/kParamType", json!("NotAFilter")),
+        change("VoiceFilter2/plainParams/kParamType", json!("MgL24")),
+        change("Oscillator3/plainParams/kParamLoopMode", json!("kForward")),
+        change("ModSlot0/plainParams/kParamAmount", json!(50)),
+    ] {
+        assert!(preset::create("serum-2", &options("serum-2"), &[refused.clone()]).is_err(), "accepted {}", refused.path);
+    }
+}
+
+#[test]
 fn native_softube_templates_require_the_exact_product_and_full_parameter_layout() {
     for format in structure::builtins().iter().filter(|format| format.info.family == "softube") {
         let identity = format.structure.files["preset"].constants["nativePluginId"].as_str().unwrap();
