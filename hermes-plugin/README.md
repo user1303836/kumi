@@ -143,10 +143,10 @@ settings:
 
 Kumi keeps what it writes for Hermes in this profile's `plugin-data/kumi/` folder: the runtime, the library index and
 map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
-changed), the code of each script you approved (`state/scripts`) and job records. Outside it, setup writes only Kumi's
+changed), the code of each script it ran (`state/scripts`) and job records. Outside it, setup writes only Kumi's
 part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
-(`User Library/Kumi/Instruments` or `Audio Effects`). A script you approve runs with your DAW's access, so what it writes
+(`User Library/Kumi/Instruments` or `Audio Effects`). A script runs with your DAW's access, so what it writes
 follows its code. Kumi reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already
 on your computer, if you allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`;
 deleting it removes everything Kumi wrote for Hermes there, including sounds from integrations that your projects may

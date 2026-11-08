@@ -336,7 +336,8 @@ KUMI_SCRIPT = _tool(
     {"language": {"type": "string", "enum": ["python", "lua"],
                   "description": "python for Live, lua for REAPER and Renoise."},
      "purpose": {"type": "string", "minLength": 1, "maxLength": 200,
-                 "description": "What the script does, in a short line the producer reads in the approval."},
+                 "description": ("What the script does, in a short line the producer reads in HISTORY, and in the "
+                                 "approval when it's asked.")},
      "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS},
      "expected_project_key": {"type": "string", "description": "The project key from kumi_observe."}},
     ("language", "purpose", "code", "expected_project_key"))
@@ -412,7 +413,7 @@ KUMI_DEVICE = _tool(
     {"spec": {"type": "object", "properties": {
         "name": {"type": "string", "minLength": 1, "maxLength": 32, "description": "The device's name in Live."},
         "about": {"type": "string", "minLength": 1, "maxLength": 400,
-                  "description": "What it does, in a sentence or two the producer reads in the approval."},
+                  "description": "What it does, in a sentence or two the producer reads, in the approval when it's asked."},
         "controls": {"type": "array", "maxItems": 16, "items": _DEVICE_CONTROL},
         "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS, "description": "GenExpr."}},
         "required": ["name", "about", "controls", "code"], "additionalProperties": False}},
