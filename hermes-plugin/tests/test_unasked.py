@@ -1,7 +1,7 @@
 """Kumi's default, "Ask before each change" off (the owner's decision): the changes the producer asks for in the DAW
-run without an approval, each still previewed and bound to what its preview saw, while setup, scripts, sample folders
-and Mirelo's jobs are asked, a device in a chat that read outside content is asked, and every refusal and the guards
-for unattended and forked turns hold."""
+run without an approval, each still previewed and bound to what its preview saw, while setup, sample folders and
+Mirelo's jobs are asked, a script or device in a chat that read outside content is asked, and every refusal and the
+guards for unattended and forked turns hold."""
 from __future__ import annotations
 
 import os
@@ -100,10 +100,54 @@ class ByDefault(unittest.TestCase):
             asked = self.hook("kumi_device", {"spec": {**test_device.SPEC, "name": "Warm Fold 2"}}, "d-2")
         self.assertEqual(asked["action"], "approve", "asked as a script is (CC-19)")
 
-    def test_setup_scripts_folders_and_mirelo_are_still_asked(self):
+    def test_a_script_runs_unasked_in_a_clean_chat_as_a_device_does(self):
         policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
+        self.assertIsNone(self.hook("kumi_script", test_scripts.script(), "s-1"))
+        ran = support.handle(self.host, "kumi_script", test_scripts.script(), session_id="s1", task_id="t1")
+        self.assertEqual(ran["state"], "ran", ran)
+        again = support.handle(self.host, "kumi_script", test_scripts.script(), session_id="s1", task_id="t1")
+        self.assertEqual(again["error"]["code"], "not_approved", "the hook's record is used once")
+        self.assertIn("runs your scripts without asking", tools.changes_mode(self.host))
+
+    def test_a_script_is_asked_with_the_setting_on_or_once_the_chat_read_outside_content(self):
+        policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
+        digest = support.module("scripts").sha256(test_scripts.CODE)
         with mock.patch.object(tools, "approvals_bypassed", lambda host, **kw: False):
-            self.assertEqual(self.hook("kumi_script", test_scripts.script(), "s-1")["action"], "approve")
+            self.ctx.settings["ask_before_changes"] = True
+            on = self.hook("kumi_script", test_scripts.script(), "s-1")
+            self.assertEqual((on["action"], on["rule_key"]), ("approve", "kumi:script:s1"))
+            self.assertIn(f"SHA-256 {digest[:16]}", on["message"], "asked with its code")
+            self.ctx.settings["ask_before_changes"] = False
+            policy.post_tool_call(self.host, tool_name="web_extract", tool_call_id="x1", args={}, result="{}",
+                                  status="ok", session_id="s1")
+            self.ctx.surface = "desktop"
+            for call in ("s-2", "s-3"):
+                tainted = self.hook("kumi_script", test_scripts.script(), call)
+                self.assertEqual((tainted["action"], tainted["rule_key"]), ("approve", f"kumi:script:{digest}"),
+                                 "asked every time, by its code, whatever the setting (CC-19)")
+                self.assertIn(test_scripts.CODE.splitlines()[0], tainted["message"], "its code shown")
+
+    def test_a_script_is_refused_in_messaging_scheduled_webhook_and_forked_turns(self):
+        policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
+        self.ctx.surface = "telegram"
+        self.assertEqual(self.hook("kumi_script", test_scripts.script()), policy.block(policy.SCRIPT_MESSAGING))
+        self.ctx.settings["scripts_in_messaging"] = True
+        with mock.patch.object(tools, "approvals_bypassed", lambda host, **kw: False):
+            self.assertEqual(self.hook("kumi_script", test_scripts.script())["action"], "approve",
+                             "allowed there, each one is asked")
+        self.ctx.surface = "tui"
+        self.ctx.cron_execution = object()
+        self.assertEqual(self.hook("kumi_script", test_scripts.script()), policy.block(tools.SCHEDULED))
+        self.ctx.cron_execution = None
+        self.ctx.surface = "webhook"
+        self.assertEqual(self.hook("kumi_script", test_scripts.script()), policy.block(policy.UNATTENDED))
+        self.ctx.surface = "tui"
+        policy.turn_started(self.host, session_id="s1", turn_id="u1")
+        self.assertEqual(self.hook("kumi_script", test_scripts.script(), turn_id="s1:t2:9f3a1c2e"),
+                         policy.block(policy.FORKED))
+        self.assertEqual(support.call(self.host, "kumi_history", {}, session_id="s1")["items"], [])
+
+    def test_setup_folders_and_mirelo_are_still_asked(self):
         folder = self.hook("kumi_library", {"action": "add_folder", "folder": support.DRUMS}, "f-1")
         self.assertEqual(folder["action"], "approve")
 

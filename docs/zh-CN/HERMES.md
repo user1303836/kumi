@@ -81,9 +81,9 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 ### 脚本和 Max for Live 设备
 
 当 Kumi 已知的修改都不合适时，Hermes 可以为它编写代码。
-- **脚本：**“在 Renoise 中写一个 Lua 脚本，把每隔一个的 pattern 反转。”Live 中用 Python，REAPER 和 Renoise 中用 Lua。批准时会显示 Hermes 所说的用途、开头几行、大小和 SHA-256，以及完整脚本保存的位置；Hermes Desktop 会显示全部代码。脚本以你的 DAW 对电脑的访问权限运行，Kumi 会在 10 秒后（Renoise 中为 0.8 秒）停止它。Kumi 无法撤销脚本：DAW 自己的撤销也许可以。HISTORY 会保留代码，用其中的 **Show code** 可以再次查看。
+- **脚本：**“在 Renoise 中写一个 Lua 脚本，把每隔一个的 pattern 反转。”Live 中用 Python，REAPER 和 Renoise 中用 Lua。征求同意时，批准会显示 Hermes 所说的用途、开头几行、大小和 SHA-256，以及完整脚本保存的位置；Hermes Desktop 会显示全部代码。脚本以你的 DAW 对电脑的访问权限运行，Kumi 会在 10 秒后（Renoise 中为 0.8 秒）停止它。Kumi 无法撤销脚本：DAW 自己的撤销也许可以。HISTORY 会保留代码，用其中的 **Show code** 可以再次查看。
 - **Max for Live 音频效果器：**“做一个带 drive 和 tone 的 Max for Live 软削波器，放在贝斯的 EQ 后面。”Kumi 用 GenExpr 代码写出一个新设备，放到 `User Library/Kumi/Audio Effects`，最多有 16 个自己的控件，另加 Mix 和 Output。它加入的声音保持在 −0.3 dBFS 以下；音轨本身的信号原样通过。征求同意时，Hermes Desktop 会显示它的控件和代码。把它放进你的 Set 是另一次修改：Kumi 把它加载到音轨链的末尾，并且可以撤销这一步。再把它从那里移走是第三次修改，只能用 Live 自己的撤销来恢复。撤销之后，这个文件仍留在你的用户库中。
-- **对话读取过外部内容后，每次都会询问：** 网页、文字稿、Hermes 从互联网获取的文件、其他插件的结果，或运行过的任何终端命令或代码。已在你磁盘上的文件、已安装的技能，以及你的音色库和工程中的名称不算在内。在这样的对话中，每个脚本和设备都会带着代码征求同意，Hermes 的确认关闭时一个也不会运行。在没有读取过外部内容的对话中，在本次会话中允许一个脚本，就对这个对话中的脚本都有效；设备会直接构建，除非打开了 Ask before each change。
+- **对话读取过外部内容后，每次都会询问：** 网页、文字稿、Hermes 从互联网获取的文件、其他插件的结果，或运行过的任何终端命令或代码。已在你磁盘上的文件、已安装的技能，以及你的音色库和工程中的名称不算在内。在这样的对话中，每个脚本和设备都会带着代码征求同意，Hermes 的确认关闭时一个也不会运行。在没有读取过外部内容的对话中，除非打开了 Ask before each change，脚本会直接运行，设备会直接构建；打开时，在本次会话中允许一个脚本，就对这个对话中的脚本都有效。
 - **在询问任何人之前就会拒绝：** 超过 400 行或 32 KB 的脚本或设备代码；含有隐藏字符或改变文字方向字符的脚本，或会运行进程、访问网络的脚本（`os.execute`、`io.popen`、`subprocess`、`os.system`、`socket`、`urllib`、`ctypes`）。这项检查是一道保护措施，不是沙盒。
 
 ### 插件预设（Live）
@@ -94,9 +94,9 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **把它加载到音轨上是另一次修改。**
 - 制作预设时，Kumi 绝不会打开你自己的预设、运行插件或下载任何东西。未安装的插件，或已安装版本未经 Kumi 验证的插件，会被拒绝。
 
-**哪些会先征求同意。** 默认情况下，Kumi 会不经询问直接做出修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设，以及在没有读取过外部内容的对话中构建设备：每一项都记入 HISTORY，大部分可以撤销。脚本、设置步骤、采样文件夹的添加与扫描、Mirelo 的上传和付费生成，以及在读取过外部内容的对话中的设备，始终会征求同意。在 Hermes 中 Kumi 的设置里打开 **Ask before each change**（插件配置中的 `ask_before_changes`），Hermes 就会在每一项之前按修改类别、按对话征求同意。Kumi 从不在 Hermes 中自动批准任何东西。`/kumi`、`hermes kumi status` 和 `hermes kumi doctor` 会说明当前是哪种情况，例如“Approvals: Kumi makes your changes without asking (Ask before each change: off); scripts, setup steps, sample folders and Mirelo jobs still ask”。
+**哪些会先征求同意。** 默认情况下，Kumi 会不经询问直接做出修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设，以及在没有读取过外部内容的对话中运行脚本和构建设备：每一项都记入 HISTORY，大部分可以撤销。设置步骤、采样文件夹的添加与扫描、Mirelo 的上传和付费生成，以及在读取过外部内容的对话中的脚本和设备，始终会征求同意。在 Hermes 中 Kumi 的设置里打开 **Ask before each change**（插件配置中的 `ask_before_changes`），Hermes 就会在每一项之前按修改类别、按对话征求同意。Kumi 从不在 Hermes 中自动批准任何东西。`/kumi`、`hermes kumi status` 和 `hermes kumi doctor` 会说明当前是哪种情况，例如“Approvals: Kumi makes your changes and runs your scripts without asking (Ask before each change: off); setup steps, sample folders and Mirelo jobs still ask”。
 
-在本次会话中或始终允许某个 Kumi 调用，只对这个对话中的同类调用有效，也包括恢复该对话的一次性运行（`hermes chat -q --resume`）；另一个对话、新的一次性运行或定时任务，会重新询问或被拒绝。定时任务和 Webhook 从不修改任何东西。新的一次性 `hermes chat -q` 运行则可以修改：Hermes 在它的网关中运行它的工具，Kumi 无法把它与对话区分开，所以默认情况下它会像对话一样做出所要求的修改。打开 Ask before each change 时，由于没有人能回答，Hermes 会在那里拒绝这些修改；脚本、设置步骤、采样文件夹和 Mirelo 任务在那里无论开关都会被拒绝。Kumi 只在你自己的回合中行动：Hermes 在后台处理对话（每轮之后的回顾）或回答旁支问题（`/btw`）时，无论你允许了什么，Kumi 都只读取。打开 Ask before each change 时，只能用 DAW 自己的撤销来恢复的修改，会作为单独的一类征求同意，所以允许其他修改并不包括它。设置步骤的批准只针对它自己的计划。选择**始终允许**会在 Hermes 的 `command_allowlist`（你的配置中的 config.yaml）里留下一条记录，Kumi 从不编辑它：要取消，请删除其中以 `plugin_rule:kumi:` 开头的条目。
+在本次会话中或始终允许某个 Kumi 调用，只对这个对话中的同类调用有效，也包括恢复该对话的一次性运行（`hermes chat -q --resume`）；另一个对话、新的一次性运行或定时任务，会重新询问或被拒绝。定时任务和 Webhook 从不修改任何东西。新的一次性 `hermes chat -q` 运行则可以修改：Hermes 在它的网关中运行它的工具，Kumi 无法把它与对话区分开，所以默认情况下它会像对话一样做出所要求的修改、运行所要求的脚本。打开 Ask before each change 时，由于没有人能回答，Hermes 会在那里拒绝这些修改；设置步骤、采样文件夹和 Mirelo 任务在那里无论开关都会被拒绝。Kumi 只在你自己的回合中行动：Hermes 在后台处理对话（每轮之后的回顾）或回答旁支问题（`/btw`）时，无论你允许了什么，Kumi 都只读取。打开 Ask before each change 时，只能用 DAW 自己的撤销来恢复的修改，会作为单独的一类征求同意，所以允许其他修改并不包括它。设置步骤的批准只针对它自己的计划。选择**始终允许**会在 Hermes 的 `command_allowlist`（你的配置中的 config.yaml）里留下一条记录，Kumi 从不编辑它：要取消，请删除其中以 `plugin_rule:kumi:` 开头的条目。
 
 使用 `--yolo`、对话中的 `/yolo` 或 `approvals.mode: off` 时，Hermes 会不经询问直接执行 Kumi 的修改、撤销、聆听、播放、采样文件夹的添加与扫描、设置步骤，以及设置了 Mirelo 时它的付费生成和上传（以你的点数上限为限）。脚本和设备在那里也会不经询问运行，但只限于没有读取过外部内容的对话：读取过的对话中，它们会被拒绝。`/kumi` 会说明这一点。如果 `approvals.single_query_mode` 或 `delegation.subagent_auto_approve` 让修改不经询问就通过，`hermes kumi status` 也会说明。一次性的 `hermes -z` 也等同于 yolo：Kumi 的调用会不经询问直接执行，而且 Kumi 无法把它与普通对话区分开。
 
@@ -113,8 +113,8 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 | DAW | Live | Kumi 连接哪个 DAW。你最先设置的 DAW 会成为它；用 `hermes kumi setup --daw <daw> --use` 切换（`ableton`、`reaper` 或 `renoise`） |
 | 采样文件夹 | 无 | 为声音地图允许 Kumi 读取的文件夹：扫描只读取其中的音频文件，其他内容一概不扫描。不能是整个磁盘或卷、你的主文件夹或它上面的文件夹，也不能在 Hermes 自己的文件夹（`HERMES_HOME`）之内或之上；可以用 `~/`。链接和联接点绝不会把 Kumi 带出你列出的文件夹；在 Windows 上，Kumi 会跳过云端占位文件（例如 OneDrive 的） |
 | 告诉智能体我在看什么 | 开 | 当你查看的内容变化时，在连接 Kumi 的对话中加入一段简短说明：你正在看什么（FOCUS），以及 Kumi 不在时工程里有哪些变化 |
-| Ask before each change | 关 | Hermes 会在 Kumi 的每次修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设和设备之前，按修改类别、按对话征求同意。关闭时，Kumi 不经询问直接执行，并把每一项记入 HISTORY；脚本、设置步骤、采样文件夹、Mirelo 任务，以及在读取过外部内容的对话中的设备，无论开关都会征求同意 |
-| 从聊天应用运行脚本 | 关 | 允许聊天应用（Discord、Slack、Telegram 等）中的对话请求在你的 DAW 中运行脚本，或构建 Max for Live 设备。每一个都会带着代码征求同意，Hermes 的确认关闭时一个也不会运行 |
+| Ask before each change | 关 | Hermes 会在 Kumi 的每次修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设、脚本和设备之前，按修改类别、按对话征求同意。关闭时，Kumi 不经询问直接执行，并把每一项记入 HISTORY；设置步骤、采样文件夹、Mirelo 任务，以及在读取过外部内容的对话中的脚本和设备，无论开关都会征求同意 |
+| 从聊天应用运行脚本 | 关 | 允许聊天应用（Discord、Slack、Telegram 等）中的对话请求在你的 DAW 中运行脚本，或构建 Max for Live 设备。无论 Ask before each change 如何，每一个都会带着代码征求同意，Hermes 的确认关闭时一个也不会运行 |
 | 用模型解读测量结果 | 关 | 把测量数值和一张小的频段能量图也发给你在 Hermes 中为 Kumi 聆听任务设置的模型（未更改时为 Vision 的模型），用文字解读；该模型必须能接受图片 |
 
 ## 哪些内容会离开你的电脑
@@ -129,7 +129,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
   - **Renoise 的速度：** 渲染可能改变它的 BPM 和每拍行数。只有它们仍是渲染留下的值时，Kumi 才会改回去；如果已经不同，它会两者都保持原样，并说明无法恢复速度。
   - **音频：** DAW 渲染到 Kumi 在该 DAW 中的组件的聆听文件夹；Kumi 把这一个文件复制到自己的数据中，在那里测量。
   - **Live：** Kumi 在 Live 停止且未录音时，通过 Kumi Ears 采集这段时间范围，结束后移除该设备；之后详细视图会重新显示你之前打开的片段。Live 可能显示 Set 已修改，并且 Live 自己的撤销历史中会留下这次聆听的临时设备步骤：在 Live 中按撤销可能会让 Kumi Ears 回来。这些步骤不是 Kumi 的 HISTORY 中的修改。
-- **脚本**以你的 DAW 对电脑的访问权限运行：它读取、写入或发送什么，取决于你批准的代码。Kumi 会把每个已批准脚本的代码保存在自己的数据中。
+- **脚本**以你的 DAW 对电脑的访问权限运行：它读取、写入或发送什么，取决于它的代码。Kumi 会把每个脚本的代码保存在自己的数据中。
 - **Max for Live 设备**是 Kumi 写入 Live 用户库（`User Library/Kumi/Audio Effects`）的新文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。
 - **插件预设**是你放进用户库后 Kumi 写入 Live 用户库（`User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects`）的新 `.vstpreset` 文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。为了知道你安装的 Serum 2、Pro-Q 4 或 Ozone 12 是哪个版本，Kumi 会读取标准插件文件夹中的 VST3 元数据；它从不加载插件。
 - **项目的副本：** 在某些修改之前，Kumi 会把最后保存的项目复制一份放在它旁边，每个保存的版本只复制一次。未保存的项目不会被复制，Kumi 也从不保存项目本身。

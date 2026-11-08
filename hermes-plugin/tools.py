@@ -312,8 +312,9 @@ class Host:
 
     def ask_before_changes(self) -> bool:
         """The producer's "Ask before each change": on, Hermes asks before each change Kumi makes in the DAW
-        (`policy.UNASKED_BY_DEFAULT`); off, the default, Kumi makes them without asking. Scripts, setup, sample folders,
-        and Mirelo's uploads and paid jobs are asked either way."""
+        (`policy.UNASKED_BY_DEFAULT`, scripts and devices included); off, the default, Kumi makes them without asking.
+        Setup, sample folders, and Mirelo's uploads and paid jobs are asked either way, as is a script or a device in a
+        chat that read outside content."""
         return self._ctx.get_config("ask_before_changes", False) is True
 
     def trust(self) -> scripts.Trust:
@@ -532,8 +533,8 @@ UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes r
                      f"doesn't say). If it is, {UNASKED} run without asking first.")
 # Whether Kumi asks before its changes ("Ask before each change"), said the same in /kumi, `hermes kumi status` and the
 # doctor.
-CHANGES_UNASKED = ("Kumi makes your changes without asking (Ask before each change: off); scripts, setup steps, sample "
-                   "folders and Mirelo jobs still ask")
+CHANGES_UNASKED = ("Kumi makes your changes and runs your scripts without asking (Ask before each change: off); setup "
+                   "steps, sample folders and Mirelo jobs still ask")
 CHANGES_ASKED = "Hermes asks before each Kumi change (Ask before each change: on)"
 
 
