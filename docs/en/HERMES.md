@@ -190,7 +190,10 @@ sample folders and Mirelo jobs still ask".
 
 Allowing a Kumi call for the session or always covers that kind of call in this chat only, including a one-shot run
 that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
-refused. Scheduled jobs and webhooks never change anything. Kumi acts only in your own turns: when Hermes works on the
+refused. Scheduled jobs and webhooks never change anything. A new one-shot `hermes chat -q` run can: Kumi can't tell
+it from a chat, since Hermes runs its tools in its gateway, so by default it makes the changes it asks for, as a chat
+does. With Ask before each change on, Hermes refuses them there, since nobody can answer; it refuses scripts, setup
+steps, sample folders and Mirelo jobs there either way. Kumi acts only in your own turns: when Hermes works on the
 chat in the background (its review after a turn) or answers a side question (`/btw`), Kumi only reads, whatever you
 allowed. With Ask before each change on, a change only your DAW's own Undo takes back asks under its own kind, so
 allowing other changes doesn't cover it. A setup step's approval covers its own plan. Choosing **Always** leaves an
