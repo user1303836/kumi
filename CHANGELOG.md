@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.75 — 2026-11-08
+
+Ships with bridge 1.0.107, as 1.24.74 did.
+
+- Kumi for Hermes makes the changes you ask for without an approval prompt by default; turn on "Ask
+  before each change" in its settings to approve each one.
+- Kumi for Hermes runs the scripts you ask for without an approval prompt by default; turn on Ask
+  before each change to approve each one. A script in a chat that has read outside content is still
+  asked every time, with its code.
+- Kumi can now set Serum 2's oscillator unison, detune, blend, wavetable position and warp, filter
+  type, cutoff, resonance and drive, envelope times and sustain, LFO rate, macros, routing levels and
+  the other synth controls. Each was measured in Serum 2.1.5 itself, so a request like "make a Serum 2
+  pad" now builds.
+- Serum 2's arpeggiator controls and main tuning are linked to the fields they really change.
+- Kumi for Hermes reads Kumi's recipes and the way to configure more knobs in a plug-in's guide, and
+  can open a plug-in's window so you can click Configure, as Kumi itself does
+- Kumi for Hermes builds a plug-in preset with up to 512 settings, as Kumi itself does
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.74 — 2026-11-06
 
 Ships with bridge 1.0.107, as 1.24.73 did.
