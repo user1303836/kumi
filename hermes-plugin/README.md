@@ -46,9 +46,9 @@ a DAW to work in.
 
 *Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.*
 
-![Every change asks first: Hermes shows exactly what Kumi will change in Live, here the Drums fader from −6.0 dB to −4 dB.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
+![With Ask before each change on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
 
-*Every change asks first: Hermes shows exactly what Kumi will change in Live, here the Drums fader from −6.0 dB to −4 dB.*
+*With **Ask before each change** on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.*
 
 ![Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
 
@@ -60,7 +60,7 @@ a DAW to work in.
 
 Screenshots: Kumi 1.24.73 on real Ableton Live 12, and Kumi 1.24.71 on real REAPER 7 (the listening shot). Hermes's
 side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side (the pane, the map,
-the approvals and the measurements) is real. The listening shot measures a synthetic test tone against a reference
+the approval and the measurements) is real. The listening shot measures a synthetic test tone against a reference
 made 3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step.
 
 ## Tools
