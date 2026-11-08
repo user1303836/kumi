@@ -217,6 +217,22 @@ mod tests {
     }
 
     #[test]
+    fn a_plugins_window_opens_as_in_kumi_itself_and_nothing_else_of_its_details_changes() {
+        let details = |input: serde_json::Value| check(PLUGIN_STEPS, "set_device_details", &input);
+        for open in [true, false] {
+            assert!(details(json!({"deviceRef": "7:device:0:0", "family": "plugin", "isEditorOpen": open})).is_ok());
+        }
+        for input in [
+            json!({"deviceRef": "7:device:0:0", "family": "plugin", "presetIndex": 3}),
+            json!({"deviceRef": "7:device:0:0", "family": "hybrid-reverb", "irFile": "Halls/Big.wav"}),
+            json!({"deviceRef": "7:device:0:0", "family": "wavetable", "unisonMode": 2}),
+            json!({"deviceRef": "7:device:0:0", "family": "plugin", "isEditorOpen": true, "selectedBand": 1}),
+        ] {
+            assert!(details(input.clone()).is_err(), "{input}");
+        }
+    }
+
+    #[test]
     fn a_file_field_takes_only_a_source_never_a_search_of_folders() {
         for sample in [json!({"folders": ["/Users/x/Private"], "random": true}), json!({"words": ["kick"]}), json!("/Users/x/kick.wav")] {
             assert!(check(PLUGIN_STEPS, "replace_sample", &json!({"deviceRef": "1:device:0:0", "sample": sample})).is_err(), "{sample}");
