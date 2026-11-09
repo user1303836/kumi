@@ -1,6 +1,6 @@
-// Sound design as the map's Make panel uses it: a new sound crossed, fused or stacked from two to sixteen sounds of the
-// map or the palette, by Kumi's engine (`POST /design`, the contract's "engine's interface"). Plain data here, no DOM:
-// tested in ui/tests.
+// Sound design as the map's Make panel uses it: a new sound crossed, fused or stacked from two or more sounds of the map
+// or the palette (no upper limit: the engine reads each one shorter when there are many), by Kumi's engine
+// (`POST /design`, the contract's "engine's interface"). Plain data here, no DOM: tested in ui/tests.
 import { plainId, quotable } from './format.ts'
 
 export type DesignOp = 'cross' | 'fuse' | 'stack'
@@ -57,9 +57,6 @@ export interface DesignCard {
   options: (keyof DesignOptions)[]
 }
 
-export const MOST_SOURCES = 16
-export const MOST_STACKED = 8
-
 /** The cards, in the panel's order: cross's four, fuse's three, then stack. */
 export const CARDS: DesignCard[] = [
   { key: 'blend', op: 'cross', mode: 'blend', options: ['seconds'] },
@@ -81,17 +78,10 @@ export const RANGES: Record<Exclude<keyof DesignOptions, 'split' | 'attack_from'
   stretch: { min: 4, max: 16, step: 1 }
 }
 
-/** The most sounds a card takes: the panel sends the first ones, as Kumi's TUI does. */
-export function mostFor(card: Pick<DesignCard, 'op'>): number {
-  return card.op === 'stack' ? MOST_STACKED : MOST_SOURCES
-}
-
-/** What the panel says of a card's sounds: too few to make anything (an i18n key and the least), the first ones only
- *  when there are more than it takes (the key, how many go in, and of how many), or nothing. */
-export function cardNote(card: Pick<DesignCard, 'op'>, count: number): { key: 'make.needTwo'; least: number } | { key: 'make.firstOnly'; most: number; of: number } | null {
-  if (count < 2) return { key: 'make.needTwo', least: 2 }
-  const most = mostFor(card)
-  return count > most ? { key: 'make.firstOnly', most, of: count } : null
+/** What the panel says of a card's sounds: too few to make anything (an i18n key and the least), or nothing. Every
+ *  sound picked goes in, however many. */
+export function cardNote(count: number): { key: 'make.needTwo'; least: number } | null {
+  return count < 2 ? { key: 'make.needTwo', least: 2 } : null
 }
 
 /** The request a card makes from these sounds and options: only the card's own options go (the rest come from the
@@ -110,7 +100,7 @@ export function requestFor(card: DesignCard, sources: DesignSource[], options: D
   return {
     op: card.op,
     ...(card.mode ? { mode: card.mode } : {}),
-    sources: sources.slice(0, mostFor(card)),
+    sources,
     ...(seed === undefined ? {} : { seed }),
     ...(Object.keys(kept).length ? { options: kept } : {})
   }

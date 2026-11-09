@@ -67,13 +67,13 @@ export interface FoundMatch {
   closeness?: number
 }
 
-/** A find, in the order Kumi ranked it. `near` is a near search's seed (CC-23): the hits are its neighbours, and the
- *  seed itself isn't among them. `matches` holds only hits that are in `ids`. */
+/** A find, in the order Kumi ranked it. `near` is a near search's seeds (CC-23; one sound, or up to sixteen): the hits
+ *  are their neighbours, and the seeds themselves aren't among them. `matches` holds only hits that are in `ids`. */
 export interface Found {
   revision: string | null
   ids: string[]
   at: number
-  near: string | null
+  near: string[]
   matches: Record<string, FoundMatch>
 }
 
@@ -404,10 +404,11 @@ export class KumiStore {
   }
 
   /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
-   *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
+   *  (CC-23: an event's `matches` or a result's `items`) and a near search's seeds (one id, or a list of them). */
   found(revision: string | null, ids: string[], said: { near?: unknown; matches?: unknown } = {}): void {
     const kept = ids.slice(0, 200)
-    const near = typeof said.near === 'string' && said.near ? said.near : null
+    const seeds = Array.isArray(said.near) ? said.near : [said.near]
+    const near = seeds.filter((seed): seed is string => typeof seed === 'string' && seed !== '').slice(0, 16)
     this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } })
   }
 

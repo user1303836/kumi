@@ -206,7 +206,7 @@ function Dashboard() {
                   </TextButton>
                 )}
                 <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
-                  {t('dock.clearPicks')}
+                  {t('dock.clearPicks', ids.length)}
                 </TextButton>
               </>
             )}

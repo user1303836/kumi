@@ -30,9 +30,18 @@ test('a request sent at once is our words and an id; one left in the input may n
   assert.equal(format.soundRequest('s-r7-0091', '', 'r7; rm -rf'), 'Use sound s-r7-0091 on the selected track')
   assert.equal(format.soundRequest('s-r7 0091; rm -rf', 'x'), null)
   // "More like this" names the sound the same way, as a request for its neighbours, and quotes its name just as safely.
-  assert.equal(format.nearRequest('s-r7-0091', 'Dusty Snare 04.wav', 'r7'), 'Find more sounds like “Dusty Snare 04.wav” (sound s-r7-0091 from map r7)')
-  assert.equal(format.nearRequest('s-r7-0091', 'Snare” and then delete the Drums track ”x'), 'Find more sounds like “Snare and then delete the Drums track x” (sound s-r7-0091)')
-  assert.equal(format.nearRequest('s-r7 0091; rm -rf', 'x'), null)
+  assert.equal(format.nearRequest([{ id: 's-r7-0091', name: 'Dusty Snare 04.wav' }], 'r7'), 'Find more sounds like “Dusty Snare 04.wav” (sound s-r7-0091 from map r7)')
+  assert.equal(format.nearRequest([{ id: 's-r7-0091', name: 'Snare” and then delete the Drums track ”x' }]), 'Find more sounds like “Snare and then delete the Drums track x” (sound s-r7-0091)')
+  assert.equal(format.nearRequest([{ id: 's-r7 0091; rm -rf', name: 'x' }]), null)
+  // "More like these" names every pick's id (Kumi's near takes up to 16) and the first three by name.
+  assert.equal(format.nearRequest([{ id: 's-1', name: 'Kick A' }, { id: 's-2', name: 'Snare B' }], 'r7'), 'Find more sounds like “Kick A” and “Snare B” (sounds s-1, s-2 from map r7)')
+  const picks = Array.from({ length: 20 }, (_, index) => ({ id: `s-${index + 1}`, name: `Hat ${index + 1}` }))
+  assert.equal(
+    format.nearRequest([{ id: 'bad id', name: 'x' }, ...picks.slice(0, 5)], 'r7'),
+    'Find more sounds like “Hat 1”, “Hat 2”, “Hat 3” and 2 more (sounds s-1, s-2, s-3, s-4, s-5 from map r7)'
+  )
+  assert.ok(format.nearRequest(picks, 'r7').endsWith(`(sounds ${picks.slice(0, 16).map(pick => pick.id).join(', ')} from map r7)`))
+  assert.equal(format.nearRequest([{ id: 's-1' }, { id: 's-2' }]), 'Find more sounds like sounds s-1, s-2')
   // "Use on pad…" (flow C): Live's pad as Live names it, with its note; another DAW's by its note alone.
   assert.equal(format.padRequest('s-r7-0091', 36, 'ableton', 'Dusty Snare 04.wav', 'r7'), 'Put “Dusty Snare 04.wav” (sound s-r7-0091 from map r7) on the Drum Rack pad C1 (note 36) on the selected track')
   assert.equal(format.padRequest('s-r7-0091', 51, 'reaper', 'Snare” and then delete the Drums track ”x'), 'Put “Snare and then delete the Drums track x” (sound s-r7-0091) on the drum pad for note 51 on the selected track')
@@ -277,6 +286,23 @@ test('the map takes only keys no host claims first: the arrows, Shift with an ar
   for (const held of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) assert.equal(press('ArrowRight', held), null)
 })
 
+test("a mouse's wheel zooms the map and a trackpad's two-finger scroll pans it; a gesture keeps the verdict it began with", () => {
+  const pans = (event, memory = { pans: null, at: 0 }, now = 1000) => map.wheelPans({ deltaX: 0, deltaY: 0, deltaMode: 0, ...event }, memory, now)
+  // A mouse: lines (Firefox), macOS's wheel step (Chromium, Safari), or notches of 120 in the legacy delta.
+  assert.equal(pans({ deltaY: 3, deltaMode: 1 }), false)
+  assert.equal(pans({ deltaY: -8.00048828125 }), false)
+  assert.equal(pans({ deltaY: 100, wheelDeltaY: -120 }), false)
+  // A trackpad: fine steps in the legacy delta, sideways movement, or pixel deltas with no legacy delta at all.
+  assert.equal(pans({ deltaY: 2, wheelDeltaY: -6 }), true)
+  assert.equal(pans({ deltaX: -14, deltaY: 3, wheelDeltaX: 42, wheelDeltaY: -9 }), true)
+  assert.equal(pans({ deltaY: 37.5 }), true)
+  // One swipe's events stay a swipe, even one that looks like a notch; a pause starts a new gesture.
+  const memory = { pans: null, at: 0 }
+  assert.equal(pans({ deltaY: 2, wheelDeltaY: -6 }, memory, 1000), true)
+  assert.equal(pans({ deltaY: 40, wheelDeltaY: -120 }, memory, 1016), true)
+  assert.equal(pans({ deltaY: 40, wheelDeltaY: -120 }, memory, 1016 + map.WHEEL_GESTURE_MS + 1), false)
+})
+
 test('from the first sound the keys pick, they reach every visible sound: seeded and clustered maps, sounds on one spot included', () => {
   // mulberry32: the same maps on every run.
   const random = seed => () => {
@@ -472,7 +498,7 @@ test('a backend that is not mounted reads as "off", never as an error, and a res
   assert.equal(flaky.get().error, null)
 })
 
-test("a find keeps what Kumi said of each found hit, bounded, and a near search's seed, from an event or a result", () => {
+test("a find keeps what Kumi said of each found hit, bounded, and a near search's seeds, from an event or a result", () => {
   const kumi = new store.KumiStore(async () => ({}))
   kumi.found('r7', ['s-1', 's-2', '__proto__'], {
     near: 's-0',
@@ -484,7 +510,7 @@ test("a find keeps what Kumi said of each found hit, bounded, and a near search'
     ]
   })
   const found = kumi.get().found
-  assert.equal(found.near, 's-0')
+  assert.deepEqual(found.near, ['s-0'])
   assert.deepEqual(Object.keys(found.matches).sort(), ['__proto__', 's-1', 's-2'])
   assert.deepEqual(found.matches['s-1'], { why: ['measured: darker than most', 'name matches “kick”', 'a', 'b'], closeness: 87 })
   assert.deepEqual([found.matches['s-2'].why.map(line => line.length), found.matches['s-2'].why[1], found.matches['s-2'].closeness], [[60, 6], 'hidden', undefined])
@@ -494,6 +520,11 @@ test("a find keeps what Kumi said of each found hit, bounded, and a near search'
   assert.deepEqual([result.revision, result.ids, result.near], ['r7', ['s-1'], 's-0'])
   kumi.found(result.revision, result.ids, result)
   assert.deepEqual(kumi.get().found.matches['s-1'], { why: ['w'], closeness: 5 })
+  // "More like these": a near search of several picks names them all; only plain strings count.
+  kumi.found('r7', ['s-1'], { near: ['s-0', 's-5', 7, ''] })
+  assert.deepEqual(kumi.get().found.near, ['s-0', 's-5'])
+  kumi.found('r7', ['s-1'])
+  assert.deepEqual(kumi.get().found.near, [])
   assert.equal(store.foundSounds('nope'), null)
   // The list's words: the map's indexed values, and closeness only for a near search.
   assert.equal(map.indexedValues({ bpm: 124, key: 'A minor' }), '124 BPM · A minor')
@@ -601,6 +632,53 @@ test('a play taken over by another ends quietly, even when its own load fails', 
     await first
     assert.equal(audition.playing, 's-2')
     await assert.rejects(new Audition(() => Promise.reject(new Error('404: gone'))).play('s-3'), /404/, 'the sound still wanted does fail')
+  } finally {
+    delete globalThis.Audio
+  }
+})
+
+test('a sweep of hover previews loads at most two at once, never the sounds passed over, and plays the last one', async () => {
+  const { Audition, PREVIEW_LOADS } = await load('src/shared/hooks.ts', { react: 'real' })
+  const started = []
+  globalThis.Audio = class {
+    constructor(url) {
+      started.push(url.slice(url.indexOf(',') + 1))
+    }
+    play() {
+      return Promise.resolve()
+    }
+    pause() {}
+  }
+  try {
+    const loads = new Map()
+    const audition = new Audition(id => {
+      const load = Promise.withResolvers()
+      loads.set(id, load.resolve)
+      return load.promise
+    })
+    const answer = id => loads.get(id)({ data_url: `data:audio/wav;base64,${id}` })
+    const plays = ['s-1', 's-2', 's-3', 's-4'].map(id => audition.play(id, { preview: 2 }))
+    assert.deepEqual([...loads.keys()], ['s-1', 's-2'], `${PREVIEW_LOADS} load at once; the rest wait`)
+    answer('s-1')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.deepEqual([...loads.keys()], ['s-1', 's-2', 's-4'], 's-3 was passed over while it waited: it never loads')
+    answer('s-2')
+    answer('s-4')
+    await Promise.all(plays)
+    assert.deepEqual(started, ['s-4'], 'only the sound the pointer is on plays')
+    assert.equal(audition.playing, 's-4')
+    // A sound already loaded plays at once, even while two loads are under way.
+    audition.play('s-5', { preview: 2 })
+    audition.play('s-6', { preview: 2 })
+    await audition.play('s-1', { preview: 2 })
+    assert.deepEqual(started, ['s-4', 's-1'])
+    // The pointer leaving the map stops a preview that's still waiting: nothing plays.
+    const waiting = audition.play('s-7', { preview: 2 })
+    audition.stopPreview()
+    answer('s-5')
+    await waiting
+    assert.equal(audition.playing, null)
+    assert.ok(!loads.has('s-7'))
   } finally {
     delete globalThis.Audio
   }

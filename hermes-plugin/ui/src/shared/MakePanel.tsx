@@ -9,7 +9,7 @@ import { T } from '@kumi/theme'
 import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { CARDS, cardNote, type DesignCard, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, mostFor, RANGES, requestFor, requestOf, reroll, resultName, takeKey } from './design.ts'
+import { CARDS, cardNote, type DesignCard, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, RANGES, requestFor, requestOf, reroll, resultName, takeKey } from './design.ts'
 import { clean, num, seconds } from './format.ts'
 import type { Designed } from './store.ts'
 import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
@@ -105,6 +105,10 @@ function Glyph({ card, size = 20 }: { card: string; size?: number }) {
 /** Each op's picture on its tab: two sounds becoming one, a long wave, and layers. */
 const OP_GLYPH = { cross: 'blend', fuse: 'smear', stack: 'stack' } as const
 const OPS = ['cross', 'fuse', 'stack'] as const
+/** The sources drawn as chips, and offered as Attack's first sound: every source goes in, but a pick of thousands
+ *  draws a few dozen, then says how many more. */
+const SOURCE_CHIPS = 48
+const ATTACK_CHOICES = 64
 
 /** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
  *  shrinking as it goes, while the palette's answer brings the chip in (it pops in as it lands). The panel draws it,
@@ -307,9 +311,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     return () => cancelAnimationFrame(frame)
   }, [])
   const card = CARDS.find(entry => entry.key === cardKey) ?? CARDS[0]
-  const note = cardNote(card, sources.length)
-  const refused = note?.key === 'make.needTwo'
-  const used = sources.slice(0, mostFor(card))
+  const note = cardNote(sources.length)
+  const refused = note !== null
 
   // The results as takes, newest take first: a reroll joins its take.
   const takes = useMemo(() => {
@@ -357,7 +360,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               value={options.attack_from ?? ''}
             >
               <option value="">{t('make.auto')}</option>
-              {used.map((source, index) => (
+              {sources.slice(0, ATTACK_CHOICES).map((source, index) => (
                 <option key={`${index}`} value={index}>
                   {clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}
                 </option>
@@ -490,16 +493,16 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         </TextButton>
       </div>
       <div style={{ overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* The sounds that go in, on one line that scrolls; how many more were picked than the card takes. A row that
-            scrolls may shrink to nothing in this column once results fill it, so it keeps its own height. */}
+        {/* The sounds that go in (all of them), on one line that scrolls: the first ones as chips, then how many more. A
+            row that scrolls may shrink to nothing in this column once results fill it, so it keeps its own height. */}
         <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
-          {used.map((source, index) => (
+          {sources.slice(0, SOURCE_CHIPS).map((source, index) => (
             <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
               <span style={S.ellipsis}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}</span>
             </span>
           ))}
-          {sources.length > used.length && <span style={{ ...S.faint, flex: 'none' }}>+{sources.length - used.length}</span>}
+          {sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
         </div>
         {chooser}
         {card.options.length > 0 && <div style={{ ...S.row, flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>{optionRow(card)}</div>}
@@ -527,7 +530,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
             {busy === 'make' ? t('make.making') : `${t('make.make')} · ${t(`make.cards.${card.key}.title`)}`}
           </button>
           {busy === 'make' && <span aria-hidden className="kumi-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${T.accent}`, borderRightColor: 'transparent' }} />}
-          {note && <span style={S.faint}>{note.key === 'make.needTwo' ? t(note.key, note.least) : t(note.key, note.most, note.of)}</span>}
+          {note && <span style={S.faint}>{t(note.key, note.least)}</span>}
           <span aria-live="polite" style={error ? { ...S.faint, color: T.warn, flex: '1 1 14rem' } : S.hidden}>
             {error ?? ''}
           </span>

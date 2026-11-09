@@ -197,6 +197,42 @@ export function zoomAt(view: MapViewport, factor: number, px: number, py: number
   return { scale, dx: px - (px - view.dx) * applied, dy: py - (py - view.dy) * applied }
 }
 
+/** How the wheel moves the map: `zoom` (a mouse's wheel), `pan` (a trackpad's two-finger scroll), or `auto`, which
+ *  tells them apart (`wheelPans`). A pinch always zooms. */
+export type WheelMode = 'auto' | 'pan' | 'zoom'
+
+/** One gesture's verdict, kept across its events: within `WHEEL_GESTURE_MS` of the last one, it's the same gesture. */
+export interface WheelMemory {
+  pans: boolean | null
+  at: number
+}
+
+export const WHEEL_GESTURE_MS = 300
+/** macOS's step for a mouse's wheel in Chromium and Safari: every notch moves a whole number of these. */
+const MAC_WHEEL_STEP = 4.000244140625
+
+/** Whether a wheel event that isn't a pinch (the browser sends a pinch as a wheel with Ctrl held) pans the map, as a
+ *  trackpad's two-finger scroll does, rather than zooming, as a mouse's wheel does. A delta in lines or pages, or one in
+ *  macOS's wheel steps, is a mouse's; otherwise the legacy `wheelDelta` tells: a wheel's notches are 120 each, a
+ *  trackpad's fine steps aren't; with no legacy delta, pixel deltas are a trackpad's. A gesture keeps the verdict its
+ *  first event had, so one event that looks like a notch doesn't switch a swipe to zooming. */
+export function wheelPans(
+  event: { deltaX: number; deltaY: number; deltaMode: number; wheelDeltaX?: number; wheelDeltaY?: number },
+  memory: WheelMemory,
+  now: number
+): boolean {
+  const going = memory.pans !== null && now - memory.at <= WHEEL_GESTURE_MS
+  memory.at = now
+  if (going) return memory.pans as boolean
+  const vertical = Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+  const delta = vertical ? event.deltaY : event.deltaX
+  const legacy = vertical ? event.wheelDeltaY : event.wheelDeltaX
+  if (event.deltaMode !== 0 || (delta !== 0 && delta % MAC_WHEEL_STEP === 0)) memory.pans = false
+  else if (typeof legacy === 'number' && legacy !== 0) memory.pans = legacy % 120 !== 0
+  else memory.pans = true
+  return memory.pans
+}
+
 /** The point nearest the screen point (`px`, `py`) within `radius` pixels, among those `visible` allows; -1 if none. */
 export function pick(model: MapModel, view: MapViewport, size: number, px: number, py: number, radius = 8, visible?: (index: number) => boolean): number {
   const unit = size * view.scale

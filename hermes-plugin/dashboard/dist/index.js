@@ -173,6 +173,7 @@
       closeness: (value) => `closeness ${value}, relative to this map`,
       closenessTitle: "How close this sound is to the one you asked about, 0 to 100, against the other sounds on this map: not a percentage, and not a confidence.",
       near: (name) => `Near “${name}”`,
+      nearMany: (name, n) => `Near “${name}” and ${n} more`,
       more: (n) => `and ${n} more on the map`,
       play: "▶ Play",
       stop: "■ Stop",
@@ -181,6 +182,9 @@
       useTitle: "Put a request to use this sound in the chat, to finish and send",
       moreLike: "More like this",
       moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
+      moreLikeThese: (n) => `More like these (${n})`,
+      moreLikeTheseTitle: "Put a request for sounds like these in the chat, to send when you like",
+      moreLikeTheseFirst: (most, n) => `Put a request for sounds like the first ${most} of your ${n} picks in the chat, to send when you like`,
       useOnPad: "Use on pad…",
       useOnPadTitle: "Pick a drum pad, an empty one included: the request goes in the chat, to send when you like",
       pads: "Drum pads",
@@ -192,7 +196,9 @@
       rescan: "Rescan…",
       rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like",
       tiles: "Tiles",
-      tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it"
+      tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it",
+      hand: "Move map",
+      handTitle: "Drag to move the map instead of drawing a box. The middle button moves it too, and so does a trackpad's two-finger scroll."
     },
     measurements: {
       tab: "Measurements",
@@ -372,7 +378,7 @@
     dock: {
       title: "Palette",
       sounds: "Sounds in the palette",
-      empty: "Nothing in your palette yet. Pick sounds on the map (drag a box with Shift held, or turn on Select) and press Add to palette.",
+      empty: "Nothing in your palette yet. Drag a box over sounds on the map (Shift adds another box) and press Add to palette.",
       none: "No palette yet: Add to palette makes one.",
       choose: "Choose a palette",
       switch: "Palette",
@@ -408,15 +414,15 @@
       addTitle: "Put this sound in your palette",
       addPicked: (n) => n === 1 ? "Add 1 to palette" : `Add ${n} to palette`,
       picked: (n) => n === 1 ? "1 picked" : `${n} picked`,
-      clearPicks: "Clear",
-      clearPicksTitle: "Pick nothing",
+      clearPicks: (n) => `Clear (${n})`,
+      clearPicksTitle: "Pick nothing (Esc, or a click on empty map, does it too)",
+      cleared: "Nothing picked",
       hover: "Hover to play",
-      hoverTitle: "Play each sound as the pointer rests on it",
-      select: "Select",
-      selectTitle: "Drag a box to pick sounds (or hold Shift while you drag); Command or Ctrl adds to the picks",
+      hoverTitle: "Play each sound as the pointer comes onto it",
       firstOnly: (n) => `The first 10,000 of ${n} picked went in.`,
       pickAll: (n) => n === 1 ? "Pick it" : `Pick all ${n}`,
       pickAllTitle: "Pick every sound this search keeps",
+      pickFoundTitle: "Pick every sound Kumi found",
       inPalette: "In palette",
       failed: (error) => `Kumi couldn't change the palette: ${error}`
     },
@@ -457,7 +463,7 @@
       makeTitle: (way) => `Make a sound with ${way}`,
       making: "Making…",
       needTwo: (n) => `Pick at least ${n} sounds to make one.`,
-      firstOnly: (most, n) => `The first ${most} of ${n} go in.`,
+      moreSources: (n) => `+${n} more`,
       missing: "This Kumi for Hermes can't make sounds yet: update it, then try again.",
       failed: (error) => `Kumi couldn't make it: ${error}`,
       seedTitle: "Its seed: the same sounds, way and seed make the same sound again",
@@ -623,6 +629,7 @@
       closeness: (value) => `近さ ${value}（このマップ内での相対値）`,
       closenessTitle: "尋ねたサウンドにどれだけ近いかを、このマップ上のほかのサウンドと比べて 0〜100 で表します。パーセントでも確信度でもありません。",
       near: (name) => `「${name}」に近いサウンド`,
+      nearMany: (name, n) => `「${name}」ほか ${n} 個に近いサウンド`,
       more: (n) => `ほか ${n} 個はマップ上に`,
       play: "▶ 再生",
       stop: "■ 停止",
@@ -631,6 +638,9 @@
       useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
       moreLike: "似たサウンド",
       moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
+      moreLikeThese: (n) => `これらに似たサウンド（${n}）`,
+      moreLikeTheseTitle: "これらに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
+      moreLikeTheseFirst: (most, n) => `選んだ ${n} 個のうち最初の ${most} 個に似たサウンドを探す依頼をチャットに入れます。送信はご自身で`,
       useOnPad: "パッドに使う…",
       useOnPadTitle: "ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で",
       pads: "ドラムパッド",
@@ -642,7 +652,9 @@
       rescan: "再スキャン…",
       rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で",
       tiles: "タイル",
-      tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します"
+      tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します",
+      hand: "マップを移動",
+      handTitle: "ドラッグで囲む代わりに、ドラッグでマップを動かします。中ボタンのドラッグや、トラックパッドの2本指スクロールでも動かせます。"
     },
     measurements: {
       tab: "測定結果",
@@ -820,7 +832,7 @@
     dock: {
       title: "パレット",
       sounds: "パレットのサウンド",
-      empty: "パレットはまだ空です。マップでサウンドを選び（Shift を押しながらドラッグで囲むか、「選択」をオン）、「パレットに追加」を押してください。",
+      empty: "パレットはまだ空です。マップ上でサウンドをドラッグで囲み（Shift で囲みを追加）、「パレットに追加」を押してください。",
       none: "パレットはまだありません。「パレットに追加」で作られます。",
       choose: "パレットを選ぶ",
       switch: "パレット",
@@ -856,15 +868,15 @@
       addTitle: "このサウンドをパレットに入れます",
       addPicked: (n) => `${n} 個をパレットに追加`,
       picked: (n) => `${n} 個を選択中`,
-      clearPicks: "解除",
-      clearPicksTitle: "選択をすべて解除",
+      clearPicks: (n) => `選択を解除（${n}）`,
+      clearPicksTitle: "何も選んでいない状態にします（Esc や、マップの空いた所のクリックでも）",
+      cleared: "選択を解除しました",
       hover: "ホバーで再生",
-      hoverTitle: "ポインタを止めたサウンドを再生します",
-      select: "選択",
-      selectTitle: "ドラッグで囲んでサウンドを選びます（Shift を押しながらのドラッグでも）。Command か Ctrl で選択に加えます",
+      hoverTitle: "ポインタが乗ったサウンドをすぐに再生します",
       firstOnly: (n) => `選んだ ${n} 個のうち、最初の 10,000 個を入れました。`,
       pickAll: (n) => `${n} 個をすべて選ぶ`,
       pickAllTitle: "この検索で残ったサウンドをすべて選びます",
+      pickFoundTitle: "Kumi が見つけたサウンドをすべて選びます",
       inPalette: "パレットにあり",
       failed: (error) => `Kumi はパレットを変更できませんでした: ${error}`
     },
@@ -904,7 +916,7 @@
       makeTitle: (way) => `${way}でサウンドを作ります`,
       making: "作成中…",
       needTwo: (n) => `作るには ${n} 個以上のサウンドを選んでください。`,
-      firstOnly: (most, n) => `${n} 個のうち最初の ${most} 個を使います。`,
+      moreSources: (n) => `ほか ${n} 個`,
       missing: "この Kumi for Hermes はまだサウンドを作れません。更新してから、もう一度お試しください。",
       failed: (error) => `作れませんでした：${error}`,
       seedTitle: "シード：同じサウンド、同じ作り方、同じシードで同じ音がもう一度できます",
@@ -1070,6 +1082,7 @@
       closeness: (value) => `接近度 ${value}（相对于这张地图）`,
       closenessTitle: "与你所问的声音有多接近，0 到 100，相对于这张地图上的其他声音：不是百分比，也不是置信度。",
       near: (name) => `与“${name}”相近的声音`,
+      nearMany: (name, n) => `与“${name}”及另外 ${n} 个相近的声音`,
       more: (n) => `地图上还有 ${n} 个`,
       play: "▶ 播放",
       stop: "■ 停止",
@@ -1078,6 +1091,9 @@
       useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
       moreLike: "更多类似的",
       moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
+      moreLikeThese: (n) => `更多类似这些的（${n}）`,
+      moreLikeTheseTitle: "把寻找与这些声音类似的声音的请求放进对话，由你决定何时发送",
+      moreLikeTheseFirst: (most, n) => `把寻找与你所选 ${n} 个中前 ${most} 个类似的声音的请求放进对话，由你决定何时发送`,
       useOnPad: "用在打击垫上…",
       useOnPadTitle: "选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送",
       pads: "打击垫",
@@ -1089,7 +1105,9 @@
       rescan: "重新扫描…",
       rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送",
       tiles: "方块",
-      tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近"
+      tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近",
+      hand: "移动地图",
+      handTitle: "拖动来移动地图，而不是拉框选择。用中键拖动或触控板双指滚动也能移动地图。"
     },
     measurements: {
       tab: "测量结果",
@@ -1267,7 +1285,7 @@
     dock: {
       title: "调色板",
       sounds: "调色板里的声音",
-      empty: "调色板还是空的。在地图上选择声音（按住 Shift 拖出一个框，或打开“选择”），然后按“加入调色板”。",
+      empty: "调色板还是空的。在地图上拖出一个框选中声音（按住 Shift 可再加一个框），然后按“加入调色板”。",
       none: "还没有调色板：“加入调色板”会新建一个。",
       choose: "选择调色板",
       switch: "调色板",
@@ -1303,15 +1321,15 @@
       addTitle: "把这个声音放进你的调色板",
       addPicked: (n) => `把 ${n} 个加入调色板`,
       picked: (n) => `已选 ${n} 个`,
-      clearPicks: "清除",
-      clearPicksTitle: "取消全部选择",
+      clearPicks: (n) => `清除（${n}）`,
+      clearPicksTitle: "取消所有选择（按 Esc 或点击地图空白处也可以）",
+      cleared: "已取消选择",
       hover: "悬停播放",
-      hoverTitle: "指针停在哪个声音上就播放它",
-      select: "选择",
-      selectTitle: "拖出一个框来选择声音（或按住 Shift 拖动）；按住 Command 或 Ctrl 可追加选择",
+      hoverTitle: "指针移到哪个声音上就立即播放它",
       firstOnly: (n) => `所选的 ${n} 个中，前 10,000 个已加入。`,
       pickAll: (n) => `选择全部 ${n} 个`,
       pickAllTitle: "选择这次搜索保留的所有声音",
+      pickFoundTitle: "选择 Kumi 找到的所有声音",
       inPalette: "已在调色板中",
       failed: (error) => `Kumi 无法修改调色板：${error}`
     },
@@ -1351,7 +1369,7 @@
       makeTitle: (way) => `用“${way}”制作一个声音`,
       making: "制作中…",
       needTwo: (n) => `至少选择 ${n} 个声音才能制作。`,
-      firstOnly: (most, n) => `${n} 个声音中只用前 ${most} 个。`,
+      moreSources: (n) => `还有 ${n} 个`,
       missing: "这个版本的 Kumi for Hermes 还不能制作声音：请先更新，再试一次。",
       failed: (error) => `Kumi 没能做出来：${error}`,
       seedTitle: "种子：同样的声音、同样的做法和同样的种子会再次做出同样的声音",
@@ -1538,8 +1556,6 @@
   }
 
   // src/shared/design.ts
-  var MOST_SOURCES = 16;
-  var MOST_STACKED = 8;
   var CARDS = [
     { key: "blend", op: "cross", mode: "blend", options: ["seconds"] },
     { key: "attack", op: "cross", mode: "attack", options: ["attack_from"] },
@@ -1557,13 +1573,8 @@
     depth: { min: 0, max: 1, step: 0.05 },
     stretch: { min: 4, max: 16, step: 1 }
   };
-  function mostFor(card) {
-    return card.op === "stack" ? MOST_STACKED : MOST_SOURCES;
-  }
-  function cardNote(card, count) {
-    if (count < 2) return { key: "make.needTwo", least: 2 };
-    const most = mostFor(card);
-    return count > most ? { key: "make.firstOnly", most, of: count } : null;
+  function cardNote(count) {
+    return count < 2 ? { key: "make.needTwo", least: 2 } : null;
   }
   function requestFor(card, sources, options = {}, seed) {
     const kept = {};
@@ -1579,7 +1590,7 @@
     return {
       op: card.op,
       ...card.mode ? { mode: card.mode } : {},
-      sources: sources.slice(0, mostFor(card)),
+      sources,
       ...seed === void 0 ? {} : { seed },
       ...Object.keys(kept).length ? { options: kept } : {}
     };
@@ -2010,10 +2021,11 @@
       }
     }
     /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
-     *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
+     *  (CC-23: an event's `matches` or a result's `items`) and a near search's seeds (one id, or a list of them). */
     found(revision, ids, said = {}) {
       const kept = ids.slice(0, 200);
-      const near = typeof said.near === "string" && said.near ? said.near : null;
+      const seeds = Array.isArray(said.near) ? said.near : [said.near];
+      const near = seeds.filter((seed) => typeof seed === "string" && seed !== "").slice(0, 16);
       this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } });
     }
     /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
@@ -2154,7 +2166,7 @@
   var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
   var PREVIEW_SECONDS = 2;
   var PREVIEW_FADE_SECONDS = 0.2;
-  var HOVER_REST_MS = 70;
+  var PREVIEW_LOADS = 2;
   var Audition = class {
     constructor(load, limit = AUDITION_CACHE_CHARS) {
       this.load = load;
@@ -2167,6 +2179,9 @@
     cached = 0;
     loading = /* @__PURE__ */ new Map();
     generation = 0;
+    /** Hover previews loading now, and the plays waiting for one of them to end (`PREVIEW_LOADS`). */
+    previewLoads = 0;
+    waiting = [];
     /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
     turn = 0;
     /** Whether what plays is a hover's preview: leaving the map stops that, never a sound the producer clicked. */
@@ -2223,17 +2238,17 @@
     /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
      *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
      *  quietly, whatever happened to it: only the sound still wanted can fail. `preview` plays a hover's preview: the
-     *  first `preview` seconds, faded out. */
+     *  first `preview` seconds, faded out, loaded as `previewUrl` allows. */
     async play(id, options = {}) {
       this.stop();
       const turn = this.turn;
+      this.previewing = options.preview !== void 0;
       this.changed(id);
       try {
-        const url = await this.url(id);
-        if (turn !== this.turn) return;
+        const url = options.preview === void 0 ? await this.url(id) : await this.previewUrl(id, turn);
+        if (url === null || turn !== this.turn) return;
         const audio = new Audio(url);
         this.audio = audio;
-        this.previewing = options.preview !== void 0;
         audio.onended = () => {
           if (this.audio === audio) this.stop();
         };
@@ -2244,6 +2259,31 @@
         this.stop();
         throw error;
       }
+    }
+    /** A preview's audio: at once when it's kept or already loading; else loaded once fewer than `PREVIEW_LOADS`
+     *  previews are loading. A play whose turn passes while it waits loads nothing (null): the sound the pointer only
+     *  crossed. */
+    async previewUrl(id, turn) {
+      while (!this.cache.has(id) && !this.loading.has(id) && this.previewLoads >= PREVIEW_LOADS) {
+        const free = Promise.withResolvers();
+        this.waiting.push(free.resolve);
+        await free.promise;
+        if (turn !== this.turn) return null;
+      }
+      if (this.cache.has(id) || this.loading.has(id)) return this.url(id);
+      this.previewLoads += 1;
+      try {
+        return await this.url(id);
+      } finally {
+        this.previewLoads -= 1;
+        this.wake();
+      }
+    }
+    /** Every waiting preview looks again: the one still wanted takes the free load, the rest end. */
+    wake() {
+      const waiting = this.waiting;
+      this.waiting = [];
+      for (const resolve2 of waiting) resolve2();
     }
     /** A preview's end: past `seconds` less the fade, the volume falls to nothing over the fade, then it stops. */
     cut(audio, turn, seconds2) {
@@ -2268,6 +2308,7 @@
         this.audio.onended = null;
         this.audio = null;
       }
+      if (this.waiting.length) this.wake();
       if (this.playing !== null) this.changed(null);
     }
     /** The pointer left the map: a hover's preview stops; a sound the producer clicked plays on. */
@@ -2283,22 +2324,16 @@
     return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
   }
   function useHoverPlay(audition, enabled, play) {
-    const timer = useRef(void 0);
     const played = useRef(play);
     played.current = play;
-    useEffect(() => () => clearTimeout(timer.current), []);
     useEffect(() => {
       if (!enabled) audition.stopPreview();
     }, [audition, enabled]);
     return useCallback(
       (id) => {
-        clearTimeout(timer.current);
         if (!enabled) return;
-        if (id === null) {
-          audition.stopPreview();
-          return;
-        }
-        timer.current = setTimeout(() => played.current(id), HOVER_REST_MS);
+        if (id === null) audition.stopPreview();
+        else played.current(id);
       },
       [audition, enabled]
     );
@@ -2537,6 +2572,8 @@
   }
   var OP_GLYPH = { cross: "blend", fuse: "smear", stack: "stack" };
   var OPS = ["cross", "fuse", "stack"];
+  var SOURCE_CHIPS = 48;
+  var ATTACK_CHOICES = 64;
   function Flying({ flight, onDone }) {
     const ghost = useRef(null);
     const done = useRef(onDone);
@@ -2714,9 +2751,8 @@
       return () => cancelAnimationFrame(frame2);
     }, []);
     const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
-    const note = cardNote(card, sources.length);
-    const refused = note?.key === "make.needTwo";
-    const used = sources.slice(0, mostFor(card));
+    const note = cardNote(sources.length);
+    const refused = note !== null;
     const takes = useMemo(() => {
       const byKey = /* @__PURE__ */ new Map();
       for (const result of [...results ?? []].reverse()) {
@@ -2756,7 +2792,7 @@
               value: options.attack_from ?? "",
               children: [
                 /* @__PURE__ */ jsx("option", { value: "", children: t("make.auto") }),
-                used.map((source, index) => /* @__PURE__ */ jsx("option", { value: index, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) }, `${index}`))
+                sources.slice(0, ATTACK_CHOICES).map((source, index) => /* @__PURE__ */ jsx("option", { value: index, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) }, `${index}`))
               ]
             }
           )
@@ -2878,14 +2914,11 @@
           ] }),
           /* @__PURE__ */ jsxs("div", { style: { overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
             /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-              used.map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }, children: [
+              sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }, children: [
                 /* @__PURE__ */ jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
                 /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })
               ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
-              sources.length > used.length && /* @__PURE__ */ jsxs("span", { style: { ...S.faint, flex: "none" }, children: [
-                "+",
-                sources.length - used.length
-              ] })
+              sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) })
             ] }),
             chooser,
             card.options.length > 0 && /* @__PURE__ */ jsx("div", { style: { ...S.row, flexWrap: "wrap", gap: 10, alignItems: "flex-end" }, children: optionRow(card) }),
@@ -2915,7 +2948,7 @@
                 }
               ),
               busy === "make" && /* @__PURE__ */ jsx("span", { "aria-hidden": true, className: "kumi-spin", style: { width: 14, height: 14, borderRadius: "50%", border: `2px solid ${T.accent}`, borderRightColor: "transparent" } }),
-              note && /* @__PURE__ */ jsx("span", { style: S.faint, children: note.key === "make.needTwo" ? t(note.key, note.least) : t(note.key, note.most, note.of) }),
+              note && /* @__PURE__ */ jsx("span", { style: S.faint, children: t(note.key, note.least) }),
               /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: error ? { ...S.faint, color: T.warn, flex: "1 1 14rem" } : S.hidden, children: error ?? "" })
             ] }),
             takes.length > 0 && /* @__PURE__ */ jsx("div", { "aria-label": t("make.results"), role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
@@ -3147,6 +3180,20 @@
     const applied = scale / view.scale;
     return { scale, dx: px - (px - view.dx) * applied, dy: py - (py - view.dy) * applied };
   }
+  var WHEEL_GESTURE_MS = 300;
+  var MAC_WHEEL_STEP = 4.000244140625;
+  function wheelPans(event, memory, now) {
+    const going = memory.pans !== null && now - memory.at <= WHEEL_GESTURE_MS;
+    memory.at = now;
+    if (going) return memory.pans;
+    const vertical = Math.abs(event.deltaY) >= Math.abs(event.deltaX);
+    const delta = vertical ? event.deltaY : event.deltaX;
+    const legacy = vertical ? event.wheelDeltaY : event.wheelDeltaX;
+    if (event.deltaMode !== 0 || delta !== 0 && delta % MAC_WHEEL_STEP === 0) memory.pans = false;
+    else if (typeof legacy === "number" && legacy !== 0) memory.pans = legacy % 120 !== 0;
+    else memory.pans = true;
+    return memory.pans;
+  }
   function pick(model, view, size, px, py, radius = 8, visible) {
     const unit = size * view.scale;
     if (unit <= 0) return -1;
@@ -3329,7 +3376,7 @@
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto" }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -3342,7 +3389,37 @@
     const [hover, setHover] = useState(null);
     const drag = useRef(null);
     const [box, setBox] = useState(null);
-    const [selecting, setSelecting] = useState(false);
+    const [handTool, setHandTool] = useState(false);
+    const [grabbing, setGrabbing] = useState(false);
+    const over = useRef(false);
+    const [spaceHeld, setSpaceHeld] = useState(false);
+    const space = useRef(false);
+    useEffect(() => {
+      const hold = (held) => {
+        if (space.current === held) return;
+        space.current = held;
+        setSpaceHeld(held);
+      };
+      const down = (event) => {
+        if (event.code !== "Space" || event.defaultPrevented || !over.current) return;
+        const target = event.target;
+        if (target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+        event.preventDefault();
+        hold(true);
+      };
+      const up = (event) => {
+        if (event.code === "Space") hold(false);
+      };
+      const blur = () => hold(false);
+      window.addEventListener("keydown", down, true);
+      window.addEventListener("keyup", up, true);
+      window.addEventListener("blur", blur);
+      return () => {
+        window.removeEventListener("keydown", down, true);
+        window.removeEventListener("keyup", up, true);
+        window.removeEventListener("blur", blur);
+      };
+    }, []);
     const rested = useRef(null);
     const rest = (id) => {
       if (rested.current === id) return;
@@ -3447,7 +3524,12 @@
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
     }, [searched, foundIds, indexOf, visible]);
     const pickedIds = useMemo(() => picked && picked.size > 0 ? model.points.filter((point) => picked.has(point.id)).map((point) => point.id) : [], [model, picked]);
-    const nearName = !searched && foundIds && found?.near && model.sounds[found.near] ? clean(model.sounds[found.near].name ?? "", 60) : "";
+    const nearName = useMemo(() => {
+      const seeds = !searched && foundIds ? (found?.near ?? []).filter((id) => model.sounds[id]) : [];
+      if (seeds.length === 0) return "";
+      const first = clean(model.sounds[seeds[0]].name ?? "", 60);
+      return seeds.length === 1 ? t("map.near", first) : t("map.nearMany", first, seeds.length - 1);
+    }, [searched, foundIds, found, model, t]);
     const [painted, setPainted] = useState("");
     useEffect(() => {
       const canvas = canvasRef.current;
@@ -3477,18 +3559,29 @@
       const framed = frame(model, foundIds, size.width, size.height);
       if (framed) setView(framed);
     }, [foundIds, model, size.width, size.height]);
+    const wheelMode = useRef(wheel);
+    wheelMode.current = wheel;
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const wheel = (event) => {
+      const memory = { pans: null, at: 0 };
+      const onWheel = (event) => {
         event.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 25e-4));
         const base = nextView.current ?? viewRef.current;
-        if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top));
+        if (!base) return;
+        const legacy = event;
+        const pans = !event.ctrlKey && (wheelMode.current === "auto" ? wheelPans(legacy, memory, performance.now()) : wheelMode.current === "pan");
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+        if (pans) {
+          queueView({ ...base, dx: base.dx - event.deltaX * unit, dy: base.dy - event.deltaY * unit });
+          return;
+        }
+        const rect = canvas.getBoundingClientRect();
+        const factor = Math.exp(-event.deltaY * unit * (event.ctrlKey ? 0.01 : 25e-4));
+        queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top));
       };
-      canvas.addEventListener("wheel", wheel, { passive: false });
-      return () => canvas.removeEventListener("wheel", wheel);
+      canvas.addEventListener("wheel", onWheel, { passive: false });
+      return () => canvas.removeEventListener("wheel", onWheel);
     }, [hasPoints]);
     const hoverAt = hover ? hover.index : null;
     useEffect(() => {
@@ -3703,19 +3796,22 @@
     };
     const reachPx = (base) => tiles && layout && view ? Math.max(base, mapSize * view.scale / layout.side * 0.62) : base;
     const press = (event) => {
-      if (!view) return;
+      if (!view || event.button !== 0 && event.button !== 1) return;
+      if (event.button === 1) event.preventDefault();
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const [x, y] = at(event);
-      const boxing = Boolean(onPicked) && (event.shiftKey || selecting);
-      drag.current = { x, y, moved: false, view, box: boxing, add: event.metaKey || event.ctrlKey };
+      const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool;
+      drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button };
       rest(null);
       setHover(null);
       if (boxing) setBox([x, y, x, y]);
+      else setGrabbing(true);
     };
     const release = (event) => {
       const held = drag.current;
       drag.current = null;
       setBox(null);
+      setGrabbing(false);
       if (!held || !view) return;
       const [x, y] = at(event);
       if (held.box && held.moved) {
@@ -3723,13 +3819,27 @@
         onPicked?.(inside, held.add ? "add" : "replace");
         return;
       }
-      if (held.moved) return;
+      if (held.moved || held.button !== 0) return;
       const index = pick(active, view, mapSize, x, y, reachPx(10), visible);
-      if (index < 0) return;
-      if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([model.points[index].id], "toggle");
-      else onPick(model.points[index].id);
+      const adding = event.shiftKey || event.metaKey || event.ctrlKey;
+      if (index < 0) {
+        if (adding) return;
+        if (pickedIds.length > 0) onPicked?.([], "replace");
+        if (selected !== null) onSelect(null);
+        return;
+      }
+      const id = model.points[index].id;
+      if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], "toggle");
+      else if (onPicked && event.shiftKey) onPicked([id], "add");
+      else onPick(id);
     };
     const onKey = (event) => {
+      if (event.key === "Escape" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
+        event.preventDefault();
+        onPicked([], "replace");
+        setSaid(t("dock.cleared"));
+        return;
+      }
       const key = mapKey(event);
       if (!view || !key) return;
       event.preventDefault();
@@ -3788,9 +3898,9 @@
             }
           )
         ] }),
-        onPicked && searched !== null && matches.length > 0 && // Native's `a`: every sound the search keeps.
-        /* @__PURE__ */ jsx(TextButton, { onClick: () => onPicked(matches, "replace"), title: t("dock.pickAllTitle"), children: t("dock.pickAll", matches.length) }),
-        onPicked && /* @__PURE__ */ jsx(TextButton, { onClick: () => setSelecting(!selecting), pressed: selecting, title: t("dock.selectTitle"), children: t("dock.select") }),
+        onPicked && matches.length > 0 && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
+        /* @__PURE__ */ jsx(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
+        onPicked && /* @__PURE__ */ jsx(TextButton, { onClick: () => setHandTool(!handTool), pressed: handTool, title: t("map.handTitle"), children: t("map.hand") }),
         onTiles && /* @__PURE__ */ jsx(TextButton, { onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle"), children: t("map.tiles") }),
         tools
       ] }),
@@ -3820,8 +3930,8 @@
           group.key
         );
       }) }),
-      matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName ? t("map.near", nearName) : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
-        nearName && /* @__PURE__ */ jsx("span", { style: { ...S.muted, padding: "0 6px" }, children: t("map.near", nearName) }),
+      matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+        nearName && /* @__PURE__ */ jsx("span", { style: { ...S.muted, padding: "0 6px" }, children: nearName }),
         matches.slice(0, MATCHES_LISTED).map((id) => {
           const sound = model.sounds[id];
           const indexed = indexedValues(sound, t);
@@ -3877,15 +3987,31 @@
             onPointerCancel: () => {
               drag.current = null;
               setBox(null);
+              setGrabbing(false);
+            },
+            onPointerEnter: () => {
+              over.current = true;
             },
             onPointerLeave: () => {
+              over.current = false;
               setHover(null);
               rest(null);
+            },
+            onMouseDown: (event) => {
+              if (event.button === 1) event.preventDefault();
             },
             onDoubleClick: () => setView(fitView(size.width, size.height)),
             role: "application",
             tabIndex: 0,
-            style: { position: "absolute", inset: 0, width: "100%", height: "100%", outlineOffset: -3, cursor: selecting || box ? "crosshair" : hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
+            style: {
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              outlineOffset: -3,
+              cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
+              touchAction: "none"
+            }
           }
         ),
         box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
@@ -4584,7 +4710,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               pickedActions: (ids) => /* @__PURE__ */ jsxs(Fragment2, { children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
                 ids.length > 1 && /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
-                /* @__PURE__ */ jsx(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks") })
+                /* @__PURE__ */ jsx(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
               ] }),
               playing,
               selected,

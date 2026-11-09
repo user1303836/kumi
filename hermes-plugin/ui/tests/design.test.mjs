@@ -1,6 +1,6 @@
-// node --test: the Make panel's requests and results: what a card sends (its own options, in range, at most the sounds
-// it takes), a reroll, the takes results group into, the answers it draws, the sources the picks and the palette
-// become, Use's request, and the store's design calls.
+// node --test: the Make panel's requests and results: what a card sends (its own options, in range, and every sound
+// picked), a reroll, the takes results group into, the answers it draws, the sources the picks and the palette become,
+// Use's request, and the store's design calls.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
@@ -25,25 +25,23 @@ const answer = (extra = {}) => ({
   ...extra
 })
 
-test('a card sends only its own options, each inside the engine’s range, and at most the sounds it takes', () => {
+test('a card sends only its own options, each inside the engine’s range, and every sound picked', () => {
   const options = { bpm: 300, bars: 2, depth: 1.5, seconds: 4, stretch: 2, attack_from: 5 }
   assert.deepEqual(design.requestFor(card('loop'), sounds(3), options), { op: 'fuse', mode: 'loop', sources: sounds(3), options: { bpm: 240, bars: 2 } })
   assert.deepEqual(design.requestFor(card('smear'), sounds(3), options).options, { stretch: 4, depth: 1 })
   // attack_from names one of the sounds sent, or it's left to the seed.
   assert.equal(design.requestFor(card('attack'), sounds(3), options).options, undefined)
   assert.deepEqual(design.requestFor(card('attack'), sounds(3), { attack_from: 2 }).options, { attack_from: 2 })
-  // Stack takes no mode and at most eight sounds; the rest take sixteen: the first ones go.
+  // Stack takes no mode; no card has an upper limit (the engine reads each sound shorter when there are many).
   const stacked = design.requestFor(card('stack'), sounds(10), options, 7)
-  assert.deepEqual([stacked.mode, stacked.sources.length, stacked.seed, stacked.options], [undefined, 8, 7, undefined])
-  assert.deepEqual(design.requestFor(card('blend'), sounds(20)).sources, sounds(16))
+  assert.deepEqual([stacked.mode, stacked.sources.length, stacked.seed, stacked.options], [undefined, 10, 7, undefined])
+  assert.deepEqual(design.requestFor(card('blend'), sounds(500)).sources, sounds(500))
 })
 
-test('too few sounds make nothing; more than a card takes, the panel says only the first ones go in', () => {
-  assert.deepEqual(design.cardNote(card('blend'), 1), { key: 'make.needTwo', least: 2 })
-  assert.equal(design.cardNote(card('stack'), 8), null)
-  assert.deepEqual(design.cardNote(card('stack'), 9), { key: 'make.firstOnly', most: 8, of: 9 })
-  assert.equal(design.cardNote(card('texture'), 16), null)
-  assert.deepEqual(design.cardNote(card('texture'), 40), { key: 'make.firstOnly', most: 16, of: 40 })
+test('fewer than two sounds make nothing; any number from two makes one', () => {
+  assert.deepEqual(design.cardNote(1), { key: 'make.needTwo', least: 2 })
+  assert.equal(design.cardNote(2), null)
+  assert.equal(design.cardNote(5000), null)
 })
 
 test('a reroll is the same take with a new seed: its options stay, and its result joins the take', () => {
