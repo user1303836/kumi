@@ -4,14 +4,15 @@
  * - A Kumi pane beside the chat: the connection, FOCUS (what the producer is looking at in the DAW) and HISTORY (the
  *   changes Kumi made), each with its undo.
  * - A status-bar chip: `● Live · Night Drive · 124 BPM`, with a menu.
- * - The sound map, as a workspace tab: the approved sample folders on a map; a click auditions in the window.
+ * - The sound map, as a workspace tab: the approved sample folders on a map, where a sound plays in the window as the
+ *   pointer rests on it or on a click, and the palette under it, which the agent's `kumi_palette` shares.
  * - An inline card for the audio `kumi_listen` measured, in place of the plain player.
  * - Palette commands and a settings page.
  *
  * Everything reads Kumi's backend (`dashboard/plugin_api.py`) through `ctx.rest`. Nothing here changes the DAW or
  * anything else: a button that would puts a request in Kumi's chat, which goes to the model, its tool and Hermes's
- * approval like any other request (contract C5). The backend's only writes are map edits that change no project (the
- * sounds that can't play here, hidden from the map).
+ * approval like any other request (contract C5). The backend's only writes are edits that change no project: the
+ * sounds that can't play here, hidden from the map, and the palette.
  */
 import type { HermesPlugin, PaletteContribution, PluginContribution, ToolMediaRendererProps } from '@hermes/plugin-sdk'
 // A namespace import too: on a Desktop without an export (the tool-media seam), a named import would stop the module.
@@ -147,6 +148,8 @@ const plugin: HermesPlugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, ours(() => void store.refresh('focus')))
     ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, ours(() => void store.refresh('history')))
     ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, ours(() => void store.refresh('map')))
+    // The agent's `kumi_palette` changed the palette the map's dock shows.
+    ctx.onEvent(`plugin.${PLUGIN_ID}.palette.changed`, ours(() => void store.refresh('palette')))
     ctx.setInterval(() => {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)

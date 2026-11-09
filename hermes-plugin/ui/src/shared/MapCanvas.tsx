@@ -1,19 +1,21 @@
 // The sound map, drawn on a canvas: each sound of the library where Kumi's layout put it, coloured by its group.
 // Wheel zooms, a drag pans, a click picks the sound under the pointer. Search and the legend dim what they leave out;
 // sounds the agent just found get a ring. What a search or a find picks out is also listed by name, for the keyboard.
+// Like native Kumi's map: a sound plays as the pointer rests on it (`onHover`), a box drawn with Shift held (or with
+// Select on) picks the sounds in it, Command or Ctrl with a click picks one more, and the palette's sounds are marked.
 // On the keyboard (`mapKey`), the arrows move to the nearest sound that way, Shift+←/→ step through every sound in turn,
 // Shift+↑/↓ zoom and Home shows the whole map; each sound reached is named to a screen reader, and Tab goes on to its
 // Play and Use….
-// Both UI halves use it; what a picked sound can do comes from `actions`.
+// Both UI halves use it; what a picked sound can do comes from `actions`, what the picks can do from `pickedActions`.
 import { CANVAS, T } from '@kumi/theme'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, pointsInBox, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
-import { Chip, FOCUSABLE, S, useT } from './ui.tsx'
+import { Chip, FOCUSABLE, S, TextButton, useT } from './ui.tsx'
 
 export interface MapCanvasProps {
   map: SoundMap | null
@@ -30,6 +32,19 @@ export interface MapCanvasProps {
   leaving?: ReadonlySet<string>
   /** What the quiet line about hidden sounds offers ("Show them", a rescan), when there are any. */
   hiddenActions?: ReactNode
+  /** The palette's sounds on this map: marked on it. */
+  marked?: ReadonlySet<string>
+  /** The sounds picked to work with (a box, Command or Ctrl with a click): marked brighter. */
+  picked?: ReadonlySet<string>
+  /** A box drawn, a Command or Ctrl click, or "Pick all": `replace` the picks, `add` to them, or `toggle` one. Without
+   *  it the map picks nothing (no Select, no box). */
+  onPicked?: (ids: string[], how: 'add' | 'replace' | 'toggle') => void
+  /** The pointer came to rest on a sound, or on none (null; it also left the map): hover-to-play listens here. */
+  onHover?: (id: string | null) => void
+  /** The parent's own toggles, at the end of the toolbar (hover to play). */
+  tools?: ReactNode
+  /** What the picks can do, in a bar while there are any ("Add 12 to palette", Clear). */
+  pickedActions?: (ids: string[]) => ReactNode
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -61,7 +76,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -74,7 +89,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const [searchFor, setSearchFor] = useState('')
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
-  const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport } | null>(null)
+  // A drag: a pan, or with Shift held (or Select on) a box that picks what's in it.
+  const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport; box: boolean; add: boolean } | null>(null)
+  const [box, setBox] = useState<[number, number, number, number] | null>(null)
+  const [selecting, setSelecting] = useState(false)
+  // The sound the pointer last rested on, so `onHover` hears only changes.
+  const rested = useRef<string | null>(null)
+  const rest = (id: string | null) => {
+    if (rested.current === id) return
+    rested.current = id
+    onHover?.(id)
+  }
   // A drag or a wheel moves the view at most once per frame: the latest view waits here for the next animation frame.
   const viewRef = useRef<MapViewport | null>(null)
   viewRef.current = view
@@ -144,6 +169,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const ids = searched ?? foundIds
     return ids ? [...ids].filter(id => indexOf.has(id) && visible(indexOf.get(id) as number)) : []
   }, [searched, foundIds, indexOf, visible])
+  // The picks in the map's own order, as a gather sends them.
+  const pickedIds = useMemo(() => (picked && picked.size > 0 ? model.points.filter(point => picked.has(point.id)).map(point => point.id) : []), [model, picked])
   // CC-23: a near search names its seed (the top-level `near`) from this map; one the map doesn't list heads nothing.
   const nearName = !searched && foundIds && found?.near && model.sounds[found.near] ? clean(model.sounds[found.near].name ?? '', 60) : ''
 
@@ -292,6 +319,36 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       }
     }
     context.globalAlpha = 1
+    // The palette's sounds, and the picks, as rings: one path each, however many there are.
+    const rings = (ids: ReadonlySet<string> | undefined, extra: number): Path2D | null => {
+      if (!ids || ids.size === 0) return null
+      const path = new Path2D()
+      for (const id of ids) {
+        const index = indexOf.get(id)
+        if (index === undefined || mask[index] === 2) continue
+        const x = points[index].x * unit + view.dx
+        const y = points[index].y * unit + view.dy
+        if (x < left || y < top || x > right || y > bottom) continue
+        path.moveTo(x + radius + extra, y)
+        path.arc(x, y, radius + extra, 0, Math.PI * 2)
+      }
+      return path
+    }
+    const inPalette = rings(marked, 2.2)
+    if (inPalette) {
+      // A thin ring, a little see-through: a palette of a whole cluster stays a cluster of its colour.
+      context.globalAlpha = 0.8
+      context.strokeStyle = colors.accent
+      context.lineWidth = 1
+      context.stroke(inPalette)
+      context.globalAlpha = 1
+    }
+    const inPicks = rings(picked, 1.4)
+    if (inPicks) {
+      context.strokeStyle = colors.strong
+      context.lineWidth = 1.6
+      context.stroke(inPicks)
+    }
     const ring = (id: string, color: string, extra: number, width: number) => {
       const index = indexOf.get(id)
       if (index === undefined) return
@@ -305,11 +362,41 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
     if (playing) ring(playing, colors.accent, 6, 2)
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock])
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0]
+  }
+
+  // A press starts a pan, or with Shift held (or Select on) a box; a press with Command or Ctrl that doesn't move picks
+  // or unpicks the sound under it.
+  const press = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!view) return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    const [x, y] = at(event)
+    const boxing = Boolean(onPicked) && (event.shiftKey || selecting)
+    drag.current = { x, y, moved: false, view, box: boxing, add: event.metaKey || event.ctrlKey }
+    rest(null)
+    setHover(null)
+    if (boxing) setBox([x, y, x, y])
+  }
+  const release = (event: PointerEvent<HTMLCanvasElement>) => {
+    const held = drag.current
+    drag.current = null
+    setBox(null)
+    if (!held || !view) return
+    const [x, y] = at(event)
+    if (held.box && held.moved) {
+      const inside = pointsInBox(model, view, mapSize, [held.x, held.y, x, y], visible).map(index => model.points[index].id)
+      onPicked?.(inside, held.add ? 'add' : 'replace')
+      return
+    }
+    if (held.moved) return
+    const index = pick(model, view, mapSize, x, y, 10, visible)
+    if (index < 0) return
+    if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([model.points[index].id], 'toggle')
+    else onPick(model.points[index].id)
   }
 
   const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
@@ -372,6 +459,18 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             ? t('map.count', num(shown, 0))
             : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))}
         </span>
+        {onPicked && searched !== null && matches.length > 0 && (
+          // Native's `a`: every sound the search keeps.
+          <TextButton onClick={() => onPicked(matches, 'replace')} title={t('dock.pickAllTitle')}>
+            {t('dock.pickAll', matches.length)}
+          </TextButton>
+        )}
+        {onPicked && (
+          <TextButton onClick={() => setSelecting(!selecting)} pressed={selecting} title={t('dock.selectTitle')}>
+            {t('dock.select')}
+          </TextButton>
+        )}
+        {tools}
       </div>
       <div style={{ ...S.row, flexWrap: 'wrap', gap: 4, padding: '6px 10px' }}>
         {model.groups.map(group => {
@@ -445,39 +544,52 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           aria-roledescription={t('map.roledescription')}
           className={FOCUSABLE}
           onKeyDown={onKey}
-          onPointerDown={event => {
-            if (!view) return
-            event.currentTarget.setPointerCapture?.(event.pointerId)
-            const [x, y] = at(event)
-            drag.current = { x, y, moved: false, view }
-          }}
+          onPointerDown={press}
           onPointerMove={event => {
             const [x, y] = at(event)
             const held = drag.current
             if (held) {
               if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true
-              if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y })
+              if (held.box) setBox([held.x, held.y, x, y])
+              else if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y })
               return
             }
             if (!view) return
             const index = pick(model, view, mapSize, x, y, 8, visible)
             setHover(index >= 0 ? { index, x, y } : null)
+            rest(index >= 0 ? model.points[index].id : null)
           }}
-          onPointerUp={event => {
-            const held = drag.current
+          onPointerUp={release}
+          onPointerCancel={() => {
             drag.current = null
-            if (!held || held.moved || !view) return
-            const [x, y] = at(event)
-            const index = pick(model, view, mapSize, x, y, 10, visible)
-            if (index >= 0) onPick(model.points[index].id)
+            setBox(null)
           }}
-          onPointerLeave={() => setHover(null)}
+          onPointerLeave={() => {
+            setHover(null)
+            rest(null)
+          }}
           onDoubleClick={() => setView(fitView(size.width, size.height))}
           role="application"
           tabIndex={0}
           // The box clips what's outside it: the focus ring sits inside the canvas's edge.
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', outlineOffset: -3, cursor: hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', outlineOffset: -3, cursor: selecting || box ? 'crosshair' : hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
         />
+        {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: Math.min(box[0], box[2]),
+              top: Math.min(box[1], box[3]),
+              width: Math.abs(box[2] - box[0]),
+              height: Math.abs(box[3] - box[1]),
+              border: `1px dashed ${T.accent}`,
+              background: `color-mix(in srgb, ${T.accent} 12%, transparent)`,
+              borderRadius: 2,
+              pointerEvents: 'none'
+            }}
+          />
+        )}
         <span id={hintId} style={S.hidden}>
           {t('map.keys')}
         </span>
@@ -492,6 +604,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           </div>
         )}
       </div>
+      {pickedIds.length > 0 && (
+        <div role="group" aria-label={t('dock.picked', pickedIds.length)} style={{ ...S.row, flexWrap: 'wrap', gap: 6, padding: '6px 10px', borderTop: `1px solid ${T.border}` }}>
+          <span style={{ ...S.text, fontWeight: 600, flex: '1 1 8rem' }}>{t('dock.picked', pickedIds.length)}</span>
+          {pickedActions?.(pickedIds)}
+        </div>
+      )}
       {(map?.hidden ?? 0) + leavingCount > 0 && (
         // One quiet line for every sound that couldn't play here, never a notice per sound.
         <div role="status" style={{ ...S.row, flexWrap: 'wrap', gap: 6, padding: '4px 10px', borderTop: `1px solid ${T.border}` }}>
