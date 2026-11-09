@@ -32,6 +32,8 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 - **REAPER：** 重启 REAPER。
 - **Renoise：** 启用 Kumi 工具。
 
+还没有 DAW？REAPER 的免费评估版大约两分钟就能用上：从 [reaper.fm](https://www.reaper.fm/download.php) 安装，然后让 Hermes“为 REAPER 设置 Kumi”。
+
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 
 如果这台电脑上的另一套 Kumi（单独的 Kumi，或另一个 Hermes 配置中的 Kumi for Hermes）已经安装了 Kumi 的 Live 组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样 Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。对于 REAPER 和 Renoise，Kumi for Hermes 目前还不能使用另一套 Kumi 的组件：设置会说明这一点，并保持原样。
@@ -204,7 +206,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 ## 限制
 
 - 你的 DAW 必须运行在运行 Hermes 的那台电脑上。连接到远程 Hermes 的 Hermes Desktop 控制的是那台电脑上的 DAW，而不是你本机的。
-- Live 支持 macOS 和 Windows；REAPER 和 Renoise 支持 macOS、Windows 和 Linux。
+- Live 12 支持 macOS 和 Windows。Kumi 在 Live 12.4（测试版）上测试过；Live 12.0 到 12.3 未经测试，且没有运行 Kumi Live 扩展所需的 Extension Host，所以在这些版本上 Kumi 无法离线渲染、把 MIDI 片段写入 Arrangement，也无法清除 Arrangement 中的范围。REAPER 7 及以上和 Renoise 3.5 及以上支持 macOS、Windows 和 Linux。
 - Kumi 会聆听你指定的时间范围，最长 60 秒（在 Live 中最多为 Arrangement 中的 256 拍）；在 Live 中读取歌曲结构时，会把整个 Arrangement 播放一次（按 Hermes 默认的工具时限最多约 6 分半，调高 `timeouts.tools.sequential_call` 后最多 15 分钟）。在所有 DAW 中，它都能测量音频文件、音色库中的声音和 Kumi 自己的结果。
 - Kumi 只读取打开的工程、你列出的采样文件夹中的音频文件、它对你指定的时间范围的渲染和采集，以及其他 Hermes 插件保存在 Hermes 生成音频文件夹（`<HERMES_HOME>/cache/generated/audio`，Kumi 从不创建这个文件夹）中的已完成音频，用于放置或测量。
 - Kumi 能直接读取 WAV 和 AIFF。对于 MP3、FLAC 等压缩音频，如果你在设置时允许，它会使用电脑上已有的 ffmpeg（绝不下载）。每次启动前，Kumi 都会确认它仍是你允许的那个 ffmpeg 文件（不检查它加载的库，这些库可能随升级而变化）。ffmpeg 只会拿到 Kumi 正在读取的那一个文件：绝不是 URL 或播放列表，也不从网络读取任何内容。Kumi 可读取的文件最大 50 MiB，最多测量其中 12 分钟。

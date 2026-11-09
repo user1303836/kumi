@@ -32,6 +32,8 @@ Hermes Desktop は各段階の確認内容をすべて表示します。ター�
 - **REAPER:** REAPER を再起動します。
 - **Renoise:** Kumi のツールを有効にします。
 
+DAW がまだない場合は、REAPER の無料評価版なら 2 分ほどで始められます。[reaper.fm](https://www.reaper.fm/download.php) からインストールし、Hermes に「REAPER 用に Kumi をセットアップして」と頼みます。
+
 最初にセットアップした DAW が、同じ確認のなかで Kumi の DAW（DAW 設定）になります。あとから別の DAW をセットアップしても、Kumi は今の DAW のままです。その場合、セットアップの最後に切り替える手順（ターミナルで `hermes kumi setup --daw <daw> --use`）が示され、設定を変える前に確認されます。Kumi のプラグイン設定（プロファイルの config.yaml の `plugins.entries.kumi.settings.daw`）で DAW を変えることもできます。Hermes の設定に書き込めない環境では、セットアップがそのことと、DAW を設定する場所を伝えます。
 
 このコンピューター上の別の Kumi（単体の Kumi、または別の Hermes プロファイルの Kumi for Hermes）がすでに Live 用の Kumi の部品をインストールしている場合、セットアップはそれを伝え、置き換えずにそのインストールを使うよう提案します。その場合、Kumi for Hermes はそのインストールの接続用ファイルを読み、自分の接続状態をそこに書き込みますが、サインイン情報や設定は使いません。REAPER と Renoise では、Kumi for Hermes はまだ別の Kumi の部品を使えません。セットアップはそのことを伝え、そのままにします。
@@ -204,7 +206,7 @@ Kumi の呼び出しをこのセッションの間または常に許可すると
 ## 制限
 
 - DAW は Hermes を動かしているコンピューターで動いている必要があります。リモートの Hermes につないだ Hermes Desktop が操作するのは、そのコンピューターの DAW です。
-- Live は macOS と Windows、REAPER と Renoise は macOS、Windows、Linux で使えます。
+- Live 12 は macOS と Windows で使えます。テストは Live 12.4（ベータ）で行っています。Live 12.0〜12.3 は未テストで、Kumi の Live 拡張機能を動かす Extension Host がないため、オフラインでのレンダー、アレンジメントへの MIDI クリップの書き込み、アレンジメントの範囲のクリアはできません。REAPER 7 以降と Renoise 3.5 以降は macOS、Windows、Linux で使えます。
 - Kumi は頼んだ範囲を最大 60 秒（Live ではアレンジメントの最大 256 拍）聴きます。Live で曲の構成を読むときは、アレンジメント全体を 1 回再生します（Hermes の既定のツール期限では最大約 6 分半、`timeouts.tools.sequential_call` を上げれば最大 15 分）。どの DAW でも、音声ファイル、ライブラリのサウンド、Kumi 自身の結果は測れます。
 - Kumi が読むのは、開いているプロジェクト、指定したサンプルフォルダーの中の音声ファイル、頼んだ範囲のレンダリングとキャプチャ、そして他の Hermes プラグインが Hermes の生成音声フォルダー（`<HERMES_HOME>/cache/generated/audio`。Kumi がこのフォルダーを作ることはありません）に保存した完成済みの音声だけです。後者は配置や測定のために読みます。
 - Kumi は WAV と AIFF をそのまま読めます。MP3、FLAC などの圧縮音声には、セットアップで許可すれば、すでにコンピューターにある ffmpeg を使います（ダウンロードはしません）。起動のたびに、許可した ffmpeg のファイルが変わっていないかを確かめます（読み込むライブラリは確かめません。アップデートで変わることがあります）。ffmpeg に渡すのは、Kumi が読んでいるそのファイル 1 つだけです。URL やプレイリストは渡さず、ネットワークからは何も読みません。読めるファイルは 50 MiB まで、測るのはそのうち最大 12 分です。
