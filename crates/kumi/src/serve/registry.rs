@@ -31,6 +31,7 @@ pub static OPERATIONS: &[&Operation] = &[
     &listening::AUDITION,
     &listening::GROOVE,
     &listening::RENDER,
+    &listening::FORM,
     &generate::GENERATE,
     &design::DESIGN,
     &device::DEVICE,

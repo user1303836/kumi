@@ -81,6 +81,9 @@ pub struct LiveRenderer {
     shared_ears: PathBuf,
     /// The plugin host's per-call scratch the tool call under way captures into (`Integration::listen_scratch`).
     call_scratch: RefCell<Option<PathBuf>>,
+    /// The tool call under way is form's, which hears the whole Arrangement: the plugin host's listening lets its
+    /// passes play up to [`rig::WHOLE_SONG_SECONDS`] in all instead of a minute each.
+    whole_song: Cell<bool>,
     listening_policy: ListeningPolicy,
     rendering: ListenFlag,
     /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
@@ -171,6 +174,7 @@ impl LiveRenderer {
             ears_failed_at: Cell::new(None),
             shared_ears,
             call_scratch: RefCell::new(None),
+            whole_song: Cell::new(false),
             listening_policy: options.policy.listening.clone(),
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
@@ -341,6 +345,17 @@ impl Rendering {
     /// One of the listening tools (judge, tune, sound, form, groove, audition, render) as the model calls it; None for
     /// any other tool.
     pub async fn call(&self, name: &str, input: JsonObject, signal: Signal) -> Option<Result<ToolResult, RuntimeError>> {
+        // form alone hears the whole Arrangement (the owner's call): its passes may play the song through.
+        struct WholeSong<'a>(&'a Cell<bool>);
+        impl Drop for WholeSong<'_> {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let _whole = (name == kumi_listening::tools::FORM_TOOL).then(|| {
+            self.live.whole_song.set(true);
+            WholeSong(&self.live.whole_song)
+        });
         self.listening.call(name, input, signal).await
     }
     pub async fn judge(&self, request: &JudgeRequest, original: Signal) -> Result<Result<Round, String>, RuntimeError> {

@@ -1,4 +1,4 @@
-//! `sound`, `audition`, `groove` and `render`: Live's own listening tools (Kumi's), through the runtime, as `judge` and
+//! `sound`, `audition`, `groove`, `form` and `render`: Live's own listening tools (Kumi's), through the runtime, as `judge` and
 //! `tune` are (see judge.rs for what every call shares: Live only, on the project key and epoch an observe gave, its
 //! rows one change in HISTORY). What each adds here:
 //! - `sound` measures 1–8 tracks heard side by side in one Kumi Ears pass, from_beat on (8 bars unless beats says).
@@ -9,18 +9,22 @@
 //! - `groove` judges a part's feel on its notes, against a MIDI clip's: it never plays (no `audio` stem, no audio-file
 //!   reference, so nothing to transcribe and no model). `apply`, and a round taking a change back, are changes in
 //!   HISTORY, undone as natively.
+//! - `form` reads the song's form bar by bar: the one listen that plays the whole Arrangement (the owner's call), up
+//!   to 15 minutes in all with every other condition of the plugin host's listening; a stop ends it at once. Its
+//!   reference is as an audition's.
 //! - `render` renders an audio track's own clips offline, at most 60 s of them; the file Live wrote is kept as the
 //!   runtime's own audio (an artifact_id) and Live's copy deleted: no path comes back.
 //!
 //! Every pass keeps to the plugin host's listening (live_pass.rs): Kumi Ears alone, Live stopped and not recording, a
-//! minute a pass with its lead-in, transport and loop put back, captures in the call's own folder.
+//! minute a pass with its lead-in (form: the whole Arrangement, 15 minutes at most), transport and loop put back,
+//! captures in the call's own folder.
 
 use super::ctx::{Call, Ctx, Effect, JsonObject, OpFuture, Operation};
 use super::judge::{listened, refusal, refused, tools_input};
 use super::listen::{source_schema, Source};
-use super::live_pass::{beats_per_bar, readable_clip, readable_reference, window_refusal, Capturing, MOST_SECONDS};
+use super::live_pass::{beats_per_bar, readable_clip, readable_reference, whole_song_refusal, window_refusal, Capturing, MOST_SECONDS};
 use kumi_common::abort::Signal;
-use kumi_listening::tools::{audition_tool, groove_tool, render_tool, sound_tool};
+use kumi_listening::tools::{audition_tool, form_tool, groove_tool, render_tool, sound_tool};
 use kumi_types::contracts::ToolResult;
 use kumi_types::daw::DawProfile;
 use kumi_types::errors::RuntimeError;
@@ -65,6 +69,19 @@ pub static GROOVE: Operation = Operation {
     run: run_groove,
 };
 
+pub static FORM: Operation = Operation {
+    name: "form",
+    description: "Kumi plays the Arrangement through Kumi Ears and reads its form bar by bar: energy over the song, \
+                  sections (role and letter), turns, intro and outro, the first hook, which tracks play where, form \
+                  problems; with a reference (an audio clip's clip ref or a source), its form and the differences. It hears \
+                  the whole Arrangement by default (from_beat and beats for part of it), so it plays as long as the song: \
+                  at most 15 minutes, with Live stopped and not recording, everything put back after; a stop ends it at once. \
+                  Made on the project key and epoch an observe gave.",
+    schema: form_schema,
+    effect: |_| Effect::Playback,
+    run: run_form,
+};
+
 pub static RENDER: Operation = Operation {
     name: "render",
     description: "Kumi renders an audio track's own clips (its recordings, a bounce) between from_beat and from_beat + beats \
@@ -86,6 +103,10 @@ fn run_audition(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 fn run_groove(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(listened(ctx, call, "groove"))
+}
+
+fn run_form(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    Box::pin(listened(ctx, call, "form"))
 }
 
 fn run_render(ctx: &Ctx, call: Call) -> OpFuture<'_> {
@@ -113,18 +134,20 @@ fn sound_schema() -> Value {
     Value::Object(schema)
 }
 
+/// A reference as the runtime takes one: an audio clip in the Set by its clip ref, or a source it resolves.
+fn reference_schema(what: &str) -> Value {
+    json!({"description": format!("{what}: an audio clip in the Set by its clip ref, or a source (a map sound, a file Kumi made, an approved file)"),
+    "anyOf": [
+        {"type": "object", "additionalProperties": false, "required": ["clip_ref"],
+            "properties": {"clip_ref": {"type": "string", "minLength": 1, "maxLength": 256}}},
+        source_schema()
+    ]})
+}
+
 fn audition_schema() -> Value {
     let mut schema = audition_tool(&DawProfile::ABLETON).schema;
     let fields = properties(&mut schema);
-    fields.insert(
-        "reference".into(),
-        json!({"description": "What to match: an audio clip in the Set by its clip ref, or a source (a map sound, a file Kumi made, an approved file)",
-            "anyOf": [
-                {"type": "object", "additionalProperties": false, "required": ["clip_ref"],
-                    "properties": {"clip_ref": {"type": "string", "minLength": 1, "maxLength": 256}}},
-                source_schema()
-            ]}),
-    );
+    fields.insert("reference".into(), reference_schema("What to match"));
     fields["reference_seconds"]["maximum"] = json!(MOST_SECONDS);
     fields["reference_seconds"]["description"] = json!("How much of the reference to hear, seconds (60 at most, and when left out)");
     bound(&mut schema);
@@ -138,6 +161,15 @@ fn groove_schema() -> Value {
     fields.remove("audio");
     fields.remove("reference_tempo");
     fields["reference"]["description"] = json!("Starts a run: the reference's MIDI clip (its clip ref)");
+    bound(&mut schema);
+    Value::Object(schema)
+}
+
+fn form_schema() -> Value {
+    let mut schema = form_tool(&DawProfile::ABLETON).schema;
+    let fields = properties(&mut schema);
+    fields.insert("reference".into(), reference_schema("A song to compare the form with"));
+    fields["beats"]["description"] = json!("How long, in beats (to the song's last clip when left out): at most 15 minutes at the tempo");
     bound(&mut schema);
     Value::Object(schema)
 }
@@ -178,6 +210,20 @@ pub(super) async fn input(
             }
             Ok((input, None))
         }
+        "form" => {
+            if let Some(beats) = number("beats") {
+                if let Some(error) = whole_song_refusal(ctx, number("from_beat").unwrap_or(0.), beats) {
+                    return Err(refusal(error));
+                }
+            }
+            let mut staged = None;
+            if let Some(reference) = input.get_mut("reference") {
+                let (resolved, copy) = resolved_reference(ctx, reference, call, capturing).await?;
+                staged = copy;
+                *reference = json!(resolved);
+            }
+            Ok((input, staged))
+        }
         "audition" => {
             if let Some(from) = number("from_beat") {
                 if let Some(error) = window_refusal(ctx, from, number("beats").unwrap_or(8.)) {
@@ -186,14 +232,8 @@ pub(super) async fn input(
             }
             let mut staged = None;
             if let Some(reference) = input.get_mut("reference") {
-                let resolved = if let Some(clip) = reference.get("clip_ref").and_then(Value::as_str) {
-                    readable_clip(ctx, clip, capturing.folder(), &call.signal).await.map_err(refusal)?
-                } else {
-                    let source = Source::parse(reference).map_err(refusal)?;
-                    let (path, copy) = readable_reference(ctx, &source, capturing.folder(), &call.signal).await.map_err(refusal)?;
-                    staged = Some(copy);
-                    path.to_string_lossy().into_owned()
-                };
+                let (resolved, copy) = resolved_reference(ctx, reference, call, capturing).await?;
+                staged = copy;
                 *reference = json!(resolved);
                 // Its excerpt is a minute at most: the whole file is never heard.
                 let seconds = number("reference_seconds").unwrap_or(MOST_SECONDS);
@@ -242,6 +282,22 @@ pub(super) async fn input(
         }
         _ => Err(refused("unsupported", format!("Kumi offers no listening tool named {name} here."))),
     }
+}
+
+/// A reference for Live's listening to read: a clip ref (decoded aside when its file is compressed) or a source staged
+/// and made readable, never a path a call gave. The staged copy lives as long as what's returned.
+async fn resolved_reference(
+    ctx: &Ctx,
+    reference: &Value,
+    call: &Call,
+    capturing: &Capturing,
+) -> Result<(String, Option<super::artifacts::StagedArtifact>), Value> {
+    if let Some(clip) = reference.get("clip_ref").and_then(Value::as_str) {
+        return Ok((readable_clip(ctx, clip, capturing.folder(), &call.signal).await.map_err(refusal)?, None));
+    }
+    let source = Source::parse(reference).map_err(refusal)?;
+    let (path, copy) = readable_reference(ctx, &source, capturing.folder(), &call.signal).await.map_err(refusal)?;
+    Ok((path.to_string_lossy().into_owned(), Some(copy)))
 }
 
 /// Whether a groove reference names a file rather than a clip: a path's separators, a home-relative start, an audio

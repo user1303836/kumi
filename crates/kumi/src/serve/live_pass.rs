@@ -41,15 +41,33 @@ pub(super) fn beats_per_bar(ctx: &Ctx) -> f64 {
 /// Why a pass over `beats` from `from_beat` won't play here, at the tempo and meter Live last said: over a minute with
 /// its lead-in and what follows. None when it fits, or Live hasn't said its tempo (its integration says it then).
 pub(super) fn window_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<OpError> {
+    longer_than(ctx, from_beat, beats, MOST_SECONDS, "60 seconds at a time here, so hear a shorter stretch (from_beat and beats)")
+}
+
+/// The most a form call plays here, seconds: the whole Arrangement once, up to a quarter of an hour (the owner's call;
+/// every other listen keeps to [`MOST_SECONDS`]). Live's integration counts each part's lead-in and holds it too.
+pub(super) const WHOLE_SONG_SECONDS: f64 = 900.;
+
+/// Why form's stretch of `beats` from `from_beat` won't play here: over [`WHOLE_SONG_SECONDS`] with its lead-in.
+pub(super) fn whole_song_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<OpError> {
+    longer_than(
+        ctx,
+        from_beat,
+        beats,
+        WHOLE_SONG_SECONDS,
+        "15 minutes of the Arrangement here, so read the form in parts (from_beat and beats)",
+    )
+}
+
+fn longer_than(ctx: &Ctx, from_beat: f64, beats: f64, most: f64, instead: &str) -> Option<OpError> {
     let transport = ctx.link().connection().and_then(|connection| connection.transport())?;
     let tempo = transport.tempo.filter(|tempo| *tempo > 0.)?;
     let meter = beats_per_bar(ctx);
     let seconds = played_seconds(from_beat, beats, tempo, meter);
-    (seconds > MOST_SECONDS).then(|| OpError::Refused {
+    (seconds > most).then(|| OpError::Refused {
         code: "window_too_long",
         reason: format!(
-            "{beats} beats at {tempo} BPM plays {seconds:.1} seconds with the bar before it and half a bar after: Kumi plays at most \
-             60 seconds at a time here, so hear a shorter stretch (from_beat and beats)."
+            "{beats} beats at {tempo} BPM plays {seconds:.1} seconds with the bar before it and half a bar after: Kumi plays at most {instead}."
         ),
         owner: None,
     })
