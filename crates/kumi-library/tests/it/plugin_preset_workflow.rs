@@ -515,6 +515,54 @@ fn serum_pad_controls_build_through_create_and_review() {
 }
 
 #[test]
+fn serum_mod_routes_build_through_create_review_and_edit() {
+    let lfo = json!({"slot": 1, "source": "LFO 1", "destination": "Filter 1 Freq", "amount": 35});
+    let pad = [
+        change("VoiceFilter0/plainParams/kParamEnable", json!(1)),
+        change("VoiceFilter0/plainParams/kParamFreq", json!(0.3)),
+        change("$modulation", lfo),
+        change("$modulation", json!({"slot": 2, "source": "Macro 1", "destination": "A WT Pos", "amount": 60, "bipolar": true})),
+        // A routed slot's amount is a plain control now.
+        change("ModSlot0/plainParams/kParamAmount", json!(40)),
+    ];
+    let created = preset::create("serum-2", &options("serum-2"), &pad).unwrap();
+    let state = serum2::SerumState::read(created.component().unwrap(), created.controller()).unwrap();
+    let body = &state.processor.body;
+    assert_eq!(body.at("ModSlot0/source/0").and_then(cbor::Value::as_i64), Some(6));
+    assert_eq!(body.at("ModSlot0/destModuleTypeString").and_then(cbor::Value::as_str), Some("VoiceFilter"));
+    assert_eq!(body.at("ModSlot0/plainParams/kParamAmount").and_then(cbor::Value::as_f64), Some(40.0));
+    assert_eq!(body.at("ModSlot1/destModuleParamName").and_then(cbor::Value::as_str), Some("kParamTablePos"));
+    assert_eq!(body.at("ModSlot1/plainParams/kParamBipolar").and_then(cbor::Value::as_f64), Some(1.0));
+
+    let mut named = options("serum-2");
+    named.name = Some("LFO pad".into());
+    let reviewed = preset::review::build("serum-2", &named, &pad).unwrap();
+    let lines: Vec<_> = reviewed.metadata.settings.iter().map(|s| s.line()).collect();
+    assert!(lines.contains(&"Mod 1: not routed → LFO 1 to Filter 1 Freq, amount 40%, routing".to_string()), "{lines:?}");
+    assert!(lines.contains(&"Mod 2: not routed → Macro 1 to A WT Pos, amount 60%, bipolar, routing".to_string()), "{lines:?}");
+    assert!(lines.iter().any(|line| line.starts_with("Mod 1 Amount: ") && line.ends_with("→ 40.0, %, -100–100")), "{lines:?}");
+    reviewed.metadata.validate().unwrap();
+    reviewed.metadata.verify(&reviewed.bytes).unwrap();
+
+    // An existing preset's routed slot takes a plain amount edit; an empty one refuses it.
+    let edited =
+        preset::edit("serum-2", &created.write(), &options("serum-2"), &[change("ModSlot1/plainParams/kParamAmount", json!(-20))]).unwrap();
+    let edited = serum2::SerumState::read(edited.component().unwrap(), edited.controller()).unwrap();
+    assert_eq!(edited.processor.body.at("ModSlot1/plainParams/kParamAmount").and_then(cbor::Value::as_f64), Some(-20.0));
+    assert_eq!(edited.processor.body.at("ModSlot1/source/0").and_then(cbor::Value::as_i64), Some(25));
+    for refused in [
+        change("ModSlot5/plainParams/kParamAmount", json!(20)),
+        change("$modulation", json!({"slot": 3, "source": "Aftertouch", "destination": "Filter 1 Freq", "amount": 20})),
+        change("$modulation", json!({"slot": 3, "source": "LFO 2", "destination": "A Hz Offset", "amount": 20})),
+        change("$modulation", json!({"slot": 3, "source": "LFO 2", "destination": "Filter 1 Freq", "amount": 120})),
+        change("$modulation", json!({"slot": 65, "source": "LFO 2", "destination": "Filter 1 Freq", "amount": 20})),
+    ] {
+        assert!(preset::edit("serum-2", &created.write(), &options("serum-2"), &[refused.clone()]).is_err(), "accepted {refused:?}");
+        assert!(preset::review::build("serum-2", &named, &[refused.clone()]).is_err(), "reviewed {refused:?}");
+    }
+}
+
+#[test]
 fn native_softube_templates_require_the_exact_product_and_full_parameter_layout() {
     for format in structure::builtins().iter().filter(|format| format.info.family == "softube") {
         let identity = format.structure.files["preset"].constants["nativePluginId"].as_str().unwrap();

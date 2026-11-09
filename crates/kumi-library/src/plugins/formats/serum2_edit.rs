@@ -106,6 +106,14 @@ impl SerumPreset {
         }
         let format = structure::builtin("serum-2").ok_or_else(|| FormatError::new("Serum format missing"))?;
         let field = format.structure.field(&canonical).ok_or_else(|| FormatError::new(format!("unknown Serum field {path}")))?;
+        // Serum saves nothing of a slot without a source, so a lone amount would be lost on the next save.
+        if canonical.starts_with("ModSlot{n}/") && !super::serum2_modulation::routed(self.file.body.get(parts[0])) {
+            return Err(FormatError::new(format!(
+                "{} has no source, and Serum drops a slot without one; write the whole slot with {}",
+                parts[0],
+                super::serum2_modulation::EDIT
+            )));
+        }
         if !value.is_number() {
             super::write_value::validate_scalar("serum-2", &canonical, value)?;
         }

@@ -15,7 +15,7 @@ belong to their owners.
 
 | Products | Native format | VST3 creation, editing and reload evidence |
 | --- | --- | --- |
-| Serum 2 | Xfer JSON header, Zstandard CBOR; separate processor/controller documents | 2.1.5: oscillators, scalar fields, names and initialized Distortion insertion; translated state reloaded and read back |
+| Serum 2 | Xfer JSON header, Zstandard CBOR; separate processor/controller documents | 2.1.5: oscillators, scalar fields, mod matrix routes, names and initialized Distortion insertion; translated state reloaded and read back |
 | Ozone 12 suite and all 20 standalone modules | XML native presets; typed JSON in zlib component state | 12.1.0.1440: each exact class initialized, edited by Rust, loaded and read back; 644 measured numeric fields, 169 verified Boolean fields and suite module ordering |
 | All 10 captured Valhalla DSP products | XML in product-specific VST3 wrappers | Each product's recorded version; native XML conversion preserves its component wrapper and private data. ValhallaDelay BBD mode checked |
 | All 16 captured Minimal Audio products | JUCE binary XML, physical `mapped_value` controls | Each product's recorded version; normalized host values and stored physical values remain distinct |
@@ -117,6 +117,13 @@ plugin-formats/
   Serum 2's `range-verification.json` also keeps `options`: for each verified text enumeration, the stored text and the
   host's label at every step of its parameter. A Serum `{n}` field, numeric or text, is writable only at the indices
   whose own parameter was measured.
+- **Serum 2's mod matrix is written a slot at a time.** Serum saves nothing of a mod slot without a source, so the
+  `$modulation` edit writes a whole slot: `{"slot": 1–64, "source", "destination", "amount": -100–100, "bipolar",
+  "output": 0–100}`. `structure.json`'s `modulation` table names each source's stored number and each destination's
+  stored module, index, parameter number and key; only `verified` entries are written. A source is verified when one
+  stimulus alone moved a slot routed from it; a destination when a slot naming it reloads unchanged and changes the
+  rendered sound. `range-verification.json` keeps those renders (`modulationSources`, `modulationDestinations`,
+  `modulationSlotChecks`). A slot's `Mod n Amount` and `Mod n Out` are plain controls only once the slot has a source.
 - **Text is not a path loader.** Nonnumeric writes require verified semantics or an explicit display-name
   allowlist, and enumerations must match documented options. Resource paths and opaque data stay read-only.
   A `map|text` field accepts only its documented `default` sentinel as text. Preset names use the same

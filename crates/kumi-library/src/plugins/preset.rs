@@ -11,7 +11,7 @@ use super::formats::{
     minimal_audio::MinimalAudioPreset,
     ozone12,
     pulsar_modular::PulsarModularPreset,
-    serum2, softube,
+    serum2, serum2_modulation, softube,
     structure::{self, PluginFormat},
     superior_drummer,
     tree::Node,
@@ -108,6 +108,8 @@ pub fn edit(plugin: &str, input: &[u8], options: &WriteOptions, edits: &[Edit]) 
                     let rack =
                         change.value.as_u64().filter(|rack| *rack <= 2).ok_or_else(|| error("$add_distortion requires rack 0, 1 or 2"))?;
                     preset.add_distortion(rack as usize)?;
+                } else if change.path == serum2_modulation::EDIT {
+                    preset.set_modulation(&change.value)?;
                 } else {
                     preset.set(&change.path, &change.value)?;
                 }

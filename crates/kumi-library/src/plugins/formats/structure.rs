@@ -159,6 +159,41 @@ pub struct ParameterLink {
     pub note: Option<String>,
 }
 
+/// A synth's modulation matrix as its format stores it: each slot section routes a source to a destination
+/// parameter. A write names both by the names here and only verified entries may be written.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Modulation {
+    pub about: String,
+    /// The slot section's field path ("ModSlot{n}") and how many slots there are.
+    pub section: String,
+    pub slots: u32,
+    /// Source name ("LFO 1") → the number a slot stores for it.
+    pub sources: BTreeMap<String, ModulationSource>,
+    /// A `parameters` link's name ("Filter 1 Freq") → how a slot stores that parameter as its destination.
+    pub destinations: BTreeMap<String, ModulationDestination>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModulationSource {
+    pub id: u32,
+    pub status: Status,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Serum names a destination four ways at once: module type, module index, the parameter's number in that
+/// module and its stored key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModulationDestination {
+    pub module: String,
+    pub index: u32,
+    pub param: u32,
+    pub name: String,
+    pub status: Status,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// `structure.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "StructureSource")]
@@ -183,6 +218,8 @@ pub struct Structure {
     pub opaque: Vec<String>,
     #[serde(default)]
     pub parameters: BTreeMap<String, ParameterLink>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulation: Option<Modulation>,
 }
 
 // The source may share repetitive metadata; the public Structure and Field
@@ -203,6 +240,8 @@ struct StructureSource {
     opaque: Vec<String>,
     #[serde(default)]
     parameters: BTreeMap<String, ParameterLink>,
+    #[serde(default)]
+    modulation: Option<Modulation>,
     #[serde(default)]
     field_defaults: BTreeMap<String, FieldDefaults>,
     #[serde(default)]
@@ -262,6 +301,7 @@ impl TryFrom<StructureSource> for Structure {
             range_scope_required: source.range_scope_required,
             opaque: source.opaque,
             parameters: source.parameters,
+            modulation: source.modulation,
         })
     }
 }
