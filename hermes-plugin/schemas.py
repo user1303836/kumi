@@ -452,6 +452,18 @@ KUMI_DEVICE = _tool(
 # preset_build op, agent-m's W3). Nothing reaches Live or the User Library until kumi_preset is approved.
 PRESET_PLUGINS = ["serum-2", "fabfilter-pro-q-4", "ozone-12"]
 PRESET_EDITS = 512  # serve's cap, the one Kumi's own vst3 tool has (kumi_library's preset::MAX_EDITS)
+# Serum's $modulation value, as serve's preset_build takes it: a measured source to a measured control, at a depth.
+_MOD_SLOT = {
+    "type": "object", "additionalProperties": False, "required": ["slot", "source", "destination", "amount"],
+    "description": "Serum $modulation: route a measured source (LFO 1, Env 2, Macro 1, Velocity …) to a measured "
+                   "destination control (Filter 1 Freq, A WT Pos …); the catalog lists both.",
+    "properties": {
+        "slot": {"type": "integer", "minimum": 1, "maximum": 64},
+        "source": {"type": "string", "maxLength": 40},
+        "destination": {"type": "string", "maxLength": 80},
+        "amount": {"type": "number", "minimum": -100, "maximum": 100, "description": "Depth in percent."},
+        "bipolar": {"type": "boolean", "description": "Swing both ways around the control's value; default false."},
+        "output": {"type": "number", "minimum": 0, "maximum": 100, "description": "Output scaling in percent; default 100."}}}
 
 KUMI_PRESET_BUILD = _tool(
     "kumi_preset_build",
@@ -470,9 +482,11 @@ KUMI_PRESET_BUILD = _tool(
      "edits": {"type": "array", "maxItems": PRESET_EDITS, "items": {
          "type": "object", "additionalProperties": False, "required": ["path", "value"], "properties": {
              "path": {"type": "string", "minLength": 1, "maxLength": 256,
-                      "description": "A writable control path from kumi_plugin_knowledge."},
+                      "description": "A writable control path from kumi_plugin_knowledge, or one of its catalog's "
+                                     "operations: Serum $modulation writes one whole mod slot."},
              "value": {"oneOf": [{"type": "number"}, {"type": "boolean"}, {"type": "string", "maxLength": 80},
-                                 {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 40}}]}}}}},
+                                 {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 40}},
+                                 _MOD_SLOT]}}}}},
     ("plugin", "name", "edits"))
 
 
