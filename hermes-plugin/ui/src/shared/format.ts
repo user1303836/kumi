@@ -233,17 +233,17 @@ export function planNotesRequest(artifactId: string, count?: number | null): str
   return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me before changing anything`
 }
 
-/** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
- *  doesn't write. The name leads, as the producer would say it; the ids follow in parentheses, with the map revision
- *  the sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
- *  again. */
+/** What Use… puts in the input, unsent: the sound's reference and nothing else, so the producer says what to do with
+ *  it. The name leads, quoted as the producer would say it; the ids follow in parentheses, with the map revision the
+ *  sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
+ *  again. Null for an id the runtime doesn't write. */
 export function soundRequest(soundId: string, name?: string, revision?: string | null): string | null {
   const id = plainId(soundId)
   if (!id) return null
   const from = revision ? plainId(revision) : null
   const said = quotable(name)
   const which = `sound ${id}${from ? ` from map ${from}` : ''}`
-  return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
+  return said ? `“${said}” (${which})` : which
 }
 
 /** The most sounds one "More like these" names: Kumi's `near` takes up to sixteen. */

@@ -170,7 +170,7 @@ function Dashboard() {
                   <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
                     {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                   </TextButton>
-                  {request && <CopyButton label={t('dashboard.copyRequest')} text={request} />}
+                  {request && <CopyButton label={t('dashboard.copyReference')} text={request} />}
                 </>
               )
             }}
@@ -257,6 +257,7 @@ function Dashboard() {
               onClose={palette.closeMake}
               onKeep={palette.keep}
               onMake={request => store.design(request)}
+              onSources={palette.makeFrom}
               onPlay={id => void audition.play(id).catch(() => {})}
               onStop={() => audition.stop()}
               playing={playing}

@@ -217,6 +217,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             onClose={palette.closeMake}
             onKeep={palette.keep}
             onMake={request => store.design(request)}
+            onSources={palette.makeFrom}
             onPlay={id => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))}
             onStop={() => audition.stop()}
             playing={playing}

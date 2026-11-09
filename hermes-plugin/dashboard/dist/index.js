@@ -148,7 +148,7 @@
       interrupted: (noun) => `${noun} interrupted`,
       interruptedWhy: "Kumi stopped before it finished.",
       underWay: (title) => `${title}: under way`,
-      percent: (title, percent) => `${title}: ${percent}%`
+      percent: (title, percent2) => `${title}: ${percent2}%`
     },
     map: {
       tab: "Sound map",
@@ -179,7 +179,7 @@
       stop: "■ Stop",
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
-      useTitle: "Put a request to use this sound in the chat, to finish and send",
+      useTitle: "Put its name and id in the chat, then say what to do with it",
       moreLike: "More like this",
       moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
       moreLikeThese: (n) => `More like these (${n})`,
@@ -429,7 +429,7 @@
     // The Make panel: a new sound from the picks or the palette, by Kumi's sound design (cross, fuse, stack).
     make: {
       open: "Make…",
-      openTitle: "Make a new sound from these: cross, fuse or stack them",
+      openTitle: "Make a new sound from these: cross, fuse, loop or stack them",
       title: "Make a sound",
       from: (n) => n === 1 ? "from 1 sound" : `from ${n} sounds`,
       close: "Close",
@@ -437,25 +437,22 @@
       way: "How to make it",
       results: "Sounds made",
       none: "Sounds you make show here: play them, reroll them, and keep the ones you like.",
-      ops: { cross: "Cross", fuse: "Fuse", stack: "Stack" },
-      opHints: { cross: "one sound with the character of several", fuse: "something longer, made of them all", stack: "layered into one" },
+      ops: { cross: "Cross", fuse: "Fuse", loop: "Loop", stack: "Stack", grow: "Grow" },
+      opHints: { cross: "one sound with the character of several", fuse: "something longer, made of them all", loop: "a beat or a melody out of them, in time", stack: "layered into one" },
       cards: {
         blend: { title: "Blend", hint: "One body morphed from them all" },
         attack: { title: "Attack", hint: "One's attack on the blend of the rest" },
         resonate: { title: "Resonate", hint: "Half ring through the other half" },
         modulate: { title: "Modulate", hint: "They modulate each other" },
         texture: { title: "Texture", hint: "A loop that moves between them" },
-        loop: { title: "Loop", hint: "Their hits as a beat" },
+        loop: { title: "Loop", hint: "Their hits as a beat, or their tones as a melody, in time" },
         smear: { title: "Smear", hint: "A long granular stretch" },
         stack: { title: "Stack", hint: "Printed as one hit" }
       },
       options: { seconds: "Length", bpm: "Tempo", bars: "Bars", depth: "Depth", stretch: "Stretch", attack_from: "Attack from" },
       optionValues: {
-        seconds: (value) => `Length ${value}`,
-        bpm: (value) => `Tempo ${value} BPM`,
-        bars: (n) => n === 1 ? "1 bar" : `${n} bars`,
-        depth: (percent) => `Depth ${percent}%`,
-        stretch: (times) => `Stretch ${times}×`
+        bpm: (value) => `${value} BPM`,
+        bars: (n) => n === 1 ? "1 bar" : `${n} bars`
       },
       auto: "Auto",
       autoTitle: "Auto: each roll picks it. Move the slider to set it yourself.",
@@ -480,8 +477,245 @@
       keepTitle: "Put it in your palette",
       kept: "In palette",
       use: "Use…",
-      useTitle: "Put a request in the chat to use this sound on a pad or a track, to send when you like",
-      copyUse: "Copy request"
+      useTitle: "Put its name and id in the chat, then say what to do with it",
+      copyUse: "Copy its reference",
+      back: "Back",
+      backTitle: (n) => n === 1 ? "Make from the sound before these again" : `Make from the ${n} sounds before these again`,
+      made: "Made by Kumi",
+      stages: "How it was modulated",
+      choose: "Choose",
+      chooseTitle: "Choose it to make from next, alone or with other results",
+      chosen: (n) => n === 1 ? "1 chosen" : `${n} chosen`,
+      fromThese: "Make from these",
+      fromTheseTitle: "Make new sounds from the chosen results: they become the sounds the panel makes from, and Back returns",
+      addToSounds: "Add to the sounds",
+      addToSoundsTitle: "Add the chosen results to the sounds the panel makes from",
+      clearChosen: "Clear",
+      clearChosenTitle: "Choose none",
+      resonate: {
+        pairing: "Who rings through whom",
+        pairings: {
+          halves: "Halves",
+          "in-order": "In order",
+          interleave: "Interleave",
+          "bright-dark": "Bright → dark",
+          "dark-bright": "Dark → bright",
+          "hits-tones": "Hits → tones",
+          "tones-hits": "Tones → hits",
+          "one-all": "First → all",
+          "all-one": "All → last",
+          chain: "Chain"
+        },
+        pairingHints: {
+          halves: "A half drawn by the seed rings through the other half",
+          "in-order": "The first half, as picked, rings through the second",
+          interleave: "The 1st, 3rd, 5th… ring through the 2nd, 4th…",
+          "bright-dark": "The brighter half rings through the darker",
+          "dark-bright": "The darker half rings through the brighter",
+          "hits-tones": "Short, punchy sounds ring through long, tonal ones",
+          "tones-hits": "Long, tonal sounds ring through short, punchy ones",
+          "one-all": "The first rings through all the others",
+          "all-one": "All the others ring through the last",
+          chain: "Each rings through the next: A rings B, that rings C…"
+        },
+        ring: "What rings",
+        rings: { partials: "Partials", body: "Body", both: "Both" },
+        decay: "Ring time",
+        short: "Short",
+        long: "Long"
+      },
+      modulate: {
+        carrier: "Played and shaped",
+        carriers: { random: "Any", first: "First", last: "Last", brightest: "Brightest", darkest: "Darkest", longest: "Longest", shortest: "Shortest", tonal: "Most tonal", noisy: "Noisiest" },
+        kinds: "Stages it may use",
+        allKinds: "all, at the usual odds",
+        kindNames: { phase: "Phase", ring: "Ring", am: "AM", fm: "FM", filter: "Filter", gain: "Gain", vocode: "Vocode" },
+        kindHints: {
+          phase: "One sound moves the other's phase",
+          ring: "Ring modulation: the two multiplied, metallic",
+          am: "One sound's loudness moves the other's",
+          fm: "One sound bends the other's pitch",
+          filter: "A filter follows one sound's level",
+          gain: "One sound gates the other",
+          vocode: "One sound's spectrum shapes the other"
+        },
+        stages: "Stages",
+        stagesTitle: "How many stages shape the played sound, one after another",
+        retrigger: "Retrigger",
+        retriggerTitle: "The chance a short modulator repeats along the played sound"
+      },
+      loop: {
+        style: "Style",
+        styles: { beat: "Beat", melody: "Melody" },
+        styleHints: { beat: "The picks' hits, played as a beat", melody: "The picks repitched into a melody, in key" },
+        tempoFrom: (bpm2) => `${bpm2} BPM, your DAW's`,
+        tempoTitle: "The loop's tempo: your DAW's until you move it (120 with none)",
+        groups: { rhythm: "Rhythm", voices: "Voices", feel: "Feel", harmony: "Harmony", line: "Line" },
+        groupHints: { rhythm: "Where the hits fall", voices: "How busy each part is", feel: "How it moves", harmony: "Key, scale and tuning", line: "The melody's shape" },
+        controls: {
+          meter: "Meter",
+          grid: "Grid",
+          density: "Density",
+          syncopation: "Syncopation",
+          lean: "Lean",
+          fills: "Fills",
+          ratchet: "Rolls",
+          poly: "Polyrhythm",
+          variation: "Variation",
+          kick: "Kick",
+          snare: "Snare",
+          hats: "Hats",
+          perc: "Percussion",
+          open: "Open hats",
+          ghosts: "Ghost notes",
+          swing: "Swing",
+          humanize: "Humanize",
+          accent: "Accents",
+          key: "Key",
+          scale: "Scale",
+          tuning: "Tuning",
+          micro: "Microtones",
+          chords: "Chords",
+          drone: "Drone",
+          contour: "Contour",
+          octaves: "Range",
+          register: "Register",
+          glide: "Glide",
+          gate: "Note length"
+        },
+        hints: {
+          density: "How many steps have a hit",
+          syncopation: "Hits pulled onto the off-beats",
+          lean: "Hits gathered toward the start or the end of the loop",
+          fills: "More happening at each phrase's end",
+          ratchet: "Quick repeats of a hit",
+          poly: "Voices cycling in other lengths, like 3 against 4",
+          variation: "How much the bars differ",
+          kick: "How busy the kick is",
+          snare: "How busy the snare is",
+          hats: "How busy the hats are",
+          perc: "How busy the other percussion is",
+          open: "The chance a hat rings open",
+          ghosts: "Quiet ghost notes between the hits",
+          swing: "Every other step pushed late",
+          humanize: "Timing and level loosened, like a player",
+          accent: "Strong and weak hits further apart",
+          micro: "Notes bent off the scale by the tuning's smallest step",
+          chords: "Notes stacked into chords",
+          drone: "A held note underneath",
+          octaves: "How many octaves the melody spans",
+          register: "Higher or lower",
+          glide: "Notes sliding into each other",
+          gate: "How long each note holds"
+        },
+        grids: { 2: "8ths", 3: "Triplets", 4: "16ths", 6: "16th triplets", 8: "32nds" },
+        scales: {
+          major: "Major",
+          minor: "Minor",
+          dorian: "Dorian",
+          phrygian: "Phrygian",
+          lydian: "Lydian",
+          mixolydian: "Mixolydian",
+          locrian: "Locrian",
+          "harmonic-minor": "Harmonic minor",
+          "melodic-minor": "Melodic minor",
+          pentatonic: "Pentatonic",
+          "minor-pentatonic": "Minor pentatonic",
+          blues: "Blues",
+          "whole-tone": "Whole tone",
+          chromatic: "Chromatic",
+          hirajoshi: "Hirajōshi",
+          "in-sen": "In-sen",
+          "phrygian-dominant": "Phrygian dominant",
+          "hungarian-minor": "Hungarian minor",
+          pelog: "Pelog",
+          slendro: "Slendro"
+        },
+        tunings: {
+          "12-tet": "12 equal (standard)",
+          "19-tet": "19 equal",
+          "22-tet": "22 equal",
+          "24-tet": "24 equal (quarter tones)",
+          "31-tet": "31 equal",
+          just: "Just intonation",
+          pythagorean: "Pythagorean",
+          "bohlen-pierce": "Bohlen–Pierce",
+          harmonic: "Harmonic series"
+        },
+        contours: { up: "Up", down: "Down", "up-down": "Up and down", walk: "Walk", leaps: "Leaps", random: "Random" },
+        registerValue: (shift) => `${shift} oct`,
+        octavesValue: (n) => n === 1 ? "1 octave" : `${n} octaves`,
+        early: "Early",
+        late: "Late",
+        reset: "Auto all",
+        resetTitle: "Leave every control here to the seed"
+      },
+      steer: {
+        title: "Steer",
+        hint: "Shape what comes out. A control left alone changes nothing; Surprise moves a few.",
+        count: (n) => `${n} set`,
+        reset: "Reset",
+        resetTitle: "Put every control back where it changes nothing",
+        roll: "Surprise",
+        rollTitle: "Move a few controls a good way, at random",
+        sound: "The sound",
+        layers: "Each layer",
+        layersHint: "Each sound draws its own value inside the range from the seed, so a reroll draws again",
+        controls: {
+          bright: "Tone",
+          body: "Body",
+          filter: "Filter",
+          resonance: "Resonance",
+          noise: "Texture",
+          punch: "Punch",
+          length: "Length",
+          drive: "Drive",
+          crush: "Crush",
+          width: "Width",
+          space: "Space",
+          pitch: "Pitch",
+          reverse: "Reverse",
+          start: "Start",
+          delay: "Delay",
+          pan: "Pan",
+          level: "Level"
+        },
+        ends: {
+          bright: { low: "Dark", high: "Bright" },
+          body: { low: "Thin", high: "Full" },
+          filter: { low: "Low-pass", high: "High-pass" },
+          noise: { low: "Tonal", high: "Noisy" },
+          punch: { low: "Soft", high: "Punchy" },
+          length: { low: "Shorter", high: "Longer" },
+          width: { low: "Mono", high: "Wide" }
+        },
+        hints: {
+          bright: "A tilt about 1 kHz: darker or brighter, up to about 10 dB",
+          body: "A low shelf about 200 Hz: thinner or fuller",
+          filter: "Left closes a low-pass toward 150 Hz; right opens a high-pass toward 5 kHz",
+          resonance: "The filter's peak at its cutoff (nothing while Filter is centred)",
+          noise: "Spectral peaks sharpened (tonal) or flattened (noisy)",
+          punch: "Transients down (soft) or up (punchy), about 12 dB",
+          length: "Decays up to 4× faster, or rings up to 2× longer",
+          drive: "Saturation, level-matched",
+          crush: "Lo-fi: fewer bits, a lower rate",
+          width: "From mono to wide",
+          space: "From dry to a room, then a hall",
+          pitch: "Each sound repitched, tape-style, somewhere in the range",
+          reverse: "The chance each sound plays backwards",
+          start: "Each sound starts this far into itself",
+          delay: "Each sound comes in this much later: flams and smears",
+          pan: "Each sound panned somewhere inside the width",
+          level: "Each sound turned down by up to 18 dB"
+        },
+        values: {
+          semitones: (low, high) => `${low}…${high} st`,
+          ms: (low, high) => `${low}–${high} ms`,
+          percentRange: (low, high) => `${low}–${high}%`,
+          down: (db) => `down to −${db} dB`,
+          pan: (percent2) => `±${percent2}%`
+        }
+      }
     },
     notify: {
       nothingToUndo: "Kumi has no change it can undo right now.",
@@ -497,6 +731,7 @@
       copyTitle: (text) => `Copy “${text}” to paste into a chat`,
       copied: "Copied",
       copyRequest: "Copy request",
+      copyReference: "Copy its reference",
       copyUndo: "Copy undo",
       mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
       askLook: "Ask Hermes in your chat to look again before another change."
@@ -604,7 +839,7 @@
       interrupted: (noun) => `${noun}中断`,
       interruptedWhy: "完了する前に Kumi が停止しました。",
       underWay: (title) => `${title}: 進行中`,
-      percent: (title, percent) => `${title}: ${percent}%`
+      percent: (title, percent2) => `${title}: ${percent2}%`
     },
     map: {
       tab: "サンプルマップ",
@@ -635,7 +870,7 @@
       stop: "■ 停止",
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
-      useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+      useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
       moreLike: "似たサウンド",
       moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
       moreLikeThese: (n) => `これらに似たサウンド（${n}）`,
@@ -882,7 +1117,7 @@
     },
     make: {
       open: "作る…",
-      openTitle: "これらから新しいサウンドを作ります（クロス、フューズ、スタック）",
+      openTitle: "これらから新しいサウンドを作ります（クロス、フューズ、ループ、スタック）",
       title: "サウンドを作る",
       from: (n) => `${n} 個のサウンドから`,
       close: "閉じる",
@@ -890,25 +1125,22 @@
       way: "作り方",
       results: "作ったサウンド",
       none: "作ったサウンドはここに並びます。再生し、リロールし、気に入ったものはキープしてパレットに入れられます。",
-      ops: { cross: "クロス", fuse: "フューズ", stack: "スタック" },
-      opHints: { cross: "複数のキャラクターを持つ 1 つの音", fuse: "すべてから作る長めの音", stack: "重ねて 1 つに" },
+      ops: { cross: "クロス", fuse: "フューズ", loop: "ループ", stack: "スタック", grow: "グロウ" },
+      opHints: { cross: "複数のキャラクターを持つ 1 つの音", fuse: "すべてから作る長めの音", loop: "それらからビートかメロディを、テンポに合わせて", stack: "重ねて 1 つに" },
       cards: {
         blend: { title: "ブレンド", hint: "すべてを混ぜ合わせた 1 つのボディ" },
         attack: { title: "アタック", hint: "1 つのアタックを残りのブレンドに" },
         resonate: { title: "レゾネート", hint: "半分がもう半分を通して鳴る" },
         modulate: { title: "モジュレート", hint: "互いに変調し合う" },
         texture: { title: "テクスチャ", hint: "それらの間を動くループ" },
-        loop: { title: "ループ", hint: "それらのヒットでビートを" },
+        loop: { title: "ループ", hint: "ヒットをビートに、または音程をメロディに、テンポに合わせて" },
         smear: { title: "スミア", hint: "長いグラニュラー・ストレッチ" },
         stack: { title: "スタック", hint: "1 つのヒットに書き出す" }
       },
       options: { seconds: "長さ", bpm: "テンポ", bars: "小節", depth: "深さ", stretch: "ストレッチ", attack_from: "アタックの元" },
       optionValues: {
-        seconds: (value) => `長さ ${value}`,
-        bpm: (value) => `テンポ ${value} BPM`,
-        bars: (n) => `${n} 小節`,
-        depth: (percent) => `深さ ${percent}%`,
-        stretch: (times) => `ストレッチ ${times}×`
+        bpm: (value) => `${value} BPM`,
+        bars: (n) => `${n} 小節`
       },
       auto: "自動",
       autoTitle: "自動：作るたびに決まります。スライダーを動かすと自分で決められます。",
@@ -933,8 +1165,245 @@
       keepTitle: "パレットに入れます",
       kept: "パレットにあります",
       use: "使う…",
-      useTitle: "このサウンドをパッドやトラックで使う依頼をチャットに入れます（送るのはあなたです）",
-      copyUse: "依頼をコピー"
+      useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
+      copyUse: "参照をコピー",
+      back: "戻る",
+      backTitle: (n) => `ひとつ前の ${n} 個のサウンドから作り直します`,
+      made: "Kumi が作ったサウンド",
+      stages: "変調のしかた",
+      choose: "選ぶ",
+      chooseTitle: "次に作るときの元に選びます（単独でも、ほかの結果と一緒でも）",
+      chosen: (n) => `${n} 個を選択中`,
+      fromThese: "これらから作る",
+      fromTheseTitle: "選んだ結果から新しいサウンドを作ります。それらが元のサウンドになり、「戻る」で元に戻せます",
+      addToSounds: "元のサウンドに加える",
+      addToSoundsTitle: "選んだ結果を、元にするサウンドに加えます",
+      clearChosen: "解除",
+      clearChosenTitle: "何も選ばない状態にします",
+      resonate: {
+        pairing: "どれがどれを通して鳴るか",
+        pairings: {
+          halves: "半分ずつ",
+          "in-order": "選んだ順",
+          interleave: "交互",
+          "bright-dark": "明 → 暗",
+          "dark-bright": "暗 → 明",
+          "hits-tones": "ヒット → トーン",
+          "tones-hits": "トーン → ヒット",
+          "one-all": "最初 → 全部",
+          "all-one": "全部 → 最後",
+          chain: "連鎖"
+        },
+        pairingHints: {
+          halves: "シードで決まる半分が、もう半分を通して鳴ります",
+          "in-order": "選んだ順の前半が後半を通して鳴ります",
+          interleave: "1、3、5 番目…が 2、4 番目…を通して鳴ります",
+          "bright-dark": "明るい半分が暗い半分を通して鳴ります",
+          "dark-bright": "暗い半分が明るい半分を通して鳴ります",
+          "hits-tones": "短くパンチのある音が、長く音程のある音を通して鳴ります",
+          "tones-hits": "長く音程のある音が、短くパンチのある音を通して鳴ります",
+          "one-all": "最初の音がほかのすべてを通して鳴ります",
+          "all-one": "ほかのすべてが最後の音を通して鳴ります",
+          chain: "それぞれが次を通して鳴ります（A が B を、B が C を…）"
+        },
+        ring: "鳴る部分",
+        rings: { partials: "倍音", body: "ボディ", both: "両方" },
+        decay: "響きの長さ",
+        short: "短い",
+        long: "長い"
+      },
+      modulate: {
+        carrier: "鳴らして変える音",
+        carriers: { random: "どれでも", first: "最初", last: "最後", brightest: "最も明るい", darkest: "最も暗い", longest: "最も長い", shortest: "最も短い", tonal: "最も音程的", noisy: "最もノイジー" },
+        kinds: "使える段",
+        allKinds: "すべて、いつもの確率で",
+        kindNames: { phase: "フェイズ", ring: "リング", am: "AM", fm: "FM", filter: "フィルター", gain: "ゲイン", vocode: "ボコード" },
+        kindHints: {
+          phase: "ひとつの音がもうひとつの位相を動かします",
+          ring: "リングモジュレーション：2 つを掛け合わせた金属的な音",
+          am: "ひとつの音の大きさがもうひとつの大きさを動かします",
+          fm: "ひとつの音がもうひとつの音程を曲げます",
+          filter: "フィルターがひとつの音のレベルを追います",
+          gain: "ひとつの音がもうひとつをゲートします",
+          vocode: "ひとつの音のスペクトルがもうひとつを形づくります"
+        },
+        stages: "段数",
+        stagesTitle: "鳴らす音を順に変えていく段の数",
+        retrigger: "リトリガー",
+        retriggerTitle: "短いモジュレーターが鳴らす音に沿って繰り返される確率"
+      },
+      loop: {
+        style: "スタイル",
+        styles: { beat: "ビート", melody: "メロディ" },
+        styleHints: { beat: "選んだ音のヒットをビートとして鳴らします", melody: "選んだ音を音程を変えてキーに合ったメロディにします" },
+        tempoFrom: (bpm2) => `${bpm2} BPM（DAW のテンポ）`,
+        tempoTitle: "ループのテンポ：動かすまでは DAW のテンポ（DAW がなければ 120）",
+        groups: { rhythm: "リズム", voices: "パート", feel: "ノリ", harmony: "ハーモニー", line: "ライン" },
+        groupHints: { rhythm: "ヒットの置きどころ", voices: "各パートの忙しさ", feel: "動き方", harmony: "キー、スケール、チューニング", line: "メロディの形" },
+        controls: {
+          meter: "拍子",
+          grid: "グリッド",
+          density: "密度",
+          syncopation: "シンコペーション",
+          lean: "寄せ",
+          fills: "フィル",
+          ratchet: "ロール",
+          poly: "ポリリズム",
+          variation: "変化",
+          kick: "キック",
+          snare: "スネア",
+          hats: "ハット",
+          perc: "パーカッション",
+          open: "オープンハット",
+          ghosts: "ゴーストノート",
+          swing: "スウィング",
+          humanize: "ヒューマナイズ",
+          accent: "アクセント",
+          key: "キー",
+          scale: "スケール",
+          tuning: "チューニング",
+          micro: "微分音",
+          chords: "コード",
+          drone: "ドローン",
+          contour: "輪郭",
+          octaves: "音域",
+          register: "音の高さ",
+          glide: "グライド",
+          gate: "音の長さ"
+        },
+        hints: {
+          density: "ヒットのあるステップの多さ",
+          syncopation: "ヒットを裏拍に寄せます",
+          lean: "ヒットをループの頭寄り、または終わり寄りに集めます",
+          fills: "フレーズの終わりで起きることを増やします",
+          ratchet: "ヒットの素早い繰り返し",
+          poly: "別の長さで巡るパート（3 対 4 など）",
+          variation: "小節ごとの違いの大きさ",
+          kick: "キックの忙しさ",
+          snare: "スネアの忙しさ",
+          hats: "ハットの忙しさ",
+          perc: "ほかのパーカッションの忙しさ",
+          open: "ハットがオープンで鳴る確率",
+          ghosts: "ヒットの間に入る小さなゴーストノート",
+          swing: "1 つおきのステップを後ろにずらします",
+          humanize: "演奏者のようにタイミングと音量をゆらします",
+          accent: "強いヒットと弱いヒットの差を広げます",
+          micro: "チューニングの最小ステップだけスケールから外れる音",
+          chords: "音を重ねてコードにします",
+          drone: "下で鳴り続ける音",
+          octaves: "メロディが広がるオクターブ数",
+          register: "高め、または低め",
+          glide: "音が次の音へなめらかに移ります",
+          gate: "各音を伸ばす長さ"
+        },
+        grids: { 2: "8 分", 3: "3 連符", 4: "16 分", 6: "16 分 3 連符", 8: "32 分" },
+        scales: {
+          major: "メジャー",
+          minor: "マイナー",
+          dorian: "ドリアン",
+          phrygian: "フリジアン",
+          lydian: "リディアン",
+          mixolydian: "ミクソリディアン",
+          locrian: "ロクリアン",
+          "harmonic-minor": "ハーモニック・マイナー",
+          "melodic-minor": "メロディック・マイナー",
+          pentatonic: "ペンタトニック",
+          "minor-pentatonic": "マイナー・ペンタトニック",
+          blues: "ブルース",
+          "whole-tone": "ホールトーン",
+          chromatic: "クロマチック",
+          hirajoshi: "平調子",
+          "in-sen": "陰旋法",
+          "phrygian-dominant": "フリジアン・ドミナント",
+          "hungarian-minor": "ハンガリアン・マイナー",
+          pelog: "ペロッグ",
+          slendro: "スレンドロ"
+        },
+        tunings: {
+          "12-tet": "12 平均律（標準）",
+          "19-tet": "19 平均律",
+          "22-tet": "22 平均律",
+          "24-tet": "24 平均律（四分音）",
+          "31-tet": "31 平均律",
+          just: "純正律",
+          pythagorean: "ピタゴラス音律",
+          "bohlen-pierce": "ボーレン＝ピアース",
+          harmonic: "倍音列"
+        },
+        contours: { up: "上がる", down: "下がる", "up-down": "上がって下がる", walk: "歩く", leaps: "跳ぶ", random: "ランダム" },
+        registerValue: (shift) => `${shift} オクターブ`,
+        octavesValue: (n) => `${n} オクターブ`,
+        early: "頭寄り",
+        late: "終わり寄り",
+        reset: "すべて自動",
+        resetTitle: "ここのコントロールをすべてシードに任せます"
+      },
+      steer: {
+        title: "ステア",
+        hint: "出てくる音を形づくります。触れていないコントロールは何も変えません。「おまかせ」はいくつかを動かします。",
+        count: (n) => `${n} 個設定`,
+        reset: "リセット",
+        resetTitle: "すべてのコントロールを何も変えない位置に戻します",
+        roll: "おまかせ",
+        rollTitle: "いくつかのコントロールをランダムに大きく動かします",
+        sound: "音そのもの",
+        layers: "各レイヤー",
+        layersHint: "それぞれの音がシードから範囲内の値を引くので、リロールで引き直されます",
+        controls: {
+          bright: "音色",
+          body: "ボディ",
+          filter: "フィルター",
+          resonance: "レゾナンス",
+          noise: "質感",
+          punch: "パンチ",
+          length: "長さ",
+          drive: "ドライブ",
+          crush: "クラッシュ",
+          width: "広がり",
+          space: "空間",
+          pitch: "ピッチ",
+          reverse: "リバース",
+          start: "開始位置",
+          delay: "ディレイ",
+          pan: "パン",
+          level: "レベル"
+        },
+        ends: {
+          bright: { low: "暗い", high: "明るい" },
+          body: { low: "細い", high: "太い" },
+          filter: { low: "ローパス", high: "ハイパス" },
+          noise: { low: "音程的", high: "ノイジー" },
+          punch: { low: "やわらか", high: "パンチ" },
+          length: { low: "短く", high: "長く" },
+          width: { low: "モノ", high: "ワイド" }
+        },
+        hints: {
+          bright: "約 1 kHz を中心とした傾き：暗く、または明るく（最大約 10 dB）",
+          body: "約 200 Hz のローシェルフ：細く、または太く",
+          filter: "左でローパスが 150 Hz に向かって閉じ、右でハイパスが 5 kHz に向かって開きます",
+          resonance: "カットオフでのフィルターのピーク（フィルターが中央の間は効きません）",
+          noise: "スペクトルのピークを鋭く（音程的）、または平らに（ノイジー）",
+          punch: "トランジェントを下げて（やわらか）、または上げて（パンチ）、約 12 dB",
+          length: "減衰を最大 4 倍速く、または響きを最大 2 倍長く",
+          drive: "サチュレーション（レベルはそろえます）",
+          crush: "ローファイ：少ないビット、低いレート",
+          width: "モノからワイドまで",
+          space: "ドライから部屋、そしてホールへ",
+          pitch: "それぞれの音を範囲内のどこかへテープ式にピッチ変更",
+          reverse: "それぞれの音が逆再生される確率",
+          start: "それぞれの音を、その長さのこの位置から鳴らします",
+          delay: "それぞれの音をこれだけ遅らせて入れます（フラムやスミア）",
+          pan: "それぞれの音を広がりの中のどこかにパン",
+          level: "それぞれの音を最大 18 dB 下げます"
+        },
+        values: {
+          semitones: (low, high) => `${low}…${high} 半音`,
+          ms: (low, high) => `${low}–${high} ms`,
+          percentRange: (low, high) => `${low}–${high}%`,
+          down: (db) => `最大 −${db} dB`,
+          pan: (percent2) => `±${percent2}%`
+        }
+      }
     },
     notify: {
       nothingToUndo: "今すぐ取り消せる変更はありません。",
@@ -950,6 +1419,7 @@
       copyTitle: (text) => `「${text}」をコピーしてチャットに貼り付け`,
       copied: "コピーしました",
       copyRequest: "依頼をコピー",
+      copyReference: "参照をコピー",
       copyUndo: "取り消しをコピー",
       mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
       askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
@@ -1057,7 +1527,7 @@
       interrupted: (noun) => `${noun}中断`,
       interruptedWhy: "Kumi 在完成前停止了。",
       underWay: (title) => `${title}：进行中`,
-      percent: (title, percent) => `${title}：${percent}%`
+      percent: (title, percent2) => `${title}：${percent2}%`
     },
     map: {
       tab: "采样地图",
@@ -1088,7 +1558,7 @@
       stop: "■ 停止",
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
-      useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+      useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
       moreLike: "更多类似的",
       moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
       moreLikeThese: (n) => `更多类似这些的（${n}）`,
@@ -1335,7 +1805,7 @@
     },
     make: {
       open: "制作…",
-      openTitle: "用这些声音制作一个新声音：交叉、熔合或叠加",
+      openTitle: "用这些声音制作一个新声音：交叉、熔合、循环或叠加",
       title: "制作声音",
       from: (n) => `来自 ${n} 个声音`,
       close: "关闭",
@@ -1343,25 +1813,22 @@
       way: "做法",
       results: "做出的声音",
       none: "做出的声音会列在这里：可以播放、重掷，把喜欢的保留在调色板里。",
-      ops: { cross: "交叉", fuse: "熔合", stack: "叠加" },
-      opHints: { cross: "一个声音，带着几个声音的特点", fuse: "用它们做成更长的声音", stack: "叠成一个" },
+      ops: { cross: "交叉", fuse: "熔合", loop: "循环", stack: "叠加", grow: "生长" },
+      opHints: { cross: "一个声音，带着几个声音的特点", fuse: "用它们做成更长的声音", loop: "用它们做成合拍的节拍或旋律", stack: "叠成一个" },
       cards: {
         blend: { title: "融合", hint: "把它们揉成一个声音主体" },
         attack: { title: "起音", hint: "一个声音的起音接上其余声音的混合" },
         resonate: { title: "共鸣", hint: "一半声音通过另一半鸣响" },
         modulate: { title: "调制", hint: "它们相互调制" },
         texture: { title: "纹理", hint: "在它们之间游走的循环" },
-        loop: { title: "循环", hint: "用它们的击打组成节拍" },
+        loop: { title: "循环", hint: "把击打组成节拍，或把音高组成旋律，合着速度" },
         smear: { title: "涂抹", hint: "长长的颗粒拉伸" },
         stack: { title: "叠加", hint: "合成一个击打" }
       },
       options: { seconds: "长度", bpm: "速度", bars: "小节", depth: "深度", stretch: "拉伸", attack_from: "起音来自" },
       optionValues: {
-        seconds: (value) => `长度 ${value}`,
-        bpm: (value) => `速度 ${value} BPM`,
-        bars: (n) => `${n} 小节`,
-        depth: (percent) => `深度 ${percent}%`,
-        stretch: (times) => `拉伸 ${times}×`
+        bpm: (value) => `${value} BPM`,
+        bars: (n) => `${n} 小节`
       },
       auto: "自动",
       autoTitle: "自动：每次制作时决定。拖动滑块即可自己设定。",
@@ -1386,8 +1853,245 @@
       keepTitle: "放进调色板",
       kept: "已在调色板中",
       use: "使用…",
-      useTitle: "把在打击垫或音轨上使用这个声音的请求放进对话，由你决定何时发送",
-      copyUse: "复制请求"
+      useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
+      copyUse: "复制引用",
+      back: "返回",
+      backTitle: (n) => `重新用之前的 ${n} 个声音制作`,
+      made: "Kumi 做出的声音",
+      stages: "调制的方式",
+      choose: "选择",
+      chooseTitle: "选它作为下一次制作的素材，可单独使用，也可与其他结果一起",
+      chosen: (n) => `已选 ${n} 个`,
+      fromThese: "用这些制作",
+      fromTheseTitle: "用选中的结果制作新声音：它们会成为面板用来制作的声音，按“返回”可回去",
+      addToSounds: "加入素材",
+      addToSoundsTitle: "把选中的结果加入面板用来制作的声音",
+      clearChosen: "清除",
+      clearChosenTitle: "取消所有选择",
+      resonate: {
+        pairing: "谁通过谁鸣响",
+        pairings: {
+          halves: "对半",
+          "in-order": "按顺序",
+          interleave: "交替",
+          "bright-dark": "亮 → 暗",
+          "dark-bright": "暗 → 亮",
+          "hits-tones": "击打 → 音调",
+          "tones-hits": "音调 → 击打",
+          "one-all": "第一个 → 全部",
+          "all-one": "全部 → 最后一个",
+          chain: "链式"
+        },
+        pairingHints: {
+          halves: "由种子决定的一半通过另一半鸣响",
+          "in-order": "按选择顺序，前一半通过后一半鸣响",
+          interleave: "第 1、3、5…个通过第 2、4…个鸣响",
+          "bright-dark": "较亮的一半通过较暗的一半鸣响",
+          "dark-bright": "较暗的一半通过较亮的一半鸣响",
+          "hits-tones": "短而有冲击力的声音通过长而有音调的声音鸣响",
+          "tones-hits": "长而有音调的声音通过短而有冲击力的声音鸣响",
+          "one-all": "第一个通过其余所有声音鸣响",
+          "all-one": "其余所有声音通过最后一个鸣响",
+          chain: "每个通过下一个鸣响：A 激起 B，B 激起 C…"
+        },
+        ring: "鸣响的部分",
+        rings: { partials: "泛音", body: "主体", both: "两者" },
+        decay: "鸣响时长",
+        short: "短",
+        long: "长"
+      },
+      modulate: {
+        carrier: "被播放和塑形的声音",
+        carriers: { random: "任意", first: "第一个", last: "最后一个", brightest: "最亮", darkest: "最暗", longest: "最长", shortest: "最短", tonal: "最有音调", noisy: "最嘈杂" },
+        kinds: "可用的调制级",
+        allKinds: "全部，按通常的概率",
+        kindNames: { phase: "相位", ring: "环形", am: "AM", fm: "FM", filter: "滤波", gain: "增益", vocode: "声码" },
+        kindHints: {
+          phase: "一个声音推动另一个的相位",
+          ring: "环形调制：两者相乘，带金属感",
+          am: "一个声音的响度带动另一个的响度",
+          fm: "一个声音弯曲另一个的音高",
+          filter: "滤波器跟随一个声音的电平",
+          gain: "一个声音为另一个开关门限",
+          vocode: "一个声音的频谱塑造另一个"
+        },
+        stages: "级数",
+        stagesTitle: "依次塑造被播放声音的调制级数",
+        retrigger: "重触发",
+        retriggerTitle: "短的调制声音沿着被播放的声音重复的概率"
+      },
+      loop: {
+        style: "风格",
+        styles: { beat: "节拍", melody: "旋律" },
+        styleHints: { beat: "把选中声音的击打当作节拍来演奏", melody: "把选中的声音变调成合调的旋律" },
+        tempoFrom: (bpm2) => `${bpm2} BPM（DAW 的速度）`,
+        tempoTitle: "循环的速度：在你调整之前跟随 DAW（没有 DAW 时为 120）",
+        groups: { rhythm: "节奏", voices: "声部", feel: "律动", harmony: "和声", line: "线条" },
+        groupHints: { rhythm: "击打落在哪里", voices: "每个声部有多忙", feel: "它如何流动", harmony: "调、音阶和律制", line: "旋律的形状" },
+        controls: {
+          meter: "拍号",
+          grid: "网格",
+          density: "密度",
+          syncopation: "切分",
+          lean: "偏向",
+          fills: "加花",
+          ratchet: "滚奏",
+          poly: "复节奏",
+          variation: "变化",
+          kick: "底鼓",
+          snare: "军鼓",
+          hats: "踩镲",
+          perc: "打击乐",
+          open: "开镲",
+          ghosts: "鬼音",
+          swing: "摇摆",
+          humanize: "人性化",
+          accent: "重音",
+          key: "调",
+          scale: "音阶",
+          tuning: "律制",
+          micro: "微分音",
+          chords: "和弦",
+          drone: "持续音",
+          contour: "轮廓",
+          octaves: "音域",
+          register: "音区",
+          glide: "滑音",
+          gate: "音符长度"
+        },
+        hints: {
+          density: "有击打的步数多少",
+          syncopation: "把击打拉到反拍上",
+          lean: "把击打集中在循环的开头或结尾",
+          fills: "每个乐句结尾发生得更多",
+          ratchet: "击打的快速重复",
+          poly: "以其他长度循环的声部，比如 3 对 4",
+          variation: "各小节之间的差异",
+          kick: "底鼓有多忙",
+          snare: "军鼓有多忙",
+          hats: "踩镲有多忙",
+          perc: "其他打击乐有多忙",
+          open: "踩镲敞开鸣响的概率",
+          ghosts: "击打之间轻轻的鬼音",
+          swing: "每隔一步往后推",
+          humanize: "像演奏者一样放松时值和力度",
+          accent: "强弱击打的差距更大",
+          micro: "音符按律制的最小音级偏离音阶",
+          chords: "把音符叠成和弦",
+          drone: "底下持续的一个音",
+          octaves: "旋律跨越的八度数",
+          register: "更高或更低",
+          glide: "音符彼此滑入",
+          gate: "每个音符持续多久"
+        },
+        grids: { 2: "八分音符", 3: "三连音", 4: "十六分音符", 6: "十六分三连音", 8: "三十二分音符" },
+        scales: {
+          major: "大调",
+          minor: "小调",
+          dorian: "多利亚",
+          phrygian: "弗里几亚",
+          lydian: "利底亚",
+          mixolydian: "混合利底亚",
+          locrian: "洛克里亚",
+          "harmonic-minor": "和声小调",
+          "melodic-minor": "旋律小调",
+          pentatonic: "五声音阶",
+          "minor-pentatonic": "小调五声音阶",
+          blues: "布鲁斯",
+          "whole-tone": "全音音阶",
+          chromatic: "半音阶",
+          hirajoshi: "平调子",
+          "in-sen": "阴旋法",
+          "phrygian-dominant": "弗里几亚属音阶",
+          "hungarian-minor": "匈牙利小调",
+          pelog: "佩罗格",
+          slendro: "斯连德罗"
+        },
+        tunings: {
+          "12-tet": "十二平均律（标准）",
+          "19-tet": "十九平均律",
+          "22-tet": "二十二平均律",
+          "24-tet": "二十四平均律（四分音）",
+          "31-tet": "三十一平均律",
+          just: "纯律",
+          pythagorean: "五度相生律",
+          "bohlen-pierce": "博伦–皮尔斯律",
+          harmonic: "泛音列"
+        },
+        contours: { up: "上行", down: "下行", "up-down": "上行再下行", walk: "级进", leaps: "跳进", random: "随机" },
+        registerValue: (shift) => `${shift} 个八度`,
+        octavesValue: (n) => `${n} 个八度`,
+        early: "偏前",
+        late: "偏后",
+        reset: "全部自动",
+        resetTitle: "把这里的所有控件交给种子决定"
+      },
+      steer: {
+        title: "引导",
+        hint: "塑造做出来的声音。没动过的控件不会改变任何东西；“随机惊喜”会动其中几个。",
+        count: (n) => `已设 ${n} 项`,
+        reset: "重置",
+        resetTitle: "把所有控件放回不改变任何东西的位置",
+        roll: "随机惊喜",
+        rollTitle: "随机把几个控件推得远一些",
+        sound: "声音本身",
+        layers: "每一层",
+        layersHint: "每个声音都从种子中在范围内取自己的值，所以重掷会重新取",
+        controls: {
+          bright: "音色",
+          body: "厚度",
+          filter: "滤波",
+          resonance: "共振",
+          noise: "质感",
+          punch: "冲击",
+          length: "长度",
+          drive: "驱动",
+          crush: "降采样",
+          width: "宽度",
+          space: "空间",
+          pitch: "音高",
+          reverse: "反向",
+          start: "起点",
+          delay: "延迟",
+          pan: "声像",
+          level: "电平"
+        },
+        ends: {
+          bright: { low: "暗", high: "亮" },
+          body: { low: "薄", high: "厚" },
+          filter: { low: "低通", high: "高通" },
+          noise: { low: "有音调", high: "嘈杂" },
+          punch: { low: "柔和", high: "有冲击力" },
+          length: { low: "更短", high: "更长" },
+          width: { low: "单声道", high: "宽" }
+        },
+        hints: {
+          bright: "以约 1 kHz 为中心倾斜：更暗或更亮，最多约 10 dB",
+          body: "约 200 Hz 的低架：更薄或更厚",
+          filter: "向左时低通向 150 Hz 收紧；向右时高通向 5 kHz 打开",
+          resonance: "滤波器在截止频率处的峰（滤波居中时不起作用）",
+          noise: "把频谱峰变尖（有音调）或压平（嘈杂）",
+          punch: "瞬态降低（柔和）或提高（有冲击力），约 12 dB",
+          length: "衰减最多快 4 倍，或鸣响最多长 2 倍",
+          drive: "饱和，电平保持一致",
+          crush: "Lo-fi：更少的位数、更低的采样率",
+          width: "从单声道到宽",
+          space: "从干声到房间，再到大厅",
+          pitch: "每个声音像磁带一样变调到范围内的某处",
+          reverse: "每个声音反向播放的概率",
+          start: "每个声音从自身的这个位置开始",
+          delay: "每个声音晚这么多进入：装饰音和涂抹",
+          pan: "每个声音放在宽度内的某处",
+          level: "每个声音最多降低 18 dB"
+        },
+        values: {
+          semitones: (low, high) => `${low}…${high} 半音`,
+          ms: (low, high) => `${low}–${high} ms`,
+          percentRange: (low, high) => `${low}–${high}%`,
+          down: (db) => `最多 −${db} dB`,
+          pan: (percent2) => `±${percent2}%`
+        }
+      }
     },
     notify: {
       nothingToUndo: "Kumi 现在没有可以撤销的改动。",
@@ -1403,6 +2107,7 @@
       copyTitle: (text) => `复制“${text}”以粘贴到对话中`,
       copied: "已复制",
       copyRequest: "复制请求",
+      copyReference: "复制引用",
       copyUndo: "复制撤销",
       mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
       askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
@@ -1533,7 +2238,7 @@
     const from = revision ? plainId(revision) : null;
     const said = quotable(name);
     const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
-    return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
+    return said ? `“${said}” (${which})` : which;
   }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   var RESCAN_REQUEST = "Kumi, rescan my sample folders";
@@ -1556,25 +2261,229 @@
   }
 
   // src/shared/design.ts
+  var UNIT = { min: 0, max: 1, step: 0.05 };
+  var BIPOLAR = { min: -1, max: 1, step: 0.05, neutral: 0 };
+  var PAIRINGS = ["halves", "in-order", "interleave", "bright-dark", "dark-bright", "hits-tones", "tones-hits", "one-all", "all-one", "chain"];
+  var RINGS = ["partials", "body", "both"];
+  var CARRIERS = ["random", "first", "last", "brightest", "darkest", "longest", "shortest", "tonal", "noisy"];
+  var MOD_KINDS = ["phase", "ring", "am", "fm", "filter", "gain", "vocode"];
+  var MODULATE_SPANS = { stages: { min: 1, max: 8, step: 1 }, retrigger: UNIT };
+  var RESONATE_SPANS = { decay: UNIT };
+  var GRIDS = [2, 3, 4, 6, 8];
+  var METER_UNITS = [2, 4, 8, 16];
+  var KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  var SCALES = [
+    "major",
+    "minor",
+    "dorian",
+    "phrygian",
+    "lydian",
+    "mixolydian",
+    "locrian",
+    "harmonic-minor",
+    "melodic-minor",
+    "pentatonic",
+    "minor-pentatonic",
+    "blues",
+    "whole-tone",
+    "chromatic",
+    "hirajoshi",
+    "in-sen",
+    "phrygian-dominant",
+    "hungarian-minor",
+    "pelog",
+    "slendro"
+  ];
+  var TUNINGS = ["12-tet", "19-tet", "22-tet", "24-tet", "31-tet", "just", "pythagorean", "bohlen-pierce", "harmonic"];
+  var CONTOURS = ["up", "down", "up-down", "walk", "leaps", "random"];
+  var LOOP_SPANS = {
+    density: UNIT,
+    syncopation: UNIT,
+    lean: BIPOLAR,
+    fills: UNIT,
+    ratchet: UNIT,
+    poly: UNIT,
+    variation: UNIT,
+    kick: UNIT,
+    snare: UNIT,
+    hats: UNIT,
+    perc: UNIT,
+    open: UNIT,
+    ghosts: UNIT,
+    swing: { min: 0, max: 0.75, step: 0.05 },
+    humanize: UNIT,
+    accent: UNIT,
+    micro: UNIT,
+    chords: UNIT,
+    drone: UNIT,
+    octaves: { min: 1, max: 4, step: 1 },
+    register: { min: -2, max: 2, step: 1, neutral: 0 },
+    glide: UNIT,
+    gate: { min: 0.05, max: 1, step: 0.05 }
+  };
+  var LOOP_GROUPS = [
+    { key: "rhythm", controls: ["meter", "grid", "density", "syncopation", "lean", "fills", "ratchet", "poly", "variation"] },
+    { key: "voices", style: "beat", controls: ["kick", "snare", "hats", "perc", "open", "ghosts"] },
+    { key: "feel", controls: ["swing", "humanize", "accent"] },
+    { key: "harmony", style: "melody", controls: ["key", "scale", "tuning", "micro", "chords", "drone"] },
+    { key: "line", style: "melody", controls: ["contour", "octaves", "register", "glide", "gate"] }
+  ];
+  var BEAT_ONLY = ["syncopation", "lean"];
+  function loopStyleOf(control) {
+    if (BEAT_ONLY.includes(control)) return "beat";
+    return LOOP_GROUPS.find((group) => group.controls.includes(control))?.style;
+  }
+  var STEER_SOUND = {
+    bright: BIPOLAR,
+    body: BIPOLAR,
+    filter: BIPOLAR,
+    resonance: UNIT,
+    noise: BIPOLAR,
+    punch: BIPOLAR,
+    length: BIPOLAR,
+    drive: UNIT,
+    crush: UNIT,
+    width: BIPOLAR,
+    space: UNIT
+  };
+  var STEER_LAYER = {
+    pitch: { min: -24, max: 24, step: 1, neutral: 0 },
+    reverse: UNIT,
+    start: { min: 0, max: 0.9, step: 0.05, neutral: 0 },
+    delay: { min: 0, max: 500, step: 5, neutral: 0 },
+    pan: UNIT,
+    level: UNIT
+  };
+  var STEER_RANGES = ["pitch", "start", "delay"];
+  var TABS = ["cross", "fuse", "loop", "stack"];
   var CARDS = [
-    { key: "blend", op: "cross", mode: "blend", options: ["seconds"] },
-    { key: "attack", op: "cross", mode: "attack", options: ["attack_from"] },
-    { key: "resonate", op: "cross", mode: "resonate", options: ["depth"] },
-    { key: "modulate", op: "cross", mode: "modulate", options: ["depth"] },
-    { key: "texture", op: "fuse", mode: "texture", options: ["seconds", "depth"] },
-    { key: "loop", op: "fuse", mode: "loop", options: ["bpm", "bars"] },
-    { key: "smear", op: "fuse", mode: "smear", options: ["stretch", "depth"] },
-    { key: "stack", op: "stack", options: [] }
+    { key: "blend", tab: "cross", op: "cross", mode: "blend", options: ["seconds"] },
+    { key: "attack", tab: "cross", op: "cross", mode: "attack", options: ["attack_from"] },
+    { key: "resonate", tab: "cross", op: "cross", mode: "resonate", options: ["depth"] },
+    { key: "modulate", tab: "cross", op: "cross", mode: "modulate", options: ["depth"] },
+    { key: "texture", tab: "fuse", op: "fuse", mode: "texture", options: ["seconds", "depth"] },
+    { key: "smear", tab: "fuse", op: "fuse", mode: "smear", options: ["stretch", "depth"] },
+    { key: "loop", tab: "loop", op: "fuse", mode: "loop", options: ["bpm", "bars"] },
+    { key: "stack", tab: "stack", op: "stack", options: [] }
   ];
   var RANGES = {
     seconds: { min: 0.5, max: 30, step: 0.5 },
     bpm: { min: 40, max: 240, step: 1 },
-    bars: { min: 1, max: 4, step: 1 },
-    depth: { min: 0, max: 1, step: 0.05 },
-    stretch: { min: 4, max: 16, step: 1 }
+    bars: { min: 1, max: 8, step: 1 },
+    depth: UNIT,
+    stretch: { min: 4, max: 16, step: 1 },
+    at: { min: 0, max: 1, step: 0.01 }
   };
+  var DEFAULT_BPM = 120;
   function cardNote(count) {
     return count < 2 ? { key: "make.needTwo", least: 2 } : null;
+  }
+  var clampTo = (span, value) => Math.min(span.max, Math.max(span.min, value));
+  var isNumber = (value) => typeof value === "number" && Number.isFinite(value);
+  function spanned(span, value) {
+    return isNumber(value) ? clampTo(span, value) : void 0;
+  }
+  function ranged(span, value) {
+    if (!Array.isArray(value) || value.length !== 2 || !isNumber(value[0]) || !isNumber(value[1])) return void 0;
+    const [low, high] = [clampTo(span, value[0]), clampTo(span, value[1])];
+    return low <= high ? [low, high] : [high, low];
+  }
+  var pick = (choices, value) => choices.includes(value) ? value : void 0;
+  var compact = (value) => Object.keys(value).length > 0 ? value : void 0;
+  function resonateOf(options) {
+    if (!options) return void 0;
+    const out = {};
+    const pairing = pick(PAIRINGS, options.pairing);
+    const ring = pick(RINGS, options.ring);
+    const decay = spanned(RESONATE_SPANS.decay, options.decay);
+    if (pairing) out.pairing = pairing;
+    if (ring) out.ring = ring;
+    if (decay !== void 0) out.decay = decay;
+    return compact(out);
+  }
+  function modulateOf(options) {
+    if (!options) return void 0;
+    const out = {};
+    const carrier = pick(CARRIERS, options.carrier);
+    const kinds = Array.isArray(options.kinds) ? MOD_KINDS.filter((kind) => options.kinds?.includes(kind)) : [];
+    const stages = spanned(MODULATE_SPANS.stages, options.stages);
+    const retrigger = spanned(MODULATE_SPANS.retrigger, options.retrigger);
+    if (carrier) out.carrier = carrier;
+    if (kinds.length > 0) out.kinds = kinds;
+    if (stages !== void 0) out.stages = Math.round(stages);
+    if (retrigger !== void 0) out.retrigger = retrigger;
+    return compact(out);
+  }
+  function loopOf(options) {
+    const style = options?.style === "melody" ? "melody" : "beat";
+    const out = { style };
+    if (!options) return out;
+    const belongs = (control) => {
+      const owner = loopStyleOf(control);
+      return owner === void 0 || owner === style;
+    };
+    const meter = options.meter;
+    if (Array.isArray(meter) && Number.isInteger(meter[0]) && meter[0] >= 1 && meter[0] <= 16 && METER_UNITS.includes(meter[1])) out.meter = [meter[0], meter[1]];
+    const grid = GRIDS.find((value) => value === options.grid);
+    if (grid !== void 0) out.grid = grid;
+    for (const [control, choices] of [
+      ["key", KEYS],
+      ["scale", SCALES],
+      ["tuning", TUNINGS],
+      ["contour", CONTOURS]
+    ]) {
+      const value = pick(choices, options[control]);
+      if (value && belongs(control)) Object.assign(out, { [control]: value });
+    }
+    for (const control of Object.keys(LOOP_SPANS)) {
+      const value = spanned(LOOP_SPANS[control], options[control]);
+      if (value !== void 0 && belongs(control)) out[control] = LOOP_SPANS[control].step === 1 ? Math.round(value) : value;
+    }
+    return out;
+  }
+  function steerOf(steer) {
+    if (!steer) return void 0;
+    const out = {};
+    for (const [key, span] of Object.entries({ ...STEER_SOUND, ...STEER_LAYER })) {
+      if (STEER_RANGES.includes(key)) {
+        const range = ranged(span, steer[key]);
+        if (range && !(range[0] === (span.neutral ?? span.min) && range[1] === (span.neutral ?? span.min))) out[key] = range;
+      } else {
+        const value = spanned(span, steer[key]);
+        if (value !== void 0 && value !== (span.neutral ?? span.min)) out[key] = value;
+      }
+    }
+    return compact(out);
+  }
+  function steerCount(steer) {
+    return Object.keys(steerOf(steer) ?? {}).length;
+  }
+  function rollSteer(random = Math.random) {
+    const keys = [...Object.keys(STEER_SOUND), ...Object.keys(STEER_LAYER)];
+    const count = 3 + Math.floor(random() * 3);
+    const chosen = [];
+    while (chosen.length < count) {
+      const key = keys[Math.floor(random() * keys.length)];
+      if (!chosen.includes(key)) chosen.push(key);
+    }
+    const out = {};
+    for (const key of chosen) {
+      const span = key in STEER_SOUND ? STEER_SOUND[key] : STEER_LAYER[key];
+      const snap2 = (value) => Math.round(clampTo(span, value) / span.step) * span.step;
+      if (STEER_RANGES.includes(key)) {
+        const middle = span.neutral ?? span.min;
+        const reach = (span.max - span.min) * (0.08 + random() * 0.17);
+        const low = snap2(middle === span.min ? span.min + reach * random() * 0.3 : middle - reach * random());
+        const high = snap2(middle === span.min ? low + reach : middle + reach * random());
+        out[key] = [Math.min(low, high), Math.max(low, high)];
+      } else if (span.neutral === 0 && span.min < 0) {
+        const value = (0.2 + random() * 0.6) * (random() < 0.5 ? -1 : 1);
+        out[key] = snap2(value);
+      } else {
+        out[key] = snap2(span.min + (span.max - span.min) * (0.2 + random() * 0.5));
+      }
+    }
+    return out;
   }
   function requestFor(card, sources, options = {}, seed) {
     const kept = {};
@@ -1582,11 +2491,18 @@
       const value = options[key];
       if (key === "attack_from") {
         if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value < sources.length) kept.attack_from = value;
-      } else if (key !== "split" && typeof value === "number" && Number.isFinite(value)) {
-        const range = RANGES[key];
-        kept[key] = Math.min(range.max, Math.max(range.min, value));
+      } else {
+        const span = spanned(RANGES[key], value);
+        if (span !== void 0) kept[key] = RANGES[key].step === 1 ? Math.round(span) : span;
       }
     }
+    const resonate = card.key === "resonate" ? resonateOf(options.resonate) : void 0;
+    const modulate = card.key === "modulate" ? modulateOf(options.modulate) : void 0;
+    if (resonate) kept.resonate = resonate;
+    if (modulate) kept.modulate = modulate;
+    if (card.key === "loop") kept.loop = loopOf(options.loop);
+    const steer = steerOf(options.steer);
+    if (steer) kept.steer = steer;
     return {
       op: card.op,
       ...card.mode ? { mode: card.mode } : {},
@@ -1609,11 +2525,19 @@
     const lead = quotable(result.recipe.split(/[:;]/, 1)[0] ?? "", 60) || quotable(result.mode ?? result.op, 60).replace(/^\w/, (letter) => letter.toUpperCase());
     return Number.isInteger(result.seed) ? `${lead}, seed ${result.seed}` : lead;
   }
+  function sourceOfResult(result) {
+    return { artifact_id: result.artifact_id, name: resultName(result) };
+  }
+  function stagesOf(recipe) {
+    const body = recipe.includes(":") ? recipe.slice(recipe.indexOf(":") + 1) : recipe;
+    const stages = body.split(/\s*(?:→|->)\s*/).map((stage) => stage.replace(/[;·].*$/, "").trim()).filter(Boolean);
+    return stages.length > 1 ? stages : [];
+  }
   function useRequest(result) {
     const id = plainId(result.artifact_id);
     if (!id) return null;
     const said = resultName(result);
-    return said ? `Put “${said}” (artifact ${id}) on a pad or track in my project` : `Put artifact ${id} on a pad or track in my project`;
+    return said ? `“${said}” (artifact ${id})` : `artifact ${id}`;
   }
   function sourcesOf(items, revision) {
     const out = [];
@@ -1628,7 +2552,7 @@
     if (!value || typeof value !== "object") return null;
     const raw = value;
     const id = typeof raw.artifact_id === "string" ? plainId(raw.artifact_id) : null;
-    const op = raw.op === "cross" || raw.op === "fuse" || raw.op === "stack" ? raw.op : null;
+    const op = raw.op === "cross" || raw.op === "fuse" || raw.op === "stack" || raw.op === "grow" ? raw.op : null;
     if (!id || !op || typeof raw.seed !== "number" || !Number.isInteger(raw.seed)) return null;
     const peaks = Array.isArray(raw.peaks) ? raw.peaks.map((peak) => typeof peak === "number" && Number.isFinite(peak) ? Math.min(1, Math.max(0, peak)) : 0) : [];
     const sources = Array.isArray(raw.sources) ? raw.sources.filter((source) => source && typeof source === "object") : [];
@@ -2536,6 +3460,619 @@
     }) });
   }
 
+  // src/shared/controls.tsx
+  var clamp = (span, value) => Math.min(span.max, Math.max(span.min, value));
+  var snap = (span, value) => {
+    const steps = Math.round((clamp(span, value) - span.min) / span.step);
+    const decimals = Math.max(0, -Math.floor(Math.log10(span.step)));
+    return Number((span.min + steps * span.step).toFixed(decimals + 1));
+  };
+  var fraction = (span, value) => (clamp(span, value) - span.min) / (span.max - span.min);
+  function Slider({
+    label,
+    span,
+    value,
+    onChange,
+    format,
+    rest,
+    restAt,
+    ends,
+    range = false,
+    title
+  }) {
+    const track = useRef(null);
+    const [dragging, setDragging] = useState(null);
+    const middle = span.neutral ?? (range ? span.min : (span.min + span.max) / 2);
+    const resting = restAt ?? middle;
+    const values = value === void 0 ? range ? [resting, resting] : [resting] : Array.isArray(value) ? value : [value];
+    const set = value !== void 0;
+    const from = (clientX) => {
+      const box = track.current?.getBoundingClientRect();
+      if (!box || box.width === 0) return values[0];
+      return snap(span, span.min + (clientX - box.left) / box.width * (span.max - span.min));
+    };
+    const commit = (thumb, next) => {
+      if (!range) return onChange(next);
+      const pair = thumb === 0 ? [Math.min(next, values[1]), values[1]] : [values[0], Math.max(next, values[0])];
+      onChange(pair);
+    };
+    const press = (event) => {
+      if (event.button !== 0) return;
+      const next = from(event.clientX);
+      const thumb = range ? Math.abs(next - values[0]) < Math.abs(next - values[1]) || values[0] === values[1] && next < values[0] ? 0 : 1 : 0;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      setDragging(thumb);
+      commit(thumb, next);
+    };
+    const keys = (thumb) => (event) => {
+      const big = event.shiftKey ? 10 : 1;
+      const at = values[thumb];
+      const moves = {
+        ArrowRight: at + span.step * big,
+        ArrowUp: at + span.step * big,
+        ArrowLeft: at - span.step * big,
+        ArrowDown: at - span.step * big,
+        PageUp: at + span.step * 10,
+        PageDown: at - span.step * 10,
+        Home: span.min,
+        End: span.max
+      };
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        onChange(void 0);
+      } else if (event.key in moves) {
+        event.preventDefault();
+        commit(thumb, snap(span, moves[event.key]));
+      }
+    };
+    const [a, b] = range ? [fraction(span, values[0]), fraction(span, values[1])] : [fraction(span, Math.min(middle, values[0])), fraction(span, Math.max(middle, values[0]))];
+    const fillFrom = range || span.neutral !== void 0 ? a : 0;
+    const fillTo = range || span.neutral !== void 0 ? b : fraction(span, values[0]);
+    const shown = set ? format(value) : rest;
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }, title, children: [
+      /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, fontSize: 11.5, color: set ? T.secondary : T.muted }, children: [
+        /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1 }, children: label }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            "aria-label": set ? `${label}: ${shown}` : `${label}: ${rest || "—"}`,
+            className: FOCUSABLE,
+            disabled: !set,
+            onClick: () => onChange(void 0),
+            type: "button",
+            style: {
+              font: "inherit",
+              fontSize: 10.5,
+              fontVariantNumeric: "tabular-nums",
+              padding: "0 6px",
+              borderRadius: 8,
+              border: `1px solid ${set ? `color-mix(in srgb, ${T.accent} 55%, transparent)` : "transparent"}`,
+              background: set ? `color-mix(in srgb, ${T.accent} 12%, transparent)` : "transparent",
+              color: set ? T.accent : T.faint,
+              cursor: set ? "pointer" : "default",
+              whiteSpace: "nowrap",
+              transition: "background-color 140ms, border-color 140ms, color 140ms"
+            },
+            children: shown || "·"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxs(
+        "div",
+        {
+          onDoubleClick: () => onChange(void 0),
+          onPointerCancel: () => setDragging(null),
+          onPointerDown: press,
+          onPointerMove: (event) => {
+            if (dragging !== null) commit(dragging, from(event.clientX));
+          },
+          onPointerUp: () => setDragging(null),
+          ref: track,
+          style: { position: "relative", height: 16, cursor: "pointer", touchAction: "none" },
+          children: [
+            /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { position: "absolute", left: 0, right: 0, top: 6, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 } }),
+            span.neutral !== void 0 && span.neutral > span.min && /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { position: "absolute", left: `${fraction(span, span.neutral) * 100}%`, top: 3, width: 1, height: 10, background: T.faint, transform: "translateX(-0.5px)" } }),
+            set && /* @__PURE__ */ jsx(
+              "span",
+              {
+                "aria-hidden": true,
+                style: {
+                  position: "absolute",
+                  left: `${fillFrom * 100}%`,
+                  width: `${Math.max(0, fillTo - fillFrom) * 100}%`,
+                  top: 6,
+                  height: 4,
+                  borderRadius: 2,
+                  background: T.accent,
+                  boxShadow: `0 0 8px -2px ${T.accent}`,
+                  transition: dragging === null ? "left 120ms, width 120ms" : "none"
+                }
+              }
+            ),
+            values.map((at, thumb) => /* @__PURE__ */ jsx(
+              "div",
+              {
+                "aria-label": range ? `${label} ${thumb === 0 ? "↓" : "↑"}` : label,
+                "aria-valuemax": span.max,
+                "aria-valuemin": span.min,
+                "aria-valuenow": at,
+                "aria-valuetext": set ? shown : rest,
+                className: FOCUSABLE,
+                onKeyDown: keys(thumb),
+                role: "slider",
+                tabIndex: 0,
+                style: {
+                  position: "absolute",
+                  left: `${fraction(span, at) * 100}%`,
+                  top: 2,
+                  width: 12,
+                  height: 12,
+                  borderRadius: "50%",
+                  transform: `translateX(-6px) scale(${dragging === thumb ? 1.25 : 1})`,
+                  background: T.raised,
+                  border: `2px solid ${set ? T.accent : T.faint}`,
+                  opacity: set ? 1 : 0.7,
+                  boxShadow: set ? `0 2px 6px -2px ${T.accent}` : "none",
+                  transition: dragging === null ? "left 120ms, transform 120ms, border-color 140ms" : "transform 120ms"
+                }
+              },
+              thumb
+            ))
+          ]
+        }
+      ),
+      ends && /* @__PURE__ */ jsxs("span", { "aria-hidden": true, style: { ...S.row, justifyContent: "space-between", fontSize: 10, color: T.faint, marginTop: -2 }, children: [
+        /* @__PURE__ */ jsx("span", { children: ends[0] }),
+        /* @__PURE__ */ jsx("span", { children: ends[1] })
+      ] })
+    ] });
+  }
+  function Pills({
+    label,
+    options,
+    value,
+    onChange,
+    rest
+  }) {
+    const all = rest === null ? options : [{ value: void 0, label: rest }, ...options];
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
+      /* @__PURE__ */ jsx("span", { style: { fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: label }),
+      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option) => {
+        const chosen = option.value === value;
+        return /* @__PURE__ */ jsxs(
+          "button",
+          {
+            "aria-checked": chosen,
+            className: FOCUSABLE,
+            onClick: () => onChange(option.value),
+            role: "radio",
+            title: option.title,
+            type: "button",
+            style: {
+              ...S.row,
+              gap: 4,
+              font: "inherit",
+              fontSize: 11.5,
+              fontWeight: chosen ? 600 : 500,
+              padding: "2px 9px",
+              borderRadius: 12,
+              border: `1px solid ${chosen ? T.accent : T.border}`,
+              background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
+              color: chosen ? T.accent : option.value === void 0 ? T.muted : T.secondary,
+              cursor: "pointer",
+              transition: "border-color 140ms, background-color 140ms, color 140ms"
+            },
+            children: [
+              option.glyph,
+              option.label
+            ]
+          },
+          String(option.value ?? "")
+        );
+      }) })
+    ] });
+  }
+  function Choice({ label, options, value, onChange, rest }) {
+    return /* @__PURE__ */ jsxs("label", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: [
+      label,
+      /* @__PURE__ */ jsxs(
+        "select",
+        {
+          className: FOCUSABLE,
+          onChange: (event) => onChange(event.target.value === "" ? void 0 : event.target.value),
+          style: { font: "inherit", fontSize: 12, padding: "2px 6px", borderRadius: 6, border: `1px solid ${value === void 0 ? T.border : T.accent}`, background: "transparent", color: value === void 0 ? T.secondary : T.accent },
+          value: value ?? "",
+          children: [
+            /* @__PURE__ */ jsx("option", { value: "", children: rest }),
+            options.map((option) => /* @__PURE__ */ jsx("option", { value: option.value, children: option.label }, option.value))
+          ]
+        }
+      )
+    ] });
+  }
+  function Toggles({ label, options, value, onChange, rest }) {
+    const chosen = value ?? [];
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
+      /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, fontSize: 11.5, color: chosen.length ? T.secondary : T.muted }, children: [
+        label,
+        chosen.length === 0 && /* @__PURE__ */ jsx("span", { style: { color: T.faint, fontSize: 10.5 }, children: rest })
+      ] }),
+      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "group", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: options.map((option) => {
+        const on = chosen.includes(option.value);
+        return /* @__PURE__ */ jsxs(
+          "button",
+          {
+            "aria-pressed": on,
+            className: FOCUSABLE,
+            onClick: () => {
+              const next = on ? chosen.filter((other) => other !== option.value) : [...chosen, option.value];
+              onChange(next.length ? next : void 0);
+            },
+            title: option.title,
+            type: "button",
+            style: {
+              font: "inherit",
+              fontSize: 11.5,
+              padding: "2px 9px",
+              borderRadius: 6,
+              border: `1px solid ${on ? T.accent : T.border}`,
+              background: on ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
+              color: on ? T.accent : T.secondary,
+              cursor: "pointer",
+              transition: "border-color 140ms, background-color 140ms, color 140ms"
+            },
+            children: [
+              on ? "✓ " : "",
+              option.label
+            ]
+          },
+          option.value
+        );
+      }) })
+    ] });
+  }
+  function Group({ title, count, summary, open, onToggle, actions, children, hint }) {
+    return /* @__PURE__ */ jsxs("section", { style: { display: "flex", flexDirection: "column", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${open ? `color-mix(in srgb, ${T.border} 100%, transparent)` : T.border}`, background: open ? `color-mix(in srgb, ${T.card} 60%, transparent)` : "transparent", transition: "background-color 160ms" }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6 }, children: [
+        /* @__PURE__ */ jsxs(
+          "button",
+          {
+            "aria-expanded": open,
+            className: FOCUSABLE,
+            onClick: onToggle,
+            type: "button",
+            style: { ...S.row, gap: 6, flex: 1, font: "inherit", fontSize: 12, fontWeight: 650, padding: 0, border: "none", background: "transparent", color: T.text, cursor: "pointer", textAlign: "left" },
+            children: [
+              /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { display: "inline-block", color: T.muted, transform: open ? "rotate(90deg)" : "none", transition: "transform 160ms" }, children: "▸" }),
+              title,
+              count && /* @__PURE__ */ jsx("span", { style: { fontSize: 10.5, fontWeight: 500, padding: "0 6px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 14%, transparent)`, color: T.accent }, children: count }),
+              !open && summary && /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11, fontWeight: 400, color: T.muted }, children: summary })
+            ]
+          }
+        ),
+        actions
+      ] }),
+      open && hint && /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11, marginTop: -4 }, children: hint }),
+      open && /* @__PURE__ */ jsx("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "10px 16px", alignItems: "start" }, children })
+    ] });
+  }
+
+  // src/shared/MakeOptions.tsx
+  var percent = (value) => Math.round(value * 100);
+  var signed2 = (value) => value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : "0";
+  var METERS = [
+    [4, 4],
+    [3, 4],
+    [5, 4],
+    [7, 4],
+    [6, 8],
+    [7, 8],
+    [9, 8],
+    [12, 8],
+    [5, 8],
+    [11, 8]
+  ];
+  function CardOptions({ card, options, sources, onChange }) {
+    const t = useT();
+    const auto = t("make.auto");
+    const set = (key, value) => onChange((current) => ({ ...current, [key]: value }));
+    const sliders = card.options.flatMap((name) => {
+      if (name === "attack_from" || name === "bpm" || name === "bars") return [];
+      const labels = {
+        seconds: (value) => seconds(value),
+        depth: (value) => `${percent(value)}%`,
+        stretch: (value) => `${value}×`
+      };
+      return [
+        /* @__PURE__ */ jsx(
+          Slider,
+          {
+            label: t(`make.options.${name}`),
+            onChange: (value) => set(name, value),
+            rest: auto,
+            span: RANGES[name],
+            value: options[name],
+            format: (value) => labels[name](value),
+            title: t("make.autoTitle")
+          },
+          name
+        )
+      ];
+    });
+    const resonate = options.resonate ?? {};
+    const modulate = options.modulate ?? {};
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
+      card.options.includes("attack_from") && /* @__PURE__ */ jsx(
+        Choice,
+        {
+          label: t("make.options.attack_from"),
+          onChange: (value) => set("attack_from", value === void 0 ? void 0 : Number(value)),
+          options: sources.slice(0, 64).map((source, index) => ({ value: String(index), label: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })),
+          rest: auto,
+          value: options.attack_from === void 0 ? void 0 : String(options.attack_from)
+        }
+      ),
+      card.key === "resonate" && /* @__PURE__ */ jsxs(Fragment2, { children: [
+        /* @__PURE__ */ jsx(
+          Pills,
+          {
+            label: t("make.resonate.pairing"),
+            onChange: (pairing) => set("resonate", { ...resonate, pairing }),
+            options: PAIRINGS.map((pairing) => ({ value: pairing, label: t(`make.resonate.pairings.${pairing}`), title: t(`make.resonate.pairingHints.${pairing}`) })),
+            rest: auto,
+            value: resonate.pairing
+          }
+        ),
+        /* @__PURE__ */ jsx(Pills, { label: t("make.resonate.ring"), onChange: (ring) => set("resonate", { ...resonate, ring }), options: RINGS.map((ring) => ({ value: ring, label: t(`make.resonate.rings.${ring}`) })), rest: auto, value: resonate.ring })
+      ] }),
+      card.key === "modulate" && /* @__PURE__ */ jsxs(Fragment2, { children: [
+        /* @__PURE__ */ jsx(
+          Pills,
+          {
+            label: t("make.modulate.carrier"),
+            onChange: (carrier) => set("modulate", { ...modulate, carrier }),
+            options: CARRIERS.filter((carrier) => carrier !== "random").map((carrier) => ({ value: carrier, label: t(`make.modulate.carriers.${carrier}`) })),
+            rest: t("make.modulate.carriers.random"),
+            value: modulate.carrier === "random" ? void 0 : modulate.carrier
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          Toggles,
+          {
+            label: t("make.modulate.kinds"),
+            onChange: (kinds) => set("modulate", { ...modulate, kinds }),
+            options: MOD_KINDS.map((kind) => ({ value: kind, label: t(`make.modulate.kindNames.${kind}`), title: t(`make.modulate.kindHints.${kind}`) })),
+            rest: t("make.modulate.allKinds"),
+            value: modulate.kinds
+          }
+        )
+      ] }),
+      (sliders.length > 0 || card.key === "resonate" || card.key === "modulate") && /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "10px 16px", alignItems: "start" }, children: [
+        sliders,
+        card.key === "resonate" && /* @__PURE__ */ jsx(
+          Slider,
+          {
+            ends: [t("make.resonate.short"), t("make.resonate.long")],
+            format: (value) => `${percent(value)}%`,
+            label: t("make.resonate.decay"),
+            onChange: (decay) => set("resonate", { ...resonate, decay }),
+            rest: auto,
+            span: RESONATE_SPANS.decay,
+            value: resonate.decay
+          }
+        ),
+        card.key === "modulate" && /* @__PURE__ */ jsxs(Fragment2, { children: [
+          /* @__PURE__ */ jsx(
+            Slider,
+            {
+              format: (value) => String(value),
+              label: t("make.modulate.stages"),
+              onChange: (stages) => set("modulate", { ...modulate, stages }),
+              rest: auto,
+              span: MODULATE_SPANS.stages,
+              title: t("make.modulate.stagesTitle"),
+              value: modulate.stages
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            Slider,
+            {
+              format: (value) => `${percent(value)}%`,
+              label: t("make.modulate.retrigger"),
+              onChange: (retrigger) => set("modulate", { ...modulate, retrigger }),
+              rest: auto,
+              span: MODULATE_SPANS.retrigger,
+              title: t("make.modulate.retriggerTitle"),
+              value: modulate.retrigger
+            }
+          )
+        ] })
+      ] })
+    ] });
+  }
+  function LoopSection({ options, tempo, onChange }) {
+    const t = useT();
+    const auto = t("make.auto");
+    const loop = options.loop ?? {};
+    const style = loop.style === "melody" ? "melody" : "beat";
+    const [open, setOpen] = useState({ rhythm: true });
+    const setLoop = (patch) => onChange((current) => ({ ...current, loop: { ...current.loop ?? {}, ...patch } }));
+    const control = (name) => {
+      const label = t(`make.loop.controls.${name}`);
+      if (name === "meter") {
+        const chosen = loop.meter ? `${loop.meter[0]}/${loop.meter[1]}` : void 0;
+        return /* @__PURE__ */ jsx(
+          Pills,
+          {
+            label,
+            onChange: (value) => setLoop({ meter: value === void 0 ? void 0 : value.split("/").map(Number) }),
+            options: METERS.map(([beats, unit]) => ({ value: `${beats}/${unit}`, label: `${beats}/${unit}` })),
+            rest: auto,
+            value: chosen
+          },
+          name
+        );
+      }
+      if (name === "grid") return /* @__PURE__ */ jsx(Pills, { label, onChange: (grid) => setLoop({ grid }), options: GRIDS.map((grid) => ({ value: grid, label: t(`make.loop.grids.${grid}`) })), rest: auto, value: loop.grid }, name);
+      if (name === "key") return /* @__PURE__ */ jsx(Pills, { label, onChange: (key) => setLoop({ key }), options: KEYS.map((key) => ({ value: key, label: key })), rest: auto, value: loop.key }, name);
+      if (name === "scale") return /* @__PURE__ */ jsx(Choice, { label, onChange: (scale) => setLoop({ scale }), options: SCALES.map((scale) => ({ value: scale, label: t(`make.loop.scales.${scale}`) })), rest: auto, value: loop.scale }, name);
+      if (name === "tuning") return /* @__PURE__ */ jsx(Choice, { label, onChange: (tuning) => setLoop({ tuning }), options: TUNINGS.map((tuning) => ({ value: tuning, label: t(`make.loop.tunings.${tuning}`) })), rest: auto, value: loop.tuning }, name);
+      if (name === "contour") return /* @__PURE__ */ jsx(Pills, { label, onChange: (contour) => setLoop({ contour }), options: CONTOURS.map((contour) => ({ value: contour, label: t(`make.loop.contours.${contour}`) })), rest: auto, value: loop.contour }, name);
+      const span = LOOP_SPANS[name];
+      const format = (value) => name === "register" ? t("make.loop.registerValue", signed2(value)) : name === "octaves" ? t("make.loop.octavesValue", value) : name === "lean" ? `${value < 0 ? t("make.loop.early") : value > 0 ? t("make.loop.late") : ""} ${percent(Math.abs(value))}%`.trim() : `${percent(value)}%`;
+      return /* @__PURE__ */ jsx(
+        Slider,
+        {
+          ends: name === "lean" ? [t("make.loop.early"), t("make.loop.late")] : void 0,
+          format: (value) => format(value),
+          label,
+          onChange: (value) => setLoop({ [name]: value }),
+          rest: auto,
+          span,
+          title: t(`make.loop.hints.${name}`),
+          value: loop[name]
+        },
+        name
+      );
+    };
+    const counted = (controls) => controls.filter((name) => loop[name] !== void 0).length;
+    return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "10px 16px", alignItems: "end" }, children: [
+        /* @__PURE__ */ jsx(
+          Pills,
+          {
+            label: t("make.loop.style"),
+            onChange: (value) => setLoop({ style: value ?? "beat" }),
+            options: [
+              { value: "beat", label: t("make.loop.styles.beat"), title: t("make.loop.styleHints.beat") },
+              { value: "melody", label: t("make.loop.styles.melody"), title: t("make.loop.styleHints.melody") }
+            ],
+            rest: null,
+            value: style
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          Slider,
+          {
+            format: (value) => t("make.optionValues.bpm", num(value, 0)),
+            label: t("make.options.bpm"),
+            onChange: (value) => onChange((current) => ({ ...current, bpm: value })),
+            rest: t("make.loop.tempoFrom", num(tempo, 0)),
+            restAt: tempo,
+            span: RANGES.bpm,
+            title: t("make.loop.tempoTitle"),
+            value: options.bpm
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          Slider,
+          {
+            format: (value) => t("make.optionValues.bars", value),
+            label: t("make.options.bars"),
+            onChange: (value) => onChange((current) => ({ ...current, bars: value })),
+            rest: auto,
+            span: RANGES.bars,
+            value: options.bars
+          }
+        )
+      ] }),
+      LOOP_GROUPS.filter((group) => !group.style || group.style === style).map((group) => {
+        const controls = group.controls.filter((name) => {
+          const owner = loopStyleOf(name);
+          return !owner || owner === style;
+        });
+        const count = counted(controls);
+        return /* @__PURE__ */ jsx(
+          Group,
+          {
+            actions: count > 0 ? /* @__PURE__ */ jsx(TextButton, { onClick: () => setLoop(Object.fromEntries(controls.map((name) => [name, void 0]))), title: t("make.loop.resetTitle"), children: t("make.loop.reset") }) : void 0,
+            count: count > 0 ? t("make.steer.count", count) : void 0,
+            hint: t(`make.loop.groupHints.${group.key}`),
+            onToggle: () => setOpen((current) => ({ ...current, [group.key]: !current[group.key] })),
+            open: open[group.key] === true,
+            title: t(`make.loop.groups.${group.key}`),
+            children: controls.map(control)
+          },
+          group.key
+        );
+      })
+    ] });
+  }
+  function SteerSection({ steer, onChange, open, onToggle }) {
+    const t = useT();
+    const count = steerCount(steer);
+    const bipolar = (key) => STEER_SOUND[key].min < 0;
+    const valueWords = (key, value) => {
+      if (Array.isArray(value)) {
+        if (key === "pitch") return t("make.steer.values.semitones", signed2(value[0]), signed2(value[1]));
+        if (key === "delay") return t("make.steer.values.ms", value[0], value[1]);
+        return t("make.steer.values.percentRange", percent(value[0]), percent(value[1]));
+      }
+      if (key === "level") return t("make.steer.values.down", Math.round(value * 18));
+      if (key === "pan") return t("make.steer.values.pan", percent(value));
+      if (key in STEER_SOUND && bipolar(key)) {
+        const end = value < 0 ? t(`make.steer.ends.${key}.low`) : t(`make.steer.ends.${key}.high`);
+        return `${end} ${percent(Math.abs(value))}%`;
+      }
+      return `${percent(value)}%`;
+    };
+    const slider = (key) => {
+      const span = key in STEER_SOUND ? STEER_SOUND[key] : STEER_LAYER[key];
+      const range = STEER_RANGES.includes(key);
+      return /* @__PURE__ */ jsx(
+        Slider,
+        {
+          ends: key in STEER_SOUND && bipolar(key) ? [t(`make.steer.ends.${key}.low`), t(`make.steer.ends.${key}.high`)] : void 0,
+          format: (value) => valueWords(key, value),
+          label: t(`make.steer.controls.${key}`),
+          onChange: (value) => {
+            const next = { ...steer };
+            next[key] = value;
+            onChange(next);
+          },
+          range,
+          rest: "",
+          span,
+          title: t(`make.steer.hints.${key}`),
+          value: range ? steer[key] : steer[key]
+        },
+        key
+      );
+    };
+    const steered = steerOf(steer) ?? {};
+    const summary = Object.keys(steered).map((key) => `${t(`make.steer.controls.${key}`)} ${valueWords(key, steered[key])}`).join(" · ");
+    return /* @__PURE__ */ jsxs(
+      Group,
+      {
+        actions: /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 4 }, children: [
+          /* @__PURE__ */ jsxs(TextButton, { onClick: () => onChange(rollSteer()), title: t("make.steer.rollTitle"), children: [
+            /* @__PURE__ */ jsxs("svg", { "aria-hidden": true, height: "10", style: { marginRight: 4, verticalAlign: "-1px" }, viewBox: "0 0 12 12", width: "10", children: [
+              /* @__PURE__ */ jsx("rect", { fill: "none", height: "10", rx: "2.5", stroke: "currentColor", strokeWidth: "1.2", width: "10", x: "1", y: "1" }),
+              /* @__PURE__ */ jsx("circle", { cx: "4", cy: "4", fill: "currentColor", r: "1" }),
+              /* @__PURE__ */ jsx("circle", { cx: "6", cy: "6", fill: "currentColor", r: "1" }),
+              /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", fill: "currentColor", r: "1" })
+            ] }),
+            t("make.steer.roll")
+          ] }),
+          count > 0 && /* @__PURE__ */ jsx(TextButton, { onClick: () => onChange({}), title: t("make.steer.resetTitle"), children: t("make.steer.reset") })
+        ] }),
+        count: count > 0 ? t("make.steer.count", count) : void 0,
+        hint: t("make.steer.hint"),
+        onToggle,
+        open,
+        summary,
+        title: t("make.steer.title"),
+        children: [
+          /* @__PURE__ */ jsx("span", { style: { gridColumn: "1 / -1", ...S.heading, fontSize: 10.5 }, children: t("make.steer.sound") }),
+          Object.keys(STEER_SOUND).map(slider),
+          /* @__PURE__ */ jsx("span", { style: { gridColumn: "1 / -1", ...S.heading, fontSize: 10.5, marginTop: 4 }, title: t("make.steer.layersHint"), children: t("make.steer.layers") }),
+          Object.keys(STEER_LAYER).map(slider),
+          /* @__PURE__ */ jsx("span", { style: { gridColumn: "1 / -1", fontSize: 10.5, color: T.faint }, children: t("make.steer.layersHint") })
+        ]
+      }
+    );
+  }
+
   // src/shared/MakePanel.tsx
   var GLYPHS = {
     blend: /* @__PURE__ */ jsxs(Fragment2, { children: [
@@ -2570,10 +4107,8 @@
   function Glyph({ card, size = 20 }) {
     return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "0 0 28 20", width: size * 28 / 20, children: GLYPHS[card] });
   }
-  var OP_GLYPH = { cross: "blend", fuse: "smear", stack: "stack" };
-  var OPS = ["cross", "fuse", "stack"];
+  var TAB_GLYPH = { cross: "blend", fuse: "smear", loop: "loop", stack: "stack" };
   var SOURCE_CHIPS = 48;
-  var ATTACK_CHOICES = 64;
   function Flying({ flight, onDone }) {
     const ghost = useRef(null);
     const done = useRef(onDone);
@@ -2680,50 +4215,22 @@
       progress !== null && progress > 0 && progress < 1 && /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { position: "absolute", top: 0, bottom: 0, left: `${progress * 100}%`, width: 2, borderRadius: 1, background: T.text, opacity: 0.8 } })
     ] });
   }
-  function OptionSlider({ name, label, value, onChange }) {
+  function Stages({ stages }) {
     const t = useT();
-    const range = RANGES[name];
-    const shown = value ?? (range.min + range.max) / 2;
-    return /* @__PURE__ */ jsxs("label", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 150, flex: "1 1 150px" }, children: [
-      /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, fontSize: 11.5, color: T.secondary }, children: [
-        /* @__PURE__ */ jsx("span", { style: { flex: 1 }, children: value === void 0 ? t(`make.options.${name}`) : label(value) }),
-        /* @__PURE__ */ jsx(
-          "button",
-          {
-            "aria-pressed": value === void 0,
-            className: FOCUSABLE,
-            onClick: (event) => {
-              event.preventDefault();
-              onChange(value === void 0 ? shown : void 0);
-            },
-            title: t("make.autoTitle"),
-            type: "button",
-            style: { font: "inherit", fontSize: 10.5, padding: "0 6px", borderRadius: 8, border: `1px solid ${value === void 0 ? T.accent : T.border}`, background: "transparent", color: value === void 0 ? T.accent : T.faint, cursor: "pointer" },
-            children: t("make.auto")
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsx(
-        "input",
-        {
-          "aria-label": t(`make.options.${name}`),
-          className: FOCUSABLE,
-          max: range.max,
-          min: range.min,
-          onChange: (event) => onChange(Number(event.target.value)),
-          step: range.step,
-          style: { accentColor: T.accent, opacity: value === void 0 ? 0.45 : 1 },
-          type: "range",
-          value: shown
-        }
-      )
-    ] });
+    return /* @__PURE__ */ jsx("span", { "aria-label": t("make.stages"), role: "list", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: stages.map((stage, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4 }, children: [
+      index > 0 && /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { color: T.faint, fontSize: 11 }, children: "→" }),
+      /* @__PURE__ */ jsx("span", { style: { fontSize: 11, padding: "1px 7px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }, children: clean(stage, 80) })
+    ] }, index)) });
   }
-  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }) {
+  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock, onSources }) {
     const t = useT();
     const [cardKey, setCardKey] = useState("blend");
-    const [lastMode, setLastMode] = useState({ cross: "blend", fuse: "texture", stack: "stack" });
-    const [options, setOptions] = useState(() => typeof tempo === "number" && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {});
+    const [lastMode, setLastMode] = useState({ cross: "blend", fuse: "texture", loop: "loop", stack: "stack" });
+    const [options, setOptions] = useState({});
+    const [steers, setSteers] = useState({});
+    const [steerOpen, setSteerOpen] = useState(false);
+    const [chosen, setChosen] = useState([]);
+    const [trail, setTrail] = useState([]);
     const [busy, setBusy] = useState(null);
     const [error, setError] = useState(null);
     const requests = useRef(/* @__PURE__ */ new Map());
@@ -2731,6 +4238,7 @@
     const [fresh, setFresh] = useState(() => /* @__PURE__ */ new Set());
     const [arrived, setArrived] = useState(null);
     const cards = useRef(/* @__PURE__ */ new Map());
+    const top = useRef(null);
     useEffect(() => {
       if (!arrived) return;
       cards.current.get(arrived)?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
@@ -2753,6 +4261,8 @@
     const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
     const note = cardNote(sources.length);
     const refused = note !== null;
+    const dawTempo = typeof tempo === "number" && tempo >= 40 && tempo <= 240 ? Math.round(tempo) : DEFAULT_BPM;
+    const steer = steers[card.key] ?? {};
     const takes = useMemo(() => {
       const byKey = /* @__PURE__ */ new Map();
       for (const result of [...results ?? []].reverse()) {
@@ -2763,6 +4273,8 @@
       }
       return [...byKey.values()].reverse();
     }, [results]);
+    const byId = useMemo(() => new Map((results ?? []).map((result) => [result.artifact_id, result])), [results]);
+    const chosenResults = chosen.flatMap((id) => byId.has(id) ? [byId.get(id)] : []);
     const make = async (request, label) => {
       setBusy(label);
       setError(null);
@@ -2779,48 +4291,27 @@
       }
       setError(answer.status === 404 ? t("make.missing") : [400, 503, 504].includes(answer.status) && answer.error ? answer.error : t("make.failed", answer.error || String(answer.status)));
     };
-    const optionRow = (entry) => entry.options.map((name) => {
-      if (name === "attack_from") {
-        return /* @__PURE__ */ jsxs("label", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 150, flex: "1 1 150px", fontSize: 11.5, color: T.secondary }, children: [
-          t("make.options.attack_from"),
-          /* @__PURE__ */ jsxs(
-            "select",
-            {
-              className: FOCUSABLE,
-              onChange: (event) => setOptions((current) => ({ ...current, attack_from: event.target.value === "" ? void 0 : Number(event.target.value) })),
-              style: { font: "inherit", fontSize: 12, padding: "1px 4px", borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
-              value: options.attack_from ?? "",
-              children: [
-                /* @__PURE__ */ jsx("option", { value: "", children: t("make.auto") }),
-                sources.slice(0, ATTACK_CHOICES).map((source, index) => /* @__PURE__ */ jsx("option", { value: index, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) }, `${index}`))
-              ]
-            }
-          )
-        ] }, name);
-      }
-      if (name === "split") return null;
-      const labels = {
-        seconds: (value) => t("make.optionValues.seconds", seconds(value)),
-        bpm: (value) => t("make.optionValues.bpm", num(value, 0)),
-        bars: (value) => t("make.optionValues.bars", value),
-        depth: (value) => t("make.optionValues.depth", Math.round(value * 100)),
-        stretch: (value) => t("make.optionValues.stretch", value)
-      };
-      return /* @__PURE__ */ jsx(OptionSlider, { label: labels[name], name, onChange: (next) => setOptions((current) => ({ ...current, [name]: next })), value: options[name] }, name);
-    });
+    const makeFrom = (next) => {
+      if (!onSources || next.length === 0) return;
+      setTrail((current) => [...current, sources].slice(-8));
+      setChosen([]);
+      onSources(next);
+      top.current?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    };
     const tint = `color-mix(in srgb, ${T.accent} 16%, transparent)`;
+    const modes = CARDS.filter((entry) => entry.tab === card.tab);
     const chooser = /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 7 }, children: [
-      /* @__PURE__ */ jsx("div", { "aria-label": t("make.way"), role: "radiogroup", style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden" }, children: OPS.map((op, index) => {
-        const chosen = card.op === op;
+      /* @__PURE__ */ jsx("div", { "aria-label": t("make.way"), role: "radiogroup", style: { display: "grid", gridTemplateColumns: `repeat(${TABS.length}, 1fr)`, border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden" }, children: TABS.map((tab, index) => {
+        const picked = card.tab === tab;
         return /* @__PURE__ */ jsxs(
           "button",
           {
-            "aria-checked": chosen,
+            "aria-checked": picked,
             className: FOCUSABLE,
             disabled: refused,
-            onClick: () => setCardKey(lastMode[op]),
+            onClick: () => setCardKey(lastMode[tab]),
             role: "radio",
-            title: t(`make.opHints.${op}`),
+            title: t(`make.opHints.${tab}`),
             type: "button",
             style: {
               display: "flex",
@@ -2830,34 +4321,34 @@
               minWidth: 0,
               font: "inherit",
               fontSize: 12.5,
-              fontWeight: chosen ? 650 : 500,
+              fontWeight: picked ? 650 : 500,
               padding: "6px 4px",
               border: "none",
               borderLeft: index > 0 ? `1px solid ${T.border}` : "none",
-              background: chosen ? tint : "transparent",
-              color: refused ? T.faint : chosen ? T.accent : T.secondary,
+              background: picked ? tint : "transparent",
+              color: refused ? T.faint : picked ? T.accent : T.secondary,
               cursor: refused ? "default" : "pointer",
               transition: "background-color 140ms, color 140ms"
             },
             children: [
-              /* @__PURE__ */ jsx(Glyph, { card: OP_GLYPH[op], size: 14 }),
-              /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: t(`make.ops.${op}`) })
+              /* @__PURE__ */ jsx(Glyph, { card: TAB_GLYPH[tab], size: 14 }),
+              /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: t(`make.ops.${tab}`) })
             ]
           },
-          op
+          tab
         );
       }) }),
-      card.op !== "stack" && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.op}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: CARDS.filter((entry) => entry.op === card.op).map((entry) => {
-        const chosen = entry.key === card.key;
+      modes.length > 1 && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry) => {
+        const picked = entry.key === card.key;
         return /* @__PURE__ */ jsxs(
           "button",
           {
-            "aria-checked": chosen,
+            "aria-checked": picked,
             className: FOCUSABLE,
             disabled: refused,
             onClick: () => {
               setCardKey(entry.key);
-              setLastMode((current) => ({ ...current, [entry.op]: entry.key }));
+              setLastMode((current) => ({ ...current, [entry.tab]: entry.key }));
             },
             role: "radio",
             title: t(`make.cards.${entry.key}.hint`),
@@ -2867,13 +4358,13 @@
               gap: 5,
               font: "inherit",
               fontSize: 12,
-              fontWeight: chosen ? 600 : 500,
+              fontWeight: picked ? 600 : 500,
               padding: "3px 10px 3px 7px",
               borderRadius: 14,
-              border: `1px solid ${chosen ? T.accent : T.border}`,
-              background: chosen ? tint : "transparent",
-              boxShadow: chosen ? `0 4px 14px -8px ${T.accent}` : "none",
-              color: refused ? T.faint : chosen ? T.accent : T.secondary,
+              border: `1px solid ${picked ? T.accent : T.border}`,
+              background: picked ? tint : "transparent",
+              boxShadow: picked ? `0 4px 14px -8px ${T.accent}` : "none",
+              color: refused ? T.faint : picked ? T.accent : T.secondary,
               cursor: refused ? "default" : "pointer",
               transition: "border-color 140ms, background-color 140ms, color 140ms, box-shadow 200ms"
             },
@@ -2910,25 +4401,42 @@
             /* @__PURE__ */ jsx("span", { style: { fontSize: 13.5, fontWeight: 650 }, children: t("make.title") }),
             /* @__PURE__ */ jsx("span", { style: S.faint, children: t("make.from", sources.length) }),
             /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
+            trail.length > 0 && onSources && /* @__PURE__ */ jsxs(
+              TextButton,
+              {
+                onClick: () => {
+                  const back = trail[trail.length - 1];
+                  setTrail((current) => current.slice(0, -1));
+                  setChosen([]);
+                  onSources(back);
+                },
+                title: t("make.backTitle", trail[trail.length - 1].length),
+                children: [
+                  /* @__PURE__ */ jsx("span", { "aria-hidden": true, children: "‹ " }),
+                  t("make.back")
+                ]
+              }
+            ),
             /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
           ] }),
           /* @__PURE__ */ jsxs("div", { style: { overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-              sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }, children: [
-                /* @__PURE__ */ jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
+            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), ref: top, role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
+              sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }, children: [
+                source.artifact_id ? /* @__PURE__ */ jsx("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
                 /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })
               ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
               sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) })
             ] }),
             chooser,
-            card.options.length > 0 && /* @__PURE__ */ jsx("div", { style: { ...S.row, flexWrap: "wrap", gap: 10, alignItems: "flex-end" }, children: optionRow(card) }),
+            card.key === "loop" ? /* @__PURE__ */ jsx(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx(CardOptions, { card, onChange: setOptions, options, sources }),
+            /* @__PURE__ */ jsx(SteerSection, { onChange: (next) => setSteers((current) => ({ ...current, [card.key]: next })), onToggle: () => setSteerOpen(!steerOpen), open: steerOpen, steer }),
             /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
               /* @__PURE__ */ jsx(
                 "button",
                 {
                   className: FOCUSABLE,
                   disabled: refused || busy !== null,
-                  onClick: () => void make(requestFor(card, sources, options), "make"),
+                  onClick: () => void make(requestFor(card, sources, { ...options, ...card.key === "loop" ? { bpm: options.bpm ?? dawTempo } : {}, steer }), "make"),
                   title: t("make.makeTitle", t(`make.cards.${card.key}.title`)),
                   type: "button",
                   style: {
@@ -2956,6 +4464,8 @@
               const result = take.results[at];
               const isPlaying = playing === result.artifact_id;
               const inPalette = kept.has(result.artifact_id);
+              const isChosen = chosen.includes(result.artifact_id);
+              const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
               return /* @__PURE__ */ jsxs(
                 "div",
                 {
@@ -2965,9 +4475,52 @@
                     else cards.current.delete(result.artifact_id);
                   },
                   role: "listitem",
-                  style: { display: "flex", flexDirection: "column", gap: 5, padding: "8px 10px", borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent", transition: "border-color 160ms, background-color 160ms" },
+                  style: {
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
+                    background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent",
+                    boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : "none",
+                    transition: "border-color 160ms, background-color 160ms, box-shadow 160ms"
+                  },
                   children: [
-                    /* @__PURE__ */ jsx("span", { style: { ...S.text, fontSize: 12, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }, title: result.recipe, children: clean(result.recipe, 220) || resultName(result) }),
+                    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+                      /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...stages.length ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, title: result.recipe, children: stages.length ? clean(result.recipe.split(":", 1)[0], 80) : clean(result.recipe, 220) || resultName(result) }),
+                      onSources && /* @__PURE__ */ jsx(
+                        "button",
+                        {
+                          "aria-label": t("make.choose"),
+                          "aria-pressed": isChosen,
+                          className: FOCUSABLE,
+                          onClick: () => setChosen((current) => current.includes(result.artifact_id) ? current.filter((id) => id !== result.artifact_id) : [...current, result.artifact_id]),
+                          title: t("make.chooseTitle"),
+                          type: "button",
+                          style: {
+                            flex: "none",
+                            width: 20,
+                            height: 20,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 0,
+                            borderRadius: "50%",
+                            border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
+                            background: isChosen ? T.accent : "transparent",
+                            color: isChosen ? T.raised : "transparent",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            transform: isChosen ? "scale(1.08)" : "none",
+                            transition: "background-color 140ms, border-color 140ms, transform 160ms"
+                          },
+                          children: "✓"
+                        }
+                      )
+                    ] }),
+                    stages.length > 0 && /* @__PURE__ */ jsx(Stages, { stages }),
                     /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 8 }, children: [
                       /* @__PURE__ */ jsx(
                         "button",
@@ -2999,8 +4552,8 @@
                     ] }),
                     /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                       /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
-                        t(`make.ops.${result.op}`),
-                        result.mode ? ` · ${t(`make.cards.${result.mode}.title`)}` : "",
+                        t(`make.ops.${result.mode === "loop" ? "loop" : result.op}`),
+                        result.mode && result.mode !== "loop" ? ` · ${t(`make.cards.${result.mode}.title`)}` : "",
                         " · ",
                         seconds(result.duration)
                       ] }),
@@ -3045,6 +4598,28 @@
             }) }),
             takes.length === 0 && results !== null && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("make.none") })
           ] }),
+          onSources && chosenResults.length > 0 && /* @__PURE__ */ jsxs(
+            "div",
+            {
+              "aria-label": t("make.chosen", chosenResults.length),
+              className: "kumi-pop",
+              role: "group",
+              style: { ...S.row, flexWrap: "wrap", gap: 6, padding: "8px 12px", borderTop: `1px solid ${T.border}`, background: `color-mix(in srgb, ${T.accent} 7%, ${T.raised})`, borderRadius: "0 0 12px 12px" },
+              children: [
+                /* @__PURE__ */ jsx("span", { style: { ...S.text, fontWeight: 600, flex: "1 1 6rem" }, children: t("make.chosen", chosenResults.length) }),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => makeFrom(chosenResults.map(sourceOfResult)), strong: true, title: t("make.fromTheseTitle"), children: t("make.fromThese") }),
+                /* @__PURE__ */ jsx(
+                  TextButton,
+                  {
+                    onClick: () => makeFrom([...sources, ...chosenResults.filter((result) => !sources.some((source) => source.artifact_id === result.artifact_id)).map(sourceOfResult)]),
+                    title: t("make.addToSoundsTitle"),
+                    children: t("make.addToSounds")
+                  }
+                ),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => setChosen([]), title: t("make.clearChosenTitle"), children: t("make.clearChosen") })
+              ]
+            }
+          ),
           flights.map((flight) => /* @__PURE__ */ jsx(Flying, { flight, onDone: () => setFlights((current) => current.filter((other) => other.key !== flight.key)) }, flight.key))
         ]
       }
@@ -3194,7 +4769,7 @@
     else memory.pans = true;
     return memory.pans;
   }
-  function pick(model, view, size, px, py, radius = 8, visible) {
+  function pick2(model, view, size, px, py, radius = 8, visible) {
     const unit = size * view.scale;
     if (unit <= 0) return -1;
     const mx = (px - view.dx) / unit;
@@ -3820,7 +5395,7 @@
         return;
       }
       if (held.moved || held.button !== 0) return;
-      const index = pick(active, view, mapSize, x, y, reachPx(10), visible);
+      const index = pick2(active, view, mapSize, x, y, reachPx(10), visible);
       const adding = event.shiftKey || event.metaKey || event.ctrlKey;
       if (index < 0) {
         if (adding) return;
@@ -3979,7 +5554,7 @@
                 return;
               }
               if (!view) return;
-              const index = pick(active, view, mapSize, x, y, reachPx(8), visible);
+              const index = pick2(active, view, mapSize, x, y, reachPx(8), visible);
               setHover(index >= 0 ? { index, x, y } : null);
               rest(index >= 0 ? model.points[index].id : null);
             },
@@ -4541,6 +6116,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       makeFromPicks: (ids) => open(sourcesOf(ids.map((id) => ({ sound_id: id, name: state.map?.sounds[id]?.name ?? null })), revision)),
       makeFromPalette: (view) => open(sourcesOf(view.items, state.palette?.map_revision ?? null)),
       closeMake: () => setMaking(null),
+      makeFrom: open,
       keep: (result) => store.paletteDo({ action: "gather", artifact_ids: [result.artifact_id] }),
       colorOf: (source) => {
         const group = source.sound_id ? groupOf.get(source.sound_id) : void 0;
@@ -4687,7 +6263,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
                   /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : palette.play(id), children: playing === id ? t("map.stop") : t("map.play") }),
                   /* @__PURE__ */ jsx(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
-                  request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyRequest"), text: request })
+                  request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyReference"), text: request })
                 ] });
               },
               empty: state.map === null ? t("map.reading") : t("dashboard.mapEmpty"),
@@ -4761,6 +6337,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             onClose: palette.closeMake,
             onKeep: palette.keep,
             onMake: (request) => store.design(request),
+            onSources: palette.makeFrom,
             onPlay: (id) => void audition.play(id).catch(() => {
             }),
             onStop: () => audition.stop(),
