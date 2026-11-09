@@ -1295,11 +1295,14 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             options.map_moves = Some(MapMoves {
                 load: {
                     let moves_file = moves_file.clone();
-                    Rc::new(move || std::fs::read(&moves_file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default())
+                    Rc::new(move || {
+                        std::fs::read(&moves_file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+                    })
                 },
                 save: Rc::new(move |moves| {
                     let partial = moves_file.with_extension("json.part");
-                    let written = serde_json::to_vec(moves).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&partial, bytes));
+                    let written =
+                        serde_json::to_vec(moves).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&partial, bytes));
                     let _ = written.and_then(|()| std::fs::rename(&partial, &moves_file));
                 }),
             });

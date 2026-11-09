@@ -562,7 +562,12 @@ pub const ACTIONS: &[Action] = &[
     act("map.made-seven", &[Map], &["7"], "Pick the 7th sound made"),
     act("map.made-eight", &[Map], &["8"], "Pick the 8th sound made"),
     act("map.made-nine", &[Map], &["9"], "Pick the 9th sound made"),
-    act("map.arrange", &[Map], &["l"], "Lay the sounds' map out the next way: by similarity, character, texture, keys, tempo, families, length, folders"),
+    act(
+        "map.arrange",
+        &[Map],
+        &["l"],
+        "Lay the sounds' map out the next way: by similarity, character, texture, keys, tempo, families, length, folders",
+    ),
     act("map.arrange-back", &[Map], &["shift+l"], "Lay the sounds' map out the way before"),
     act("map.near", &[Map], &["n"], "Pick more sounds like the ones picked (or the one chosen), by how they sound"),
     act("map.unmove", &[Map], &["shift+r"], "Put the points dragged back where the map put them (the picked ones, or all)"),

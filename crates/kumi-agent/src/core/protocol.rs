@@ -906,8 +906,11 @@ impl Session {
             Op::Map(request) => answered(request, |op::Map {}| async move { Ok(part(session.map_loader())?().await) }).await,
             Op::MapKey(request) => answered(request, |op::MapKey {}| async move { Ok(part(session.map_keyer())?().await) }).await,
             Op::MapNear(request) => {
-                answered(request, |op::MapNear { paths, limit }| async move { Ok(part(session.map_nearer())?(paths, limit as usize).await) })
-                    .await
+                answered(
+                    request,
+                    |op::MapNear { paths, limit }| async move { Ok(part(session.map_nearer())?(paths, limit as usize).await) },
+                )
+                .await
             }
             Op::Slots(request) => {
                 answered(

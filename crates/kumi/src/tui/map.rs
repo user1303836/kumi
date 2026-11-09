@@ -1193,7 +1193,10 @@ impl MapView {
         if from.is_empty() {
             return Asked::Nothing;
         }
-        self.told = Some(format!("Finding more like {}…", if from.len() == 1 { "this".to_string() } else { format!("these {}", grouped(from.len())) }));
+        self.told = Some(format!(
+            "Finding more like {}…",
+            if from.len() == 1 { "this".to_string() } else { format!("these {}", grouped(from.len())) }
+        ));
         Asked::Near(from.into_iter().take(MOST_NEAR).map(|at| data.sounds.points[at as usize].path.clone()).collect())
     }
 
@@ -1643,7 +1646,8 @@ impl MapView {
         let Some(layout) = self.layout(tab) else { return Asked::Nothing };
         let back: Vec<u32> = layout.home.keys().copied().filter(|at| picked.is_empty() || picked.contains(at)).collect();
         if back.is_empty() {
-            self.told = Some(if picked.is_empty() { "Nothing on this map was moved." } else { "None of the points picked was moved." }.into());
+            self.told =
+                Some(if picked.is_empty() { "Nothing on this map was moved." } else { "None of the points picked was moved." }.into());
             return Asked::Nothing;
         }
         let laid = if tab == 0 { self.laid } else { 0 };
@@ -1722,14 +1726,19 @@ impl MapView {
         let aspect = self.views[0].aspect;
         self.laid = (self.laid as isize + by).rem_euclid(count as isize) as usize;
         let view = &mut self.views[0];
-        (view.aspect, view.zoom, view.centre) = (self.layouts[0][self.laid].fit.aspect, 1., (self.layouts[0][self.laid].fit.aspect / 2., 0.5));
+        (view.aspect, view.zoom, view.centre) =
+            (self.layouts[0][self.laid].fit.aspect, 1., (self.layouts[0][self.laid].fit.aspect / 2., 0.5));
         self.glide = None;
         self.morph = Some(Morph { from, aspect, started: Instant::now() });
         if !self.morphs {
             self.morph_step(true);
         }
         let hovering = self.hovered.take().is_some() || self.from_hover;
-        if hovering { Asked::Leave } else { Asked::Nothing }
+        if hovering {
+            Asked::Leave
+        } else {
+            Asked::Nothing
+        }
     }
 
     /// A change of layout gliding: each point (and the map's aspect) eased along from where it was to its place on the
@@ -2490,7 +2499,12 @@ impl MapView {
         for at in view.picked.iter().filter(|at| shown(at)) {
             let (x, y) = cell(*at);
             let found = self.tab == 0 && self.found.contains(at);
-            screen.put(x, y, if found { "✦" } else { "●" }, &Style { bold: true, ..Style::fg(if found { palette::ACCENT } else { palette::BRIGHT }) });
+            screen.put(
+                x,
+                y,
+                if found { "✦" } else { "●" },
+                &Style { bold: true, ..Style::fg(if found { palette::ACCENT } else { palette::BRIGHT }) },
+            );
         }
         // A path grown, from its first sound toward its second: its points made so far, each ◆ (the one chosen ◈), and
         // the line to the furthest made; ◇ for those still coming.
@@ -2605,9 +2619,19 @@ impl MapView {
         let ground = Style { bg: Some(palette::GROUND), ..Style::fg(palette::TEXT) };
         screen.fill(panel, &ground);
         let title = format!("Make options: {}", layout_name(way));
-        let x = screen.put(panel.x + 1, panel.y, &title, &Style { bold: true, ..Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) } });
+        let x = screen.put(
+            panel.x + 1,
+            panel.y,
+            &title,
+            &Style { bold: true, ..Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) } },
+        );
         let tab = self.keymap.hint(&[(&["map.switch"], "next way")]);
-        screen.put(x + 2, panel.y, &truncate(&tab, panel.x + width - x - 3), &Style { bg: Some(palette::GROUND), ..Style::fg(palette::FAINT) });
+        screen.put(
+            x + 2,
+            panel.y,
+            &truncate(&tab, panel.x + width - x - 3),
+            &Style { bg: Some(palette::GROUND), ..Style::fg(palette::FAINT) },
+        );
         let height = (panel.height - 1).max(1) as usize;
         let top = editing.row.saturating_sub(height - 1);
         for (line, row) in rows.iter().enumerate().skip(top).take(height) {
@@ -3488,7 +3512,10 @@ mod tests {
         map.on_pan(x - 10, y + 3);
         map.on_release(x - 10, y + 3);
         let moved = map.views[0].centre;
-        assert!(moved.0 > centre.0 && moved.1 > centre.1, "dragged left and down, the map shows what's right and up: {centre:?} → {moved:?}");
+        assert!(
+            moved.0 > centre.0 && moved.1 > centre.1,
+            "dragged left and down, the map shows what's right and up: {centre:?} → {moved:?}"
+        );
         assert_eq!(map.views[0].picked, picked, "nothing picked or let go");
         assert!(map.boxed.is_none() && map.pressed.is_none());
         // The point under the mouse went with it: a third of the way there and back, it's where it was.

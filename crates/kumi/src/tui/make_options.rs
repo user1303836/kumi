@@ -95,7 +95,13 @@ pub fn rows(way: &str) -> Vec<Row> {
         "modulate" => {
             rows.push(word("modulate", "carrier", "carrier", words(&choices::Carrier::ALL)));
             for kind in words(&choices::Modulation::ALL) {
-                rows.push(Row { group: "modulate", key: "kinds", label: format!("kind: {kind}"), knob: Knob::Flag { word: kind }, style: None });
+                rows.push(Row {
+                    group: "modulate",
+                    key: "kinds",
+                    label: format!("kind: {kind}"),
+                    knob: Knob::Flag { word: kind },
+                    style: None,
+                });
             }
             rows.push(whole("modulate", "stages", "stages", 1, 8, 4));
             rows.push(number("modulate", "retrigger", "retrigger", 0., 1., 0.05));
@@ -107,9 +113,21 @@ pub fn rows(way: &str) -> Vec<Row> {
             // The meter's two numbers, its beats and its unit, as two rows (`options` puts them together).
             rows.push(whole("loop", "meter", "meter beats", 1, 16, 4));
             let unit = ["2", "4", "8", "16"].map(String::from).to_vec();
-            rows.push(Row { group: "loop", key: "meter-unit", label: "meter unit".into(), knob: Knob::Word { words: unit, numbers: true }, style: None });
+            rows.push(Row {
+                group: "loop",
+                key: "meter-unit",
+                label: "meter unit".into(),
+                knob: Knob::Word { words: unit, numbers: true },
+                style: None,
+            });
             let grid = ["2", "3", "4", "6", "8"].map(String::from).to_vec();
-            rows.push(Row { group: "loop", key: "grid", label: "steps a beat".into(), knob: Knob::Word { words: grid, numbers: true }, style: None });
+            rows.push(Row {
+                group: "loop",
+                key: "grid",
+                label: "steps a beat".into(),
+                knob: Knob::Word { words: grid, numbers: true },
+                style: None,
+            });
             rows.push(number("loop", "swing", "swing", 0., 0.75, 0.05));
             for key in ["density", "humanize", "accent", "fills", "ratchet", "poly", "variation"] {
                 rows.push(number("loop", key, key, 0., 1., 0.05));
@@ -260,8 +278,12 @@ impl Knobs {
                     let to = high * 0.6;
                     Value::from(round((from + (to - from).max(0.) * draw()).clamp(*low, *high), *step))
                 }
-                Knob::Whole { low, high, .. } => Value::from(low + ((high - low + 1) as f64 * draw()).floor().min((high - low) as f64) as i64),
-                Knob::Word { words, numbers } => word_value(&words[((words.len() as f64 * draw()) as usize).min(words.len() - 1)], *numbers),
+                Knob::Whole { low, high, .. } => {
+                    Value::from(low + ((high - low + 1) as f64 * draw()).floor().min((high - low) as f64) as i64)
+                }
+                Knob::Word { words, numbers } => {
+                    word_value(&words[((words.len() as f64 * draw()) as usize).min(words.len() - 1)], *numbers)
+                }
                 Knob::Flag { .. } => Value::from(draw() < 0.5),
             };
             self.set(way, &row, Some(value));
@@ -313,7 +335,9 @@ impl Knobs {
                             shown
                                 .iter()
                                 .filter_map(|row| match &row.knob {
-                                    Knob::Flag { word } => self.value(way, row).and_then(Value::as_bool).unwrap_or(true).then(|| Value::from(word.clone())),
+                                    Knob::Flag { word } => {
+                                        self.value(way, row).and_then(Value::as_bool).unwrap_or(true).then(|| Value::from(word.clone()))
+                                    }
                                     _ => None,
                                 })
                                 .collect(),
