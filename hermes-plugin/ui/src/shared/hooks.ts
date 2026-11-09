@@ -19,8 +19,9 @@ export const AUDITION_CACHE_CHARS = 48 * 1024 * 1024
 /** A hover's preview, as native Kumi's map plays one: the first two seconds, cut with a 0.2 s fade. */
 export const PREVIEW_SECONDS = 2
 export const PREVIEW_FADE_SECONDS = 0.2
-/** How long the pointer rests on a sound before its preview loads: a sweep across the map loads nothing. */
-export const HOVER_REST_MS = 70
+/** How many hover previews load at once. A sweep across the map starts a preview on every sound it crosses; past this
+ *  many loads, only the latest sound waits for the next free one, and the sounds passed over meanwhile never load. */
+export const PREVIEW_LOADS = 2
 
 /**
  * Plays a sound or artifact Kumi published, in the window only: an audition is a read (the bytes come from the
@@ -33,6 +34,9 @@ export class Audition {
   private cached = 0
   private loading = new Map<string, Promise<string>>()
   private generation = 0
+  /** Hover previews loading now, and the plays waiting for one of them to end (`PREVIEW_LOADS`). */
+  private previewLoads = 0
+  private waiting: (() => void)[] = []
   /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
   private turn = 0
   /** Whether what plays is a hover's preview: leaving the map stops that, never a sound the producer clicked. */
@@ -100,17 +104,18 @@ export class Audition {
   /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
    *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
    *  quietly, whatever happened to it: only the sound still wanted can fail. `preview` plays a hover's preview: the
-   *  first `preview` seconds, faded out. */
+   *  first `preview` seconds, faded out, loaded as `previewUrl` allows. */
   async play(id: string, options: { preview?: number } = {}): Promise<void> {
     this.stop()
     const turn = this.turn
+    // A preview is one from the start: the pointer leaving the map stops it while it still loads, too.
+    this.previewing = options.preview !== undefined
     this.changed(id)
     try {
-      const url = await this.url(id)
-      if (turn !== this.turn) return
+      const url = options.preview === undefined ? await this.url(id) : await this.previewUrl(id, turn)
+      if (url === null || turn !== this.turn) return
       const audio = new Audio(url)
       this.audio = audio
-      this.previewing = options.preview !== undefined
       audio.onended = () => {
         if (this.audio === audio) this.stop()
       }
@@ -121,6 +126,33 @@ export class Audition {
       this.stop()
       throw error
     }
+  }
+
+  /** A preview's audio: at once when it's kept or already loading; else loaded once fewer than `PREVIEW_LOADS`
+   *  previews are loading. A play whose turn passes while it waits loads nothing (null): the sound the pointer only
+   *  crossed. */
+  private async previewUrl(id: string, turn: number): Promise<string | null> {
+    while (!this.cache.has(id) && !this.loading.has(id) && this.previewLoads >= PREVIEW_LOADS) {
+      const free = Promise.withResolvers<void>()
+      this.waiting.push(free.resolve)
+      await free.promise
+      if (turn !== this.turn) return null
+    }
+    if (this.cache.has(id) || this.loading.has(id)) return this.url(id)
+    this.previewLoads += 1
+    try {
+      return await this.url(id)
+    } finally {
+      this.previewLoads -= 1
+      this.wake()
+    }
+  }
+
+  /** Every waiting preview looks again: the one still wanted takes the free load, the rest end. */
+  private wake(): void {
+    const waiting = this.waiting
+    this.waiting = []
+    for (const resolve of waiting) resolve()
   }
 
   /** A preview's end: past `seconds` less the fade, the volume falls to nothing over the fade, then it stops. */
@@ -147,6 +179,7 @@ export class Audition {
       this.audio.onended = null
       this.audio = null
     }
+    if (this.waiting.length) this.wake()
     if (this.playing !== null) this.changed(null)
   }
 
@@ -165,26 +198,20 @@ export function usePlaying(audition: Audition): string | null {
   return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing)
 }
 
-/** Sounds play as the pointer rests on them (native Kumi's map, `h`): `onHover` from the map plays each one's preview
- *  through `play` once the pointer has rested `HOVER_REST_MS` on it, and stops the preview when it leaves the map.
- *  Nothing happens while `enabled` is off. */
+/** Sounds play as the pointer comes onto them (native Kumi's map, `h`): `onHover` from the map plays each one's preview
+ *  through `play` at once, and stops the preview when the pointer leaves the map. The audition keeps a sweep's loads in
+ *  check (`PREVIEW_LOADS`). Nothing happens while `enabled` is off. */
 export function useHoverPlay(audition: Audition, enabled: boolean, play: (id: string) => void): (id: string | null) => void {
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const played = useRef(play)
   played.current = play
-  useEffect(() => () => clearTimeout(timer.current), [])
   useEffect(() => {
     if (!enabled) audition.stopPreview()
   }, [audition, enabled])
   return useCallback(
     (id: string | null) => {
-      clearTimeout(timer.current)
       if (!enabled) return
-      if (id === null) {
-        audition.stopPreview()
-        return
-      }
-      timer.current = setTimeout(() => played.current(id), HOVER_REST_MS)
+      if (id === null) audition.stopPreview()
+      else played.current(id)
     },
     [audition, enabled]
   )

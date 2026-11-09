@@ -233,28 +233,40 @@ export function planNotesRequest(artifactId: string, count?: number | null): str
   return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me before changing anything`
 }
 
-/** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
- *  doesn't write. The name leads, as the producer would say it; the ids follow in parentheses, with the map revision
- *  the sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
- *  again. */
+/** What Use… puts in the input, unsent: the sound's reference and nothing else, so the producer says what to do with
+ *  it. The name leads, quoted as the producer would say it; the ids follow in parentheses, with the map revision the
+ *  sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
+ *  again. Null for an id the runtime doesn't write. */
 export function soundRequest(soundId: string, name?: string, revision?: string | null): string | null {
   const id = plainId(soundId)
   if (!id) return null
   const from = revision ? plainId(revision) : null
   const said = quotable(name)
   const which = `sound ${id}${from ? ` from map ${from}` : ''}`
-  return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
+  return said ? `“${said}” (${which})` : which
 }
 
-/** Left unsent, like Use…: the map's "More like this" asks the model for the sounds nearest this one (a `near`
- *  search), naming it and its map revision the same way; null for an id the runtime doesn't write. */
-export function nearRequest(soundId: string, name?: string, revision?: string | null): string | null {
-  const id = plainId(soundId)
-  if (!id) return null
+/** The most sounds one "More like these" names: Kumi's `near` takes up to sixteen. */
+export const MOST_NEAR = 16
+/** How many of them the request names, before "and N more". */
+const NEAR_NAMED = 3
+
+/** Left unsent, like Use…: the map's "More like this" (one sound) and "More like these" (the picks) ask the model for
+ *  the sounds nearest them (a `near` search), naming the first `MOST_NEAR` by id with the map revision they're from,
+ *  and the first few by name; null when none is an id the runtime writes. */
+export function nearRequest(sounds: readonly { id: string; name?: string }[], revision?: string | null): string | null {
+  const kept = sounds.flatMap(sound => {
+    const id = plainId(sound.id)
+    return id ? [{ id, said: quotable(sound.name) }] : []
+  }).slice(0, MOST_NEAR)
+  if (kept.length === 0) return null
   const from = revision ? plainId(revision) : null
-  const said = quotable(name)
-  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
-  return said ? `Find more sounds like “${said}” (${which})` : `Find more sounds like ${which}`
+  const which = `${kept.length === 1 ? 'sound' : 'sounds'} ${kept.map(sound => sound.id).join(', ')}${from ? ` from map ${from}` : ''}`
+  const names = kept.flatMap(sound => (sound.said ? [`“${sound.said}”`] : [])).slice(0, NEAR_NAMED)
+  if (names.length === 0) return `Find more sounds like ${which}`
+  const rest = kept.length - names.length
+  const listed = rest > 0 ? `${names.join(', ')} and ${rest} more` : names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
+  return `Find more sounds like ${listed} (${which})`
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']

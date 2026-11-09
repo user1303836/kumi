@@ -30,6 +30,8 @@ export interface PaletteMap {
   /** Open the Make panel on the picks (in the map's order) or on the palette's playable sounds. */
   makeFromPicks: (ids: string[]) => void
   makeFromPalette: (view: PaletteView) => void
+  /** Make from these sounds instead (results chosen in the panel, or the ones it had before). */
+  makeFrom: (sources: DesignSource[]) => void
   closeMake: () => void
   /** A made sound into the current palette; true when it went in. */
   keep: (result: DesignResult) => Promise<boolean>
@@ -90,6 +92,7 @@ export function usePaletteMap(
     makeFromPicks: ids => open(sourcesOf(ids.map(id => ({ sound_id: id, name: state.map?.sounds[id]?.name ?? null })), revision)),
     makeFromPalette: view => open(sourcesOf(view.items, state.palette?.map_revision ?? null)),
     closeMake: () => setMaking(null),
+    makeFrom: open,
     keep: result => store.paletteDo({ action: 'gather', artifact_ids: [result.artifact_id] }),
     colorOf: source => {
       const group = source.sound_id ? groupOf.get(source.sound_id) : undefined
