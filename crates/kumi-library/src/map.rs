@@ -224,14 +224,6 @@ pub struct Label {
 
 impl Layer {
     pub fn empty(kind: Kind, why: &str) -> Layer {
-        Layer {
-            kind,
-            points: vec![],
-            groups: vec![],
-            places: vec![],
-            tags: vec![],
-            empty: Some(why.into()),
-            arrangements: vec![],
-        }
+        Layer { kind, points: vec![], groups: vec![], places: vec![], tags: vec![], empty: Some(why.into()), arrangements: vec![] }
     }
 }
