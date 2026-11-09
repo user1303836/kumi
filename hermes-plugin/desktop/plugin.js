@@ -4139,7 +4139,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
           /* @__PURE__ */ jsx11(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
         ] }),
         /* @__PURE__ */ jsxs11("div", { style: { overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-          /* @__PURE__ */ jsxs11("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
+          /* @__PURE__ */ jsxs11("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
             used.map((source, index) => /* @__PURE__ */ jsxs11("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }, children: [
               /* @__PURE__ */ jsx11("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
               /* @__PURE__ */ jsx11("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })

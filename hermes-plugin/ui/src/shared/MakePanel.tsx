@@ -490,8 +490,9 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         </TextButton>
       </div>
       <div style={{ overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* The sounds that go in, on one line that scrolls; how many more were picked than the card takes. */}
-        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
+        {/* The sounds that go in, on one line that scrolls; how many more were picked than the card takes. A row that
+            scrolls may shrink to nothing in this column once results fill it, so it keeps its own height. */}
+        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
           {used.map((source, index) => (
             <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
