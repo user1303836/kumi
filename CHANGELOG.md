@@ -3,6 +3,25 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.76 — 2026-11-08
+
+Ships with bridge 1.0.107, as 1.24.75 did.
+
+- Kumi can now set up Serum 2 modulation: an LFO, envelope, macro, velocity, note, mod wheel or pitch
+  bend moving one of 163 controls at the depth you ask (LFO depth included), each measured in Serum
+  2.1.5 itself.
+- Kumi for Hermes can judge changes by ear against a goal in rounds, tune a plug-in toward it, and
+  write wavetables from your sounds, as Kumi itself does (Live)
+- Kumi never writes a new wavetable over a file that's already there, even when two are written at
+  once
+- Kumi for Hermes never downloads ffmpeg, and its judged listening plays at most a minute a pass,
+  lead-in included, keeping what it hears in its own folder
+- Kumi says where a wavetable it made really went: Vital's own folder, or the User Library's
+  Kumi/Wavetables for Serum 2
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.75 — 2026-11-08
 
 Ships with bridge 1.0.107, as 1.24.74 did.
