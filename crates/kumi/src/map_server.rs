@@ -36,8 +36,9 @@ pub struct Served {
     pub points: Box<dyn Fn() -> LocalBoxFuture<'static, String>>,
     /// What a point plays: its file, from where and for how long (seconds). None when no point has that id.
     pub audio: Box<dyn Fn(&str) -> Option<(PathBuf, f64, f64)>>,
-    /// What the producer chose on the page (an action, and the point's id): true once it's in the input box.
-    pub action: Box<dyn Fn(&str, &str) -> bool>,
+    /// What the producer chose on the page (an action, and the points' ids: one, or for more like these up to
+    /// MOST_LIKE): true once it's in the input box.
+    pub action: Box<dyn Fn(&str, &[String]) -> bool>,
     /// Points picked on the page (their ids) into the session's palette: what happened, in words; None when there's no
     /// palette to put them in.
     pub palette: Box<dyn Fn(Vec<String>) -> LocalBoxFuture<'static, Option<String>>>,
@@ -234,6 +235,9 @@ async fn say(stream: &mut TcpStream, status: u16, words: &str) {
 }
 
 /// A point's id: letters, digits, `:`, `-` and `_` (`sounds:12`, `songs:345`), never a path.
+/// The most picked points more like these starts from.
+pub const MOST_LIKE: usize = 16;
+
 pub fn is_id(text: &str) -> bool {
     !text.is_empty() && text.len() <= 64 && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || b":-_".contains(&byte))
 }
@@ -277,11 +281,19 @@ async fn answer(mut stream: TcpStream, serving: &Serving, token: &str, port: u16
             audio(&mut stream, serving, &asked["audio/".len()..], request.range.as_deref()).await
         }
         ("POST", "action") => {
-            let chosen: Option<(String, String)> = serde_json::from_slice::<Value>(&request.body)
-                .ok()
-                .and_then(|value| Some((value.get("action")?.as_str()?.to_string(), value.get("id")?.as_str()?.to_string())));
+            // One point's id, or several picked ones' (`ids`).
+            let chosen: Option<(String, Vec<String>)> = serde_json::from_slice::<Value>(&request.body).ok().and_then(|value| {
+                let ids = match (value.get("id"), value.get("ids")) {
+                    (Some(id), None) => vec![id.as_str()?.to_string()],
+                    (None, Some(ids)) => ids.as_array()?.iter().map(|id| id.as_str().map(str::to_string)).collect::<Option<_>>()?,
+                    _ => return None,
+                };
+                Some((value.get("action")?.as_str()?.to_string(), ids))
+            });
             match chosen {
-                Some((action, id)) if is_id(&id) && (served.action)(&action, &id) => {
+                Some((action, ids))
+                    if (1..=MOST_LIKE).contains(&ids.len()) && ids.iter().all(|id| is_id(id)) && (served.action)(&action, &ids) =>
+                {
                     let _ = reply(&mut stream, 204, "text/plain", b"", &[]).await;
                 }
                 _ => say(&mut stream, 400, "That isn't something the map does.").await,

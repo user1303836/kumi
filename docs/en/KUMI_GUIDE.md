@@ -1621,6 +1621,7 @@ Environment variables (paths must be absolute):
 | `KUMI_RECIPES_DIR`, `KUMI_PROJECTS_DIR`, `KUMI_GOALS_DIR` | Recipes; each Set's conversations, notes and last state; goals and searches in progress, and background jobs Kumi closed on |
 | `KUMI_REFERENCES_DIR` | Measured references |
 | `KUMI_INPUT_HISTORY_FILE`, `KUMI_GAPS_FILE`, `KUMI_RESTORE_FILE` | What you sent (for ↑), the gap log, and the render tracks a listen cut off by a crash leaves behind |
+| `KUMI_MAP_MOVES_FILE` | Where the sounds you dragged on `/map` sit |
 | `KUMI_VIDEOS_DIR`, `KUMI_TOOLS_DIR` | Watched videos, and the programs Kumi fetches |
 | `KUMI_LIBRARY_DIR` | What Kumi learned of your sounds, presets and Sets |
 | `OLLAMA_HOST`, `LM_API_TOKEN` | Where Ollama listens, as Ollama reads it; LM Studio's API token, when its server wants one |

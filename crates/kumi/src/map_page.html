@@ -58,8 +58,9 @@ aside h3:first-child { margin-top: 0; }
 <header>
   <strong>Kumi's map</strong>
   <span id="layers"></span>
+  <span id="layouts" title="Lay the sounds out another way"></span>
   <input id="filter" type="search" placeholder="Filter by name, folder or tag" aria-label="Filter">
-  <button id="lasso" aria-pressed="false" title="Draw around points to pick them (or hold Shift and drag)">Lasso</button>
+  <button id="lasso" aria-pressed="false" title="Draw around points to pick them (or hold Shift and drag to add to the picks; the middle button drags the map)">Lasso</button>
   <button id="zoomIn" title="Zoom in (+)">+</button>
   <button id="zoomOut" title="Zoom out (−)">−</button>
   <button id="fit" title="See it all (0)">Fit</button>
@@ -90,6 +91,11 @@ const audio = new Audio();
 const state = {
   data: null, at: 0, view: { x: 0.5, y: 0.5, zoom: 1 }, hidden: new Set(), words: "", shown: null, grid: null,
   colours: [], chosen: -1, picked: [], lasso: false, path: null, drag: null, moved: false, image: null, count: 0,
+  layout: -1, morph: 0, adding: false, moving: -1,
+};
+/* Each arrangement's axis words (left, right, top, bottom): the page's words, not its data's. */
+const AXES = {
+  character: ["dark", "bright", "punchy", "soft"], texture: ["tonal", "noisy", "high", "low"], tempo: ["slower", "faster", "", ""],
 };
 
 function status(words) { document.getElementById("status").textContent = words || ""; }
@@ -126,6 +132,24 @@ function show(at) {
   state.chosen = -1;
   state.picked = [];
   state.colours = layer().groups.map((group) => rgb(group.color));
+  /* By similarity first, kept to come back to; then each arrangement the map has. */
+  const points = layer().points;
+  if (!points.similarity) points.similarity = { x: points.x.slice(), y: points.y.slice() };
+  points.x = points.similarity.x.slice();
+  points.y = points.similarity.y.slice();
+  state.layout = -1;
+  const layouts = document.getElementById("layouts");
+  layouts.replaceChildren();
+  const arrangements = layer().arrangements || [];
+  if (arrangements.length) {
+    ["similarity", ...arrangements.map((each) => each.id)].forEach((id, each) => {
+      const button = document.createElement("button");
+      button.textContent = id[0].toUpperCase() + id.slice(1);
+      button.setAttribute("aria-pressed", String(each === 0));
+      button.addEventListener("click", () => arrange(each - 1));
+      layouts.appendChild(button);
+    });
+  }
   [...document.getElementById("layers").children].forEach((button, each) => button.setAttribute("aria-pressed", String(each === at)));
   const empty = document.getElementById("empty");
   empty.textContent = layer().empty || "";
@@ -133,6 +157,25 @@ function show(at) {
   index();
   fit();
   panels();
+}
+
+/* The sounds laid out another way (-1: by similarity), each point gliding there. */
+function arrange(at) {
+  const points = layer().points, to = at < 0 ? points.similarity : layer().arrangements[at];
+  const from = { x: points.x.slice(), y: points.y.slice() }, started = performance.now(), morph = ++state.morph;
+  state.layout = at;
+  [...document.getElementById("layouts").children].forEach((button, each) => button.setAttribute("aria-pressed", String(each === at + 1)));
+  fit();
+  const step = (now) => {
+    if (morph !== state.morph) return;
+    const t = Math.min(1, (now - started) / 450), eased = 1 - (1 - t) ** 3;
+    for (let each = 0; each < points.x.length; each++) {
+      points.x[each] = from.x[each] + (to.x[each] - from.x[each]) * eased;
+      points.y[each] = from.y[each] + (to.y[each] - from.y[each]) * eased;
+    }
+    if (t < 1) { draw(); requestAnimationFrame(step); } else index();
+  };
+  requestAnimationFrame(step);
 }
 
 /* The points by place on a grid over the map, for finding the one under the pointer quickly. */
@@ -234,6 +277,20 @@ function draw() {
   if (state.picked.length <= 60) for (const at of state.picked) ring(at, 4 * ratio);
   else for (const at of state.picked) { const [x, y] = toScreen(points.x[at], points.y[at]); context.fillRect(x - ratio, y - ratio, 2 * ratio, 2 * ratio); }
   if (state.chosen >= 0) { context.lineWidth = 2.5 * ratio; ring(state.chosen, 8 * ratio); }
+  /* An arrangement's words where they belong, and its axes' at the edges. */
+  const arrangement = state.layout >= 0 ? layer().arrangements[state.layout] : null;
+  if (arrangement) {
+    context.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+    context.font = 12 * ratio + "px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    for (const [text, x, y] of arrangement.labels) { const [sx, sy] = toScreen(x, y); context.fillText(text, sx, sy); }
+    const [left, right, top, bottom] = AXES[arrangement.id] || ["", "", "", ""];
+    context.textAlign = "left"; context.fillText(left, 8 * ratio, height / 2);
+    context.textAlign = "right"; context.fillText(right, width - 8 * ratio, height / 2);
+    context.textAlign = "center"; context.fillText(top, width / 2, 12 * ratio); context.fillText(bottom, width / 2, height - 12 * ratio);
+    context.fillStyle = chosen;
+  }
   if (state.path && state.path.length > 1) {
     context.lineWidth = 1.5 * ratio;
     context.setLineDash([6 * ratio, 4 * ratio]);
@@ -375,6 +432,23 @@ function picked() {
   count.className = "muted";
   count.textContent = state.picked.length.toLocaleString() + (state.picked.length === 1 ? " point" : " points") + (state.picked.length > 100 ? "; the first 100:" : ":");
   box.appendChild(count);
+  /* Esc does the same; and more like these, from the first 16 picked, into Kumi's input box. */
+  const clear = document.createElement("button");
+  clear.textContent = "Clear (" + state.picked.length.toLocaleString() + ")";
+  clear.addEventListener("click", () => { state.picked = []; picked(); draw(); });
+  const more = document.createElement("button");
+  const from = state.picked.slice(0, 16);
+  more.textContent = from.length === 1 ? "More like this" : "More like these (" + from.length + ")";
+  more.addEventListener("click", async () => {
+    const answer = await fetch("action", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "more", ids: from.map(idOf) }),
+    }).catch(() => null);
+    status(answer && answer.ok ? "It's in Kumi's input box: send it there." : "Kumi couldn't take that: is it still running?");
+  });
+  const row = document.createElement("div");
+  row.className = "actions";
+  row.append(more, clear);
+  box.appendChild(row);
   /* Into the session's palette: what happened shows under it. */
   if (state.data.palette) {
     const add = document.createElement("button");
@@ -417,18 +491,34 @@ function inside(path, x, y) {
   return within;
 }
 
+/* The middle button drags the map; Shift and a drag (or Lasso) draws around points to pick them, Shift adding them to
+   the picks; a drag from a point moves it (on this page, till it closes); any other drag moves the map. */
 canvas.addEventListener("pointerdown", (event) => {
   try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* a pointer the page didn't see go down */ }
   const [px, py] = pointer(event);
   state.moved = false;
-  if (state.lasso || event.shiftKey) state.path = [[px, py]];
+  if (event.button === 1) { event.preventDefault(); state.drag = { px, py, x: state.view.x, y: state.view.y }; return; }
+  if (state.lasso || event.shiftKey) { state.path = [[px, py]]; state.adding = event.shiftKey; return; }
+  const under = nearest(px, py);
+  if (under >= 0) state.moving = under;
   else state.drag = { px, py, x: state.view.x, y: state.view.y };
 });
+canvas.addEventListener("mousedown", (event) => { if (event.button === 1) event.preventDefault(); });
 canvas.addEventListener("pointermove", (event) => {
   const [px, py] = pointer(event);
   if (state.path) {
     state.path.push([px, py]);
     draw();
+    return;
+  }
+  if (state.moving >= 0) {
+    const points = layer().points;
+    const start = toScreen(points.x[state.moving], points.y[state.moving]);
+    if (state.moved || Math.abs(px - start[0]) + Math.abs(py - start[1]) > 6) {
+      state.moved = true;
+      [points.x[state.moving], points.y[state.moving]] = toMap(px, py);
+      draw();
+    }
     return;
   }
   if (state.drag) {
@@ -465,14 +555,21 @@ canvas.addEventListener("pointerup", (event) => {
         if (inside(path, x, y)) chosen.push(at);
       }
     }
-    state.picked = chosen;
+    state.picked = state.adding ? [...new Set([...state.picked, ...chosen])] : chosen;
+    state.adding = false;
     picked();
     draw();
     return;
   }
-  const dragged = state.moved;
+  const dragged = state.moved, moving = state.moving;
   state.drag = null;
-  if (!dragged) choose(nearest(px, py), true);
+  state.moving = -1;
+  if (moving >= 0 && dragged) { index(); return; }
+  if (dragged) return;
+  const at = nearest(px, py);
+  /* A click on no point lets the picks go. */
+  if (at < 0 && state.picked.length) { state.picked = []; picked(); }
+  choose(at, true);
 });
 canvas.addEventListener("pointerleave", () => { tip.style.display = "none"; });
 canvas.addEventListener("wheel", (event) => {

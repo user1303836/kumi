@@ -664,6 +664,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `KUMI_RECIPES_DIR`、`KUMI_PROJECTS_DIR`、`KUMI_GOALS_DIR` | レシピ。各 Set の会話、メモ、最後の状態。進行中のゴールと探索、Kumi の終了で中断したバックグラウンドジョブ |
 | `KUMI_REFERENCES_DIR` | 測ったリファレンス |
 | `KUMI_INPUT_HISTORY_FILE`、`KUMI_GAPS_FILE`、`KUMI_RESTORE_FILE` | 送信した内容（↑ 用）、ギャップのログ、クラッシュで途切れた聴き取りが残したレンダートラック |
+| `KUMI_MAP_MOVES_FILE` | `/map` でドラッグしたサウンドの場所 |
 | `KUMI_VIDEOS_DIR`、`KUMI_TOOLS_DIR` | 見たビデオと、Kumi が取得するプログラム |
 | `KUMI_LIBRARY_DIR` | Kumi が学習したサウンド、プリセット、Set |
 | `OLLAMA_HOST`、`LM_API_TOKEN` | Ollama の待ち受け先（Ollama 自身の読み方で）、LM Studio のサーバーが求めるときの API トークン |

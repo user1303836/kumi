@@ -148,6 +148,8 @@ pub struct SessionOptions {
     pub map: Option<kumi_library::map::LoadMap>,
     /// /map: the key its maps would be read under now, to know a map kept from before is still the same.
     pub map_key: Option<kumi_library::map::MapKey>,
+    /// /map's more like these, from the library.
+    pub map_near: Option<kumi_library::map::MapNear>,
     /// The models to talk to and the sign-ins, which /model, /effort, /fast, /login and /logout ask the session about.
     pub models: Option<Rc<dyn kumi_ai::control::ModelController>>,
     /// Native audio generation and transcription, separate from conversation models.
@@ -206,6 +208,7 @@ impl SessionOptions {
             slots: None,
             map: None,
             map_key: None,
+            map_near: None,
             models: None,
             audio: None,
             matching: true,
@@ -3642,6 +3645,9 @@ impl Session {
     }
     pub fn map_keyer(&self) -> Option<kumi_library::map::MapKey> {
         self.0.options.map_key.clone()
+    }
+    pub fn map_nearer(&self) -> Option<kumi_library::map::MapNear> {
+        self.0.options.map_near.clone()
     }
     pub fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         self.0.options.models.clone()

@@ -137,6 +137,9 @@ pub type LoadMap = Rc<dyn Fn() -> LocalBoxFuture<'static, MapData>>;
 /// What the maps would be read from now, as a key: the same key, the same maps (`/map` keeps one it made ready while the
 /// key holds). Cheap: what files are there and when they changed, not what's in them.
 pub type MapKey = Rc<dyn Fn() -> LocalBoxFuture<'static, String>>;
+/// More like these (/map's n): the sounds nearest any of these files by how they sound, each one's turn in order, the
+/// files themselves left out, at most `limit` of them (their files); or why there are none.
+pub type MapNear = Rc<dyn Fn(Vec<String>, usize) -> LocalBoxFuture<'static, Result<Vec<String>, String>>>;
 
 /// Both maps, as read when /map opened.
 #[derive(Clone, Debug)]

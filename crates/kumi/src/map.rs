@@ -5,7 +5,10 @@
 
 use futures::FutureExt;
 use kumi_library::{
-    map::{read_sounds_map, sounds_on_map_by_turns, MapKey, MapSound, SOUNDS_MAP},
+    features::VECTOR_LENGTH,
+    map::{read_sounds_map, sounds_on_map_by_turns, MapKey, MapNear, MapSound, SOUNDS_MAP},
+    search::{LikeSound, SoundQuery},
+    store::unpack_vector,
     Library, SoundClass, CLASSES,
 };
 use kumi_listening::music::{
@@ -291,6 +294,17 @@ struct PageLayer<'a> {
     places: &'a [String],
     tags: &'a [String],
     points: PagePoints<'a>,
+    /// The other ways its points are laid out (the sounds' map's), each one's places column by column, y up.
+    arrangements: Vec<PageArrangement<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct PageArrangement<'a> {
+    id: &'static str,
+    /// The data's words where they belong: text, x, y.
+    labels: Vec<(&'a str, f64, f64)>,
+    x: Vec<f64>,
+    y: Vec<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -349,6 +363,18 @@ fn page_layer<'a>(layer: &'a Layer, title: &'static str) -> PageLayer<'a> {
             place: points.iter().map(|point| point.place).collect(),
             tags: points.iter().map(|point| point.tags).collect(),
         },
+        // An arrangement's places are y down: the page's are y up.
+        arrangements: layer
+            .arrangements
+            .iter()
+            .enumerate()
+            .map(|(k, arrangement)| PageArrangement {
+                id: arrangement.id,
+                labels: arrangement.labels.iter().map(|label| (label.text.as_str(), short(label.x), short(1. - label.y))).collect(),
+                x: points.iter().map(|point| short(point.place(Some(k)).0)).collect(),
+                y: points.iter().map(|point| short(1. - point.place(Some(k)).1)).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -404,11 +430,25 @@ impl Page {
         ids.iter().filter_map(|id| self.place(id)).map(|(kind, at)| gathered(self.layer(kind), at as u32)).collect()
     }
 
-    /// What an action chosen on the page asks Kumi, for the input box: none for an action or a point it doesn't have.
-    pub fn asked(&self, action: &str, id: &str) -> Option<String> {
+    /// What an action chosen on the page asks Kumi, for the input box (`ids`: one point, or for more like these several
+    /// picked on one map): none for an action or a point it doesn't have.
+    pub fn asked(&self, action: &str, ids: &[String]) -> Option<String> {
         let (action, _) = ACTIONS.iter().find(|(each, _)| action_called(*each) == action)?;
-        let (kind, point) = self.point(id)?;
-        Some(asked(kind, point, *action))
+        let points: Vec<(Kind, &Point)> = ids.iter().map(|id| self.point(id)).collect::<Option<_>>()?;
+        match points.as_slice() {
+            [(kind, point)] => Some(asked(*kind, point, *action)),
+            [(kind, _), ..] if *action == Action::More && points.iter().all(|(each, _)| each == kind) => Some(match kind {
+                Kind::Sounds => format!(
+                    "Find sounds like these: {}",
+                    points.iter().map(|(_, point)| point.path.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+                Kind::Songs => format!(
+                    "Find songs in my music like these: {}",
+                    points.iter().map(|(_, point)| format!("“{}”: {}", point.name, point.path)).collect::<Vec<_>>().join(", ")
+                ),
+            }),
+            _ => None,
+        }
     }
 }
 
@@ -418,6 +458,43 @@ pub fn loader(library: Rc<Library>, library_dir: PathBuf, music: Rc<Music>) -> L
     Rc::new(move || {
         let (library, dir, music) = (library.clone(), library_dir.clone(), music.clone());
         async move { MapData { sounds: sounds(&library, dir).await, songs: songs(&music).await } }.boxed_local()
+    })
+}
+
+/// More like these (`MapNear`): the sounds in this session's DAW's library nearest any of `paths` by how they sound (by
+/// their learned features), each one's turn in order, `paths` left out; at most `limit`. A file with nothing learned of
+/// it adds nothing; only all of them is refused.
+pub fn nearer(library: Rc<Library>) -> MapNear {
+    Rc::new(move |paths, limit| {
+        let library = library.clone();
+        async move {
+            let index = library.sound_index_in(Some(crate::daw::current().id())).await.map_err(|error| error.to_string())?;
+            let likes: Vec<LikeSound> = paths
+                .iter()
+                .filter_map(|path| {
+                    let entry = index.vector_of(path, None)?;
+                    let vector = entry.vector.as_deref().map(unpack_vector).unwrap_or_default();
+                    (vector.len() == VECTOR_LENGTH && vector.iter().all(|v| v.is_finite())).then(|| LikeSound {
+                        vector: vector.into_iter().map(f64::from).collect(),
+                        name: String::new(),
+                        path: Some(path.clone()),
+                        brightness: entry.brightness.unwrap_or_default(),
+                        attack: entry.attack.unwrap_or_default(),
+                        seconds: entry.seconds.unwrap_or_default(),
+                    })
+                })
+                .collect();
+            if likes.is_empty() {
+                return Err(match paths.len() {
+                    1 => "Kumi hasn't learned how that sound sounds yet.".to_string(),
+                    _ => "Kumi hasn't learned how those sounds sound yet.".to_string(),
+                });
+            }
+            let left_out: std::collections::HashSet<&String> = paths.iter().collect();
+            let found = index.search_near(&SoundQuery { limit, ..SoundQuery::default() }, &likes, true);
+            Ok(found.hits.into_iter().map(|hit| hit.entry.file.path.clone()).filter(|path| !left_out.contains(path)).collect())
+        }
+        .boxed_local()
     })
 }
 
