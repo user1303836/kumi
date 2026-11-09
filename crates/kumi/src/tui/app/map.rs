@@ -45,9 +45,14 @@ impl TuiApp {
             voice.cancel();
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
-        let gathers = self.can().palette;
-        self.0.state.borrow_mut().map =
-            Some(MapView::new(self.0.graphics, hover).gliding(self.0.options.map_glides).gathering(gathers).keyed(&self.0.keymap));
+        let (gathers, designs) = (self.can().palette, self.designs());
+        self.0.state.borrow_mut().map = Some(
+            MapView::new(self.0.graphics, hover)
+                .gliding(self.0.options.map_glides)
+                .gathering(gathers)
+                .designing(designs)
+                .keyed(&self.0.keymap),
+        );
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
@@ -340,6 +345,19 @@ impl TuiApp {
                 }
                 if !on {
                     self.map_leave();
+                }
+            }
+            Asked::Design { op, mode, files } => {
+                self.design(op, mode, files, true);
+            }
+            Asked::Reroll | Asked::Keep | Asked::PlayMade => {
+                let last = self.0.state.borrow().map_design;
+                if let Some(id) = last {
+                    match asked {
+                        Asked::Reroll => self.reroll_design(id),
+                        Asked::Keep => self.keep_design(id),
+                        _ => self.play_design(id),
+                    }
                 }
             }
             Asked::Gather(files) => {

@@ -137,6 +137,8 @@ pub struct SessionOptions {
     pub library: Option<Rc<Library>>,
     /// Kumi-owned output folder for new plug-in presets; a private temporary folder when absent.
     pub preset_dir: Option<std::path::PathBuf>,
+    /// Kumi-owned folder for the sounds the producer designs (cross, fuse, stack): with it, `design_sound` is offered.
+    pub design_dir: Option<std::path::PathBuf>,
     /// The producer's own music, when Kumi knows where it is: how learning it goes reaches the app, and /music asks the
     /// session about it.
     pub music: Option<Rc<kumi_listening::music::learning::Music>>,
@@ -199,6 +201,7 @@ impl SessionOptions {
             timings: None,
             library: None,
             preset_dir: None,
+            design_dir: None,
             music: None,
             slots: None,
             map: None,
@@ -453,6 +456,8 @@ struct Inner {
     /// palette tool, with them.
     palettes: Option<Rc<crate::core::palette::Palettes>>,
     palette_tool: Option<Rc<dyn KernelTool>>,
+    /// `design_sound`, when the session has a folder for designed sounds.
+    design_tool: Option<Rc<dyn KernelTool>>,
     timings: Option<String>,
     shelf: Vec<Rc<dyn KernelTool>>,
     plugins: Rc<dyn KernelTool>,
@@ -843,6 +848,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 emit(SessionEvent::Library(LibraryEvent { status }))
             }))
         });
+        let design_tool = options.design_dir.clone().map(|dir| crate::core::design::DesignTool::new(dir, palettes.clone()));
         Inner {
             plugins: crate::core::plugin_tools::PluginTool::new(options.preset_dir.clone()),
             options,
@@ -862,6 +868,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
             taste,
             search_memory,
             palette_tool: palettes.clone().map(crate::core::palette_tool::PaletteTool::new),
+            design_tool,
             palettes,
             timings,
             shelf,
@@ -1777,6 +1784,7 @@ impl Session {
             tools.extend(self.0.shelf.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.recipes.clone());
             tools.extend(self.0.palette_tool.clone());
+            tools.extend(self.0.design_tool.iter().map(|tool| self.with_background(tool.clone())));
             tools.push(self.with_background(self.0.plugins.clone()));
             if let Some(service) = self.audio_service() {
                 tools.push(self.with_background(crate::core::audio_tools::tool(service, self.audio_notice())));

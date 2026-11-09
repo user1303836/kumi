@@ -2,6 +2,7 @@ pub mod awake;
 pub mod cli;
 pub mod config;
 pub mod daw;
+pub mod design;
 pub mod doctor;
 pub mod export;
 pub mod has;

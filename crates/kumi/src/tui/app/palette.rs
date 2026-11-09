@@ -36,7 +36,10 @@ impl Tab for PaletteTab {
         Some(&self.empty)
     }
     fn shown(&self) -> bool {
-        self.app.upgrade().is_some_and(|a| a.state.borrow().palette.is_some())
+        self.app.upgrade().is_some_and(|a| {
+            let state = a.state.borrow();
+            state.palette.is_some() || !state.designs.is_empty()
+        })
     }
 }
 
@@ -72,8 +75,9 @@ impl TuiApp {
         Some(self.session().op(op::PaletteGather { files }).await.map_err(|error| error.to_string()))
     }
 
-    /// A row a file (its name, and its class or a song's style at the right), then a row that asks Kumi to load the
-    /// palette's sounds as a kit: made once for the palette as it stands (and the width), not each frame.
+    /// A row a file (its name, and its class or a song's style at the right), a row that asks Kumi to load the palette's
+    /// sounds as a kit, then the ways to make a sound from them and the sounds made (design.rs): made once for the palette
+    /// as it stands (and the width), not each frame.
     fn palette_rows(&self, width: i32) -> Rc<[TabRow]> {
         if let Some((made, rows)) = &self.0.state.borrow().palette_rows {
             if *made == width {
@@ -86,9 +90,10 @@ impl TuiApp {
     }
 
     fn make_palette_rows(&self, width: i32) -> Rc<[TabRow]> {
-        let Some(palette) = self.0.state.borrow().palette.clone() else { return Rc::default() };
+        let Some(palette) = self.0.state.borrow().palette.clone() else { return self.design_rows(&[], width).into() };
         let mut rows: Vec<TabRow> = palette.files.iter().map(|file| self.palette_row(file, width)).collect();
         let sounds: Vec<&PaletteFile> = palette.files.iter().filter(|file| !file.song).collect();
+        let files: Vec<String> = sounds.iter().take(kumi_design::MAX_SOURCES).map(|file| file.path.clone()).collect();
         if !sounds.is_empty() {
             // A kit takes as many as map_samples lays out at once.
             let first = if sounds.len() > MOST_SAMPLES { format!("the first {MOST_SAMPLES} of ") } else { String::new() };
@@ -110,6 +115,7 @@ impl TuiApp {
                 ..Default::default()
             });
         }
+        rows.extend(self.design_rows(&files, width));
         rows.into()
     }
 

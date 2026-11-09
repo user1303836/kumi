@@ -35,6 +35,8 @@ fn table(size: usize) -> Arc<Table> {
         .clone()
 }
 /// In-place complex FFT (radix 2); `re` and `im` have a power-of-two length.
+// Inlined so a crate built optimized in tests (kumi-design) runs its transforms optimized too.
+#[inline]
 pub fn fft(re: &mut [f64], im: &mut [f64]) {
     let size = re.len();
     let table = table(size);
@@ -109,6 +111,7 @@ impl Biquad {
     pub fn new(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
         Self { b0, b1, b2, a1, a2, z1: 0.0, z2: 0.0 }
     }
+    #[inline]
     pub fn process(&mut self, input: f64) -> f64 {
         let output = self.b0 * input + self.z1;
         self.z1 = self.b1 * input - self.a1 * output + self.z2;
@@ -167,11 +170,13 @@ impl TruePeak {
     pub fn new() -> Self {
         Self::default()
     }
+    #[inline]
     pub fn push(&mut self, sample: f64) {
         self.history[self.at] = sample;
         self.history[self.at + 12] = sample;
         self.at = (self.at + 1) % 12;
     }
+    #[inline]
     pub fn peak(&self) -> f64 {
         let history: &[f64; 12] = self.history[self.at..self.at + 12].try_into().unwrap();
         // Fixed tap accesses remove per-sample ring arithmetic and bounds checks.
@@ -200,6 +205,7 @@ impl TruePeak {
 /// Audio from one rate to another: a windowed sinc (Blackman, 32 zero crossings a side), its cutoff under the lower
 /// rate's half. Between whole rates, each output sample's kernel is one of a few made once (polyphase: 44.1 to 48 kHz
 /// is 160 kernels of 69 taps, 44.1 to 22.05 kHz one).
+#[inline]
 pub fn resample(input: &[f32], from: f64, to: f64) -> Vec<f32> {
     if (from - to).abs() < 1e-6 || input.is_empty() {
         return input.to_vec();

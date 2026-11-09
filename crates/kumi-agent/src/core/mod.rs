@@ -8,6 +8,7 @@ pub mod contracts;
 pub mod conversations;
 pub mod delivery;
 pub mod describe;
+pub mod design;
 pub mod evolve;
 pub mod export;
 pub mod file_sync;

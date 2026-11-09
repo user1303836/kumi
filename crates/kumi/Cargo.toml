@@ -25,6 +25,7 @@ kumi-media.workspace = true
 kumi-ai.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
+kumi-design.workspace = true
 kumi-agent.workspace = true
 kumi-daw.workspace = true
 kumi-daw-ableton.workspace = true

@@ -75,7 +75,7 @@ LAYERS = {
     # What a DAW's crate gives the app and gets from it: below the DAWs' integrations, above the agent.
     "kumi-daw": 4,
     "kumi-agent": 3,
-    "kumi-listening": 2, "kumi-library": 2, "kumi-web": 2, "kumi-ai": 2,
+    "kumi-listening": 2, "kumi-library": 2, "kumi-web": 2, "kumi-ai": 2, "kumi-design": 2,
     "kumi-media": 1, "kumi-net": 1, "kumi-store": 1, "kumi-genexpr": 1, "kumi-layout": 1,
     "kumi-types": 0, "kumi-common": 0,
 }
