@@ -52,9 +52,10 @@ aiff = _load("aiff", "aiff.py")
 palettes = _load("palettes", "palettes.py")
 designs = _load("designs", "designs.py")
 
-# The largest body `POST /map/hidden` and `POST /design` read: 500 ids of 128 characters with their reasons fit well
-# inside it, and a design's sixteen sounds with their names much more so.
+# The largest body `POST /map/hidden` reads: 500 ids of 128 characters with their reasons fit well inside it.
 _BODY_MAX = 256 * 1024
+# The largest body `POST /design` reads: a design takes as many sounds as are picked, thousands with their names.
+_DESIGN_BODY_MAX = 8 * 1024 * 1024
 # The largest body `POST /palette` reads: a gather of 10,000 current-revision ids (about 45 bytes each) fits in it.
 _PALETTE_BODY_MAX = 1024 * 1024
 
@@ -223,11 +224,11 @@ def _design(body: object) -> dict:
 
 @router.post("/design")
 async def design(request: Request) -> dict:
-    """Make a new sound from two to sixteen of the map's sounds or earlier results (by id): cross, fuse or stack, with
-    a seed (contract: the engine's interface). Answers the engine's answer with the result's `artifact_id`, which
-    `/audio` serves; 400 with `detail` for a request the engine refuses, 503 while Kumi isn't set up or is already
-    making two, 504 past two minutes."""
-    return await run_in_threadpool(_design, await _json(request, _BODY_MAX))
+    """Make a new sound from two or more of the map's sounds or earlier results (by id): cross, fuse or stack them, or
+    grow one toward another, with a seed and any steer or choices (contract: the engine's interface). Answers the
+    engine's answer with the result's `artifact_id`, which `/audio` serves; 400 with `detail` for a request the engine
+    refuses, 503 while Kumi isn't set up or is already making two, 504 past five minutes."""
+    return await run_in_threadpool(_design, await _json(request, _DESIGN_BODY_MAX))
 
 
 @router.get("/designs")

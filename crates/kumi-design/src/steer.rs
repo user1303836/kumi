@@ -165,7 +165,8 @@ impl Steer {
             let mut r = rng.fork(salt);
             (0..n).map(|_| r.unit()).collect::<Vec<f64>>()
         };
-        let within = |range: [f64; 2], salt: u64| draws(salt).into_iter().map(|u| range[0] + (range[1] - range[0]) * u).collect::<Vec<f64>>();
+        let within =
+            |range: [f64; 2], salt: u64| draws(salt).into_iter().map(|u| range[0] + (range[1] - range[0]) * u).collect::<Vec<f64>>();
         let pitch = spans(self.pitch).map(|r| within(r, 1));
         let reverse = moved(self.reverse).map(|p| draws(2).into_iter().map(|u| u < p).collect::<Vec<bool>>());
         let start = spans(self.start).map(|r| within(r, 3));
@@ -243,12 +244,14 @@ impl Steer {
         (out, words)
     }
 
-    /// The result as the controls on it shape it, and the recipe's words for what they did. A loop is shaped over
-    /// two rounds and its second kept, so every effect comes round into its start.
+    /// The result as the controls on it shape it, and the recipe's words for what they did. A loop is shaped over three
+    /// rounds and the middle one kept: every effect has run in from the round before and on into the round after, so
+    /// its end runs into its start.
     pub(crate) fn result(&self, audio: Stereo, ending: &Ending, rng: &Rng) -> (Stereo, Vec<String>) {
         let looped = matches!(ending, Ending::Loop);
         let len = audio[0].len();
-        let mut x: Stereo = if looped { std::array::from_fn(|c| audio[c].iter().chain(&audio[c]).copied().collect()) } else { audio };
+        let mut x: Stereo =
+            if looped { std::array::from_fn(|c| audio[c].iter().chain(&audio[c]).chain(&audio[c]).copied().collect()) } else { audio };
         let mut words = Vec::new();
         if !looped {
             // Room for a tail to ring into: finishing trims what stays silent.
@@ -263,8 +266,11 @@ impl Steer {
         }
         if let Some(sweep) = moved(self.filter) {
             let resonance = self.resonance.unwrap_or(0.0);
-            let (hz, low) =
-                if sweep < 0.0 { (20_000.0 * (150.0 / 20_000.0f64).powf(-sweep), true) } else { (20.0 * (5_000.0 / 20.0f64).powf(sweep), false) };
+            let (hz, low) = if sweep < 0.0 {
+                (20_000.0 * (150.0 / 20_000.0f64).powf(-sweep), true)
+            } else {
+                (20.0 * (5_000.0 / 20.0f64).powf(sweep), false)
+            };
             let q = 0.707 + 9.0 * resonance;
             for channel in x.iter_mut() {
                 let mut svf = fx::Svf::default();
@@ -299,12 +305,21 @@ impl Steer {
             words.push("driven".into());
         }
         if let Some(crush) = moved(self.crush) {
-            crushed(&mut x, crush);
+            crushed(&mut x, crush, looped.then_some(len));
             words.push("crushed".into());
         }
         if let Some(width) = moved(self.width) {
             widen(&mut x, width);
-            words.push(if width <= -0.99 { "mono" } else if width < 0.0 { "narrower" } else { "wider" }.into());
+            words.push(
+                if width <= -0.99 {
+                    "mono"
+                } else if width < 0.0 {
+                    "narrower"
+                } else {
+                    "wider"
+                }
+                .into(),
+            );
         }
         if let Some(space) = moved(self.space) {
             let mut verb_rng = rng.fork(12);
@@ -382,7 +397,7 @@ fn lengthen(x: Stereo, amount: f64) -> Stereo {
     if amount < 0.0 {
         let end = analysis::end_of(&mono).max(hit + 1);
         let mut x = x;
-        decay(&mut x, hit, end, -amount);
+        decay(&mut x, hit, end, len, -amount);
         return x;
     }
     let keep = (hit + (0.03 * RATE) as usize).min(len);
@@ -416,7 +431,7 @@ fn lengthen_hits(mut x: Stereo, amount: f64) -> Stereo {
         let end = starts.get(j + 1).copied().unwrap_or(len);
         let hit = analysis::peak_after(&mono, start, ((0.03 * RATE) as usize).min(end - start));
         if amount < 0.0 {
-            decay(&mut x, hit, end, -amount);
+            decay(&mut x, hit, end, end, -amount);
         } else {
             let top = level[hit].max(1e-9) as f64;
             for i in hit..end {
@@ -431,11 +446,11 @@ fn lengthen_hits(mut x: Stereo, amount: f64) -> Stereo {
     x
 }
 
-/// Past `hit`, an extra fall of `faster` × 3 × 60 dB over the time to `end`: the sound dies `1 + 3 × faster` times
-/// sooner.
-fn decay(x: &mut Stereo, hit: usize, end: usize, faster: f64) {
+/// From `hit` to `stop`, an extra fall of `faster` × 3 × 60 dB over the time to `end`: the sound dies `1 + 3 × faster`
+/// times sooner.
+fn decay(x: &mut Stereo, hit: usize, end: usize, stop: usize, faster: f64) {
     let span = (end - hit).max(1) as f64;
-    for i in hit..x[0].len() {
+    for i in hit..stop.min(x[0].len()) {
         let db = (-180.0 * faster * (i - hit) as f64 / span).max(-120.0);
         let gain = if db <= -120.0 { 0.0 } else { 10f64.powf(db / 20.0) as f32 };
         x[0][i] *= gain;
@@ -444,7 +459,7 @@ fn decay(x: &mut Stereo, hit: usize, end: usize, faster: f64) {
 }
 
 /// `x` made `factor` times longer at the same pitch, by a phase vocoder.
-fn stretch(x: &[f32], factor: f64) -> Vec<f32> {
+pub(crate) fn stretch(x: &[f32], factor: f64) -> Vec<f32> {
     let (n, synthesis) = (2048usize, 512usize);
     let window = hann(n);
     let bins = n / 2 + 1;
@@ -493,14 +508,15 @@ fn saturate(x: &mut Stereo, amount: f64) {
     }
 }
 
-/// From 16 bits at full rate down to 4 bits at a twelfth of it.
-fn crushed(x: &mut Stereo, amount: f64) {
+/// From 16 bits at full rate down to 4 bits at a twelfth of it. A loop's held samples are counted from its own start
+/// (`period`), so its rounds hold alike and its end runs into its start.
+fn crushed(x: &mut Stereo, amount: f64, period: Option<usize>) {
     let levels = 2f64.powf(15.0 - 12.0 * amount);
     let hold = 1 + (11.0 * amount * amount).round() as usize;
     for channel in x.iter_mut() {
         let mut held = 0.0f64;
         for (i, v) in channel.iter_mut().enumerate() {
-            if i % hold == 0 {
+            if period.map_or(i, |period| i % period) % hold == 0 {
                 held = *v as f64;
             }
             *v = ((held * levels).round() / levels) as f32;

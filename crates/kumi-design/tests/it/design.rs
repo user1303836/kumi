@@ -318,8 +318,12 @@ fn each_steer_control_pushes_the_sound_its_way() {
         r
     };
     let base = make(Steer::default());
-    let (dark, bright) = (make(Steer { bright: Some(-1.0), ..Default::default() }), make(Steer { bright: Some(1.0), ..Default::default() }));
-    assert!(colour(&bright).centroid > colour(&base).centroid && colour(&base).centroid > colour(&dark).centroid, "bright moves the centroid up");
+    let (dark, bright) =
+        (make(Steer { bright: Some(-1.0), ..Default::default() }), make(Steer { bright: Some(1.0), ..Default::default() }));
+    assert!(
+        colour(&bright).centroid > colour(&base).centroid && colour(&base).centroid > colour(&dark).centroid,
+        "bright moves the centroid up"
+    );
     assert!(dark.recipe.contains("darker") && bright.recipe.contains("brighter"), "{} / {}", dark.recipe, bright.recipe);
     let closed = make(Steer { filter: Some(-0.8), resonance: Some(0.5), ..Default::default() });
     assert!(colour(&closed).centroid < colour(&base).centroid * 0.6, "a low-pass takes the top off");
@@ -329,7 +333,13 @@ fn each_steer_control_pushes_the_sound_its_way() {
     let (tonal, noisy) = (make(Steer { noise: Some(-1.0), ..Default::default() }), make(Steer { noise: Some(1.0), ..Default::default() }));
     assert!(colour(&noisy).flatness > colour(&tonal).flatness, "noise flattens the spectrum");
     let (short, long) = (make(Steer { length: Some(-1.0), ..Default::default() }), make(Steer { length: Some(1.0), ..Default::default() }));
-    assert!(short.duration() < base.duration() && base.duration() < long.duration(), "length: {} < {} < {}", short.duration(), base.duration(), long.duration());
+    assert!(
+        short.duration() < base.duration() && base.duration() < long.duration(),
+        "length: {} < {} < {}",
+        short.duration(),
+        base.duration(),
+        long.duration()
+    );
     let roomy = make(Steer { space: Some(1.0), ..Default::default() });
     assert!(roomy.duration() > base.duration() + 0.5 && roomy.recipe.contains("in a hall"), "space rings on: {} s", roomy.duration());
     let mono = make(Steer { width: Some(-1.0), ..Default::default() });
@@ -349,7 +359,11 @@ fn each_steer_control_pushes_the_sound_its_way() {
     // Every sound reversed swells into its hit: the loudest moment comes late.
     let backwards = make(Steer { reverse: Some(1.0), ..Default::default() });
     let loudest = |r: &Render| mono_of(r).iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).map_or(0, |(i, _)| i);
-    assert!(loudest(&backwards) > loudest(&base) + (0.1 * RATE) as usize && backwards.recipe.contains("3 of 3 reversed"), "{}", backwards.recipe);
+    assert!(
+        loudest(&backwards) > loudest(&base) + (0.1 * RATE) as usize && backwards.recipe.contains("3 of 3 reversed"),
+        "{}",
+        backwards.recipe
+    );
     // Each delayed by 100 ms: the stack starts 100 ms late.
     let late = make(Steer { delay: Some([100.0, 100.0]), ..Default::default() });
     let first = mono_of(&late).iter().position(|v| v.abs() > 1e-3).unwrap_or(0);
@@ -358,11 +372,18 @@ fn each_steer_control_pushes_the_sound_its_way() {
 
 #[test]
 fn steered_pitch_moves_each_sound_and_a_reroll_draws_again() {
+    // Grown no way at all, the render is its first sound alone: a plain harmonic tone, whose pitch is clear to hear.
+    let tone = mono("Tone.wav", 48_000.0, 1.2, |t, _| (2.0 * (t * 330.0).fract() - 1.0) * (-t * 2.0).exp() * 0.5);
+    let pair = [tone, kick()];
+    let pitched = |steer: Steer| {
+        let r = run(&request(Op::Grow, None, &pair, Options { at: Some(0.0), steer: Some(steer), ..Default::default() }), 1, &pair);
+        (analysis::pitch(&mono_of(&r), 0).expect("a pitched bell"), r.recipe)
+    };
+    let (plain, _) = pitched(Steer::default());
+    let (octave, recipe) = pitched(Steer { pitch: Some([12.0, 12.0]), ..Default::default() });
+    assert!((octave / plain - 2.0).abs() < 0.04, "an octave up: {plain:.0} Hz to {octave:.0} Hz");
+    assert!(recipe.contains("pitch +12 st"), "{recipe}");
     let bells = [bell(), bell()];
-    let octave = run(&request(Op::Stack, None, &bells, steered(Steer { pitch: Some([12.0, 12.0]), ..Default::default() })), 1, &bells);
-    let heard = analysis::pitch(&mono_of(&octave), 0).expect("a pitched stack");
-    assert!((heard / 1046.0 - 1.0).abs() < 0.03, "an octave up the 523 Hz bell: {heard:.0} Hz");
-    assert!(octave.recipe.contains("pitch +12 st"), "{}", octave.recipe);
     let ranged = request(Op::Stack, None, &bells, steered(Steer { pitch: Some([-12.0, 12.0]), ..Default::default() }));
     assert!(run(&ranged, 5, &bells).wav() == run(&ranged, 5, &bells).wav(), "the same seed draws the same pitches");
     assert!(run(&ranged, 5, &bells).wav() != run(&ranged, 6, &bells).wav(), "another seed draws others");
@@ -372,7 +393,16 @@ fn steered_pitch_moves_each_sound_and_a_reroll_draws_again() {
 fn a_steered_loop_still_comes_round() {
     let sources = [groove(), kick(), snare(), hat()];
     let steer = Steer { space: Some(0.8), punch: Some(0.5), width: Some(0.6), length: Some(-0.5), noise: Some(0.3), ..Default::default() };
-    let r = run(&request(Op::Fuse, Some(Mode::Loop), &sources, Options { bpm: Some(120.0), bars: Some(1), steer: Some(steer), ..Default::default() }), 3, &sources);
+    let r = run(
+        &request(
+            Op::Fuse,
+            Some(Mode::Loop),
+            &sources,
+            Options { bpm: Some(120.0), bars: Some(1), steer: Some(steer), ..Default::default() },
+        ),
+        3,
+        &sources,
+    );
     sound(&r, "steered loop");
     assert_eq!(r.audio[0].len(), (0.125 * RATE * 16.0).round() as usize, "a steered loop keeps its bars");
     seamless(&r, "steered loop");
@@ -412,7 +442,8 @@ fn new_choices_are_refused_where_they_dont_belong() {
     assert!(steer(Steer { pitch: Some([5.0, -5.0]), ..Default::default() }).contains("low first"));
     assert!(steer(Steer { delay: Some([0.0, 900.0]), ..Default::default() }).contains("delay"));
     let resonate = serde_json::from_str::<kumi_design::choices::Resonate>(r#"{"pairing":"bright-dark"}"#).unwrap();
-    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two, Options { resonate: Some(resonate), ..Default::default() })).contains("cross:resonate"));
+    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two, Options { resonate: Some(resonate), ..Default::default() }))
+        .contains("cross:resonate"));
     let looping = |json: &str, options: Options| {
         refused(request(Op::Fuse, Some(Mode::Loop), &two, Options { r#loop: Some(serde_json::from_str(json).unwrap()), ..options }))
     };
@@ -429,4 +460,95 @@ fn a_design_takes_any_number_of_sounds() {
     sound(&blend, "a blend of 24");
     let stack = run(&request(Op::Stack, None, &many[..12], Options::default()), 2, &many[..12]);
     sound(&stack, "a stack of 12");
+}
+
+fn looped(json: &str, bpm: f64, bars: u32) -> Options {
+    Options { bpm: Some(bpm), bars: Some(bars), r#loop: Some(serde_json::from_str(json).unwrap()), ..Default::default() }
+}
+
+/// The loop's energy in its first and last quarters.
+fn quarters(render: &Render) -> (f64, f64) {
+    let mono = mono_of(render);
+    let q = mono.len() / 4;
+    let energy = |part: &[f32]| part.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+    (energy(&mono[..q]), energy(&mono[mono.len() - q..]))
+}
+
+#[test]
+fn a_beat_takes_its_meter_and_its_choices() {
+    let sources = [groove(), kick(), snare(), hat()];
+    let beat = |json: &str, seed: u64| {
+        let r = run(&request(Op::Fuse, Some(Mode::Loop), &sources, looped(json, 120.0, 2)), seed, &sources);
+        sound(&r, json);
+        seamless(&r, json);
+        r
+    };
+    // 7/8 at 120: an eighth is 0.25 s, so two bars are 3.5 s.
+    let seven = beat(r#"{"meter":[7,8]}"#, 1);
+    assert_eq!(seven.audio[0].len(), (3.5 * RATE) as usize, "two bars of 7/8 at 120");
+    assert!(seven.recipe.contains("of 7/8"), "{}", seven.recipe);
+    let triplets = beat(r#"{"grid":3}"#, 1);
+    assert!(triplets.recipe.contains("triplets"), "{}", triplets.recipe);
+    // Leaning late puts the hits near the end, leaning early near the start.
+    let (early_start, early_end) = quarters(&beat(r#"{"lean":-1,"density":0.9,"perc":1}"#, 3));
+    let (late_start, late_end) = quarters(&beat(r#"{"lean":1,"density":0.9,"perc":1}"#, 3));
+    assert!(
+        late_end / late_start > early_end / early_start,
+        "lean: early {early_start:.1}/{early_end:.1}, late {late_start:.1}/{late_end:.1}"
+    );
+    for (json, word) in [
+        (r#"{"fills":1}"#, "fills"),
+        (r#"{"ghosts":1}"#, "ghost notes"),
+        (r#"{"ratchet":1}"#, "rolls"),
+        (r#"{"poly":1}"#, "perc in"),
+        (r#"{"open":1}"#, "open hats"),
+        (r#"{"hats":0}"#, "every half beat"),
+        (r#"{"hats":1}"#, "every step"),
+    ] {
+        let r = beat(json, 2);
+        assert!(r.recipe.contains(word), "{json}: {}", r.recipe);
+    }
+}
+
+/// The pitch class (0 C to 11 B) a frequency is nearest, and how far off it is in cents.
+fn pitch_class(hz: f64) -> (usize, f64) {
+    let midi = 69.0 + 12.0 * (hz / 440.0).log2();
+    ((midi.round() as i64).rem_euclid(12) as usize, (midi - midi.round()) * 100.0)
+}
+
+#[test]
+fn a_melody_plays_in_its_key_scale_and_tuning() {
+    let sources = [bell(), pad(), kick()];
+    let melody = |json: &str, seed: u64| {
+        let r = run(&request(Op::Fuse, Some(Mode::Loop), &sources, looped(json, 100.0, 2)), seed, &sources);
+        sound(&r, json);
+        seamless(&r, json);
+        assert_eq!(r.audio[0].len(), (0.6 * 4.0 * 2.0 * RATE).round() as usize, "{json}: exactly two bars at 100 BPM");
+        r
+    };
+    let plain =
+        r#"{"style":"melody","key":"A","scale":"minor-pentatonic","chords":0,"glide":0,"micro":0,"drone":0,"gate":0.9,"density":0.4}"#;
+    let r = melody(plain, 4);
+    assert!(r.recipe.starts_with("Melody") && r.recipe.contains("in A minor pentatonic"), "{}", r.recipe);
+    // Every note heard is one of A minor pentatonic's: A, C, D, E, G.
+    let mono = mono_of(&r);
+    let heard: Vec<(usize, f64)> =
+        analysis::onsets(&mono).into_iter().filter_map(|at| analysis::pitch(&mono, at)).map(pitch_class).collect();
+    assert!(heard.len() >= 3, "notes heard: {heard:?}");
+    let in_scale = heard.iter().filter(|(class, off)| [9, 0, 2, 4, 7].contains(class) && off.abs() < 35.0).count();
+    assert!(in_scale * 10 >= heard.len() * 8, "{in_scale} of {} notes in A minor pentatonic: {heard:?}", heard.len());
+    assert!(melody(plain, 4).wav() == r.wav() && melody(plain, 5).wav() != r.wav(), "one seed, one melody; another, another");
+    let bent = melody(r#"{"style":"melody","tuning":"24-tet","micro":1}"#, 2);
+    assert!(bent.recipe.contains("24-TET") && bent.recipe.contains("bent off the scale"), "{}", bent.recipe);
+    let tritave = melody(r#"{"style":"melody","tuning":"bohlen-pierce","scale":"major"}"#, 3);
+    assert!(tritave.recipe.contains("Bohlen–Pierce"), "{}", tritave.recipe);
+    // A held root fills the whole loop: no eighth of it is silent.
+    let held = melody(r#"{"style":"melody","drone":0.9,"density":0.2}"#, 6);
+    assert!(held.recipe.contains("a held root"), "{}", held.recipe);
+    let mono = mono_of(&held);
+    let eighth = mono.len() / 8;
+    for part in mono.chunks(eighth).take(8) {
+        let rms = (part.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / part.len() as f64).sqrt();
+        assert!(rms > 1e-3, "the drone holds through every eighth of the loop ({rms:.5})");
+    }
 }

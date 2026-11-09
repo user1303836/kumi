@@ -15,11 +15,11 @@ pub enum Pairing {
     InOrder,
     /// The 1st, 3rd, 5th… through the 2nd, 4th, 6th….
     Interleave,
-    /// The brighter half through the darker.
+    /// The brighter half (the larger half, for an odd count) through the darker, each measured around its start.
     BrightDark,
     /// The darker half through the brighter.
     DarkBright,
-    /// The punchy, short ones through the tonal, long ones.
+    /// The punchy, short ones (the larger half, for an odd count) through the tonal, long ones.
     HitsTones,
     /// The tonal, long ones through the punchy, short ones.
     TonesHits,
@@ -132,7 +132,8 @@ impl Modulation {
 pub struct Modulate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier: Option<Carrier>,
-    /// The ways allowed, in any order; not given, every way at its usual odds.
+    /// The ways allowed, in any order; not given, every way at its usual odds. A way never runs twice in a row unless
+    /// it's the only one allowed, and FM runs once while another allowed way remains.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kinds: Option<Vec<Modulation>>,
     /// How many shapings run, one after another (1 to 8).
@@ -319,7 +320,20 @@ impl Tuning {
             Tuning::Tet22 => equal(22),
             Tuning::Tet24 => equal(24),
             Tuning::Tet31 => equal(31),
-            Tuning::Just => ratios(&[1.0, 16.0 / 15.0, 9.0 / 8.0, 6.0 / 5.0, 5.0 / 4.0, 4.0 / 3.0, 45.0 / 32.0, 3.0 / 2.0, 8.0 / 5.0, 5.0 / 3.0, 9.0 / 5.0, 15.0 / 8.0]),
+            Tuning::Just => ratios(&[
+                1.0,
+                16.0 / 15.0,
+                9.0 / 8.0,
+                6.0 / 5.0,
+                5.0 / 4.0,
+                4.0 / 3.0,
+                45.0 / 32.0,
+                3.0 / 2.0,
+                8.0 / 5.0,
+                5.0 / 3.0,
+                9.0 / 5.0,
+                15.0 / 8.0,
+            ]),
             Tuning::Pythagorean => ratios(&[
                 1.0,
                 256.0 / 243.0,

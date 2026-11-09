@@ -5,7 +5,9 @@
 use crate::core::palette::Palettes;
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_design::{fresh_seed, load_source, render, schema, source_seconds, Answer, Mode, Op, Options, Request, SourceRef, MAX_SEED, MIN_SOURCES};
+use kumi_design::{
+    fresh_seed, load_source, render, schema, source_seconds, Answer, Mode, Op, Options, Request, SourceRef, MAX_SEED, MIN_SOURCES,
+};
 use kumi_media::audio::DecodeOptions;
 use kumi_types::{
     contracts::{JsonObject, KernelTool, Reach, ToolResult},
@@ -39,8 +41,9 @@ pub fn request(op: Op, mode: Option<Mode>, files: &[String], seed: Option<u64>, 
     Request { op, mode, sources, seed, options }
 }
 
-/// What a made sound's file is called: the op or mode, its first source, how many more, and the seed, so every
-/// variation keeps a name of its own ("Blend - Kick 909 + 2 - 4821.wav").
+/// What a made sound's file is called: the op or mode, its first source, how many more, how far a grow went, a short
+/// mark of any other options set, and the seed, so every variation keeps a name of its own ("Blend - Kick 909 + 2 -
+/// 4821.wav", "Grow - Kick 909 + 1 - 35% - 4821.wav", "Loop - Kick 909 + 3 - 9c1e - 4821.wav").
 pub fn file_name(request: &Request, seed: u64) -> String {
     let what = match (request.op, request.mode) {
         (Op::Grow, _) => "Grow",
@@ -65,7 +68,17 @@ pub fn file_name(request: &Request, seed: u64) -> String {
         .take(40)
         .collect();
     let more = request.sources.len().saturating_sub(1);
-    format!("{what} - {} + {more} - {seed}.wav", first.trim())
+    let at = if request.op == Op::Grow { format!(" - {:.0}%", request.options.at.unwrap_or(0.5) * 100.0) } else { String::new() };
+    let rest = Options { at: None, ..request.options.clone() };
+    let mark = if rest == Options::default() {
+        String::new()
+    } else {
+        // FNV-1a of the options as written: the same options, the same mark.
+        let written = serde_json::to_string(&rest).unwrap_or_default();
+        let hash = written.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+        format!(" - {:04x}", hash & 0xffff)
+    };
+    format!("{what} - {} + {more}{at}{mark} - {seed}.wav", first.trim())
 }
 
 /// Renders the request (its sources files) into `folder`: decoded, designed on a blocking thread, written whole.

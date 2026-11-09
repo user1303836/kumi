@@ -10,6 +10,7 @@ mod cross;
 mod fuse;
 mod fx;
 mod grow;
+mod melody;
 pub mod rng;
 pub mod schema;
 mod stack;
@@ -358,7 +359,13 @@ impl Source {
 
 /// Reads up to `seconds` of a file as a source (`source_seconds` says how much a design of so many sounds reads), WAV
 /// and AIFF by Kumi's own reader; anything else only through the decoder `decode` allows.
-pub async fn load_source(path: &Path, name: &str, seconds: f64, decode: &DecodeOptions, signal: Option<Signal>) -> Result<Source, AudioError> {
+pub async fn load_source(
+    path: &Path,
+    name: &str,
+    seconds: f64,
+    decode: &DecodeOptions,
+    signal: Option<Signal>,
+) -> Result<Source, AudioError> {
     let seconds = seconds.clamp(MIN_SOURCE_SECONDS, MAX_SOURCE_SECONDS);
     let mut audio = open_audio_to_with_options(path, signal, Some(seconds), decode).await?;
     let rate = audio.sample_rate;

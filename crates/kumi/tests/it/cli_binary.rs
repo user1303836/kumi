@@ -110,7 +110,7 @@ fn kumi_design_renders_a_request_headless_and_refuses_in_json() {
     let refused = run(home.path(), &["design", "--json", &bad, "--out", none.to_str().unwrap()], false);
     assert_eq!(refused.status.code(), Some(1));
     let said: serde_json::Value = serde_json::from_slice(&refused.stdout).unwrap();
-    assert!(said["error"].as_str().unwrap().contains("2 to 8"), "{said}");
+    assert!(said["error"].as_str().unwrap().contains("2 or more"), "{said}");
     assert!(!none.exists());
     assert!(!home.path().join("settings.json").exists(), "no settings read or written");
 }
