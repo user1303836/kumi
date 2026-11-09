@@ -10,7 +10,7 @@ import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { sourcesOf, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -117,13 +117,20 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const session = ownerSession(state)
   const map = state.map
   // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own step,
-  // sent as the pane sends it), else a request to scan (Kumi asks which folder when none is set up).
+  // sent as the pane sends it), the scan's progress while one runs, else a request to scan (Kumi asks which folder
+  // when none is set up).
   const setupFirst = RUNTIME_MISSING[state.setup?.state ?? ''] ? (nextSteps(state, t)[0] ?? null) : null
+  const scanning = Object.values(state.jobs).find(job => job.kind === 'scan' && (job.state === 'running' || job.state === undefined))
   const empty =
     state.available === false ? (
       t('map.agentOff')
     ) : map === null ? (
       t('map.reading')
+    ) : scanning ? (
+      <>
+        {t('map.scanningNow')}
+        {jobWords(scanning, t).detail && <div style={{ marginTop: 6, color: T.faint }}>{jobWords(scanning, t).detail}</div>}
+      </>
     ) : (
       <>
         {setupFirst ? t('map.setupFirst') : t('map.empty')}

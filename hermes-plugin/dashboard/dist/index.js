@@ -200,6 +200,7 @@
       scanTitle: "Put a request to scan your sample folders in the chat (Kumi asks which folder to add if none is set up), to send when you like",
       scanCopy: "Copy the request",
       setupFirst: "Kumi's runtime isn't set up yet. Once it is, Kumi builds the map from your sample folders.",
+      scanningNow: "Kumi is scanning your sample folders; the map appears when it's done.",
       tiles: "Tiles",
       tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it",
       hand: "Move map",
@@ -939,6 +940,7 @@
       scanTitle: "サンプルフォルダをスキャンする依頼をチャットに入れます（まだフォルダがなければ、どれを加えるか Kumi が尋ねます）。送信はご自身で",
       scanCopy: "依頼をコピー",
       setupFirst: "Kumi のランタイムはまだセットアップされていません。セットアップすると、サンプルフォルダからマップを作ります。",
+      scanningNow: "Kumi がサンプルフォルダをスキャンしています。終わるとマップが表示されます。",
       tiles: "タイル",
       tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します",
       hand: "マップを移動",
@@ -1673,6 +1675,7 @@
       scanTitle: "把扫描采样文件夹的请求放进对话（还没有文件夹时，Kumi 会问你要加哪个），由你决定何时发送",
       scanCopy: "复制请求",
       setupFirst: "Kumi 的运行时还没有设置好。设置好后，Kumi 会根据你的采样文件夹生成地图。",
+      scanningNow: "Kumi 正在扫描你的采样文件夹，扫描完成后地图就会出现。",
       tiles: "方块",
       tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近",
       hand: "移动地图",
@@ -7564,7 +7567,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               empty: state.map === null ? t("map.reading") : ["needs_runtime", "outdated_runtime", "damaged_runtime"].includes(state.setup?.state ?? "") ? (
                 // No runtime yet: setup comes first (the dashboard's header says how).
                 t("map.setupFirst")
-              ) : /* @__PURE__ */ jsxs(Fragment2, { children: [
+              ) : Object.values(state.jobs).some((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0)) ? t("map.scanningNow") : /* @__PURE__ */ jsxs(Fragment2, { children: [
                 t("dashboard.mapEmpty"),
                 /* @__PURE__ */ jsx("div", { style: { marginTop: 10 }, children: /* @__PURE__ */ jsx(CopyButton, { label: t("map.scanCopy"), text: SCAN_REQUEST }) })
               ] }),
