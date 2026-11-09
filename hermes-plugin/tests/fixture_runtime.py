@@ -74,6 +74,7 @@ class Fixture:
         self.devices: set[str] = set()  # the .amxd names in the User Library's Kumi folder (CC-22)
         self.device_files: dict[str, str] = {}  # a preview's file, by its spec's SHA-256 (W1-B)
         self.preset_files: set[str] = set()  # the .vstpreset labels Kumi wrote in its User Library folders (CC-26)
+        self.wavetables: set[str] = set()  # the wavetable names Kumi wrote (the plugin-parity contract)
         self.seq = 0
         self.connected = False
         self.playing = False  # whether transport's play started it (CC-17)
@@ -1203,11 +1204,55 @@ def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
     return ids
 
 
+def judged(name: str):
+    """Serve's judge and tune as they answer (the plugin-parity contract): refused with the project or a reference
+    string, else `done` with Live's round. A change round or a tune is a HISTORY change of its own; a change round
+    whose change says "worse" takes the newest change back instead and makes no row."""
+    def run(fixture: Fixture, args: dict, host: dict) -> dict:
+        same = {"history_ids": [], "taken_back": [], "project_key": fixture.set["key"], "epoch": fixture.epoch}
+        if not fixture.connected:
+            return {"state": "refused", "code": "not_connected", "reason": "Kumi isn't connected.", **same}
+        if (args.get("expected_project_key"), args.get("expected_epoch")) != (fixture.set["key"], fixture.epoch):
+            return {"state": "refused", "code": "stale", "reason": "The project changed: observe again.", **same}
+        if isinstance((args.get("goal") or {}).get("reference"), str):
+            return {"state": "refused", "code": "invalid", "reason": "A reference is a clip_ref or a source.", **same}
+        ids, taken = [], []
+        if name == "judge" and "worse" in str(args.get("change", "")):
+            newest = next(row for row in reversed(fixture.history) if row["state"] == "applied")
+            newest["state"], taken = "undone", [newest["id"]]
+        elif name == "tune" or "change" in args:
+            ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+            fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}",
+                                    "project_key": fixture.set["key"], "runtime_generation": fixture.generation,
+                                    "title": "Tune" if name == "tune" else "Judged round", "family": "device",
+                                    "at": now(), "state": "applied", "undo_available": True, "track": "Bass",
+                                    "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied",
+                                    "change_id": f"ch-{len(fixture.history) + 1}", "before": copy.deepcopy(fixture.set)})
+            ids = [ident]
+        fixture.publish("history", "focus")
+        return {**same, "state": "done", "round": {"kind": name, "kept": not taken, "next": "loudness"},
+                "history_ids": ids, "taken_back": taken, "undo_available": bool(ids),
+                "in_hermes": "In Kumi for Hermes: judge is kumi_judge, tune is kumi_tune."}
+    return run
+
+
+def wavetable(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Serve's wavetable: a new file, "Name.wav", else "Name 2.wav"…, never over one; a path is refused."""
+    if set(args) != {"device_ref", "wavetable"} or "file" in (args["wavetable"].get("from_audio") or {}):
+        return error("invalid", "A wavetable takes device_ref and wavetable only, and from_audio a source.")
+    base = args["wavetable"].get("name") or "Kumi Wavetable"
+    made = next(label for label in (base, *(f"{base} {n}" for n in range(2, 1000))) if label not in fixture.wavetables)
+    fixture.wavetables.add(made)
+    return {"made": made, "file": f"{made}.wav", "folder": "Vital's wavetable folder", "frames": 4,
+            "next": "Pick it in the plug-in's wavetable menu.",
+            "in_hermes": "The file stays where it is: an undo doesn't remove it, and it's not in HISTORY."}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
          "variations": variations, "device": device, "preset_build": preset_build,
-         "preset": preset}
+         "preset": preset, "judge": judged("judge"), "tune": judged("tune"), "wavetable": wavetable}
 
 
 def main() -> None:

@@ -184,6 +184,15 @@ initialized settings and changing up to 512 controls Kumi has verified, with the
 - Kumi never opens your own presets, runs the plug-in or downloads anything to build one. A plug-in that isn't
   installed, or whose installed version Kumi hasn't verified, is refused.
 
+### Judged rounds and wavetables (Live)
+
+"Get this to −14 LUFS with a −1 dB ceiling." Kumi works toward a loudness, a true peak or a reference's balance in
+rounds (`kumi_judge`): it hears the stretch, lists the gaps, and after each change you make keeps it only if it helped,
+otherwise takes it back itself. `kumi_tune` lets Kumi pick a device's numbers in such a round. Each round is a change in
+HISTORY that you can undo; Live plays the stretch through Kumi Ears with Live stopped, and puts it back after (asked
+first with Ask before each change on). For Serum 2 or Vital, `kumi_wavetable` writes a new wavetable file you then pick
+in the plug-in's window; it stays after an undo.
+
 **What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes, presets, and
 scripts and devices in a chat that hasn't read outside content without asking: each goes into HISTORY, and most can be
 undone. Setup steps, sample-folder adds and scans, Mirelo uploads and paid generations, and a script or device in a
@@ -262,6 +271,14 @@ run without asking there, and Kumi can't tell it from a chat.
   keeps each script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
   outside Kumi's own data. They stay there until you delete them.
+- **Wavetables** are new `.wav` files Kumi writes (never over a file) into Vital's wavetable folder
+  (`~/Music/Vital/User/Wavetables`; `~/Documents/Vital/User/Wavetables` on Windows) or Live's User Library
+  (`User Library/Kumi/Wavetables`, for Serum 2 and others), outside Kumi's own data. They stay after an undo.
+- **Judged rounds and tunes** play the stretch in Live (at most 60 s a pass) through the Kumi Ears device setup
+  installed, placed on the track or before Main, with Live stopped and not recording, and remove it after (Live's own
+  Undo history keeps those temporary device steps). A tune's search or probe makes scratch copies of the run's track in
+  the Set and removes them after; if Kumi stops partway, its next look (`kumi_observe`) removes leftovers. There's no
+  record pass, and no model is downloaded: a run goes by its meters.
 - **Plug-in presets** you put in your User Library are new `.vstpreset` files Kumi writes into Live's User Library
   (`User Library/Kumi/Instruments` or `User Library/Kumi/Audio Effects`), outside Kumi's own data. They stay there
   until you delete them. To tell which version of Serum 2, Pro-Q 4 or Ozone 12 you have, Kumi reads the VST3

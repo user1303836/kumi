@@ -60,6 +60,9 @@ a DAW to work in.
 | `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | in a chat that has read outside content, with its code; otherwise only with Ask before each change on |
 | `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy, with Kumi's own preset writer and its limits (up to 512 verified controls); changes nothing in Live (Live only) | no |
 | `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | only with Ask before each change on, with every setting |
+| `kumi_judge` | Works toward a loudness, true peak or reference's balance in rounds: Live plays a stretch through Kumi Ears, and Kumi keeps each change only if it helped, else takes it back (Live only) | only with Ask before each change on |
+| `kumi_tune` | Lets Kumi pick a device's numbers in a judged round (fit, home, search or probe), kept or taken back (Live only) | only with Ask before each change on |
+| `kumi_wavetable` | Writes a new wavetable `.wav` for Serum 2 or Vital into the plug-in's wavetable folder or `User Library/Kumi/Wavetables`; it stays after an undo (Live only) | only with Ask before each change on |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
@@ -146,7 +149,8 @@ map, HISTORY, measurements, copies of the audio it measured or made (`state/arti
 changed), the code of each script it ran (`state/scripts`) and job records. Outside it, setup writes only Kumi's
 part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
-(`User Library/Kumi/Instruments` or `Audio Effects`). A script runs with your DAW's access, so what it writes
+(`User Library/Kumi/Instruments` or `Audio Effects`), and each wavetable a new `.wav` file in Vital's wavetable folder
+or `User Library/Kumi/Wavetables`. A script runs with your DAW's access, so what it writes
 follows its code. Kumi reads WAV and AIFF itself; for MP3, FLAC and other compressed audio it uses an ffmpeg already
 on your computer, if you allow it at setup (it never downloads one). Removing the plugin keeps `plugin-data/kumi/`;
 deleting it removes everything Kumi wrote for Hermes there, including sounds from integrations that your projects may
@@ -189,6 +193,14 @@ project as…** with **Copy all media into project directory**), or they'll miss
   Live's User Library (`User Library/Kumi/Audio Effects`); it stays there after an undo, and in any Set that uses it.
   Each preset you place is a new `.vstpreset` file there too (`User Library/Kumi/Instruments` or `Audio Effects`),
   and it stays after an undo.
+  Each wavetable Kumi makes is a new `.wav` file (never over a file) in Vital's wavetable folder
+  (`~/Music/Vital/User/Wavetables`; `~/Documents/Vital/User/Wavetables` on Windows) or Live's User Library
+  (`User Library/Kumi/Wavetables`, for Serum 2 and others); it stays after an undo. While judging or tuning, Live plays
+  the stretch (at most 60 s a pass) through the Kumi Ears device setup installed, placed on the track or before Main,
+  with Live stopped and not recording, and removes it after (Live's own Undo history keeps those temporary device
+  steps); a tune's search or probe makes scratch copies of the run's track in the Set and removes them after, and if
+  Kumi stops partway its next look (`kumi_observe`) removes leftovers. No record pass, and no model is downloaded: a
+  run goes by its meters.
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest

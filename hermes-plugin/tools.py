@@ -119,7 +119,7 @@ class Host:
     def remember_change(self, kwargs: dict, answer: Any) -> None:
         """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
         make of takes) as its newest change, so "undo that" means it, never one before it."""
-        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial", "ran", "failed"):
+        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial", "ran", "failed", "done"):
             return
         session, ids = kwargs.get("session_id"), answer.get("history_ids")
         if (isinstance(session, str) and session and isinstance(ids, list) and ids
@@ -139,9 +139,9 @@ class Host:
             self._undone |= {each for each in undone if isinstance(each, str)}
 
     def remember_library_write(self, kwargs: dict, file: Any) -> None:
-        """Keep a chat's write into the User Library (CC-22's device build) as its newest step. Kumi never undoes one:
-        the file stays, as its approval said. So "undo that" right after it undoes nothing, never the change before it
-        (CC-26's 26-w5)."""
+        """Keep a chat's write of a new file outside the Set (CC-22's device build, a preset, a wavetable) as its
+        newest step. Kumi never undoes one: the file stays, as its approval said. So "undo that" right after it undoes
+        nothing, never the change before it (CC-26's 26-w5)."""
         session = kwargs.get("session_id")
         if isinstance(session, str) and session and isinstance(file, str) and file:
             with self._changes_lock:
@@ -783,14 +783,15 @@ def kumi_plugin_knowledge(host: Host, args: dict, **kwargs: Any) -> dict:
     return live.call("plugin_knowledge", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
 
 
-def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
+def _write(host: Host, tool: str, args: dict, kwargs: dict, timeout: float | None = None) -> dict:
     """A write (C2): sent once. An answer that never came, or can't be read, means the outcome is unknown: reported as
     unsure, never resent, and never called unchanged. The producer's Stop cancels it while it waits (`notifications/
     cancelled`), so its remaining steps don't go on applying after Hermes has given the call up (research-1's review,
     item 7); that's unsure too."""
     live = host.live()
     try:
-        answer = live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
+        answer = live.call(tool, args, host.identity(kwargs), timeout=timeout or WRITE_TIMEOUT,
+                           interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
@@ -925,9 +926,8 @@ def _words(text: str, limit: int) -> str:
 # wrote a file into the User Library, which Kumi never undoes (26-w5); and how many of a chat's writes Kumi keeps for it.
 NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started, or it "
                    "undid them all. kumi_history lists Kumi's changes; undo one by its id.")
-FILE_STAYS = ("Kumi didn't undo anything: this chat's newest step wrote {file} into your User Library, which Kumi "
-              "never undoes (the file stays, as its approval said). kumi_history lists Kumi's changes; undo one by its "
-              "id.")
+FILE_STAYS = ("Kumi didn't undo anything: this chat's newest step wrote {file}, a file Kumi never undoes (it stays, as "
+              "its approval said). kumi_history lists Kumi's changes; undo one by its id.")
 CHANGES_KEPT = 20
 
 
@@ -980,6 +980,146 @@ def kumi_variations(host: Host, args: dict, **kwargs: Any) -> dict:
             return {"error": {"code": "not_approved", "reason": "Kumi didn't make any takes: no approval saw them."}}
         asked |= {"seed": drawn["seed"], "expect_takes": drawn["takes_digest"]}
     return _write(host, "variations", asked, kwargs)
+
+
+# Judged listening (serve's judge and tune) and wavetables, Live only. No runtime preview exists for them, so the
+# plugin checks their arguments itself before anything is asked or sent, in the hook and again in the handler.
+JUDGED_TIMEOUT = 900.0  # a round plays at most 60 s a pass; a tune's search or probe hears several passes
+TUNE_HOWS = ("fit", "home", "search", "probe")
+TUNE_FIELDS = frozenset({"device", "how", "target", "knobs", "change", "expected_project_key", "expected_epoch"})
+JUDGE_FIELDS = frozenset({"goal", "track", "from_beat", "beats", "change", "done", "expected_project_key",
+                          "expected_epoch"})
+WAVETABLE_UNSURE_HINT = ("Whether the wavetable was written is unknown. Don't make it again: ask the producer to look "
+                         "in the plug-in's wavetable menu.")
+
+
+def _expected_refusal(args: dict) -> str | None:
+    key, epoch = args.get("expected_project_key"), args.get("expected_epoch")
+    if not isinstance(key, str) or not key.strip():
+        return "it needs expected_project_key, the project key kumi_observe gave."
+    if not ((type(epoch) is int and epoch >= 0) or (isinstance(epoch, str) and epoch.isascii() and epoch.isdigit())):
+        return "it needs expected_epoch, the epoch kumi_observe gave."
+    return None
+
+
+def _number(value: Any) -> bool:
+    return type(value) in (int, float) and _finite(value)
+
+
+def judge_refusal(args: dict) -> str | None:
+    """Why serve's judge wouldn't take these arguments, or None: the project key and epoch, and exactly one of goal
+    (with from_beat and beats, a bounded stretch), change or done: true; a reference is {clip_ref} or a source, never a
+    path string."""
+    if not set(args) <= JUDGE_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(JUDGE_FIELDS))}."
+    given = [key for key in ("goal", "change", "done") if key in args]
+    if len(given) != 1:
+        return "give one of goal (with from_beat and beats), change, or done: true."
+    if "done" in args and args["done"] is not True:
+        return "done is true, to end the run."
+    if "goal" not in args and TRACK_KEYS & set(args):
+        return "track, from_beat and beats go with a goal."
+    if "change" in args and (not isinstance(args["change"], str) or not args["change"].strip()):
+        return "change is what you changed since the last round, in one line."
+    if "goal" in args:
+        goal = args["goal"]
+        if not isinstance(goal, dict):
+            return "goal is an object: what to reach."
+        start, beats = args.get("from_beat"), args.get("beats")
+        if not _number(start) or start < 0 or not _number(beats) or not 0 < beats <= MAX_BEATS:
+            return f"a goal needs from_beat (0 or more) and beats (above 0, at most {MAX_BEATS}): the stretch it hears."
+        if "track" in args and (not isinstance(args["track"], str) or not args["track"].strip()):
+            return "track is one track's ref or name; leave it out for the mix."
+        if "reference" in goal and not _judge_reference(goal["reference"]):
+            return ("a reference is {\"clip_ref\"} for an audio clip in the Set, or a source: {\"sound_id\", "
+                    "\"map_revision\"}, {\"artifact_id\"} or {\"file\"} in an approved folder, never a path.")
+    return _expected_refusal(args)
+
+
+def _judge_reference(reference: Any) -> bool:
+    if isinstance(reference, dict) and set(reference) == {"clip_ref"}:
+        return isinstance(reference["clip_ref"], str) and bool(reference["clip_ref"].strip())
+    return _file_source(reference)
+
+
+def tune_refusal(args: dict) -> str | None:
+    """Why serve's tune wouldn't take these arguments, or None: a device ref, how, the knobs how needs, and the
+    project key and epoch."""
+    if not set(args) <= TUNE_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(TUNE_FIELDS))}."
+    if not isinstance(args.get("device"), str) or not args["device"].strip():
+        return "name the device to tune by its ref."
+    how = args.get("how")
+    if how not in TUNE_HOWS:
+        return "how is fit, home, search or probe."
+    knobs = args.get("knobs", [])
+    if not isinstance(knobs, list) or len(knobs) > 5 or not all(isinstance(k, str) and k.strip() for k in knobs):
+        return "knobs is a list of up to 5 knob names."
+    if how in ("home", "probe") and len(knobs) != 1:
+        return "home and probe move one knob: give its name in knobs."
+    if how == "search" and not 2 <= len(knobs) <= 5:
+        return "search tunes 2 to 5 knobs that interact: give their names in knobs."
+    for key in ("target", "change"):
+        if key in args and (not isinstance(args[key], str) or not args[key].strip()):
+            return f"{key} is a few words."
+    return _expected_refusal(args)
+
+
+def wavetable_refusal(args: dict) -> str | None:
+    """Why serve's wavetable wouldn't take these arguments, or None: device_ref and wavetable only, and from_audio
+    takes a source, never a file path."""
+    if not set(args) <= {"device_ref", "wavetable", "preview"}:
+        return "it takes only device_ref and wavetable."
+    if not isinstance(args.get("device_ref"), str) or not args["device_ref"].strip():
+        return "give device_ref, the plug-in device's ref from the current look."
+    table = args.get("wavetable")
+    if not isinstance(table, dict) or not table:
+        return "give wavetable: keyframes (with count), or from_audio."
+    if "from_audio" in table:
+        cut = table["from_audio"]
+        if not isinstance(cut, dict) or "file" in cut or not _file_source(cut.get("source")):
+            return ("from_audio takes source: {\"sound_id\", \"map_revision\"}, {\"artifact_id\"} or {\"file\"} in an "
+                    "approved folder, never a path of its own.")
+    return None
+
+
+def _judged(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
+    """A judge or tune round, sent once as cleared (the epoch as a string, as kumi_change sends it). Its rows are the
+    chat's newest change; an earlier change the round took back is undone now, so "undo that" never means it."""
+    refusal = (judge_refusal if tool == "judge" else tune_refusal)(args)
+    if refusal is not None:
+        return {"state": "refused", "code": "invalid", "reason": f"Kumi didn't run this: {refusal}"}
+    asked = {key: value for key, value in args.items() if key != "preview"}
+    asked["expected_epoch"] = str(asked["expected_epoch"])
+    answer = _write(host, tool, asked, kwargs, timeout=JUDGED_TIMEOUT)
+    taken = answer.get("taken_back") if isinstance(answer, dict) else None
+    if isinstance(taken, list) and taken:
+        host.remember_undo({}, {"rows": [{"history_id": each, "state": "undone"} for each in taken]})
+    return answer
+
+
+def kumi_judge(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _judged(host, "judge", args, kwargs)
+
+
+def kumi_tune(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _judged(host, "tune", args, kwargs)
+
+
+def kumi_wavetable(host: Host, args: dict, **kwargs: Any) -> dict:
+    """A new wavetable file, written once as cleared. The file stays after an undo: it's this chat's newest write, which
+    "undo that" never undoes."""
+    refusal = wavetable_refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": f"Kumi didn't make the wavetable: {refusal}"}}
+    made = _write(host, "wavetable", {key: value for key, value in args.items() if key != "preview"}, kwargs)
+    if made.get("state") == "unsure":
+        return {**made, "hint": WAVETABLE_UNSURE_HINT}
+    file, folder = made.get("file"), made.get("folder")
+    if "error" not in made and isinstance(file, str) and file.strip():
+        where = f" into {_words(folder, 80)}" if isinstance(folder, str) and folder.strip() else ""
+        host.remember_library_write(kwargs, f"{_words(file, 120)}{where}")
+    return made
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
@@ -1471,6 +1611,9 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_device", schemas.KUMI_DEVICE, kumi_device, "🧩"),
     ("kumi_preset_build", schemas.KUMI_PRESET_BUILD, kumi_preset_build, "🎚️"),
     ("kumi_preset", schemas.KUMI_PRESET, kumi_preset, "🎛️"),
+    ("kumi_judge", schemas.KUMI_JUDGE, kumi_judge, "⚖️"),
+    ("kumi_tune", schemas.KUMI_TUNE, kumi_tune, "🎯"),
+    ("kumi_wavetable", schemas.KUMI_WAVETABLE, kumi_wavetable, "🌊"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1480,7 +1623,8 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_setup", "kumi_connect"}
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py clears, asking the producer or (for a change, by default) not: they run only as cleared,
     with what the hook's preview bound (CC-5)."""
-    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset")
+    return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
+                     "kumi_tune", "kumi_wavetable")
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))
