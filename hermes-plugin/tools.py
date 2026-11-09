@@ -195,14 +195,16 @@ class Host:
         return config if isinstance(config, dict) else {}
 
     def mirelo_key(self) -> str | None:
-        """The producer's Mirelo API key, read on each call: plugin.yaml's `mirelo_api_key` secret, which Hermes keeps in
-        the profile's .env as MIRELO_API_KEY and gives through its public, profile-scoped `get_env_value`. Kumi never
-        opens .env itself, and the key goes only into one request's `_mirelo`, after the producer's approval (13-R3)."""
+        """The producer's Mirelo API key, read on each call: plugin.yaml's `mirelo_api_key` secret, MIRELO_API_KEY, as
+        Hermes's `agent.secret_scope.get_secret` resolves it for the active profile (catalog rule 11). Under
+        multiplexing without a profile scope it raises, and Kumi reads no key, so Mirelo is refused rather than sent
+        another profile's. Kumi never opens .env itself, and the key goes only into one request's `_mirelo`, after the
+        producer's approval (13-R3)."""
         if self._mirelo_key is not None:
             return self._mirelo_key()
         try:
-            from hermes_cli.config import get_env_value  # Hermes's
-            value = get_env_value(generate.KEY_ENV)
+            from agent.secret_scope import get_secret  # Hermes's public secret route
+            value = get_secret(generate.KEY_ENV)
         except Exception:
             return None
         return value if isinstance(value, str) and value.strip() else None
