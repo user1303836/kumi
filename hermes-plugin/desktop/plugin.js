@@ -5516,10 +5516,21 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const [fresh, setFresh] = useState6(() => /* @__PURE__ */ new Set());
   const [arrived, setArrived] = useState6(null);
   const cards = useRef3(/* @__PURE__ */ new Map());
-  const top = useRef3(null);
+  const list = useRef3(null);
+  const reveal = (element, where) => {
+    const box = list.current;
+    if (!box || !element) return;
+    const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()];
+    let top = box.scrollTop;
+    if (where === "start") top = 0;
+    else if (inner.top < outer.top) top += inner.top - outer.top - 8;
+    else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8;
+    else return;
+    box.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
   useEffect5(() => {
     if (!arrived) return;
-    cards.current.get(arrived)?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    reveal(cards.current.get(arrived), "nearest");
     setArrived(null);
   }, [arrived, results]);
   const [flights, setFlights] = useState6([]);
@@ -5574,7 +5585,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     setTrail((current) => [...current, sources].slice(-8));
     setChosen([]);
     onSources(next);
-    top.current?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    reveal(list.current, "start");
   };
   const tint = `color-mix(in srgb, ${T.accent} 16%, transparent)`;
   const modes = CARDS.filter((entry) => entry.tab === card.tab);
@@ -5697,8 +5708,8 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
           ),
           /* @__PURE__ */ jsx13(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
         ] }),
-        /* @__PURE__ */ jsxs13("div", { style: { overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-          /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), ref: top, role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
+        /* @__PURE__ */ jsxs13("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
+          /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
             sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs13("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }, children: [
               source.artifact_id ? /* @__PURE__ */ jsx13("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx13("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
               /* @__PURE__ */ jsx13("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })

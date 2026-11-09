@@ -280,12 +280,25 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const [arrived, setArrived] = useState<string | null>(null)
   // Each shown result's card, by its sound's id: where a new one scrolls to, and where a kept one flies from.
   const cards = useRef(new Map<string, HTMLDivElement>())
-  const top = useRef<HTMLDivElement | null>(null)
+  // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
+  // ancestor too, the pane the map sits in among them.
+  const list = useRef<HTMLDivElement | null>(null)
+  const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start') => {
+    const box = list.current
+    if (!box || !element) return
+    const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()]
+    let top = box.scrollTop
+    if (where === 'start') top = 0
+    else if (inner.top < outer.top) top += inner.top - outer.top - 8
+    else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8
+    else return
+    box.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }
   useEffect(() => {
     if (!arrived) return
-    cards.current.get(arrived)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    reveal(cards.current.get(arrived), 'nearest')
     setArrived(null)
-  }, [arrived, results])
+  }, [arrived, results]) // eslint-disable-line react-hooks/exhaustive-deps
   const [flights, setFlights] = useState<Flight[]>([])
   const flightKey = useRef(0)
   /** Keep's flight from the card's waveform into the dock; none for a system that asks for less motion, or with no
@@ -349,7 +362,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     setTrail(current => [...current, sources].slice(-8))
     setChosen([])
     onSources(next)
-    top.current?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    reveal(list.current, 'start')
   }
 
   // The way to make it, in two steps that take little room beside the chat: the tab, then its modes as pills, and a
@@ -479,11 +492,13 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
           ×
         </TextButton>
       </div>
-      <div style={{ overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Positioned, so the screen-reader-only words inside (absolutely placed) scroll and clip with the list instead
+          of hanging below the pane, which gave the pane room to scroll. */}
+      <div ref={list} style={{ position: 'relative', overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* The sounds that go in (all of them), on one line that scrolls: the first ones as chips (a sound Kumi made
             marked as one), then how many more. A row that scrolls may shrink to nothing in this column once results
             fill it, so it keeps its own height. */}
-        <div aria-label={t('make.sources')} ref={top} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
+        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
           {sources.slice(0, SOURCE_CHIPS).map((source, index) => (
             <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }}>
               {source.artifact_id ? (
