@@ -32,9 +32,17 @@ fn schema() -> Value {
         "name":{"type":"string","minLength":1,"maxLength":80},
         "edits":{"type":"array","maxItems":MAX_EDITS,"items":{
             "type":"object","additionalProperties":false,"required":["path","value"],"properties":{
-                "path":{"type":"string","minLength":1,"maxLength":256,"description":"A writable catalog control path. Serum $add_distortion takes rack 0, 1 or 2; Ozone $chain takes module names."},
+                "path":{"type":"string","minLength":1,"maxLength":256,"description":"A writable catalog control path. Serum $add_distortion takes rack 0, 1 or 2; Serum $modulation takes one whole mod slot; Ozone $chain takes module names."},
                 "value":{"oneOf":[{"type":"number"},{"type":"boolean"},{"type":"string","maxLength":80},
-                    {"type":"array","maxItems":16,"items":{"type":"string","maxLength":40}}]}
+                    {"type":"array","maxItems":16,"items":{"type":"string","maxLength":40}},
+                    {"type":"object","additionalProperties":false,"required":["slot","source","destination","amount"],
+                        "description":"Serum $modulation: route a measured source (LFO 1, Env 2, Macro 1, Velocity …) to a measured destination control (Filter 1 Freq, A WT Pos …); the catalog lists both.","properties":{
+                        "slot":{"type":"integer","minimum":1,"maximum":64},
+                        "source":{"type":"string","maxLength":40},
+                        "destination":{"type":"string","maxLength":80},
+                        "amount":{"type":"number","minimum":-100,"maximum":100,"description":"Depth in percent."},
+                        "bipolar":{"type":"boolean","description":"Swing both ways around the control's value; default false."},
+                        "output":{"type":"number","minimum":0,"maximum":100,"description":"Output scaling in percent; default 100."}}}]}
             }
         }}
     }})

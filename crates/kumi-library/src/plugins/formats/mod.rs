@@ -16,6 +16,7 @@ pub mod ozone12;
 pub mod pulsar_modular;
 pub mod serum2;
 pub mod serum2_edit;
+pub mod serum2_modulation;
 pub mod softube;
 pub mod structure;
 pub mod superior_drummer;

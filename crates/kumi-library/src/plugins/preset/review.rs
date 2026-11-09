@@ -2,6 +2,7 @@
 
 use super::{create, edit, inspect, Edit, WriteOptions, MAX_EDITS};
 use crate::plugins::formats::{
+    serum2_modulation::{self, Route},
     structure::{self, Field, PluginFormat, Status, Structure},
     tree::PathRule,
     write_value, FormatError,
@@ -211,6 +212,9 @@ fn review_path(plugin: &str, change: &Edit) -> Result<String, ReviewError> {
         let rack = change.value.as_u64().filter(|rack| *rack <= 2).ok_or_else(|| fail("$add_distortion takes rack 0, 1 or 2."))?;
         return Ok(format!("FXRack{rack}/FX"));
     }
+    if plugin == "serum-2" && change.path == serum2_modulation::EDIT {
+        return Ok(Route::parse(&change.value)?.section());
+    }
     if plugin == "ozone-12" {
         if change.path == "$chain" {
             return Ok(change.path.clone());
@@ -224,11 +228,19 @@ fn review_path(plugin: &str, change: &Edit) -> Result<String, ReviewError> {
 fn rack(path: &str) -> Option<usize> {
     path.strip_prefix("FXRack")?.strip_suffix("/FX")?.parse::<usize>().ok().filter(|rack| *rack <= 2)
 }
+/// "ModSlot0" → slot 1: the section a whole-slot route is reviewed as.
+fn mod_slot(path: &str) -> Option<usize> {
+    let slot = path.strip_prefix("ModSlot").filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))?.parse::<usize>().ok()? + 1;
+    serum2_modulation::matrix().ok().filter(|matrix| slot <= matrix.slots as usize).map(|_| slot)
+}
 type Description<'a> = (String, String, Option<[f64; 2]>, Option<&'a Field>);
 fn descriptor<'a>(format: &'a PluginFormat, path: &str) -> Result<Description<'a>, ReviewError> {
     if format.info.plugin == "serum-2" {
         if let Some(rack) = rack(path) {
             return Ok((format!("FX rack {} effects", rack + 1), "modules".into(), None, None));
+        }
+        if let Some(slot) = mod_slot(path) {
+            return Ok((format!("Mod {slot}"), "routing".into(), None, None));
         }
     }
     if format.info.plugin == "ozone-12" && path == "$chain" {
@@ -273,6 +285,9 @@ fn read_value(plugin: &str, data: &Value, path: &str, field: Option<&Field>, fro
             .filter(|value| bounded_value(value))
             .cloned()
             .ok_or_else(|| fail("The Ozone module order couldn't be read."));
+    }
+    if plugin == "serum-2" && mod_slot(path).is_some() {
+        return Ok(json!(serum2_modulation::describe(data.get(path))?));
     }
     let mut value = data;
     for part in path.split('/') {

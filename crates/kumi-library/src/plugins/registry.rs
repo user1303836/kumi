@@ -179,10 +179,11 @@ pub fn format_catalog(plugin: Option<&str>, query: Option<&str>, limit: usize) -
             "more_fields":fields.len().saturating_sub(limit), "more_parameters":parameters.len().saturating_sub(limit),
             "operations":match plugin {
                 "ozone-12" => json!({"$chain":{"value":"ordered array of module names; suite only","modules":crate::plugins::formats::ozone12::MODULES}}),
-                "serum-2" => json!({"$add_distortion":{"value":"effects chain number: 0 for main, 1 or 2 for buses"}}),
+                "serum-2" => json!({"$add_distortion":{"value":"effects chain number: 0 for main, 1 or 2 for buses"},
+                    "$modulation":crate::plugins::formats::serum2_modulation::catalog()}),
                 _ => json!({}),
             },
-            "note":"Paths with {n} or [] describe repeated sections; inspect gives concrete paths. 'seen' is an observed range, not an allowed range. Write only verified versions. $chain replaces an Ozone module order; $add_distortion adds a Serum initialized Distortion slot (value selects effects chain 0–2)."}),
+            "note":"Paths with {n} or [] describe repeated sections; inspect gives concrete paths. 'seen' is an observed range, not an allowed range. Write only verified versions. $chain replaces an Ozone module order; $add_distortion adds a Serum initialized Distortion slot (value selects effects chain 0–2); $modulation writes a whole Serum mod slot (source, destination, amount)."}),
         )
     } else {
         let matched: Vec<_> = structure::builtins()
