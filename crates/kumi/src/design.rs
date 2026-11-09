@@ -2,7 +2,7 @@
 //! (Kumi for Hermes's Desktop runs it). It reads the request, decodes the files it names, renders, writes the WAV where
 //! it's told and answers in JSON on stdout. No DAW, no session, no settings, no network.
 
-use kumi_design::{fresh_seed, load_source, render, Answer, Request, MAX_SOURCES};
+use kumi_design::{fresh_seed, load_source, render, source_seconds, Answer, Request};
 use kumi_media::audio::DecodeOptions;
 use std::{
     io::{Read, Write},
@@ -10,13 +10,13 @@ use std::{
 };
 
 pub const USAGE: &str = "usage: kumi design --json <request | -> --out <file.wav> [--ffmpeg <path>]
-  request: {\"op\": \"cross\" | \"fuse\" | \"stack\", \"mode\": ..., \"sources\": [{\"file\": \"/abs/path\", \"name\": \"...\"}, ...],
+  request: {\"op\": \"cross\" | \"fuse\" | \"stack\" | \"grow\", \"mode\": ..., \"sources\": [{\"file\": \"/abs/path\", \"name\": \"...\"}, ...],
             \"seed\": 0, \"options\": {...}}
   The answer (one JSON line on stdout): {op, mode, seed, sources, duration, sample_rate, channels, peaks, recipe};
   a refusal: {\"error\": \"...\"} and exit 1.";
 
-/// The most request text read: far past 16 sources' paths and options.
-const MOST_REQUEST: u64 = 256 * 1024;
+/// The most request text read: room for thousands of sources' paths and every option.
+const MOST_REQUEST: u64 = 8 * 1024 * 1024;
 
 struct Args {
     request: String,
@@ -87,14 +87,12 @@ fn files(request: &Request) -> Result<Vec<(PathBuf, String)>, String> {
 async fn design(args: Args) -> Result<Answer, String> {
     let mut request: Request = serde_json::from_str(&args.request).map_err(|e| format!("the request isn't one: {e}"))?;
     request.check().map_err(|e| e.0)?;
-    if request.sources.len() > MAX_SOURCES {
-        return Err("too many sources".into());
-    }
     let files = files(&request)?;
     let decode = DecodeOptions { installed_only: true, ffmpeg: args.ffmpeg };
+    let seconds = source_seconds(files.len());
     let mut sources = Vec::with_capacity(files.len());
     for (path, name) in &files {
-        sources.push(load_source(path, name, &decode, None).await.map_err(|e| format!("{name}: {}", e.0))?);
+        sources.push(load_source(path, name, seconds, &decode, None).await.map_err(|e| format!("{name}: {}", e.0))?);
     }
     let seed = *request.seed.get_or_insert_with(fresh_seed);
     let rendered = render(&request, seed, &sources, &mut |_| {}).map_err(|e| e.0)?;

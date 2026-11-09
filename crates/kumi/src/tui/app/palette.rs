@@ -93,7 +93,7 @@ impl TuiApp {
         let Some(palette) = self.0.state.borrow().palette.clone() else { return self.design_rows(&[], width).into() };
         let mut rows: Vec<TabRow> = palette.files.iter().map(|file| self.palette_row(file, width)).collect();
         let sounds: Vec<&PaletteFile> = palette.files.iter().filter(|file| !file.song).collect();
-        let files: Vec<String> = sounds.iter().take(kumi_design::MAX_SOURCES).map(|file| file.path.clone()).collect();
+        let files: Vec<String> = sounds.iter().map(|file| file.path.clone()).collect();
         if !sounds.is_empty() {
             // A kit takes as many as map_samples lays out at once.
             let first = if sounds.len() > MOST_SAMPLES { format!("the first {MOST_SAMPLES} of ") } else { String::new() };

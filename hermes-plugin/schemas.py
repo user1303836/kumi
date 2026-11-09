@@ -502,31 +502,98 @@ _DESIGN_SOURCE = {
     "additionalProperties": False,
 }
 
+
+def _number(low: float, high: float, what: str) -> dict:
+    return {"type": "number", "minimum": low, "maximum": high, "description": what}
+
+
+def _unit(what: str) -> dict:
+    return _number(0, 1, what)
+
+
+def _range(low: float, high: float, what: str) -> dict:
+    return {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": low, "maximum": high},
+            "description": what}
+
+
+# The same choices as the engine's own schema (kumi_design::schema): every one optional, drawn from the seed if left out.
+_STEER = {"type": "object", "additionalProperties": False,
+          "description": "Push the design one way before it renders; every control optional and neutral left out.",
+          "properties": {
+              "bright": _number(-1, 1, "dark (-1) to bright (1)"), "body": _number(-1, 1, "thin (-1) to full (1)"),
+              "filter": _number(-1, 1, "a low-pass closing (-1) or a high-pass opening (1); 0 is open"),
+              "resonance": _unit("the filter's peak"), "noise": _number(-1, 1, "tonal (-1) to noisy (1)"),
+              "punch": _number(-1, 1, "soft (-1) to percussive (1)"), "length": _number(-1, 1, "shorter (-1) to longer (1)"),
+              "drive": _unit("saturation"), "crush": _unit("lo-fi"), "width": _number(-1, 1, "mono (-1) to wide (1)"),
+              "space": _unit("dry (0) to a room growing into a hall (1)"),
+              "pitch": _range(-24, 24, "[low, high] semitones: each sound repitched somewhere in it"),
+              "reverse": _unit("the chance each sound plays backwards"),
+              "start": _range(0, 0.9, "[low, high]: each sound starts this far into itself"),
+              "delay": _range(0, 500, "[low, high] ms: each sound comes in this much later"),
+              "pan": _unit("each sound panned within ± this"), "level": _unit("each sound's level drops by up to this × 18 dB")}}
+_RESONATE = {"type": "object", "additionalProperties": False, "description": "cross resonate's choices", "properties": {
+    "pairing": {"enum": ["halves", "in-order", "interleave", "bright-dark", "dark-bright", "hits-tones", "tones-hits",
+                         "one-all", "all-one", "chain"], "description": "who rings through whom"},
+    "ring": {"enum": ["partials", "body", "both"]}, "decay": _unit("a short ring (0) to a long one (1)")}}
+_MODULATE = {"type": "object", "additionalProperties": False, "description": "cross modulate's choices", "properties": {
+    "carrier": {"enum": ["random", "first", "last", "brightest", "darkest", "longest", "shortest", "tonal", "noisy"],
+                "description": "which sound is played and shaped"},
+    "kinds": {"type": "array", "minItems": 1,
+              "items": {"enum": ["phase", "ring", "am", "fm", "filter", "gain", "vocode"]}, "description": "the ways allowed"},
+    "stages": {"type": "integer", "minimum": 1, "maximum": 8}, "retrigger": _unit("the chance a short modulator repeats")}}
+_LOOP = {"type": "object", "additionalProperties": False, "description": "fuse loop's choices", "properties": {
+    "style": {"enum": ["beat", "melody"]},
+    "meter": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 1, "maximum": 16},
+              "description": "[beats, unit]: [7, 8] is 7/8"},
+    "grid": {"enum": [2, 3, 4, 6, 8], "description": "steps a beat"}, "swing": _number(0, 0.75, "how late the off-steps fall"),
+    **{key: _unit(what) for key, what in [
+        ("density", "how many steps sound"), ("humanize", "timing and velocity drift"), ("accent", "strong steps stand out"),
+        ("fills", "more at a phrase's end"), ("ratchet", "rolls"), ("poly", "voices cycling in other lengths"),
+        ("variation", "how much bars differ"), ("syncopation", "beat: hits pulled off the beat"), ("ghosts", "beat: ghost notes"),
+        ("open", "beat: the chance a hat rings open"), ("kick", "beat: how busy the kick is"),
+        ("snare", "beat: how busy the snare is"), ("hats", "beat: how busy the hats are"),
+        ("perc", "beat: how busy the percussion is"), ("micro", "melody: notes bent off the scale"),
+        ("chords", "melody: stacked notes"), ("glide", "melody: slides"), ("drone", "melody: a held root")]},
+    "lean": _number(-1, 1, "beat: hits clustered toward the loop's start (-1) or end (1)"),
+    "key": {"type": "string", "pattern": "^[A-Ga-g](#|b|♯|♭)?$", "description": "melody: the root"},
+    "scale": {"enum": ["major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonic-minor",
+                       "melodic-minor", "pentatonic", "minor-pentatonic", "blues", "whole-tone", "chromatic", "hirajoshi",
+                       "in-sen", "phrygian-dominant", "hungarian-minor", "pelog", "slendro"]},
+    "tuning": {"enum": ["12-tet", "19-tet", "22-tet", "24-tet", "31-tet", "just", "pythagorean", "bohlen-pierce", "harmonic"]},
+    "octaves": {"type": "integer", "minimum": 1, "maximum": 4}, "register": {"type": "integer", "minimum": -2, "maximum": 2},
+    "contour": {"enum": ["up", "down", "up-down", "walk", "leaps", "random"]},
+    "gate": _number(0.05, 1, "melody: how much of the time to its next note a note sounds")}}
+
 KUMI_DESIGN = _tool(
     "kumi_design",
-    "Make a new sound from 2-16 of the producer's sounds (stack: 2-8), kept as Kumi's private artifact; nothing in the "
-    "DAW changes (skill kumi:sounds, Making sounds). cross blend: one body morphed from all of them; cross attack: one's "
-    "transient (options.attack_from) onto the blend of the rest; cross resonate: half ring through the other half "
-    "(options.split, the exciters); cross modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other; "
-    "fuse texture: a loopable bed that moves between them (options.seconds); fuse loop: their hits as a 1-4 bar beat "
-    "(options.bpm, options.bars); fuse smear: a 4-16x granular stretch with a long tail (options.stretch); stack: "
-    "printed as one hit. A seed picks every choice: a reroll is the same call with another seed (or none), the same "
-    "seed the same sound. Answers the artifact_id (which kumi_listen, kumi_change and a later kumi_design take), the "
-    "seed, the length and a one-line recipe to tell the producer.",
-    {"op": {"type": "string", "enum": ["cross", "fuse", "stack"]},
+    "Make a new sound from 2 or more of the producer's sounds, as many as they picked, kept as Kumi's private artifact; "
+    "nothing in the DAW changes (skill kumi:sounds, Making sounds). cross blend: one body morphed from all of them; cross "
+    "attack: one's transient (options.attack_from) onto the blend of the rest; cross resonate: some ring through the "
+    "others (options.resonate.pairing, or options.split for the exciters); cross modulate: one carrier shaped by the "
+    "others (options.modulate: carrier, kinds, stages); fuse texture: a loopable bed that moves between them "
+    "(options.seconds); fuse loop: a beat of their hits or a melody of them repitched (options.bpm: give the DAW's "
+    "tempo; options.bars 1-8; options.loop: style, meter, grid, feel, key, scale, tuning); fuse smear: a 4-16x granular "
+    "stretch with a long tail (options.stretch); stack: printed as one hit; grow: the first sound part of the way "
+    "(options.at, 0 to 1) toward the second (exactly 2). options.steer pushes any of them before it renders. A seed "
+    "picks every choice: a reroll is the same call with another seed (or none), the same seed the same sound. Answers "
+    "the artifact_id (which kumi_listen, kumi_change and a later kumi_design take), the seed, the length and a one-line "
+    "recipe to tell the producer.",
+    {"op": {"type": "string", "enum": ["cross", "fuse", "stack", "grow"]},
      "mode": {"type": "string", "enum": ["blend", "attack", "resonate", "modulate", "texture", "loop", "smear"],
-              "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack: none."},
-     "sources": {"type": "array", "minItems": 2, "maxItems": 16, "items": _DESIGN_SOURCE},
+              "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack and grow: none."},
+     "sources": {"type": "array", "minItems": 2, "items": _DESIGN_SOURCE},
      "seed": {"type": "integer", "minimum": 0, "maximum": 2**53 - 1,
               "description": "The variation; leave it out for a new one."},
      "options": {"type": "object", "additionalProperties": False, "properties": {
          "seconds": {"type": "number", "minimum": 0.1, "maximum": 30},
          "bpm": {"type": "number", "minimum": 40, "maximum": 240},
-         "bars": {"type": "integer", "minimum": 1, "maximum": 4},
-         "attack_from": {"type": "integer", "minimum": 0, "maximum": 15},
-         "split": {"type": "array", "maxItems": 15, "items": {"type": "integer", "minimum": 0, "maximum": 15}},
+         "bars": {"type": "integer", "minimum": 1, "maximum": 8},
+         "attack_from": {"type": "integer", "minimum": 0},
+         "split": {"type": "array", "items": {"type": "integer", "minimum": 0}},
          "depth": {"type": "number", "minimum": 0, "maximum": 1},
-         "stretch": {"type": "number", "minimum": 4, "maximum": 16}}}},
+         "stretch": {"type": "number", "minimum": 4, "maximum": 16},
+         "at": _unit("grow: how far from the first sound toward the second"),
+         "steer": _STEER, "resonate": _RESONATE, "modulate": _MODULATE, "loop": _LOOP}}},
     ("op", "sources"))
 
 

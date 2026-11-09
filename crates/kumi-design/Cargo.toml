@@ -1,7 +1,7 @@
 [package]
 name = "kumi-design"
 version = "0.1.0"
-description = "Sound design on a group of samples: cross (blend, attack, resonate, modulate), fuse (texture, loop, smear) and stack, seeded so a reroll is a variation and the same seed the same bytes; built optimized even in tests."
+description = "Sound design on a group of samples: cross (blend, attack, resonate, modulate), fuse (texture, loop, smear), stack and grow, steerable, seeded so a reroll is a variation and the same seed the same bytes; built optimized even in tests."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,9 +12,9 @@ publish = false
 kumi-common.workspace = true
 kumi-media.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

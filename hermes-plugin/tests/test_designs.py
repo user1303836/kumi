@@ -151,8 +151,10 @@ class Routes(unittest.TestCase):
             "fuse with cross's mode": {"op": "fuse", "mode": "blend", "sources": two},
             "stack with a mode": {"op": "stack", "mode": "loop", "sources": two},
             "one sound": {"op": "stack", "sources": two[:1]},
-            "nine for a stack": {"op": "stack", "sources": two * 4 + two[:1]},
-            "seventeen": {"op": "cross", "mode": "blend", "sources": two * 8 + two[:1]},
+            "grow from three": {"op": "grow", "sources": two + two[:1]},
+            "grow with a mode": {"op": "grow", "mode": "blend", "sources": two},
+            "a steer that isn't choices": {"op": "stack", "sources": two, "options": {"steer": 3}},
+            "a steer with a nested object": {"op": "stack", "sources": two, "options": {"steer": {"bright": {"a": 1}}}},
             "a file": {"op": "stack", "sources": [two[0], {"file": self.tom}]},
             "both ids": {"op": "stack", "sources": [two[0], {"sound_id": "s-r7-0003", "artifact_id": "a-7f32"}]},
             "a revision without a sound": {"op": "stack", "sources": [two[0], {"artifact_id": "a-7f32", "map_revision": "r7"}]},
@@ -175,7 +177,7 @@ class Routes(unittest.TestCase):
                 self.assertTrue(reply.json()["detail"])
                 self.assertNotIn(str(self.library), reply.text)
         self.assertEqual(self.client.post("/api/plugins/kumi/design", content=b"{not json").status_code, 400)
-        self.assertEqual(self.client.post("/api/plugins/kumi/design", content=b" " * (300 * 1024)).status_code, 413)
+        self.assertEqual(self.client.post("/api/plugins/kumi/design", content=b" " * (9 * 1024 * 1024)).status_code, 413)
         self.assertEqual(self.client.get("/api/plugins/kumi/design").status_code, 405)
         self.assertEqual(self.made(), [], "nothing was made")
         self.assertEqual(self.client.get("/api/plugins/kumi/designs").json(), {"designs": []})

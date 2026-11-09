@@ -1,9 +1,11 @@
 //! Fuse: a cluster of sounds as one continuous sound that moves between them. **Texture** is a loopable granular (or
 //! spectral) bed whose mix follows a seeded path through the sources; **loop** slices their hits and sequences them on a
-//! tempo grid; **smear** stretches them 4 to 16 times into a diffuse wash.
+//! tempo grid in any meter, steered by its choices (or, as a melody, repitches them: see `melody`); **smear** stretches
+//! them 4 to 16 times into a diffuse wash.
 
 use super::{
     analysis::{self, envelope, frame_at, hann, read_at, Frame, Stereo, Synth},
+    choices::Style,
     fx,
     rng::Rng,
     short, Ending, Options, Prepared, RATE,
@@ -284,7 +286,10 @@ fn first_hit(x: &[f32]) -> usize {
 }
 
 /// `k` hits spread as evenly as they go over `n` steps, turned `rotation` steps (Bjorklund's patterns).
-fn euclid(k: usize, n: usize, rotation: usize) -> Vec<bool> {
+pub(super) fn euclid(k: usize, n: usize, rotation: usize) -> Vec<bool> {
+    if n == 0 {
+        return Vec::new();
+    }
     (0..n).map(|i| ((i + n - rotation % n) * k) % n < k).collect()
 }
 
@@ -296,15 +301,17 @@ enum Role {
     Perc,
 }
 
-/// A hit placed in the loop: when (samples), which hit, how loud, how fast it plays (pitch).
+/// A hit placed in the loop: when (samples), which hit, how loud, how fast it plays (pitch), and whether it rings on
+/// past the next of its kind (an open hat).
 struct Event {
     at: usize,
     hit: usize,
     velocity: f64,
     rate: f64,
+    open: bool,
 }
 
-fn shifted(hit: &Stereo, rate: f64) -> Stereo {
+pub(super) fn shifted(hit: &Stereo, rate: f64) -> Stereo {
     if (rate - 1.0).abs() < 1e-9 {
         return hit.clone();
     }
@@ -312,13 +319,74 @@ fn shifted(hit: &Stereo, rate: f64) -> Stereo {
     std::array::from_fn(|c| (0..len).map(|i| read_at(&hit[c], i as f64 * rate) as f32).collect())
 }
 
+/// A loop's grid: its meter's beats to the bar, steps to a beat, a bar's steps, its bars, and a step's length and the
+/// loop's (samples). The tempo counts quarter notes, so a beat of 7/8 is an eighth.
+pub(super) struct Grid {
+    pub beats: usize,
+    pub unit: u32,
+    pub grid: usize,
+    pub steps: usize,
+    pub bars: usize,
+    pub bpm: f64,
+    pub step: f64,
+    pub len: usize,
+}
+
+impl Grid {
+    pub(super) fn of(options: &Options) -> Grid {
+        let choices = options.r#loop.as_ref();
+        let bpm = options.bpm.unwrap_or(120.0);
+        let bars = options.bars.unwrap_or(2) as usize;
+        let [beats, unit] = choices.and_then(|c| c.meter).unwrap_or([4, 4]);
+        let grid = choices.and_then(|c| c.grid).unwrap_or(4) as usize;
+        let step = 60.0 / bpm * 4.0 / unit as f64 / grid as f64 * RATE;
+        let steps = beats as usize * grid;
+        Grid { beats: beats as usize, unit, grid, steps, bars, bpm, step, len: (step * (steps * bars) as f64).round() as usize }
+    }
+    /// Where step `s` (counted over the whole loop) falls: an off-step of each pair late by `swing` of a step (on an
+    /// even grid), and within ±`jitter` seconds.
+    pub(super) fn place(&self, s: usize, swing: f64, jitter: f64, rng: &mut Rng) -> usize {
+        let late = if self.grid % 2 == 0 && s % 2 == 1 { swing * self.step } else { 0.0 };
+        ((s as f64 * self.step + late + rng.range(-jitter, jitter) * RATE).max(0.0) as usize).min(self.len - 1)
+    }
+    /// How loud step `s` of a bar sounds against the beat's own: a beat at 1, a half beat a little under, the rest less,
+    /// the more so with `accent`.
+    pub(super) fn accent(&self, s: usize, accent: f64) -> f64 {
+        if s % self.grid == 0 {
+            1.0
+        } else if self.grid % 2 == 0 && s % (self.grid / 2) == 0 {
+            1.0 - 0.45 * accent
+        } else {
+            1.0 - 0.8 * accent
+        }
+    }
+    /// The loop as words: "2 bars of 7/8 at 124 BPM in 16ths" (4/4 isn't said).
+    pub(super) fn words(&self) -> String {
+        let meter = if self.beats == 4 && self.unit == 4 { String::new() } else { format!(" of {}/{}", self.beats, self.unit) };
+        let grid = match self.grid {
+            2 => "8ths",
+            3 => "triplets",
+            4 => "16ths",
+            6 => "16th triplets",
+            _ => "32nds",
+        };
+        format!("{} bar{}{meter} at {} BPM in {grid}", self.bars, if self.bars == 1 { "" } else { "s" }, (self.bpm * 100.0).round() / 100.0)
+    }
+}
+
+/// A choice as given, or drawn from the seed within `low` to `high`.
+pub(super) fn drawn(given: Option<f64>, low: f64, high: f64, rng: &mut Rng) -> f64 {
+    given.unwrap_or_else(|| rng.range(low, high))
+}
+
 pub(super) fn looped(sources: &[Prepared], options: &Options, mut rng: Rng) -> (Stereo, String, Ending) {
-    let bpm = options.bpm.unwrap_or(120.0);
-    let bars = options.bars.unwrap_or(2) as usize;
-    let step = 60.0 / bpm / 4.0 * RATE;
-    let steps = 16 * bars;
-    let len = (step * steps as f64).round() as usize;
-    let mut hits = slice(sources, ((2.0 * 4.0 * step) as usize).min((1.5 * RATE) as usize));
+    let choices = options.r#loop.clone().unwrap_or_default();
+    if choices.style == Some(Style::Melody) {
+        return super::melody::melody(sources, options, rng);
+    }
+    let g = Grid::of(options);
+    let (steps, len) = (g.steps, g.len);
+    let mut hits = slice(sources, ((8.0 * g.step) as usize).min((1.5 * RATE) as usize));
     // Roles by colour, drawn from the seed among the likeliest: the lowest hit kicks, the brightest ticks, the noisiest
     // mid hit snaps; a hit used twice is filtered into its second role.
     let score = |role: Role, c: &analysis::Colour| -> f64 {
@@ -370,63 +438,122 @@ pub(super) fn looped(sources: &[Prepared], options: &Options, mut rng: Rng) -> (
     }
     let order = rng.shuffled(percs.len());
     let percs: Vec<usize> = order.into_iter().take(3).map(|i| percs[i]).collect();
-    let swing = rng.range(0.0, 0.25);
-    let place = |s: usize, rng: &mut Rng| -> usize {
-        let late = if s % 2 == 1 { swing * step } else { 0.0 };
-        ((s as f64 * step + late + rng.range(-0.001, 0.001) * RATE).max(0.0) as usize).min(len - 1)
-    };
-    let mut events: Vec<(Role, Event)> = Vec::new();
-    let kicks = [3usize, 4, 4, 5][rng.below(4)];
-    let kick_pattern = euclid(kicks, 16, 0);
+    // The feel: each choice as given, or drawn from the seed in a range that keeps a loop a loop.
+    let swing = drawn(choices.swing, 0.0, 0.25, &mut rng);
+    let density = drawn(choices.density, 0.35, 0.7, &mut rng);
+    let busy = |given: Option<f64>, rng: &mut Rng| given.unwrap_or_else(|| (density + rng.range(-0.15, 0.15)).clamp(0.0, 1.0));
+    let (kick_busy, snare_busy, hat_busy, perc_busy) =
+        (busy(choices.kick, &mut rng), busy(choices.snare, &mut rng), busy(choices.hats, &mut rng), busy(choices.perc, &mut rng));
+    let jitter = 0.001 + 0.014 * choices.humanize.unwrap_or(0.1);
+    let accent = drawn(choices.accent, 0.3, 0.6, &mut rng);
+    let fills = drawn(choices.fills, 0.0, 0.3, &mut rng);
+    let ratchet = choices.ratchet.unwrap_or(0.0);
+    let poly = drawn(choices.poly, 0.0, 0.25, &mut rng);
+    let variation = drawn(choices.variation, 0.0, 0.2, &mut rng);
+    let syncopation = drawn(choices.syncopation, 0.0, 0.3, &mut rng);
+    let ghosts = drawn(choices.ghosts, 0.0, 0.15, &mut rng);
+    let open = drawn(choices.open, 0.0, 0.2, &mut rng);
+    let lean = choices.lean.unwrap_or(0.0);
+    // A bar's patterns.
+    let count = |busy: f64, low: f64, high: f64| ((steps as f64 * (low + (high - low) * busy)).round() as usize).clamp(1, steps);
+    let kicks = count(kick_busy, 0.12, 0.38);
+    let kick_turn = if rng.chance(syncopation) { 1 + rng.below(g.grid.max(2) - 1) } else { 0 };
+    let kick_pattern = euclid(kicks, steps, kick_turn);
     let backbeat = rng.chance(0.75);
-    let snare_pattern = if backbeat { (0..16).map(|s| s == 4 || s == 12).collect() } else { euclid(2 + rng.below(2), 16, 4) };
-    let hat_style = rng.weighted(&[0.35, 0.25, 0.4]);
-    let hat_hits = 5 + rng.below(7);
-    let hat_pattern: Vec<bool> = match hat_style {
-        0 => (0..16).map(|s| s % 2 == 0).collect(),
-        1 => vec![true; 16],
-        _ => euclid(hat_hits, 16, rng.below(4)),
+    let mut snare_pattern: Vec<bool> = if backbeat {
+        let beats = euclid((g.beats / 2).max(1), g.beats, 1);
+        (0..steps).map(|s| s % g.grid == 0 && beats[s / g.grid]).collect()
+    } else {
+        euclid(count(snare_busy, 0.08, 0.25), steps, g.grid)
     };
-    let perc_hits = 3 + rng.below(5);
-    let perc_pattern = euclid(perc_hits, 16, rng.below(16));
+    if snare_busy > 0.6 {
+        // A busy snare plays between its backbeats too.
+        for (s, extra) in euclid(count(snare_busy - 0.6, 0.02, 0.3), steps, 3).into_iter().enumerate() {
+            snare_pattern[s] |= extra && !kick_pattern[s];
+        }
+    }
+    let hat_style = if hat_busy < 0.33 {
+        0
+    } else if hat_busy > 0.78 {
+        1
+    } else {
+        2
+    };
+    let hat_hits = count(hat_busy, 0.3, 0.75);
+    let hat_pattern: Vec<bool> = match hat_style {
+        0 => (0..steps).map(|s| s % (g.grid / 2).max(1) == 0).collect(),
+        1 => vec![true; steps],
+        _ => euclid(hat_hits, steps, rng.below(g.grid)),
+    };
+    let perc_hits = count(perc_busy, 0.12, 0.45);
+    // Polymeter: the percussion's cycle runs a step short or long of the bar, or in threes, so it drifts against it.
+    let perc_cycle =
+        if rng.chance(poly) { [steps - 1, steps + 1, 3 * g.grid, (5 * g.grid).div_ceil(2)][rng.below(4)].max(2) } else { steps };
+    let perc_pattern = euclid(perc_hits.min(perc_cycle), perc_cycle, rng.below(perc_cycle));
     let intervals = [0.0, 0.0, 3.0, -5.0, 7.0, -12.0, 12.0];
-    for bar in 0..bars {
+    let total = steps * g.bars;
+    // Leaning toward the loop's end thins what's near its start (and toward the start, its end); the favoured end
+    // gathers extra percussion and ghost notes.
+    let keeps = |s: usize| (1.0 - lean * (1.0 - 2.0 * s as f64 / total as f64) * 0.9).clamp(0.08, 1.0);
+    let favoured = |s: usize| (lean * (2.0 * s as f64 / total as f64 - 1.0)).max(0.0);
+    let fill_steps = g.grid * if fills > 0.6 { 2 } else { 1 };
+    let mut events: Vec<(Role, Event)> = Vec::new();
+    for bar in 0..g.bars {
+        let phrase_end = bar == g.bars - 1 || (g.bars >= 4 && bar % 2 == 1);
         let pickup = bar > 0 && rng.chance(0.4);
-        for s in 0..16 {
-            let at_step = bar * 16 + s;
-            let mut kick_here = kick_pattern[s] || (pickup && s == 14);
-            if bar == bars - 1 && s > 8 && rng.chance(0.06) {
+        for s in 0..steps {
+            let at_step = bar * steps + s;
+            let mut kick_here = kick_pattern[s] || (pickup && s == steps.saturating_sub(2));
+            if bar > 0 && rng.chance(variation * 0.3) {
                 kick_here = !kick_here && s % 2 == 0;
             }
-            if kick_here {
-                events.push((Role::Kick, Event { at: place(at_step, &mut rng), hit: kick, velocity: rng.range(0.9, 1.0), rate: 1.0 }));
+            if kick_here && (s == 0 || rng.chance(keeps(at_step))) {
+                let at = g.place(at_step, swing, jitter, &mut rng);
+                events.push((Role::Kick, Event { at, hit: kick, velocity: rng.range(0.9, 1.0), rate: 1.0, open: false }));
             }
-            if snare_pattern[s] {
-                events.push((Role::Snare, Event { at: place(at_step, &mut rng), hit: snare, velocity: rng.range(0.85, 1.0), rate: 1.0 }));
-            } else if !kick_here && rng.chance(0.06) {
-                events.push((Role::Snare, Event { at: place(at_step, &mut rng), hit: snare, velocity: rng.range(0.25, 0.4), rate: 1.0 }));
+            let filling = phrase_end && s + fill_steps >= steps && rng.chance(fills);
+            if snare_pattern[s] || filling {
+                let rise =
+                    if filling && !snare_pattern[s] { 0.45 + 0.5 * (s + fill_steps - steps) as f64 / fill_steps as f64 } else { 1.0 };
+                let at = g.place(at_step, swing, jitter, &mut rng);
+                events.push((Role::Snare, Event { at, hit: snare, velocity: rng.range(0.85, 1.0) * rise, rate: 1.0, open: false }));
+            } else if !kick_here && rng.chance(ghosts * 0.5 + favoured(at_step) * 0.2) {
+                let at = g.place(at_step, swing, jitter, &mut rng);
+                events.push((Role::Snare, Event { at, hit: snare, velocity: rng.range(0.25, 0.4), rate: 1.0, open: false }));
             }
-            if hat_pattern[s] {
-                let accent = if s % 4 == 0 {
-                    0.95
-                } else if s % 2 == 0 {
-                    0.75
-                } else {
-                    0.55
-                };
-                events.push((
-                    Role::Hat,
-                    Event { at: place(at_step, &mut rng), hit: hat, velocity: accent * rng.range(0.85, 1.05), rate: 1.0 },
-                ));
+            if hat_pattern[s] && rng.chance(keeps(at_step)) && !(bar > 0 && rng.chance(variation * 0.25)) {
+                let at = g.place(at_step, swing, jitter, &mut rng);
+                let velocity = g.accent(s, accent) * rng.range(0.85, 1.05);
+                events.push((Role::Hat, Event { at, hit: hat, velocity, rate: 1.0, open: rng.chance(open) }));
             }
-            if perc_pattern[s] {
+            if (perc_pattern[at_step % perc_cycle] || rng.chance(favoured(at_step) * 0.35)) && rng.chance(keeps(at_step)) {
                 let hit = percs[rng.below(percs.len())];
                 let rate = 2f64.powf(intervals[rng.below(intervals.len())] / 12.0);
-                events.push((Role::Perc, Event { at: place(at_step, &mut rng), hit, velocity: rng.range(0.6, 0.95), rate }));
+                let at = g.place(at_step, swing, jitter, &mut rng);
+                let velocity = rng.range(0.6, 0.95) * g.accent(s, accent).max(0.6);
+                events.push((Role::Perc, Event { at, hit, velocity, rate, open: false }));
             }
         }
     }
-    // Each role's hits cut the one before (a closing hat), percussion rings on.
+    // Rolls: a hat, snare or perc hit becomes two to four quick repeats within its step.
+    if ratchet > 0.0 {
+        let mut rolled = Vec::new();
+        for (role, event) in &events {
+            if *role != Role::Kick && rng.chance(ratchet * 0.5) {
+                let n = 2 + rng.below(3);
+                for k in 1..n {
+                    let at = event.at + (k as f64 * g.step / n as f64) as usize;
+                    if at < len {
+                        let velocity = event.velocity * 0.85f64.powi(k as i32);
+                        rolled.push((*role, Event { at, hit: event.hit, velocity, rate: event.rate, open: false }));
+                    }
+                }
+            }
+        }
+        events.extend(rolled);
+    }
+    events.sort_by_key(|(_, event)| event.at);
+    // Each role's hits cut the one before (a closing hat), percussion and open hats ring on.
     let gains = |role: Role| match role {
         Role::Kick => 1.0,
         Role::Snare => 0.8,
@@ -436,11 +563,13 @@ pub(super) fn looped(sources: &[Prepared], options: &Options, mut rng: Rng) -> (
     let mut out = fx::silence(len + (2.0 * RATE) as usize);
     for (index, (role, event)) in events.iter().enumerate() {
         let mut audio = shifted(&hits[event.hit].audio, event.rate);
-        if *role != Role::Perc {
+        if *role != Role::Perc && !event.open {
             let next = events[index + 1..]
                 .iter()
                 .find(|(r, _)| r == role)
-                .map_or(event.at + len, |(_, e)| e.at + if e.at < event.at { len } else { 0 });
+                .map(|(_, e)| e.at)
+                .or_else(|| events.iter().find(|(r, _)| r == role).map(|(_, e)| e.at + len))
+                .unwrap_or(event.at + len);
             let room = next.saturating_sub(event.at).max(64);
             if audio[0].len() > room {
                 for c in audio.iter_mut() {
@@ -449,30 +578,46 @@ pub(super) fn looped(sources: &[Prepared], options: &Options, mut rng: Rng) -> (
                 fx::fade_out(&mut audio, (0.004 * RATE) as usize);
             }
         }
-        let g = gains(*role) * event.velocity;
-        fx::mix_into(&mut out, &audio, event.at, [g, g]);
+        let gain = gains(*role) * event.velocity;
+        fx::mix_into(&mut out, &audio, event.at, [gain, gain]);
     }
     fx::wrap_tail(&mut out, len);
     let name = |hit: usize| short(&sources[hits[hit].source].name);
     let mut perc_names: Vec<String> = percs.iter().map(|h| name(*h)).collect();
     perc_names.dedup();
+    let mut feel = Vec::new();
+    for (on, word) in [
+        (ghosts >= 0.3, "ghost notes".to_string()),
+        (fills >= 0.3, "fills".into()),
+        (ratchet > 0.0, "rolls".into()),
+        (open >= 0.3, "open hats".into()),
+        (syncopation >= 0.5, "syncopated".into()),
+        (lean >= 0.2, "leaning late".into()),
+        (lean <= -0.2, "leaning early".into()),
+        (perc_cycle != steps, format!("perc in {perc_cycle}")),
+    ] {
+        if on {
+            feel.push(word);
+        }
+    }
     let recipe = format!(
-        "Loop, {} bar{} at {} BPM, {:.0}% swing: kick from {} (E({},16)), snare from {}, hats from {} ({}), perc from {} (E({},16))",
-        bars,
-        if bars == 1 { "" } else { "s" },
-        (bpm * 100.0).round() / 100.0,
+        "Loop, {}, {:.0}% swing: kick from {} (E({},{})), snare from {}, hats from {} ({}), perc from {} (E({},{})){}",
+        g.words(),
         swing * 100.0,
         name(kick),
         kicks,
+        steps,
         name(snare),
         name(hat),
         match hat_style {
-            0 => "8ths".to_string(),
-            1 => "16ths".to_string(),
-            _ => format!("E({hat_hits},16)"),
+            0 => "every half beat".to_string(),
+            1 => "every step".to_string(),
+            _ => format!("E({hat_hits},{steps})"),
         },
         perc_names.join(" + "),
-        perc_hits
+        perc_hits.min(perc_cycle),
+        perc_cycle,
+        if feel.is_empty() { String::new() } else { format!("; {}", feel.join(", ")) }
     );
     (out, recipe, Ending::Loop)
 }

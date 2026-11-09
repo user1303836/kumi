@@ -51,7 +51,6 @@ impl TuiApp {
     /// Makes a sound from `files` (at most as many as the op takes), listed under MADE at once and played when it's
     /// made: its number.
     pub(super) fn design(&self, op: Op, mode: Option<Mode>, files: Vec<String>, from_map: bool) -> Option<u64> {
-        let files: Vec<String> = files.into_iter().take(op.most_sources()).collect();
         self.make(design::request(op, mode, &files, None, Options::default()), from_map)
     }
 
@@ -179,8 +178,7 @@ impl TuiApp {
         }
         let app = Rc::downgrade(&self.0);
         if files.len() >= kumi_design::MIN_SOURCES {
-            let reach = files.len().min(kumi_design::MAX_SOURCES);
-            rows.push(TabRow { spans: vec![sp(format!("MAKE from {}", sounds(reach)), st::LABEL)], ..Default::default() });
+            rows.push(TabRow { spans: vec![sp(format!("MAKE from {}", sounds(files.len())), st::LABEL)], ..Default::default() });
             for (op, mode, name, does) in WAYS {
                 let make: Rc<dyn Fn()> = {
                     let (app, files) = (app.clone(), files.to_vec());
