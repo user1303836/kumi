@@ -406,7 +406,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   )
 
   return (
-    <section aria-label={t('dock.title')} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
+    <section aria-label={t('dock.title')} data-kumi-dock="" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
       {header}
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
@@ -424,7 +424,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </div>
       )}
       {open && current && items.length > 0 && (
-        <div aria-label={t('dock.sounds')} role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
+        <div aria-label={t('dock.sounds')} data-kumi-dock-chips="" role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip
               audio={audio}

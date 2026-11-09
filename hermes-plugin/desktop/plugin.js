@@ -3794,6 +3794,40 @@ var GLYPHS = {
 function Glyph({ card }) {
   return /* @__PURE__ */ jsx11("svg", { "aria-hidden": true, height: "20", style: { flex: "none" }, viewBox: "0 0 28 20", width: "28", children: GLYPHS[card] });
 }
+function flyToDock(from) {
+  const dock = document.querySelector("[data-kumi-dock-chips]") ?? document.querySelector("[data-kumi-dock]");
+  if (!from || !dock || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const start = from.getBoundingClientRect();
+  const end = dock.getBoundingClientRect();
+  const canvas = from.querySelector("canvas");
+  const ghost = document.createElement("div");
+  ghost.setAttribute("aria-hidden", "true");
+  Object.assign(ghost.style, {
+    position: "fixed",
+    left: `${start.left}px`,
+    top: `${start.top}px`,
+    width: `${start.width}px`,
+    height: `${start.height}px`,
+    borderRadius: "8px",
+    pointerEvents: "none",
+    zIndex: "2147483000",
+    background: canvas ? `center / 100% 100% no-repeat url(${canvas.toDataURL()})` : T.accent,
+    boxShadow: `0 10px 28px -10px ${T.accent}`
+  });
+  document.body.appendChild(ghost);
+  const dx = end.left + Math.min(64, end.width / 2) - (start.left + start.width / 2);
+  const dy = end.top + Math.min(14, end.height / 2) - (start.top + start.height / 2);
+  const flight = ghost.animate(
+    [
+      { transform: "translate(0, 0) scale(1)", opacity: 1 },
+      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
+    ],
+    { duration: 640, easing: "cubic-bezier(.35,.6,.4,1)" }
+  );
+  flight.onfinish = () => ghost.remove();
+  flight.oncancel = () => ghost.remove();
+}
 function Wave2({ peaks, playing, duration }) {
   const canvas = useRef2(null);
   const box = useRef2(null);
@@ -3841,7 +3875,7 @@ function Wave2({ peaks, playing, duration }) {
     }
   }, [peaks, width]);
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1e3 / duration) : null;
-  return /* @__PURE__ */ jsxs11("div", { ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
+  return /* @__PURE__ */ jsxs11("div", { "data-wave": "", ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
     /* @__PURE__ */ jsx11(
       "canvas",
       {
@@ -4124,7 +4158,19 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                     /* @__PURE__ */ jsx11("span", { style: { flex: 1 } }),
                     /* @__PURE__ */ jsx11(TextButton, { label: isPlaying ? t("make.stop") : t("make.play"), onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), children: isPlaying ? "■" : "▶" }),
                     /* @__PURE__ */ jsx11(TextButton, { disabled: busy !== null, onClick: () => void make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : t("make.reroll") }),
-                    /* @__PURE__ */ jsx11(TextButton, { disabled: inPalette, onClick: () => void onKeep(result), pressed: inPalette, title: t("make.keepTitle"), children: inPalette ? t("make.kept") : t("make.keep") }),
+                    /* @__PURE__ */ jsx11(
+                      TextButton,
+                      {
+                        disabled: inPalette,
+                        onClick: () => {
+                          flyToDock(list.current?.querySelector(`[data-made="${result.artifact_id}"] [data-wave]`));
+                          void onKeep(result);
+                        },
+                        pressed: inPalette,
+                        title: t("make.keepTitle"),
+                        children: inPalette ? t("make.kept") : t("make.keep")
+                      }
+                    ),
                     use?.(result)
                   ] })
                 ]
@@ -5429,7 +5475,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     current && current.items.length > 0 && kit?.(current),
     current && !forgetting && /* @__PURE__ */ jsx13(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") })
   ] });
-  return /* @__PURE__ */ jsxs13("section", { "aria-label": t("dock.title"), style: { display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", borderTop: `1px solid ${T.border}`, color: T.text }, children: [
+  return /* @__PURE__ */ jsxs13("section", { "aria-label": t("dock.title"), "data-kumi-dock": "", style: { display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", borderTop: `1px solid ${T.border}`, color: T.text }, children: [
     header,
     current && forgetting && /* @__PURE__ */ jsxs13("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
       /* @__PURE__ */ jsx13("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
@@ -5446,7 +5492,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       ),
       /* @__PURE__ */ jsx13(TextButton, { onClick: () => setForgetting(false), children: t("dock.keep") })
     ] }),
-    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
+    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), "data-kumi-dock-chips": "", role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
       items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx13(
         Chip2,
         {

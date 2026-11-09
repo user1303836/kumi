@@ -90,6 +90,44 @@ function Glyph({ card }: { card: string }) {
   )
 }
 
+/** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock, shrinking as it
+ *  goes, while the palette's answer brings the chip in (it pops in as it lands). Nothing moves for a system that asks
+ *  for less motion, or when no dock is on screen. */
+function flyToDock(from: Element | null | undefined) {
+  const dock = document.querySelector('[data-kumi-dock-chips]') ?? document.querySelector('[data-kumi-dock]')
+  if (!from || !dock || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const start = from.getBoundingClientRect()
+  const end = dock.getBoundingClientRect()
+  const canvas = from.querySelector('canvas')
+  const ghost = document.createElement('div')
+  ghost.setAttribute('aria-hidden', 'true')
+  Object.assign(ghost.style, {
+    position: 'fixed',
+    left: `${start.left}px`,
+    top: `${start.top}px`,
+    width: `${start.width}px`,
+    height: `${start.height}px`,
+    borderRadius: '8px',
+    pointerEvents: 'none',
+    zIndex: '2147483000',
+    background: canvas ? `center / 100% 100% no-repeat url(${canvas.toDataURL()})` : T.accent,
+    boxShadow: `0 10px 28px -10px ${T.accent}`
+  })
+  document.body.appendChild(ghost)
+  const dx = end.left + Math.min(64, end.width / 2) - (start.left + start.width / 2)
+  const dy = end.top + Math.min(14, end.height / 2) - (start.top + start.height / 2)
+  const flight = ghost.animate(
+    [
+      { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
+    ],
+    { duration: 640, easing: 'cubic-bezier(.35,.6,.4,1)' }
+  )
+  flight.onfinish = () => ghost.remove()
+  flight.oncancel = () => ghost.remove()
+}
+
 /** A result's waveform, from the engine's 256 peaks, mirrored about the middle; a line runs across it while it plays. */
 function Wave({ peaks, playing, duration }: { peaks: number[]; playing: boolean; duration: number }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
@@ -140,7 +178,7 @@ function Wave({ peaks, playing, duration }: { peaks: number[]; playing: boolean;
   }, [peaks, width])
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1000 / duration) : null
   return (
-    <div ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
+    <div data-wave="" ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
       <canvas
         aria-hidden
         ref={canvas}
@@ -459,7 +497,15 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     <TextButton disabled={busy !== null} onClick={() => void make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
                       {busy === take.key ? t('make.rerolling') : t('make.reroll')}
                     </TextButton>
-                    <TextButton disabled={inPalette} onClick={() => void onKeep(result)} pressed={inPalette} title={t('make.keepTitle')}>
+                    <TextButton
+                      disabled={inPalette}
+                      onClick={() => {
+                        flyToDock(list.current?.querySelector(`[data-made="${result.artifact_id}"] [data-wave]`))
+                        void onKeep(result)
+                      }}
+                      pressed={inPalette}
+                      title={t('make.keepTitle')}
+                    >
                       {inPalette ? t('make.kept') : t('make.keep')}
                     </TextButton>
                     {use?.(result)}
