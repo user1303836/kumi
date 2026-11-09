@@ -62,14 +62,15 @@ PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_histor
         "kumi_plugin_knowledge"}
 # What the producer approves first: always for setup, and for the rest while "Ask before each change" is on.
 # What a scheduled job may call is tools.SCHEDULED_READS.
-ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset"}
+ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
+         "kumi_tune", "kumi_wavetable"}
 # The owner's decision: by default Kumi makes the changes the producer asks for in the DAW without asking, each in
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
 # refusal still refuses, unattended and forked turns still don't write, and setup, sample folders and Mirelo's uploads
 # and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
 UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
-                      "kumi_transport", "kumi_variations"}
+                      "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable"}
 _ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build"}
@@ -229,7 +230,7 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 # a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A device's
 # names its spec (CC-22), and a preset's its file's digest (CC-26's 26-w3): they outlive the chat, so even a clean
 # chat's "Always" covers only that one.
-ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:")
+ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:", "kumi:wavetable:")
 
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -259,6 +260,10 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return (block(PRESET_BUILD_ONLY_LIVE) if host.daw() != "ableton" else None), {}
     if tool == "kumi_preset":
         return _preset(host, args, kwargs)
+    if tool in ("kumi_judge", "kumi_tune"):
+        return _judged(host, tool, args), {}
+    if tool == "kumi_wavetable":
+        return _wavetable(host, args), {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -333,6 +338,92 @@ def _take_line(take: dict) -> str:
     line = take.get("line")
     return line if isinstance(line, str) and line.strip() else f"{take['take']} ({take.get('direction') or 'a take'})"
 
+
+# Judged rounds and tunes (serve's judge and tune): no runtime preview exists for them, so they're asked in words
+# built from their arguments, after the plugin's own checks of those arguments.
+JUDGED = "Kumi didn't listen"
+JUDGED_ONLY_LIVE = f"{JUDGED}. Kumi judges and tunes by ear only in Ableton Live."
+JUDGED_PLAYS = ("Live plays that stretch (at most 60 s a pass) through Kumi Ears with Live stopped and not recording, "
+                "and puts it back after.")
+JUDGED_KEEPS = "Kumi keeps the change only if it helped; otherwise it takes it back itself."
+SCRATCH = "It hears trial settings on scratch copies of the run's track in the Set, removed after."
+
+
+def _judged(host: Any, tool: str, args: dict) -> dict:
+    refusal = (tools.judge_refusal if tool == "kumi_judge" else tools.tune_refusal)(args)
+    if refusal is not None:
+        return block(refused(JUDGED, refusal))
+    if host.daw() != "ableton":
+        return block(JUDGED_ONLY_LIVE)
+    if tool == "kumi_tune":
+        knobs = ", ".join(quoted(knob, 40) for knob in args.get("knobs") or [])
+        target = quoted(args["target"], 60) if "target" in args else "the run's next target"
+        lines = [f"Kumi: tune device {quoted(args['device'], 60)} ({args['how']}{f': {knobs}' if knobs else ''}) "
+                 f"toward {target}", JUDGED_PLAYS.replace("that stretch", "the run's stretch"),
+                 *([SCRATCH] if args["how"] in ("search", "probe") else []), JUDGED_KEEPS]
+        return approve(lines, "kumi:write:tune")
+    if "goal" in args:
+        start, beats = args["from_beat"], args["beats"]
+        heard = f"track {quoted(args['track'], 60)}" if "track" in args else "the mix"
+        lines = [f"Kumi: start a judged run on {heard}, beats {start:g}–{start + beats:g}",
+                 f"Toward: {_goal_words(args['goal'])}", JUDGED_PLAYS]
+    elif "change" in args:
+        lines = [f"Kumi: judge this round's change, {quoted(args['change'], 80)}",
+                 JUDGED_PLAYS.replace("that stretch", "the run's stretch"), JUDGED_KEEPS]
+    else:
+        lines = ["Kumi: end the judged run, hearing its stretch once more",
+                 JUDGED_PLAYS.replace("that stretch", "the run's stretch")]
+    return approve(lines, "kumi:write:judge")
+
+
+def _goal_words(goal: dict) -> str:
+    """A goal in a few words: its loudness, ceiling, reference, focus and targets."""
+    parts = []
+    if isinstance(goal.get("loudness"), (int, float)):
+        parts.append(f"{goal['loudness']:g} LUFS")
+    if isinstance(goal.get("true_peak"), (int, float)):
+        parts.append(f"true peak at most {goal['true_peak']:g} dBTP")
+    reference = goal.get("reference")
+    if isinstance(reference, dict):
+        named = reference.get("clip_ref") or reference.get("sound_id") or reference.get("artifact_id") or (
+            Path(str(reference.get("file", ""))).name)
+        parts.append(f"the balance of {quoted(named, 60)}")
+    if isinstance(goal.get("focus"), str):
+        parts.append(f"{quoted(goal['focus'], 40)} cutting through")
+    targets = [t.get("measure") for t in goal.get("targets") or [] if isinstance(t, dict)]
+    if targets:
+        parts.append(", ".join(one_line(measure, 20) for measure in targets))
+    if goal.get("problems", True) is not False:
+        parts.append("clearing the problems it finds")
+    return "; ".join(parts)
+
+
+# A wavetable: a new file outside the Set, asked (with "Ask before each change" on) in its arguments' words, under its
+# arguments' digest, since the file outlives the chat as a preset does.
+WAVETABLE = "Kumi didn't make the wavetable"
+WAVETABLE_ONLY_LIVE = f"{WAVETABLE}. Kumi makes wavetables only for Ableton Live's plug-ins."
+WAVETABLE_WARNING = ("Writes a new .wav (never over a file) into the plug-in's wavetable folder (Vital's), else Live's "
+                     "User Library/Kumi/Wavetables. It stays there after an undo.")
+
+
+def _wavetable(host: Any, args: dict) -> dict:
+    refusal = tools.wavetable_refusal(args)
+    if refusal is not None:
+        return block(refused(WAVETABLE, refusal))
+    if host.daw() != "ableton":
+        return block(WAVETABLE_ONLY_LIVE)
+    table = args["wavetable"]
+    name = quoted(table["name"], 48) if isinstance(table.get("name"), str) else "a wavetable"
+    if "from_audio" in table:
+        source = table["from_audio"]["source"]
+        named = source.get("sound_id") or source.get("artifact_id") or Path(str(source.get("file", ""))).name
+        drawn = f"single cycles cut from {quoted(named, 60)}"
+    else:
+        count = len(table.get("keyframes") or [])
+        drawn = f"{count} keyframe{'s' if count != 1 else ''} morphing"
+    frames = f", {table['count']} frames" if isinstance(table.get("count"), int) else ""
+    lines = [f"Kumi: make {name} for plug-in {quoted(args['device_ref'], 60)}", f"{drawn}{frames}", WAVETABLE_WARNING]
+    return approve(lines, f"kumi:wavetable:{calls.digest(args)}")
 
 
 def preview_timeout(hook_timeout: float | None) -> float:

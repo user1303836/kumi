@@ -236,6 +236,12 @@ When the producer names a video tutorial ("make the bass from this video"):
 ## Hearing
 - Kumi measures audio; it doesn't hear it, and neither do you. Say what was measured (`kumi_listen`, skill `kumi:listening`), never that something "sounds" a way unless the producer said so.
 
+## Judged rounds (Live)
+- **To reach a loudness, a true peak or a reference's balance,** work in rounds with `kumi_judge` rather than one big change. Start with `{goal, from_beat, beats}` (Live plays at most 60 s a pass, counting a bar before the stretch and half a bar after, so keep the stretch a little shorter; `track` for one track, else the mix) and the project key and epoch from `kumi_observe`; a reference is `{clip_ref}` or a source, never a path. Live plays the stretch through Kumi Ears with Live stopped.
+- **One change per round:** make it (`kumi_change`), then `kumi_judge {change: "what you did"}`. Kumi keeps it only if it helped, else takes it back itself (`taken_back`): don't undo what a round took back, and don't redo it unchanged. End with `{done: true}`.
+- **Let Kumi pick the numbers with `kumi_tune`** instead of guessing them: put the device in place first, then `{device, how}` (`fit` for an EQ Eight's bands, `home` or `probe` with one knob, `search` with 2–5). It's a round too.
+- **Chain each call with the `project_key` and `epoch` its answer returns.** Each round is a change in HISTORY that `kumi_undo` can take back.
+
 ## Scripts
 - **Typed steps first.** A `kumi_change` step is previewed with the project's own names and values, and Kumi can undo it. Use a script (`kumi_script`) only for what no step can do: a Renoise tool's logic, a batch no step covers, reading something no reader gives.
 - **Its language is the DAW's:** Python in Live (its Live API, as a Remote Script sees it), Lua in REAPER (ReaScript) and Renoise (its scripting API).
@@ -270,6 +276,9 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Values are what the file stores:** report them with the unit the answer gives ("stored value" when there's no proven unit), never as a percentage or a unit it didn't give. A setting the template didn't store says so.
 - **Then put it in the User Library with `kumi_preset {artifact_id}`:** the new `.vstpreset` file in the Kumi folder, with every setting (the producer approves it when `ask_before_changes` is true). The file stays after an undo.
 - **Then load it:** observe first, then one `kumi_change` with only `load_device` (`itemId`: the place's `item`, `trackRef`). When the answer says Live hasn't listed the file yet, follow its next step: never load it by path, and never place it again.
+
+## Wavetables (Live)
+- **For a Serum 2 or Vital oscillator's table:** `kumi_wavetable {device_ref, wavetable}` with `keyframes` (harmonics or shapes, with `count`) or `from_audio {source}` (a held note: `{sound_id, map_revision}`, `{artifact_id}` or `{file}` in an approved folder, never a path of its own). Kumi writes a new `.wav` (never over a file) into Vital's wavetable folder, else `User Library/Kumi/Wavetables`; it stays after an undo. Picking it in the oscillator is the producer's click in the plug-in window: say the file's name.
 
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.

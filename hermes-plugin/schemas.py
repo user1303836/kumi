@@ -460,3 +460,89 @@ KUMI_PRESET = _tool(
     "Live only.",
     {"artifact_id": {"type": "string", "minLength": 1, "description": "kumi_preset_build's artifact_id."}},
     ("artifact_id",))
+
+
+# Judged listening and wavetables (serve's judge, tune and wavetable ops), Live only.
+_JUDGED_LISTEN = ("Live plays the stretch (at most 60 s a pass) through the Kumi Ears device setup installed, with Live "
+                  "stopped, and puts it back after.")
+_TARGETS = ["dynamics", "density", "range", "punch", "pumping", "distortion", "low_width", "rumble", "brightness",
+            "decay_time", "tail_darkening", "echo_time", "echo_fall", "swing", "sweep", "tail_share"]
+
+KUMI_JUDGE = _tool(
+    "kumi_judge",
+    "Work toward a sound goal in rounds (skill kumi:daw, Judged rounds): start with goal, from_beat and beats; Kumi "
+    "hears the mix (or track) and answers a checklist of gaps. Make one change (kumi_change or kumi_tune), then call "
+    "with change: Kumi hears it again and keeps it only if it helped, else takes it back itself. End with done: true. "
+    "Give exactly one of goal, change or done. " + _JUDGED_LISTEN + " Pass the project key and epoch from kumi_observe, "
+    "then the ones each answer returns. Each round is a change in HISTORY. Live only.",
+    {"goal": {"type": "object", "additionalProperties": False, "description": "Starts a run: what to reach.",
+              "properties": {
+                  "loudness": {"type": "number", "minimum": -60, "maximum": 0, "description": "Integrated LUFS."},
+                  "true_peak": {"type": "number", "minimum": -12, "maximum": 0, "description": "Ceiling, dBTP."},
+                  "reference": {"type": "object", "additionalProperties": False,
+                                "description": ("Whose balance, dynamics and low end become targets: {\"clip_ref\"} "
+                                                "for an audio clip in the Set, or a source as kumi_listen takes one. "
+                                                "Never a path string."),
+                                "properties": {"clip_ref": {"type": "string"}, **_SOURCE["properties"]}},
+                  "problems": {"type": "boolean", "description": "Clear what Kumi's detectors find (default true)."},
+                  "sound": {"type": "boolean", "description": "A single sound against a reference sound."},
+                  "focus": {"type": "string", "description": "The track that must cut through (ref or name)."},
+                  "targets": {"type": "array", "maxItems": 12, "items": {
+                      "type": "object", "additionalProperties": False, "required": ["measure"],
+                      "properties": {"measure": {"type": "string", "enum": _TARGETS},
+                                     "value": {"type": "number"}, "within": {"type": "number", "minimum": 0},
+                                     "at_least": {"type": "number"}, "at_most": {"type": "number"}}}}}},
+     "track": {"type": "string", "description": "With goal: one track (ref or name) instead of the mix."},
+     "from_beat": {"type": "number", "minimum": 0, "description": "With goal: where the stretch starts, in beats."},
+     "beats": {"type": "number", "exclusiveMinimum": 0, "maximum": 256,
+               "description": "With goal: how long the stretch is, in beats (at most 60 s at the tempo)."},
+     "change": {"type": "string", "minLength": 1, "maxLength": 400,
+                "description": "What you changed since the last round, in one line."},
+     "done": {"type": "boolean", "description": "true: end the run, hearing the stretch once more."},
+     "expected_project_key": {"type": "string"},
+     "expected_epoch": {"type": "string"}},
+    ("expected_project_key", "expected_epoch"))
+
+KUMI_TUNE = _tool(
+    "kumi_tune",
+    "Let Kumi pick a device's numbers against the judged run's checklist, judged as a round (kept or taken back), "
+    "instead of guessing them. Start a run with kumi_judge goal, and put the device in place with kumi_change first. "
+    "how: fit (an EQ Eight's bands from what was measured), home (one knob toward its target), search (2-5 knobs that "
+    "interact, on scratch copies of the run's track) or probe (one knob across its range on scratch copies). Scratch "
+    "copies are removed after. " + _JUDGED_LISTEN + " Pass the project key and epoch from kumi_observe or the last "
+    "answer. A change in HISTORY. Live only.",
+    {"device": {"type": "string", "minLength": 1, "description": "The device's ref."},
+     "how": {"type": "string", "enum": ["fit", "home", "search", "probe"]},
+     "target": {"type": "string", "description": "The checklist item's id; the run's next target when left out."},
+     "knobs": {"type": "array", "maxItems": 5, "items": {"type": "string", "minLength": 1},
+               "description": "Knob names or roles (kumi_plugin_knowledge byRole): one for home or probe, 2-5 for "
+                              "search."},
+     "change": {"type": "string", "maxLength": 400, "description": "What the change is, in a few words."},
+     "expected_project_key": {"type": "string"},
+     "expected_epoch": {"type": "string"}},
+    ("device", "how", "expected_project_key", "expected_epoch"))
+
+KUMI_WAVETABLE = _tool(
+    "kumi_wavetable",
+    "Make a wavetable for a Serum 2 or Vital instance in Live (device_ref from kumi_observe): frames morphing through "
+    "keyframes (harmonics or shapes), or single cycles cut from a held note in an audio source. Kumi writes a new .wav "
+    "(never over a file) into the plug-in's wavetable folder (Vital's), else Live's User Library/Kumi/Wavetables; it "
+    "stays after an undo. The producer picks it in the plug-in window. Live only.",
+    {"device_ref": {"type": "string", "minLength": 1, "description": "The plug-in device's ref from the current look."},
+     "wavetable": {"type": "object", "additionalProperties": False,
+                   "description": "What to draw: keyframes (with count), or from_audio.",
+                   "properties": {
+                       "name": {"type": "string", "minLength": 1, "maxLength": 48},
+                       "keyframes": {"type": "array", "minItems": 1, "maxItems": 16, "items": {
+                           "type": "object", "additionalProperties": False, "properties": {
+                               "harmonics": {"type": "array", "minItems": 1, "maxItems": 512,
+                                             "items": {"type": "number"},
+                                             "description": "Amplitudes of harmonics 1, 2, 3…"},
+                               "shape": {"type": "string", "enum": ["sine", "saw", "square", "triangle", "pulse"]},
+                               "width": {"type": "number", "minimum": 0.01, "maximum": 0.99}}}},
+                       "count": {"type": "integer", "minimum": 1, "maximum": 256},
+                       "from_audio": {"type": "object", "additionalProperties": False, "required": ["source"],
+                                      "properties": {"source": _SOURCE, "start": {"type": "number", "minimum": 0},
+                                                     "seconds": {"type": "number", "exclusiveMinimum": 0,
+                                                                 "maximum": 60}}}}}},
+    ("device_ref", "wavetable"))
