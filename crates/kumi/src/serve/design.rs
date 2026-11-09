@@ -1,18 +1,19 @@
-//! `design`: cross, fuse or stack two to sixteen approved sounds into a new one, kept as a private artifact. Sources are
-//! map sounds (by revision), artifacts, or files the host resolved inside an approved root (its own results, kept in a
-//! media root); each is authorized, then staged as an immutable copy before it's decoded, and nothing changes in the DAW.
+//! `design`: cross, fuse or stack two or more approved sounds into a new one, or grow one toward another, kept as a
+//! private artifact. Sources are map sounds (by revision), artifacts, or files the host resolved inside an approved root
+//! (its own results, kept in a media root); each is authorized, then staged as an immutable copy before it's decoded, and
+//! nothing changes in the DAW.
 
 use super::artifacts::StagedArtifact;
 use super::ctx::{Call, Ctx, Effect, OpError, OpFuture, Operation};
 use super::listen::{check, Source};
-use kumi_design::{fresh_seed, load_source, render, Answer, Mode, Op, Request, MAX_SEED, MAX_SOURCES, MIN_SOURCES};
+use kumi_design::{fresh_seed, load_source, render, schema, source_seconds, Answer, Request, MAX_SEED, MIN_SOURCES};
 use kumi_media::audio::DecodeOptions;
 use serde_json::{json, Value};
 use std::{io::Write, path::Path};
 
 pub static DESIGN: Operation = Operation {
     name: "design",
-    description: "Make a new sound from 2-16 approved sounds (map sounds, artifacts, or files in an approved folder): cross them (blend: one morphed body; attack: one's transient on the blend of the rest; resonate: half ring through the other half; modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other), fuse them (texture: a loopable bed that moves between them; loop: their hits sequenced on a tempo grid, 1-4 bars; smear: a 4-16x granular stretch with a diffuse tail), or stack 2-8 as one hit. A seed picks every choice: the same request and seed make the same sound, another seed a variation (reroll). Returns a private 48 kHz 24-bit WAV artifact, its peaks and a one-line recipe; changes nothing in the DAW.",
+    description: "Make a new sound from 2 or more approved sounds (map sounds, artifacts, or files in an approved folder), as many as given: cross them (blend: one morphed body; attack: one's transient on the blend of the rest; resonate: some ring through the others, paired as `resonate.pairing` says; modulate: one carrier phase-, ring-, AM-, FM-, filter-, gain- or spectrum-shaped by the others, as `modulate` says), fuse them (texture: a loopable bed that moves between them; loop: a beat of their hits or a melody of them repitched, its meter, groove, key, scale and tuning as `loop` says, 1-8 bars at `bpm` (give the DAW's tempo); smear: a 4-16x granular stretch with a diffuse tail), stack them as one hit, or grow the first part of the way (`at`) toward the second (exactly 2). `steer` pushes any of them before it renders: tone, punch, length, drive, width and space on the result, and pitch, reverse, start, delay, pan and level drawn for each source. A seed picks every choice: the same request and seed make the same sound, another seed a variation (reroll). Returns a private 48 kHz 24-bit WAV artifact, its peaks and a one-line recipe; changes nothing in the DAW.",
     schema,
     effect: |_| Effect::Read,
     run,
@@ -21,17 +22,12 @@ pub static DESIGN: Operation = Operation {
 fn schema() -> Value {
     let name = json!({"type": "string", "minLength": 1, "maxLength": 120});
     let id = json!({"type": "string", "minLength": 1, "maxLength": 200});
-    let ops: Vec<&str> = [Op::Cross, Op::Fuse, Op::Stack].iter().map(|op| op.name()).collect();
-    let modes: Vec<&str> = [Mode::Blend, Mode::Attack, Mode::Resonate, Mode::Modulate, Mode::Texture, Mode::Loop, Mode::Smear]
-        .iter()
-        .map(|m| m.name())
-        .collect();
     json!({
         "type": "object", "additionalProperties": false, "required": ["op", "sources"],
         "properties": {
-            "op": {"type": "string", "enum": ops},
-            "mode": {"type": "string", "enum": modes, "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack: none."},
-            "sources": {"type": "array", "minItems": MIN_SOURCES, "maxItems": MAX_SOURCES, "items": {
+            "op": {"type": "string", "enum": schema::ops()},
+            "mode": {"type": "string", "enum": schema::modes(), "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack and grow: none."},
+            "sources": {"type": "array", "minItems": MIN_SOURCES, "description": "As many as wanted (grow: exactly 2, from and toward).", "items": {
                 "type": "object", "additionalProperties": false,
                 "properties": {"sound_id": id, "map_revision": id, "artifact_id": id, "file": {"type": "string", "minLength": 1}, "name": name},
                 "oneOf": [
@@ -41,15 +37,7 @@ fn schema() -> Value {
                 ]
             }},
             "seed": {"type": "integer", "minimum": 0, "maximum": MAX_SEED, "description": "The variation; omitted: a fresh one, answered."},
-            "options": {"type": "object", "additionalProperties": false, "properties": {
-                "seconds": {"type": "number", "minimum": 0.1, "maximum": 30},
-                "bpm": {"type": "number", "minimum": 40, "maximum": 240},
-                "bars": {"type": "integer", "minimum": 1, "maximum": 4},
-                "attack_from": {"type": "integer", "minimum": 0, "maximum": MAX_SOURCES - 1},
-                "split": {"type": "array", "minItems": 1, "maxItems": MAX_SOURCES - 1, "items": {"type": "integer", "minimum": 0, "maximum": MAX_SOURCES - 1}},
-                "depth": {"type": "number", "minimum": 0, "maximum": 1},
-                "stretch": {"type": "number", "minimum": 4, "maximum": 16}
-            }}
+            "options": schema::options()
         }
     })
 }
@@ -92,12 +80,13 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             staged.push(super::listen::stage_source(ctx, source, &call.signal).await?);
         }
         let decode = DecodeOptions { installed_only: true, ffmpeg: ctx.media().tool("ffmpeg").map(Path::to_path_buf) };
+        let seconds = source_seconds(staged.len());
         let mut decoded = Vec::with_capacity(staged.len());
         for (i, file) in staged.iter().enumerate() {
             check(&call.signal)?;
             file.verify()?;
             let name = names[i].clone().unwrap_or_else(|| format!("made sound {}", i + 1));
-            let source = load_source(file.path(), &name, &decode, Some(call.signal.clone())).await.map_err(|e| OpError::Failed {
+            let source = load_source(file.path(), &name, seconds, &decode, Some(call.signal.clone())).await.map_err(|e| OpError::Failed {
                 reason: format!("{name}: {}", e.0.replace(&file.path().display().to_string(), "the sound")),
             })?;
             decoded.push(source);

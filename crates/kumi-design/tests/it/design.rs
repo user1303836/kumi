@@ -2,7 +2,7 @@
 //! -1 dBTP and of a sensible length; the same seed renders the same bytes and another seed a variation; loops land on
 //! their grid and come round without a seam; textures move; and requests no design can make are refused.
 
-use kumi_design::{analysis, render, Mode, Op, Options, Render, Request, Source, SourceRef, RATE};
+use kumi_design::{analysis, render, steer::Steer, Mode, Op, Options, Render, Request, Source, SourceRef, RATE};
 use std::f64::consts::TAU;
 
 /// A seeded noise source for the test sounds (not the engine's generator).
@@ -242,18 +242,18 @@ fn the_same_seed_renders_the_same_bytes_and_another_a_variation() {
 fn requests_no_design_can_make_are_refused() {
     let two = [kick(), snare()];
     let refused = |req: Request| req.check().unwrap_err().0;
-    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two[..1], Options::default())).contains("2 to 16"));
-    let many: Vec<Source> = (0..9).map(|_| kick()).collect();
-    assert!(refused(request(Op::Stack, None, &many, Options::default())).contains("2 to 8"));
-    let seventeen: Vec<Source> = (0..17).map(|_| kick()).collect();
-    assert!(refused(request(Op::Fuse, Some(Mode::Smear), &seventeen, Options::default())).contains("2 to 16"));
+    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two[..1], Options::default())).contains("2 or more"));
+    // No most: any number of sounds is a request a design can make.
+    let many: Vec<Source> = (0..40).map(|_| kick()).collect();
+    assert!(request(Op::Stack, None, &many, Options::default()).check().is_ok());
+    assert!(request(Op::Fuse, Some(Mode::Smear), &many, Options::default()).check().is_ok());
     assert!(refused(request(Op::Cross, None, &two, Options::default())).contains("needs a mode"));
     assert!(refused(request(Op::Fuse, Some(Mode::Blend), &two, Options::default())).contains("mode of cross"));
     assert!(refused(request(Op::Stack, Some(Mode::Loop), &two, Options::default())).contains("mode of fuse"));
     let split = |s: Vec<usize>| refused(request(Op::Cross, Some(Mode::Resonate), &two, Options { split: Some(s), ..Default::default() }));
     assert!(split(vec![0, 1]).contains("at least one"));
     assert!(split(vec![2]).contains("by place"));
-    assert!(refused(request(Op::Fuse, Some(Mode::Loop), &two, Options { bars: Some(5), ..Default::default() })).contains("bars"));
+    assert!(refused(request(Op::Fuse, Some(Mode::Loop), &two, Options { bars: Some(9), ..Default::default() })).contains("bars"));
     assert!(refused(request(Op::Fuse, Some(Mode::Smear), &two, Options { stretch: Some(2.0), ..Default::default() })).contains("stretch"));
     let mut seeded = request(Op::Stack, None, &two, Options::default());
     seeded.seed = Some(1 << 60);
@@ -268,4 +268,165 @@ fn requests_no_design_can_make_are_refused() {
     let silent = [kick(), Source::new("Room Tone.wav", &[vec![0.0; 48_000]], RATE)];
     let error = render(&request(Op::Stack, None, &silent, Options::default()), 1, &silent, &mut |_| {}).err().unwrap();
     assert!(error.0.contains("Room Tone.wav is silent"), "{}", error.0);
+}
+
+/// The render's mono mix.
+fn mono_of(render: &Render) -> Vec<f32> {
+    analysis::mono(&render.audio)
+}
+
+/// Its brightness and noisiness over its first 300 ms, where the steered tone shows.
+fn colour(render: &Render) -> analysis::Colour {
+    let mono = mono_of(render);
+    analysis::colour(&mono[..mono.len().min((0.3 * RATE) as usize)], 0)
+}
+
+/// How much of its energy is in its first 15 ms against the 15 to 150 ms after: how hard it hits.
+fn hit_share(render: &Render) -> f64 {
+    let mono = mono_of(render);
+    let energy = |from: f64, to: f64| -> f64 {
+        let (a, b) = ((from * RATE) as usize, ((to * RATE) as usize).min(mono.len()));
+        mono[a.min(b)..b].iter().map(|v| (*v as f64).powi(2)).sum()
+    };
+    energy(0.0, 0.015) / energy(0.015, 0.15).max(1e-12)
+}
+
+fn steered(steer: Steer) -> Options {
+    Options { steer: Some(steer), ..Default::default() }
+}
+
+#[test]
+fn a_steer_that_moves_nothing_renders_the_same_bytes() {
+    let sources = [kick(), snare(), bell()];
+    for (op, mode) in [(Op::Cross, Some(Mode::Blend)), (Op::Stack, None), (Op::Fuse, Some(Mode::Loop))] {
+        let plain = run(&request(op, mode, &sources, Options::default()), 9, &sources);
+        let neutral = Steer { bright: Some(0.0), pitch: Some([0.0, 0.0]), reverse: Some(0.0), resonance: Some(0.7), ..Default::default() };
+        for steer in [Steer::default(), neutral] {
+            let same = run(&request(op, mode, &sources, steered(steer)), 9, &sources);
+            assert!(same.wav() == plain.wav() && same.recipe == plain.recipe, "{op:?} {mode:?}: a neutral steer changes nothing");
+        }
+    }
+}
+
+#[test]
+fn each_steer_control_pushes_the_sound_its_way() {
+    let sources = [kick(), snare(), hat()];
+    let make = |steer: Steer| {
+        let r = run(&request(Op::Stack, None, &sources, steered(steer)), 4, &sources);
+        sound(&r, &r.recipe.clone());
+        no_clicks(&r, &r.recipe.clone());
+        r
+    };
+    let base = make(Steer::default());
+    let (dark, bright) = (make(Steer { bright: Some(-1.0), ..Default::default() }), make(Steer { bright: Some(1.0), ..Default::default() }));
+    assert!(colour(&bright).centroid > colour(&base).centroid && colour(&base).centroid > colour(&dark).centroid, "bright moves the centroid up");
+    assert!(dark.recipe.contains("darker") && bright.recipe.contains("brighter"), "{} / {}", dark.recipe, bright.recipe);
+    let closed = make(Steer { filter: Some(-0.8), resonance: Some(0.5), ..Default::default() });
+    assert!(colour(&closed).centroid < colour(&base).centroid * 0.6, "a low-pass takes the top off");
+    assert!(closed.recipe.contains("low-passed") && closed.recipe.contains("resonant"), "{}", closed.recipe);
+    let (soft, punchy) = (make(Steer { punch: Some(-1.0), ..Default::default() }), make(Steer { punch: Some(1.0), ..Default::default() }));
+    assert!(hit_share(&punchy) > hit_share(&soft), "punch moves energy onto the hit");
+    let (tonal, noisy) = (make(Steer { noise: Some(-1.0), ..Default::default() }), make(Steer { noise: Some(1.0), ..Default::default() }));
+    assert!(colour(&noisy).flatness > colour(&tonal).flatness, "noise flattens the spectrum");
+    let (short, long) = (make(Steer { length: Some(-1.0), ..Default::default() }), make(Steer { length: Some(1.0), ..Default::default() }));
+    assert!(short.duration() < base.duration() && base.duration() < long.duration(), "length: {} < {} < {}", short.duration(), base.duration(), long.duration());
+    let roomy = make(Steer { space: Some(1.0), ..Default::default() });
+    assert!(roomy.duration() > base.duration() + 0.5 && roomy.recipe.contains("in a hall"), "space rings on: {} s", roomy.duration());
+    let mono = make(Steer { width: Some(-1.0), ..Default::default() });
+    assert!(mono.audio[0].iter().zip(&mono.audio[1]).all(|(l, r)| (l - r).abs() < 1e-6), "width -1 is mono");
+    let wide = make(Steer { width: Some(1.0), ..Default::default() });
+    assert!(wide.audio[0].iter().zip(&wide.audio[1]).any(|(l, r)| (l - r).abs() > 1e-3), "width 1 widens a mono stack");
+    for (steer, word) in [
+        (Steer { drive: Some(0.8), ..Default::default() }, "driven"),
+        (Steer { crush: Some(0.9), ..Default::default() }, "crushed"),
+        (Steer { level: Some(0.5), ..Default::default() }, "levels within"),
+        (Steer { pan: Some(0.8), ..Default::default() }, "panned ±80%"),
+        (Steer { start: Some([0.1, 0.3]), ..Default::default() }, "started 10…30% in"),
+    ] {
+        let r = make(steer);
+        assert!(r.recipe.contains(word), "{word}: {}", r.recipe);
+    }
+    // Every sound reversed swells into its hit: the loudest moment comes late.
+    let backwards = make(Steer { reverse: Some(1.0), ..Default::default() });
+    let loudest = |r: &Render| mono_of(r).iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).map_or(0, |(i, _)| i);
+    assert!(loudest(&backwards) > loudest(&base) + (0.1 * RATE) as usize && backwards.recipe.contains("3 of 3 reversed"), "{}", backwards.recipe);
+    // Each delayed by 100 ms: the stack starts 100 ms late.
+    let late = make(Steer { delay: Some([100.0, 100.0]), ..Default::default() });
+    let first = mono_of(&late).iter().position(|v| v.abs() > 1e-3).unwrap_or(0);
+    assert!(first as f64 >= 0.095 * RATE, "delay: the first sound at {:.3} s", first as f64 / RATE);
+}
+
+#[test]
+fn steered_pitch_moves_each_sound_and_a_reroll_draws_again() {
+    let bells = [bell(), bell()];
+    let octave = run(&request(Op::Stack, None, &bells, steered(Steer { pitch: Some([12.0, 12.0]), ..Default::default() })), 1, &bells);
+    let heard = analysis::pitch(&mono_of(&octave), 0).expect("a pitched stack");
+    assert!((heard / 1046.0 - 1.0).abs() < 0.03, "an octave up the 523 Hz bell: {heard:.0} Hz");
+    assert!(octave.recipe.contains("pitch +12 st"), "{}", octave.recipe);
+    let ranged = request(Op::Stack, None, &bells, steered(Steer { pitch: Some([-12.0, 12.0]), ..Default::default() }));
+    assert!(run(&ranged, 5, &bells).wav() == run(&ranged, 5, &bells).wav(), "the same seed draws the same pitches");
+    assert!(run(&ranged, 5, &bells).wav() != run(&ranged, 6, &bells).wav(), "another seed draws others");
+}
+
+#[test]
+fn a_steered_loop_still_comes_round() {
+    let sources = [groove(), kick(), snare(), hat()];
+    let steer = Steer { space: Some(0.8), punch: Some(0.5), width: Some(0.6), length: Some(-0.5), noise: Some(0.3), ..Default::default() };
+    let r = run(&request(Op::Fuse, Some(Mode::Loop), &sources, Options { bpm: Some(120.0), bars: Some(1), steer: Some(steer), ..Default::default() }), 3, &sources);
+    sound(&r, "steered loop");
+    assert_eq!(r.audio[0].len(), (0.125 * RATE * 16.0).round() as usize, "a steered loop keeps its bars");
+    seamless(&r, "steered loop");
+}
+
+#[test]
+fn grow_starts_as_one_sound_and_ends_as_the_other() {
+    let pair = [kick(), hat()];
+    let grow = |at: f64, seed: u64| {
+        let r = run(&request(Op::Grow, None, &pair, Options { at: Some(at), ..Default::default() }), seed, &pair);
+        sound(&r, &format!("grow at {at}"));
+        no_clicks(&r, &format!("grow at {at}"));
+        r
+    };
+    let centroids: Vec<f64> = [0.0, 0.25, 0.5, 0.75, 1.0].iter().map(|at| colour(&grow(*at, 7)).centroid).collect();
+    assert!(centroids.windows(2).all(|w| w[0] < w[1]), "from the low kick toward the bright hat, step by step: {centroids:?}");
+    // The ends are the sounds themselves, whatever the path; the middle is the path's own.
+    for at in [0.0, 1.0] {
+        assert!(grow(at, 1).wav() == grow(at, 2).wav(), "at {at}, every path is at the same sound");
+    }
+    assert!(grow(0.5, 1).wav() != grow(0.5, 2).wav(), "halfway, another seed is another path");
+    assert!(grow(0.5, 1).wav() == grow(0.5, 1).wav(), "one seed, one path");
+    assert!(grow(0.35, 3).recipe.contains("Grown 35% of the way from Kick 01 toward Hat 03"), "{}", grow(0.35, 3).recipe);
+}
+
+#[test]
+fn new_choices_are_refused_where_they_dont_belong() {
+    let two = [kick(), snare()];
+    let refused = |req: Request| req.check().unwrap_err().0;
+    let three = [kick(), snare(), hat()];
+    assert!(refused(request(Op::Grow, None, &three, Options::default())).contains("grow takes 2 sounds"));
+    assert!(refused(request(Op::Grow, None, &two, Options { bpm: Some(120.0), ..Default::default() })).contains("grow takes at"));
+    assert!(refused(request(Op::Grow, Some(Mode::Blend), &two, Options::default())).contains("not of grow"));
+    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two, Options { at: Some(0.5), ..Default::default() })).contains("at is grow's"));
+    let steer = |s: Steer| refused(request(Op::Stack, None, &two, steered(s)));
+    assert!(steer(Steer { bright: Some(1.5), ..Default::default() }).contains("bright is -1 to 1"));
+    assert!(steer(Steer { pitch: Some([5.0, -5.0]), ..Default::default() }).contains("low first"));
+    assert!(steer(Steer { delay: Some([0.0, 900.0]), ..Default::default() }).contains("delay"));
+    let resonate = serde_json::from_str::<kumi_design::choices::Resonate>(r#"{"pairing":"bright-dark"}"#).unwrap();
+    assert!(refused(request(Op::Cross, Some(Mode::Blend), &two, Options { resonate: Some(resonate), ..Default::default() })).contains("cross:resonate"));
+    let looping = |json: &str, options: Options| {
+        refused(request(Op::Fuse, Some(Mode::Loop), &two, Options { r#loop: Some(serde_json::from_str(json).unwrap()), ..options }))
+    };
+    assert!(looping(r#"{"meter":[7,5]}"#, Options::default()).contains("meter"));
+    assert!(looping(r#"{"key":"H"}"#, Options::default()).contains("key"));
+    assert!(looping(r#"{"meter":[16,4]}"#, Options { bars: Some(8), bpm: Some(40.0), ..Default::default() }).contains("at most 60 s"));
+    assert!(serde_json::from_str::<kumi_design::choices::Loop>(r#"{"scale":"bebop"}"#).is_err(), "an unknown scale isn't read");
+}
+
+#[test]
+fn a_design_takes_any_number_of_sounds() {
+    let many: Vec<Source> = (0..24).map(|i| [kick(), snare(), hat(), bell()][i % 4].clone()).collect();
+    let blend = run(&request(Op::Cross, Some(Mode::Blend), &many, Options::default()), 2, &many);
+    sound(&blend, "a blend of 24");
+    let stack = run(&request(Op::Stack, None, &many[..12], Options::default()), 2, &many[..12]);
+    sound(&stack, "a stack of 12");
 }

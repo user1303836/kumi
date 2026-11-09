@@ -1,16 +1,22 @@
-//! Sound design on a group of samples: **cross** two to sixteen into one (blend, attack, resonate, modulate), **fuse**
-//! them into a texture, a loop or a smear, or **stack** two to eight as one hit. Every design draws its choices from a
-//! seed: the same request and seed render the same bytes, and another seed is a variation (a reroll). The result is
-//! 48 kHz stereo, faded, finite, and at -1 dBTP; `Render::wav` writes it as 24-bit WAV.
+//! Sound design on a group of samples: **cross** two or more into one (blend, attack, resonate, modulate), **fuse**
+//! them into a texture, a loop or a smear, **stack** them as one hit, or **grow** one part of the way toward another.
+//! Every design draws its choices from a seed: the same request and seed render the same bytes, and another seed is
+//! a variation (a reroll). A **steer** pushes any design one way before it renders. The result is 48 kHz stereo,
+//! faded, finite, and at -1 dBTP; `Render::wav` writes it as 24-bit WAV.
 
 pub mod analysis;
+pub mod choices;
 mod cross;
 mod fuse;
 mod fx;
+mod grow;
 pub mod rng;
+pub mod schema;
 mod stack;
+pub mod steer;
 
 use analysis::Stereo;
+use choices::{Loop, Modulate, Resonate};
 use kumi_common::abort::Signal;
 use kumi_media::audio::{
     decode::{open_audio_to_with_options, DecodeOptions},
@@ -20,14 +26,20 @@ use kumi_media::audio::{
 use rng::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use steer::Steer;
 
 /// The rate every design works and renders at.
 pub const RATE: f64 = 48_000.0;
 pub const MIN_SOURCES: usize = 2;
-pub const MAX_SOURCES: usize = 16;
-pub const MAX_STACK: usize = 8;
-/// How much of each source is read.
+/// The most of each source that's read, when a design has few.
 pub const MAX_SOURCE_SECONDS: f64 = 30.0;
+/// The least of each source that's read, however many a design has.
+pub const MIN_SOURCE_SECONDS: f64 = 0.5;
+/// The audio a design reads in all, across its sources: a design of many sounds reads less of each.
+pub const SOURCES_SECONDS: f64 = 300.0;
+/// A loop's most bars, and its longest length.
+pub const MAX_BARS: u32 = 8;
+pub const MAX_LOOP_SECONDS: f64 = 60.0;
 /// The longest render asked for.
 pub const MAX_SECONDS: f64 = 30.0;
 /// The peaks an answer carries.
@@ -41,6 +53,7 @@ pub enum Op {
     Cross,
     Fuse,
     Stack,
+    Grow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,21 +74,15 @@ impl Op {
             Op::Cross => "cross",
             Op::Fuse => "fuse",
             Op::Stack => "stack",
+            Op::Grow => "grow",
         }
     }
-    /// The modes the op takes (stack takes none).
+    /// The modes the op takes (stack and grow take none).
     pub fn modes(self) -> &'static [Mode] {
         match self {
             Op::Cross => &[Mode::Blend, Mode::Attack, Mode::Resonate, Mode::Modulate],
             Op::Fuse => &[Mode::Texture, Mode::Loop, Mode::Smear],
-            Op::Stack => &[],
-        }
-    }
-    pub fn most_sources(self) -> usize {
-        if self == Op::Stack {
-            MAX_STACK
-        } else {
-            MAX_SOURCES
+            Op::Stack | Op::Grow => &[],
         }
     }
 }
@@ -125,6 +132,35 @@ pub struct Options {
     /// Smear: how many times longer than its sources (4 to 16).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stretch: Option<f64>,
+    /// Grow: how far from the first sound toward the second, 0 to 1 (0.5 when not given).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<f64>,
+    /// Pushes any design one way: controls on the result and on each source (see `Steer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steer: Option<Steer>,
+    /// Resonate's choices: who rings through whom, how, and for how long.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resonate: Option<Resonate>,
+    /// Modulate's choices: which sound is shaped, by which ways, in how many stages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulate: Option<Modulate>,
+    /// A loop's choices: a beat or a melody, its meter and groove, its key, scale and tuning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#loop: Option<Loop>,
+}
+
+/// How much of each source a design of `count` sounds reads: all 30 seconds when there are few, less as there are
+/// more, so the whole design reads at most `SOURCES_SECONDS` of audio (never under half a second of each).
+pub fn source_seconds(count: usize) -> f64 {
+    (SOURCES_SECONDS / count.max(1) as f64).clamp(MIN_SOURCE_SECONDS, MAX_SOURCE_SECONDS)
+}
+
+/// A loop's length in seconds: its bars of its meter at its tempo (the tempo counts quarter notes).
+pub fn loop_seconds(options: &Options) -> f64 {
+    let bpm = options.bpm.unwrap_or(120.0);
+    let bars = options.bars.unwrap_or(2) as f64;
+    let [beats, unit] = options.r#loop.as_ref().and_then(|l| l.meter).unwrap_or([4, 4]);
+    bars * beats as f64 * (4.0 / unit as f64) * 60.0 / bpm
 }
 
 /// A source as a request names it: a library sound or a made sound by id, or (the one-shot `kumi design`, whose caller
@@ -202,9 +238,12 @@ impl Request {
             }
             _ => {}
         }
-        let (count, most) = (self.sources.len(), self.op.most_sources());
-        if !(MIN_SOURCES..=most).contains(&count) {
-            return refuse(format!("{} takes {MIN_SOURCES} to {most} sounds; this has {count}.", self.op.name()));
+        let count = self.sources.len();
+        if self.op == Op::Grow && count != 2 {
+            return refuse(format!("grow takes 2 sounds, the one to grow from and the one to grow toward; this has {count}."));
+        }
+        if count < MIN_SOURCES {
+            return refuse(format!("{} takes {MIN_SOURCES} or more sounds; this has {count}.", self.op.name()));
         }
         for source in &self.sources {
             let given = [&source.sound_id, &source.artifact_id, &source.file].iter().filter(|v| v.is_some()).count();
@@ -226,8 +265,9 @@ impl Request {
         within(o.bpm, 40.0, 240.0, "bpm")?;
         within(o.depth, 0.0, 1.0, "depth")?;
         within(o.stretch, 4.0, 16.0, "stretch")?;
-        if o.bars.is_some_and(|bars| !(1..=4).contains(&bars)) {
-            return refuse("bars is 1 to 4.");
+        within(o.at, 0.0, 1.0, "at")?;
+        if o.bars.is_some_and(|bars| !(1..=MAX_BARS).contains(&bars)) {
+            return refuse(format!("bars is 1 to {MAX_BARS}."));
         }
         if o.attack_from.is_some_and(|i| i >= count) {
             return refuse(format!("attack_from names a sound by its place, 0 to {}.", count - 1));
@@ -241,6 +281,53 @@ impl Request {
             }
             if split.is_empty() || split.len() >= count {
                 return refuse("split leaves at least one sound to excite and one to resonate.");
+            }
+        }
+        if self.op == Op::Grow {
+            let others = [
+                o.bpm.is_some(),
+                o.bars.is_some(),
+                o.attack_from.is_some(),
+                o.split.is_some(),
+                o.depth.is_some(),
+                o.stretch.is_some(),
+                o.resonate.is_some(),
+                o.modulate.is_some(),
+                o.r#loop.is_some(),
+            ];
+            if others.contains(&true) {
+                return refuse("grow takes at, seconds and steer.");
+            }
+        } else if o.at.is_some() {
+            return refuse("at is grow's: how far from the first sound toward the second.");
+        }
+        if let Some(steer) = &o.steer {
+            steer.check()?;
+        }
+        for (given, mode, what) in [
+            (o.resonate.is_some(), Mode::Resonate, "resonate's"),
+            (o.modulate.is_some(), Mode::Modulate, "modulate's"),
+            (o.r#loop.is_some(), Mode::Loop, "loop's"),
+        ] {
+            if given && self.mode != Some(mode) {
+                return refuse(format!("{what} choices are for {}:{}.", mode.op().name(), mode.name()));
+            }
+        }
+        if let Some(resonate) = &o.resonate {
+            resonate.check()?;
+        }
+        if let Some(modulate) = &o.modulate {
+            modulate.check()?;
+        }
+        if let Some(looping) = &o.r#loop {
+            looping.check()?;
+        }
+        if self.mode == Some(Mode::Loop) {
+            let seconds = loop_seconds(o);
+            if seconds > MAX_LOOP_SECONDS + 1e-9 {
+                return refuse(format!(
+                    "That loop would run {seconds:.0} s; a loop is at most {MAX_LOOP_SECONDS:.0} s: fewer bars, a shorter meter or a faster tempo."
+                ));
             }
         }
         Ok(())
@@ -269,12 +356,13 @@ impl Source {
     }
 }
 
-/// Reads up to 30 seconds of a file as a source (WAV and AIFF by Kumi's own reader; anything else only through the
-/// decoder `decode` allows).
-pub async fn load_source(path: &Path, name: &str, decode: &DecodeOptions, signal: Option<Signal>) -> Result<Source, AudioError> {
-    let mut audio = open_audio_to_with_options(path, signal, Some(MAX_SOURCE_SECONDS), decode).await?;
+/// Reads up to `seconds` of a file as a source (`source_seconds` says how much a design of so many sounds reads), WAV
+/// and AIFF by Kumi's own reader; anything else only through the decoder `decode` allows.
+pub async fn load_source(path: &Path, name: &str, seconds: f64, decode: &DecodeOptions, signal: Option<Signal>) -> Result<Source, AudioError> {
+    let seconds = seconds.clamp(MIN_SOURCE_SECONDS, MAX_SOURCE_SECONDS);
+    let mut audio = open_audio_to_with_options(path, signal, Some(seconds), decode).await?;
     let rate = audio.sample_rate;
-    let wanted = (rate * MAX_SOURCE_SECONDS) as usize;
+    let wanted = (rate * seconds) as usize;
     let mut channels: Vec<Vec<f32>> = Vec::new();
     while channels.first().map_or(0, Vec::len) < wanted {
         let Some(block) = audio.read(65_536).await? else { break };
@@ -288,6 +376,9 @@ pub async fn load_source(path: &Path, name: &str, decode: &DecodeOptions, signal
     let _ = audio.close().await;
     if channels.first().is_none_or(Vec::is_empty) {
         return Err(AudioError(format!("{name} has no audio.")));
+    }
+    for channel in channels.iter_mut() {
+        channel.truncate(wanted);
     }
     Ok(Source::new(name, &channels, rate))
 }
@@ -307,15 +398,17 @@ impl Prepared {
     }
 }
 
-fn prepare(source: &Source) -> Result<Prepared, DesignError> {
-    let mono = analysis::mono(&source.audio);
+fn prepare(source: &Source, most: usize) -> Result<Prepared, DesignError> {
+    let read = source.audio[0].len().min(most);
+    let whole: Stereo = [source.audio[0][..read].to_vec(), source.audio[1][..read].to_vec()];
+    let mono = analysis::mono(&whole);
     let loudest = mono.iter().fold(0.0f32, |m, v| m.max(v.abs()));
     if loudest < 1e-5 {
         return refuse(format!("{} is silent.", source.name));
     }
     let start = analysis::start_of(&mono).saturating_sub((0.001 * RATE) as usize);
     let end = analysis::end_of(&mono).max(start + (0.02 * RATE) as usize).min(mono.len());
-    let mut audio: Stereo = [source.audio[0][start..end].to_vec(), source.audio[1][start..end].to_vec()];
+    let mut audio: Stereo = [whole[0][start..end].to_vec(), whole[1][start..end].to_vec()];
     fx::fade_out(&mut audio, ((end - start) / 20).min((0.01 * RATE) as usize));
     let loudness = analysis::lufs(&audio);
     let gain = 10f64.powf(((SOURCE_LUFS - loudness) / 20.0).min(1.5));
@@ -427,6 +520,9 @@ pub fn fresh_seed() -> u64 {
     Rng::new(nanos ^ u64::from(std::process::id())).next() & MAX_SEED
 }
 
+/// Steering draws from a stream of its own, so a design's own choices are the same steered or not.
+const STEER_SALT: u64 = 0x7374_6565_72;
+
 /// Renders a checked request from its decoded sources (in the request's order), with `seed` deciding every choice.
 /// `progress` hears how far along it is, 0 to 1.
 pub fn render(request: &Request, seed: u64, sources: &[Source], progress: &mut dyn FnMut(f64)) -> Result<Render, DesignError> {
@@ -435,12 +531,20 @@ pub fn render(request: &Request, seed: u64, sources: &[Source], progress: &mut d
         return refuse("Every sound the request names must be read before it's designed.");
     }
     progress(0.0);
-    let prepared = sources.iter().map(prepare).collect::<Result<Vec<_>, _>>()?;
+    let most = (source_seconds(sources.len()) * RATE) as usize;
+    let prepared = sources.iter().map(|source| prepare(source, most)).collect::<Result<Vec<_>, _>>()?;
     progress(0.1);
     let rng = Rng::new(seed);
     let options = &request.options;
+    let steer = options.steer.as_ref().filter(|steer| steer.moves());
+    let steering = Rng::new(seed).fork(STEER_SALT);
+    let (prepared, mut steered) = match steer {
+        Some(steer) => steer.sources(prepared, &steering),
+        None => (prepared, Vec::new()),
+    };
     let (audio, recipe, ending) = match (request.op, request.mode) {
         (Op::Stack, _) => stack::stack(&prepared, options, rng),
+        (Op::Grow, _) => grow::grow(&prepared, options, rng, progress),
         (_, Some(Mode::Blend)) => cross::blend(&prepared, options, rng, progress),
         (_, Some(Mode::Attack)) => cross::attack(&prepared, options, rng, progress),
         (_, Some(Mode::Resonate)) => cross::resonate(&prepared, options, rng),
@@ -450,6 +554,13 @@ pub fn render(request: &Request, seed: u64, sources: &[Source], progress: &mut d
         (_, Some(Mode::Smear)) => fuse::smear(&prepared, options, rng, progress),
         (_, None) => unreachable!("check refuses a cross or fuse without a mode"),
     };
+    progress(0.9);
+    let (audio, more) = match steer {
+        Some(steer) => steer.result(audio, &ending, &steering),
+        None => (audio, Vec::new()),
+    };
+    steered.extend(more);
+    let recipe = if steered.is_empty() { recipe } else { format!("{recipe} · {}", steered.join(", ")) };
     progress(0.95);
     let audio = finish(audio, ending, options.seconds)?;
     progress(1.0);
