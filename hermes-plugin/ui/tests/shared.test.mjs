@@ -1,7 +1,7 @@
 // node --test: what both UI halves share: the requests and words they show, the listen card's numbers, the map's
 // geometry and the store that reads Kumi's backend.
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { mock, test } from 'node:test'
 
 import { load } from './load.mjs'
 import { profileResult, reference, replay, window as referenceWindow } from './reference.fixtures.mjs'
@@ -571,6 +571,95 @@ test('a second play, even one made while the first still loads, leaves one sound
   } finally {
     delete globalThis.Audio
   }
+})
+
+test("a play that fails says why: no audio for the id is gone, audio the window can't decode is unplayable", async () => {
+  const { playFailure } = await load('src/shared/hooks.ts', { react: 'real' })
+  const named = (name, message = 'x') => Object.assign(new Error(message), { name })
+  assert.equal(playFailure(named('NotSupportedError', 'Failed to load because no supported source was found.')), 'unplayable')
+  assert.equal(playFailure(new Error('404: {"detail":"Kumi has no audio for that id here."}')), 'gone', "Desktop's ctx.rest")
+  assert.equal(playFailure(Object.assign(new Error('Kumi has no audio for that id here.'), { status: 404 })), 'gone', "the dashboard's ApiError")
+  assert.equal(playFailure(named('NotAllowedError')), 'blocked', 'the window may not play yet: nothing to hide')
+  assert.equal(playFailure(new Error('504: {"detail":"timed out"}')), 'other')
+  assert.equal(playFailure(Object.assign(new Error('The Hermes service took too long to respond.'), { status: 504 })), 'other')
+})
+
+test('a play taken over by another ends quietly, even when its own load fails', async () => {
+  const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
+  globalThis.Audio = class {
+    play() {
+      return Promise.resolve()
+    }
+    pause() {}
+  }
+  try {
+    let fail
+    const audition = new Audition(id => (id === 's-1' ? new Promise((_, reject) => (fail = reject)) : Promise.resolve({ data_url: 'data:audio/wav;base64,AA' })))
+    const first = audition.play('s-1')
+    await audition.play('s-2')
+    fail(new Error('404: gone'))
+    await first
+    assert.equal(audition.playing, 's-2')
+    await assert.rejects(new Audition(() => Promise.reject(new Error('404: gone'))).play('s-3'), /404/, 'the sound still wanted does fail')
+  } finally {
+    delete globalThis.Audio
+  }
+})
+
+test("sounds that can't play leave the map at once and are reported as one batch; the map then leaves them out", async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const posts = []
+    let hidden = new Set()
+    const points = ['s-r7-1', 's-r7-2', 's-r7-3'].map((id, at) => [id, at / 4, 0.5, 0])
+    const kumi = new store.KumiStore(async (path, init) => {
+      if (init) {
+        posts.push([path, init])
+        if (init.body.action === 'clear') hidden = new Set()
+        else for (const { id } of init.body.ids) hidden.add(id)
+        return { hidden: hidden.size }
+      }
+      return { revision: 'r7', points: points.filter(point => !hidden.has(point[0])), groups: {}, sounds: {}, hidden: hidden.size }
+    })
+    await kumi.refresh('map')
+    kumi.hide('s-r7-1', 'gone')
+    kumi.hide('s-r7-2', 'unplayable')
+    kumi.hide('s-r7-1', 'unplayable')
+    kumi.hide('s-r7-9', 'gone')
+    assert.deepEqual([...kumi.get().leaving], ['s-r7-1', 's-r7-2'], 'off the map at once; a sound not on it is nothing to hide')
+    assert.equal(posts.length, 0, 'nothing is sent per sound')
+    mock.timers.tick(store.HIDE_BATCH_MS)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(posts, [['/map/hidden', { method: 'POST', body: { revision: 'r7', ids: [{ id: 's-r7-1', why: 'gone' }, { id: 's-r7-2', why: 'unplayable' }] } }]])
+    assert.deepEqual(kumi.get().map.points.map(point => point[0]), ['s-r7-3'])
+    assert.equal(kumi.get().map.hidden, 2)
+    assert.equal(kumi.get().leaving.size, 0, 'done leaving once the map leaves them out')
+    await kumi.showHidden()
+    assert.deepEqual(posts.at(-1), ['/map/hidden', { method: 'POST', body: { action: 'clear' } }])
+    assert.equal(kumi.get().map.points.length, 3, '"Show them" puts them back')
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("another window's report reads the map again, though its revision didn't move", async () => {
+  const reads = []
+  let hidden = 0
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/status') return { connected: true, revisions: { focus: 1, history: 1, map: 'r7', hidden } }
+    if (path === '/map') return { revision: 'r7', points: [], groups: {}, sounds: {}, hidden }
+    return { items: [], seq: 1 }
+  })
+  kumi.want('map')
+  await kumi.refreshStatus()
+  reads.length = 0
+  await kumi.refreshStatus()
+  assert.ok(!reads.includes('/map'))
+  hidden = 1
+  await kumi.refreshStatus()
+  assert.ok(reads.includes('/map'))
 })
 
 test('a runtime that went quiet and then stopped has FOCUS read again, so the chip and FOCUS agree', async () => {

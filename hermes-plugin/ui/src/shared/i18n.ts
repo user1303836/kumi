@@ -154,7 +154,12 @@ const en = {
     useOnPadTitle: 'Pick a drum pad, an empty one included: the request goes in the chat, to send when you like',
     pads: 'Drum pads',
     pad: (name: string, note: number) => (name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`),
-    playFailed: (error: string) => `Kumi couldn't play that sound: ${error}`
+    playFailed: (error: string) => `Kumi couldn't play that sound: ${error}`,
+    hidden: (n: number) => (n === 1 ? "1 sound hidden: its file is missing or can't play here." : `${n} sounds hidden: their files are missing or can't play here.`),
+    showHidden: 'Show them',
+    showHiddenTitle: 'Put the hidden sounds back on the map',
+    rescan: 'Rescan…',
+    rescanTitle: 'Put a request to rescan your sample folders in the chat, to send when you like'
   },
   measurements: {
     tab: 'Measurements',
@@ -494,7 +499,12 @@ const ja: Shape<typeof en> = {
     useOnPadTitle: 'ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で',
     pads: 'ドラムパッド',
     pad: (name, note) => (name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`),
-    playFailed: error => `Kumi はそのサウンドを再生できませんでした: ${error}`
+    playFailed: error => `Kumi はそのサウンドを再生できませんでした: ${error}`,
+    hidden: n => `${n} 個のサウンドを隠しました。ファイルが見つからないか、ここでは再生できません。`,
+    showHidden: '表示する',
+    showHiddenTitle: '隠したサウンドをマップに戻します',
+    rescan: '再スキャン…',
+    rescanTitle: 'サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で'
   },
   measurements: {
     tab: '測定結果',
@@ -830,7 +840,12 @@ const zh: Shape<typeof en> = {
     useOnPadTitle: '选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送',
     pads: '打击垫',
     pad: (name, note) => (name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`),
-    playFailed: error => `Kumi 无法播放这个声音：${error}`
+    playFailed: error => `Kumi 无法播放这个声音：${error}`,
+    hidden: n => `已隐藏 ${n} 个声音：文件不见了，或无法在这里播放。`,
+    showHidden: '显示它们',
+    showHiddenTitle: '把隐藏的声音放回地图',
+    rescan: '重新扫描…',
+    rescanTitle: '把重新扫描采样文件夹的请求放进对话，由你决定何时发送'
   },
   measurements: {
     tab: '测量结果',

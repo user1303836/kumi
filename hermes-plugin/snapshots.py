@@ -252,8 +252,11 @@ def public_map(state: Path, revision: str | None = None) -> dict | None:
     """A map revision as a client may see it: its sounds without their paths (CC-4), and without the envelope's
     schema number."""
     data = map_revision(state, revision)
-    if data is None:
-        return None
+    return None if data is None else public_of_map(data)
+
+
+def public_of_map(data: dict) -> dict:
+    """`public_map` of a revision already read (`map_revision`), for a caller that also needs its private paths."""
     sounds = data.get("sounds")
     public = {key: value for key, value in data.items() if key not in ("schema", "sounds")}
     public["sounds"] = (
@@ -468,18 +471,23 @@ def _artifacts(state: Path) -> dict:
     return {key: value for key, value in table.items() if isinstance(value, dict)}
 
 
-def media(state: Path, media_id: str, library_folders: list[str] | None = None) -> dict | None:
+def media(state: Path, media_id: str, library_folders: list[str] | None = None, *, current: dict | None = None) -> dict | None:
     """The file behind a media id, `{id, path, kind, mime, bytes}`, or None. Only two kinds of id have one (CC-4):
     an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
     sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
-    data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
+    data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB. `current`:
+    the current map revision, already read (`map_revision`), for a caller asking about many of its sounds at once."""
     approved = _approved(library_folders)
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
         roots = _artifact_roots(state) + approved
     else:
-        found = sound(state, media_id)
-        if found is None:
+        if current is not None:
+            sounds = current.get("sounds")
+            found = sounds.get(media_id) if isinstance(sounds, dict) else None
+        else:
+            found = sound(state, media_id)
+        if not isinstance(found, dict):
             return None
         entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
         roots = approved

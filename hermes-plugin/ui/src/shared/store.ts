@@ -1,11 +1,13 @@
-// One store per UI half over Kumi's read-only routes (contract C4), shared by every view in it. It never writes: it
-// reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
-// one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
+// One store per UI half over Kumi's backend routes (contract C4), shared by every view in it. It reads `/status` on a
+// poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the one it holds, or when
+// the runtime's liveness changed (the routes say per read whether anything can be undone). Its only writes are the
+// contract's map edits, which change no project: the sounds that can't play here, hidden from the map.
 import { clean, plainId } from './format.ts'
 import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
 import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
-export type Fetch = <T>(path: string) => Promise<T>
+/** A read (`GET`), or with `init` one of the backend's few writes, a JSON `POST`. */
+export type Fetch = <T>(path: string, init?: { method: 'POST'; body: unknown }) => Promise<T>
 
 export type Part = 'focus' | 'history' | 'map' | 'setup'
 
@@ -32,6 +34,9 @@ export interface KumiState {
   /** The script whose approval waits in the chat in front (CC-19), and its saved code once read: null while it's being
    *  read, `false` when it couldn't be (missing, or no longer what the approval named). One at a time: approvals are. */
   script: { pending: PendingScript; code: ScriptCode | null | false } | null
+  /** Sounds of the map in hand that couldn't play here: off the map at once (they fade out), and reported, until a map
+   *  read no longer has them. */
+  leaving: ReadonlySet<string>
 }
 
 export interface TrackedJob extends Job {
@@ -86,7 +91,11 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set() }
+
+/** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
+export const HIDE_BATCH_MS = 1200
+export const HIDE_MOST = 500
 
 const SHA256 = /^[0-9a-f]{64}$/
 
@@ -148,6 +157,11 @@ export class KumiStore {
   /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
    *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
   private started = new Set<string>()
+  /** Failed plays not reported yet, by sound id, and the timer that reports them. */
+  private toHide = new Map<string, 'gone' | 'unplayable'>()
+  private hideTimer: ReturnType<typeof setTimeout> | null = null
+  /** `/status`'s count of hidden-sound edits at the last map read: another window's report reads the map again. */
+  private hiddenSeq: number | null = null
 
   constructor(private readonly fetch: Fetch, private readonly historyLimit = 50) {}
 
@@ -176,6 +190,10 @@ export class KumiStore {
     this.reads.clear()
     this.cards.clear()
     this.started.clear()
+    this.toHide.clear()
+    clearTimeout(this.hideTimer ?? undefined)
+    this.hideTimer = null
+    this.hiddenSeq = null
     this.state = EMPTY
     for (const fn of [...this.listeners]) fn()
   }
@@ -224,10 +242,13 @@ export class KumiStore {
       this.set({ available: true, error: null, status: heard(status) })
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null }
       const moved = (part: 'focus' | 'history' | 'map'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
+      const hidden = typeof after.hidden === 'number' ? after.hidden : 0
+      const hiddenMoved = this.hiddenSeq !== null && hidden !== this.hiddenSeq
+      this.hiddenSeq = hidden
       const reads: Promise<void>[] = []
       if (liveness || moved('focus')) reads.push(this.refresh('focus'))
       if (liveness || moved('history')) reads.push(this.refresh('history'))
-      if ((this.wanted.get('map') ?? 0) > 0 && moved('map')) reads.push(this.refresh('map'))
+      if ((this.wanted.get('map') ?? 0) > 0 && (moved('map') || hiddenMoved)) reads.push(this.refresh('map'))
       // Setup moves while Kumi isn't connected (a step a chat just installed, the DAW restarted to load Kumi's part),
       // and the pane's next step is read from it: read it on every poll until Kumi connects, and when liveness changes.
       if (first || liveness || !status.connected || (this.wanted.get('setup') ?? 0) > 0) reads.push(this.refresh('setup'))
@@ -241,12 +262,67 @@ export class KumiStore {
       const path = part === 'history' ? `/history?limit=${this.historyLimit}` : `/${part}`
       try {
         const value = await this.fetch<unknown>(path)
-        if (generation === this.generation) this.set({ [part]: heard(value) } as Partial<KumiState>)
+        if (generation !== this.generation) return
+        this.set({ [part]: heard(value) } as Partial<KumiState>)
+        if (part === 'map') this.mapRead()
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404 && part !== 'setup') this.set({ available: false })
       }
     })
+  }
+
+  /** A map read: sounds it left out (hidden, or gone in a new revision) are done leaving. One still on it waits there,
+   *  off the map, while its report is pending or on its way. */
+  private mapRead(): void {
+    if (this.state.leaving.size === 0) return
+    const on = new Set((this.state.map?.points ?? []).map(point => point[0]))
+    const leaving = new Set([...this.state.leaving].filter(id => on.has(id) && (this.toHide.has(id) || this.hideTimer !== null)))
+    if (leaving.size !== this.state.leaving.size) this.set({ leaving })
+  }
+
+  /** A sound of the map in hand couldn't play here (`playFailure`): off the map now, and reported with the others that
+   *  fail within `HIDE_BATCH_MS`, so the next map read leaves them out and counts them. Never a notice per sound. */
+  hide(id: string, why: 'gone' | 'unplayable'): void {
+    const map = this.state.map
+    if (!map?.revision || this.state.leaving.has(id) || !map.points.some(point => point[0] === id)) return
+    this.toHide.set(id, why)
+    this.set({ leaving: new Set([...this.state.leaving, id]) })
+    if (this.hideTimer === null) this.hideTimer = setTimeout(() => void this.reportHidden(), HIDE_BATCH_MS)
+  }
+
+  private async reportHidden(): Promise<void> {
+    this.hideTimer = null
+    const revision = this.state.map?.revision
+    const batch = [...this.toHide].map(([id, why]) => ({ id, why }))
+    this.toHide.clear()
+    if (!revision || batch.length === 0) return
+    const generation = this.generation
+    for (let at = 0; at < batch.length; at += HIDE_MOST) {
+      try {
+        await this.fetch('/map/hidden', { method: 'POST', body: { revision, ids: batch.slice(at, at + HIDE_MOST) } })
+      } catch {
+        // Not reported: the sounds stay off the map in this window until it closes, and fail again quietly elsewhere.
+      }
+      if (generation !== this.generation) return
+    }
+    await this.refresh('map')
+  }
+
+  /** "Show them": every hidden sound goes back on the map. */
+  async showHidden(): Promise<void> {
+    const generation = this.generation
+    this.toHide.clear()
+    clearTimeout(this.hideTimer ?? undefined)
+    this.hideTimer = null
+    try {
+      await this.fetch('/map/hidden', { method: 'POST', body: { action: 'clear' } })
+    } catch {
+      return
+    }
+    if (generation !== this.generation) return
+    this.set({ leaving: new Set() })
+    await this.refresh('map')
   }
 
   /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each

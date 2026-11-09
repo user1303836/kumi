@@ -288,6 +288,9 @@ export function connectRequest(daw: unknown): string {
 /** After an outcome Kumi couldn't confirm: a fresh look (a read) before anything else. */
 export const LOOK_AGAIN_REQUEST = 'Kumi, look at my project again before changing anything else'
 
+/** From the map's line about hidden sounds: a scan finds what moved, and drops what's gone, for good. */
+export const RESCAN_REQUEST = 'Kumi, rescan my sample folders'
+
 /** What an unsure or partial outcome's `cleanup` says Kumi did about it (CC-2), as a sentence or nothing. */
 export function cleanupWords(cleanup: unknown, t: Translate = english): string {
   if (cleanup === 'restored') return t('history.restored')

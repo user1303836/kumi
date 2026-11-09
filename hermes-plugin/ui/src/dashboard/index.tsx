@@ -4,8 +4,8 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
-import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { Audition, playFailure, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
@@ -58,13 +58,29 @@ function KumiDashboard() {
 
 function Dashboard() {
   const t = useT()
-  const store = useMemo(() => new KumiStore(path => SDK.fetchJSON(`${BASE}${path}`)), [])
+  // Reads, and the backend's few writes (the sounds hidden from the map) as JSON POSTs.
+  const store = useMemo(
+    () =>
+      new KumiStore((path, init) =>
+        SDK.fetchJSON(`${BASE}${path}`, init && { method: init.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(init.body) })
+      ),
+    []
+  )
   const audition = useMemo(() => new Audition(id => SDK.fetchJSON<AudioReply>(`${BASE}/audio?id=${encodeURIComponent(id)}`)), [])
   useWant(store, 'map')
   const state = useKumi(store)
   const playing = usePlaying(audition)
   const now = useNow()
   const [selected, setSelected] = useState<null | string>(null)
+  // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
+  const play = (id: string) => {
+    audition.play(id).catch(error => {
+      const why = playFailure(error)
+      if (why !== 'gone' && why !== 'unplayable') return
+      store.hide(id, why)
+      setSelected(current => (current === id ? null : current))
+    })
+  }
 
   useEffect(() => {
     void store.refreshStatus()
@@ -142,17 +158,26 @@ function Dashboard() {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
+                  <TextButton onClick={() => (playing === id ? audition.stop() : play(id))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
                   {request && <CopyButton label={t('dashboard.copyRequest')} text={request} />}
                 </>
               )
             }}
             empty={state.map === null ? t('map.reading') : t('dashboard.mapEmpty')}
             found={state.found}
+            hiddenActions={
+              <>
+                <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
+                  {t('map.showHidden')}
+                </TextButton>
+                <CopyButton label={t('map.rescan')} text={RESCAN_REQUEST} />
+              </>
+            }
+            leaving={state.leaving}
             map={state.map}
             onPick={id => {
               setSelected(id)
-              void audition.play(id).catch(() => undefined)
+              play(id)
             }}
             onSelect={setSelected}
             playing={playing}

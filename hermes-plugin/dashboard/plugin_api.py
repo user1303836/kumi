@@ -1,21 +1,24 @@
 """Kumi's backend for its Desktop and web-dashboard halves (contract C4): `/api/plugins/kumi/…`.
 
-Read-only by design. Every route is a GET over the snapshots `kumi serve` publishes in this profile's plugin data
-(contract C3), re-resolved on every request. Nothing here starts, stops or talks to the runtime, the DAW or the
-network, and no route writes anything: a change in the DAW only ever comes from a tool call the user approves, which
-the UI asks for by putting a request into the chat.
+GET routes read the snapshots `kumi serve` publishes in this profile's plugin data (contract C3), re-resolved on every
+request. The few POST routes the contract names (`/map/hidden`) keep the UI's own state: they take small, bounded JSON
+bodies, never a file path, answer without one, change no project and write only under `<state>`. Nothing here starts,
+stops or talks to the runtime, the DAW or the network: a change in the DAW only ever comes from a tool call the user
+approves, which the UI asks for by putting a request into the chat.
 """
 
 from __future__ import annotations
 
 import base64
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +46,11 @@ def _load(name: str, file: str) -> Any:
 
 snapshots = _load("snapshots", "snapshots.py")
 schemas = _load("schemas", "schemas.py")
+hidden = _load("hidden", "hidden.py")
+aiff = _load("aiff", "aiff.py")
+
+# The largest body `POST /map/hidden` reads: 500 ids of 128 characters with their reasons fit well inside it.
+_BODY_MAX = 256 * 1024
 
 router = APIRouter()
 
@@ -84,7 +92,9 @@ def _liveness(state: Path) -> dict:
 def status() -> dict:
     """Setup and connection, the project, the owner's session, and each snapshot's revision. Until a runtime has said
     which DAW it works in, the DAW is the one chosen in Kumi's settings, so "not connected" names it."""
-    out = snapshots.status(snapshots.state_dir())
+    state = snapshots.state_dir()
+    out = snapshots.status(state)
+    out["revisions"]["hidden"] = hidden.seq(state)
     if not out.get("daw") and (chosen := _chosen_daw()):
         out["daw"] = chosen
     return out
@@ -104,13 +114,60 @@ def history(limit: int = Query(20, ge=1, le=snapshots.HISTORY_MAX)) -> dict:
 
 @router.get("/map")
 def sound_map(revision: str | None = Query(None, max_length=128)) -> dict:
-    """A sound-map revision (the current one by default): points, groups and sounds, never a file's path (CC-4)."""
+    """A sound-map revision (the current one by default): points, groups and sounds, never a file's path (CC-4).
+    Sounds the UI found it can't play here are left out (`hidden.visible`), and `hidden` says how many."""
     state = snapshots.state_dir()
     current = snapshots.map_current(state)
-    public = snapshots.public_map(state, revision or current)
-    out: dict = {"revision": None, "points": [], "groups": {}, "sounds": {}, **(public or {}), **_liveness(state)}
+    private = snapshots.map_revision(state, revision or current)
+    public = None
+    if private is not None:
+        public = hidden.visible(snapshots.public_of_map(private), private.get("sounds"), state, snapshots.local)
+    out: dict = {"revision": None, "points": [], "groups": {}, "sounds": {}, "hidden": 0, **(public or {}), **_liveness(state)}
     out["current"] = current
     return out
+
+
+def _map_hidden(body: object) -> dict:
+    """`POST /map/hidden`'s work, off the event loop: hide the sounds of the current revision a client reports
+    (`{"revision", "ids": [{"id", "why"}]}`), or show them all again (`{"action": "clear"}`)."""
+    try:
+        action, revision_id, reports = hidden.parse(body)
+    except hidden.Invalid as invalid:
+        raise HTTPException(status_code=400, detail=str(invalid)) from None
+    state = snapshots.state_dir()
+    try:
+        if action == "clear":
+            return hidden.clear(state)
+        current = snapshots.map_current(state)
+        private = snapshots.map_revision(state, current) if current else None
+        folders = _library_folders()
+        return hidden.hide(
+            state, current, private, revision_id, reports,
+            servable=lambda sound_id: snapshots.media(state, sound_id, folders, current=private) is not None,
+            checked=snapshots.local,
+        )
+    except hidden.Busy:
+        raise HTTPException(status_code=503, detail="Kumi is saving its hidden sounds for another request; try again.") from None
+    except OSError:
+        _log.warning("Kumi couldn't save its hidden sounds", exc_info=True)
+        raise HTTPException(status_code=500, detail="Kumi couldn't save its hidden sounds.") from None
+
+
+@router.post("/map/hidden")
+async def map_hidden(request: Request) -> dict:
+    """Hide sounds the UI can't play here (their file is gone, or the browser can't decode it) so the map leaves them
+    out quietly, or show them all again. Answers `{"hidden": points of the current revision now hidden, "ignored":
+    ids not taken, "seq"}`; 400 with `detail` for any other body."""
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _BODY_MAX:
+            raise HTTPException(status_code=413, detail="That request is too big.")
+    try:
+        body = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise HTTPException(status_code=400, detail="The body must be JSON.") from None
+    return await run_in_threadpool(_map_hidden, body)
 
 
 @router.get("/sound")
@@ -127,13 +184,18 @@ def sound(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: 
 def audio(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: A002 - the query parameter is `id`
     """An artifact's or a current map sound's bytes, as a data URL. Only ids the runtime published are served, only
     from the state folder's artifacts or an approved sample folder, up to 50 MiB, and only as audio or PNG (CC-4,
-    `snapshots.media`: `/sound`'s `playable` asks the same)."""
+    `snapshots.media`: `/sound`'s `playable` asks the same). AIFF goes out as WAV: Chromium, and so Hermes Desktop,
+    plays no AIFF (`aiff.to_wav`; one it can't convert goes out as it is)."""
     read = snapshots.read_media(snapshots.state_dir(), id, _library_folders())
     if read is None:
         raise HTTPException(status_code=404, detail="Kumi has no audio for that id here.")
     found, data = read
+    mime = found["mime"]
+    wav = aiff.to_wav(data) if mime.startswith("audio/") else None
+    if wav is not None:
+        data, mime = wav, "audio/wav"
     encoded = base64.b64encode(data).decode("ascii")
-    return {"id": id, "mime": found["mime"], "bytes": len(data), "data_url": f"data:{found['mime']};base64,{encoded}"}
+    return {"id": id, "mime": mime, "bytes": len(data), "data_url": f"data:{mime};base64,{encoded}"}
 
 
 @router.get("/setup")

@@ -1,4 +1,4 @@
-"""dashboard/plugin_api.py: the read-only routes both UIs read (contract C4)."""
+"""dashboard/plugin_api.py: the routes both UIs read, and the POST routes that keep their own state (contract C4)."""
 
 from __future__ import annotations
 
@@ -58,10 +58,12 @@ class Routes(unittest.TestCase):
         self.api.snapshots.state_dir, self.api._library_folders = self.saved
         self.tmp.cleanup()
 
-    def test_every_route_is_a_get(self) -> None:
+    def test_every_route_is_a_get_but_the_contracts_post_routes(self) -> None:
         methods = {route.path: route.methods for route in self.api.router.routes}
-        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script"})
-        self.assertTrue(all(found == {"GET"} for found in methods.values()), methods)
+        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/map/hidden", "/sound", "/audio", "/setup", "/job", "/script"})
+        posts = {path for path, found in methods.items() if found == {"POST"}}
+        self.assertEqual(posts, {"/map/hidden"})
+        self.assertTrue(all(found == {"GET"} for path, found in methods.items() if path not in posts), methods)
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
         self.assertTrue(self.api.status()["connected"])
@@ -105,6 +107,32 @@ class Routes(unittest.TestCase):
         self.api._library_folders = lambda: []
         with self.assertRaises(HTTPException):
             self.api.audio(id="s-r7-0091")
+
+    def _sound_file(self, sound_id: str, name: str, data: bytes) -> None:
+        """Point a current-map sound at a file of `data` in the approved folder."""
+        current = self.state / "map" / "r7.json"
+        sound_map = json.loads(current.read_text(encoding="utf-8"))
+        path = self.library / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        sound_map["sounds"][sound_id]["path"] = str(path)
+        current.write_text(json.dumps(sound_map), encoding="utf-8")
+
+    def test_aiff_goes_out_as_wav_and_one_it_cant_convert_goes_out_as_it_is(self) -> None:
+        import struct
+
+        aiff_tests = _load("kumi_test_aiff_cases", HERE / "test_aiff.py")
+        values = [0, 1000, -1000, 32767]
+        self._sound_file("s-r7-0091", "Snare.aif", aiff_tests.make(struct.pack(">4h", *values), channels=1, bits=16, frames=4))
+        reply = self.api.audio(id="s-r7-0091")
+        self.assertEqual(reply["mime"], "audio/wav")
+        self.assertTrue(reply["data_url"].startswith("data:audio/wav;base64,"))
+        fmt, samples = aiff_tests.wav(base64.b64decode(reply["data_url"].split(",", 1)[1]))
+        self.assertEqual((fmt["tag"], fmt["rate"], samples), (1, 44100, struct.pack("<4h", *values)))
+        broken = b"FORM\x00\x00\x00\x04AIFF"
+        self._sound_file("s-r7-0091", "Broken.aiff", broken)
+        reply = self.api.audio(id="s-r7-0091")
+        self.assertEqual((reply["mime"], base64.b64decode(reply["data_url"].split(",", 1)[1])), ("audio/aiff", broken))
 
     def test_a_saved_script_is_served_whole_only_while_it_is_the_code_the_approval_named(self) -> None:
         import hashlib
@@ -277,7 +305,7 @@ class Routes(unittest.TestCase):
             self.api.job(id="../owner")
 
     @unittest.skipIf(TestClient is None, "the FastAPI test client needs httpx")
-    def test_over_http_queries_are_validated_and_a_post_is_refused(self) -> None:
+    def test_over_http_queries_are_validated_and_only_the_contracts_posts_are_taken(self) -> None:
         from fastapi import FastAPI
 
         app = FastAPI()
@@ -288,6 +316,37 @@ class Routes(unittest.TestCase):
         self.assertEqual(client.post("/api/plugins/kumi/status").status_code, 405)
         self.assertEqual(client.get("/api/plugins/kumi/audio", params={"id": "a-nothing"}).status_code, 404)
         self.assertNotIn(str(self.library), json.dumps(client.get("/api/plugins/kumi/map").json()))
+
+    @unittest.skipIf(TestClient is None, "the FastAPI test client needs httpx")
+    def test_over_http_hidden_sounds_leave_the_map_and_clear_brings_them_back(self) -> None:
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(self.api.router, prefix="/api/plugins/kumi")
+        client = TestClient(app)
+        route = "/api/plugins/kumi/map/hidden"
+        whole = client.get("/api/plugins/kumi/map").json()
+        self.assertEqual((whole["hidden"], client.get("/api/plugins/kumi/status").json()["revisions"]["hidden"]), (0, 0))
+
+        # s-r7-0001's file is missing; s-r7-0091's plays, so its "gone" is the client's mistake.
+        reply = client.post(route, json={"revision": "r7", "ids": [{"id": "s-r7-0001", "why": "gone"}, {"id": "s-r7-0091", "why": "gone"}]})
+        self.assertEqual((reply.status_code, reply.json()), (200, {"hidden": 1, "ignored": 1, "seq": 1}))
+        shown = client.get("/api/plugins/kumi/map").json()
+        self.assertEqual((shown["hidden"], len(shown["points"])), (1, len(whole["points"]) - 1))
+        self.assertNotIn("s-r7-0001", shown["sounds"])
+        self.assertEqual(client.get("/api/plugins/kumi/status").json()["revisions"]["hidden"], 1)
+        self.assertNotIn(str(self.library), reply.text + json.dumps(shown))
+
+        for bad in ({"revision": "r7", "ids": []}, {"action": "forget"}, {"ids": [{"id": "s-r7-0002", "why": "gone"}]}):
+            refused = client.post(route, json=bad)
+            self.assertEqual(refused.status_code, 400, bad)
+            self.assertTrue(refused.json()["detail"])
+        self.assertEqual(client.post(route, content=b"{not json", headers={"content-type": "application/json"}).status_code, 400)
+        self.assertEqual(client.post(route, content=b" " * (300 * 1024)).status_code, 413)
+        self.assertEqual(client.get(route).status_code, 405)
+
+        self.assertEqual(client.post(route, json={"action": "clear"}).json(), {"hidden": 0, "ignored": 0, "seq": 2})
+        self.assertEqual(client.get("/api/plugins/kumi/map").json()["hidden"], 0)
 
 
 if __name__ == "__main__":

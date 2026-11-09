@@ -183,7 +183,12 @@
       useOnPadTitle: "Pick a drum pad, an empty one included: the request goes in the chat, to send when you like",
       pads: "Drum pads",
       pad: (name, note) => name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`,
-      playFailed: (error) => `Kumi couldn't play that sound: ${error}`
+      playFailed: (error) => `Kumi couldn't play that sound: ${error}`,
+      hidden: (n) => n === 1 ? "1 sound hidden: its file is missing or can't play here." : `${n} sounds hidden: their files are missing or can't play here.`,
+      showHidden: "Show them",
+      showHiddenTitle: "Put the hidden sounds back on the map",
+      rescan: "Rescan…",
+      rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like"
     },
     measurements: {
       tab: "Measurements",
@@ -517,7 +522,12 @@
       useOnPadTitle: "ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で",
       pads: "ドラムパッド",
       pad: (name, note) => name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`,
-      playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
+      playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`,
+      hidden: (n) => `${n} 個のサウンドを隠しました。ファイルが見つからないか、ここでは再生できません。`,
+      showHidden: "表示する",
+      showHiddenTitle: "隠したサウンドをマップに戻します",
+      rescan: "再スキャン…",
+      rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で"
     },
     measurements: {
       tab: "測定結果",
@@ -850,7 +860,12 @@
       useOnPadTitle: "选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送",
       pads: "打击垫",
       pad: (name, note) => name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`,
-      playFailed: (error) => `Kumi 无法播放这个声音：${error}`
+      playFailed: (error) => `Kumi 无法播放这个声音：${error}`,
+      hidden: (n) => `已隐藏 ${n} 个声音：文件不见了，或无法在这里播放。`,
+      showHidden: "显示它们",
+      showHiddenTitle: "把隐藏的声音放回地图",
+      rescan: "重新扫描…",
+      rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送"
     },
     measurements: {
       tab: "测量结果",
@@ -1172,6 +1187,7 @@
     return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
   }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
+  var RESCAN_REQUEST = "Kumi, rescan my sample folders";
   function cleanupWords(cleanup, t = english) {
     if (cleanup === "restored") return t("history.restored");
     if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -1188,6 +1204,457 @@
     if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
     if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
     return { tone: "muted", text: t("chip.notConnected", daw) };
+  }
+
+  // src/shared/listen.ts
+  var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
+  function parseListen(result) {
+    let value = result;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+    const state = "state" in value ? value.state : void 0;
+    if (typeof state === "string" && NOT_MEASURED[state]) return null;
+    return value;
+  }
+  var finite = (value) => typeof value === "number" && Number.isFinite(value);
+  function fileName(analysis, fallback) {
+    const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+    return clean(file || fallback, 60);
+  }
+  function displayReferenceName(reference) {
+    return clean((reference.origin?.name ?? reference.name ?? "").split(/[\\/]/).pop() || "Reference", 160);
+  }
+  function stable(value) {
+    if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+    if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
+    return JSON.stringify(value) ?? "null";
+  }
+  function memberKey(reference) {
+    const window2 = reference.window;
+    const origin = reference.origin;
+    const replay = origin?.window && window2 && window2.start_frame === 0 && window2.frame_count === origin.window.frame_count && window2.sample_rate === origin.window.sample_rate && window2.channels === origin.window.channels;
+    const selected = replay ? origin : reference;
+    return stable({
+      identity: selected.identity ?? { artifact_id: reference.artifact_id },
+      window: selected.window ? {
+        start_frame: selected.window.start_frame,
+        frame_count: selected.window.frame_count,
+        sample_rate: selected.window.sample_rate,
+        channels: selected.window.channels
+      } : null
+    });
+  }
+  function hasReferenceFacts(result) {
+    return Array.isArray(result.references) || !!(result.compare?.identity || result.compare?.window || result.compare?.origin);
+  }
+  function referenceKey(result) {
+    if (Array.isArray(result.references)) return `profile:${stable(result.references.map(memberKey).sort())}`;
+    if (hasReferenceFacts(result) && result.compare) return `excerpt:${memberKey(result.compare)}`;
+    const reference = result.compare?.metrics;
+    if (!reference) return null;
+    const lufs = reference.loudness?.integratedLufs;
+    return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+  }
+  function keptBy(result, rounds) {
+    const kept = result.compare?.artifact_id;
+    if (typeof kept !== "string" || !kept) return null;
+    for (const [key, each] of Object.entries(rounds)) {
+      const round = each.find((other) => other.kept === kept);
+      if (round) return [key, round];
+    }
+    return null;
+  }
+  function roundKey(result, rounds) {
+    return hasReferenceFacts(result) ? referenceKey(result) : keptBy(result, rounds)?.[0] ?? referenceKey(result);
+  }
+  function referenceName(result, rounds) {
+    return keptBy(result, rounds)?.[1].name || void 0;
+  }
+  function roundOf(result, id, rounds) {
+    const kept = result.compare?.artifact_id;
+    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+  }
+  function gapsOf(result) {
+    const mine = result.metrics ?? {};
+    const reference = result.compare?.metrics;
+    if (!reference) return {};
+    const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
+    const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
+    const out = {};
+    if (loudness !== void 0) out.loudness = loudness;
+    const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
+    if (tilt !== void 0) out.tilt = tilt;
+    const width = gap(mine.stereo?.width, reference.stereo?.width);
+    if (width !== void 0) out.width = width;
+    return out;
+  }
+
+  // src/shared/store.ts
+  var MOST_REASONS = 4;
+  var REASON_CHARACTERS = 60;
+  function foundMatches(entries, ids) {
+    const out = /* @__PURE__ */ Object.create(null);
+    if (!Array.isArray(entries)) return out;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = entry;
+      const id = typeof value.sound_id === "string" ? value.sound_id : "";
+      if (!ids.has(id) || Object.hasOwn(out, id)) continue;
+      const why = (Array.isArray(value.why) ? value.why : []).map((line) => clean(line, REASON_CHARACTERS)).filter(Boolean).slice(0, MOST_REASONS);
+      const closeness = value.closeness;
+      out[id] = { why, ...typeof closeness === "number" && Number.isInteger(closeness) && closeness >= 0 && closeness <= 100 ? { closeness } : {} };
+    }
+    return out;
+  }
+  var JOB_KEPT_MS = 6e4;
+  var MOST_JOBS = 20;
+  var MOST_ROUNDS = 6;
+  var MOST_REFERENCES = 8;
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set() };
+  var HIDE_BATCH_MS = 1200;
+  var HIDE_MOST = 500;
+  var SHA256 = /^[0-9a-f]{64}$/;
+  function pendingScriptOf(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const value = payload;
+    const id = plainId(value.tool_call_id);
+    const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
+    if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
+    const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
+    const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
+    const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
+    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
+  }
+  function finished(job) {
+    return typeof job.state === "string" && job.state !== "running";
+  }
+  function statusOf(error) {
+    const text = error instanceof Error ? error.message : String(error ?? "");
+    const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text);
+    return match ? Number(match[1]) : 0;
+  }
+  function notLive(state) {
+    return {
+      status: state.status && { ...state.status, connected: false, stale: true },
+      focus: state.focus && { ...state.focus, connected: false, stale: true },
+      history: state.history && {
+        ...state.history,
+        connected: false,
+        stale: true,
+        items: state.history.items.map((item) => ({ ...item, undo_available: false }))
+      }
+    };
+  }
+  function heard(reply) {
+    if (!reply || typeof reply !== "object" || !("age_ms" in reply)) return reply;
+    const age = reply.age_ms;
+    return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
+  }
+  var KumiStore = class {
+    constructor(fetch, historyLimit = 50) {
+      this.fetch = fetch;
+      this.historyLimit = historyLimit;
+    }
+    fetch;
+    historyLimit;
+    state = EMPTY;
+    listeners = /* @__PURE__ */ new Set();
+    reads = /* @__PURE__ */ new Map();
+    wanted = /* @__PURE__ */ new Map();
+    generation = 0;
+    /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
+    cards = /* @__PURE__ */ new Map();
+    /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
+     *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
+    started = /* @__PURE__ */ new Set();
+    /** Failed plays not reported yet, by sound id, and the timer that reports them. */
+    toHide = /* @__PURE__ */ new Map();
+    hideTimer = null;
+    /** `/status`'s count of hidden-sound edits at the last map read: another window's report reads the map again. */
+    hiddenSeq = null;
+    get = () => this.state;
+    subscribe = (fn) => {
+      this.listeners.add(fn);
+      return () => this.listeners.delete(fn);
+    };
+    set(patch) {
+      this.state = { ...this.state, ...patch };
+      for (const fn of [...this.listeners]) fn();
+    }
+    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+    want(part) {
+      this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
+      if (!this.state[part]) void this.refresh(part);
+      return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
+    }
+    /** Forget everything (another profile or connection): what's shown must be that profile's. */
+    reset() {
+      this.generation += 1;
+      this.reads.clear();
+      this.cards.clear();
+      this.started.clear();
+      this.toHide.clear();
+      clearTimeout(this.hideTimer ?? void 0);
+      this.hideTimer = null;
+      this.hiddenSeq = null;
+      this.state = EMPTY;
+      for (const fn of [...this.listeners]) fn();
+    }
+    /** Run read `key`, or, while one is running, run it once more after it: a read never answers with what an
+     *  older one, begun before the change that asked for it, saw. */
+    once(key, run) {
+      const running = this.reads.get(key);
+      if (running) {
+        running.again = true;
+        return running.promise;
+      }
+      const generation = this.generation;
+      const entry = { again: false, promise: Promise.resolve() };
+      entry.promise = (async () => {
+        do {
+          entry.again = false;
+          await run().catch(() => void 0);
+        } while (entry.again && generation === this.generation);
+      })().finally(() => {
+        if (this.reads.get(key) === entry) this.reads.delete(key);
+      });
+      this.reads.set(key, entry);
+      return entry.promise;
+    }
+    /** Read /status, then whatever its revisions say moved. */
+    refreshStatus() {
+      return this.once("status", async () => {
+        const generation = this.generation;
+        let status;
+        try {
+          status = await this.fetch("/status");
+        } catch (error) {
+          if (generation !== this.generation) return;
+          if (statusOf(error) === 404) this.set({ available: false, error: null });
+          else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+        if (generation !== this.generation) return;
+        const before = this.state.status;
+        const after = status.revisions ?? {};
+        const first = this.state.available !== true;
+        const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
+        this.set({ available: true, error: null, status: heard(status) });
+        const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
+        const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
+        const hidden = typeof after.hidden === "number" ? after.hidden : 0;
+        const hiddenMoved = this.hiddenSeq !== null && hidden !== this.hiddenSeq;
+        this.hiddenSeq = hidden;
+        const reads = [];
+        if (liveness || moved("focus")) reads.push(this.refresh("focus"));
+        if (liveness || moved("history")) reads.push(this.refresh("history"));
+        if ((this.wanted.get("map") ?? 0) > 0 && (moved("map") || hiddenMoved)) reads.push(this.refresh("map"));
+        if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
+        await Promise.all(reads);
+      });
+    }
+    refresh(part) {
+      return this.once(part, async () => {
+        const generation = this.generation;
+        const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
+        try {
+          const value = await this.fetch(path);
+          if (generation !== this.generation) return;
+          this.set({ [part]: heard(value) });
+          if (part === "map") this.mapRead();
+        } catch (error) {
+          if (generation !== this.generation) return;
+          if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });
+        }
+      });
+    }
+    /** A map read: sounds it left out (hidden, or gone in a new revision) are done leaving. One still on it waits there,
+     *  off the map, while its report is pending or on its way. */
+    mapRead() {
+      if (this.state.leaving.size === 0) return;
+      const on = new Set((this.state.map?.points ?? []).map((point) => point[0]));
+      const leaving = new Set([...this.state.leaving].filter((id) => on.has(id) && (this.toHide.has(id) || this.hideTimer !== null)));
+      if (leaving.size !== this.state.leaving.size) this.set({ leaving });
+    }
+    /** A sound of the map in hand couldn't play here (`playFailure`): off the map now, and reported with the others that
+     *  fail within `HIDE_BATCH_MS`, so the next map read leaves them out and counts them. Never a notice per sound. */
+    hide(id, why) {
+      const map = this.state.map;
+      if (!map?.revision || this.state.leaving.has(id) || !map.points.some((point) => point[0] === id)) return;
+      this.toHide.set(id, why);
+      this.set({ leaving: /* @__PURE__ */ new Set([...this.state.leaving, id]) });
+      if (this.hideTimer === null) this.hideTimer = setTimeout(() => void this.reportHidden(), HIDE_BATCH_MS);
+    }
+    async reportHidden() {
+      this.hideTimer = null;
+      const revision = this.state.map?.revision;
+      const batch = [...this.toHide].map(([id, why]) => ({ id, why }));
+      this.toHide.clear();
+      if (!revision || batch.length === 0) return;
+      const generation = this.generation;
+      for (let at = 0; at < batch.length; at += HIDE_MOST) {
+        try {
+          await this.fetch("/map/hidden", { method: "POST", body: { revision, ids: batch.slice(at, at + HIDE_MOST) } });
+        } catch {
+        }
+        if (generation !== this.generation) return;
+      }
+      await this.refresh("map");
+    }
+    /** "Show them": every hidden sound goes back on the map. */
+    async showHidden() {
+      const generation = this.generation;
+      this.toHide.clear();
+      clearTimeout(this.hideTimer ?? void 0);
+      this.hideTimer = null;
+      try {
+        await this.fetch("/map/hidden", { method: "POST", body: { action: "clear" } });
+      } catch {
+        return;
+      }
+      if (generation !== this.generation) return;
+      this.set({ leaving: /* @__PURE__ */ new Set() });
+      await this.refresh("map");
+    }
+    /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
+     *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
+    found(revision, ids, said = {}) {
+      const kept = ids.slice(0, 200);
+      const near = typeof said.near === "string" && said.near ? said.near : null;
+      this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } });
+    }
+    /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
+    measure(toolCallId, result) {
+      this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
+    }
+    /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+     *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
+     *  twice (both signals for one call) counts once. */
+    noteListen(result) {
+      const parsed = parseListen(result);
+      const key = parsed ? roundKey(parsed, this.state.rounds) : null;
+      const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
+      if (!parsed || !key || !id) return;
+      const before = this.state.rounds[key] ?? [];
+      if (before.some((round) => round.id === id)) return;
+      const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
+      const keys = Object.keys(rounds);
+      if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
+      this.set({ rounds });
+    }
+    /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
+     *  no plain call id, exact SHA-256 or known language shows nothing. */
+    scriptPending(payload) {
+      const pending = pendingScriptOf(payload);
+      if (!pending) return;
+      this.set({ script: { pending, code: null } });
+      const generation = this.generation;
+      void this.readScript(pending.sha256, pending.language).then((code) => {
+        if (generation !== this.generation || this.state.script?.pending !== pending) return;
+        this.set({ script: { pending, code: code ?? false } });
+      });
+    }
+    /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
+    scriptSettled(toolCallId) {
+      const id = plainId(toolCallId);
+      if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null });
+    }
+    /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
+     *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
+    async readScript(sha256, language) {
+      if (!SHA256.test(sha256)) return null;
+      try {
+        const read = await this.fetch(`/script?sha=${sha256}&language=${language}`);
+        return read && read.sha256 === sha256 && typeof read.code === "string" ? read : null;
+      } catch {
+        return null;
+      }
+    }
+    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
+     *  the source says it was running: a call that started it, or an event that reported it running. */
+    trackJob(id, started = false) {
+      const jobId = plainId(id);
+      if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+      if (started) {
+        this.started.add(jobId);
+        if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
+      }
+      void this.refreshJob(jobId);
+    }
+    /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
+     *  has none, and read the job as news. Unlike a job first met finished elsewhere, a generation the event reports
+     *  shows even when it has already ended: with tool progress off, this row is where it shows. */
+    noteGeneration(card) {
+      const id = jobOf(card);
+      if (!id) return;
+      const before = this.state.jobs[id];
+      if (before) this.set({ jobs: { ...this.state.jobs, [id]: { ...before, card } } });
+      else if (Object.keys(this.state.jobs).length >= MOST_JOBS) return;
+      else {
+        this.cards.delete(id);
+        this.cards.set(id, card);
+        if (this.cards.size > MOST_JOBS) this.cards.delete(this.cards.keys().next().value);
+      }
+      void this.refreshJob(id);
+    }
+    /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
+     *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
+     *  with it. */
+    refreshJobs(now = Date.now()) {
+      const kept = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
+      if (kept.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept) });
+      const stopped = this.state.status?.stale === true && this.state.status.running === false;
+      if (this.state.status?.stale && !stopped) return Promise.resolve();
+      return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id, stopped))).then(() => void 0);
+    }
+    refreshJob(id, stopped = false) {
+      return this.once(`job:${id}`, async () => {
+        const generation = this.generation;
+        try {
+          const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
+          if (generation !== this.generation) return;
+          const before = this.state.jobs[id];
+          const news = this.started.delete(id) || this.cards.has(id);
+          if (!before && finished(read) && !news) return;
+          const card = before?.card ?? this.cards.get(id);
+          this.cards.delete(id);
+          const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
+          const ended_at = finished(job) ? before?.ended_at ?? Date.now() : null;
+          this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at, ...card === void 0 ? {} : { card } } } });
+        } catch (error) {
+          if (generation !== this.generation || statusOf(error) !== 404) return;
+          this.cards.delete(id);
+          if (!this.state.jobs[id]) return;
+          const { [id]: _gone, ...rest } = this.state.jobs;
+          this.set({ jobs: rest });
+        }
+      });
+    }
+  };
+  function dawPartWorks(state) {
+    const setup = state.setup;
+    const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
+    if (!onlyDawPart || !state.status?.connected) return false;
+    const component = state.status.setup?.component;
+    if (!component) return true;
+    return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
+  }
+  function jobOf(result) {
+    let value = result;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return value && typeof value === "object" && "job_id" in value ? plainId(value.job_id) : null;
   }
 
   // src/shared/hooks.ts
@@ -1262,7 +1729,8 @@
       this.loading.clear();
     }
     /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
-     *  there's never more than one sound playing, and never one that can't be stopped. */
+     *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
+     *  quietly, whatever happened to it: only the sound still wanted can fail. */
     async play(id) {
       this.stop();
       const turn = this.turn;
@@ -1277,7 +1745,8 @@
         };
         await audio.play();
       } catch (error) {
-        if (turn === this.turn) this.stop();
+        if (turn !== this.turn) return;
+        this.stop();
         throw error;
       }
     }
@@ -1297,6 +1766,13 @@
   };
   function usePlaying(audition) {
     return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
+  }
+  function playFailure(error) {
+    const name = error instanceof Error ? error.name : "";
+    if (name === "NotSupportedError") return "unplayable";
+    if (name === "NotAllowedError") return "blocked";
+    const status = error && typeof error === "object" && "status" in error ? error.status : statusOf(error);
+    return status === 404 ? "gone" : "other";
   }
 
   // src/dashboard/jsx-runtime.ts
@@ -1666,6 +2142,7 @@
 
   // src/shared/MapCanvas.tsx
   var MATCHES_LISTED = 6;
+  var FADE_MS = 450;
   function resolve(canvas) {
     const style = getComputedStyle(canvas);
     const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -1679,7 +2156,7 @@
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -1725,12 +2202,26 @@
     const mask = useMemo(() => {
       const out = new Uint8Array(model.points.length);
       model.points.forEach((point, index) => {
-        out[index] = hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
+        out[index] = leaving?.has(point.id) ? 2 : hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
       });
       return out;
-    }, [model, hidden, searched]);
+    }, [model, hidden, searched, leaving]);
     const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
-    const shown = useMemo(() => mask.reduce((count, keep) => count + keep, 0), [mask]);
+    const shown = useMemo(() => mask.reduce((count, keep) => count + (keep === 1 ? 1 : 0), 0), [mask]);
+    const leavingCount = useMemo(() => mask.reduce((count, keep) => count + (keep === 2 ? 1 : 0), 0), [mask]);
+    const leftAt = useRef(/* @__PURE__ */ new Map());
+    const [clock, setClock] = useState(0);
+    useEffect(() => {
+      const now = performance.now();
+      for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
+      for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
+    }, [leaving]);
+    useEffect(() => {
+      const now = performance.now();
+      if (![...leftAt.current.values()].some((at2) => now - at2 < FADE_MS)) return;
+      const frame2 = requestAnimationFrame(setClock);
+      return () => cancelAnimationFrame(frame2);
+    }, [clock, leaving]);
     const matches = useMemo(() => {
       const ids = searched ?? foundIds;
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -1829,6 +2320,19 @@
           }
         }
       }
+      const now = performance.now();
+      for (const [id, at2] of leftAt.current) {
+        const progress = (now - at2) / FADE_MS;
+        const index = indexOf.get(id);
+        if (progress >= 1 || index === void 0) continue;
+        const eased = 1 - (1 - progress) ** 2;
+        const point = points[index];
+        context.globalAlpha = 0.92 * (1 - eased);
+        context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
+        context.beginPath();
+        context.arc(point.x * unit + view.dx, point.y * unit + view.dy, radius * (1 - eased) + 0.1, 0, Math.PI * 2);
+        context.fill();
+      }
       if (onScreen <= 40) {
         context.globalAlpha = 0.85;
         context.fillStyle = colors.text;
@@ -1858,7 +2362,7 @@
       foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
       if (playing) ring(playing, colors.accent, 6, 2);
       if (selected) ring(selected, colors.strong, 4, 2);
-    }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted]);
+    }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -1887,7 +2391,13 @@
       }
     };
     if (!model.points.length) {
-      return /* @__PURE__ */ jsx("div", { style: { ...S.muted, padding: 16 }, children: empty });
+      return /* @__PURE__ */ jsxs("div", { style: { ...S.muted, padding: 16 }, children: [
+        empty,
+        (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs("div", { role: "status", style: { ...S.row, flexWrap: "wrap", gap: 6, marginTop: 8 }, children: [
+          /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", map?.hidden ?? 0) }),
+          hiddenActions
+        ] })
+      ] });
     }
     const chosen = selected ? model.sounds[selected] : void 0;
     const hovered = hover ? model.points[hover.index] : void 0;
@@ -1905,7 +2415,7 @@
             value: query
           }
         ),
-        /* @__PURE__ */ jsx("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
+        /* @__PURE__ */ jsx("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0)) })
       ] }),
       /* @__PURE__ */ jsx("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
         const off = hidden.has(group.key);
@@ -2021,6 +2531,11 @@
           }
         )
       ] }),
+      (map?.hidden ?? 0) + leavingCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
+      /* @__PURE__ */ jsxs("div", { role: "status", style: { ...S.row, flexWrap: "wrap", gap: 6, padding: "4px 10px", borderTop: `1px solid ${T.border}` }, children: [
+        /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", (map?.hidden ?? 0) + leavingCount) }),
+        hiddenActions
+      ] }),
       selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
         /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
@@ -2035,393 +2550,6 @@
         /* @__PURE__ */ jsx("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions?.(selected, chosen) })
       ] })
     ] });
-  }
-
-  // src/shared/listen.ts
-  var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
-  function parseListen(result) {
-    let value = result;
-    if (typeof value === "string") {
-      try {
-        value = JSON.parse(value);
-      } catch {
-        return null;
-      }
-    }
-    if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
-    const state = "state" in value ? value.state : void 0;
-    if (typeof state === "string" && NOT_MEASURED[state]) return null;
-    return value;
-  }
-  var finite = (value) => typeof value === "number" && Number.isFinite(value);
-  function fileName(analysis, fallback) {
-    const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
-    return clean(file || fallback, 60);
-  }
-  function displayReferenceName(reference) {
-    return clean((reference.origin?.name ?? reference.name ?? "").split(/[\\/]/).pop() || "Reference", 160);
-  }
-  function stable(value) {
-    if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-    if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
-    return JSON.stringify(value) ?? "null";
-  }
-  function memberKey(reference) {
-    const window2 = reference.window;
-    const origin = reference.origin;
-    const replay = origin?.window && window2 && window2.start_frame === 0 && window2.frame_count === origin.window.frame_count && window2.sample_rate === origin.window.sample_rate && window2.channels === origin.window.channels;
-    const selected = replay ? origin : reference;
-    return stable({
-      identity: selected.identity ?? { artifact_id: reference.artifact_id },
-      window: selected.window ? {
-        start_frame: selected.window.start_frame,
-        frame_count: selected.window.frame_count,
-        sample_rate: selected.window.sample_rate,
-        channels: selected.window.channels
-      } : null
-    });
-  }
-  function hasReferenceFacts(result) {
-    return Array.isArray(result.references) || !!(result.compare?.identity || result.compare?.window || result.compare?.origin);
-  }
-  function referenceKey(result) {
-    if (Array.isArray(result.references)) return `profile:${stable(result.references.map(memberKey).sort())}`;
-    if (hasReferenceFacts(result) && result.compare) return `excerpt:${memberKey(result.compare)}`;
-    const reference = result.compare?.metrics;
-    if (!reference) return null;
-    const lufs = reference.loudness?.integratedLufs;
-    return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
-  }
-  function keptBy(result, rounds) {
-    const kept = result.compare?.artifact_id;
-    if (typeof kept !== "string" || !kept) return null;
-    for (const [key, each] of Object.entries(rounds)) {
-      const round = each.find((other) => other.kept === kept);
-      if (round) return [key, round];
-    }
-    return null;
-  }
-  function roundKey(result, rounds) {
-    return hasReferenceFacts(result) ? referenceKey(result) : keptBy(result, rounds)?.[0] ?? referenceKey(result);
-  }
-  function referenceName(result, rounds) {
-    return keptBy(result, rounds)?.[1].name || void 0;
-  }
-  function roundOf(result, id, rounds) {
-    const kept = result.compare?.artifact_id;
-    return { id, gaps: gapsOf(result), kept: typeof kept === "string" && kept ? kept : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
-  }
-  function gapsOf(result) {
-    const mine = result.metrics ?? {};
-    const reference = result.compare?.metrics;
-    if (!reference) return {};
-    const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
-    const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
-    const out = {};
-    if (loudness !== void 0) out.loudness = loudness;
-    const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
-    if (tilt !== void 0) out.tilt = tilt;
-    const width = gap(mine.stereo?.width, reference.stereo?.width);
-    if (width !== void 0) out.width = width;
-    return out;
-  }
-
-  // src/shared/store.ts
-  var MOST_REASONS = 4;
-  var REASON_CHARACTERS = 60;
-  function foundMatches(entries, ids) {
-    const out = /* @__PURE__ */ Object.create(null);
-    if (!Array.isArray(entries)) return out;
-    for (const entry of entries) {
-      if (!entry || typeof entry !== "object") continue;
-      const value = entry;
-      const id = typeof value.sound_id === "string" ? value.sound_id : "";
-      if (!ids.has(id) || Object.hasOwn(out, id)) continue;
-      const why = (Array.isArray(value.why) ? value.why : []).map((line) => clean(line, REASON_CHARACTERS)).filter(Boolean).slice(0, MOST_REASONS);
-      const closeness = value.closeness;
-      out[id] = { why, ...typeof closeness === "number" && Number.isInteger(closeness) && closeness >= 0 && closeness <= 100 ? { closeness } : {} };
-    }
-    return out;
-  }
-  var JOB_KEPT_MS = 6e4;
-  var MOST_JOBS = 20;
-  var MOST_ROUNDS = 6;
-  var MOST_REFERENCES = 8;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null };
-  var SHA256 = /^[0-9a-f]{64}$/;
-  function pendingScriptOf(payload) {
-    if (!payload || typeof payload !== "object") return null;
-    const value = payload;
-    const id = plainId(value.tool_call_id);
-    const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
-    if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
-    const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
-    const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
-    const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
-    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
-  }
-  function finished(job) {
-    return typeof job.state === "string" && job.state !== "running";
-  }
-  function statusOf(error) {
-    const text = error instanceof Error ? error.message : String(error ?? "");
-    const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text);
-    return match ? Number(match[1]) : 0;
-  }
-  function notLive(state) {
-    return {
-      status: state.status && { ...state.status, connected: false, stale: true },
-      focus: state.focus && { ...state.focus, connected: false, stale: true },
-      history: state.history && {
-        ...state.history,
-        connected: false,
-        stale: true,
-        items: state.history.items.map((item) => ({ ...item, undo_available: false }))
-      }
-    };
-  }
-  function heard(reply) {
-    if (!reply || typeof reply !== "object" || !("age_ms" in reply)) return reply;
-    const age = reply.age_ms;
-    return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
-  }
-  var KumiStore = class {
-    constructor(fetch, historyLimit = 50) {
-      this.fetch = fetch;
-      this.historyLimit = historyLimit;
-    }
-    fetch;
-    historyLimit;
-    state = EMPTY;
-    listeners = /* @__PURE__ */ new Set();
-    reads = /* @__PURE__ */ new Map();
-    wanted = /* @__PURE__ */ new Map();
-    generation = 0;
-    /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
-    cards = /* @__PURE__ */ new Map();
-    /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
-     *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
-    started = /* @__PURE__ */ new Set();
-    get = () => this.state;
-    subscribe = (fn) => {
-      this.listeners.add(fn);
-      return () => this.listeners.delete(fn);
-    };
-    set(patch) {
-      this.state = { ...this.state, ...patch };
-      for (const fn of [...this.listeners]) fn();
-    }
-    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
-    want(part) {
-      this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
-      if (!this.state[part]) void this.refresh(part);
-      return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
-    }
-    /** Forget everything (another profile or connection): what's shown must be that profile's. */
-    reset() {
-      this.generation += 1;
-      this.reads.clear();
-      this.cards.clear();
-      this.started.clear();
-      this.state = EMPTY;
-      for (const fn of [...this.listeners]) fn();
-    }
-    /** Run read `key`, or, while one is running, run it once more after it: a read never answers with what an
-     *  older one, begun before the change that asked for it, saw. */
-    once(key, run) {
-      const running = this.reads.get(key);
-      if (running) {
-        running.again = true;
-        return running.promise;
-      }
-      const generation = this.generation;
-      const entry = { again: false, promise: Promise.resolve() };
-      entry.promise = (async () => {
-        do {
-          entry.again = false;
-          await run().catch(() => void 0);
-        } while (entry.again && generation === this.generation);
-      })().finally(() => {
-        if (this.reads.get(key) === entry) this.reads.delete(key);
-      });
-      this.reads.set(key, entry);
-      return entry.promise;
-    }
-    /** Read /status, then whatever its revisions say moved. */
-    refreshStatus() {
-      return this.once("status", async () => {
-        const generation = this.generation;
-        let status;
-        try {
-          status = await this.fetch("/status");
-        } catch (error) {
-          if (generation !== this.generation) return;
-          if (statusOf(error) === 404) this.set({ available: false, error: null });
-          else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
-          return;
-        }
-        if (generation !== this.generation) return;
-        const before = this.state.status;
-        const after = status.revisions ?? {};
-        const first = this.state.available !== true;
-        const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
-        this.set({ available: true, error: null, status: heard(status) });
-        const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
-        const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
-        const reads = [];
-        if (liveness || moved("focus")) reads.push(this.refresh("focus"));
-        if (liveness || moved("history")) reads.push(this.refresh("history"));
-        if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
-        if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
-        await Promise.all(reads);
-      });
-    }
-    refresh(part) {
-      return this.once(part, async () => {
-        const generation = this.generation;
-        const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
-        try {
-          const value = await this.fetch(path);
-          if (generation === this.generation) this.set({ [part]: heard(value) });
-        } catch (error) {
-          if (generation !== this.generation) return;
-          if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });
-        }
-      });
-    }
-    /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
-     *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
-    found(revision, ids, said = {}) {
-      const kept = ids.slice(0, 200);
-      const near = typeof said.near === "string" && said.near ? said.near : null;
-      this.set({ found: { revision, ids: kept, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept)) } });
-    }
-    /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
-    measure(toolCallId, result) {
-      this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
-    }
-    /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
-     *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
-     *  twice (both signals for one call) counts once. */
-    noteListen(result) {
-      const parsed = parseListen(result);
-      const key = parsed ? roundKey(parsed, this.state.rounds) : null;
-      const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
-      if (!parsed || !key || !id) return;
-      const before = this.state.rounds[key] ?? [];
-      if (before.some((round) => round.id === id)) return;
-      const rounds = { ...this.state.rounds, [key]: [...before, roundOf(parsed, id, this.state.rounds)].slice(-MOST_ROUNDS) };
-      const keys = Object.keys(rounds);
-      if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
-      this.set({ rounds });
-    }
-    /** A `script.pending` event for the chat in front (CC-19): show it, then read its saved code. An event that names
-     *  no plain call id, exact SHA-256 or known language shows nothing. */
-    scriptPending(payload) {
-      const pending = pendingScriptOf(payload);
-      if (!pending) return;
-      this.set({ script: { pending, code: null } });
-      const generation = this.generation;
-      void this.readScript(pending.sha256, pending.language).then((code) => {
-        if (generation !== this.generation || this.state.script?.pending !== pending) return;
-        this.set({ script: { pending, code: code ?? false } });
-      });
-    }
-    /** The pending script's approval settled (`script.settled`, or its call's `tool.complete`): it isn't waiting now. */
-    scriptSettled(toolCallId) {
-      const id = plainId(toolCallId);
-      if (id && this.state.script?.pending.tool_call_id === id) this.set({ script: null });
-    }
-    /** A saved script's code by its SHA-256 (`/script`, which re-hashes the file): for the pending script, and for a
-     *  script row's "Show code". Null when it can't be read, or when what came back isn't that code. */
-    async readScript(sha256, language) {
-      if (!SHA256.test(sha256)) return null;
-      try {
-        const read = await this.fetch(`/script?sha=${sha256}&language=${language}`);
-        return read && read.sha256 === sha256 && typeof read.code === "string" ? read : null;
-      } catch {
-        return null;
-      }
-    }
-    /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
-     *  the source says it was running: a call that started it, or an event that reported it running. */
-    trackJob(id, started = false) {
-      const jobId = plainId(id);
-      if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return;
-      if (started) {
-        this.started.add(jobId);
-        if (this.started.size > MOST_JOBS) this.started.delete(this.started.values().next().value);
-      }
-      void this.refreshJob(jobId);
-    }
-    /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
-     *  has none, and read the job as news. Unlike a job first met finished elsewhere, a generation the event reports
-     *  shows even when it has already ended: with tool progress off, this row is where it shows. */
-    noteGeneration(card) {
-      const id = jobOf(card);
-      if (!id) return;
-      const before = this.state.jobs[id];
-      if (before) this.set({ jobs: { ...this.state.jobs, [id]: { ...before, card } } });
-      else if (Object.keys(this.state.jobs).length >= MOST_JOBS) return;
-      else {
-        this.cards.delete(id);
-        this.cards.set(id, card);
-        if (this.cards.size > MOST_JOBS) this.cards.delete(this.cards.keys().next().value);
-      }
-      void this.refreshJob(id);
-    }
-    /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
-     *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
-     *  with it. */
-    refreshJobs(now = Date.now()) {
-      const kept = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
-      if (kept.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept) });
-      const stopped = this.state.status?.stale === true && this.state.status.running === false;
-      if (this.state.status?.stale && !stopped) return Promise.resolve();
-      return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id, stopped))).then(() => void 0);
-    }
-    refreshJob(id, stopped = false) {
-      return this.once(`job:${id}`, async () => {
-        const generation = this.generation;
-        try {
-          const read = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
-          if (generation !== this.generation) return;
-          const before = this.state.jobs[id];
-          const news = this.started.delete(id) || this.cards.has(id);
-          if (!before && finished(read) && !news) return;
-          const card = before?.card ?? this.cards.get(id);
-          this.cards.delete(id);
-          const job = stopped && !finished(read) ? { ...read, state: "interrupted" } : read;
-          const ended_at = finished(job) ? before?.ended_at ?? Date.now() : null;
-          this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at, ...card === void 0 ? {} : { card } } } });
-        } catch (error) {
-          if (generation !== this.generation || statusOf(error) !== 404) return;
-          this.cards.delete(id);
-          if (!this.state.jobs[id]) return;
-          const { [id]: _gone, ...rest } = this.state.jobs;
-          this.set({ jobs: rest });
-        }
-      });
-    }
-  };
-  function dawPartWorks(state) {
-    const setup = state.setup;
-    const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
-    if (!onlyDawPart || !state.status?.connected) return false;
-    const component = state.status.setup?.component;
-    if (!component) return true;
-    return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
-  }
-  function jobOf(result) {
-    let value = result;
-    if (typeof value === "string") {
-      try {
-        value = JSON.parse(value);
-      } catch {
-        return null;
-      }
-    }
-    return value && typeof value === "object" && "job_id" in value ? plainId(value.job_id) : null;
   }
 
   // src/dashboard/index.tsx
@@ -2462,13 +2590,26 @@
   }
   function Dashboard() {
     const t = useT();
-    const store = useMemo(() => new KumiStore((path) => SDK.fetchJSON(`${BASE}${path}`)), []);
+    const store = useMemo(
+      () => new KumiStore(
+        (path, init) => SDK.fetchJSON(`${BASE}${path}`, init && { method: init.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(init.body) })
+      ),
+      []
+    );
     const audition = useMemo(() => new Audition((id) => SDK.fetchJSON(`${BASE}/audio?id=${encodeURIComponent(id)}`)), []);
     useWant(store, "map");
     const state = useKumi(store);
     const playing = usePlaying(audition);
     const now = useNow();
     const [selected, setSelected] = useState(null);
+    const play = (id) => {
+      audition.play(id).catch((error) => {
+        const why = playFailure(error);
+        if (why !== "gone" && why !== "unplayable") return;
+        store.hide(id, why);
+        setSelected((current) => current === id ? null : current);
+      });
+    };
     useEffect(() => {
       void store.refreshStatus();
       const timer = setInterval(() => {
@@ -2530,16 +2671,21 @@
             actions: (id, sound) => {
               const request = soundRequest(id, sound.name, state.map?.revision);
               return /* @__PURE__ */ jsxs(Fragment2, { children: [
-                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : void audition.play(id).catch(() => void 0), children: playing === id ? t("map.stop") : t("map.play") }),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), children: playing === id ? t("map.stop") : t("map.play") }),
                 request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyRequest"), text: request })
               ] });
             },
             empty: state.map === null ? t("map.reading") : t("dashboard.mapEmpty"),
             found: state.found,
+            hiddenActions: /* @__PURE__ */ jsxs(Fragment2, { children: [
+              /* @__PURE__ */ jsx(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+              /* @__PURE__ */ jsx(CopyButton, { label: t("map.rescan"), text: RESCAN_REQUEST })
+            ] }),
+            leaving: state.leaving,
             map: state.map,
             onPick: (id) => {
               setSelected(id);
-              void audition.play(id).catch(() => void 0);
+              play(id);
             },
             onSelect: setSelected,
             playing,
