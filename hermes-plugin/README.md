@@ -61,6 +61,7 @@ a DAW to work in.
 | `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy, with Kumi's own preset writer and its limits (up to 512 verified controls); changes nothing in Live (Live only) | no |
 | `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | only with Ask before each change on, with every setting |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
+| `kumi_palette` | Your palette, shared with the sound map in Desktop: lists and searches it, finds what a loose palette brings in, adds, removes and excludes sounds, manages palettes, and says how to load it as a kit in your DAW; changes no project | no (its edits never run from a webhook, a one-shot query or Hermes's background work) |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
 | `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |

@@ -43,6 +43,15 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
   4. Place the one the producer picks with one `kumi_change` file step, as below.
   5. The placed sample measures as it did before. To check it in the mix, the producer exports or bounces into an approved folder, and you measure that file.
 
+## Palette
+- **The palette is the sounds the producer gathered to work with,** shared with the sound map in Desktop: what one changes, the other sees. The turn's note names it. Edit it only when the producer asks or agrees; edits change no project.
+- **"Put these in my palette":** `kumi_palette` `add` with the `sound_ids` you just found (or `artifact_ids` of Kumi results). With no palette, it makes one. Report Kumi's words ("Added 3 sounds to Drums.").
+- **"What's in my palette":** `list` (in order, with each sound's `key`), or `search` with `words`. A sound whose file isn't on this map has `sound_id: null`: name it, but don't place or measure it.
+- **"Load my palette as a kit":** `kit`, then its `say`, step by step as "Placing a sound" says for the DAW at hand. Its sounds go in its order; say how many it `left_out`.
+- **Strict or loose:** strict keeps to the palette's own sounds. When loose, `neighbours` gives what each one brings in: when you use one of those, say which and offer to add it. `strict` and `loose` switch it, when the producer asks.
+- **Other edits:** `remove` (`sound_ids` or `keys`), `exclude` (sounds it must never bring in), `move` (`key`, `to`), and `new`, `use`, `rename`, `forget` by name.
+- **Never invent ids:** sound ids belong to one map revision. Take them from this map's `kumi_sounds` or the palette's `list`, never from memory or an earlier map.
+
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
   - **Live, from a sound:**

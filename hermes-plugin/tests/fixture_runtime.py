@@ -26,6 +26,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -809,7 +810,11 @@ def library(fixture: Fixture, args: dict, host: dict) -> dict:
 def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
     """CC-23's search: the index's values and why each hit matched (the query's words, never a name's other text), and
     on a near search the seed apart and each hit's closeness. One reason here names a path, as a runtime must never:
-    the plugin's second guard drops it."""
+    the plugin's second guard drops it. A near search for a sound of a map the test published (`map/current` with its
+    points) answers that map's nearest points by distance, closest first, as the index ranks them."""
+    near = map_neighbours(fixture, args)
+    if near is not None:
+        return near
     words = str(args.get("query") or "").lower().split()
     found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)
              and float(args.get("min_seconds") or 0) <= sound["duration"] <= float(args.get("max_seconds") or 1e9)
@@ -823,6 +828,26 @@ def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
                      **({"closeness": 87} if args.get("near") else {})})
     return {"map_revision": "r1", "indexed": True, **({"near": args["near"]} if args.get("near") else {}),
             "items": hits}
+
+
+def map_neighbours(fixture: Fixture, args: dict) -> dict | None:
+    try:
+        revision = (fixture.state / "map" / "current").read_text(encoding="utf-8").strip()
+        published = json.loads((fixture.state / "map" / f"{revision}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    at = {point[0]: (point[1], point[2]) for point in published.get("points") or []}
+    seed = at.get(args.get("near"))
+    if seed is None:
+        return None
+    apart = sorted((math.dist(seed, xy), sound_id) for sound_id, xy in at.items() if sound_id != args["near"])
+    hits = []
+    for distance, sound_id in apart[:int(args.get("limit") or 20)]:
+        sound = published["sounds"][sound_id]
+        hits.append({"sound_id": sound_id, "name": sound["name"], "class": sound.get("class"),
+                     "kind": sound.get("kind"), "why": ["near the seed"],
+                     "closeness": max(0, 100 - round(distance * 100))})
+    return {"map_revision": revision, "indexed": True, "near": args["near"], "items": hits}
 
 
 def listen(fixture: Fixture, args: dict, host: dict) -> dict:

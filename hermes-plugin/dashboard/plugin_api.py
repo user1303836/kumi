@@ -1,10 +1,10 @@
 """Kumi's backend for its Desktop and web-dashboard halves (contract C4): `/api/plugins/kumi/…`.
 
 GET routes read the snapshots `kumi serve` publishes in this profile's plugin data (contract C3), re-resolved on every
-request. The few POST routes the contract names (`/map/hidden`) keep the UI's own state: they take small, bounded JSON
-bodies, never a file path, answer without one, change no project and write only under `<state>`. Nothing here starts,
-stops or talks to the runtime, the DAW or the network: a change in the DAW only ever comes from a tool call the user
-approves, which the UI asks for by putting a request into the chat.
+request. The few POST routes the contract names (`/map/hidden`, `/palette`) keep the UI's own state: they take small,
+bounded JSON bodies, never a file path, answer without one, change no project and write only under `<state>`. Nothing
+here starts, stops or talks to the runtime, the DAW or the network: a change in the DAW only ever comes from a tool
+call the user approves, which the UI asks for by putting a request into the chat.
 """
 
 from __future__ import annotations
@@ -48,9 +48,12 @@ snapshots = _load("snapshots", "snapshots.py")
 schemas = _load("schemas", "schemas.py")
 hidden = _load("hidden", "hidden.py")
 aiff = _load("aiff", "aiff.py")
+palettes = _load("palettes", "palettes.py")
 
 # The largest body `POST /map/hidden` reads: 500 ids of 128 characters with their reasons fit well inside it.
 _BODY_MAX = 256 * 1024
+# The largest body `POST /palette` reads: a gather of 10,000 current-revision ids (about 45 bytes each) fits in it.
+_PALETTE_BODY_MAX = 1024 * 1024
 
 router = APIRouter()
 
@@ -153,21 +156,25 @@ def _map_hidden(body: object) -> dict:
         raise HTTPException(status_code=500, detail="Kumi couldn't save its hidden sounds.") from None
 
 
+async def _json(request: Request, most: int) -> object:
+    """A POST's JSON body, read up to `most` bytes: 413 past it, 400 when it isn't JSON."""
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > most:
+            raise HTTPException(status_code=413, detail="That request is too big.")
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError):
+        raise HTTPException(status_code=400, detail="The body must be JSON.") from None
+
+
 @router.post("/map/hidden")
 async def map_hidden(request: Request) -> dict:
     """Hide sounds the UI can't play here (their file is gone, or the browser can't decode it) so the map leaves them
     out quietly, or show them all again. Answers `{"hidden": points of the current revision now hidden, "ignored":
     ids not taken, "seq"}`; 400 with `detail` for any other body."""
-    raw = bytearray()
-    async for chunk in request.stream():
-        raw += chunk
-        if len(raw) > _BODY_MAX:
-            raise HTTPException(status_code=413, detail="That request is too big.")
-    try:
-        body = json.loads(raw)
-    except (ValueError, RecursionError):
-        raise HTTPException(status_code=400, detail="The body must be JSON.") from None
-    return await run_in_threadpool(_map_hidden, body)
+    return await run_in_threadpool(_map_hidden, await _json(request, _BODY_MAX))
 
 
 @router.get("/sound")
@@ -196,6 +203,91 @@ def audio(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: 
         data, mime = wav, "audio/wav"
     encoded = base64.b64encode(data).decode("ascii")
     return {"id": id, "mime": mime, "bytes": len(data), "data_url": f"data:{mime};base64,{encoded}"}
+
+
+def _palette_map(state: Path) -> Any:
+    """The current map revision as the palette maps ids through it (built once per revision)."""
+    return palettes.current_map(state, snapshots.map_current(state), lambda rev: snapshots.map_revision(state, rev))
+
+
+@router.get("/palette")
+def palette() -> dict:
+    """The palette both UIs and the agent share: the current one's items in order, as current-revision sound ids (an
+    item whose file isn't on this map has none), and every palette by name. Never a path (CC-4)."""
+    state = snapshots.state_dir()
+    return palettes.view(state, _palette_map(state))
+
+
+def _strings(body: dict, field: str, most: int, *, least: int = 1, pattern: Any = None) -> list[str]:
+    """`body[field]`: a list of `least` to `most` ids, each a short string (matching `pattern` when given)."""
+    value = body.get(field, [])
+    if (not isinstance(value, list) or not least <= len(value) <= most
+            or any(not isinstance(each, str) or not 0 < len(each) <= 128 for each in value)
+            or (pattern is not None and any(not pattern.fullmatch(each) for each in value))):
+        raise palettes.Invalid(f"{field} is a list of {least} to {most:,} ids.")
+    return value
+
+
+def _whole(body: dict, field: str, low: int, high: int) -> int:
+    value = body.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise palettes.Invalid(f"{field} is a whole number from {low} to {high:,}.")
+    return value
+
+
+def _id(body: dict, field: str, pattern: Any) -> str:
+    value = body.get(field)
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise palettes.Invalid(f"{field} isn't one the palette gave: read it again.")
+    return value
+
+
+def _palette_edit(state: Path, body: Any) -> str:
+    if not isinstance(body, dict):
+        raise palettes.Invalid("The palette takes a JSON object with an action.")
+    action = body.get("action")
+    if action == "gather":
+        sound_ids = _strings(body, "sound_ids", palettes.MOST_GATHERED, least=0)
+        artifact_ids = _strings(body, "artifact_ids", palettes.MOST_ARTIFACTS, least=0)
+        if not sound_ids and not artifact_ids:
+            raise palettes.Invalid("Gather takes sound ids or artifact ids.")
+        folders = _library_folders() if artifact_ids else []
+        artifacts = [(each, snapshots.palette_artifact(state, each, folders)) for each in artifact_ids]
+        if any(name is None for _, name in artifacts):
+            raise palettes.Invalid("Kumi can't play that result here, so it can't go in the palette.")
+        return palettes.gather(state, _palette_map(state) if sound_ids else None, sound_ids, artifacts)
+    if action == "remove":
+        return palettes.remove_keys(state, _strings(body, "keys", palettes.MOST_GATHERED, pattern=palettes.ITEM_KEY))
+    if action == "move":
+        return palettes.move(state, _id(body, "key", palettes.ITEM_KEY), _whole(body, "to", 0, 1_000_000))
+    if action in ("rename", "new"):
+        return (palettes.rename if action == "rename" else palettes.new)(state, body.get("name"))
+    if action in ("use", "forget"):
+        return (palettes.use if action == "use" else palettes.forget)(state, _id(body, "id", palettes.PALETTE_ID))
+    if action == "reach":
+        return palettes.reach(state, _whole(body, "reach", 0, palettes.FARTHEST))
+    raise palettes.Invalid("action is gather, remove, move, rename, new, use, forget or reach.")
+
+
+def _palette_answer(body: object) -> dict:
+    """`POST /palette`'s work, off the event loop."""
+    state = snapshots.state_dir()
+    try:
+        said = _palette_edit(state, body)
+    except palettes.Invalid as invalid:
+        raise HTTPException(status_code=400, detail=str(invalid)) from None
+    except palettes.Busy as busy:
+        raise HTTPException(status_code=503, detail=str(busy)) from None
+    return {"said": said, "palette": palettes.view(state, _palette_map(state))}
+
+
+@router.post("/palette")
+async def palette_edit(request: Request) -> dict:
+    """One edit of the palette, from either UI: gather (current-revision sound ids, up to 10,000, and artifact ids
+    `/audio` serves, up to 64), remove (item keys), move (key, to), rename and new (name), use and forget (id), reach
+    (0 strict, 1-50 loose). Answers what it did in one line and the palette as `GET /palette` has it; 400 says why
+    an edit is refused. It changes the plugin's own file only, never a project."""
+    return await run_in_threadpool(_palette_answer, await _json(request, _PALETTE_BODY_MAX))
 
 
 @router.get("/setup")

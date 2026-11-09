@@ -193,6 +193,8 @@ def status(state: Path, now_ms: int | None = None) -> dict:
         "focus": _seq(read(state, "focus")),
         "history": _seq(read(state, "history")),
         "map": map_current(state),
+        # The plugin's own palettes file (palettes.py), which both UIs and the agent edit: 0 before the first write.
+        "palette": _seq(read(state, "palettes")) or 0,
     }
     return out
 
@@ -510,6 +512,21 @@ def artifact_file(state: Path, artifact_id: str) -> str | None:
     doesn't serve it."""
     entry = _artifacts(state).get(artifact_id)
     return _real_file(entry.get("path"), _artifact_roots(state)) if entry is not None else None
+
+
+def palette_artifact(state: Path, artifact_id: Any, library_folders: list[str] | None = None) -> str | None:
+    """The name a palette keeps for an artifact it gathers (its own `name`, else its file's stem), when it's audio
+    the media guard serves (`media`, so `/audio?id=` plays it); None for anything else, a map sound's id included."""
+    if not isinstance(artifact_id, str) or len(artifact_id) > 128:
+        return None
+    entry = _artifacts(state).get(artifact_id)
+    found = media(state, artifact_id, library_folders) if entry is not None else None
+    if found is None or not found["mime"].startswith("audio/"):
+        return None
+    name = entry.get("name")
+    if isinstance(name, str) and name.strip():
+        return " ".join(name.split())[:200]
+    return os.path.splitext(os.path.basename(found["path"]))[0]
 
 
 def _artifact_roots(state: Path) -> list[Path]:

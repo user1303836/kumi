@@ -59,11 +59,9 @@ class Routes(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_every_route_is_a_get_but_the_contracts_post_routes(self) -> None:
-        methods = {route.path: route.methods for route in self.api.router.routes}
-        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/map/hidden", "/sound", "/audio", "/setup", "/job", "/script"})
-        posts = {path for path, found in methods.items() if found == {"POST"}}
-        self.assertEqual(posts, {"/map/hidden"})
-        self.assertTrue(all(found == {"GET"} for path, found in methods.items() if path not in posts), methods)
+        methods = {(route.path, method) for route in self.api.router.routes for method in route.methods}
+        reads = {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script", "/palette"}
+        self.assertEqual(methods, {(path, "GET") for path in reads} | {("/map/hidden", "POST"), ("/palette", "POST")})
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
         self.assertTrue(self.api.status()["connected"])
@@ -347,6 +345,63 @@ class Routes(unittest.TestCase):
 
         self.assertEqual(client.post(route, json={"action": "clear"}).json(), {"hidden": 0, "ignored": 0, "seq": 2})
         self.assertEqual(client.get("/api/plugins/kumi/map").json()["hidden"], 0)
+
+    def test_the_palette_round_trips_over_http_in_sound_ids_and_never_a_path(self) -> None:
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(self.api.router, prefix="/api/plugins/kumi")
+        client = TestClient(app)
+        url = "/api/plugins/kumi/palette"
+
+        def edit(**body):
+            answer = client.post(url, json=body)
+            self.assertEqual(answer.status_code, 200, answer.text)
+            return answer.json()
+
+        def refused(body) -> str:
+            answer = client.post(url, json=body)
+            self.assertEqual(answer.status_code, 400, answer.text)
+            return answer.json()["detail"]
+
+        self.assertEqual(client.get(url).json(), {"seq": 0, "map_revision": "r7", "current": None, "palettes": []})
+        gathered = edit(action="gather", sound_ids=["s-r7-0091", "s-r7-0092", "s-r7-0001"], artifact_ids=["a-7f32"])
+        self.assertEqual(gathered["said"], "Added 4 sounds to Palette 1.")
+        current = gathered["palette"]["current"]
+        self.assertEqual((current["name"], current["reach"], current["mode"], current["excluded"]),
+                         ("Palette 1", 0, "strict", 0))
+        self.assertEqual([(i["source"], i["sound_id"], i["artifact_id"], i["group"]) for i in current["items"]],
+                         [("sound", "s-r7-0091", None, 1), ("sound", "s-r7-0092", None, 1),
+                          ("sound", "s-r7-0001", None, 0), ("artifact", None, "a-7f32", None)])
+        self.assertEqual(current["items"][3]["name"], "a-7f32-dusty")
+        self.assertEqual(refused({"action": "gather", "sound_ids": ["s-r6-0001"]}),
+                         "Those sounds aren't on the current map: read it again.")
+        self.assertIn("can't go in the palette", refused({"action": "gather", "artifact_ids": ["s-r7-0091"]}))
+        for body in ({"action": "gather"}, {"action": "gather", "sound_ids": ["x"] * 10_001}, {"action": "fly"},
+                     ["gather"], {"action": "reach", "reach": 51}, {"action": "move", "key": "it-1", "to": 0},
+                     {"action": "new", "name": "a\u2028b"}, {"action": "use", "id": "../palettes"}):
+            with self.subTest(body=str(body)[:60]):
+                self.assertEqual(len(refused(body).splitlines()), 1)
+        keys = [item["key"] for item in current["items"]]
+        self.assertEqual(edit(action="move", key=keys[2], to=0)["said"], "Moved Boom Kick 01 to place 1 in Palette 1.")
+        self.assertEqual(edit(action="reach", reach=4)["palette"]["current"]["mode"], "loose, 4 nearest")
+        self.assertEqual(edit(action="rename", name="Snares")["said"], "The palette is called Snares now.")
+        removed = edit(action="remove", keys=[keys[3]])
+        self.assertEqual([i["key"] for i in removed["palette"]["current"]["items"]], [keys[2], keys[0], keys[1]])
+        made = edit(action="new", name="Pads")["palette"]
+        self.assertEqual([(p["name"], p["items"], p["current"]) for p in made["palettes"]],
+                         [("Snares", 3, False), ("Pads", 0, True)])
+        snares = made["palettes"][0]["id"]
+        self.assertEqual(edit(action="use", id=snares)["palette"]["current"]["name"], "Snares")
+        self.assertEqual(refused({"action": "new", "name": "pads"}), "There's a palette called Pads already: use it "
+                                                                     "to work with it.")
+        forgot = edit(action="forget", id=snares)
+        self.assertEqual((forgot["said"], forgot["palette"]["current"]), ("Forgot the palette Snares and its 3 sounds.",
+                                                                          None))
+        seq = client.get(url).json()["seq"]
+        self.assertEqual((seq, client.get("/api/plugins/kumi/status").json()["revisions"]["palette"]), (8, 8))
+        self.assertNotIn(str(self.library), json.dumps(client.get(url).json()))
+        self.assertNotIn(str(self.state), json.dumps(gathered))
 
 
 if __name__ == "__main__":

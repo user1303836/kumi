@@ -175,9 +175,10 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     unattended = host.unattended()
     if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
         return block(tools.SCHEDULED), {}
-    if tool not in PASS and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
+    read = tool in PASS or palette_read(tool, args)
+    if not read and host.turns.forked(kwargs.get("session_id"), kwargs.get("turn_id")):
         return block(FORKED), {}
-    if unattended and (tool in ASKED or tool in UNASKED_WRITERS):
+    if unattended and (tool in ASKED or tool in UNASKED_WRITERS or (tool == "kumi_palette" and not read)):
         return block(UNATTENDED), {}
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
         return block(UNATTENDED_CANCEL), {}
@@ -208,6 +209,12 @@ def asks_first(host: Any, tool: str, always: bool = False) -> bool:
     return tool not in UNASKED_BY_DEFAULT or always or host.ask_before_changes()
 
 
+def palette_read(tool: str, args: dict) -> bool:
+    """A kumi_palette read (list, search, neighbours, kit): it passes like kumi_sounds, in forked turns too. Its edits
+    change no project, so they're never asked, but they still need someone in the chat."""
+    return tool == "kumi_palette" and args.get("action") in tools.PALETTE_READS
+
+
 # kumi-adv's decision: "this session" and "always" cover a kind of Kumi change within one chat, the convenience quick
 # tweaks need, never a new chat, a scheduled job or a webhook, which Hermes then asks about or refuses. So the rule key
 # ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own digest, never a
@@ -234,6 +241,8 @@ ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:")
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
     if tool in PASS:
+        return None, {}
+    if tool == "kumi_palette":  # a read, or an edit of the plugin's own file: never asked (decide blocked the rest)
         return None, {}
     if tool == "kumi_listen":
         return _listen(host, args, kwargs)

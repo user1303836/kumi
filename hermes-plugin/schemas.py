@@ -259,6 +259,33 @@ KUMI_SOUNDS = _tool(
      "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
     ("query",))
 
+PALETTE_ACTIONS = ("list", "search", "neighbours", "add", "remove", "exclude", "kit", "new", "use", "rename", "forget",
+                   "strict", "loose", "move")
+_IDS = {"type": "array", "items": {"type": "string", "maxLength": 128}, "minItems": 1}
+
+KUMI_PALETTE = _tool(
+    "kumi_palette",
+    "The producer's palette: the sounds they gathered to work with (on the sound map in Desktop, or here), which the "
+    "turn's note names. Reads: list (its sounds in order, and those it excludes); search (its sounds with every one of "
+    "words in their name, class or folder); neighbours (what a loose palette brings in: each of its sounds' nearest on "
+    "the map); kit (its sounds on this map in order, with how to load them as a drum kit in this DAW). Edits, only when "
+    "the producer asks or agrees (they change no project): add (sound_ids from kumi_sounds or list, or artifact_ids "
+    "of Kumi results; with no palette it makes one), remove (sound_ids or keys), exclude (sound_ids it must never bring "
+    "in), new and use (name), rename (the current one), forget (name), strict, loose (reach: how many nearest each "
+    "sound brings, default 5), move (key to place to, 0 first). Sound ids belong to one map revision: take them from "
+    "this map's kumi_sounds or list, never from memory. A sound whose file isn't on this map has sound_id null.",
+    {"action": {"type": "string", "enum": list(PALETTE_ACTIONS)},
+     "words": {"type": "string", "description": "search: what its sounds have in their name, class or folder."},
+     "sound_ids": {**_IDS, "maxItems": 200, "description": "add, remove, exclude: sound ids of the current map."},
+     "artifact_ids": {**_IDS, "maxItems": 64, "description": "add: ids of Kumi results (artifact_id)."},
+     "keys": {**_IDS, "maxItems": 200, "description": "remove: the items' keys, as list gives them."},
+     "key": {"type": "string", "description": "move: the item's key."},
+     "to": {"type": "integer", "minimum": 0, "description": "move: its new place, 0 first."},
+     "name": {"type": "string", "maxLength": 80, "description": "new, use, rename, forget: a palette's name."},
+     "reach": {"type": "integer", "minimum": 1, "maximum": 50, "description": "loose: each sound's nearest, default 5."},
+     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "list, search, neighbours: default 50."}},
+    ("action",))
+
 KUMI_LIBRARY = _tool(
     "kumi_library",
     "The producer's sample library: its folders and scan state (status), add a folder Kumi may read (add_folder, which "
