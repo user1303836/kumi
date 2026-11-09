@@ -1,10 +1,11 @@
 """Kumi's backend for its Desktop and web-dashboard halves (contract C4): `/api/plugins/kumi/…`.
 
 GET routes read the snapshots `kumi serve` publishes in this profile's plugin data (contract C3), re-resolved on every
-request. The few POST routes the contract names (`/map/hidden`, `/palette`) keep the UI's own state: they take small,
-bounded JSON bodies, never a file path, answer without one, change no project and write only under `<state>`. Nothing
-here starts, stops or talks to the runtime, the DAW or the network: a change in the DAW only ever comes from a tool
-call the user approves, which the UI asks for by putting a request into the chat.
+request. The few POST routes the contract names (`/map/hidden`, `/palette`, `/design`) keep the UI's own state: they
+take small, bounded JSON bodies, never a file path, answer without one, change no project and write only under
+`<state>`. Nothing here starts, stops or talks to the runtime the chat holds, the DAW or the network: `/design` runs the
+pinned runtime's one-shot `kumi design` on files the media guard approved, which needs no DAW or session. A change in
+the DAW only ever comes from a tool call the user approves, which the UI asks for by putting a request into the chat.
 """
 
 from __future__ import annotations
@@ -49,8 +50,10 @@ schemas = _load("schemas", "schemas.py")
 hidden = _load("hidden", "hidden.py")
 aiff = _load("aiff", "aiff.py")
 palettes = _load("palettes", "palettes.py")
+designs = _load("designs", "designs.py")
 
-# The largest body `POST /map/hidden` reads: 500 ids of 128 characters with their reasons fit well inside it.
+# The largest body `POST /map/hidden` and `POST /design` read: 500 ids of 128 characters with their reasons fit well
+# inside it, and a design's sixteen sounds with their names much more so.
 _BODY_MAX = 256 * 1024
 # The largest body `POST /palette` reads: a gather of 10,000 current-revision ids (about 45 bytes each) fits in it.
 _PALETTE_BODY_MAX = 1024 * 1024
@@ -175,6 +178,62 @@ async def map_hidden(request: Request) -> dict:
     out quietly, or show them all again. Answers `{"hidden": points of the current revision now hidden, "ignored":
     ids not taken, "seq"}`; 400 with `detail` for any other body."""
     return await run_in_threadpool(_map_hidden, await _json(request, _BODY_MAX))
+
+
+def _design(body: object) -> dict:
+    """`POST /design`'s work, off the event loop: the request checked, each sound resolved to its approved file by
+    the media guard (`snapshots.media`), the pinned runtime's `kumi design` run, the result listed and answered."""
+    try:
+        request = designs.parse(body)
+    except designs.Invalid as invalid:
+        raise HTTPException(status_code=400, detail=str(invalid)) from None
+    state = snapshots.state_dir()
+    try:
+        setup = _load("setup", "setup.py")
+        kumi, ffmpeg = designs.runtime(state.parent, setup.pinned_version(), setup.host_target())
+    except designs.Unavailable as unavailable:
+        raise HTTPException(status_code=503, detail=str(unavailable)) from None
+    revision = snapshots.map_current(state)
+    current = snapshots.map_revision(state, revision) if revision else None
+    sounds = current.get("sounds") if isinstance(current, dict) and isinstance(current.get("sounds"), dict) else {}
+    folders = _library_folders()
+
+    def sound(sound_id: str) -> tuple[dict | None, str | None] | None:
+        entry = sounds.get(sound_id)
+        if not isinstance(entry, dict):
+            return None
+        name = entry.get("name") if isinstance(entry.get("name"), str) else None
+        return snapshots.media(state, sound_id, folders, current=current), name
+
+    def artifact(artifact_id: str) -> dict | None:
+        return None if artifact_id in sounds else snapshots.media(state, artifact_id, folders)
+
+    try:
+        return designs.render(state, request, designs.resolve(request, revision, sound, artifact), kumi, ffmpeg)
+    except designs.Invalid as invalid:
+        raise HTTPException(status_code=400, detail=str(invalid)) from None
+    except designs.Busy as busy:
+        raise HTTPException(status_code=503, detail=str(busy)) from None
+    except designs.TimedOut as late:
+        raise HTTPException(status_code=504, detail=str(late)) from None
+    except OSError:
+        _log.warning("Kumi couldn't make or keep a sound", exc_info=True)
+        raise HTTPException(status_code=500, detail="Kumi couldn't make or keep that sound.") from None
+
+
+@router.post("/design")
+async def design(request: Request) -> dict:
+    """Make a new sound from two to sixteen of the map's sounds or earlier results (by id): cross, fuse or stack, with
+    a seed (contract: the engine's interface). Answers the engine's answer with the result's `artifact_id`, which
+    `/audio` serves; 400 with `detail` for a request the engine refuses, 503 while Kumi isn't set up or is already
+    making two, 504 past two minutes."""
+    return await run_in_threadpool(_design, await _json(request, _BODY_MAX))
+
+
+@router.get("/designs")
+def designs_made() -> dict:
+    """The sounds made here, newest first (at most 50): the Make panel's variations survive a reload."""
+    return {"designs": designs.history(snapshots.state_dir())}
 
 
 @router.get("/sound")

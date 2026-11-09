@@ -60,8 +60,10 @@ class Routes(unittest.TestCase):
 
     def test_every_route_is_a_get_but_the_contracts_post_routes(self) -> None:
         methods = {(route.path, method) for route in self.api.router.routes for method in route.methods}
-        reads = {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script", "/palette"}
-        self.assertEqual(methods, {(path, "GET") for path in reads} | {("/map/hidden", "POST"), ("/palette", "POST")})
+        reads = {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script", "/palette",
+                 "/designs"}
+        posts = {"/map/hidden", "/palette", "/design"}
+        self.assertEqual(methods, {(path, "GET") for path in reads} | {(path, "POST") for path in posts})
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
         self.assertTrue(self.api.status()["connected"])

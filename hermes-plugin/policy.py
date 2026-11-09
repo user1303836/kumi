@@ -73,7 +73,7 @@ UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", 
                       "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable"}
 _ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
-UNASKED_WRITERS = {"kumi_preset_build"}
+UNASKED_WRITERS = {"kumi_preset_build", "kumi_design"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
 UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
@@ -273,6 +273,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _judged(host, tool, args), {}
     if tool == "kumi_wavetable":
         return _wavetable(host, args), {}
+    if tool == "kumi_design":  # a new sound kept as Kumi's private copy: nothing in the DAW changes
+        return None, {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 

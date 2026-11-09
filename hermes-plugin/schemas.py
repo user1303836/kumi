@@ -490,6 +490,43 @@ KUMI_PRESET_BUILD = _tool(
     ("plugin", "name", "edits"))
 
 
+_DESIGN_SOURCE = {
+    "type": "object",
+    "description": ("A sound: {\"sound_id\", \"map_revision\"} from kumi_sounds, or {\"artifact_id\"} of an earlier Kumi "
+                    "result (a design, a listen, a generated sound); \"name\" is what the recipe calls it."),
+    "properties": {"sound_id": {"type": "string"}, "map_revision": {"type": "string"}, "artifact_id": {"type": "string"},
+                   "name": {"type": "string", "maxLength": 120}},
+    "additionalProperties": False,
+}
+
+KUMI_DESIGN = _tool(
+    "kumi_design",
+    "Make a new sound from 2-16 of the producer's sounds (stack: 2-8), kept as Kumi's private artifact; nothing in the "
+    "DAW changes (skill kumi:sounds, Making sounds). cross blend: one body morphed from all of them; cross attack: one's "
+    "transient (options.attack_from) onto the blend of the rest; cross resonate: half ring through the other half "
+    "(options.split, the exciters); cross modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other; "
+    "fuse texture: a loopable bed that moves between them (options.seconds); fuse loop: their hits as a 1-4 bar beat "
+    "(options.bpm, options.bars); fuse smear: a 4-16x granular stretch with a long tail (options.stretch); stack: "
+    "printed as one hit. A seed picks every choice: a reroll is the same call with another seed (or none), the same "
+    "seed the same sound. Answers the artifact_id (which kumi_listen, kumi_change and a later kumi_design take), the "
+    "seed, the length and a one-line recipe to tell the producer.",
+    {"op": {"type": "string", "enum": ["cross", "fuse", "stack"]},
+     "mode": {"type": "string", "enum": ["blend", "attack", "resonate", "modulate", "texture", "loop", "smear"],
+              "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack: none."},
+     "sources": {"type": "array", "minItems": 2, "maxItems": 16, "items": _DESIGN_SOURCE},
+     "seed": {"type": "integer", "minimum": 0, "maximum": 2**53 - 1,
+              "description": "The variation; leave it out for a new one."},
+     "options": {"type": "object", "additionalProperties": False, "properties": {
+         "seconds": {"type": "number", "minimum": 0.1, "maximum": 30},
+         "bpm": {"type": "number", "minimum": 40, "maximum": 240},
+         "bars": {"type": "integer", "minimum": 1, "maximum": 4},
+         "attack_from": {"type": "integer", "minimum": 0, "maximum": 15},
+         "split": {"type": "array", "maxItems": 15, "items": {"type": "integer", "minimum": 0, "maximum": 15}},
+         "depth": {"type": "number", "minimum": 0, "maximum": 1},
+         "stretch": {"type": "number", "minimum": 4, "maximum": 16}}}},
+    ("op", "sources"))
+
+
 # CC-26: a verified preset from kumi_preset_build into Live's User Library (serve's preset op, preview then place).
 KUMI_PRESET = _tool(
     "kumi_preset",

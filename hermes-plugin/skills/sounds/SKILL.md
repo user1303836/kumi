@@ -1,6 +1,6 @@
 ---
 name: sounds
-description: Find, audition and place sounds from the producer's own sample folders with Kumi's sound map, or a file another Hermes plugin made (ElevenLabs) - approved folders only, revision-scoped sound ids, placing as a typed change.
+description: Find, audition, make and place sounds from the producer's own sample folders with Kumi's sound map, or a file another Hermes plugin made (ElevenLabs) - approved folders only, revision-scoped sound ids, new sounds crossed, fused or stacked from them, placing as a typed change.
 ---
 # The producer's sounds, with Kumi
 
@@ -51,6 +51,20 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 - **Strict or loose:** strict keeps to the palette's own sounds. When loose, `neighbours` gives what each one brings in: when you use one of those, say which and offer to add it. `strict` and `loose` switch it, when the producer asks.
 - **Other edits:** `remove` (`sound_ids` or `keys`), `exclude` (sounds it must never bring in), `move` (`key`, `to`), and `new`, `use`, `rename`, `forget` by name.
 - **Never invent ids:** sound ids belong to one map revision. Take them from this map's `kumi_sounds` or the palette's `list`, never from memory or an earlier map.
+
+## Making sounds
+- **`kumi_design` makes a new sound from 2 to 16 sounds** (stack: 2 to 8): map sounds as `{"sound_id", "map_revision"}`, or Kumi results and sounds made on the map as `{"artifact_id"}`, never a path. It changes no project: the result is Kumi's own copy, an `artifact_id`. Make one when the producer asks for a new sound out of theirs.
+- **Which way:**
+  - **cross** gives one new hit from all of them: `blend` when they want one body morphed from all ("a kick between these three"); `attack` for one sound's hit on the others' body (`options.attack_from`: which one gives the hit); `resonate` when some should ring through the others, like a clap struck inside a bell (`options.split`: the ones that strike); `modulate` for something stranger, the sounds bending and filtering each other.
+  - **fuse** gives something longer: `texture` for a bed or atmosphere (`options.seconds`); `loop` for a beat from their hits (`options.bars` 1-4, `options.bpm`: the project's tempo from `kumi_observe` when there is one); `smear` for a long, washed-out stretch (`options.stretch` 4-16).
+  - **stack** layers 2 to 8 into one hit, lined up and balanced: "this snare with that clap".
+  - `options.depth` (0-1) sets how far it goes; leave options out for Kumi to choose.
+- **Say what came back:** its `recipe` line, in Kumi's words, and its length. Never describe how it sounds beyond the recipe and what `kumi_listen` measures.
+- **Reroll:** the same call with another seed, or none, is another take of the same recipe; the same `seed` makes the same sound again. Keep the `seed` of each take, so "go back to the second one" is that take's id, or its seed again.
+- **Hear it:** `kumi_listen` with `{"artifact_id"}` measures it and returns its `MEDIA:` line for a messaging chat.
+- **Keep it:** `kumi_palette` `add` with its `artifact_ids`, when the producer asks. Results kept in a palette stay; Kumi otherwise keeps the newest sounds made on the map.
+- **Place it** like any sound (below), with `{"artifact_id"}` as the source of the file step: a pad, a Simpler, a track.
+- **It never runs from a webhook, a one-shot query, a scheduled job or Hermes's background work:** say so, and ask the producer to ask in a chat.
 
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.

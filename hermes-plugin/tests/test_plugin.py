@@ -246,14 +246,16 @@ class Tools(unittest.TestCase):
         self.host.runtimes.stop_all()
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
-        self.assertEqual(started["argv"][-2:], ["--library-root", support.DRUMS])
+        at = started["argv"].index("--library-root")
+        self.assertEqual(started["argv"][at:at + 2], ["--library-root", support.DRUMS])
 
-    def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio(self):
+    def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio_and_kumis_own_designs(self):
         generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
         host, _, data = support.host(self, media_roots=[generated])
         support.call(host, "kumi_connect", {}, session_id="s1")
         started = json.loads((data / "state" / "fixture-start.json").read_text(encoding="utf-8"))["argv"]
-        self.assertEqual([started[i + 1] for i, arg in enumerate(started) if arg == "--media-root"], [generated])
+        self.assertEqual([started[i + 1] for i, arg in enumerate(started) if arg == "--media-root"],
+                         [generated, str(data / "state" / "designs")])
 
     def test_hermess_generated_audio_folder_is_this_profiles_and_kumi_never_makes_it(self):
         try:

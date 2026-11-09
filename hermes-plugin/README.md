@@ -65,6 +65,7 @@ a DAW to work in.
 | `kumi_wavetable` | Writes a new wavetable `.wav` for Serum 2 or Vital into the plug-in's wavetable folder or `User Library/Kumi/Wavetables`; it stays after an undo (Live only) | only with Ask before each change on |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_palette` | Your palette, shared with the sound map in Desktop: lists and searches it, finds what a loose palette brings in, adds, removes and excludes sounds, manages palettes, and says how to load it as a kit in your DAW; changes no project | no (its edits never run from a webhook, a one-shot query or Hermes's background work) |
+| `kumi_design` | Makes a new sound from 2 to 16 of yours or of Kumi's results: crosses them (blend, attack, resonate, modulate), fuses them (texture, loop, smear) or stacks them into one hit; each seed is a variation, so a reroll is another seed. Kept as Kumi's private copy; changes no project | no (it never runs from a webhook, a one-shot query or Hermes's background work) |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
 | `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |
@@ -150,7 +151,8 @@ settings:
 
 Kumi keeps what it writes for Hermes in this profile's `plugin-data/kumi/` folder: the runtime, the library index and
 map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
-changed), the code of each script it ran (`state/scripts`), your palettes (`state/palettes.json`), the sounds hidden
+changed), the code of each script it ran (`state/scripts`), your palettes (`state/palettes.json`), the sounds made on
+the map (`state/designs`, listed in `state/designs.json`: the 200 newest, and any older one a palette keeps), the sounds hidden
 from the map (`state/map-hidden.json`) and job records. Outside it, setup writes only Kumi's
 part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
