@@ -110,7 +110,9 @@ function Waveform({ id, color, audio }: { id: string | null; color: string; audi
     element.height = height * ratio
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, width, height)
-    context.fillStyle = color
+    // A canvas takes no CSS variables, and a theme colour is one (`var(--ui-accent)`): the canvas wears the colour as
+    // its own CSS colour, and the computed value is what it draws with.
+    context.fillStyle = getComputedStyle(element).color
     const bars = peaks ?? new Array<number>(BARS).fill(0.08)
     const step = width / bars.length
     bars.forEach((peak, bar) => {
@@ -119,7 +121,7 @@ function Waveform({ id, color, audio }: { id: string | null; color: string; audi
       context.fillRect(bar * step, (height - tall) / 2, Math.max(1, step - 0.6), tall)
     })
   }, [peaks, color])
-  return <canvas aria-hidden ref={canvas} style={{ width: 44, height: 16, flex: 'none' }} />
+  return <canvas aria-hidden ref={canvas} style={{ width: 44, height: 16, flex: 'none', color }} />
 }
 
 function Chip({
@@ -437,7 +439,8 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip
               audio={audio}
-              color={colorOf(item.group)}
+              // A sound Kumi made has no group on the map: it wears the accent, so its waveform shows.
+              color={item.source === 'artifact' ? T.accent : colorOf(item.group)}
               dragging={dragging}
               index={index}
               item={item}

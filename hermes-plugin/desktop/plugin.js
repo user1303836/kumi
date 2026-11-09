@@ -5336,7 +5336,7 @@ function Waveform({ id, color, audio }) {
     element.height = height * ratio;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
-    context.fillStyle = color;
+    context.fillStyle = getComputedStyle(element).color;
     const bars = peaks ?? new Array(BARS).fill(0.08);
     const step2 = width / bars.length;
     bars.forEach((peak, bar) => {
@@ -5345,7 +5345,7 @@ function Waveform({ id, color, audio }) {
       context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.6), tall);
     });
   }, [peaks, color]);
-  return /* @__PURE__ */ jsx13("canvas", { "aria-hidden": true, ref: canvas, style: { width: 44, height: 16, flex: "none" } });
+  return /* @__PURE__ */ jsx13("canvas", { "aria-hidden": true, ref: canvas, style: { width: 44, height: 16, flex: "none", color } });
 }
 function Chip2({
   item,
@@ -5616,7 +5616,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
         Chip2,
         {
           audio,
-          color: colorOf2(item.group),
+          color: item.source === "artifact" ? T.accent : colorOf2(item.group),
           dragging,
           index,
           item,
