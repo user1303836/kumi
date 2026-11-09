@@ -1,16 +1,16 @@
 // The sound-map workspace: Kumi's map of the approved sample folders, with the palette under it. A sound plays here,
-// in the window, as the pointer rests on it or on a click (a read, nothing reaches the DAW); a box (Shift held, or
-// Select on) picks sounds, and Add to palette gathers them into the palette the agent shares. "Use" puts a request
-// naming a sound into the chat for the producer to finish, "Use on pad…" one naming a drum pad too, and the palette's
-// "Use as kit…" one to load it as a kit. "Make…" (the picks' or the palette's) opens the Make panel, which makes new
-// sounds from them. A sound that can't play here leaves the map quietly (never a notice per sound), and one line under
-// the map counts them.
+// in the window, as the pointer comes onto it or on a click (a read, nothing reaches the DAW); a box picks sounds
+// (Shift adds another), and Add to palette gathers them into the palette the agent shares. "Use" puts a request naming
+// a sound into the chat for the producer to finish, "Use on pad…" one naming a drum pad too, "More like this" (or "More
+// like these" for the picks) one asking for the sounds nearest them, and the palette's "Use as kit…" one to load it as a
+// kit. "Make…" (the picks' or the palette's) opens the Make panel, which makes new sounds from them. A sound that can't
+// play here leaves the map quietly (never a notice per sound), and one line under the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { liveNote, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useRequest } from '../shared/design.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel } from '../shared/MakePanel.tsx'
@@ -98,7 +98,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <MapCanvas
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)
-            const near = nearRequest(id, sound.name, map?.revision)
+            const near = nearRequest([{ id, name: sound.name }], map?.revision)
             return (
               <>
                 <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))} title={t('map.playTitle')}>
@@ -162,21 +162,32 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             if (id !== padsFor) setPadsFor(null)
           }}
           picked={palette.picked}
-          pickedActions={ids => (
-            <>
-              <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
-                {t('dock.addPicked', ids.length)}
-              </TextButton>
-              {ids.length > 1 && (
-                <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
-                  {t('make.open')}
+          pickedActions={ids => {
+            const near = ids.length > 1 ? nearRequest(ids.map(id => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null
+            return (
+              <>
+                <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
+                  {t('dock.addPicked', ids.length)}
                 </TextButton>
-              )}
-              <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
-                {t('dock.clearPicks')}
-              </TextButton>
-            </>
-          )}
+                {ids.length > 1 && (
+                  <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
+                    {t('make.open')}
+                  </TextButton>
+                )}
+                {near && (
+                  <TextButton
+                    onClick={() => void ask(ctx, near, { send: false, session })}
+                    title={ids.length > MOST_NEAR ? t('map.moreLikeTheseFirst', MOST_NEAR, ids.length) : t('map.moreLikeTheseTitle')}
+                  >
+                    {t('map.moreLikeThese', Math.min(ids.length, MOST_NEAR))}
+                  </TextButton>
+                )}
+                <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
+                  {t('dock.clearPicks', ids.length)}
+                </TextButton>
+              </>
+            )
+          }}
           playing={playing}
           selected={selected}
           flying={palette.flying}
@@ -206,6 +217,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             onClose={palette.closeMake}
             onKeep={palette.keep}
             onMake={request => store.design(request)}
+            onSources={palette.makeFrom}
             onPlay={id => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))}
             onStop={() => audition.stop()}
             playing={playing}

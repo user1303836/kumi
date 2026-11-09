@@ -1,18 +1,19 @@
 // The sound map, drawn on a canvas: each sound of the library where Kumi's layout put it, coloured by its group.
-// Wheel zooms, a drag pans, a click picks the sound under the pointer. Search and the legend dim what they leave out;
-// sounds the agent just found get a ring. What a search or a find picks out is also listed by name, for the keyboard.
-// Like native Kumi's map: a sound plays as the pointer rests on it (`onHover`), a box drawn with Shift held (or with
-// Select on) picks the sounds in it, Command or Ctrl with a click picks one more, and the palette's sounds are marked.
-// On the keyboard (`mapKey`), the arrows move to the nearest sound that way, Shift+←/→ step through every sound in turn,
-// Shift+↑/↓ zoom and Home shows the whole map; each sound reached is named to a screen reader, and Tab goes on to its
-// Play and Use….
+// A drag with the left button draws a box that picks the sounds in it (Shift adds another box to the picks, Command
+// or Ctrl with a click picks or unpicks one); the middle button pans, as does the left with Space held or the hand
+// tool on. A mouse's wheel zooms; a trackpad's two-finger scroll pans and its pinch zooms. A click picks the sound
+// under the pointer. Search and the legend dim what they leave out; sounds the agent just found get a ring. What a
+// search or a find picks out is also listed by name, for the keyboard. Like native Kumi's map: a sound plays as the
+// pointer comes onto it (`onHover`), and the palette's sounds are marked. On the keyboard (`mapKey`), the arrows move
+// to the nearest sound that way, Shift+←/→ step through every sound in turn, Shift+↑/↓ zoom and Home shows the whole
+// map; each sound reached is named to a screen reader, and Tab goes on to its Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`, what the picks can do from `pickedActions`.
 import { CANVAS, T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from './ui.tsx'
@@ -24,8 +25,9 @@ export interface MapCanvasProps {
   selected: string | null
   /** A click, or a found list's row: pick that sound and play it. */
   onPick: (id: string) => void
-  /** The keyboard moved to a sound: picked, not played (its Play is the next tab stop). */
-  onSelect: (id: string) => void
+  /** The keyboard moved to a sound: picked, not played (its Play is the next tab stop). Null: a click on empty map let
+   *  go of it. */
+  onSelect: (id: string | null) => void
   actions?: (id: string, sound: MapSound) => ReactNode
   empty: ReactNode
   /** Sounds that couldn't play here (the store's `leaving`): they fade off the map at once, and can't be picked. */
@@ -50,6 +52,8 @@ export interface MapCanvasProps {
   onTiles?: (on: boolean) => void
   /** Sounds just gathered into the palette, which fly from where they are into the dock under the map. */
   flying?: { ids: string[]; at: number } | null
+  /** What the wheel does: `auto` tells a mouse's wheel (zoom) from a trackpad's scroll (pan). */
+  wheel?: WheelMode
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -106,7 +110,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto' }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -119,10 +123,44 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const [searchFor, setSearchFor] = useState('')
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
-  // A drag: a pan, or with Shift held (or Select on) a box that picks what's in it.
-  const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport; box: boolean; add: boolean } | null>(null)
+  // A drag: with the left button a box that picks what's in it (`add`: Shift, Command or Ctrl held, so it adds to the
+  // picks); a pan with the middle button, with the left while Space is held or the hand tool is on, or on a map that
+  // picks nothing.
+  const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport; box: boolean; add: boolean; button: number } | null>(null)
   const [box, setBox] = useState<[number, number, number, number] | null>(null)
-  const [selecting, setSelecting] = useState(false)
+  const [handTool, setHandTool] = useState(false)
+  const [grabbing, setGrabbing] = useState(false)
+  // Space held over the map pans with the left button, as in drawing apps. Desktop takes Space for its composer before
+  // the map sees it, so this works in the dashboard; Desktop has the hand tool and the middle button.
+  const over = useRef(false)
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const space = useRef(false)
+  useEffect(() => {
+    const hold = (held: boolean) => {
+      if (space.current === held) return
+      space.current = held
+      setSpaceHeld(held)
+    }
+    const down = (event: globalThis.KeyboardEvent) => {
+      if (event.code !== 'Space' || event.defaultPrevented || !over.current) return
+      const target = event.target as HTMLElement | null
+      if (target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return
+      event.preventDefault()
+      hold(true)
+    }
+    const up = (event: globalThis.KeyboardEvent) => {
+      if (event.code === 'Space') hold(false)
+    }
+    const blur = () => hold(false)
+    window.addEventListener('keydown', down, true)
+    window.addEventListener('keyup', up, true)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down, true)
+      window.removeEventListener('keyup', up, true)
+      window.removeEventListener('blur', blur)
+    }
+  }, [])
   // The sound the pointer last rested on, so `onHover` hears only changes.
   const rested = useRef<string | null>(null)
   const rest = (id: string | null) => {
@@ -246,8 +284,14 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }, [searched, foundIds, indexOf, visible])
   // The picks in the map's own order, as a gather sends them.
   const pickedIds = useMemo(() => (picked && picked.size > 0 ? model.points.filter(point => picked.has(point.id)).map(point => point.id) : []), [model, picked])
-  // CC-23: a near search names its seed (the top-level `near`) from this map; one the map doesn't list heads nothing.
-  const nearName = !searched && foundIds && found?.near && model.sounds[found.near] ? clean(model.sounds[found.near].name ?? '', 60) : ''
+  // CC-23: a near search names its seeds (the top-level `near`) from this map, the first by name and how many more;
+  // seeds the map doesn't list head nothing.
+  const nearName = useMemo(() => {
+    const seeds = !searched && foundIds ? (found?.near ?? []).filter(id => model.sounds[id]) : []
+    if (seeds.length === 0) return ''
+    const first = clean(model.sounds[seeds[0]].name ?? '', 60)
+    return seeds.length === 1 ? t('map.near', first) : t('map.nearMany', first, seeds.length - 1)
+  }, [searched, foundIds, found, model, t])
 
   // The canvas paints the theme's colours itself, and neither host tells a plugin its theme changed (Desktop's
   // useTheme is newer than some Desktops; the dashboard has none): it looks at them once a second, and a light or dark
@@ -288,19 +332,32 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (framed) setView(framed)
   }, [foundIds, model, size.width, size.height])
 
-  // Wheel zoom (a native listener: React's wheel handler can't stop the page from scrolling).
+  // The wheel (a native listener: React's wheel handler can't stop the page from scrolling). A pinch, which comes as a
+  // wheel with Ctrl held, zooms; so does a mouse's wheel; a trackpad's two-finger scroll pans (`wheelPans`).
+  const wheelMode = useRef(wheel)
+  wheelMode.current = wheel
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const wheel = (event: WheelEvent) => {
+    const memory: WheelMemory = { pans: null, at: 0 }
+    const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      const rect = canvas.getBoundingClientRect()
-      const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0025))
       const base = nextView.current ?? viewRef.current
-      if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top))
+      if (!base) return
+      const legacy = event as WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number }
+      const pans = !event.ctrlKey && (wheelMode.current === 'auto' ? wheelPans(legacy, memory, performance.now()) : wheelMode.current === 'pan')
+      // Lines and pages (Firefox's mouse wheel) count as 16 and 400 pixels.
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1
+      if (pans) {
+        queueView({ ...base, dx: base.dx - event.deltaX * unit, dy: base.dy - event.deltaY * unit })
+        return
+      }
+      const rect = canvas.getBoundingClientRect()
+      const factor = Math.exp(-event.deltaY * unit * (event.ctrlKey ? 0.01 : 0.0025))
+      queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top))
     }
-    canvas.addEventListener('wheel', wheel, { passive: false })
-    return () => canvas.removeEventListener('wheel', wheel)
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
   }, [hasPoints])
 
   // The sound under the pointer, for its glow: a move over the same sound draws nothing new.
@@ -542,22 +599,27 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // How near the pointer must be to a sound to reach it: a dot's few pixels, or most of a tile.
   const reachPx = (base: number): number => (tiles && layout && view ? Math.max(base, ((mapSize * view.scale) / layout.side) * 0.62) : base)
 
-  // A press starts a pan, or with Shift held (or Select on) a box; a press with Command or Ctrl that doesn't move picks
-  // or unpicks the sound under it.
+  // A press with the left button starts a box (Shift, Command or Ctrl held: one more box, added to the picks); with the
+  // middle button, with Space held or the hand tool on, a pan. A left press that doesn't move picks the sound under it:
+  // Command or Ctrl picks or unpicks it, Shift adds it to the picks, and a plain click picks and plays it.
   const press = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (!view) return
+    if (!view || (event.button !== 0 && event.button !== 1)) return
+    // The middle button scrolls the page on some systems (autoscroll): not over the map.
+    if (event.button === 1) event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
     const [x, y] = at(event)
-    const boxing = Boolean(onPicked) && (event.shiftKey || selecting)
-    drag.current = { x, y, moved: false, view, box: boxing, add: event.metaKey || event.ctrlKey }
+    const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool
+    drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button }
     rest(null)
     setHover(null)
     if (boxing) setBox([x, y, x, y])
+    else setGrabbing(true)
   }
   const release = (event: PointerEvent<HTMLCanvasElement>) => {
     const held = drag.current
     drag.current = null
     setBox(null)
+    setGrabbing(false)
     if (!held || !view) return
     const [x, y] = at(event)
     if (held.box && held.moved) {
@@ -565,14 +627,31 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       onPicked?.(inside, held.add ? 'add' : 'replace')
       return
     }
-    if (held.moved) return
+    if (held.moved || held.button !== 0) return
     const index = pick(active, view, mapSize, x, y, reachPx(10), visible)
-    if (index < 0) return
-    if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([model.points[index].id], 'toggle')
-    else onPick(model.points[index].id)
+    const adding = event.shiftKey || event.metaKey || event.ctrlKey
+    if (index < 0) {
+      // A plain click on empty map lets go of everything: the picks, and the sound picked last.
+      if (adding) return
+      if (pickedIds.length > 0) onPicked?.([], 'replace')
+      if (selected !== null) onSelect(null)
+      return
+    }
+    const id = model.points[index].id
+    if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], 'toggle')
+    else if (onPicked && event.shiftKey) onPicked([id], 'add')
+    else onPick(id)
   }
 
   const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
+    // Escape lets go of the picks. Only while there are some: otherwise it stays Desktop's (it stops a running turn),
+    // which stands down for a key the map already took.
+    if (event.key === 'Escape' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
+      event.preventDefault()
+      onPicked([], 'replace')
+      setSaid(t('dock.cleared'))
+      return
+    }
     const key = mapKey(event)
     if (!view || !key) return
     event.preventDefault()
@@ -638,15 +717,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             {countWords}
           </span>
         </div>
-        {onPicked && searched !== null && matches.length > 0 && (
-          // Native's `a`: every sound the search keeps.
-          <TextButton onClick={() => onPicked(matches, 'replace')} title={t('dock.pickAllTitle')}>
+        {onPicked && matches.length > 0 && (
+          // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
+          <TextButton onClick={() => onPicked(matches, 'replace')} title={searched !== null ? t('dock.pickAllTitle') : t('dock.pickFoundTitle')}>
             {t('dock.pickAll', matches.length)}
           </TextButton>
         )}
         {onPicked && (
-          <TextButton onClick={() => setSelecting(!selecting)} pressed={selecting} title={t('dock.selectTitle')}>
-            {t('dock.select')}
+          <TextButton onClick={() => setHandTool(!handTool)} pressed={handTool} title={t('map.handTitle')}>
+            {t('map.hand')}
           </TextButton>
         )}
         {onTiles && (
@@ -683,9 +762,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         })}
       </div>
       {matches.length > 0 && (
-        <div aria-label={searched ? t('map.matches') : nearName ? t('map.near', nearName) : t('map.found')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
-          {/* CC-23: a near search's neighbours, under the seed's name from this map (the seed itself isn't listed). */}
-          {nearName && <span style={{ ...S.muted, padding: '0 6px' }}>{t('map.near', nearName)}</span>}
+        <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
+          {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
+          {nearName && <span style={{ ...S.muted, padding: '0 6px' }}>{nearName}</span>}
           {matches.slice(0, MATCHES_LISTED).map(id => {
             const sound = model.sounds[id]
             const indexed = indexedValues(sound, t)
@@ -747,16 +826,33 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           onPointerCancel={() => {
             drag.current = null
             setBox(null)
+            setGrabbing(false)
+          }}
+          onPointerEnter={() => {
+            over.current = true
           }}
           onPointerLeave={() => {
+            over.current = false
             setHover(null)
             rest(null)
+          }}
+          // The middle button's own press would start the page's autoscroll on some systems.
+          onMouseDown={event => {
+            if (event.button === 1) event.preventDefault()
           }}
           onDoubleClick={() => setView(fitView(size.width, size.height))}
           role="application"
           tabIndex={0}
           // The box clips what's outside it: the focus ring sits inside the canvas's edge.
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', outlineOffset: -3, cursor: selecting || box ? 'crosshair' : hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            outlineOffset: -3,
+            cursor: grabbing ? 'grabbing' : spaceHeld || handTool || !onPicked ? 'grab' : box ? 'crosshair' : hover ? 'pointer' : 'default',
+            touchAction: 'none'
+          }}
         />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
           // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).

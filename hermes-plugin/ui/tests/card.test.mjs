@@ -449,16 +449,18 @@ test('what the agent found, or a search, is also listed by name above the map, f
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
   assert.ok(!draw(null).includes('Sounds Kumi found'))
   // CC-23: each found hit with the map's indexed values and what Kumi said of it; a near search heads the list with
-  // its seed, named from the map. Closeness is relative to this map, never a percentage.
+  // its seeds, named from the map. Closeness is relative to this map, never a percentage.
   const indexed = { ...map, sounds: { ...map.sounds, [ids[0]]: { ...map.sounds[ids[0]], bpm: 124, key: 'A minor' }, [ids[1]]: { ...map.sounds[ids[1]], note: 'D2' } } }
-  const nearFind = { revision: 'r7', ids: ids.slice(0, 2), near: 's-r7-0099', matches: { [ids[0]]: { why: ['measured: darker than most'], closeness: 87 }, [ids[1]]: { why: [] } } }
+  const nearFind = { revision: 'r7', ids: ids.slice(0, 2), near: ['s-r7-0099'], matches: { [ids[0]]: { why: ['measured: darker than most'], closeness: 87 }, [ids[1]]: { why: [] } } }
   const near = renderToStaticMarkup(createElement(MapCanvas, { map: indexed, found: nearFind, playing: null, selected: null, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
   for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), `${english('map.closeness', '87')} · measured: darker than most`]) {
     assert.ok(near.includes(text), `${text} in ${near}`)
   }
   assert.ok(!rows(near).includes('%'), rows(near))
+  // "More like these": several seeds, the first named and the rest counted.
+  assert.ok(draw({ ...nearFind, near: ['s-r7-0099', ids[7]] }).includes(english('map.nearMany', 'Kick 1.wav', 1)))
   // The same hits found without a near search say their reasons alone; a seed the map doesn't list heads nothing.
-  const plain = draw({ ...nearFind, near: 's-gone' })
+  const plain = draw({ ...nearFind, near: ['s-gone'] })
   assert.ok(plain.includes('aria-label="Sounds Kumi found"') && plain.includes('measured: darker than most') && !plain.includes('closeness'), plain)
 })
 

@@ -1,16 +1,18 @@
-// The Make panel: a new sound from the picked sounds or the palette, by Kumi's sound-design engine. A card per way of
-// making it (cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack), a few options the card
-// takes (the rest come from the seed), and the results as playable waveforms: Reroll makes the same take again with
-// another seed and keeps every variation, Keep puts one in the palette (its waveform flies into the dock), Use puts a
-// request for it in the chat. Making a sound changes no project, so it runs at once (`POST /design`). Both UI halves
-// use it; what Use does comes from `use`. Everything it draws is its own: it reads only its own elements and the
-// dock's, through refs, never the app's markup (catalog rule 8).
+// The Make panel: a new sound from the picked sounds or the palette, by Kumi's sound-design engine. Tabs for the way of
+// making it (Cross: blend, attack, resonate, modulate; Fuse: texture, smear; Loop: a beat or a melody; Stack), the
+// mode's own choices (the rest come from the seed), the steer every way takes (kept per mode), and the results as
+// playable waveforms: Reroll makes the same take again with another seed and keeps every variation, Keep puts one in
+// the palette (its waveform flies into the dock), Use puts a request for it in the chat, and chosen results become the
+// sounds to make from next (generation after generation; Back returns to the last ones). Making a sound changes no
+// project, so it runs at once (`POST /design`). Both UI halves use it; what Use does comes from `use`. Everything it
+// draws is its own: it reads only its own elements and the dock's, through refs, never the app's markup (catalog rule 8).
 import { T } from '@kumi/theme'
 import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { CARDS, cardNote, type DesignCard, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, mostFor, RANGES, requestFor, requestOf, reroll, resultName, takeKey } from './design.ts'
-import { clean, num, seconds } from './format.ts'
+import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, type DesignTab, requestFor, requestOf, reroll, resultName, sourceOfResult, stagesOf, type Steer, TABS, takeKey } from './design.ts'
+import { clean, seconds } from './format.ts'
+import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
 import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
 
@@ -38,6 +40,8 @@ export interface MakePanelProps {
   inline?: boolean
   /** The palette dock (its `landing`), where a kept sound's waveform flies to. */
   dock?: RefObject<HTMLElement | null>
+  /** Make from other sounds (chosen results, or back to the last ones): the panel's `sources` become these. */
+  onSources?: (sources: DesignSource[]) => void
 }
 
 /** A kept sound's flight: from its waveform's box to the dock's, as the viewport saw them when Keep was pressed, and
@@ -102,9 +106,11 @@ function Glyph({ card, size = 20 }: { card: string; size?: number }) {
   )
 }
 
-/** Each op's picture on its tab: two sounds becoming one, a long wave, and layers. */
-const OP_GLYPH = { cross: 'blend', fuse: 'smear', stack: 'stack' } as const
-const OPS = ['cross', 'fuse', 'stack'] as const
+/** Each tab's picture: two sounds becoming one, a long wave, a loop, and layers. */
+const TAB_GLYPH: Record<DesignTab, string> = { cross: 'blend', fuse: 'smear', loop: 'loop', stack: 'stack' }
+/** The sources drawn as chips: every source goes in, but a pick of thousands draws a few dozen, then says how many
+ *  more. */
+const SOURCE_CHIPS = 48
 
 /** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
  *  shrinking as it goes, while the palette's answer brings the chip in (it pops in as it lands). The panel draws it,
@@ -222,41 +228,24 @@ function Wave({ peaks, playing, duration }: { peaks: number[]; playing: boolean;
   )
 }
 
-/** A slider for one option, with "Auto" (the seed picks it) until it's moved. */
-function OptionSlider({ name, label, value, onChange }: { name: Exclude<keyof DesignOptions, 'split' | 'attack_from'>; label: (value: number) => string; value: number | undefined; onChange: (value: number | undefined) => void }) {
+/** A modulate result's stages, as its recipe names them, in a chain: how the sounds were modulated, always in view. */
+function Stages({ stages }: { stages: string[] }) {
   const t = useT()
-  const range = RANGES[name]
-  const shown = value ?? (range.min + range.max) / 2
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 150, flex: '1 1 150px' }}>
-      <span style={{ ...S.row, gap: 6, fontSize: 11.5, color: T.secondary }}>
-        <span style={{ flex: 1 }}>{value === undefined ? t(`make.options.${name}`) : label(value)}</span>
-        <button
-          aria-pressed={value === undefined}
-          className={FOCUSABLE}
-          onClick={event => {
-            event.preventDefault()
-            onChange(value === undefined ? shown : undefined)
-          }}
-          title={t('make.autoTitle')}
-          type="button"
-          style={{ font: 'inherit', fontSize: 10.5, padding: '0 6px', borderRadius: 8, border: `1px solid ${value === undefined ? T.accent : T.border}`, background: 'transparent', color: value === undefined ? T.accent : T.faint, cursor: 'pointer' }}
-        >
-          {t('make.auto')}
-        </button>
-      </span>
-      <input
-        aria-label={t(`make.options.${name}`)}
-        className={FOCUSABLE}
-        max={range.max}
-        min={range.min}
-        onChange={event => onChange(Number(event.target.value))}
-        step={range.step}
-        style={{ accentColor: T.accent, opacity: value === undefined ? 0.45 : 1 }}
-        type="range"
-        value={shown}
-      />
-    </label>
+    <span aria-label={t('make.stages')} role="list" style={{ ...S.row, flexWrap: 'wrap', gap: 4 }}>
+      {stages.map((stage, index) => (
+        <span key={index} role="listitem" style={{ ...S.row, gap: 4 }}>
+          {index > 0 && (
+            <span aria-hidden style={{ color: T.faint, fontSize: 11 }}>
+              →
+            </span>
+          )}
+          <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }}>
+            {clean(stage, 80)}
+          </span>
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -268,12 +257,18 @@ interface Take {
   request: DesignRequest
 }
 
-export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }: MakePanelProps) {
+export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock, onSources }: MakePanelProps) {
   const t = useT()
   const [cardKey, setCardKey] = useState('blend')
-  // The mode each op had last, so going back to Cross finds Attack where it was left.
-  const [lastMode, setLastMode] = useState<Record<(typeof OPS)[number], string>>({ cross: 'blend', fuse: 'texture', stack: 'stack' })
-  const [options, setOptions] = useState<DesignOptions>(() => (typeof tempo === 'number' && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {}))
+  // The mode each tab had last, so going back to Cross finds Attack where it was left.
+  const [lastMode, setLastMode] = useState<Record<DesignTab, string>>({ cross: 'blend', fuse: 'texture', loop: 'loop', stack: 'stack' })
+  const [options, setOptions] = useState<DesignOptions>({})
+  // The steer, kept per mode: Blend's stays Blend's when the producer tries Resonate and comes back.
+  const [steers, setSteers] = useState<Record<string, Steer>>({})
+  const [steerOpen, setSteerOpen] = useState(false)
+  // Results chosen to make from next, in the order they were chosen; and the sounds made from before, for Back.
+  const [chosen, setChosen] = useState<string[]>([])
+  const [trail, setTrail] = useState<DesignSource[][]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The requests this window sent, by take: a reroll repeats them exactly (their options too).
@@ -285,11 +280,25 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const [arrived, setArrived] = useState<string | null>(null)
   // Each shown result's card, by its sound's id: where a new one scrolls to, and where a kept one flies from.
   const cards = useRef(new Map<string, HTMLDivElement>())
+  // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
+  // ancestor too, the pane the map sits in among them.
+  const list = useRef<HTMLDivElement | null>(null)
+  const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start') => {
+    const box = list.current
+    if (!box || !element) return
+    const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()]
+    let top = box.scrollTop
+    if (where === 'start') top = 0
+    else if (inner.top < outer.top) top += inner.top - outer.top - 8
+    else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8
+    else return
+    box.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }
   useEffect(() => {
     if (!arrived) return
-    cards.current.get(arrived)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    reveal(cards.current.get(arrived), 'nearest')
     setArrived(null)
-  }, [arrived, results])
+  }, [arrived, results]) // eslint-disable-line react-hooks/exhaustive-deps
   const [flights, setFlights] = useState<Flight[]>([])
   const flightKey = useRef(0)
   /** Keep's flight from the card's waveform into the dock; none for a system that asks for less motion, or with no
@@ -307,9 +316,11 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     return () => cancelAnimationFrame(frame)
   }, [])
   const card = CARDS.find(entry => entry.key === cardKey) ?? CARDS[0]
-  const note = cardNote(card, sources.length)
-  const refused = note?.key === 'make.needTwo'
-  const used = sources.slice(0, mostFor(card))
+  const note = cardNote(sources.length)
+  const refused = note !== null
+  // A loop starts at the DAW's tempo (A6), the engine's 120 with none.
+  const dawTempo = typeof tempo === 'number' && tempo >= 40 && tempo <= 240 ? Math.round(tempo) : DEFAULT_BPM
+  const steer = steers[card.key] ?? {}
 
   // The results as takes, newest take first: a reroll joins its take.
   const takes = useMemo(() => {
@@ -322,6 +333,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     }
     return [...byKey.values()].reverse()
   }, [results])
+  const byId = useMemo(() => new Map((results ?? []).map(result => [result.artifact_id, result])), [results])
+  const chosenResults = chosen.flatMap(id => (byId.has(id) ? [byId.get(id) as DesignResult] : []))
 
   const make = async (request: DesignRequest, label: string) => {
     setBusy(label)
@@ -343,57 +356,33 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     // older backend with no sound design (404) and a failure with no words get the panel's own.
     setError(answer.status === 404 ? t('make.missing') : [400, 503, 504].includes(answer.status) && answer.error ? answer.error : t('make.failed', answer.error || String(answer.status)))
   }
+  /** The panel's sounds become `next`; the ones it had wait for Back. */
+  const makeFrom = (next: DesignSource[]) => {
+    if (!onSources || next.length === 0) return
+    setTrail(current => [...current, sources].slice(-8))
+    setChosen([])
+    onSources(next)
+    reveal(list.current, 'start')
+  }
 
-  const optionRow = (entry: DesignCard): ReactNode[] =>
-    entry.options.map(name => {
-      if (name === 'attack_from') {
-        return (
-          <label key={name} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 150, flex: '1 1 150px', fontSize: 11.5, color: T.secondary }}>
-            {t('make.options.attack_from')}
-            <select
-              className={FOCUSABLE}
-              onChange={event => setOptions(current => ({ ...current, attack_from: event.target.value === '' ? undefined : Number(event.target.value) }))}
-              style={{ font: 'inherit', fontSize: 12, padding: '1px 4px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
-              value={options.attack_from ?? ''}
-            >
-              <option value="">{t('make.auto')}</option>
-              {used.map((source, index) => (
-                <option key={`${index}`} value={index}>
-                  {clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )
-      }
-      if (name === 'split') return null
-      const labels: Record<string, (value: number) => string> = {
-        seconds: value => t('make.optionValues.seconds', seconds(value)),
-        bpm: value => t('make.optionValues.bpm', num(value, 0)),
-        bars: value => t('make.optionValues.bars', value),
-        depth: value => t('make.optionValues.depth', Math.round(value * 100)),
-        stretch: value => t('make.optionValues.stretch', value)
-      }
-      return <OptionSlider key={name} label={labels[name]} name={name} onChange={next => setOptions(current => ({ ...current, [name]: next }))} value={options[name]} />
-    })
-
-  // The way to make it, in two steps that take little room beside the chat: the op as three tabs, then its modes as
-  // pills, and a line saying what the chosen one does.
+  // The way to make it, in two steps that take little room beside the chat: the tab, then its modes as pills, and a
+  // line saying what the chosen one does.
   const tint = `color-mix(in srgb, ${T.accent} 16%, transparent)`
+  const modes = CARDS.filter(entry => entry.tab === card.tab)
   const chooser = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      <div aria-label={t('make.way')} role="radiogroup" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', border: `1px solid ${T.border}`, borderRadius: 8, overflow: 'hidden' }}>
-        {OPS.map((op, index) => {
-          const chosen = card.op === op
+      <div aria-label={t('make.way')} role="radiogroup" style={{ display: 'grid', gridTemplateColumns: `repeat(${TABS.length}, 1fr)`, border: `1px solid ${T.border}`, borderRadius: 8, overflow: 'hidden' }}>
+        {TABS.map((tab, index) => {
+          const picked = card.tab === tab
           return (
             <button
-              aria-checked={chosen}
+              aria-checked={picked}
               className={FOCUSABLE}
               disabled={refused}
-              key={op}
-              onClick={() => setCardKey(lastMode[op])}
+              key={tab}
+              onClick={() => setCardKey(lastMode[tab])}
               role="radio"
-              title={t(`make.opHints.${op}`)}
+              title={t(`make.opHints.${tab}`)}
               type="button"
               style={{
                 display: 'flex',
@@ -403,35 +392,35 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                 minWidth: 0,
                 font: 'inherit',
                 fontSize: 12.5,
-                fontWeight: chosen ? 650 : 500,
+                fontWeight: picked ? 650 : 500,
                 padding: '6px 4px',
                 border: 'none',
                 borderLeft: index > 0 ? `1px solid ${T.border}` : 'none',
-                background: chosen ? tint : 'transparent',
-                color: refused ? T.faint : chosen ? T.accent : T.secondary,
+                background: picked ? tint : 'transparent',
+                color: refused ? T.faint : picked ? T.accent : T.secondary,
                 cursor: refused ? 'default' : 'pointer',
                 transition: 'background-color 140ms, color 140ms'
               }}
             >
-              <Glyph card={OP_GLYPH[op]} size={14} />
-              <span style={S.ellipsis}>{t(`make.ops.${op}`)}</span>
+              <Glyph card={TAB_GLYPH[tab]} size={14} />
+              <span style={S.ellipsis}>{t(`make.ops.${tab}`)}</span>
             </button>
           )
         })}
       </div>
-      {card.op !== 'stack' && (
-        <div aria-label={t(`make.ops.${card.op}`)} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
-          {CARDS.filter(entry => entry.op === card.op).map(entry => {
-            const chosen = entry.key === card.key
+      {modes.length > 1 && (
+        <div aria-label={t(`make.ops.${card.tab}`)} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
+          {modes.map(entry => {
+            const picked = entry.key === card.key
             return (
               <button
-                aria-checked={chosen}
+                aria-checked={picked}
                 className={FOCUSABLE}
                 disabled={refused}
                 key={entry.key}
                 onClick={() => {
                   setCardKey(entry.key)
-                  setLastMode(current => ({ ...current, [entry.op]: entry.key }))
+                  setLastMode(current => ({ ...current, [entry.tab]: entry.key }))
                 }}
                 role="radio"
                 title={t(`make.cards.${entry.key}.hint`)}
@@ -441,13 +430,13 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   gap: 5,
                   font: 'inherit',
                   fontSize: 12,
-                  fontWeight: chosen ? 600 : 500,
+                  fontWeight: picked ? 600 : 500,
                   padding: '3px 10px 3px 7px',
                   borderRadius: 14,
-                  border: `1px solid ${chosen ? T.accent : T.border}`,
-                  background: chosen ? tint : 'transparent',
-                  boxShadow: chosen ? `0 4px 14px -8px ${T.accent}` : 'none',
-                  color: refused ? T.faint : chosen ? T.accent : T.secondary,
+                  border: `1px solid ${picked ? T.accent : T.border}`,
+                  background: picked ? tint : 'transparent',
+                  boxShadow: picked ? `0 4px 14px -8px ${T.accent}` : 'none',
+                  color: refused ? T.faint : picked ? T.accent : T.secondary,
                   cursor: refused ? 'default' : 'pointer',
                   transition: 'border-color 140ms, background-color 140ms, color 140ms, box-shadow 200ms'
                 }}
@@ -485,29 +474,53 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         <span style={{ fontSize: 13.5, fontWeight: 650 }}>{t('make.title')}</span>
         <span style={S.faint}>{t('make.from', sources.length)}</span>
         <span style={{ flex: 1 }} />
+        {trail.length > 0 && onSources && (
+          <TextButton
+            onClick={() => {
+              const back = trail[trail.length - 1]
+              setTrail(current => current.slice(0, -1))
+              setChosen([])
+              onSources(back)
+            }}
+            title={t('make.backTitle', trail[trail.length - 1].length)}
+          >
+            <span aria-hidden>‹ </span>
+            {t('make.back')}
+          </TextButton>
+        )}
         <TextButton label={t('make.close')} onClick={onClose} title={t('make.close')}>
           ×
         </TextButton>
       </div>
-      <div style={{ overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* The sounds that go in, on one line that scrolls; how many more were picked than the card takes. A row that
-            scrolls may shrink to nothing in this column once results fill it, so it keeps its own height. */}
+      {/* Positioned, so the screen-reader-only words inside (absolutely placed) scroll and clip with the list instead
+          of hanging below the pane, which gave the pane room to scroll. */}
+      <div ref={list} style={{ position: 'relative', overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* The sounds that go in (all of them), on one line that scrolls: the first ones as chips (a sound Kumi made
+            marked as one), then how many more. A row that scrolls may shrink to nothing in this column once results
+            fill it, so it keeps its own height. */}
         <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
-          {used.map((source, index) => (
-            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${T.border}`, color: T.secondary, maxWidth: 160 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
+          {sources.slice(0, SOURCE_CHIPS).map((source, index) => (
+            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }}>
+              {source.artifact_id ? (
+                <span aria-label={t('make.made')} role="img" style={{ color: T.accent, fontSize: 10, flex: 'none' }}>
+                  ✦
+                </span>
+              ) : (
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
+              )}
               <span style={S.ellipsis}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}</span>
             </span>
           ))}
-          {sources.length > used.length && <span style={{ ...S.faint, flex: 'none' }}>+{sources.length - used.length}</span>}
+          {sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
         </div>
         {chooser}
-        {card.options.length > 0 && <div style={{ ...S.row, flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>{optionRow(card)}</div>}
+        {card.key === 'loop' ? <LoopSection onChange={setOptions} options={options} tempo={dawTempo} /> : <CardOptions card={card} onChange={setOptions} options={options} sources={sources} />}
+        <SteerSection onChange={next => setSteers(current => ({ ...current, [card.key]: next }))} onToggle={() => setSteerOpen(!steerOpen)} open={steerOpen} steer={steer} />
         <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
           <button
             className={FOCUSABLE}
             disabled={refused || busy !== null}
-            onClick={() => void make(requestFor(card, sources, options), 'make')}
+            onClick={() => void make(requestFor(card, sources, { ...options, ...(card.key === 'loop' ? { bpm: options.bpm ?? dawTempo } : {}), steer }), 'make')}
             title={t('make.makeTitle', t(`make.cards.${card.key}.title`))}
             type="button"
             style={{
@@ -527,7 +540,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
             {busy === 'make' ? t('make.making') : `${t('make.make')} · ${t(`make.cards.${card.key}.title`)}`}
           </button>
           {busy === 'make' && <span aria-hidden className="kumi-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${T.accent}`, borderRightColor: 'transparent' }} />}
-          {note && <span style={S.faint}>{note.key === 'make.needTwo' ? t(note.key, note.least) : t(note.key, note.most, note.of)}</span>}
+          {note && <span style={S.faint}>{t(note.key, note.least)}</span>}
           <span aria-live="polite" style={error ? { ...S.faint, color: T.warn, flex: '1 1 14rem' } : S.hidden}>
             {error ?? ''}
           </span>
@@ -539,6 +552,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               const result = take.results[at]
               const isPlaying = playing === result.artifact_id
               const inPalette = kept.has(result.artifact_id)
+              const isChosen = chosen.includes(result.artifact_id)
+              const stages = result.mode === 'modulate' ? stagesOf(result.recipe) : []
               return (
                 <div
                   className={fresh.has(result.artifact_id) ? 'kumi-pop' : undefined}
@@ -548,12 +563,55 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   }}
                   key={take.key}
                   role="listitem"
-                  style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 10px', borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : 'transparent', transition: 'border-color 160ms, background-color 160ms' }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 5,
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
+                    background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : 'transparent',
+                    boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : 'none',
+                    transition: 'border-color 160ms, background-color 160ms, box-shadow 160ms'
+                  }}
                 >
-                  {/* Two lines of the recipe; all of it on hover. */}
-                  <span style={{ ...S.text, fontSize: 12, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={result.recipe}>
-                    {clean(result.recipe, 220) || resultName(result)}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    {/* Two lines of the recipe, all of it on hover; a modulate result names its stages in full below. */}
+                    <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...(stages.length ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }) }} title={result.recipe}>
+                      {stages.length ? clean(result.recipe.split(':', 1)[0], 80) : clean(result.recipe, 220) || resultName(result)}
+                    </span>
+                    {onSources && (
+                      <button
+                        aria-label={t('make.choose')}
+                        aria-pressed={isChosen}
+                        className={FOCUSABLE}
+                        onClick={() => setChosen(current => (current.includes(result.artifact_id) ? current.filter(id => id !== result.artifact_id) : [...current, result.artifact_id]))}
+                        title={t('make.chooseTitle')}
+                        type="button"
+                        style={{
+                          flex: 'none',
+                          width: 20,
+                          height: 20,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0,
+                          borderRadius: '50%',
+                          border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
+                          background: isChosen ? T.accent : 'transparent',
+                          color: isChosen ? T.raised : 'transparent',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transform: isChosen ? 'scale(1.08)' : 'none',
+                          transition: 'background-color 140ms, border-color 140ms, transform 160ms'
+                        }}
+                      >
+                        ✓
+                      </button>
+                    )}
+                  </div>
+                  {stages.length > 0 && <Stages stages={stages} />}
                   {/* A round play button by the waveform; the waveform plays on a click too. */}
                   <div style={{ ...S.row, gap: 8 }}>
                     <button
@@ -586,8 +644,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
                     <span style={S.faint}>
-                      {t(`make.ops.${result.op}`)}
-                      {result.mode ? ` · ${t(`make.cards.${result.mode}.title`)}` : ''} · {seconds(result.duration)}
+                      {t(`make.ops.${result.mode === 'loop' ? 'loop' : result.op}`)}
+                      {result.mode && result.mode !== 'loop' ? ` · ${t(`make.cards.${result.mode}.title`)}` : ''} · {seconds(result.duration)}
                     </span>
                     <span style={{ ...S.faint, fontSize: 10.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} title={t('make.seedTitle')}>
                       #{result.seed}
@@ -637,6 +695,29 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         )}
         {takes.length === 0 && results !== null && <span style={S.faint}>{t('make.none')}</span>}
       </div>
+      {/* The results chosen to make from next, and what to do with them: under the list, in view while it scrolls. */}
+      {onSources && chosenResults.length > 0 && (
+        <div
+          aria-label={t('make.chosen', chosenResults.length)}
+          className="kumi-pop"
+          role="group"
+          style={{ ...S.row, flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderTop: `1px solid ${T.border}`, background: `color-mix(in srgb, ${T.accent} 7%, ${T.raised})`, borderRadius: '0 0 12px 12px' }}
+        >
+          <span style={{ ...S.text, fontWeight: 600, flex: '1 1 6rem' }}>{t('make.chosen', chosenResults.length)}</span>
+          <TextButton onClick={() => makeFrom(chosenResults.map(sourceOfResult))} strong title={t('make.fromTheseTitle')}>
+            {t('make.fromThese')}
+          </TextButton>
+          <TextButton
+            onClick={() => makeFrom([...sources, ...chosenResults.filter(result => !sources.some(source => source.artifact_id === result.artifact_id)).map(sourceOfResult)])}
+            title={t('make.addToSoundsTitle')}
+          >
+            {t('make.addToSounds')}
+          </TextButton>
+          <TextButton onClick={() => setChosen([])} title={t('make.clearChosenTitle')}>
+            {t('make.clearChosen')}
+          </TextButton>
+        </div>
+      )}
       {flights.map(flight => (
         <Flying flight={flight} key={flight.key} onDone={() => setFlights(current => current.filter(other => other.key !== flight.key))} />
       ))}

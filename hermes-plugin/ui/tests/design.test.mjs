@@ -1,6 +1,6 @@
-// node --test: the Make panel's requests and results: what a card sends (its own options, in range, at most the sounds
-// it takes), a reroll, the takes results group into, the answers it draws, the sources the picks and the palette
-// become, Use's request, and the store's design calls.
+// node --test: the Make panel's requests and results: what a card sends (its own options, in range, and every sound
+// picked), a reroll, the takes results group into, the answers it draws, the sources the picks and the palette become,
+// Use's request, and the store's design calls.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
@@ -25,25 +25,57 @@ const answer = (extra = {}) => ({
   ...extra
 })
 
-test('a card sends only its own options, each inside the engine’s range, and at most the sounds it takes', () => {
+test('a card sends only its own options, each inside the engine’s range, and every sound picked', () => {
   const options = { bpm: 300, bars: 2, depth: 1.5, seconds: 4, stretch: 2, attack_from: 5 }
-  assert.deepEqual(design.requestFor(card('loop'), sounds(3), options), { op: 'fuse', mode: 'loop', sources: sounds(3), options: { bpm: 240, bars: 2 } })
+  assert.deepEqual(design.requestFor(card('loop'), sounds(3), options), { op: 'fuse', mode: 'loop', sources: sounds(3), options: { bpm: 240, bars: 2, loop: { style: 'beat' } } })
   assert.deepEqual(design.requestFor(card('smear'), sounds(3), options).options, { stretch: 4, depth: 1 })
   // attack_from names one of the sounds sent, or it's left to the seed.
   assert.equal(design.requestFor(card('attack'), sounds(3), options).options, undefined)
   assert.deepEqual(design.requestFor(card('attack'), sounds(3), { attack_from: 2 }).options, { attack_from: 2 })
-  // Stack takes no mode and at most eight sounds; the rest take sixteen: the first ones go.
+  // Stack takes no mode; no card has an upper limit (the engine reads each sound shorter when there are many).
   const stacked = design.requestFor(card('stack'), sounds(10), options, 7)
-  assert.deepEqual([stacked.mode, stacked.sources.length, stacked.seed, stacked.options], [undefined, 8, 7, undefined])
-  assert.deepEqual(design.requestFor(card('blend'), sounds(20)).sources, sounds(16))
+  assert.deepEqual([stacked.mode, stacked.sources.length, stacked.seed, stacked.options], [undefined, 10, 7, undefined])
+  assert.deepEqual(design.requestFor(card('blend'), sounds(500)).sources, sounds(500))
 })
 
-test('too few sounds make nothing; more than a card takes, the panel says only the first ones go in', () => {
-  assert.deepEqual(design.cardNote(card('blend'), 1), { key: 'make.needTwo', least: 2 })
-  assert.equal(design.cardNote(card('stack'), 8), null)
-  assert.deepEqual(design.cardNote(card('stack'), 9), { key: 'make.firstOnly', most: 8, of: 9 })
-  assert.equal(design.cardNote(card('texture'), 16), null)
-  assert.deepEqual(design.cardNote(card('texture'), 40), { key: 'make.firstOnly', most: 16, of: 40 })
+test('fewer than two sounds make nothing; any number from two makes one', () => {
+  assert.deepEqual(design.cardNote(1), { key: 'make.needTwo', least: 2 })
+  assert.equal(design.cardNote(2), null)
+  assert.equal(design.cardNote(5000), null)
+})
+
+test('a request carries only the choices set, each one the engine takes; an untouched steer is no steer at all', () => {
+  // Resonate and modulate: their own choices only, known values, in range; the kinds in the engine's order.
+  const resonate = design.requestFor(card('resonate'), sounds(4), { resonate: { pairing: 'bright-dark', ring: 'loud', decay: 3 }, modulate: { stages: 3 } })
+  assert.deepEqual(resonate.options, { resonate: { pairing: 'bright-dark', decay: 1 } })
+  const modulate = design.requestFor(card('modulate'), sounds(4), { modulate: { carrier: 'darkest', kinds: ['vocode', 'am', 'nope'], stages: 9.6, retrigger: 0.25 } })
+  assert.deepEqual(modulate.options, { modulate: { carrier: 'darkest', kinds: ['am', 'vocode'], stages: 8, retrigger: 0.25 } })
+  // A loop names its style; the other style's controls stay out (a beat's voices with a melody, a key with a beat).
+  const loop = { style: 'melody', key: 'F#', scale: 'dorian', kick: 0.9, lean: -0.5, swing: 2, meter: [7, 8], grid: 3 }
+  assert.deepEqual(design.requestFor(card('loop'), sounds(4), { loop }).options.loop, { style: 'melody', meter: [7, 8], grid: 3, key: 'F#', scale: 'dorian', swing: 0.75 })
+  assert.deepEqual(design.requestFor(card('loop'), sounds(4), { loop: { ...loop, style: 'beat', meter: [7, 5] } }).options.loop, { style: 'beat', grid: 3, lean: -0.5, kick: 0.9, swing: 0.75 })
+  // Steer: what changes nothing is left out (an empty steer renders the same bytes as none); ranges come low to high.
+  assert.equal(design.requestFor(card('blend'), sounds(2), { steer: {} }).options, undefined)
+  assert.equal(design.requestFor(card('stack'), sounds(2), { steer: { bright: 0, pitch: [0, 0], reverse: 0 } }).options, undefined)
+  assert.deepEqual(design.requestFor(card('stack'), sounds(2), { steer: { bright: -0.4, pitch: [7, -30], delay: [0, 120], level: 0 } }).options, { steer: { bright: -0.4, pitch: [-24, 7], delay: [0, 120] } })
+  assert.equal(design.steerCount({ bright: -0.4, pitch: [0, 0], space: 0.3 }), 2)
+  // Grow: exactly the two sounds, a point inside 0–1, the path's seed kept for every point along it.
+  const [from, to] = sounds(2)
+  assert.deepEqual(design.growRequest(from, to, 1.4, 77, { punch: 0.5 }), { op: 'grow', sources: [from, to], seed: 77, options: { at: 1, steer: { punch: 0.5 } } })
+})
+
+test('a surprise moves three to five steer controls a good way, inside their ranges; a modulate recipe names its stages', () => {
+  let state = 7
+  const random = () => ((state = (state * 1103515245 + 12345) % 2147483648) / 2147483648)
+  for (let round = 0; round < 50; round++) {
+    const rolled = design.rollSteer(random)
+    const kept = design.steerOf(rolled) ?? {}
+    assert.ok(Object.keys(rolled).length >= 3 && Object.keys(rolled).length <= 5, JSON.stringify(rolled))
+    // Everything it moved is something the engine takes as is.
+    assert.deepEqual(kept, Object.fromEntries(Object.entries(rolled).filter(([key]) => key in kept)), JSON.stringify(rolled))
+  }
+  assert.deepEqual(design.stagesOf('Modulate of 3: ring by Kick 02 → low-pass filter follows Snare 4 → FM by Vox; retrigger 0.6'), ['ring by Kick 02', 'low-pass filter follows Snare 4', 'FM by Vox'])
+  assert.deepEqual(design.stagesOf('Blend of 2: 55% Kick, 45% Tom'), [])
 })
 
 test('a reroll is the same take with a new seed: its options stay, and its result joins the take', () => {
@@ -82,9 +114,9 @@ test('the picks and the palette become sounds by id, with names safe to quote; a
   assert.deepEqual(design.sourcesOf(items, null), [{ artifact_id: 'a-dAAAAAAAAAAAAAAAAAAAAAA', name: 'Blend of 2' }])
 })
 
-test('Use names the made sound by its artifact id for the chat, and nothing for an id Kumi never made', () => {
+test("Use is the made sound's reference, its name and artifact id, and nothing for an id Kumi never made", () => {
   const made = design.resultOf(answer())
-  assert.equal(design.useRequest(made), 'Put “Blend of 2, seed 482113” (artifact a-dAAAAAAAAAAAAAAAAAAAAAA) on a pad or track in my project')
+  assert.equal(design.useRequest(made), '“Blend of 2, seed 482113” (artifact a-dAAAAAAAAAAAAAAAAAAAAAA)')
   // Named as the palette names it once kept: the recipe's lead up to `:` or `;`, and the seed.
   assert.equal(design.resultName({ ...made, recipe: 'Modulate Vox; read by Kick (PM 24 smp)', seed: 7 }), 'Modulate Vox, seed 7')
   assert.equal(design.resultName({ ...made, recipe: '', mode: 'smear', seed: 3 }), 'Smear, seed 3')
