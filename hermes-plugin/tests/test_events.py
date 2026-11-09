@@ -44,6 +44,11 @@ class Announce(unittest.TestCase):
         self.assertEqual((near["near"], near["matches"]), ("s-r1-2", [{"sound_id": "s-r1-1", "why": why,
                                                                        "closeness": 87}]), "the seed apart")
         self.sent.clear()
+        self.ended("kumi_sounds", self.handled("kumi_sounds", {"query": "", "near": ["s-r1-2", "s-r1-3"]}))
+        [(_, several)] = self.sent
+        self.assertEqual(several["near"], ["s-r1-2", "s-r1-3"], "more like these: the picks as given")
+        self.assertNotIn("s-r1-2", several["sound_ids"], "the picks apart")
+        self.sent.clear()
         # (reasons past serve's bounds, 4 of at most 60 characters: they go first, the ids and closeness stay)
         hits = [{"sound_id": f"s-r1-{n}", "why": ["x" * 2000] * 4, "closeness": 50} for n in range(250)]
         self.ended("kumi_sounds", json.dumps({"map_revision": "r1", "indexed": True, "items": hits}))

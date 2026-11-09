@@ -241,7 +241,8 @@ SOUND_CLASSES = ("kick", "snare", "clap", "hat", "cymbal", "tom", "perc", "drums
 
 KUMI_SOUNDS = _tool(
     "kumi_sounds",
-    "Search the producer's sound map (samples in the folders they approved) by words, or find sounds near one sound. "
+    "Search the producer's sound map (samples in the folders they approved) by words, or find sounds near one sound or "
+    "several (more like these: each one contributes, and the ones given are left out). "
     "Style words match the indexed names and folders; descriptors such as dark or punchy rank by what Kumi measured. "
     "Filters, by the values Kumi indexed at the last scan: bpm (also matches half or double time), key (also its "
     "relative major or minor, or a one-shot's root note), min_seconds and max_seconds, and class (what the sound is), "
@@ -249,7 +250,9 @@ KUMI_SOUNDS = _tool(
     "matched; a near search adds closeness, 0 to 100 and relative to this map, never a percentage. Returns sound ids "
     "for the map's current revision; pass them to kumi_listen, or place one with a kumi_change file step, its file "
     "field {sound_id, map_revision}. Reads only.",
-    {"query": {"type": "string"}, "near": {"type": "string", "description": "A sound id to find similar sounds to."},
+    {"query": {"type": "string"},
+     "near": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 16}],
+              "description": "A sound id, or a list of 1 to 16, to find similar sounds to."},
      "kind": {"type": "string", "description": "loop or one-shot, or a kind of sound such as kick or pad."},
      "class": {"type": "string", "enum": list(SOUND_CLASSES), "description": "What the sound is, as Kumi indexed it."},
      "bpm": {"type": "number", "exclusiveMinimum": 0, "description": "About this tempo, or half or double it."},
