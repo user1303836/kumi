@@ -96,6 +96,11 @@ pub struct MapHover {
     pub load: Rc<dyn Fn() -> bool>,
     pub save: Rc<dyn Fn(bool)>,
 }
+/// The places of the sounds dragged on the map, read as it opens and written as one is moved or put back.
+pub struct MapMoves {
+    pub load: Rc<dyn Fn() -> super::map::Moves>,
+    pub save: Rc<dyn Fn(&super::map::Moves)>,
+}
 pub struct TuiOptions {
     /// The session, which the app reaches only through its protocol.
     pub session: Rc<dyn SessionHandle>,
@@ -137,6 +142,8 @@ pub struct TuiOptions {
     pub design_dir: Option<std::path::PathBuf>,
     /// Whether the map's points play as the mouse comes to them, remembered; they do when None.
     pub map_hover: Option<MapHover>,
+    /// Where the sounds dragged on the map are kept; none keeps them for the session only.
+    pub map_moves: Option<MapMoves>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
     pub whats_new: Option<crate::whats_new::News>,
     /// How this terminal shows Kumi's status and notifications; read from the environment when None.
@@ -254,6 +261,7 @@ impl TuiOptions {
             player: None,
             design_dir: None,
             map_hover: None,
+            map_moves: None,
             whats_new: None,
             terminal: None,
             full_repaint: None,

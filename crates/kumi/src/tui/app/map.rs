@@ -46,8 +46,10 @@ impl TuiApp {
         }
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
         let (gathers, designs) = (self.can().palette, self.designs());
+        let moves = self.0.options.map_moves.as_ref().map(|kept| (kept.load)()).unwrap_or_default();
         self.0.state.borrow_mut().map = Some(
             MapView::new(self.0.graphics, hover)
+                .moved(moves)
                 .gliding(self.0.options.map_glides)
                 .gathering(gathers)
                 .designing(designs)
@@ -311,10 +313,14 @@ impl TuiApp {
                     }
                     asked
                 }
+                // Shift or ctrl and a click or a box adds to the picks (many terminals keep shift and a drag for selecting
+                // their text: ctrl does the same there). The middle button drags the map.
                 InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Left, x, y, mods, .. } => {
-                    view.on_click(x, y, mods.ctrl)
+                    view.on_click(x, y, mods.ctrl || mods.shift)
                 }
+                InputEvent::Mouse { action: MouseAction::Press, button: MouseButton::Middle, x, y, .. } => view.on_middle(x, y),
                 InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Left, x, y, .. } => view.on_drag(x, y),
+                InputEvent::Mouse { action: MouseAction::Drag, button: MouseButton::Middle, x, y, .. } => view.on_pan(x, y),
                 InputEvent::Mouse { action: MouseAction::Release, x, y, .. } => view.on_release(x, y),
                 InputEvent::Mouse { action: MouseAction::Move, x, y, .. } => view.on_move(x, y),
                 InputEvent::Mouse { action: MouseAction::Wheel, direction, x, y, .. } => {
@@ -345,6 +351,11 @@ impl TuiApp {
                 }
                 if !on {
                     self.map_leave();
+                }
+            }
+            Asked::Moved(moves) => {
+                if let Some(kept) = &self.0.options.map_moves {
+                    (kept.save)(&moves);
                 }
             }
             Asked::Design { op, mode, files } => {

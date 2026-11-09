@@ -337,6 +337,7 @@ location!(load_db_file, "KUMI_DB_FILE", "kumi.db");
 location!(load_memory_file, "KUMI_MEMORY_FILE", "memory.json");
 location!(load_techniques_file, "KUMI_TECHNIQUES_FILE", "techniques.json");
 location!(load_restore_file, "KUMI_RESTORE_FILE", "audition-restore.json");
+location!(load_map_moves_file, "KUMI_MAP_MOVES_FILE", "map-moves.json");
 location!(load_goals_dir, "KUMI_GOALS_DIR", "goals");
 location!(load_references_dir, "KUMI_REFERENCES_DIR", "references");
 location!(load_playbook_file, "KUMI_PLAYBOOK_FILE", "playbook.json");

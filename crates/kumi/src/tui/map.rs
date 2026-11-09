@@ -10,7 +10,7 @@
 //! typical sound a little bigger than the rest), a soft light shows where they gather, and where the map is drawn in
 //! cells a zoom or a move glides.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -103,6 +103,8 @@ pub enum Asked {
         mode: Option<Mode>,
         files: Vec<String>,
     },
+    /// A sound dragged to a place of its own, or moved sounds put back (shift+r): every move on the maps now, to keep.
+    Moved(Moves),
     /// r, once a sound was made here: another variation of it.
     Reroll,
     /// k: the sound made into the palette.
@@ -110,6 +112,37 @@ pub enum Asked {
     /// p: the sound made, played again.
     PlayMade,
     Close,
+}
+
+/// The places of the sounds (and songs) dragged to places of their own, by each map's id (`MAP_IDS`) and each one's file:
+/// where it was put as the map's data has its places (`Turn::back`), kept between sessions.
+pub type Moves = BTreeMap<String, BTreeMap<String, [f64; 2]>>;
+
+/// Each map's id, by its tab, as `Moves` keeps them.
+const MAP_IDS: [&str; 2] = ["sounds", "songs"];
+
+/// The sounds made on the map this run that it lists (1 to 9 pick them).
+const MOST_MADE: usize = 9;
+
+/// A sound made on the map this run: its number in the app, its name and file, and whether it's picked to make the next
+/// one from.
+#[derive(Clone, Debug, PartialEq)]
+struct MadeSound {
+    id: u64,
+    name: String,
+    path: String,
+    picked: bool,
+}
+
+/// A left press on the map: its cell, whether it adds to the picks (shift or ctrl held), the point it went down on,
+/// which a drag moves, and whether it went down on no point at all (let go there, the picks go).
+#[derive(Clone, Copy, Debug)]
+struct Press {
+    x: i32,
+    y: i32,
+    adds: bool,
+    grabbed: Option<u32>,
+    empty: bool,
 }
 
 /// Where each map is: what the filter keeps, the point chosen, and what the area shows.
@@ -250,13 +283,64 @@ fn spot(point: &Point) -> (f64, f64) {
     (point.x as f64, point.y as f64)
 }
 
-/// A map as it's drawn: how wide it is against its height, how far each point is from its nearest on it, and how
-/// typical each is (how many others have it among their NEAREST nearest there, against the median: 0.7 to 1.7).
+/// A map as it's drawn: how wide it is against its height, how far each point is from its nearest on it, how typical
+/// each is (how many others have it among their NEAREST nearest there, against the median: 0.7 to 1.7), and how its
+/// places as read were turned and fitted into its box.
 #[derive(Clone, Debug, Default)]
 struct Fit {
     aspect: f64,
     apart: Vec<f32>,
     typical: Vec<f32>,
+    turn: Turn,
+}
+
+/// How a map's places as read became its places as drawn (`fitted_on`): moved to its middle, turned by its main
+/// direction's angle, its strays brought in, and scaled into its box. A sound dragged to a place is kept as read, so it
+/// lands at the same place among its neighbours however the map is fitted next.
+#[derive(Clone, Copy, Debug, Default)]
+struct Turn {
+    mean: (f64, f64),
+    cos: f64,
+    sin: f64,
+    /// Past `edge` from the middle a place's distance grows as a log, `ease` of it at a time.
+    edge: f64,
+    ease: f64,
+    low: (f64, f64),
+    /// The box's height in places as read (none: every place is one), and how far up a flat map sits in it.
+    span: f64,
+    lift: f64,
+}
+
+impl Turn {
+    /// A place as read, as the map draws it.
+    fn forward(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        if self.span <= 0. {
+            return (0.5, 0.5);
+        }
+        let (dx, dy) = (x - self.mean.0, y - self.mean.1);
+        let (mut px, mut py) = (dx * self.cos + dy * self.sin, dy * self.cos - dx * self.sin);
+        let far = px.hypot(py);
+        if self.ease > 0. && far > self.edge {
+            let kept = (self.edge + self.ease * ((far - self.edge) / self.ease).ln_1p()) / far;
+            (px, py) = (px * kept, py * kept);
+        }
+        ((px - self.low.0) / self.span, (py - self.low.1) / self.span + self.lift)
+    }
+
+    /// A place as the map draws it, as read: `forward` undone.
+    fn back(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        if self.span <= 0. {
+            return self.mean;
+        }
+        let (mut px, mut py) = (x * self.span + self.low.0, (y - self.lift) * self.span + self.low.1);
+        let far = px.hypot(py);
+        if self.ease > 0. && far > self.edge {
+            // Far out past the strays the log's undoing grows fast: a place dragged off the map stays within reach.
+            let read = self.edge + self.ease * ((far - self.edge) / self.ease).min(30.).exp_m1();
+            (px, py) = (px * read / far, py * read / far);
+        }
+        (px * self.cos - py * self.sin + self.mean.0, px * self.sin + py * self.cos + self.mean.1)
+    }
 }
 
 /// Both maps as they were made ready to draw, kept after /map closes (`MapView::kept`): their data (its colours as read,
@@ -265,6 +349,7 @@ pub struct KeptMap {
     data: Rc<MapData>,
     fits: Vec<Fit>,
     colors_read: [Vec<Rgb>; 2],
+    home: [HashMap<u32, (f32, f32)>; 2],
 }
 
 /// Both maps made ready to draw: worked out once as /map opens, off Kumi's thread.
@@ -335,6 +420,7 @@ fn fitted_on(layer: &mut Layer, threads: Option<usize>) -> Fit {
             if span > 0. { (((x - low.0) / span) as f32, ((y - low.1) / span + (1. - tall / span) / 2.) as f32) } else { (0.5, 0.5) };
     }
     let aspect = if span > 0. { (wide / span).max(1e-3) } else { 1. };
+    let turn = Turn { mean, cos, sin, edge, ease, low, span, lift: if span > 0. { (1. - tall / span) / 2. } else { 0. } };
     let (apart, named) = match threads {
         Some(threads) => nearest_named_on(points, aspect, threads),
         None => nearest_named(points, aspect),
@@ -343,7 +429,7 @@ fn fitted_on(layer: &mut Layer, threads: Option<usize>) -> Fit {
     sorted.sort_unstable();
     let median = sorted[count / 2] as f64;
     let typical = named.iter().map(|named| ((*named as f64 + 1.) / (median + 1.)).sqrt().clamp(0.7, 1.7) as f32).collect();
-    Fit { aspect, apart, typical }
+    Fit { aspect, apart, typical, turn }
 }
 
 /// Each point's distance to its nearest other on a map `aspect` wide, and how many others have it among their NEAREST
@@ -798,10 +884,17 @@ pub struct MapView {
     /// The palette's points on each map, and those it brings in, by their place in its layer.
     marked: [Vec<u32>; 2],
     halo: [Vec<u32>; 2],
-    /// Where the left button went down (and whether with ctrl), while that may become a box dragged; the box, corner to
-    /// corner, once it has.
-    pressed: Option<(i32, i32, bool)>,
+    /// Where the left button went down, while that may become a box dragged (or the point it went down on dragged); the
+    /// box, corner to corner, once it has; and whether the point has moved.
+    pressed: Option<Press>,
     boxed: Option<((i32, i32), (i32, i32))>,
+    dragging: bool,
+    /// Where the middle button went down and the map's centre then, while it's held: the map follows it.
+    panning: Option<((i32, i32), (f64, f64))>,
+    /// The sounds dragged to places of their own (kept between sessions), and where each map put each one first (by its
+    /// place in the layer), for shift+r to put them back.
+    moves: Moves,
+    home: [HashMap<u32, (f32, f32)>; 2],
     /// What putting points into the palette did, said under the map until the next key; and how many were picked when
     /// Enter put in only the first MOST_GATHERED.
     told: Option<String>,
@@ -811,6 +904,10 @@ pub struct MapView {
     designs: bool,
     making: bool,
     made: Option<String>,
+    /// The sounds made on the map this run, the oldest first (at most MOST_MADE), listed under it to make the next one
+    /// from; and where each one's name was drawn in that row (its first and last cell), for a click.
+    made_sounds: Vec<MadeSound>,
+    made_cells: Vec<(i32, i32)>,
     /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
     nearest: [Option<Rc<Vec<u32>>>; 2],
     /// The keys the footer names: Kumi's own, or the app's (`keyed`).
@@ -845,11 +942,17 @@ impl MapView {
             halo: [vec![], vec![]],
             pressed: None,
             boxed: None,
+            dragging: false,
+            panning: None,
+            moves: Moves::new(),
+            home: [HashMap::new(), HashMap::new()],
             told: None,
             capped: None,
             designs: false,
             making: false,
             made: None,
+            made_sounds: vec![],
+            made_cells: vec![],
             nearest: [None, None],
             keymap: Keymap::default(),
         }
@@ -878,22 +981,71 @@ impl MapView {
         self.made = words;
     }
 
-    /// d: the picked sounds (two or more, on the sounds' map) wait for a way's key.
+    /// A sound made on the map (its number in the app and its file): listed under the map, to make the next one from.
+    /// Past MOST_MADE the oldest one not picked goes.
+    pub fn made_sound(&mut self, id: u64, path: String) {
+        if self.made_sounds.iter().any(|made| made.id == id) {
+            return;
+        }
+        let name = std::path::Path::new(&path).file_stem().map_or_else(|| path.clone(), |stem| stem.to_string_lossy().into_owned());
+        self.made_sounds.push(MadeSound { id, name, path, picked: false });
+        if self.made_sounds.len() > MOST_MADE {
+            let gone = self.made_sounds.iter().position(|made| !made.picked).unwrap_or(0);
+            self.made_sounds.remove(gone);
+        }
+    }
+
+    /// How many sounds the next make is from: the sounds made that are picked, and the sounds picked on the map (on its
+    /// sounds' map).
+    fn sources(&self) -> usize {
+        let picked = if self.tab == 0 { self.views.first().map_or(0, |view| view.picked.len()) } else { 0 };
+        self.made_sounds.iter().filter(|made| made.picked).count() + picked
+    }
+
+    /// d: the picked sounds (two or more: sounds made, and picks on the sounds' map) wait for a way's key.
     fn design_menu(&mut self) -> Asked {
-        if self.tab != 0 {
+        let made = self.made_sounds.iter().any(|made| made.picked);
+        if self.tab != 0 && !made {
             self.told = Some("Sounds are made from sounds: tab goes to them.".into());
-        } else if self.views[0].picked.len() < kumi_design::MIN_SOURCES {
-            self.told = Some("Pick two or more sounds to make one from them (x, or drag a box).".into());
+        } else if self.sources() < kumi_design::MIN_SOURCES {
+            self.told = Some("Pick two or more sounds to make one from them (x, drag a box, or a sound made's number).".into());
         } else {
             self.making = true;
         }
         Asked::Nothing
     }
 
-    /// The picked sounds' files, at most `most`.
-    fn picked_files(&self, most: usize) -> Vec<String> {
-        let Some(data) = self.data.as_ref() else { return vec![] };
-        self.views[0].picked.iter().take(most).map(|at| data.sounds.points[*at as usize].path.clone()).collect()
+    /// The files to make from, every one: the sounds made that are picked, then the sounds picked on the map.
+    fn picked_files(&self) -> Vec<String> {
+        let made = self.made_sounds.iter().filter(|made| made.picked).map(|made| made.path.clone());
+        let picked: Vec<String> = match self.data.as_ref().filter(|_| self.tab == 0) {
+            Some(data) => self.views[0].picked.iter().map(|at| data.sounds.points[*at as usize].path.clone()).collect(),
+            None => vec![],
+        };
+        made.chain(picked).collect()
+    }
+
+    /// How many are picked: on the map on show, and of the sounds made.
+    fn picks(&self) -> usize {
+        self.views.get(self.tab).map_or(0, |view| view.picked.len()) + self.made_sounds.iter().filter(|made| made.picked).count()
+    }
+
+    /// Every pick let go: on the map on show, and of the sounds made.
+    fn let_go_picks(&mut self) {
+        if let Some(view) = self.views.get_mut(self.tab) {
+            view.picked.clear();
+        }
+        for made in &mut self.made_sounds {
+            made.picked = false;
+        }
+        self.version += 1;
+    }
+
+    /// A sound made picked to make the next one from, or let go (its number in the list, from 1).
+    fn toggle_made(&mut self, number: usize) -> bool {
+        let Some(made) = number.checked_sub(1).and_then(|at| self.made_sounds.get_mut(at)) else { return false };
+        made.picked = !made.picked;
+        true
     }
 
     /// The session's palette's files, and what a loose one brings in (by their paths), marked on the map.
@@ -977,21 +1129,62 @@ impl MapView {
         self.version += 1;
     }
 
-    /// The left button held and moved: once off the cell it went down on, a box is dragged from there.
+    /// The left button held and moved: a point it went down on goes with it; else, once off the cell it went down on, a
+    /// box is dragged from there.
     pub fn on_drag(&mut self, x: i32, y: i32) -> Asked {
-        let Some((from_x, from_y, _)) = self.pressed.filter(|_| self.graphics != Graphics::Words) else { return Asked::Nothing };
-        if self.boxed.is_some() || (x, y) != (from_x, from_y) {
-            let area = self.area;
-            let clamped = (x.clamp(area.x, area.x + area.width - 1), y.clamp(area.y, area.y + area.height - 1));
-            self.boxed = Some(((from_x, from_y), clamped));
+        let Some(press) = self.pressed.filter(|_| self.graphics != Graphics::Words) else { return Asked::Nothing };
+        let area = self.area;
+        let clamped = (x.clamp(area.x, area.x + area.width - 1), y.clamp(area.y, area.y + area.height - 1));
+        if let Some(at) = press.grabbed {
+            if self.dragging || (x, y) != (press.x, press.y) {
+                self.dragging = true;
+                self.move_to(at, clamped);
+            }
+        } else if self.boxed.is_some() || (x, y) != (press.x, press.y) {
+            self.boxed = Some(((press.x, press.y), clamped));
         }
         Asked::Nothing
     }
 
-    /// The left button let go: a box dragged picks what's in it (in place of what was picked; with ctrl, as well).
+    /// The middle button went down on the map: while it's held, the map follows the mouse (`on_pan`).
+    pub fn on_middle(&mut self, x: i32, y: i32) -> Asked {
+        self.told = None;
+        if self.graphics != Graphics::Words && self.data.is_some() && self.prompt.is_none() && inside(self.area, x, y) {
+            self.glide = None;
+            self.panning = Some(((x, y), self.views[self.tab].centre));
+        }
+        Asked::Nothing
+    }
+
+    /// The middle button held and moved: the map moves with the mouse, picking nothing.
+    pub fn on_pan(&mut self, x: i32, y: i32) -> Asked {
+        let Some(((from_x, from_y), centre)) = self.panning else { return Asked::Nothing };
+        let (area, view) = (self.area, &mut self.views[self.tab]);
+        let scale = Frame::new(area, view).scale;
+        view.centre = (centre.0 - ((x - from_x) * 2) as f64 / scale, centre.1 + ((y - from_y) * 4) as f64 / scale);
+        view.clamp();
+        self.version += 1;
+        Asked::Nothing
+    }
+
+    /// A button let go: a point dragged stays where it was let go (and is kept there); a box dragged picks what's in it
+    /// (in place of what was picked; with shift or ctrl, as well).
     pub fn on_release(&mut self, _x: i32, _y: i32) -> Asked {
-        let (pressed, boxed) = (self.pressed.take(), self.boxed.take());
-        let (Some((_, _, ctrl)), Some(((x0, y0), (x1, y1)))) = (pressed, boxed) else { return Asked::Nothing };
+        if self.panning.take().is_some() {
+            return Asked::Nothing;
+        }
+        let (pressed, boxed, dragged) = (self.pressed.take(), self.boxed.take(), std::mem::take(&mut self.dragging));
+        if let Some(at) = pressed.and_then(|press| press.grabbed).filter(|_| dragged) {
+            return self.keep_move(at);
+        }
+        // A click on no point, without a drag: the picks go.
+        if let (Some(press), None) = (pressed, boxed) {
+            if press.empty && !press.adds {
+                self.let_go_picks();
+            }
+            return Asked::Nothing;
+        }
+        let (Some(press), Some(((x0, y0), (x1, y1)))) = (pressed, boxed) else { return Asked::Nothing };
         let Some(data) = self.data.clone() else { return Asked::Nothing };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
         let (area, view) = (self.area, &mut self.views[self.tab]);
@@ -1000,7 +1193,7 @@ impl MapView {
         let corner = |x: i32, y: i32| frame.at((((x - area.x) * 2) as f64, ((y - area.y) * 4) as f64));
         let (a, b) = (corner(x0.min(x1), y0.min(y1)), corner(x0.max(x1) + 1, y0.max(y1) + 1));
         let (left, right, low, high) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
-        if !ctrl {
+        if !press.adds {
             view.picked.clear();
         }
         view.picked.extend(view.shown.iter().copied().filter(|at| {
@@ -1009,6 +1202,104 @@ impl MapView {
         }));
         self.version += 1;
         Asked::Nothing
+    }
+
+    /// The point a press went down on, which a drag would move: the one drawn in that cell, or well inside its disc.
+    /// None over density, or on a console's list.
+    fn grabbed(&self, x: i32, y: i32) -> Option<u32> {
+        let picture = self.picture.as_ref().filter(|picture| !picture.dense)?;
+        let at = self.under(x, y)?;
+        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fits.get(self.tab)?);
+        let (area, frame) = (self.area, Frame::new(self.area, view));
+        let (px, py) = frame.dot(spot(&layer.points[at as usize]));
+        let dot = (((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64);
+        let cell = (area.x + (px / 2.) as i32, area.y + (py / 4.) as i32);
+        let well_inside = (px - dot.0).hypot(py - dot.1) <= radius_of(fit, at, picture.radius, frame.scale) - 1.5;
+        (cell == (x, y) || well_inside).then_some(at)
+    }
+
+    /// A point dragged to a cell of the map: drawn there at once (where the map first put it remembered).
+    fn move_to(&mut self, at: u32, (x, y): (i32, i32)) {
+        let (area, tab) = (self.area, self.tab);
+        let Some(view) = self.views.get(tab) else { return };
+        let place = Frame::new(area, view).at((((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64));
+        let Some(data) = self.data.as_mut() else { return };
+        let data = Rc::make_mut(data);
+        let layer = if tab == 0 { &mut data.sounds } else { &mut data.songs };
+        let point = &mut layer.points[at as usize];
+        self.home[tab].entry(at).or_insert((point.x, point.y));
+        (point.x, point.y) = (place.0 as f32, place.1 as f32);
+        self.version += 1;
+    }
+
+    /// A point let go where it was dragged: its place kept by its file, as the map's data has places, and the point
+    /// chosen's nearest and each one's nearest for g worked out again.
+    fn keep_move(&mut self, at: u32) -> Asked {
+        let (Some(data), Some(fit)) = (self.data.clone(), self.fits.get(self.tab)) else { return Asked::Nothing };
+        let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
+        let point = &layer.points[at as usize];
+        let (x, y) = fit.turn.back(spot(point));
+        self.moves.entry(MAP_IDS[self.tab].into()).or_default().insert(point.path.clone(), [x, y]);
+        self.nearest[self.tab] = None;
+        let view = &mut self.views[self.tab];
+        view.choose(layer, view.chosen);
+        Asked::Moved(self.moves.clone())
+    }
+
+    /// shift+r: the moved points picked (none picked: every one moved on this map) back where the map put them.
+    fn unmove(&mut self) -> Asked {
+        let tab = self.tab;
+        let picked = &self.views[tab].picked;
+        let back: Vec<u32> = self.home[tab].keys().copied().filter(|at| picked.is_empty() || picked.contains(at)).collect();
+        if back.is_empty() {
+            self.told = Some(if picked.is_empty() { "Nothing on this map was moved." } else { "None of the points picked was moved." }.into());
+            return Asked::Nothing;
+        }
+        let Some(data) = self.data.as_mut() else { return Asked::Nothing };
+        let layer = if tab == 0 { &mut Rc::make_mut(data).sounds } else { &mut Rc::make_mut(data).songs };
+        let moved = self.moves.entry(MAP_IDS[tab].into()).or_default();
+        for at in &back {
+            let point = &mut layer.points[*at as usize];
+            if let Some(home) = self.home[tab].remove(at) {
+                (point.x, point.y) = home;
+            }
+            moved.remove(&point.path);
+        }
+        if moved.is_empty() {
+            self.moves.remove(MAP_IDS[tab]);
+        }
+        self.told = Some(match back.len() {
+            1 => "1 point is back where the map put it.".to_string(),
+            count => format!("{} points are back where the map put them.", grouped(count)),
+        });
+        let layer = if tab == 0 { &data.sounds } else { &data.songs };
+        self.nearest[tab] = None;
+        let view = &mut self.views[tab];
+        view.choose(layer, view.chosen);
+        self.version += 1;
+        Asked::Moved(self.moves.clone())
+    }
+
+    /// The same map with the sounds dragged to places of their own (kept from before) there.
+    pub fn moved(mut self, moves: Moves) -> MapView {
+        self.moves = moves;
+        self
+    }
+
+    /// The moves kept, each point moved drawn where it was put (where its map put it remembered, for shift+r).
+    fn place_moved(&mut self) {
+        let Some(data) = self.data.as_mut() else { return };
+        let data = Rc::make_mut(data);
+        for (tab, layer) in [&mut data.sounds, &mut data.songs].into_iter().enumerate() {
+            let (Some(moved), Some(fit)) = (self.moves.get(MAP_IDS[tab]), self.fits.get(tab)) else { continue };
+            for (at, point) in layer.points.iter_mut().enumerate() {
+                if let Some([x, y]) = moved.get(&point.path) {
+                    self.home[tab].entry(at as u32).or_insert((point.x, point.y));
+                    let (x, y) = fit.turn.forward((*x, *y));
+                    (point.x, point.y) = (x as f32, y as f32);
+                }
+            }
+        }
     }
 
     /// The same map with its zooms and moves gliding where it's drawn in cells (an image would go up again each step).
@@ -1023,7 +1314,7 @@ impl MapView {
         let Ready { data, fits } = ready;
         // The classes' and styles' colours as read, for each theme's own (`rethemed`).
         let colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
-        self.shown_from(KeptMap { data: Rc::new(data), fits: fits.into(), colors_read });
+        self.shown_from(KeptMap { data: Rc::new(data), fits: fits.into(), colors_read, home: Default::default() });
     }
 
     /// A map kept from the last time /map was open, still the same (`KeptMap`): shown as it was first shown, without
@@ -1033,12 +1324,13 @@ impl MapView {
     }
 
     fn shown_from(&mut self, kept: KeptMap) {
-        let KeptMap { data, fits, colors_read } = kept;
-        self.colors_read = colors_read;
-        self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
-        self.fits = fits;
-        self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
+        let KeptMap { data, fits, colors_read, home } = kept;
+        (self.colors_read, self.home, self.fits) = (colors_read, home, fits);
         self.data = Some(data);
+        self.place_moved();
+        let data = self.data.clone().expect("given");
+        self.views = vec![View::new(&data.sounds, self.fits[0].aspect), View::new(&data.songs, self.fits[1].aspect)];
+        self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
         self.version += 1;
         self.mark_palette();
         self.rethemed();
@@ -1047,7 +1339,7 @@ impl MapView {
     /// What to keep of the map as it closes, for /map again while what it was read from stays the same: its data, its
     /// fits and its colours as read. None when it never came.
     pub fn kept(self) -> Option<KeptMap> {
-        Some(KeptMap { data: self.data?, fits: self.fits, colors_read: self.colors_read })
+        Some(KeptMap { data: self.data?, fits: self.fits, colors_read: self.colors_read, home: self.home })
     }
 
     /// Each class's and style's colour as it reads on the theme's ground (on light, one too pale deepened), from the
@@ -1144,8 +1436,15 @@ impl MapView {
                 "map.design" if picks && self.designs => return self.design_menu(),
                 id if making && id.starts_with("map.make-") => {
                     let Some((op, mode)) = way_of(id) else { continue };
-                    let files = self.picked_files(op.most_sources());
+                    let files = self.picked_files();
                     return Asked::Design { op, mode, files };
+                }
+                id if MADE_KEYS.contains(&id) => {
+                    let number = MADE_KEYS.iter().position(|key| *key == id).map_or(0, |at| at + 1);
+                    if !self.toggle_made(number) {
+                        continue;
+                    }
+                    return Asked::Nothing;
                 }
                 "map.reroll" if !making && self.made.is_some() => return Asked::Reroll,
                 "map.keep" if !making && self.made.is_some() => return Asked::Keep,
@@ -1171,14 +1470,15 @@ impl MapView {
                     }
                     return Asked::Nothing;
                 }
-                // Esc lets a box being dragged go, then the points picked, then closes the map.
-                "map.let-go" if self.pressed.is_some() || self.boxed.is_some() => {
+                // Esc lets a box being dragged go (a point dragged stays where it is till the button's let go), then the
+                // points picked, then closes the map.
+                "map.let-go" if self.boxed.is_some() || self.pressed.is_some_and(|press| press.grabbed.is_none()) => {
                     (self.pressed, self.boxed) = (None, None);
                     return Asked::Nothing;
                 }
-                "map.let-go" if self.views.get(self.tab).is_some_and(|view| !view.picked.is_empty()) => {
-                    self.views[self.tab].picked.clear();
-                    self.version += 1;
+                "map.unmove" if picks => return self.unmove(),
+                "map.let-go" if self.picks() > 0 => {
+                    self.let_go_picks();
                     return Asked::Nothing;
                 }
                 "map.close" => return Asked::Close,
@@ -1274,11 +1574,18 @@ impl MapView {
         Asked::Nothing
     }
 
-    /// A click chooses the point nearest it (or the group of a list's row); with ctrl it picks it, or lets it go. The
-    /// button held and moved from there drags a box (`on_drag`).
-    pub fn on_click(&mut self, x: i32, y: i32, ctrl: bool) -> Asked {
+    /// A click chooses the point nearest it (or the group of a list's row); with shift or ctrl (`adds`) it picks it, or
+    /// lets it go. The button held and moved from there drags the point it went down on, or a box (`on_drag`).
+    pub fn on_click(&mut self, x: i32, y: i32, adds: bool) -> Asked {
         self.told = None;
         let area = self.area;
+        // A sound made, clicked in its row under the map: picked to make the next one from, or let go.
+        if self.prompt.is_none() && !self.made_cells.is_empty() && y == area.y + area.height {
+            if let Some(at) = self.made_cells.iter().position(|(first, last)| (*first..=*last).contains(&x)) {
+                self.toggle_made(at + 1);
+            }
+            return Asked::Nothing;
+        }
         if self.prompt.is_some() || !inside(area, x, y) {
             return Asked::Nothing;
         }
@@ -1293,13 +1600,14 @@ impl MapView {
             return Asked::Nothing;
         }
         let picked = self.under(x, y);
-        if let Some(at) = picked.filter(|_| ctrl) {
+        if let Some(at) = picked.filter(|_| adds) {
             self.toggle(at);
         }
         if picked.is_some() {
             self.views[self.tab].choose(layer, picked);
         }
-        self.pressed = Some((x, y, ctrl));
+        let grabbed = if adds { None } else { self.grabbed(x, y) };
+        (self.pressed, self.dragging) = (Some(Press { x, y, adds, grabbed, empty: picked.is_none() }), false);
         Asked::Nothing
     }
 
@@ -1466,8 +1774,11 @@ impl MapView {
             screen.put(1, 0, &truncate(&words, columns - 2), &Style::fg(palette::DIM));
             return None;
         }
-        self.area = Rect::new(1, 2, columns - 2, rows - 5);
+        // The sounds made on the map take a row above the point's.
+        let strip = i32::from(!self.made_sounds.is_empty());
+        self.area = Rect::new(1, 2, columns - 2, rows - 5 - strip);
         self.draw_header(screen);
+        self.draw_made(screen);
         let Some(data) = self.data.clone() else {
             centred(screen, self.area, "Reading your map…", Style::fg(palette::DIM));
             self.draw_keys(screen);
@@ -1735,6 +2046,27 @@ impl MapView {
         }
     }
 
+    /// The sounds made on the map, numbered (the key that picks each), the picked ones marked: the row above the point's.
+    fn draw_made(&mut self, screen: &mut Screen) {
+        self.made_cells.clear();
+        if self.made_sounds.is_empty() {
+            return;
+        }
+        let (y, end) = (screen.height - 4, screen.width - 1);
+        let mut x = screen.put(1, y, "Made", &Style::fg(palette::FAINT)) + 2;
+        for (at, made) in self.made_sounds.iter().enumerate() {
+            let text = format!("{} {}{}", at + 1, if made.picked { "✓ " } else { "" }, made.name);
+            let text = truncate(&text, (end - x).min(32));
+            if text_width(&text) < 5 {
+                break;
+            }
+            let style = if made.picked { Style { bold: true, ..Style::fg(palette::ACCENT) } } else { Style::fg(palette::DIM) };
+            let after = screen.put(x, y, &text, &style);
+            self.made_cells.push((x, after - 1));
+            x = after + 2;
+        }
+    }
+
     /// The point chosen (its name, what it is, its folder), and under it what it's near.
     fn draw_point(&self, screen: &mut Screen, layer: &Layer) {
         let (y, width) = (screen.height - 3, screen.width - 2);
@@ -1785,7 +2117,7 @@ impl MapView {
         let other = if self.tab == 0 { "songs" } else { "sounds" };
         let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
         if self.making {
-            let making = format!("make from {} picks:", picked.min(kumi_design::MAX_SOURCES));
+            let making = format!("make from {} picks:", grouped(self.sources()));
             let mut parts: Vec<(&[&str], &str, &str)> = vec![(&[], "", &making)];
             parts.extend(MAKES.iter().map(|(id, words)| (std::slice::from_ref(id), "", *words)));
             parts.push((&["map.let-go"], "", "cancels"));
@@ -1796,6 +2128,7 @@ impl MapView {
         let gather: (&[&str], &str, &str) = (&["map.gather"], "", "adds to the palette");
         let mut parts: Vec<(&[&str], &str, &str)> = vec![];
         let (adds, hover);
+        let clears = format!("clears {}", if self.picks() == 1 { "the pick".into() } else { format!("{} picks", grouped(self.picks())) });
         if self.graphics == Graphics::Words {
             parts.push((&["map.up", "map.down"], "up and down", "choose"));
             parts.push((&["map.play"], "", "plays"));
@@ -1808,20 +2141,29 @@ impl MapView {
         } else if picked > 0 && self.gathers {
             adds = format!("adds {} to the palette", if picked == 1 { "1 point".into() } else { format!("{} points", grouped(picked)) });
             parts.push((&["map.gather"], "", &adds));
-            if self.designs && self.tab == 0 && picked >= kumi_design::MIN_SOURCES {
+            if self.designs && self.sources() >= kumi_design::MIN_SOURCES {
                 parts.push((&["map.design"], "", "makes a sound of them"));
             }
-            parts.push((&[], "", "drag picks (ctrl adds)"));
+            parts.push((&[], "", "drag picks (shift adds)"));
             parts.push((&["map.pick"], "", "picks"));
             parts.push((&["map.pick-all"], "", "all"));
             parts.push((&["map.grow"], "", "grows"));
-            parts.push((&["map.let-go"], "", "lets go"));
+            parts.push((&["map.let-go"], "", &clears));
         } else {
             hover = format!("hover {}", if self.hover { "plays" } else { "quiet" });
             if self.made.is_some() {
                 parts.push((&["map.reroll"], "", "another"));
                 parts.push((&["map.keep"], "", "keeps it"));
                 parts.push((&["map.again"], "", "plays it"));
+            }
+            if !self.made_sounds.is_empty() {
+                parts.push((&MADE_KEYS, "1–9", "pick sounds made"));
+                if self.designs && self.sources() >= kumi_design::MIN_SOURCES {
+                    parts.push((&["map.design"], "", "makes a sound of them"));
+                }
+                if self.picks() > 0 {
+                    parts.push((&["map.let-go"], "", &clears));
+                }
             }
             parts.push((&["map.up", "map.down", "map.left", "map.right"], "arrows", "move"));
             parts.push((&["map.pan-up", "map.pan-down", "map.pan-left", "map.pan-right"], "shift+arrows", "pan"));
@@ -1838,6 +2180,10 @@ impl MapView {
             parts.push((&["map.filter"], "", "filters"));
             parts.push((&["map.play"], "", "plays"));
             parts.push((&["map.hover"], "", &hover));
+            if !self.home[self.tab].is_empty() {
+                parts.push((&["map.unmove"], "", "puts moved points back"));
+            }
+            parts.push((&[], "", "middle-drag pans"));
             parts.push((&["map.switch"], "", other));
             parts.push((&["map.close"], "", "closes"));
         }
@@ -1846,6 +2192,19 @@ impl MapView {
         None
     }
 }
+
+/// The keys that pick the sounds made, by their numbers.
+const MADE_KEYS: [&str; MOST_MADE] = [
+    "map.made-one",
+    "map.made-two",
+    "map.made-three",
+    "map.made-four",
+    "map.made-five",
+    "map.made-six",
+    "map.made-seven",
+    "map.made-eight",
+    "map.made-nine",
+];
 
 /// The ways to make a sound after d, by their keys' actions, as the footer names them.
 const MAKES: [(&str, &str); 8] = [
@@ -2306,7 +2665,7 @@ mod tests {
         assert_eq!(
             footer(&mut gathering(&points)),
             "arrows move · shift+arrows pan · + − zoom · drag or x picks · enter adds to the palette · / filters · space plays · \
-             h hover plays · tab songs · esc closes"
+             h hover plays · middle-drag pans · tab songs · esc closes"
         );
         // keys.json's keys say themselves; a drag still picks with x given none.
         let (keymap, _) =
@@ -2314,7 +2673,7 @@ mod tests {
         assert_eq!(
             footer(&mut gathering(&points).keyed(&keymap)),
             "↑ ↓ h → move · shift+arrows pan · + − zoom · drag picks · enter adds to the palette · / filters · space plays · \
-             v hover plays · tab songs · f10 closes"
+             v hover plays · middle-drag pans · tab songs · f10 closes"
         );
     }
 
@@ -2489,4 +2848,149 @@ mod tests {
     }
     /// What main's fit made of the fixed map (its digest, from main's tui/map.rs before this search ran on threads).
     const MAINS_FIT: u64 = 13_404_431_125_891_730_567;
+    #[test]
+    fn shift_and_a_box_adds_its_sounds_to_the_first_boxs() {
+        let points = [(0.2, 0.2, 0), (0.25, 0.25, 0), (0.8, 0.8, 1), (0.82, 0.78, 1), (0.5, 0.5, 0)];
+        let mut map = gathering(&points);
+        let (a, b, c) = (cell_of(&map, 0), cell_of(&map, 1), cell_of(&map, 3));
+        map.on_click(a.0 - 1, a.1 + 1, false);
+        map.on_drag(b.0 + 1, b.1 - 1);
+        map.on_release(b.0 + 1, b.1 - 1);
+        // A second box with shift held (the app hands shift on as adding, as ctrl): one chunk, then another.
+        map.on_click(c.0 - 2, c.1 - 2, true);
+        map.on_drag(c.0 + 2, c.1 + 2);
+        map.on_release(c.0 + 2, c.1 + 2);
+        assert_eq!(map.views[0].picked, BTreeSet::from([0, 1, 2, 3]));
+    }
+
+    #[test]
+    fn a_middle_drag_moves_the_view_and_picks_nothing() {
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let mut map = gathering(&points);
+        map.on_text("x");
+        let picked = map.views[0].picked.clone();
+        for _ in 0..4 {
+            map.on_text("+");
+        }
+        let (centre, area) = (map.views[0].centre, map.area);
+        let (x, y) = (area.x + area.width / 2, area.y + area.height / 2);
+        map.on_middle(x, y);
+        map.on_pan(x - 10, y + 3);
+        map.on_release(x - 10, y + 3);
+        let moved = map.views[0].centre;
+        assert!(moved.0 > centre.0 && moved.1 > centre.1, "dragged left and down, the map shows what's right and up: {centre:?} → {moved:?}");
+        assert_eq!(map.views[0].picked, picked, "nothing picked or let go");
+        assert!(map.boxed.is_none() && map.pressed.is_none());
+        // The point under the mouse went with it: a third of the way there and back, it's where it was.
+        map.on_middle(x, y);
+        map.on_pan(x + 10, y - 3);
+        map.on_release(x + 10, y - 3);
+        let back = map.views[0].centre;
+        assert!((back.0 - centre.0).abs() < 1e-9 && (back.1 - centre.1).abs() < 1e-9, "{centre:?} {back:?}");
+    }
+
+    #[test]
+    fn a_dragged_sound_stays_where_it_was_put_after_a_reload_and_shift_r_puts_it_back() {
+        // Points scattered so the map is turned and its strays brought in: a moved one comes back through all that.
+        let points: Vec<(f32, f32, u16)> =
+            (0..40).map(|n| ((n * 37 % 100) as f32 / 100., (n * 61 % 100) as f32 / 140. + 0.1 * (n % 3) as f32, 0)).collect();
+        let data = MapData { sounds: layer(&points), songs: layer(&[]) };
+        let open = |moves: Moves| {
+            let mut map = MapView::new(Graphics::Cells, true).gathering(true).moved(moves);
+            map.loaded(ready(data.clone()));
+            map.draw(&mut Screen::new(100, 30), &mut |_, _, _, _| 0);
+            map
+        };
+        let mut map = open(Moves::new());
+        let at = 7;
+        let home = spot(&map.layer().unwrap().points[at]);
+        let (x, y) = cell_of(&map, at as u32);
+        let to = (map.area.x + 3, map.area.y + 2);
+        assert_ne!((x, y), to);
+        map.on_click(x, y, false);
+        map.on_drag(to.0, to.1);
+        let Asked::Moved(moves) = map.on_release(to.0, to.1) else { panic!("a move kept") };
+        assert_eq!(cell_of(&map, at as u32), to, "drawn where it was let go");
+        let put = spot(&map.layer().unwrap().points[at]);
+        assert!(moves["sounds"].contains_key("/s/p7.wav"), "kept by its file: {moves:?}");
+        // Opened again with the moves kept: there, and the other points where they were.
+        let mut again = open(moves);
+        let there = spot(&again.layer().unwrap().points[at]);
+        assert!((there.0 - put.0).abs() < 1e-4 && (there.1 - put.1).abs() < 1e-4, "{put:?} {there:?}");
+        assert_eq!(spot(&again.layer().unwrap().points[3]), spot(&map.layer().unwrap().points[3]));
+        // shift+r: back where the map put it, and nothing kept.
+        let Asked::Moved(moves) = again.on_text("R") else { panic!("the moves put back") };
+        assert!(moves.is_empty(), "{moves:?}");
+        assert_eq!(spot(&again.layer().unwrap().points[at]), home);
+        assert_eq!(again.on_text("R"), Asked::Nothing, "nothing left to put back");
+        // A drag that starts beside a point draws a box: the point stays.
+        let (x, y) = cell_of(&again, 3);
+        let before = spot(&again.layer().unwrap().points[3]);
+        again.on_click(x - 1, y + 1, false);
+        again.on_drag(x + 4, y + 2);
+        assert!(again.boxed.is_some());
+        assert_eq!(again.on_release(x + 4, y + 2), Asked::Nothing);
+        assert_eq!(spot(&again.layer().unwrap().points[3]), before);
+    }
+
+    #[test]
+    fn a_make_from_sounds_made_names_their_files_with_every_pick_and_no_cap() {
+        let points: Vec<(f32, f32, u16)> = (0..30).map(|n| ((n % 10) as f32 / 10., (n / 10) as f32 / 3., 0)).collect();
+        let mut map = gathering(&points).designing(true);
+        map.made_sound(4, "/d/Blend - p0 + 1 - 42.wav".into());
+        map.made_sound(5, "/d/Blend - p0 + 1 - 43.wav".into());
+        map.made_sound(5, "/d/Blend - p0 + 1 - 43.wav".into());
+        let mut screen = Screen::new(140, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines()[26].contains("Made  1 Blend - p0 + 1 - 42  2 Blend - p0 + 1 - 43"), "{}", screen.lines()[26]);
+        // The two made, picked by their numbers: d and b makes a blend of them.
+        map.on_text("1");
+        map.on_text("2");
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines()[26].contains("1 ✓ Blend"), "{}", screen.lines()[26]);
+        assert!(screen.lines()[29].contains("d makes a sound of them") && screen.lines()[29].contains("esc clears 2 picks"));
+        map.on_text("d");
+        let asked = map.on_text("b");
+        assert_eq!(
+            asked,
+            Asked::Design {
+                op: Op::Cross,
+                mode: Some(Mode::Blend),
+                files: vec!["/d/Blend - p0 + 1 - 42.wav".into(), "/d/Blend - p0 + 1 - 43.wav".into()]
+            }
+        );
+        // With every point picked too: all 32, none left out.
+        map.on_text("a");
+        map.on_text("d");
+        let Asked::Design { files, .. } = map.on_text("k") else { panic!("a stack") };
+        assert_eq!(files.len(), 32);
+        assert_eq!(files[..2], ["/d/Blend - p0 + 1 - 42.wav", "/d/Blend - p0 + 1 - 43.wav"]);
+        // Esc lets every pick go, made ones too; a sound made comes off the list as the tenth comes.
+        assert_eq!(map.on_key("escape", false), Asked::Nothing);
+        assert_eq!(map.picks(), 0);
+        for id in 6..13 {
+            map.made_sound(id, format!("/d/{id}.wav"));
+        }
+        map.on_text("1");
+        map.made_sound(13, "/d/13.wav".into());
+        assert_eq!(map.made_sounds.len(), MOST_MADE);
+        assert_eq!(map.made_sounds.iter().map(|made| made.id).collect::<Vec<_>>(), [4, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert!(map.made_sounds[0].picked, "the oldest not picked went, the picked one stays");
+    }
+
+    #[test]
+    fn a_click_on_no_point_lets_the_picks_go() {
+        let points = [(0.2, 0.2, 0), (0.25, 0.25, 0), (0.8, 0.8, 1)];
+        let mut map = gathering(&points);
+        map.on_text("a");
+        assert_eq!(map.views[0].picked.len(), 3);
+        // Ctrl or shift and a click there keeps them.
+        let (x, y) = (map.area.x + map.area.width - 2, map.area.y + 1);
+        map.on_click(x, y, true);
+        map.on_release(x, y);
+        assert_eq!(map.views[0].picked.len(), 3);
+        map.on_click(x, y, false);
+        map.on_release(x, y);
+        assert!(map.views[0].picked.is_empty());
+    }
 }

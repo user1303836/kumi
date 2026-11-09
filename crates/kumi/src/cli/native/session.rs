@@ -5,7 +5,7 @@ use crate::{
     history::{log_redactor, open_input_history},
     models::{create_model_control, ModelControlOptions},
     terminal::{create_terminal, Terminal, TerminalOptions},
-    tui::app::{create_tui, AwaySettings, ConnectDaw, ContextMeter, MapHover, PanelTab, TuiOptions},
+    tui::app::{create_tui, AwaySettings, ConnectDaw, ContextMeter, MapHover, MapMoves, PanelTab, TuiOptions},
     voice::{create_voice_control, VoiceControlOptions},
 };
 use async_trait::async_trait;
@@ -1288,6 +1288,21 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
                 })
             },
         });
+        // The sounds dragged on the map: their places, by their files, in map-moves.json.
+        if let Ok(moves_file) = crate::config::load_map_moves_file(&io.env) {
+            let moves_file = std::path::PathBuf::from(moves_file);
+            options.map_moves = Some(MapMoves {
+                load: {
+                    let moves_file = moves_file.clone();
+                    Rc::new(move || std::fs::read(&moves_file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default())
+                },
+                save: Rc::new(move |moves| {
+                    let partial = moves_file.with_extension("json.part");
+                    let written = serde_json::to_vec(moves).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&partial, bytes));
+                    let _ = written.and_then(|()| std::fs::rename(&partial, &moves_file));
+                }),
+            });
+        }
         Rc::new(create_tui(options))
     } else {
         // Plain mode reaches the session through its protocol, its models with it, as the screen does.
