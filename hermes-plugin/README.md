@@ -196,7 +196,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
   Each wavetable Kumi makes is a new `.wav` file (never over a file) in Vital's wavetable folder
   (`~/Music/Vital/User/Wavetables`; `~/Documents/Vital/User/Wavetables` on Windows) or Live's User Library
   (`User Library/Kumi/Wavetables`, for Serum 2 and others); it stays after an undo. While judging or tuning, Live plays
-  the stretch (at most 60 s a pass) through the Kumi Ears device setup installed, placed on the track or before Main,
+  the stretch through the Kumi Ears device setup installed (at most 60 s a pass, counting the bar Live plays before the
+  stretch and the half bar after it; a judge or tune pass may play once more when Live started late, under the same
+  limit), keeping what it hears in Kumi's own data until the call ends, placed on the track or before Main,
   with Live stopped and not recording, and removes it after (Live's own Undo history keeps those temporary device
   steps); a tune's search or probe makes scratch copies of the run's track in the Set and removes them after, and if
   Kumi stops partway its next look (`kumi_observe`) removes leftovers. No record pass, and no model is downloaded: a
