@@ -5,7 +5,7 @@
 // palette. Both UI halves use it: what "Use as kit" does comes from `kit`.
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num } from './format.ts'
 import { groupColor } from './mapModel.ts'
@@ -129,7 +129,8 @@ function Chip({
   onMove,
   onDropHere,
   dragging,
-  onDrag
+  onDrag,
+  arriving
 }: {
   item: PaletteItem
   index: number
@@ -144,6 +145,8 @@ function Chip({
   onDropHere: () => void
   dragging: string | null
   onDrag: (key: string | null) => void
+  /** Just gathered: it pops in, after the flight from the map lands (its place in the batch sets the delay). */
+  arriving: number | null
 }) {
   const t = useT()
   const id = playableId(item)
@@ -178,6 +181,7 @@ function Chip({
         setOver(false)
         if (dragging && dragging !== item.key) onDropHere()
       }}
+      className={arriving === null ? undefined : 'kumi-pop'}
       role="listitem"
       style={{
         display: 'flex',
@@ -191,7 +195,8 @@ function Chip({
         background: playing ? T.chip : 'transparent',
         opacity: dragging === item.key ? 0.4 : id ? 1 : 0.55,
         transition: 'border-color 120ms, box-shadow 160ms, opacity 120ms',
-        cursor: 'grab'
+        cursor: 'grab',
+        animationDelay: arriving === null ? undefined : `${380 + Math.min(arriving, 24) * 22}ms`
       }}
     >
       <button
@@ -271,6 +276,16 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   // A move shows at once; the backend's answer then replaces it.
   const [order, setOrder] = useState<PaletteItem[] | null>(null)
   useEffect(() => setOrder(null), [palette])
+  // Which chips were there before the last answer: one that wasn't is new (a gather), and pops in. The first answer
+  // shows the palette as it is, with nothing popping.
+  const known = useRef<{ id: string | null; keys: Set<string> } | null>(null)
+  const arrived = useMemo(() => {
+    const keys = new Set((current?.items ?? []).map(item => item.key))
+    const before = known.current
+    const fresh = before && before.id === current?.id ? (current?.items ?? []).filter(item => !before.keys.has(item.key)).map(item => item.key) : []
+    known.current = { id: current?.id ?? null, keys }
+    return new Map(fresh.map((key, order) => [key, order]))
+  }, [current])
   // The last sentence fades after a while: it says what just happened, not what is.
   const [now, setNow] = useState(() => Date.now())
   const shownFor = said?.failed ? 8000 : 4000
@@ -410,6 +425,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
               index={index}
               item={item}
               key={item.key}
+              arriving={arrived.get(item.key) ?? null}
               onDrag={setDragging}
               onDropHere={() => dragging && move(dragging, index)}
               onMove={to => move(item.key, to)}

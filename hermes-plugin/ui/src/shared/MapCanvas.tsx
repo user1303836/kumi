@@ -12,7 +12,7 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, pointsInBox, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, foundLine, frame, indexedValues, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, FOCUSABLE, S, TextButton, useT } from './ui.tsx'
@@ -45,12 +45,42 @@ export interface MapCanvasProps {
   tools?: ReactNode
   /** What the picks can do, in a bar while there are any ("Add 12 to palette", Clear). */
   pickedActions?: (ids: string[]) => ReactNode
+  /** Square tiles instead of dots (the dots morph into them); `onTiles` shows the toggle and hears it. */
+  tiles?: boolean
+  onTiles?: (on: boolean) => void
+  /** Sounds just gathered into the palette, which fly from where they are into the dock under the map. */
+  flying?: { ids: string[]; at: number } | null
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
 const MATCHES_LISTED = 6
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
+// The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
+// middle out, dots morph into tiles and back, gathered sounds fly into the dock, and a playing sound ripples.
+const INTRO_MS = 900
+const MORPH_MS = 760
+const FLY_MS = 620
+const FLY_STAGGER = 14
+const FLY_MOST = 48
+const RIPPLE_MS = 1100
+/** How far apart, in a morph's span, the middle's points and the edge's move: the middle leads. */
+const STAGGER = 0.55
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value))
+const easeInOut = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
+const easeOutBack = (t: number): number => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2
+
+interface Morph {
+  from: number
+  to: number
+  at: number
+}
+
+/** How far the dots-to-tiles morph is at `now`: 0 dots, 1 tiles. */
+function morphAt(morph: Morph, now: number): number {
+  return morph.from + (morph.to - morph.from) * easeInOut(clamp01((now - morph.at) / MORPH_MS))
+}
 
 interface Size {
   width: number
@@ -76,7 +106,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -149,20 +179,65 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const visible = useMemo(() => (index: number): boolean => mask[index] === 1, [mask])
   const shown = useMemo(() => mask.reduce((count, keep) => count + (keep === 1 ? 1 : 0), 0), [mask])
   const leavingCount = useMemo(() => mask.reduce((count, keep) => count + (keep === 2 ? 1 : 0), 0), [mask])
-  // When each leaving sound started fading, and a clock that moves once a frame while one still fades.
+  // Motion: when each leaving sound started fading, when the map arrived (its points pop in from the middle out), the
+  // dots-to-tiles morph, and the sounds flying into the palette. One clock moves once a frame while any of them runs,
+  // or while a sound plays (its ripple), and not otherwise: a map that sits still draws nothing. A system asking for
+  // less motion gets none of it.
+  const still = useMemo(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, [])
   const leftAt = useRef(new Map<string, number>())
+  const introAt = useRef(-Infinity)
+  const until = useRef(0)
   const [clock, setClock] = useState(0)
+  const animate = (ms: number) => {
+    until.current = Math.max(until.current, performance.now() + ms)
+    setClock(performance.now())
+  }
   useEffect(() => {
     const now = performance.now()
     for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now)
     for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id)
-  }, [leaving])
+    if (leaving?.size) animate(FADE_MS)
+  }, [leaving]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (still || !model.revision) return
+    introAt.current = performance.now()
+    animate(INTRO_MS)
+  }, [model.revision]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [morph, setMorph] = useState<Morph>(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }))
   useEffect(() => {
     const now = performance.now()
-    if (![...leftAt.current.values()].some(at => now - at < FADE_MS)) return
+    setMorph(current => (current.to === (tiles ? 1 : 0) ? current : { from: still ? (tiles ? 1 : 0) : morphAt(current, now), to: tiles ? 1 : 0, at: now }))
+    if (!still) animate(MORPH_MS)
+  }, [tiles]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST)
+  }, [flying]) // eslint-disable-line react-hooks/exhaustive-deps
+  const playingHere = playing !== null && indexOf.has(playing) && !still
+  useEffect(() => {
+    if (performance.now() >= until.current && !playingHere) return
     const frame = requestAnimationFrame(setClock)
     return () => cancelAnimationFrame(frame)
-  }, [clock, leaving])
+  }, [clock, playingHere])
+  // The tile view's model: laid out the first time tiles show, and kept while the morph runs back to dots.
+  const layout = useMemo(() => (tiles || morph.from > 0 ? tileLayout(model) : null), [model, tiles, morph.from > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tiled = useMemo(() => (layout ? tileModel(model, layout) : null), [model, layout])
+  // What the pointer, the keyboard, a box and a find's frame work on: the tiles once they show, else the dots.
+  const active = tiles && tiled ? tiled : model
+  // Each point's place in the motion: 0 at the map's middle, 1 at its edge.
+  const spread = useMemo(() => {
+    const points = model.points
+    const out = new Float32Array(points.length)
+    if (points.length === 0) return out
+    const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length
+    const cy = points.reduce((sum, point) => sum + point.y, 0) / points.length
+    let far = 0
+    points.forEach((point, index) => {
+      out[index] = Math.hypot(point.x - cx, point.y - cy)
+      far = Math.max(far, out[index])
+    })
+    if (far > 0) for (let index = 0; index < out.length; index++) out[index] /= far
+    return out
+  }, [model])
   // What a search, or else the agent's find, picked out, also as named rows: a keyboard or a screen reader can pick a
   // sound the canvas only draws.
   const matches = useMemo(() => {
@@ -228,10 +303,13 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return () => canvas.removeEventListener('wheel', wheel)
   }, [hasPoints])
 
-  // Draw whenever anything shown changes. Points are batched into one path per group colour, so a 25,000-sound map is a
-  // few hundred fills, not 25,000. Each colour's points are split into `ROUNDS` interleaved paths, drawn round by round:
-  // where groups overlap, their colours still mix as the map's own order left them, instead of the last colour covering
-  // the rest.
+  // The sound under the pointer, for its glow: a move over the same sound draws nothing new.
+  const hoverAt = hover ? hover.index : null
+  // Draw whenever anything shown changes, and once a frame while something moves. Points are batched into one path
+  // per group colour, so a 25,000-sound map is a few hundred fills, not 25,000. Each colour's points are split into
+  // `ROUNDS` interleaved paths, drawn round by round: where groups overlap, their colours still mix as the map's own
+  // order left them, instead of the last colour covering the rest. A point is a dot, a square tile, or between the
+  // two while the morph runs.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !view || size.width === 0) return
@@ -247,6 +325,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const colors = resolve(canvas)
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, size.width, size.height)
+    const now = performance.now()
     // A small map (a fresh folder of a few sounds) draws bigger points than a library of thousands.
     const points = model.points
     const count = points.length
@@ -255,6 +334,39 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const groupColor = new Map(model.groups.map(group => [group.key, group.color]))
     const unit = mapSize * view.scale
     const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8]
+    // The morph (0 dots, 1 tiles), each point's own share of it (the middle leads), and a tile's side in pixels.
+    const morphed = still ? morph.to : morphAt(morph, now)
+    const tilePoints = tiled && morphed > 0 ? tiled.points : null
+    const tileSide = layout ? (unit / layout.side) * 0.86 : 0
+    const blendOf = (index: number): number => (tilePoints ? clamp01(morphed * (1 + STAGGER) - spread[index] * STAGGER) : 0)
+    const placeOf = (index: number): [number, number, number] => {
+      const point = points[index]
+      const blend = blendOf(index)
+      const x = tilePoints ? point.x + (tilePoints[index].x - point.x) * blend : point.x
+      const y = tilePoints ? point.y + (tilePoints[index].y - point.y) * blend : point.y
+      return [x * unit + view.dx, y * unit + view.dy, blend]
+    }
+    // A new map's points pop in from the middle out: each grows from nothing, just past its size, then settles.
+    const introFor = (index: number): number => {
+      const since = now - introAt.current - spread[index] * (INTRO_MS * 0.45)
+      return since >= INTRO_MS * 0.55 ? 1 : since <= 0 ? 0 : easeOutBack(since / (INTRO_MS * 0.55))
+    }
+    const shape = (path: Path2D, x: number, y: number, blend: number, grow = 1) => {
+      if (blend <= 0) {
+        const r = radius * grow
+        if (r <= 0.05) return
+        path.moveTo(x + r, y)
+        path.arc(x, y, r, 0, Math.PI * 2)
+        return
+      }
+      const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow
+      if (side <= 0.1) return
+      const corner = side / 2 - (side / 2 - side * 0.18) * blend
+      if (typeof path.roundRect === 'function') path.roundRect(x - side / 2, y - side / 2, side, side, corner)
+      else path.rect(x - side / 2, y - side / 2, side, side)
+    }
+    // How far beyond a point its rings sit: past a tile's corner once tiles show.
+    const reach = (blend: number): number => radius + (Math.max(radius, tileSide * 0.62) - radius) * blend
     // The labels need at most 41 on-screen points: past 40 there are none.
     const labelled: [number, number, string][] = []
     let onScreen = 0
@@ -263,20 +375,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
       for (let index = 0; index < count; index++) {
         if (mask[index] !== pass) continue
-        const point = points[index]
-        const x = point.x * unit + view.dx
-        const y = point.y * unit + view.dy
+        const [x, y, blend] = placeOf(index)
         if (x < left || y < top || x > right || y > bottom) continue
-        const color = groupColor.get(point.group) ?? colors.faint
+        const color = groupColor.get(points[index].group) ?? colors.faint
         const paths = rounds[index % ROUNDS]
         let path = paths.get(color)
         if (!path) {
           path = new Path2D()
           paths.set(color, path)
         }
-        path.moveTo(x + radius, y)
-        path.arc(x, y, radius, 0, Math.PI * 2)
-        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
+        shape(path, x, y, blend, introFor(index))
+        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ''])
       }
       context.globalAlpha = pass ? 0.92 : 0.16
       for (const paths of rounds) {
@@ -287,18 +396,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       }
     }
     // A sound that couldn't play shrinks and fades off where it was, drawn on its own: there are only ever a few.
-    const now = performance.now()
     for (const [id, at] of leftAt.current) {
       const progress = (now - at) / FADE_MS
       const index = indexOf.get(id)
       if (progress >= 1 || index === undefined) continue
       const eased = 1 - (1 - progress) ** 2
-      const point = points[index]
+      const [x, y, blend] = placeOf(index)
+      const path = new Path2D()
+      shape(path, x, y, blend, 1 - eased + 0.02)
       context.globalAlpha = 0.92 * (1 - eased)
-      context.fillStyle = groupColor.get(point.group) ?? colors.faint
-      context.beginPath()
-      context.arc(point.x * unit + view.dx, point.y * unit + view.dy, radius * (1 - eased) + 0.1, 0, Math.PI * 2)
-      context.fill()
+      context.fillStyle = groupColor.get(points[index].group) ?? colors.faint
+      context.fill(path)
     }
     // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
     // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
@@ -309,10 +417,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.font = `11px ${getComputedStyle(canvas).fontFamily || 'sans-serif'}`
       context.textBaseline = 'middle'
       const placed: [number, number, number, number][] = []
+      const gap = reach(morphed) + 4
       for (const [x, y, name] of labelled) {
         const text = mapLabel(name)
         if (!text) continue
-        const box: [number, number, number, number] = [x + radius + 4, y - 7, context.measureText(text).width, 14]
+        const box: [number, number, number, number] = [x + gap, y - 7, context.measureText(text).width, 14]
         if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue
         placed.push(box)
         context.fillText(text, box[0], y)
@@ -326,11 +435,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       for (const id of ids) {
         const index = indexOf.get(id)
         if (index === undefined || mask[index] === 2) continue
-        const x = points[index].x * unit + view.dx
-        const y = points[index].y * unit + view.dy
+        const [x, y, blend] = placeOf(index)
         if (x < left || y < top || x > right || y > bottom) continue
-        path.moveTo(x + radius + extra, y)
-        path.arc(x, y, radius + extra, 0, Math.PI * 2)
+        const r = reach(blend) + extra
+        path.moveTo(x + r, y)
+        path.arc(x, y, r, 0, Math.PI * 2)
       }
       return path
     }
@@ -352,22 +461,76 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const ring = (id: string, color: string, extra: number, width: number) => {
       const index = indexOf.get(id)
       if (index === undefined) return
-      const [x, y] = toScreen(view, mapSize, model.points[index].x, model.points[index].y)
+      const [x, y, blend] = placeOf(index)
       context.strokeStyle = color
       context.lineWidth = width
       context.beginPath()
-      context.arc(x, y, radius + extra, 0, Math.PI * 2)
+      context.arc(x, y, reach(blend) + extra, 0, Math.PI * 2)
       context.stroke()
     }
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
-    if (playing) ring(playing, colors.accent, 6, 2)
+    // The sound under the pointer glows in its colour, a little bigger.
+    const hovered = hoverAt
+    if (hovered !== null && hovered < count && mask[hovered] === 1) {
+      const [x, y, blend] = placeOf(hovered)
+      const color = groupColor.get(points[hovered].group) ?? colors.faint
+      const path = new Path2D()
+      shape(path, x, y, blend, 1.45)
+      context.save()
+      context.shadowColor = color
+      context.shadowBlur = 14
+      context.fillStyle = color
+      context.fill(path)
+      context.restore()
+    }
+    // A playing sound ripples: two rings spread from it and fade, half a beat apart.
+    if (playing) {
+      ring(playing, colors.accent, 6, 2)
+      const index = indexOf.get(playing)
+      if (index !== undefined && !still) {
+        const [x, y, blend] = placeOf(index)
+        for (const offset of [0, 0.5]) {
+          const phase = ((now / RIPPLE_MS + offset) % 1 + 1) % 1
+          context.globalAlpha = 0.65 * (1 - phase) ** 1.5
+          context.strokeStyle = groupColor.get(points[index].group) ?? colors.accent
+          context.lineWidth = 2 - phase
+          context.beginPath()
+          context.arc(x, y, reach(blend) + 4 + phase * 26, 0, Math.PI * 2)
+          context.stroke()
+        }
+        context.globalAlpha = 1
+      }
+    }
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked])
+    // Sounds just gathered fly down into the palette under the map, shrinking, one after another.
+    if (flying && !still) {
+      const target: [number, number] = [size.width / 2, size.height + 24]
+      flying.ids.slice(0, FLY_MOST).forEach((id, order) => {
+        const index = indexOf.get(id)
+        if (index === undefined) return
+        const progress = clamp01((now - flying.at - order * FLY_STAGGER) / FLY_MS)
+        if (progress <= 0 || progress >= 1) return
+        const eased = progress * progress * (3 - 2 * progress)
+        const [x0, y0] = placeOf(index)
+        // A slight arc: up a little first, then down into the dock.
+        const x = x0 + (target[0] - x0) * eased
+        const y = y0 + (target[1] - y0) * eased - Math.sin(progress * Math.PI) * 28
+        context.globalAlpha = 0.95 - 0.5 * progress
+        context.fillStyle = groupColor.get(points[index].group) ?? colors.accent
+        context.beginPath()
+        context.arc(x, y, Math.max(1.2, (radius + 1.5) * (1 - 0.55 * progress)), 0, Math.PI * 2)
+        context.fill()
+      })
+      context.globalAlpha = 1
+    }
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0]
   }
+  // How near the pointer must be to a sound to reach it: a dot's few pixels, or most of a tile.
+  const reachPx = (base: number): number => (tiles && layout && view ? Math.max(base, ((mapSize * view.scale) / layout.side) * 0.62) : base)
 
   // A press starts a pan, or with Shift held (or Select on) a box; a press with Command or Ctrl that doesn't move picks
   // or unpicks the sound under it.
@@ -388,12 +551,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (!held || !view) return
     const [x, y] = at(event)
     if (held.box && held.moved) {
-      const inside = pointsInBox(model, view, mapSize, [held.x, held.y, x, y], visible).map(index => model.points[index].id)
+      const inside = pointsInBox(active, view, mapSize, [held.x, held.y, x, y], visible).map(index => model.points[index].id)
       onPicked?.(inside, held.add ? 'add' : 'replace')
       return
     }
     if (held.moved) return
-    const index = pick(model, view, mapSize, x, y, 10, visible)
+    const index = pick(active, view, mapSize, x, y, reachPx(10), visible)
     if (index < 0) return
     if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([model.points[index].id], 'toggle')
     else onPick(model.points[index].id)
@@ -410,12 +573,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       setView(fitView(size.width, size.height))
     } else if ('zoom' in key) {
       // Around the sound picked, so it stays where it is; else around the middle.
-      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y)
+      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, active.points[picked].x, active.points[picked].y)
       setView(zoomAt(view, key.zoom, x, y))
     } else {
-      const next = moveWith(model, view, mapSize, picked, key, middle, visible)
+      const next = moveWith(active, view, mapSize, picked, key, middle, visible)
       if (next < 0) return
-      const point = model.points[next]
+      const point = active.points[next]
       const [x, y] = toScreen(view, mapSize, point.x, point.y)
       setView(keepInView(view, x, y, size.width, size.height))
       onSelect(point.id)
@@ -468,6 +631,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         {onPicked && (
           <TextButton onClick={() => setSelecting(!selecting)} pressed={selecting} title={t('dock.selectTitle')}>
             {t('dock.select')}
+          </TextButton>
+        )}
+        {onTiles && (
+          <TextButton onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')}>
+            {t('map.tiles')}
           </TextButton>
         )}
         {tools}
@@ -555,7 +723,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               return
             }
             if (!view) return
-            const index = pick(model, view, mapSize, x, y, 8, visible)
+            const index = pick(active, view, mapSize, x, y, reachPx(8), visible)
             setHover(index >= 0 ? { index, x, y } : null)
             rest(index >= 0 ? model.points[index].id : null)
           }}
@@ -575,20 +743,23 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', outlineOffset: -3, cursor: selecting || box ? 'crosshair' : hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
         />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
-          <div
+          // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
+          <svg
             aria-hidden
-            style={{
-              position: 'absolute',
-              left: Math.min(box[0], box[2]),
-              top: Math.min(box[1], box[3]),
-              width: Math.abs(box[2] - box[0]),
-              height: Math.abs(box[3] - box[1]),
-              border: `1px dashed ${T.accent}`,
-              background: `color-mix(in srgb, ${T.accent} 12%, transparent)`,
-              borderRadius: 2,
-              pointerEvents: 'none'
-            }}
-          />
+            height={Math.abs(box[3] - box[1])}
+            style={{ position: 'absolute', left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: 'visible', pointerEvents: 'none' }}
+            width={Math.abs(box[2] - box[0])}
+          >
+            <rect
+              className="kumi-ants"
+              height={Math.max(0, Math.abs(box[3] - box[1]) - 1)}
+              rx={2}
+              style={{ fill: `color-mix(in srgb, ${T.accent} 12%, transparent)`, stroke: T.accent, strokeWidth: 1, strokeDasharray: '5 4' }}
+              width={Math.max(0, Math.abs(box[2] - box[0]) - 1)}
+              x={0.5}
+              y={0.5}
+            />
+          </svg>
         )}
         <span id={hintId} style={S.hidden}>
           {t('map.keys')}

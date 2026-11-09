@@ -120,6 +120,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   that off) or on a click, AIFF included; nothing changes in your DAW. A sound whose file is gone, or that the window
   can't play, fades off the map quietly, and one line under the map counts them: **Show them** puts them back, and
   **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard, it copies the request).
+  **Tiles** turns the map into square tiles in each group's colour, every sound on its own tile near its place; the
+  dots morph into them and back.
 
 ### Your palette
 

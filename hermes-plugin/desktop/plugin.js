@@ -149,7 +149,9 @@ var en = {
     showHidden: "Show them",
     showHiddenTitle: "Put the hidden sounds back on the map",
     rescan: "Rescan…",
-    rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like"
+    rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like",
+    tiles: "Tiles",
+    tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it"
   },
   measurements: {
     tab: "Measurements",
@@ -540,7 +542,9 @@ var ja = {
     showHidden: "表示する",
     showHiddenTitle: "隠したサウンドをマップに戻します",
     rescan: "再スキャン…",
-    rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で"
+    rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で",
+    tiles: "タイル",
+    tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します"
   },
   measurements: {
     tab: "測定結果",
@@ -929,7 +933,9 @@ var zh = {
     showHidden: "显示它们",
     showHiddenTitle: "把隐藏的声音放回地图",
     rescan: "重新扫描…",
-    rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送"
+    rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送",
+    tiles: "方块",
+    tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近"
   },
   measurements: {
     tab: "测量结果",
@@ -2232,7 +2238,7 @@ var S = {
 };
 var FOCUSABLE = "kumi-focusable";
 function FocusStyle() {
-  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}` });
+  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop{animation:none}}` });
 }
 function Chip({ children, title, tone }) {
   const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -3492,6 +3498,90 @@ function buildModel(map) {
   })).filter((group) => Number.isInteger(group.key)).sort((a, b) => a.key - b.key);
   return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells };
 }
+var TILE_ROOM = 1.12;
+function tileLayout(model) {
+  const points = model.points;
+  const count2 = points.length;
+  const COARSE = 40;
+  const covered = new Uint8Array(COARSE * COARSE);
+  for (const point of points) covered[Math.min(COARSE - 1, Math.floor(point.y * COARSE)) * COARSE + Math.min(COARSE - 1, Math.floor(point.x * COARSE))] = 1;
+  const area = Math.max(0.05, covered.reduce((sum, cell) => sum + cell, 0) / (COARSE * COARSE));
+  const side = Math.max(2, Math.ceil(Math.sqrt(Math.max(1, count2) * TILE_ROOM / area)));
+  const span2 = side + 1;
+  const right = new Int32Array(side * span2);
+  const left = new Int32Array(side * span2);
+  for (let r = 0; r < side; r++) {
+    for (let c = 0; c < span2; c++) {
+      right[r * span2 + c] = c;
+      left[r * span2 + c] = c;
+    }
+  }
+  const find = (links, base, at) => {
+    let x = at;
+    while (links[base + x] !== x) {
+      links[base + x] = links[base + links[base + x]];
+      x = links[base + x];
+    }
+    return x;
+  };
+  const col = new Int32Array(count2);
+  const row2 = new Int32Array(count2);
+  const cells = new Int32Array(side * side).fill(-1);
+  let cx = 0;
+  let cy = 0;
+  for (const point of points) {
+    cx += point.x / Math.max(1, count2);
+    cy += point.y / Math.max(1, count2);
+  }
+  const order = points.map((_, index) => index).sort((a, b) => (points[a].x - cx) ** 2 + (points[a].y - cy) ** 2 - ((points[b].x - cx) ** 2 + (points[b].y - cy) ** 2) || a - b);
+  for (const index of order) {
+    const tx = points[index].x * side - 0.5;
+    const ty = points[index].y * side - 0.5;
+    const r0 = Math.min(side - 1, Math.max(0, Math.round(ty)));
+    const c0 = Math.min(side - 1, Math.max(0, Math.round(tx)));
+    let best = Infinity;
+    let bestRow = -1;
+    let bestCol = -1;
+    const consider = (r, c) => {
+      const distance = (c - tx) ** 2 + (r - ty) ** 2;
+      if (distance < best) {
+        best = distance;
+        bestRow = r;
+        bestCol = c;
+      }
+    };
+    for (let dy = 0; dy < side; dy++) {
+      const near = Math.max(0, dy - 0.5);
+      if (near * near >= best) break;
+      for (const r of dy === 0 ? [r0] : [r0 - dy, r0 + dy]) {
+        if (r < 0 || r >= side) continue;
+        const base = r * span2;
+        const after = find(right, base, c0);
+        if (after < side) consider(r, after);
+        const before = find(left, base, c0 + 1) - 1;
+        if (before >= 0) consider(r, before);
+      }
+    }
+    col[index] = bestCol;
+    row2[index] = bestRow;
+    cells[bestRow * side + bestCol] = index;
+    right[bestRow * span2 + bestCol] = bestCol + 1;
+    left[bestRow * span2 + bestCol + 1] = bestCol;
+  }
+  return { side, col, row: row2, cells };
+}
+function tileModel(model, layout) {
+  const cells = /* @__PURE__ */ new Map();
+  const points = model.points.map((point, index) => {
+    const tiled = { ...point, x: (layout.col[index] + 0.5) / layout.side, y: (layout.row[index] + 0.5) / layout.side };
+    const cell = cellOf(tiled.x, tiled.y);
+    const list = cells.get(cell);
+    if (list) list.push(index);
+    else cells.set(cell, [index]);
+    return tiled;
+  });
+  return { ...model, points, cells };
+}
 function fitView(width, height, margin = 16) {
   const size = Math.max(1, Math.min(width, height) - 2 * margin);
   return { scale: 1, dx: (width - size) / 2, dy: (height - size) / 2 };
@@ -3661,6 +3751,19 @@ function pointsInBox(model, view, size, box, visible) {
 import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
 var FADE_MS = 450;
+var INTRO_MS = 900;
+var MORPH_MS = 760;
+var FLY_MS = 620;
+var FLY_STAGGER = 14;
+var FLY_MOST = 48;
+var RIPPLE_MS = 1100;
+var STAGGER = 0.55;
+var clamp01 = (value) => Math.min(1, Math.max(0, value));
+var easeInOut = (t) => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+var easeOutBack = (t) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
+function morphAt(morph, now) {
+  return morph.from + (morph.to - morph.from) * easeInOut(clamp01((now - morph.at) / MORPH_MS));
+}
 function resolve(canvas) {
   const style = getComputedStyle(canvas);
   const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -3674,7 +3777,7 @@ function resolve(canvas) {
 }
 var ROUNDS = 8;
 var maps = 0;
-function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions }) {
+function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying }) {
   const t = useT();
   const model = useMemo(() => buildModel(map), [map]);
   const canvasRef = useRef2(null);
@@ -3735,19 +3838,58 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
   const shown = useMemo(() => mask.reduce((count2, keep) => count2 + (keep === 1 ? 1 : 0), 0), [mask]);
   const leavingCount = useMemo(() => mask.reduce((count2, keep) => count2 + (keep === 2 ? 1 : 0), 0), [mask]);
+  const still = useMemo(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const leftAt = useRef2(/* @__PURE__ */ new Map());
+  const introAt = useRef2(-Infinity);
+  const until = useRef2(0);
   const [clock2, setClock] = useState4(0);
+  const animate = (ms2) => {
+    until.current = Math.max(until.current, performance.now() + ms2);
+    setClock(performance.now());
+  };
   useEffect5(() => {
     const now = performance.now();
     for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
     for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
+    if (leaving?.size) animate(FADE_MS);
   }, [leaving]);
   useEffect5(() => {
+    if (still || !model.revision) return;
+    introAt.current = performance.now();
+    animate(INTRO_MS);
+  }, [model.revision]);
+  const [morph, setMorph] = useState4(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
+  useEffect5(() => {
     const now = performance.now();
-    if (![...leftAt.current.values()].some((at2) => now - at2 < FADE_MS)) return;
+    setMorph((current) => current.to === (tiles ? 1 : 0) ? current : { from: still ? tiles ? 1 : 0 : morphAt(current, now), to: tiles ? 1 : 0, at: now });
+    if (!still) animate(MORPH_MS);
+  }, [tiles]);
+  useEffect5(() => {
+    if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
+  }, [flying]);
+  const playingHere = playing !== null && indexOf.has(playing) && !still;
+  useEffect5(() => {
+    if (performance.now() >= until.current && !playingHere) return;
     const frame2 = requestAnimationFrame(setClock);
     return () => cancelAnimationFrame(frame2);
-  }, [clock2, leaving]);
+  }, [clock2, playingHere]);
+  const layout = useMemo(() => tiles || morph.from > 0 ? tileLayout(model) : null, [model, tiles, morph.from > 0]);
+  const tiled = useMemo(() => layout ? tileModel(model, layout) : null, [model, layout]);
+  const active = tiles && tiled ? tiled : model;
+  const spread = useMemo(() => {
+    const points = model.points;
+    const out = new Float32Array(points.length);
+    if (points.length === 0) return out;
+    const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const cy = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    let far = 0;
+    points.forEach((point, index) => {
+      out[index] = Math.hypot(point.x - cx, point.y - cy);
+      far = Math.max(far, out[index]);
+    });
+    if (far > 0) for (let index = 0; index < out.length; index++) out[index] /= far;
+    return out;
+  }, [model]);
   const matches = useMemo(() => {
     const ids = searched ?? foundIds;
     return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -3796,6 +3938,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     canvas.addEventListener("wheel", wheel, { passive: false });
     return () => canvas.removeEventListener("wheel", wheel);
   }, [hasPoints]);
+  const hoverAt = hover ? hover.index : null;
   useEffect5(() => {
     const canvas = canvasRef.current;
     if (!canvas || !view || size.width === 0) return;
@@ -3811,6 +3954,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const colors = resolve(canvas);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, size.width, size.height);
+    const now = performance.now();
     const points = model.points;
     const count2 = points.length;
     const base = count2 <= 40 ? 5 : count2 <= 300 ? 3.2 : 2.2;
@@ -3818,26 +3962,53 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
     const unit = mapSize * view.scale;
     const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8];
+    const morphed = still ? morph.to : morphAt(morph, now);
+    const tilePoints = tiled && morphed > 0 ? tiled.points : null;
+    const tileSide = layout ? unit / layout.side * 0.86 : 0;
+    const blendOf = (index) => tilePoints ? clamp01(morphed * (1 + STAGGER) - spread[index] * STAGGER) : 0;
+    const placeOf = (index) => {
+      const point = points[index];
+      const blend = blendOf(index);
+      const x = tilePoints ? point.x + (tilePoints[index].x - point.x) * blend : point.x;
+      const y = tilePoints ? point.y + (tilePoints[index].y - point.y) * blend : point.y;
+      return [x * unit + view.dx, y * unit + view.dy, blend];
+    };
+    const introFor = (index) => {
+      const since = now - introAt.current - spread[index] * (INTRO_MS * 0.45);
+      return since >= INTRO_MS * 0.55 ? 1 : since <= 0 ? 0 : easeOutBack(since / (INTRO_MS * 0.55));
+    };
+    const shape = (path, x, y, blend, grow = 1) => {
+      if (blend <= 0) {
+        const r = radius * grow;
+        if (r <= 0.05) return;
+        path.moveTo(x + r, y);
+        path.arc(x, y, r, 0, Math.PI * 2);
+        return;
+      }
+      const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow;
+      if (side <= 0.1) return;
+      const corner = side / 2 - (side / 2 - side * 0.18) * blend;
+      if (typeof path.roundRect === "function") path.roundRect(x - side / 2, y - side / 2, side, side, corner);
+      else path.rect(x - side / 2, y - side / 2, side, side);
+    };
+    const reach = (blend) => radius + (Math.max(radius, tileSide * 0.62) - radius) * blend;
     const labelled = [];
     let onScreen = 0;
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
       for (let index = 0; index < count2; index++) {
         if (mask[index] !== pass) continue;
-        const point = points[index];
-        const x = point.x * unit + view.dx;
-        const y = point.y * unit + view.dy;
+        const [x, y, blend] = placeOf(index);
         if (x < left || y < top || x > right || y > bottom) continue;
-        const color = groupColor2.get(point.group) ?? colors.faint;
+        const color = groupColor2.get(points[index].group) ?? colors.faint;
         const paths = rounds[index % ROUNDS];
         let path = paths.get(color);
         if (!path) {
           path = new Path2D();
           paths.set(color, path);
         }
-        path.moveTo(x + radius, y);
-        path.arc(x, y, radius, 0, Math.PI * 2);
-        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
+        shape(path, x, y, blend, introFor(index));
+        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ""]);
       }
       context.globalAlpha = pass ? 0.92 : 0.16;
       for (const paths of rounds) {
@@ -3847,18 +4018,17 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
       }
     }
-    const now = performance.now();
     for (const [id, at2] of leftAt.current) {
       const progress = (now - at2) / FADE_MS;
       const index = indexOf.get(id);
       if (progress >= 1 || index === void 0) continue;
       const eased = 1 - (1 - progress) ** 2;
-      const point = points[index];
+      const [x, y, blend] = placeOf(index);
+      const path = new Path2D();
+      shape(path, x, y, blend, 1 - eased + 0.02);
       context.globalAlpha = 0.92 * (1 - eased);
-      context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
-      context.beginPath();
-      context.arc(point.x * unit + view.dx, point.y * unit + view.dy, radius * (1 - eased) + 0.1, 0, Math.PI * 2);
-      context.fill();
+      context.fillStyle = groupColor2.get(points[index].group) ?? colors.faint;
+      context.fill(path);
     }
     if (onScreen <= 40) {
       context.globalAlpha = 0.85;
@@ -3866,10 +4036,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
       context.textBaseline = "middle";
       const placed = [];
+      const gap = reach(morphed) + 4;
       for (const [x, y, name] of labelled) {
         const text = mapLabel(name);
         if (!text) continue;
-        const box2 = [x + radius + 4, y - 7, context.measureText(text).width, 14];
+        const box2 = [x + gap, y - 7, context.measureText(text).width, 14];
         if (placed.some(([left2, top2, width, height]) => box2[0] < left2 + width && left2 < box2[0] + box2[2] && box2[1] < top2 + height && top2 < box2[1] + box2[3])) continue;
         placed.push(box2);
         context.fillText(text, box2[0], y);
@@ -3882,11 +4053,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       for (const id of ids) {
         const index = indexOf.get(id);
         if (index === void 0 || mask[index] === 2) continue;
-        const x = points[index].x * unit + view.dx;
-        const y = points[index].y * unit + view.dy;
+        const [x, y, blend] = placeOf(index);
         if (x < left || y < top || x > right || y > bottom) continue;
-        path.moveTo(x + radius + extra, y);
-        path.arc(x, y, radius + extra, 0, Math.PI * 2);
+        const r = reach(blend) + extra;
+        path.moveTo(x + r, y);
+        path.arc(x, y, r, 0, Math.PI * 2);
       }
       return path;
     };
@@ -3907,21 +4078,70 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const ring = (id, color, extra, width) => {
       const index = indexOf.get(id);
       if (index === void 0) return;
-      const [x, y] = toScreen(view, mapSize, model.points[index].x, model.points[index].y);
+      const [x, y, blend] = placeOf(index);
       context.strokeStyle = color;
       context.lineWidth = width;
       context.beginPath();
-      context.arc(x, y, radius + extra, 0, Math.PI * 2);
+      context.arc(x, y, reach(blend) + extra, 0, Math.PI * 2);
       context.stroke();
     };
     foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
-    if (playing) ring(playing, colors.accent, 6, 2);
+    const hovered2 = hoverAt;
+    if (hovered2 !== null && hovered2 < count2 && mask[hovered2] === 1) {
+      const [x, y, blend] = placeOf(hovered2);
+      const color = groupColor2.get(points[hovered2].group) ?? colors.faint;
+      const path = new Path2D();
+      shape(path, x, y, blend, 1.45);
+      context.save();
+      context.shadowColor = color;
+      context.shadowBlur = 14;
+      context.fillStyle = color;
+      context.fill(path);
+      context.restore();
+    }
+    if (playing) {
+      ring(playing, colors.accent, 6, 2);
+      const index = indexOf.get(playing);
+      if (index !== void 0 && !still) {
+        const [x, y, blend] = placeOf(index);
+        for (const offset of [0, 0.5]) {
+          const phase = ((now / RIPPLE_MS + offset) % 1 + 1) % 1;
+          context.globalAlpha = 0.65 * (1 - phase) ** 1.5;
+          context.strokeStyle = groupColor2.get(points[index].group) ?? colors.accent;
+          context.lineWidth = 2 - phase;
+          context.beginPath();
+          context.arc(x, y, reach(blend) + 4 + phase * 26, 0, Math.PI * 2);
+          context.stroke();
+        }
+        context.globalAlpha = 1;
+      }
+    }
     if (selected) ring(selected, colors.strong, 4, 2);
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock2, marked, picked]);
+    if (flying && !still) {
+      const target = [size.width / 2, size.height + 24];
+      flying.ids.slice(0, FLY_MOST).forEach((id, order) => {
+        const index = indexOf.get(id);
+        if (index === void 0) return;
+        const progress = clamp01((now - flying.at - order * FLY_STAGGER) / FLY_MS);
+        if (progress <= 0 || progress >= 1) return;
+        const eased = progress * progress * (3 - 2 * progress);
+        const [x0, y0] = placeOf(index);
+        const x = x0 + (target[0] - x0) * eased;
+        const y = y0 + (target[1] - y0) * eased - Math.sin(progress * Math.PI) * 28;
+        context.globalAlpha = 0.95 - 0.5 * progress;
+        context.fillStyle = groupColor2.get(points[index].group) ?? colors.accent;
+        context.beginPath();
+        context.arc(x, y, Math.max(1.2, (radius + 1.5) * (1 - 0.55 * progress)), 0, Math.PI * 2);
+        context.fill();
+      });
+      context.globalAlpha = 1;
+    }
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
   };
+  const reachPx = (base) => tiles && layout && view ? Math.max(base, mapSize * view.scale / layout.side * 0.62) : base;
   const press = (event) => {
     if (!view) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -3939,12 +4159,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     if (!held || !view) return;
     const [x, y] = at(event);
     if (held.box && held.moved) {
-      const inside = pointsInBox(model, view, mapSize, [held.x, held.y, x, y], visible).map((index2) => model.points[index2].id);
+      const inside = pointsInBox(active, view, mapSize, [held.x, held.y, x, y], visible).map((index2) => model.points[index2].id);
       onPicked?.(inside, held.add ? "add" : "replace");
       return;
     }
     if (held.moved) return;
-    const index = pick(model, view, mapSize, x, y, 10, visible);
+    const index = pick(active, view, mapSize, x, y, reachPx(10), visible);
     if (index < 0) return;
     if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([model.points[index].id], "toggle");
     else onPick(model.points[index].id);
@@ -3959,12 +4179,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     if ("fit" in key) {
       setView(fitView(size.width, size.height));
     } else if ("zoom" in key) {
-      const [x, y] = picked2 === void 0 ? middle : toScreen(view, mapSize, model.points[picked2].x, model.points[picked2].y);
+      const [x, y] = picked2 === void 0 ? middle : toScreen(view, mapSize, active.points[picked2].x, active.points[picked2].y);
       setView(zoomAt(view, key.zoom, x, y));
     } else {
-      const next = moveWith(model, view, mapSize, picked2, key, middle, visible);
+      const next = moveWith(active, view, mapSize, picked2, key, middle, visible);
       if (next < 0) return;
-      const point = model.points[next];
+      const point = active.points[next];
       const [x, y] = toScreen(view, mapSize, point.x, point.y);
       setView(keepInView(view, x, y, size.width, size.height));
       onSelect(point.id);
@@ -4001,6 +4221,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       onPicked && searched !== null && matches.length > 0 && // Native's `a`: every sound the search keeps.
       /* @__PURE__ */ jsx11(TextButton, { onClick: () => onPicked(matches, "replace"), title: t("dock.pickAllTitle"), children: t("dock.pickAll", matches.length) }),
       onPicked && /* @__PURE__ */ jsx11(TextButton, { onClick: () => setSelecting(!selecting), pressed: selecting, title: t("dock.selectTitle"), children: t("dock.select") }),
+      onTiles && /* @__PURE__ */ jsx11(TextButton, { onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle"), children: t("map.tiles") }),
       tools
     ] }),
     /* @__PURE__ */ jsx11("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
@@ -4078,7 +4299,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               return;
             }
             if (!view) return;
-            const index = pick(model, view, mapSize, x, y, 8, visible);
+            const index = pick(active, view, mapSize, x, y, reachPx(8), visible);
             setHover(index >= 0 ? { index, x, y } : null);
             rest(index >= 0 ? model.points[index].id : null);
           },
@@ -4097,21 +4318,26 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           style: { position: "absolute", inset: 0, width: "100%", height: "100%", outlineOffset: -3, cursor: selecting || box ? "crosshair" : hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
         }
       ),
-      box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && /* @__PURE__ */ jsx11(
-        "div",
+      box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
+      /* @__PURE__ */ jsx11(
+        "svg",
         {
           "aria-hidden": true,
-          style: {
-            position: "absolute",
-            left: Math.min(box[0], box[2]),
-            top: Math.min(box[1], box[3]),
-            width: Math.abs(box[2] - box[0]),
-            height: Math.abs(box[3] - box[1]),
-            border: `1px dashed ${T.accent}`,
-            background: `color-mix(in srgb, ${T.accent} 12%, transparent)`,
-            borderRadius: 2,
-            pointerEvents: "none"
-          }
+          height: Math.abs(box[3] - box[1]),
+          style: { position: "absolute", left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: "visible", pointerEvents: "none" },
+          width: Math.abs(box[2] - box[0]),
+          children: /* @__PURE__ */ jsx11(
+            "rect",
+            {
+              className: "kumi-ants",
+              height: Math.max(0, Math.abs(box[3] - box[1]) - 1),
+              rx: 2,
+              style: { fill: `color-mix(in srgb, ${T.accent} 12%, transparent)`, stroke: T.accent, strokeWidth: 1, strokeDasharray: "5 4" },
+              width: Math.max(0, Math.abs(box[2] - box[0]) - 1),
+              x: 0.5,
+              y: 0.5
+            }
+          )
         }
       ),
       /* @__PURE__ */ jsx11("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
@@ -4209,7 +4435,7 @@ function peaksOf2(samples, bins) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect6, useRef as useRef3, useState as useState5 } from "react";
+import { useEffect as useEffect6, useMemo as useMemo2, useRef as useRef3, useState as useState5 } from "react";
 import { Fragment as Fragment4, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var BARS = 28;
@@ -4297,7 +4523,8 @@ function Chip2({
   onMove,
   onDropHere,
   dragging,
-  onDrag
+  onDrag,
+  arriving
 }) {
   const t = useT();
   const id = playableId(item);
@@ -4333,6 +4560,7 @@ function Chip2({
         setOver(false);
         if (dragging && dragging !== item.key) onDropHere();
       },
+      className: arriving === null ? void 0 : "kumi-pop",
       role: "listitem",
       style: {
         display: "flex",
@@ -4346,7 +4574,8 @@ function Chip2({
         background: playing ? T.chip : "transparent",
         opacity: dragging === item.key ? 0.4 : id ? 1 : 0.55,
         transition: "border-color 120ms, box-shadow 160ms, opacity 120ms",
-        cursor: "grab"
+        cursor: "grab",
+        animationDelay: arriving === null ? void 0 : `${380 + Math.min(arriving, 24) * 22}ms`
       },
       children: [
         /* @__PURE__ */ jsxs12(
@@ -4431,6 +4660,14 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
   const [dragging, setDragging] = useState5(null);
   const [order, setOrder] = useState5(null);
   useEffect6(() => setOrder(null), [palette]);
+  const known = useRef3(null);
+  const arrived = useMemo2(() => {
+    const keys = new Set((current?.items ?? []).map((item) => item.key));
+    const before = known.current;
+    const fresh = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
+    known.current = { id: current?.id ?? null, keys };
+    return new Map(fresh.map((key, order2) => [key, order2]));
+  }, [current]);
   const [now, setNow] = useState5(() => Date.now());
   const shownFor = said?.failed ? 8e3 : 4e3;
   useEffect6(() => {
@@ -4540,6 +4777,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           dragging,
           index,
           item,
+          arriving: arrived.get(item.key) ?? null,
           onDrag: setDragging,
           onDropHere: () => dragging && move(dragging, index),
           onMove: (to) => move(item.key, to),
@@ -4564,13 +4802,14 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
 }
 
 // src/shared/paletteMap.ts
-import { useEffect as useEffect7, useMemo as useMemo2, useState as useState6 } from "react";
+import { useEffect as useEffect7, useMemo as useMemo3, useState as useState6 } from "react";
 function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const revision = state.map?.revision ?? null;
   const [picks, setPicks] = useState6({ revision, ids: /* @__PURE__ */ new Set() });
   const picked = picks.revision === revision ? picks.ids : /* @__PURE__ */ new Set();
   useEffect7(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
-  const marked = useMemo2(() => marksOf(state.palette, revision), [state.palette, revision]);
+  const marked = useMemo3(() => marksOf(state.palette, revision), [state.palette, revision]);
+  const [flying, setFlying] = useState6(null);
   const play = (id, preview = false) => {
     audition.play(id, preview ? { preview: PREVIEW_SECONDS } : {}).catch((error) => {
       const why = playFailure(error);
@@ -4588,6 +4827,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     marked,
     play,
     onHover,
+    flying,
     onPicked: (ids, how) => setPicks((current) => {
       const base = current.revision === revision ? current.ids : /* @__PURE__ */ new Set();
       const next = how === "replace" ? /* @__PURE__ */ new Set() : new Set(base);
@@ -4601,6 +4841,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     gather: async (ids) => {
       const { ids: sent, dropped } = gatherIds(ids);
       if (sent.length === 0) return;
+      setFlying({ ids: sent.filter((id) => !marked.has(id)), at: performance.now() });
       const done = await store.paletteDo({ action: "gather", sound_ids: sent }, dropped > 0 ? t("dock.firstOnly", sent.length + dropped) : void 0);
       if (done) setPicks({ revision, ids: /* @__PURE__ */ new Set() });
     }
@@ -4610,6 +4851,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
 // src/desktop/map.tsx
 import { Fragment as Fragment5, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var HOVER_PLAY = "mapHover";
+var TILES = "mapTiles";
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
@@ -4655,6 +4897,7 @@ function MapWorkspace({ ctx, store, audition }) {
   const [selected, setSelected] = useState7(null);
   const [padsFor, setPadsFor] = useState7(null);
   const [hover, setHover] = useState7(() => ctx.storage.get(HOVER_PLAY, true) !== false);
+  const [tiles, setTiles] = useState7(() => ctx.storage.get(TILES, false) === true);
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
@@ -4716,6 +4959,12 @@ function MapWorkspace({ ctx, store, audition }) {
         ] }),
         playing,
         selected,
+        flying: palette.flying,
+        onTiles: (on) => {
+          ctx.storage.set(TILES, on);
+          setTiles(on);
+        },
+        tiles,
         tools: /* @__PURE__ */ jsx13(
           TextButton,
           {

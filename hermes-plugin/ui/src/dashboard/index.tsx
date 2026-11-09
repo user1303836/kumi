@@ -22,6 +22,8 @@ const BASE = '/api/plugins/kumi'
 const POLL_MS = 5000
 /** The browser's own key for hover-to-play: on unless the producer turned it off, as native Kumi's `h`. */
 const HOVER_PLAY = 'kumi.mapHover'
+/** The browser's own key for the square-tile view: off until the producer turns it on. */
+const TILES = 'kumi.mapTiles'
 
 function useNow(every = 30_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -80,6 +82,7 @@ function Dashboard() {
   const now = useNow()
   const [selected, setSelected] = useState<null | string>(null)
   const [hover, setHover] = useState(() => globalThis.localStorage?.getItem(HOVER_PLAY) !== 'off')
+  const [tiles, setTiles] = useState(() => globalThis.localStorage?.getItem(TILES) === 'on')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
 
@@ -200,6 +203,12 @@ function Dashboard() {
             )}
             playing={playing}
             selected={selected}
+            flying={palette.flying}
+            onTiles={on => {
+              globalThis.localStorage?.setItem(TILES, on ? 'on' : 'off')
+              setTiles(on)
+            }}
+            tiles={tiles}
             tools={
               <TextButton
                 onClick={() => {
