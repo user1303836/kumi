@@ -149,7 +149,7 @@
       interrupted: (noun) => `${noun} interrupted`,
       interruptedWhy: "Kumi stopped before it finished.",
       underWay: (title) => `${title}: under way`,
-      percent: (title, percent2) => `${title}: ${percent2}%`
+      percent: (title, percent3) => `${title}: ${percent3}%`
     },
     map: {
       tab: "Sound map",
@@ -220,6 +220,27 @@
       families: { name: "Families", title: "An island for each kind, alike sounds together inside it" },
       length: { name: "Length", title: "A spiral from the shortest sound in the middle out to the longest" },
       folders: { name: "Folders", title: "An island for each top folder, alike sounds together inside it" }
+    },
+    // Grow: one sound grown toward another along a vine on the map (A2).
+    grow: {
+      tool: "Grow",
+      toolTitle: "Grow one sound toward another: click the sound to start from, then the one to grow toward",
+      from: "Click the sound to grow from",
+      to: (name) => `Now click the sound to grow ${name} toward`,
+      cancel: "Cancel",
+      title: (from, to) => `${from} → ${to}`,
+      bud: (percent3) => `${percent3}% of the way`,
+      handle: "Grow any point along the vine",
+      hint: "Click a bud to hear it, or drag the handle along the vine",
+      growing: (percent3) => `Growing the sound ${percent3}% of the way…`,
+      failed: (why) => `It didn't grow: ${why}`,
+      again: "Grow from here",
+      againTitle: "A new vine from this sound toward the same one",
+      reroll: "Another path",
+      rerollTitle: "The same two sounds by another path: every point grown again",
+      close: "Close the vine",
+      between: "Grow between",
+      betweenTitle: "Grow the first pick toward the second: the sounds between them, along a vine"
     },
     measurements: {
       tab: "Measurements",
@@ -737,7 +758,7 @@
           ms: (low, high) => `${low}–${high} ms`,
           percentRange: (low, high) => `${low}–${high}%`,
           down: (db) => `down to −${db} dB`,
-          pan: (percent2) => `±${percent2}%`
+          pan: (percent3) => `±${percent3}%`
         }
       }
     },
@@ -863,7 +884,7 @@
       interrupted: (noun) => `${noun}中断`,
       interruptedWhy: "完了する前に Kumi が停止しました。",
       underWay: (title) => `${title}: 進行中`,
-      percent: (title, percent2) => `${title}: ${percent2}%`
+      percent: (title, percent3) => `${title}: ${percent3}%`
     },
     map: {
       tab: "サンプルマップ",
@@ -933,6 +954,26 @@
       families: { name: "種類", title: "種類ごとの島。島の中では似たサウンドどうしが近くに並びます" },
       length: { name: "長さ", title: "中央の最も短いサウンドから、外側の最も長いサウンドへのらせん" },
       folders: { name: "フォルダ", title: "最上位フォルダごとの島。島の中では似たサウンドどうしが近くに並びます" }
+    },
+    grow: {
+      tool: "グロウ",
+      toolTitle: "あるサウンドを別のサウンドへ育てます。始点のサウンドをクリックし、次に向かう先のサウンドをクリックします",
+      from: "育て始めるサウンドをクリック",
+      to: (name) => `${name} を育てる先のサウンドをクリック`,
+      cancel: "キャンセル",
+      title: (from, to) => `${from} → ${to}`,
+      bud: (percent3) => `${percent3}% の地点`,
+      handle: "つるに沿って好きな地点を育てる",
+      hint: "つぼみをクリックして試聴するか、ハンドルをつるに沿ってドラッグします",
+      growing: (percent3) => `${percent3}% の地点のサウンドを育てています…`,
+      failed: (why) => `育てられませんでした: ${why}`,
+      again: "ここから育てる",
+      againTitle: "このサウンドから同じ先へ、新しいつるを育てます",
+      reroll: "別の道筋",
+      rerollTitle: "同じ2つのサウンドを別の道筋で。すべての地点を育て直します",
+      close: "つるを閉じる",
+      between: "間を育てる",
+      betweenTitle: "1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます"
     },
     measurements: {
       tab: "測定結果",
@@ -1447,7 +1488,7 @@
           ms: (low, high) => `${low}–${high} ms`,
           percentRange: (low, high) => `${low}–${high}%`,
           down: (db) => `最大 −${db} dB`,
-          pan: (percent2) => `±${percent2}%`
+          pan: (percent3) => `±${percent3}%`
         }
       }
     },
@@ -1573,7 +1614,7 @@
       interrupted: (noun) => `${noun}中断`,
       interruptedWhy: "Kumi 在完成前停止了。",
       underWay: (title) => `${title}：进行中`,
-      percent: (title, percent2) => `${title}：${percent2}%`
+      percent: (title, percent3) => `${title}：${percent3}%`
     },
     map: {
       tab: "采样地图",
@@ -1643,6 +1684,26 @@
       families: { name: "类别", title: "每个类别一座岛，岛里相似的声音挨在一起" },
       length: { name: "长度", title: "一条螺旋：最短的声音在中心，越往外越长" },
       folders: { name: "文件夹", title: "每个顶层文件夹一座岛，岛里相似的声音挨在一起" }
+    },
+    grow: {
+      tool: "生长",
+      toolTitle: "让一个声音朝另一个声音生长：先点击起点的声音，再点击要长向的声音",
+      from: "点击要开始生长的声音",
+      to: (name) => `再点击 ${name} 要长向的声音`,
+      cancel: "取消",
+      title: (from, to) => `${from} → ${to}`,
+      bud: (percent3) => `走到 ${percent3}% 的地方`,
+      handle: "沿着藤蔓生长任意一点",
+      hint: "点击花苞试听，或沿着藤蔓拖动手柄",
+      growing: (percent3) => `正在生长 ${percent3}% 处的声音…`,
+      failed: (why) => `没有长出来：${why}`,
+      again: "从这里生长",
+      againTitle: "从这个声音朝同一个目标长出一条新藤蔓",
+      reroll: "换一条路径",
+      rerollTitle: "同样两个声音，换一条路径：每一点都重新生长",
+      close: "关闭藤蔓",
+      between: "在两者之间生长",
+      betweenTitle: "让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开"
     },
     measurements: {
       tab: "测量结果",
@@ -2157,7 +2218,7 @@
           ms: (low, high) => `${low}–${high} ms`,
           percentRange: (low, high) => `${low}–${high}%`,
           down: (db) => `最多 −${db} dB`,
-          pan: (percent2) => `±${percent2}%`
+          pan: (percent3) => `±${percent3}%`
         }
       }
     },
@@ -2585,6 +2646,12 @@
       ...Object.keys(kept2).length ? { options: kept2 } : {}
     };
   }
+  function growRequest(from, to, at, seed, steer) {
+    const kept2 = { at: spanned(RANGES.at, at) ?? 0.5 };
+    const steered = steerOf(steer);
+    if (steered) kept2.steer = steered;
+    return { op: "grow", sources: [from, to], ...seed === void 0 ? {} : { seed }, options: kept2 };
+  }
   function reroll(request) {
     const { seed: _seed, ...rest } = request;
     return rest;
@@ -2640,6 +2707,129 @@
       peaks,
       recipe: typeof raw.recipe === "string" ? raw.recipe : "",
       ...typeof raw.at === "number" ? { at: raw.at } : {}
+    };
+  }
+
+  // src/shared/grow.ts
+  var BUDS = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+  var RENDERS = 2;
+  var SCRUB_STEP = 0.04;
+  function soundEnd(id, name, revision) {
+    const [source] = sourcesOf([{ sound_id: id, name: name ?? id }], revision);
+    return source ? { source, id, place: null, name: clean(name ?? id, 80) } : null;
+  }
+  function vinePoint(a, b, t, bow = 0.22) {
+    const [cx, cy] = [(a[0] + b[0]) / 2 - (b[1] - a[1]) * bow, (a[1] + b[1]) / 2 + (b[0] - a[0]) * bow];
+    const u = 1 - t;
+    return [u * u * a[0] + 2 * u * t * cx + t * t * b[0], u * u * a[1] + 2 * u * t * cy + t * t * b[1]];
+  }
+  function nearestOnVine(a, b, p, bow = 0.22) {
+    let [best, nearest] = [0, Infinity];
+    for (let step2 = 0; step2 <= 240; step2++) {
+      const [x, y] = vinePoint(a, b, step2 / 240, bow);
+      const distance = (x - p[0]) ** 2 + (y - p[1]) ** 2;
+      if (distance < nearest) [best, nearest] = [step2 / 240, distance];
+    }
+    return best;
+  }
+  function nextToGrow(buds, scrub, running) {
+    if (running >= RENDERS) return null;
+    if (scrub?.state === "waiting") return scrub;
+    return buds.find((bud) => bud.state === "waiting") ?? null;
+  }
+  var newSeed = () => Math.floor(Math.random() * 2 ** 31);
+  var fresh = () => BUDS.map((at) => ({ at, state: "waiting" }));
+  function useGrow(design, heard2, revision) {
+    const [choosing, setChoosing] = useState(null);
+    const [path, setPath] = useState(null);
+    const [pending, setPending] = useState(null);
+    const [buds, setBuds] = useState([]);
+    const [scrub, setScrub] = useState(null);
+    const [handle, setHandle] = useState(0.5);
+    const [picked, setPicked] = useState(null);
+    const [running, setRunning] = useState(0);
+    const generation = useRef(0);
+    const heardRef = useRef(heard2);
+    heardRef.current = heard2;
+    const scrubAt = useRef(null);
+    const start = (from, to) => {
+      generation.current += 1;
+      setPath({ from, to, seed: newSeed() });
+      setBuds(fresh());
+      setScrub(null);
+      setHandle(0.5);
+      setPicked(null);
+      setChoosing(null);
+      setPending(null);
+    };
+    const close = () => {
+      generation.current += 1;
+      setPath(null);
+      setBuds([]);
+      setScrub(null);
+      setPicked(null);
+      setChoosing(null);
+      setPending(null);
+    };
+    useEffect(close, [revision]);
+    useEffect(() => {
+      if (!path) return;
+      const next = nextToGrow(buds, scrub, running);
+      if (!next) return;
+      const mine = generation.current;
+      const isScrub = next === scrub;
+      const mark = (bud) => isScrub ? setScrub((current) => current?.at === next.at ? bud : current) : setBuds((current) => current.map((each) => each.at === next.at ? bud : each));
+      mark({ at: next.at, state: "growing" });
+      setRunning((count) => count + 1);
+      void design(growRequest(path.from.source, path.to.source, next.at, path.seed)).then((answer) => {
+        setRunning((count) => count - 1);
+        if (mine !== generation.current) return;
+        if ("result" in answer) {
+          mark({ at: next.at, state: "ready", result: answer.result });
+          if (isScrub && scrubAt.current === next.at) heardRef.current(answer.result);
+        } else {
+          mark({ at: next.at, state: "failed", error: answer.error });
+        }
+      });
+    }, [path, buds, scrub, running]);
+    return {
+      choosing,
+      from: path?.from ?? pending,
+      to: path?.to ?? null,
+      buds,
+      handle,
+      scrub,
+      picked,
+      choose: (on) => {
+        setChoosing(on ? "from" : null);
+        setPending(null);
+      },
+      name: (end) => {
+        if (choosing === "from") {
+          setPending(end);
+          setChoosing("to");
+        } else if (choosing === "to" && pending && (end.id ?? end.source.artifact_id) !== (pending.id ?? pending.source.artifact_id)) {
+          start(pending, end);
+        }
+      },
+      between: start,
+      scrubTo: (at, done) => {
+        setHandle(at);
+        if (done) setPicked(at);
+        const asks = done || !scrub || scrub.state !== "growing" && scrub.state !== "waiting" && Math.abs(scrub.at - at) >= SCRUB_STEP;
+        if (!asks) return;
+        scrubAt.current = at;
+        setScrub({ at, state: "waiting" });
+      },
+      pick: (at) => {
+        setPicked(at);
+        const bud = at === null ? null : scrub?.at === at ? scrub : buds.find((each) => each.at === at);
+        if (bud?.state === "ready") heardRef.current(bud.result);
+      },
+      reroll: () => {
+        if (path) start(path.from, path.to);
+      },
+      close
     };
   }
 
@@ -3367,7 +3557,7 @@
   };
   var FOCUSABLE = "kumi-focusable";
   function FocusStyle() {
-    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop{animation:none}.kumi-spin{animation-duration:2.4s}}` });
+    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
   }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -4307,7 +4497,7 @@
     const [error, setError] = useState(null);
     const requests = useRef(/* @__PURE__ */ new Map());
     const [shown, setShown] = useState({});
-    const [fresh, setFresh] = useState(() => /* @__PURE__ */ new Set());
+    const [fresh2, setFresh] = useState(() => /* @__PURE__ */ new Set());
     const [arrived, setArrived] = useState(null);
     const cards = useRef(/* @__PURE__ */ new Map());
     const list = useRef(null);
@@ -4552,7 +4742,7 @@
               return /* @__PURE__ */ jsxs(
                 "div",
                 {
-                  className: fresh.has(result.artifact_id) ? "kumi-pop" : void 0,
+                  className: fresh2.has(result.artifact_id) ? "kumi-pop" : void 0,
                   ref: (element) => {
                     if (element) cards.current.set(result.artifact_id, element);
                     else cards.current.delete(result.artifact_id);
@@ -5279,6 +5469,187 @@
     ] });
   }
 
+  // src/shared/GrowLayer.tsx
+  var percent2 = (at) => Math.round(at * 100);
+  var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
+  function GrowLayer({
+    grow,
+    from,
+    to,
+    fromMap,
+    toMap,
+    fromColor,
+    toColor,
+    width,
+    height,
+    top,
+    playing,
+    onPlay,
+    onStop,
+    actions
+  }) {
+    const t = useT();
+    const press = useRef(null);
+    if (!from) return null;
+    if (!to || !grow.to) {
+      return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height, style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: /* @__PURE__ */ jsx("circle", { className: "kumi-breathe", cx: from[0], cy: from[1], fill: "none", r: 11, stroke: fromColor, strokeWidth: 2.5 }) });
+    }
+    const at = (bud) => vinePoint(from, to, bud);
+    const [cx, cy] = [(from[0] + to[0]) / 2 - (to[1] - from[1]) * 0.22, (from[1] + to[1]) / 2 + (to[0] - from[0]) * 0.22];
+    const curve = `M ${from[0]} ${from[1]} Q ${cx} ${cy} ${to[0]} ${to[1]}`;
+    const gradient = `kumi-vine-${Math.round(from[0])}-${Math.round(to[0])}`;
+    const handle = at(grow.handle);
+    const pointOf = (event) => {
+      const box = (event.currentTarget.ownerSVGElement ?? event.currentTarget).getBoundingClientRect();
+      return [event.clientX - box.left, event.clientY - box.top];
+    };
+    const nudge = (event) => {
+      const step2 = event.key === "ArrowRight" || event.key === "ArrowUp" ? 0.05 : event.key === "ArrowLeft" || event.key === "ArrowDown" ? -0.05 : 0;
+      if (!step2) return;
+      event.preventDefault();
+      grow.scrubTo(Math.min(1, Math.max(0, Math.round((grow.handle + step2) * 20) / 20)), true);
+    };
+    const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : grow.buds.find((bud) => bud.at === grow.picked) ?? null;
+    const pickedAt = picked ? at(picked.at) : null;
+    const xs = [from[0], to[0], cx];
+    const ys = [from[1], to[1], cy];
+    const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const card = floatBeside(anchor, 300, picked?.state === "ready" ? 132 : 70, width, height, top, 10);
+    const budView = (bud, scrubbed = false) => {
+      const [x, y] = at(bud.at);
+      const color = mixed(fromColor, toColor, bud.at);
+      const sounding = bud.state === "ready" && playing === bud.result.artifact_id;
+      const isPicked = grow.picked === bud.at;
+      return /* @__PURE__ */ jsxs(
+        "g",
+        {
+          "aria-label": t("grow.bud", percent2(bud.at)),
+          className: FOCUSABLE,
+          onClick: () => grow.pick(bud.at),
+          onKeyDown: (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              grow.pick(bud.at);
+            }
+          },
+          role: "button",
+          style: { cursor: "pointer", pointerEvents: "auto" },
+          tabIndex: 0,
+          children: [
+            /* @__PURE__ */ jsx("circle", { cx: x, cy: y, fill: "transparent", r: 12 }),
+            isPicked && /* @__PURE__ */ jsx("circle", { cx: x, cy: y, fill: "none", r: 11, stroke: T.text, strokeWidth: 1.25 }),
+            sounding && /* @__PURE__ */ jsx("circle", { cx: x, cy: y, fill: "none", r: 14, stroke: color, strokeOpacity: 0.5, strokeWidth: 2 }),
+            bud.state === "ready" ? /* @__PURE__ */ jsx("circle", { className: "kumi-open", cx: x, cy: y, fill: color, r: 6.5, stroke: T.raised, strokeWidth: 1.5 }) : bud.state === "failed" ? /* @__PURE__ */ jsx("path", { d: `M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x + 4} ${y - 4} L ${x - 4} ${y + 4}`, stroke: T.bad, strokeLinecap: "round", strokeWidth: 2 }) : /* @__PURE__ */ jsx("circle", { className: bud.state === "growing" ? "kumi-breathe" : void 0, cx: x, cy: y, fill: T.raised, r: 5, stroke: color, strokeDasharray: bud.state === "waiting" ? "2 2" : void 0, strokeWidth: 1.75 })
+          ]
+        },
+        `${scrubbed ? "s" : "b"}${bud.at}`
+      );
+    };
+    return /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsxs("svg", { "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)), height, role: "group", style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: [
+        /* @__PURE__ */ jsx("defs", { children: /* @__PURE__ */ jsxs("linearGradient", { gradientUnits: "userSpaceOnUse", id: gradient, x1: from[0], x2: to[0], y1: from[1], y2: to[1], children: [
+          /* @__PURE__ */ jsx("stop", { offset: "0", stopColor: fromColor }),
+          /* @__PURE__ */ jsx("stop", { offset: "1", stopColor: toColor })
+        ] }) }),
+        /* @__PURE__ */ jsx("path", { d: curve, fill: "none", opacity: 0.22, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 10 }),
+        /* @__PURE__ */ jsx("path", { className: "kumi-vine", d: curve, fill: "none", pathLength: 1, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 3 }),
+        /* @__PURE__ */ jsx("circle", { cx: from[0], cy: from[1], fill: "none", r: 9, stroke: fromColor, strokeWidth: 2 }),
+        /* @__PURE__ */ jsx("circle", { cx: to[0], cy: to[1], fill: "none", r: 9, stroke: toColor, strokeDasharray: "3 2", strokeWidth: 2 }),
+        grow.buds.map((bud) => budView(bud)),
+        grow.scrub && !grow.buds.some((bud) => bud.at === grow.scrub?.at) && budView(grow.scrub, true),
+        /* @__PURE__ */ jsxs(
+          "g",
+          {
+            "aria-label": t("grow.handle"),
+            "aria-valuemax": 100,
+            "aria-valuemin": 0,
+            "aria-valuenow": percent2(grow.handle),
+            "aria-valuetext": t("grow.bud", percent2(grow.handle)),
+            className: FOCUSABLE,
+            onKeyDown: nudge,
+            onPointerDown: (event) => {
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              const [x, y] = pointOf(event);
+              press.current = { x, y, moved: false };
+            },
+            onPointerMove: (event) => {
+              const held = press.current;
+              if (!held) return;
+              const at2 = pointOf(event);
+              if (!held.moved && Math.hypot(at2[0] - held.x, at2[1] - held.y) > 3) held.moved = true;
+              if (held.moved) grow.scrubTo(nearestOnVine(from, to, at2), false);
+            },
+            onPointerUp: (event) => {
+              const held = press.current;
+              press.current = null;
+              if (!held) return;
+              const at2 = pointOf(event);
+              if (held.moved) {
+                grow.scrubTo(nearestOnVine(from, to, at2), true);
+                return;
+              }
+              const under = [...grow.buds, ...grow.scrub ? [grow.scrub] : []].find((bud) => {
+                const [x, y] = vinePoint(from, to, bud.at);
+                return Math.hypot(x - at2[0], y - at2[1]) <= 12;
+              });
+              if (under) grow.pick(under.at);
+              else grow.scrubTo(nearestOnVine(from, to, at2), true);
+            },
+            role: "slider",
+            style: { cursor: "grab", pointerEvents: "auto" },
+            tabIndex: 0,
+            children: [
+              /* @__PURE__ */ jsx("circle", { cx: handle[0], cy: handle[1], fill: "transparent", r: 16 }),
+              /* @__PURE__ */ jsx("circle", { cx: handle[0], cy: handle[1], fill: T.raised, r: 8.5, stroke: T.accent, strokeWidth: 2.5 }),
+              /* @__PURE__ */ jsx("circle", { cx: handle[0], cy: handle[1], fill: T.accent, r: 3 }),
+              /* @__PURE__ */ jsx("text", { fill: T.text, fontSize: 10.5, fontWeight: 600, paintOrder: "stroke", stroke: T.raised, strokeWidth: 3, textAnchor: "middle", x: handle[0], y: handle[1] - 15, children: `${percent2(grow.handle)}%` })
+            ]
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxs(
+        "div",
+        {
+          className: "kumi-pop",
+          role: "group",
+          "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)),
+          style: { ...glass, position: "absolute", zIndex: 1, left: card.left, top: card.top, width: 300, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 },
+          children: [
+            /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6 }, children: [
+              /* @__PURE__ */ jsx(Icon, { name: "grow", size: 14 }),
+              /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }, children: t("grow.title", clean(grow.from?.name ?? "", 40), clean(grow.to.name, 40)) }),
+              /* @__PURE__ */ jsx("button", { "aria-label": t("grow.close"), className: FOCUSABLE, onClick: grow.close, title: t("grow.close"), type: "button", style: { display: "flex", padding: 3, border: "none", borderRadius: 10, background: "transparent", color: T.faint, cursor: "pointer" }, children: /* @__PURE__ */ jsx(Icon, { name: "close", size: 11 }) })
+            ] }),
+            !picked ? /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs(Fragment2, { children: [
+              /* @__PURE__ */ jsxs("span", { style: { fontSize: 11, color: T.secondary }, title: picked.result.recipe, children: [
+                /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
+                /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
+                actions?.(picked.result),
+                fromMap && toMap && /* @__PURE__ */ jsx(
+                  TextButton,
+                  {
+                    onClick: () => {
+                      const place = vinePoint(fromMap, toMap, picked.at);
+                      const end = { source: { artifact_id: picked.result.artifact_id, name: clean(picked.result.recipe, 120) }, id: null, place, name: t("grow.bud", percent2(picked.at)) };
+                      if (grow.to) grow.between(end, grow.to);
+                    },
+                    title: t("grow.againTitle"),
+                    children: t("grow.again")
+                  }
+                ),
+                /* @__PURE__ */ jsx(TextButton, { onClick: grow.reroll, title: t("grow.rerollTitle"), children: t("grow.reroll") })
+              ] })
+            ] }) : picked.state === "failed" ? /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }) : /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
+          ]
+        }
+      )
+    ] });
+  }
+
   // src/shared/palette.ts
   var MOST_GATHERED = 1e4;
   var LOOSE = 5;
@@ -5354,12 +5725,12 @@
       const bytes = new Uint8Array(binary.length);
       for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
       const buffer = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
-      const mixed = new Float32Array(buffer.length);
+      const mixed2 = new Float32Array(buffer.length);
       for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
         const data = buffer.getChannelData(channel);
-        for (let at = 0; at < data.length; at++) mixed[at] += data[at];
+        for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
       }
-      return peaksOf(mixed, bars);
+      return peaksOf(mixed2, bars);
     };
     const promise = queue.then(run, run).catch(() => null).then((peaks) => {
       kept.set(key, peaks);
@@ -5559,7 +5930,7 @@
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -5861,14 +6232,14 @@
         return since >= INTRO_MS * 0.55 ? 1 : since <= 0 ? 0 : easeOutBack(since / (INTRO_MS * 0.55));
       };
       const glyphs = new Map(model.groups.map((group) => [group.key, glyphOf(group.key)]));
-      const shape = (path, x, y, blend, grow = 1, glyph = 0) => {
+      const shape = (path, x, y, blend, grow2 = 1, glyph = 0) => {
         if (blend <= 0) {
-          const r = radius * grow;
+          const r = radius * grow2;
           if (r <= 0.05) return;
           traceGlyph(path, glyph, x, y, r);
           return;
         }
-        const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow;
+        const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow2;
         if (side <= 0.1) return;
         const corner = side / 2 - (side / 2 - side * 0.18) * blend;
         if (typeof path.roundRect === "function") path.roundRect(x - side / 2, y - side / 2, side, side, corner);
@@ -6073,7 +6444,7 @@
       if (event.button === 1) event.preventDefault();
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const [x, y] = at(event);
-      const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool;
+      const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool && !grow?.choosing;
       drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button };
       rest(null);
       setHover(null);
@@ -6102,11 +6473,32 @@
         return;
       }
       const id = model.points[index].id;
-      if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], "toggle");
+      if (grow?.choosing) {
+        const end = endOf(id);
+        if (end) grow.name(end);
+        onPick(id);
+      } else if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], "toggle");
       else if (onPicked && event.shiftKey) onPicked([id], "add");
       else onPick(id);
     };
+    const endOf = (id) => soundEnd(id, model.sounds[id]?.name, model.revision);
+    const placeOfEnd = (end) => {
+      if (!end) return null;
+      if (end.id === null) return end.place;
+      const index = indexOf.get(end.id);
+      return index === void 0 ? null : [active.points[index].x, active.points[index].y];
+    };
+    const colorOfEnd = (end) => {
+      const index = end?.id ? indexOf.get(end.id) : void 0;
+      return index === void 0 ? T.accent : model.groups.find((group) => group.key === model.points[index].group)?.color ?? T.accent;
+    };
+    const screenOf = (place) => place && view ? toScreen(view, mapSize, place[0], place[1]) : null;
     const onKey = (event) => {
+      if (event.key === "Escape" && grow?.choosing && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        grow.choose(false);
+        return;
+      }
       if (event.key === "Escape" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
         event.preventDefault();
         onPicked([], "replace");
@@ -6207,6 +6599,7 @@
           /* @__PURE__ */ jsxs(ToolGroup, { label: t("map.tools"), children: [
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
+            grow && /* @__PURE__ */ jsx(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
             onPicked && /* @__PURE__ */ jsx(Rule, {}),
             layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), onChoose: chooseArrangement }),
             onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
@@ -6252,6 +6645,12 @@
             group.key
           );
         }) }),
+        grow?.choosing && // Grow names its sounds with clicks on the map: which one this click names, and a way out.
+        /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...glass, borderRadius: 16, ...S.row, gap: 8, padding: "4px 6px 4px 12px", pointerEvents: "auto", maxWidth: "100%" }, children: [
+          /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
+          /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+          /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+        ] }),
         matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
           /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
             /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
@@ -6385,6 +6784,25 @@
                 clean(hoveredSound.class ?? "", 16)
               ] })
             ]
+          }
+        ),
+        grow && (grow.from || grow.to) && /* @__PURE__ */ jsx(
+          GrowLayer,
+          {
+            actions: growActions,
+            from: screenOf(placeOfEnd(grow.from)),
+            fromColor: colorOfEnd(grow.from),
+            fromMap: placeOfEnd(grow.from),
+            grow,
+            height: size.height,
+            onPlay: (result) => onPlayMade?.(result),
+            onStop: () => onStop?.(),
+            playing,
+            to: screenOf(placeOfEnd(grow.to)),
+            toColor: colorOfEnd(grow.to),
+            toMap: placeOfEnd(grow.to),
+            top: topInset,
+            width: size.width - coverRight
           }
         )
       ] }),
@@ -6714,9 +7132,9 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const arrived = useMemo(() => {
       const keys = new Set((current?.items ?? []).map((item) => item.key));
       const before = known.current;
-      const fresh = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
+      const fresh2 = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
       known.current = { id: current?.id ?? null, keys };
-      return new Map(fresh.map((key, order2) => [key, order2]));
+      return new Map(fresh2.map((key, order2) => [key, order2]));
     }, [current]);
     const strip = useRef(null);
     useEffect(() => {
@@ -7053,6 +7471,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [paletteOpen, setPaletteOpen] = useState(() => globalThis.localStorage?.getItem(PALETTE_OPEN) !== "off");
     const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? "");
     const palette = usePaletteMap(store, state, audition, t, { hover, left: (id) => setSelected((current) => current === id ? null : current) });
+    const grow = useGrow((request) => store.design(request), (result) => void audition.play(result.artifact_id).catch(() => {
+    }), state.map?.revision ?? null);
     const dock = useRef(null);
     useEffect(() => {
       void store.refreshStatus();
@@ -7137,11 +7557,27 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 palette.play(id);
               },
               onPicked: palette.onPicked,
+              grow,
+              onPlayMade: (result) => void audition.play(result.artifact_id).catch(() => {
+              }),
+              growActions: (result) => {
+                const request = useRequest(result);
+                const kept2 = palette.kept.has(result.artifact_id);
+                return /* @__PURE__ */ jsxs(Fragment2, { children: [
+                  /* @__PURE__ */ jsx(TextButton, { disabled: kept2, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept2 ? t("make.kept") : t("make.keep") }),
+                  request && /* @__PURE__ */ jsx(CopyButton, { label: t("make.copyUse"), text: request }),
+                  /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null)), title: t("make.openTitle"), children: t("make.open") })
+                ] });
+              },
               onSelect: setSelected,
               picked: palette.picked,
               pickedActions: (ids) => /* @__PURE__ */ jsxs(Fragment2, { children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
                 ids.length > 1 && /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
+                ids.length === 2 && (() => {
+                  const [from, to] = ids.map((id) => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null));
+                  return from && to ? /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.between(from, to), title: t("grow.betweenTitle"), children: t("grow.between") }) : null;
+                })(),
                 /* @__PURE__ */ jsx(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
               ] }),
               playing,

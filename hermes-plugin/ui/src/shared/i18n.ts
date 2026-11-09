@@ -189,6 +189,27 @@ const en = {
     length: { name: 'Length', title: 'A spiral from the shortest sound in the middle out to the longest' },
     folders: { name: 'Folders', title: 'An island for each top folder, alike sounds together inside it' }
   },
+  // Grow: one sound grown toward another along a vine on the map (A2).
+  grow: {
+    tool: 'Grow',
+    toolTitle: 'Grow one sound toward another: click the sound to start from, then the one to grow toward',
+    from: 'Click the sound to grow from',
+    to: (name: string) => `Now click the sound to grow ${name} toward`,
+    cancel: 'Cancel',
+    title: (from: string, to: string) => `${from} → ${to}`,
+    bud: (percent: number) => `${percent}% of the way`,
+    handle: 'Grow any point along the vine',
+    hint: 'Click a bud to hear it, or drag the handle along the vine',
+    growing: (percent: number) => `Growing the sound ${percent}% of the way…`,
+    failed: (why: string) => `It didn't grow: ${why}`,
+    again: 'Grow from here',
+    againTitle: 'A new vine from this sound toward the same one',
+    reroll: 'Another path',
+    rerollTitle: 'The same two sounds by another path: every point grown again',
+    close: 'Close the vine',
+    between: 'Grow between',
+    betweenTitle: 'Grow the first pick toward the second: the sounds between them, along a vine'
+  },
   measurements: {
     tab: 'Measurements',
     nothing: 'Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.',
@@ -908,6 +929,26 @@ const ja: Shape<typeof en> = {
     length: { name: '長さ', title: '中央の最も短いサウンドから、外側の最も長いサウンドへのらせん' },
     folders: { name: 'フォルダ', title: '最上位フォルダごとの島。島の中では似たサウンドどうしが近くに並びます' }
   },
+  grow: {
+    tool: 'グロウ',
+    toolTitle: 'あるサウンドを別のサウンドへ育てます。始点のサウンドをクリックし、次に向かう先のサウンドをクリックします',
+    from: '育て始めるサウンドをクリック',
+    to: name => `${name} を育てる先のサウンドをクリック`,
+    cancel: 'キャンセル',
+    title: (from, to) => `${from} → ${to}`,
+    bud: percent => `${percent}% の地点`,
+    handle: 'つるに沿って好きな地点を育てる',
+    hint: 'つぼみをクリックして試聴するか、ハンドルをつるに沿ってドラッグします',
+    growing: percent => `${percent}% の地点のサウンドを育てています…`,
+    failed: why => `育てられませんでした: ${why}`,
+    again: 'ここから育てる',
+    againTitle: 'このサウンドから同じ先へ、新しいつるを育てます',
+    reroll: '別の道筋',
+    rerollTitle: '同じ2つのサウンドを別の道筋で。すべての地点を育て直します',
+    close: 'つるを閉じる',
+    between: '間を育てる',
+    betweenTitle: '1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます'
+  },
   measurements: {
     tab: '測定結果',
     nothing: 'まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。',
@@ -1620,6 +1661,26 @@ const zh: Shape<typeof en> = {
     families: { name: '类别', title: '每个类别一座岛，岛里相似的声音挨在一起' },
     length: { name: '长度', title: '一条螺旋：最短的声音在中心，越往外越长' },
     folders: { name: '文件夹', title: '每个顶层文件夹一座岛，岛里相似的声音挨在一起' }
+  },
+  grow: {
+    tool: '生长',
+    toolTitle: '让一个声音朝另一个声音生长：先点击起点的声音，再点击要长向的声音',
+    from: '点击要开始生长的声音',
+    to: name => `再点击 ${name} 要长向的声音`,
+    cancel: '取消',
+    title: (from, to) => `${from} → ${to}`,
+    bud: percent => `走到 ${percent}% 的地方`,
+    handle: '沿着藤蔓生长任意一点',
+    hint: '点击花苞试听，或沿着藤蔓拖动手柄',
+    growing: percent => `正在生长 ${percent}% 处的声音…`,
+    failed: why => `没有长出来：${why}`,
+    again: '从这里生长',
+    againTitle: '从这个声音朝同一个目标长出一条新藤蔓',
+    reroll: '换一条路径',
+    rerollTitle: '同样两个声音，换一条路径：每一点都重新生长',
+    close: '关闭藤蔓',
+    between: '在两者之间生长',
+    betweenTitle: '让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开'
   },
   measurements: {
     tab: '测量结果',

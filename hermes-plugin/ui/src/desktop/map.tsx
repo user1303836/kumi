@@ -11,7 +11,8 @@ import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
-import { useRequest } from '../shared/design.ts'
+import { sourcesOf, useRequest } from '../shared/design.ts'
+import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
@@ -94,6 +95,9 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
     left: id => setSelected(current => (current === id ? null : current))
   })
+  // Grow: its renders go through the store; the handle's point plays as soon as it's grown.
+  const playMade = (id: string) => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))
+  const grow = useGrow(request => store.design(request), result => playMade(result.artifact_id), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(() => ctx.storage.get<boolean>(PALETTE_OPEN, true) !== false)
@@ -177,6 +181,27 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             palette.play(id)
           }}
           onPicked={palette.onPicked}
+          grow={grow}
+          onPlayMade={result => playMade(result.artifact_id)}
+          growActions={result => {
+            const request = useRequest(result)
+            const kept = palette.kept.has(result.artifact_id)
+            return (
+              <>
+                <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                  {kept ? t('make.kept') : t('make.keep')}
+                </TextButton>
+                {request && (
+                  <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('make.useTitle')}>
+                    {t('make.use')}
+                  </TextButton>
+                )}
+                <TextButton onClick={() => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null))} title={t('make.openTitle')}>
+                  {t('make.open')}
+                </TextButton>
+              </>
+            )
+          }}
           onSelect={id => {
             setSelected(id)
             if (id !== padsFor) setPadsFor(null)
@@ -194,6 +219,15 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                     {t('make.open')}
                   </TextButton>
                 )}
+                {ids.length === 2 &&
+                  (() => {
+                    const [from, to] = ids.map(id => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null))
+                    return from && to ? (
+                      <TextButton onClick={() => grow.between(from, to)} title={t('grow.betweenTitle')}>
+                        {t('grow.between')}
+                      </TextButton>
+                    ) : null
+                  })()}
                 {near && (
                   <TextButton
                     onClick={() => void ask(ctx, near, { send: false, session })}

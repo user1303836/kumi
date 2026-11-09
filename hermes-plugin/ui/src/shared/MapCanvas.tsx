@@ -12,7 +12,10 @@ import { CANVAS, T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
+import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
+import { GrowLayer } from './GrowLayer.tsx'
 import { arrangedModel, buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
@@ -66,6 +69,11 @@ export interface MapCanvasProps {
    *  parent keeps it, hearing each choice in `onArrangement`. Without it the map keeps its own. */
   arrangement?: string
   onArrangement?: (id: string) => void
+  /** Grow's vine, drawn over the map; while it names its ends, a click on a sound names one (and plays it) instead of
+   *  picking it. `growActions` are the parent's for a grown point (Keep, Use…, Make from); `onPlayMade` plays one. */
+  grow?: Grow
+  growActions?: (result: DesignResult) => ReactNode
+  onPlayMade?: (result: DesignResult) => void
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -133,7 +141,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -746,7 +754,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (event.button === 1) event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
     const [x, y] = at(event)
-    const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool
+    const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool && !grow?.choosing
     drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button }
     rest(null)
     setHover(null)
@@ -776,14 +784,38 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       return
     }
     const id = model.points[index].id
-    if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], 'toggle')
+    if (grow?.choosing) {
+      const end = endOf(id)
+      if (end) grow.name(end)
+      onPick(id)
+    } else if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], 'toggle')
     else if (onPicked && event.shiftKey) onPicked([id], 'add')
     else onPick(id)
   }
 
+  // Grow's ends: a map sound as a source (with the map it's from); where an end sits in map units (a map sound wherever
+  // the layout shown puts it, a made one where its bud grew); and its colour (a made one's is the accent).
+  const endOf = (id: string): GrowEnd | null => soundEnd(id, model.sounds[id]?.name, model.revision)
+  const placeOfEnd = (end: GrowEnd | null): readonly [number, number] | null => {
+    if (!end) return null
+    if (end.id === null) return end.place
+    const index = indexOf.get(end.id)
+    return index === undefined ? null : [active.points[index].x, active.points[index].y]
+  }
+  const colorOfEnd = (end: GrowEnd | null): string => {
+    const index = end?.id ? indexOf.get(end.id) : undefined
+    return index === undefined ? T.accent : (model.groups.find(group => group.key === model.points[index].group)?.color ?? T.accent)
+  }
+  const screenOf = (place: readonly [number, number] | null): [number, number] | null => (place && view ? toScreen(view, mapSize, place[0], place[1]) : null)
+
   const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
-    // Escape lets go of the picks. Only while there are some: otherwise it stays Desktop's (it stops a running turn),
-    // which stands down for a key the map already took.
+    // Escape stops Grow naming its sounds, else lets go of the picks. Only while there's one of those: otherwise it
+    // stays Desktop's (it stops a running turn), which stands down for a key the map already took.
+    if (event.key === 'Escape' && grow?.choosing && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault()
+      grow.choose(false)
+      return
+    }
     if (event.key === 'Escape' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
       event.preventDefault()
       onPicked([], 'replace')
@@ -899,6 +931,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           <ToolGroup label={t('map.tools')}>
             {onPicked && <ToolButton icon="pick" label={t('map.pickTool')} onClick={() => setHandTool(false)} pressed={!handTool} title={t('map.pickToolTitle')} />}
             {onPicked && <ToolButton icon="hand" label={t('map.hand')} onClick={() => setHandTool(true)} pressed={handTool} title={t('map.handTitle')} />}
+            {grow && <ToolButton icon="grow" label={t('grow.tool')} onClick={() => grow.choose(!grow.choosing)} pressed={grow.choosing !== null} title={t('grow.toolTitle')} />}
             {onPicked && <Rule />}
             {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} onChoose={chooseArrangement} />}
             {onTiles && <ToolButton icon="tiles" label={t('map.tiles')} onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')} />}
@@ -943,6 +976,14 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             )
           })}
         </div>
+        {grow?.choosing && (
+          // Grow names its sounds with clicks on the map: which one this click names, and a way out.
+          <div className="kumi-pop" role="status" style={{ ...glass, borderRadius: 16, ...S.row, gap: 8, padding: '4px 6px 4px 12px', pointerEvents: 'auto', maxWidth: '100%' }}>
+            <Icon name="grow" size={13} />
+            <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
+            <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
+          </div>
+        )}
         {matches.length > 0 && (
           <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: 'min(340px, 100%)', pointerEvents: 'auto' }}>
             <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
@@ -1086,6 +1127,24 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           >
             {clean(hoveredSound.name, 48)} <span style={{ color: T.muted }}>· {clean(hoveredSound.class ?? '', 16)}</span>
           </div>
+        )}
+        {grow && (grow.from || grow.to) && (
+          <GrowLayer
+            actions={growActions}
+            from={screenOf(placeOfEnd(grow.from))}
+            fromColor={colorOfEnd(grow.from)}
+            fromMap={placeOfEnd(grow.from)}
+            grow={grow}
+            height={size.height}
+            onPlay={result => onPlayMade?.(result)}
+            onStop={() => onStop?.()}
+            playing={playing}
+            to={screenOf(placeOfEnd(grow.to))}
+            toColor={colorOfEnd(grow.to)}
+            toMap={placeOfEnd(grow.to)}
+            top={topInset}
+            width={size.width - coverRight}
+          />
         )}
       </div>
       {hasPicks && (

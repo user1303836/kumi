@@ -42,7 +42,11 @@ export function FocusStyle() {
         '@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}' +
         '.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}' +
         '@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop{animation:none}.kumi-spin{animation-duration:2.4s}}'}
+        // Grow's vine draws itself from its first sound to its last; a bud breathes while it grows and opens once grown.
+        '@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}' +
+        '@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}' +
+        '@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }

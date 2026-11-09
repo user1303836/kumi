@@ -6,7 +6,8 @@ import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
-import { useRequest } from '../shared/design.ts'
+import { sourcesOf, useRequest } from '../shared/design.ts'
+import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
@@ -94,6 +95,8 @@ function Dashboard() {
   const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? '')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
+  // Grow: its renders go through the store; the handle's point plays as soon as it's grown.
+  const grow = useGrow(request => store.design(request), result => void audition.play(result.artifact_id).catch(() => {}), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
 
@@ -201,6 +204,23 @@ function Dashboard() {
               palette.play(id)
             }}
             onPicked={palette.onPicked}
+            grow={grow}
+            onPlayMade={result => void audition.play(result.artifact_id).catch(() => {})}
+            growActions={result => {
+              const request = useRequest(result)
+              const kept = palette.kept.has(result.artifact_id)
+              return (
+                <>
+                  <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                    {kept ? t('make.kept') : t('make.keep')}
+                  </TextButton>
+                  {request && <CopyButton label={t('make.copyUse')} text={request} />}
+                  <TextButton onClick={() => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null))} title={t('make.openTitle')}>
+                    {t('make.open')}
+                  </TextButton>
+                </>
+              )
+            }}
             onSelect={setSelected}
             picked={palette.picked}
             pickedActions={ids => (
@@ -213,6 +233,15 @@ function Dashboard() {
                     {t('make.open')}
                   </TextButton>
                 )}
+                {ids.length === 2 &&
+                  (() => {
+                    const [from, to] = ids.map(id => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null))
+                    return from && to ? (
+                      <TextButton onClick={() => grow.between(from, to)} title={t('grow.betweenTitle')}>
+                        {t('grow.between')}
+                      </TextButton>
+                    ) : null
+                  })()}
                 <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
                   {t('dock.clearPicks', ids.length)}
                 </TextButton>
