@@ -41,6 +41,7 @@ mod generate_output;
 mod generate_source;
 mod listen_reference;
 mod listen_track;
+mod live_pass;
 mod turn;
 
 use kumi_types::daw::DawId;
@@ -150,13 +151,14 @@ fn add_once(paths: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 /// The environment the runtime and the DAW code it drives read: this process's, with the Kumi home it was given, the
-/// update check off (the host moves versions; a runtime never updates itself), no model fetched (it downloads nothing
-/// its host didn't install: a judged run goes by its meters) and no model key (the host's model plans; the runtime calls
-/// none).
+/// update check off (the host moves versions; a runtime never updates itself), no model or program fetched (it downloads
+/// nothing its host didn't install: a judged run goes by its meters, and ffmpeg is the one setup allowed or none) and no
+/// model key (the host's model plans; the runtime calls none).
 pub fn environment(args: &Args, mut env: Env) -> Env {
     env.insert("KUMI_HOME".into(), args.kumi_home.display().to_string());
     env.insert("KUMI_NO_UPDATE_CHECK".into(), "1".into());
     env.insert(kumi_ai::models::NO_FETCH.into(), "1".into());
+    env.insert(kumi_media::programs::NO_PROGRAM_FETCH.into(), "1".into());
     for name in crate::report::KEY_VARIABLES {
         env.remove(name);
     }
@@ -169,6 +171,7 @@ fn set_process_environment(args: &Args) {
     std::env::set_var("KUMI_HOME", &args.kumi_home);
     std::env::set_var("KUMI_NO_UPDATE_CHECK", "1");
     std::env::set_var(kumi_ai::models::NO_FETCH, "1");
+    std::env::set_var(kumi_media::programs::NO_PROGRAM_FETCH, "1");
     for name in crate::report::KEY_VARIABLES {
         std::env::remove_var(name);
     }
@@ -347,6 +350,7 @@ mod tests {
         assert_eq!(env.get("KUMI_HOME"), Some(&(home() + "/home")));
         assert_eq!(env.get("KUMI_NO_UPDATE_CHECK").map(String::as_str), Some("1"));
         assert_eq!(env.get("KUMI_NO_MODEL_FETCH").map(String::as_str), Some("1"));
+        assert_eq!(env.get("KUMI_NO_PROGRAM_FETCH").map(String::as_str), Some("1"));
         assert!(!env.contains_key("OPENAI_API_KEY") && !env.contains_key("ANTHROPIC_API_KEY"));
         assert_eq!(env.get("PATH").map(String::as_str), Some("/bin"), "the rest is as given");
     }

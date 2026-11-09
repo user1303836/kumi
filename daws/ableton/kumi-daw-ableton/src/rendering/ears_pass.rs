@@ -60,9 +60,9 @@ impl LiveRenderer {
         let link = ears.link.clone();
         let taps: Vec<_> = ears.taps.iter().map(|(name, tap)| (name.clone(), tap.clone())).collect();
         let pieces = pieces(rig.window(), tempo, self.observer.beats_per_bar.get(), taps.len());
+        let ears_folder = self.ears_folder();
         // A listen in parts keeps them in a folder of its own until they're joined, out of the folder's pruning.
-        let folder =
-            if pieces.len() > 1 { self.ears_folder.join(format!("parts-{}", uuid::Uuid::new_v4())) } else { self.ears_folder.clone() };
+        let folder = if pieces.len() > 1 { ears_folder.join(format!("parts-{}", uuid::Uuid::new_v4())) } else { ears_folder.clone() };
         let mut started = false;
         // Each tap's parts so far, in order; a tap that missed a part keeps what came before, and says so.
         let mut parts: IndexMap<String, (Vec<Part>, bool)> = IndexMap::new();
@@ -117,9 +117,9 @@ impl LiveRenderer {
         if result.is_ok() {
             for (name, (heard, short)) in parts {
                 let lead = heard.first().map_or(0., |part| part.lead);
-                let file = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
+                let file = ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
                 let written = match heard.as_slice() {
-                    [only] if only.file.parent() == Some(self.ears_folder.as_path()) => Ok(only.file.clone()),
+                    [only] if only.file.parent() == Some(ears_folder.as_path()) => Ok(only.file.clone()),
                     [only] => tokio::fs::rename(&only.file, &file).await.map(|_| file),
                     _ => {
                         let seams: Vec<_> = heard.iter().map(|part| (part.file.clone(), part.tail)).collect();
@@ -167,6 +167,15 @@ impl LiveRenderer {
         let beat_ms = 60. / tempo * 1000.;
         let mut heard: IndexMap<String, Result<Part, Missed>> = IndexMap::new();
         for longer in [false, true] {
+            // The plugin host's listening plays each pass for a minute at most, its lead-in and half a bar after
+            // included: Live reaching the stretch late plays it once more only when that fits too.
+            if longer && self.restricted() && super::rig::played_seconds(piece, meter, tempo, true) > super::rig::RESTRICTED_SECONDS {
+                rig.notes.push(
+                    "Live reached the stretch late, and playing it again from two bars ahead would take over 60 seconds, so Kumi didn't."
+                        .into(),
+                );
+                break;
+            }
             let span = render_span(piece.from, piece.beats, meter, tempo, longer, Some(0.));
             let prime_key = to_string(span.position);
             let priming = rig.hold.as_ref().is_none_or(|hold| hold.primed.as_ref() != Some(&prime_key));
@@ -191,6 +200,7 @@ impl LiveRenderer {
                 }
             }))
             .await?;
+            let began = now_ms() as f64;
             self.step("play", json!({"action":"continue"}), signal.clone()).await?;
             let probe = &taps.first().ok_or_else(|| plain("Cannot read properties of undefined (reading '1')"))?.1;
             let mut first_seen = None;
@@ -208,7 +218,12 @@ impl LiveRenderer {
                 self.step("set_transport", json!({"position":span.position}), signal.clone()).await?;
             }
             let end = piece.from + piece.beats + meter / 2.;
-            let deadline = now_ms() as f64 + seconds * 1000.;
+            // The plugin host's listening stops Live a minute after it started playing, whatever it reached.
+            let deadline = if self.restricted() {
+                (now_ms() as f64 + seconds * 1000.).min(began + super::rig::RESTRICTED_SECONDS * 1000.)
+            } else {
+                now_ms() as f64 + seconds * 1000.
+            };
             let mut jumped = there;
             while (now_ms() as f64) < deadline {
                 let now = link.transport(probe, Some(signal.clone())).await.map_err(plain)?;
@@ -232,7 +247,7 @@ impl LiveRenderer {
                 let link = link.clone();
                 let signal = signal.clone();
                 async move {
-                    let raw = RawFile(self.ears_folder.join(format!("{}.raw", uuid::Uuid::new_v4())));
+                    let raw = RawFile(folder.join(format!("{}.raw", uuid::Uuid::new_v4())));
                     let outcome = self.ears_part(&link, &tap, &raw, folder, span.position, piece, first, last, signal).await;
                     drop(raw);
                     Ok::<_, RuntimeError>((name, outcome))

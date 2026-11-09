@@ -13,16 +13,14 @@
 use super::connection;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::history::{CallIdentity, Row, KEPT};
-use super::listen::{source_schema, stage_source, Source};
+use super::listen::{source_schema, Source};
+use super::live_pass::{readable_reference, window_refusal, Capturing};
 use kumi_listening::tools::{judge_tool, tune_tool};
 use kumi_types::contracts::ToolResult;
 use kumi_types::daw::{DawId, DawProfile};
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-
-/// The longest stretch a judged run hears here, seconds (the plugin host's listening limit).
-const MOST_SECONDS: f64 = 60.;
 
 /// How the integration's words map here, said with every round.
 const IN_HERMES: &str = "In Kumi for Hermes: make_changes is kumi_change, judge is kumi_judge, tune is kumi_tune, \
@@ -32,7 +30,8 @@ const IN_HERMES: &str = "In Kumi for Hermes: make_changes is kumi_change, judge 
 pub static JUDGE: Operation = Operation {
     name: "judge",
     description: "Kumi's judged run in Live: start one with goal (loudness, true_peak, a reference, focus, targets) over \
-                  from_beat and beats (at most 60 seconds) of a track or the mix; Kumi hears it through Kumi Ears and answers \
+                  from_beat and beats of a track or the mix (Live plays at most 60 seconds: the stretch, a bar before it and half a \
+                  bar after); Kumi hears it through Kumi Ears and answers \
                   the checklist and the next target. Make ONE change toward it with kumi_change, then judge with change: Kumi \
                   hears the same bars again, keeps the change only if the evidence says so and takes it back itself \
                   otherwise. done ends the run with before → after. Made on the project key and epoch an observe gave.",
@@ -121,6 +120,7 @@ async fn judge_input(
     ctx: &Ctx,
     args: &JsonObject,
     call: &Call,
+    capturing: &Capturing,
 ) -> Result<(Map<String, Value>, Option<super::artifacts::StagedArtifact>), Value> {
     let given = ["goal", "change", "done"].iter().filter(|key| args.contains_key(**key)).count();
     if given != 1 || args.get("done").is_some_and(|done| done != &json!(true)) {
@@ -135,20 +135,14 @@ async fn judge_input(
         return Ok((input, None));
     };
     let (Some(from), Some(beats)) = (args.get("from_beat").and_then(Value::as_f64), args.get("beats").and_then(Value::as_f64)) else {
-        return Err(refused("invalid", "A goal hears from_beat and beats of the Arrangement (at most 60 seconds), never the whole song."));
+        return Err(refused("invalid", "A goal hears from_beat and beats of the Arrangement (at most 60 seconds with a bar before and half a bar after), never the whole song."));
     };
     if !(from.is_finite() && from >= 0. && beats.is_finite() && beats > 0.) {
         return Err(refused("invalid", "from_beat is 0 or more and beats more than 0."));
     }
     // The integration refuses a longer pass; at the tempo the DAW last said, it's said before Kumi hears anything.
-    let tempo = ctx.link().connection().and_then(|connection| connection.transport()).and_then(|transport| transport.tempo);
-    if let Some(tempo) = tempo.filter(|tempo| *tempo > 0.) {
-        if beats * 60. / tempo > MOST_SECONDS {
-            return Err(refused(
-                "window_too_long",
-                format!("{beats} beats at {tempo} BPM is over 60 seconds: Kumi listens to at most 60 seconds at a time here."),
-            ));
-        }
+    if let Some(error) = window_refusal(ctx, from, beats) {
+        return Err(refusal(error));
     }
     let mut staged = None;
     if let Some(reference) = goal.get_mut("reference") {
@@ -156,10 +150,9 @@ async fn judge_input(
             clip.to_string()
         } else {
             let source = Source::parse(reference).map_err(refusal)?;
-            let copy = stage_source(ctx, &source, &call.signal).await.map_err(refusal)?;
-            let path = copy.path().to_string_lossy().into_owned();
+            let (path, copy) = readable_reference(ctx, &source, capturing.folder(), &call.signal).await.map_err(refusal)?;
             staged = Some(copy);
-            path
+            path.to_string_lossy().into_owned()
         };
         *reference = json!(resolved);
     }
@@ -192,8 +185,13 @@ async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, Op
             "This Live offers Kumi no judged listening: update Kumi's part in Live with setup, then restart Live.",
         ));
     };
+    // What the call's passes capture, and a reference decoded for them, go in its own folder, removed with it.
+    let capturing = match Capturing::new(ctx) {
+        Ok(capturing) => capturing,
+        Err(error) => return Ok(refusal(error)),
+    };
     let (input, _staged) = if name == "judge" {
-        match judge_input(ctx, args, &call).await {
+        match judge_input(ctx, args, &call, &capturing).await {
             Ok(input) => input,
             Err(refusal) => return Ok(refusal),
         }

@@ -59,7 +59,7 @@ impl Renderer for LiveHost {
         &self.rendering
     }
     fn kept_folder(&self) -> PathBuf {
-        self.ears_folder.join("judge")
+        self.kept_captures()
     }
 
     async fn song_end(&self, signal: Signal) -> Option<f64> {

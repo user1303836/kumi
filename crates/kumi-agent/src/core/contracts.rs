@@ -810,6 +810,10 @@ pub trait Integration {
         let _ = (request, signal);
         Err(absent())
     }
+    /// The folder a host whose listening is restricted (`ListeningPolicy::Restricted`) gives the tool calls that follow
+    /// for what they capture: its private per-call scratch, under the policy's root. None once the call ends. A pass
+    /// under that policy captures nowhere else, and is refused without one. Ignored by default.
+    fn listen_scratch(&self, _folder: Option<std::path::PathBuf>) {}
     fn has_hear(&self) -> bool {
         self.profile().caps.hear
     }

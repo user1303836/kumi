@@ -98,13 +98,16 @@ impl LiveRenderer {
                     directory.recursive(true);
                     #[cfg(unix)]
                     directory.mode(0o700);
-                    directory.create(&this.ears_folder).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
-                    sweep_ears(&this.ears_folder).await;
+                    // The plugin host's listening captures into its per-call scratch, and sweeps no shared folder.
+                    let restricted = this.restricted();
+                    if !restricted {
+                        directory.create(&this.shared_ears).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+                        sweep_ears(&this.shared_ears).await;
+                    }
                     if this.open_ears.is_some() {
                         return Ok(Some(link));
                     }
                     // The plugin host's listening uses the Kumi Ears its setup installed, and never installs it.
-                    let restricted = matches!(this.listening_policy, ListeningPolicy::Restricted { .. });
                     if !restricted {
                         install_ears(this.user_library.clone().unwrap_or_else(|| user_library(None, None)))
                             .await
@@ -364,8 +367,12 @@ impl LiveRenderer {
         }
     }
     /// Kumi's own takes in its folder (see `prune_takes`).
+    /// The plugin host's per-call scratch goes with its call, so it isn't pruned.
     pub(super) async fn prune_ears(&self) {
-        let _ = prune_takes(&self.ears_folder, TAKES_KEPT, FRESH).await;
+        if self.restricted() {
+            return;
+        }
+        let _ = prune_takes(&self.shared_ears, TAKES_KEPT, FRESH).await;
     }
 }
 
