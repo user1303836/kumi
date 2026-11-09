@@ -410,9 +410,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (!moved.current && size.width > 0) setView(fit())
   }, [topInset, coverRight]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // What the agent found: frame it.
+  // What the agent found: frame it, once the map has a size. Only once: a later resize (the palette drawer opening, a
+  // side sheet) leaves the producer's own view alone.
+  const framedFound = useRef<ReadonlySet<string> | null>(null)
   useEffect(() => {
-    if (!foundIds || size.width === 0) return
+    if (!foundIds || size.width === 0 || framedFound.current === foundIds) return
+    framedFound.current = foundIds
     const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight)
     if (framed) setView(framed)
   }, [foundIds, model, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps

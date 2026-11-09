@@ -7461,8 +7461,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   useEffect9(() => {
     if (!moved2.current && size.width > 0) setView(fit());
   }, [topInset, coverRight]);
+  const framedFound = useRef8(null);
   useEffect9(() => {
-    if (!foundIds || size.width === 0) return;
+    if (!foundIds || size.width === 0 || framedFound.current === foundIds) return;
+    framedFound.current = foundIds;
     const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
     if (framed) setView(framed);
   }, [foundIds, model, size.width, size.height]);
