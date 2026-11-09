@@ -63,6 +63,10 @@ a DAW to work in.
 | `kumi_judge` | Works toward a loudness, true peak or reference's balance in rounds: Live plays a stretch through Kumi Ears, and Kumi keeps each change only if it helped, else takes it back (Live only) | only with Ask before each change on |
 | `kumi_tune` | Lets Kumi pick a device's numbers in a judged round (fit, home, search or probe), kept or taken back (Live only) | only with Ask before each change on |
 | `kumi_wavetable` | Writes a new wavetable `.wav` for Serum 2 or Vital into the plug-in's wavetable folder or `User Library/Kumi/Wavetables`; it stays after an undo (Live only) | only with Ask before each change on |
+| `kumi_sound` | Measures 1–8 tracks heard side by side in one pass through Kumi Ears: each sound's envelope, tone, effects (reverb time, echoes, pumping), problems, a kit verdict and ducking; nothing in the Set changes (Live only) | only with Ask before each change on |
+| `kumi_audition` | Plays a part once and scores up to 8 candidate tracks (or the mix) 0–100 against a reference, with their gaps; Session-clip candidates play from temporary Arrangement copies removed after (Live only) | only with Ask before each change on |
+| `kumi_groove` | Shapes a MIDI part's feel toward a reference MIDI clip's, judged on the notes with no listening; `apply` moves the notes as a change you can undo, and a round that didn't help is taken back (Live only) | change and apply: only with Ask before each change on |
+| `kumi_render` | Renders up to 60 s of an audio track's own clips offline (no playback) and keeps the file in Kumi's own data as an `artifact_id` for `kumi_listen` (Live only) | only with Ask before each change on |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_palette` | Your palette, shared with the sound map in Desktop: lists and searches it, finds what a loose palette brings in, adds, removes and excludes sounds, manages palettes, and says how to load it as a kit in your DAW; changes no project | no (its edits never run from a webhook, a one-shot query or Hermes's background work) |
 | `kumi_design` | Makes a new sound from 2 to 16 of yours or of Kumi's results: crosses them (blend, attack, resonate, modulate), fuses them (texture, loop, smear) or stacks them into one hit; each seed is a variation, so a reroll is another seed. Kept as Kumi's private copy; changes no project | no (it never runs from a webhook, a one-shot query or Hermes's background work) |
@@ -209,7 +213,11 @@ project as…** with **Copy all media into project directory**), or they'll miss
   once more when Live started late, under the same limit. What Kumi hears stays in its own data until the call ends. A
   tune's search or probe makes scratch copies of the run's track in the Set and removes them after, and if Kumi stops
   partway its next look (`kumi_observe`) removes leftovers. No record pass, and no model is downloaded: a run goes by
-  its meters.
+  its meters. Measuring sounds (`kumi_sound`) and auditioning (`kumi_audition`) play the same way, with the same
+  limits; an audition of Session clips plays them from temporary copies in the Arrangement, removed after. A groove
+  round (`kumi_groove`) never plays: its `apply`, and a round it takes back, change a MIDI clip's notes as changes in
+  HISTORY. A render (`kumi_render`) is offline: Kumi keeps the file (at most 60 s of the track's own clips) in its own
+  data and deletes Live's temporary render file.
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest

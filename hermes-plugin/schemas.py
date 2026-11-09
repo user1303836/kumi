@@ -624,3 +624,83 @@ KUMI_WAVETABLE = _tool(
                                                      "seconds": {"type": "number", "exclusiveMinimum": 0,
                                                                  "maximum": 60}}}}}},
     ("device_ref", "wavetable"))
+
+
+# Live's other listening tools (serve's sound, audition, groove and render ops), Live only.
+_PASS_LISTEN = ("Live plays it through the Kumi Ears device setup installed, with Live stopped and not recording, at "
+                "most 60 s a pass counting a bar before the stretch and half a bar after, and puts it back after.")
+_PROJECT = {"expected_project_key": {"type": "string"}, "expected_epoch": {"type": "string"}}
+_REFERENCE = {"type": "object", "additionalProperties": False,
+              "description": ("{\"clip_ref\"} for an audio clip in the Set, or a source as kumi_listen takes one. Never "
+                              "a path string."),
+              "properties": {"clip_ref": {"type": "string"}, **_SOURCE["properties"]}}
+
+KUMI_SOUND = _tool(
+    "kumi_sound",
+    "Measure sounds in Live (skill kumi:listening, Sounds side by side): 1-8 tracks heard together in one pass from "
+    "from_beat (8 bars unless beats says). Each gets its envelope, brightness, pitch drop, modulation, warmth, width, "
+    "noise floor and tail, its effects (reverb time, echoes, swings, pumping), its problems, a kit verdict, how it "
+    "ducks under or plays against `against`, and cents from `key`. Nothing in the Set changes. " + _PASS_LISTEN + " "
+    "Pass the project key and epoch from kumi_observe, then the ones each answer returns. Live only.",
+    {"tracks": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string", "minLength": 1},
+                "description": "The tracks to measure, by ref or name."},
+     "against": {"type": "string", "description": "A track the others duck under or play against."},
+     "key": {"type": "string", "maxLength": 40, "description": "The song's key, like \"F# minor\"."},
+     "from_beat": {"type": "number", "minimum": 0, "description": "Where to listen from, in beats."},
+     "beats": {"type": "number", "exclusiveMinimum": 0, "maximum": 256,
+               "description": "How long, in beats (8 bars when left out); with the lead-in, at most 60 s."},
+     **_PROJECT},
+    ("tracks", "from_beat", "expected_project_key", "expected_epoch"))
+
+KUMI_AUDITION = _tool(
+    "kumi_audition",
+    "Hear up to 8 candidate tracks in one pass (after their devices; or the whole mix, alone) and score each 0-100 "
+    "against a reference, with its gaps (skill kumi:listening, Auditions). The producer hears the first candidate; "
+    "Kumi hears the others on their own. The part is from_beat and beats in the Arrangement (8 beats unless said), or "
+    "a Session clip per candidate, which plays from temporary Arrangement copies Kumi removes after. The reference is "
+    "heard for at most 60 s. " + _PASS_LISTEN + " Pass the project key and epoch from kumi_observe. Live only.",
+    {"candidates": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+        "type": "object", "additionalProperties": False, "properties": {
+            "track": {"type": "string", "minLength": 1, "description": "The candidate's track ref."},
+            "mix": {"type": "boolean", "description": "true: the whole mix, alone."},
+            "clip": {"type": "string", "minLength": 1, "description": "A Session clip on that track (its clip ref)."},
+            "label": {"type": "string", "minLength": 1, "maxLength": 60}}}},
+     "from_beat": {"type": "number", "minimum": 0, "description": "Where the part starts in the Arrangement."},
+     "beats": {"type": "number", "exclusiveMinimum": 0, "maximum": 256, "description": "How long (8 when left out)."},
+     "reference": _REFERENCE,
+     "reference_from_seconds": {"type": "number", "minimum": 0, "description": "Where in the reference the part is."},
+     "reference_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60,
+                           "description": "How much of the reference to hear (60 s at most, and when left out)."},
+     "focus": {"type": "string", "enum": ["sound", "section"],
+               "description": "sound: one patch or hit; section: a part or mix."},
+     **_PROJECT},
+    ("candidates", "expected_project_key", "expected_epoch"))
+
+KUMI_GROOVE = _tool(
+    "kumi_groove",
+    "Shape a MIDI part's feel toward a reference part's, judged on the notes with no listening (skill kumi:daw, "
+    "Groove): start with clip (the part's clip ref) and reference (a MIDI clip's clip ref, never a file); then change "
+    "(judge ONE change you made with kumi_change: kept or taken back by Kumi), apply: true (Kumi moves the notes "
+    "toward the reference, amount 0-1) and done: true. apply and a take-back are changes in HISTORY that kumi_undo "
+    "takes back. Pass the project key and epoch from kumi_observe, then the ones each answer returns. Live only.",
+    {"clip": {"type": "string", "minLength": 1, "description": "Starts a run: the part, a MIDI clip's clip ref."},
+     "reference": {"type": "string", "minLength": 1, "description": "Starts a run: the reference's MIDI clip ref."},
+     "change": {"type": "string", "minLength": 1, "maxLength": 400, "description": "What you changed in the part."},
+     "apply": {"type": "boolean", "description": "true: Kumi moves the notes toward the reference, then judges."},
+     "amount": {"type": "number", "minimum": 0, "maximum": 1, "description": "With apply: how far (1 when left out)."},
+     "done": {"type": "boolean", "description": "true: end the run, before → after on every line."},
+     **_PROJECT},
+    ("expected_project_key", "expected_epoch"))
+
+KUMI_RENDER = _tool(
+    "kumi_render",
+    "Render an audio track's own clips (its recordings, a bounce) between from_beat and from_beat + beats, offline and "
+    "silent: the raw audio before the track's devices, at most 60 s of it. Kumi keeps the file in its own data and "
+    "answers its artifact_id and measures: hear or compare it with kumi_listen (source {\"artifact_id\"}). Pass the "
+    "project key and epoch from kumi_observe. Live only.",
+    {"track": {"type": "string", "minLength": 1, "description": "An audio track's ref from the current look."},
+     "from_beat": {"type": "number", "minimum": 0, "description": "Where to start, in beats."},
+     "beats": {"type": "number", "exclusiveMinimum": 0, "maximum": 256,
+               "description": "How long, in beats: at most 60 s at the tempo."},
+     **_PROJECT},
+    ("track", "from_beat", "beats", "expected_project_key", "expected_epoch"))

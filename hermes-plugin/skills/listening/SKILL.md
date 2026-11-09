@@ -52,6 +52,13 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **In Live, a listen leaves traces Kumi can't remove.** Live may show the Set as modified, and Live's own Undo history holds the listen's temporary device steps, so pressing Undo in Live can bring Kumi Ears back. Kumi's answer says so; say it again if the producer asks what changed. A listen isn't a change in Kumi's HISTORY.
 - **A listen that didn't measure** (`refused`, `cancelled` or `unsure`) has no measurements. Say what happened; after `unsure`, observe again (`kumi_observe`) before anything else, and never send it again.
 
+## Sounds, auditions and renders (Live)
+- **Several sounds at once, measured in depth:** `kumi_sound {tracks, from_beat}` (1–8 tracks, 8 bars unless `beats` says; `against` for the track the others duck under; `key` for cents from it). One pass, nothing in the Set changes. Use it over several `kumi_listen` track captures when the question is how sounds sit together, their effects (reverb time, echoes, pumping) or what's wrong with them.
+- **Which candidate is closest to a reference:** `kumi_audition {candidates, from_beat, beats, reference}`: up to 8 tracks (each idea on its own track; the one you lean toward first, since that's the one the producer hears), or `{mix: true}` alone. The reference is `{clip_ref}` or a source, never a path, heard for at most 60 s (`reference_from_seconds`, `reference_seconds`). Session clips (`clip` per candidate) play from temporary Arrangement copies, removed after. Report each take's score and gaps as measured.
+- **Both play the project** like a track listen: Live stopped, through Kumi Ears, at most 60 s a pass counting a bar before and half a bar after (keep the stretch a little shorter than 60 s), everything put back. By default they run without a prompt: say in one line what will play first. Neither is a change you can undo; an audition is a heard row in HISTORY.
+- **A track's own audio, before its devices:** `kumi_render {track, from_beat, beats}` renders up to 60 s offline (nothing plays) and answers an `artifact_id`; measure or compare it with `kumi_listen` (`source: {"artifact_id": …}`).
+- **A whole song's form at once** (sections, energy over the song) isn't offered here: listen to a window, or say standalone Kumi does it.
+
 ## Rounds: comparing candidate changes
 - **Only where `kumi_listen` captures a track or the mix** (its description names those DAWs). Elsewhere, compare finished audio files: bounces into an approved folder.
 - **Agree first:**
