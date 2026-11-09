@@ -1,14 +1,16 @@
 // Kumi's tab in the Hermes web dashboard: the connection, FOCUS, HISTORY, the sound map and the palette, read from the
 // same backend routes as the Desktop half. The dashboard has no chat input to put a request in, so it changes nothing
-// in the DAW: a row's request can be copied, to paste into a chat. It edits only what changes no project, as Desktop
-// does: the palette, and the sounds hidden from the map.
+// in the DAW: a row's request can be copied, to paste into a chat. It does only what changes no project, as Desktop
+// does: edits the palette and the sounds hidden from the map, and makes new sounds (the Make panel).
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
 import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { useRequest } from '../shared/design.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
+import { MakePanel } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import { kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
@@ -196,6 +198,11 @@ function Dashboard() {
                 <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
                   {t('dock.addPicked', ids.length)}
                 </TextButton>
+                {ids.length > 1 && (
+                  <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
+                    {t('make.open')}
+                  </TextButton>
+                )}
                 <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
                   {t('dock.clearPicks')}
                 </TextButton>
@@ -226,6 +233,7 @@ function Dashboard() {
             audio={id => audition.url(id)}
             groups={state.map?.groups}
             kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+            make={palette.makeFromPalette}
             onDo={action => store.paletteDo(action)}
             onPlay={id => palette.play(id)}
             onStop={() => audition.stop()}
@@ -234,6 +242,30 @@ function Dashboard() {
             said={state.paletteSaid}
           />
         </div>
+        {/* Under the map card, in the grid's own column (the page scrolls): the map keeps its whole height, and the
+            dock sits between them, so a kept sound lands in view. */}
+        {palette.making && (
+          <div style={{ gridColumn: 2, minWidth: 0 }}>
+            <MakePanel
+              colorOf={palette.colorOf}
+              inline
+              kept={palette.kept}
+              onClose={palette.closeMake}
+              onKeep={palette.keep}
+              onMake={request => store.design(request)}
+              onPlay={id => void audition.play(id).catch(() => {})}
+              onStop={() => audition.stop()}
+              playing={playing}
+              results={state.designs}
+              sources={palette.making}
+              tempo={state.focus?.transport?.tempo}
+              use={result => {
+                const request = useRequest(result)
+                return request ? <CopyButton label={t('make.copyUse')} text={request} /> : null
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

@@ -2,15 +2,18 @@
 // in the window, as the pointer rests on it or on a click (a read, nothing reaches the DAW); a box (Shift held, or
 // Select on) picks sounds, and Add to palette gathers them into the palette the agent shares. "Use" puts a request
 // naming a sound into the chat for the producer to finish, "Use on pad…" one naming a drum pad too, and the palette's
-// "Use as kit…" one to load it as a kit. A sound that can't play here leaves the map quietly (never a notice per
-// sound), and one line under the map counts them.
+// "Use as kit…" one to load it as a kit. "Make…" (the picks' or the palette's) opens the Make panel, which makes new
+// sounds from them. A sound that can't play here leaves the map quietly (never a notice per sound), and one line under
+// the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { liveNote, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { useRequest } from '../shared/design.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
+import { MakePanel } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import { kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
@@ -88,7 +91,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      {/* The Make panel floats over the map, not the dock: a kept sound lands in the dock in view. */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <MapCanvas
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)
@@ -161,6 +165,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
               <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
                 {t('dock.addPicked', ids.length)}
               </TextButton>
+              {ids.length > 1 && (
+                <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
+                  {t('make.open')}
+                </TextButton>
+              )}
               <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
                 {t('dock.clearPicks')}
               </TextButton>
@@ -187,6 +196,29 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             </TextButton>
           }
         />
+        {palette.making && (
+          <MakePanel
+            colorOf={palette.colorOf}
+            kept={palette.kept}
+            onClose={palette.closeMake}
+            onKeep={palette.keep}
+            onMake={request => store.design(request)}
+            onPlay={id => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))}
+            onStop={() => audition.stop()}
+            playing={playing}
+            results={state.designs}
+            sources={palette.making}
+            tempo={state.focus?.transport?.tempo}
+            use={result => {
+              const request = useRequest(result)
+              return request ? (
+                <TextButton onClick={() => void ask(ctx, request, { send: false, session })} strong title={t('make.useTitle')}>
+                  {t('make.use')}
+                </TextButton>
+              ) : null
+            }}
+          />
+        )}
       </div>
       <PaletteDock
         audio={id => audition.url(id)}
@@ -196,6 +228,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             {t('dock.kit')}
           </TextButton>
         )}
+        make={palette.makeFromPalette}
         onDo={action => store.paletteDo(action)}
         onPlay={id => palette.play(id)}
         onStop={() => audition.stop()}

@@ -1,11 +1,14 @@
 // What the map does with the palette, the same in both UI halves: the picks (a box, Command or Ctrl with a click,
-// Pick all), gathering them into the palette, the palette's marks, hover-to-play, and a sound that can't play leaving
-// the map quietly.
+// Pick all), gathering them into the palette, the palette's marks, hover-to-play, a sound that can't play leaving the
+// map quietly, and the Make panel's sounds (the picks or the palette) and what it keeps.
+import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
+import { type DesignResult, type DesignSource, sourcesOf } from './design.ts'
 import { type Audition, playFailure, PREVIEW_SECONDS, useHoverPlay } from './hooks.ts'
 import type { Translate } from './i18n.ts'
-import { gatherIds, marksOf } from './palette.ts'
+import { groupColor } from './mapModel.ts'
+import { gatherIds, marksOf, type PaletteView } from './palette.ts'
 import type { KumiState, KumiStore } from './store.ts'
 
 export interface PaletteMap {
@@ -22,6 +25,18 @@ export interface PaletteMap {
   gather: (ids: string[]) => Promise<void>
   /** The sounds of the last gather, flying from the map into the dock (the map's `flying`). */
   flying: { ids: string[]; at: number } | null
+  /** The sounds the open Make panel makes from; null while it's closed. */
+  making: DesignSource[] | null
+  /** Open the Make panel on the picks (in the map's order) or on the palette's playable sounds. */
+  makeFromPicks: (ids: string[]) => void
+  makeFromPalette: (view: PaletteView) => void
+  closeMake: () => void
+  /** A made sound into the current palette; true when it went in. */
+  keep: (result: DesignResult) => Promise<boolean>
+  /** The made sounds the current palette holds. */
+  kept: ReadonlySet<string>
+  /** A sound's colour on the map (its group's); a made sound's is the accent. */
+  colorOf: (source: DesignSource) => string
 }
 
 /** The picks, the marks and the plays for a map. `hover` turns hover-to-play on; `other` hears a play's failure that
@@ -40,6 +55,16 @@ export function usePaletteMap(
   useEffect(() => setPicks(current => (current.revision === revision ? current : { revision, ids: new Set() })), [revision])
   const marked = useMemo(() => marksOf(state.palette, revision), [state.palette, revision])
   const [flying, setFlying] = useState<{ ids: string[]; at: number } | null>(null)
+  const [making, setMaking] = useState<DesignSource[] | null>(null)
+  const kept = useMemo(() => new Set((state.palette?.current?.items ?? []).flatMap(item => (item.artifact_id ? [item.artifact_id] : []))), [state.palette])
+  const groupOf = useMemo(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map])
+  // Its sounds' ids belong to the map they were picked on: a new map closes the panel (the results stay, for later).
+  useEffect(() => setMaking(current => (current?.some(source => source.sound_id && source.map_revision !== revision) ? null : current)), [revision])
+  const open = (sources: DesignSource[]) => {
+    setMaking(sources)
+    // The engine's earlier results, once: a variation history that survives a reload.
+    if (state.designs === null) void store.readDesigns()
+  }
 
   const play = (id: string, preview = false) => {
     audition.play(id, preview ? { preview: PREVIEW_SECONDS } : {}).catch(error => {
@@ -60,6 +85,16 @@ export function usePaletteMap(
     play,
     onHover,
     flying,
+    making,
+    kept,
+    makeFromPicks: ids => open(sourcesOf(ids.map(id => ({ sound_id: id, name: state.map?.sounds[id]?.name ?? null })), revision)),
+    makeFromPalette: view => open(sourcesOf(view.items, state.palette?.map_revision ?? null)),
+    closeMake: () => setMaking(null),
+    keep: result => store.paletteDo({ action: 'gather', artifact_ids: [result.artifact_id] }),
+    colorOf: source => {
+      const group = source.sound_id ? groupOf.get(source.sound_id) : undefined
+      return group === undefined ? T.accent : groupColor(state.map?.groups[String(group)]?.color, group)
+    },
     onPicked: (ids, how) =>
       setPicks(current => {
         const base = current.revision === revision ? current.ids : new Set<string>()

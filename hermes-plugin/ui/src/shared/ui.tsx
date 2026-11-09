@@ -32,7 +32,8 @@ export const FOCUSABLE = 'kumi-focusable'
 /** The focus ring for Kumi's controls, in the host theme's colour. Desktop turns focus rings off for every element
  *  (`*:focus-visible { outline: none }`); this rule's class beats that one, and only a keyboard focus shows it. Each UI
  *  root renders it once. With it come the few animations Kumi's views draw in CSS (a box's marching edge, a palette
- *  chip popping in), which a system asking for less motion doesn't get. */
+ *  chip or a new sound popping in, the spinner while one is made), which a system asking for less motion doesn't get
+ *  (the spinner turns slowly instead, so it still shows that something is happening). */
 export function FocusStyle() {
   return (
     <style>
@@ -40,7 +41,8 @@ export function FocusStyle() {
         '@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}' +
         '@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}' +
         '.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop{animation:none}}'}
+        '@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop{animation:none}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }

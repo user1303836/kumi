@@ -6,6 +6,7 @@ export const T = {
   faint: 'var(--color-muted-foreground)',
   border: 'var(--color-border)',
   card: 'var(--color-card)',
+  raised: 'var(--color-popover, var(--color-card))',
   chip: 'var(--color-muted)',
   accent: 'var(--color-primary)',
   good: 'var(--color-success)',
