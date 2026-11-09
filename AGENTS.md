@@ -52,7 +52,7 @@ scripts/                    dev.py, areas.toml, moves.toml; release.py and packa
 docs/{en,ja,zh-CN}/         user docs in three languages
 install.sh, install.ps1     the installers
 .config/nextest.toml        the test sets: ci (main's CI), extended (every test)
-.github/workflows/          CI, Extended, Installer, Network, Willington files, Caches, Release notes to Discord
+.github/workflows/          CI, Extended, Installer, Network, CodeQL, Willington files, Caches, Release notes to Discord
 ```
 
 Why it's shaped this way (keep it so):
@@ -135,6 +135,7 @@ What runs:
 - **Main, after each merge:** `Required CI` again (it keeps the build caches pull requests restore), and the tests on Linux: `Rust / Linux` in three parts (the `ci` set, every package), the Remote Script's, the Live extension's and Renoise's tool's tests, and the Hermes plugin's (with the Hermes catalog's own checks on Hermes v0.22.7). No newer merge cancels a main run. A red one opens an issue ("Main's CI failed") and is fixed before anything else, by whoever broke it; no release goes out until main's CI on the commit to release is green.
 - **The Installer:** on a release tag, which it publishes (all six bundles, each installed, the update from the last release, the migrations), and each night on main (all six bundles with the `release` profile, which keeps the tag's build cache warm, installed on each system; a failure opens an issue). Nothing else builds on macOS or Windows.
 - **By hand, on any branch, when a change wants it (nothing requires it):** `gh workflow run CI --ref <branch>` (main's set), `gh workflow run Installer --ref <branch>` (a tag's run; only a tag publishes), `gh workflow run Extended --ref <branch>` (every test on Linux, macOS and Windows: oracle replays, long simulations, SDK interop, the eval runner's own tests) and `gh workflow run Network --ref <branch>` (the HTTP clients against each system's own trust store and proxies).
+- **CodeQL:** on `main`, only after a change to Python, JavaScript or TypeScript (an HTML page's scripts too), C or C++, or a workflow, and each Monday over all of them. Never on a pull request.
 
 Rules:
 - No new workflow, job, matrix entry, schedule, required check or step without the owner's yes in the PR; cutting one needs none. A one-off measurement or probe runs locally or through `workflow_dispatch` of a workflow that exists; it's never committed as a workflow of its own.
