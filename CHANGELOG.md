@@ -3,6 +3,26 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.77 — 2026-11-08
+
+Ships with bridge 1.0.107, as 1.24.76 did.
+
+- Kumi for Hermes can measure your sounds in place, audition candidates against a reference and pick
+  the best, compare a part's groove and tighten it, and render a track's clips to a file, as Kumi
+  itself does (Live; a minute of listening at most)
+- AIFF samples play on Kumi's sound map in Hermes Desktop and the dashboard.
+- A sound whose file is gone, or that can't play there, leaves the map quietly instead of raising a
+  notice for each one; one line counts them, with Show them and Rescan.
+- Make new sounds from your own: cross samples into one (blend, attack, resonate, modulate), fuse them
+  into a texture, a loop or a long smear, or stack them as one hit — on PALETTE, with `d` on the map's
+  picks, or by asking Kumi; `r` rerolls a variation.
+- `kumi design --json` renders one of these headless, for scripts and Kumi for Hermes.
+- Kumi for Hermes can judge a change by ear against a reference, tune a plug-in toward it in rounds,
+  and make a wavetable from one of your sounds (Live)
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.76 — 2026-11-08
 
 Ships with bridge 1.0.107, as 1.24.75 did.
