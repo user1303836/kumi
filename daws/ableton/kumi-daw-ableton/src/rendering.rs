@@ -84,6 +84,9 @@ pub struct LiveRenderer {
     /// The tool call under way is form's, which hears the whole Arrangement: the plugin host's listening lets its
     /// passes play up to [`rig::WHOLE_SONG_SECONDS`] in all instead of a minute each.
     whole_song: Cell<bool>,
+    /// The plugin host's budget for the call under way, seconds, when its deadline is shorter than the policy's limit
+    /// (`Integration::listen_budget`).
+    call_budget: Cell<Option<f64>>,
     listening_policy: ListeningPolicy,
     rendering: ListenFlag,
     /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
@@ -175,6 +178,7 @@ impl LiveRenderer {
             shared_ears,
             call_scratch: RefCell::new(None),
             whole_song: Cell::new(false),
+            call_budget: Cell::new(None),
             listening_policy: options.policy.listening.clone(),
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
@@ -286,6 +290,10 @@ impl LiveRenderer {
         if self.restricted() {
             let _ = tokio::fs::remove_dir_all(self.kept_captures()).await;
         }
+    }
+    /// The plugin host's budget for the tool call that follows, seconds, None once the call ends.
+    pub fn listen_budget(&self, seconds: Option<f64>) {
+        self.call_budget.set(seconds);
     }
     /// The plugin host's per-call scratch for the tool calls that follow, None once the call ends.
     pub fn listen_scratch(&self, folder: Option<PathBuf>) {

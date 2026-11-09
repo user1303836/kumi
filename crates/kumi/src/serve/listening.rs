@@ -22,7 +22,9 @@
 use super::ctx::{Call, Ctx, Effect, JsonObject, OpFuture, Operation};
 use super::judge::{listened, refusal, refused, tools_input};
 use super::listen::{source_schema, Source};
-use super::live_pass::{beats_per_bar, readable_clip, readable_reference, whole_song_refusal, window_refusal, Capturing, MOST_SECONDS};
+use super::live_pass::{
+    beats_per_bar, readable_clip, readable_reference, whole_song_budget, whole_song_refusal, window_refusal, Capturing, MOST_SECONDS,
+};
 use kumi_common::abort::Signal;
 use kumi_listening::tools::{audition_tool, form_tool, groove_tool, render_tool, sound_tool};
 use kumi_types::contracts::ToolResult;
@@ -75,8 +77,9 @@ pub static FORM: Operation = Operation {
                   sections (role and letter), turns, intro and outro, the first hook, which tracks play where, form \
                   problems; with a reference (an audio clip's clip ref or a source), its form and the differences. It hears \
                   the whole Arrangement by default (from_beat and beats for part of it), so it plays as long as the song: \
-                  at most 15 minutes, with Live stopped and not recording, everything put back after; a stop ends it at once. \
-                  Made on the project key and epoch an observe gave.",
+                  at most 15 minutes, or the host's max_seconds when that's less (a song that doesn't fit is refused before \
+                  anything plays: read it in parts), with Live stopped and not recording, everything put back after; a stop \
+                  ends it at once. Made on the project key and epoch an observe gave.",
     schema: form_schema,
     effect: |_| Effect::Playback,
     run: run_form,
@@ -170,6 +173,11 @@ fn form_schema() -> Value {
     let fields = properties(&mut schema);
     fields.insert("reference".into(), reference_schema("A song to compare the form with"));
     fields["beats"]["description"] = json!("How long, in beats (to the song's last clip when left out): at most 15 minutes at the tempo");
+    fields.insert(
+        "max_seconds".into(),
+        json!({"type": "number", "exclusiveMinimum": 0,
+            "description": "The host's budget: the most this call may play, seconds, lead-ins included (900 at most; more is taken as 900). A song that doesn't fit is refused before anything plays."}),
+    );
     bound(&mut schema);
     Value::Object(schema)
 }
@@ -211,11 +219,16 @@ pub(super) async fn input(
             Ok((input, None))
         }
         "form" => {
+            // The host's own budget (its deadline): what can't play within it is refused before anything plays.
+            let Some(budget) = whole_song_budget(input.remove("max_seconds").as_ref()) else {
+                return Err(refused("invalid", "max_seconds is how long this call may play, a number of seconds above 0."));
+            };
             if let Some(beats) = number("beats") {
-                if let Some(error) = whole_song_refusal(ctx, number("from_beat").unwrap_or(0.), beats) {
+                if let Some(error) = whole_song_refusal(ctx, number("from_beat").unwrap_or(0.), beats, budget) {
                     return Err(refusal(error));
                 }
             }
+            capturing.budget(budget);
             let mut staged = None;
             if let Some(reference) = input.get_mut("reference") {
                 let (resolved, copy) = resolved_reference(ctx, reference, call, capturing).await?;

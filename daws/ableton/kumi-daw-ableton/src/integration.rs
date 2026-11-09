@@ -1106,6 +1106,9 @@ impl Integration for Ableton {
     fn listen_scratch(&self, folder: Option<std::path::PathBuf>) {
         self.rendering.listen_scratch(folder);
     }
+    fn listen_budget(&self, seconds: Option<f64>) {
+        self.rendering.listen_budget(seconds);
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.hear_in_set(request, signal).await

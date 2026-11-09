@@ -178,7 +178,7 @@ impl LiveRenderer {
         let limit = self.play_limit();
         let left = |played: f64| match limit {
             super::rig::PlayLimit::Minute => limit.seconds(),
-            super::rig::PlayLimit::WholeSong => limit.seconds() - played,
+            super::rig::PlayLimit::WholeSong(_) => limit.seconds() - played,
         };
         let meter = self.observer.beats_per_bar.get();
         let beat_ms = 60. / tempo * 1000.;
@@ -189,7 +189,7 @@ impl LiveRenderer {
             if longer && self.restricted() && super::rig::played_seconds(piece, meter, tempo, true) > left(*played) {
                 rig.notes.push(match limit {
                     super::rig::PlayLimit::Minute => "Live reached the stretch late, and playing it again from two bars ahead would take over 60 seconds, so Kumi didn't.".into(),
-                    super::rig::PlayLimit::WholeSong => "Live reached the stretch late, and playing it again would take Kumi past 15 minutes of listening, so it didn't.".into(),
+                    super::rig::PlayLimit::WholeSong(_) => "Live reached the stretch late, and playing it again would take Kumi past what it may listen to in this call, so it didn't.".into(),
                 });
                 break;
             }

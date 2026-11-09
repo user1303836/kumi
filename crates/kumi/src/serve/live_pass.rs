@@ -48,15 +48,20 @@ pub(super) fn window_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<Op
 /// every other listen keeps to [`MOST_SECONDS`]). Live's integration counts each part's lead-in and holds it too.
 pub(super) const WHOLE_SONG_SECONDS: f64 = 900.;
 
-/// Why form's stretch of `beats` from `from_beat` won't play here: over [`WHOLE_SONG_SECONDS`] with its lead-in.
-pub(super) fn whole_song_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<OpError> {
-    longer_than(
-        ctx,
-        from_beat,
-        beats,
-        WHOLE_SONG_SECONDS,
-        "15 minutes of the Arrangement here, so read the form in parts (from_beat and beats)",
-    )
+/// Why form's stretch of `beats` from `from_beat` won't play here: over `budget` seconds (at most
+/// [`WHOLE_SONG_SECONDS`]) with its lead-in.
+pub(super) fn whole_song_refusal(ctx: &Ctx, from_beat: f64, beats: f64, budget: f64) -> Option<OpError> {
+    let instead = format!("{budget:.0} seconds in one call here, so read the form in parts, each from_beat and beats short enough");
+    longer_than(ctx, from_beat, beats, budget, &instead)
+}
+
+/// The most a form call may play, seconds: the host's `max_seconds` (its own deadline, less its margin), never over
+/// [`WHOLE_SONG_SECONDS`]; that when the host gives none. None when what it gave isn't a positive number of seconds.
+pub(super) fn whole_song_budget(max_seconds: Option<&serde_json::Value>) -> Option<f64> {
+    match max_seconds {
+        None => Some(WHOLE_SONG_SECONDS),
+        Some(value) => value.as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.).map(|seconds| seconds.min(WHOLE_SONG_SECONDS)),
+    }
 }
 
 fn longer_than(ctx: &Ctx, from_beat: f64, beats: f64, most: f64, instead: &str) -> Option<OpError> {
@@ -96,11 +101,17 @@ impl Capturing {
     pub(super) fn scratch(&self) -> &Scratch {
         &self.scratch
     }
+
+    /// The host's budget for this call's playing, seconds, given to the integration while this lives.
+    pub(super) fn budget(&self, seconds: f64) {
+        self.integration.listen_budget(Some(seconds));
+    }
 }
 
 impl Drop for Capturing {
     fn drop(&mut self) {
         self.integration.listen_scratch(None);
+        self.integration.listen_budget(None);
     }
 }
 
