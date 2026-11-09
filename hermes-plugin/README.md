@@ -40,6 +40,39 @@ a DAW to work in.
 - **Measured, not imagined.** Loudness, true peak, loudness range, spectrum and tempo are measured on your
   computer. Kumi never claims to have heard what it hasn't measured.
 
+## What it looks like
+
+![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../docs/assets/hermes/screenshots/catalog-1-pane.png)
+
+*Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.*
+
+![With Ask before each change on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
+
+*With **Ask before each change** on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.*
+
+![Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
+
+*Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
+
+![The sound map: your own samples, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
+
+*The sound map: your own samples, with the found snares circled and why each matched.*
+
+![The palette: a box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
+
+*The palette: a box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.*
+
+![Make: a Cross blend, a Fuse loop at the project's 124 BPM (playing, kept in the palette) and a Stack, each with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
+
+*Make: a Cross blend, a Fuse loop at the project's 124 BPM (playing, kept in the palette) and a Stack, each with Reroll, Keep and Use.*
+
+Screenshots: Kumi 1.24.73 on real Ableton Live 12, and Kumi 1.24.71 on real REAPER 7 (the listening shot). Hermes's
+side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side (the pane, the map,
+the approval and the measurements) is real. The listening shot measures a synthetic test tone against a reference
+made 3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step. The
+palette and Make shots are Kumi 1.24.77 in Hermes v0.23.0's Desktop interface: the 8,830-sound map and its samples are
+generated test data, and the made sounds come from Kumi's sound-design engine.
+
 ## Tools
 
 | Tool | What it does | Asks first |

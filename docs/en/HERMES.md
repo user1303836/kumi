@@ -126,6 +126,11 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 ### Your palette
 
 The palette is the sounds you gather to work with, as in Kumi's own map; Hermes reads and edits the same one.
+
+![The sound map in Hermes Desktop: a Shift-drag box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
+
+*Kumi 1.24.77 in Hermes Desktop; the 8,830-sound map and its samples are generated test data.*
+
 - **Gather:** on the map, drag a box with Shift held (or turn on **Select**), Command or Ctrl-click a sound to pick
   one more, or **Pick all** for what a search keeps; then **Add to palette**. A picked sound's own **Add to palette**
   takes just it. The palette's sounds are ringed on the map.
@@ -144,6 +149,11 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 
 Kumi makes a new sound out of 2 to 16 of yours (map sounds, palette sounds, or sounds Kumi made before). Nothing in
 your project changes: the result is Kumi's own copy until you use it.
+
+![The Make panel: a Cross blend, a Fuse loop at the project's 124 BPM (playing, already kept in the palette) and a Stack, each with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
+
+*Kumi 1.24.77 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
+
 - **Cross** them into one sound:
   - **blend:** one body morphed from all of them;
   - **attack:** one sound's hit on the body of the others;
@@ -294,6 +304,13 @@ run without asking there, and Kumi can't tell it from a chat.
   for your approval, the pane shows its whole code (and a device's controls); a script's HISTORY row has **Show
   code**. Buttons put a request into the chat; they never change your project by themselves.
 - **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
+
+![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
+
+![The web dashboard's Kumi tab: HISTORY, status and the map.](../assets/hermes/screenshots/hermes-dashboard.png)
+
+Screenshots: Kumi 1.24.73 on real Ableton Live 12. Hermes's side of the chat came from a scripted stand-in model, so the
+words are illustrative; Kumi's side is real.
 
 ## Settings
 
