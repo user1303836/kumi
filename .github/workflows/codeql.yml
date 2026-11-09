@@ -1,30 +1,16 @@
 name: CodeQL
 
 # Code scanning for the languages CodeQL reads here: the Live extension's TypeScript and JavaScript and the map page's
-# inline scripts, the Remote Script's and the scripts' Python, REAPER's C++ shim and SDK headers, and the workflows
-# themselves. Each language's analysis is the repository's former default setup's (build-mode none, the default queries,
-# its category), so its alerts carry on. It runs only for a change to one of those (a pull request's, and main's once it
-# merges), and each Monday over all of them, which brings new queries to unchanged code. The default setup it replaces
-# ran all four on every push.
+# inline scripts, the Hermes plugin's Python and TypeScript, the Remote Script's and the scripts' Python, REAPER's C++
+# shim and SDK headers, and the workflows themselves. Each language's analysis is the repository's former default
+# setup's (build-mode none, the default queries, its category), so its alerts carry on. It runs on main only after a
+# change to one of those, and each Monday over all of them, which brings new queries to unchanged code; never on a pull
+# request, which runs only Required CI (AGENTS.md, "Minimal CI"). The default setup it replaces ran all four on every
+# push.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.py"
-      - "**/*.js"
-      - "**/*.mjs"
-      - "**/*.cjs"
-      - "**/*.ts"
-      - "**/*.tsx"
-      - "**/*.html"
-      - "**/*.c"
-      - "**/*.cc"
-      - "**/*.cpp"
-      - "**/*.h"
-      - "**/*.hpp"
-      - ".github/workflows/**"
-  pull_request:
     paths:
       - "**/*.py"
       - "**/*.js"
@@ -45,11 +31,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  # A pull request's newer push replaces its run; every other run (main's, the weekly one) keeps its own.
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
