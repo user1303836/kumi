@@ -26,6 +26,7 @@ import threading
 import time
 from typing import Any, Callable, Iterable, Mapping
 
+from . import snapshots
 from .setup import DAWS, host_target
 
 log = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history
 OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "change", "undo", "history", "listen",
                         "sounds", "library", "job", "generate", "transport", "script", "variations",
                         "device", "plugin_knowledge",
-                        "preset", "preset_build", "judge", "tune", "wavetable"})
+                        "preset", "preset_build", "judge", "tune", "wavetable", "design"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -193,15 +194,16 @@ def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Itera
                media_roots: Iterable[str] = (), hermes: tuple[str | None, str | None] = (None, None)) -> list[str]:
     """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, each sample folder
     the producer approved (`--library-root`, the runtime's only grant to read them), each folder of finished media it
-    may import or measure (`--media-root`: Hermes's generated audio, where other plugins' results land), the ffmpeg
-    they allowed at setup while it's unchanged (`--tool ffmpeg=`, CC-10), and Hermes's homes (`hermes_homes()`:
-    `--hermes-home`, `--hermes-root`), each only when it's a full path: inside them the runtime takes no library root
-    and reads no source, but for a media root it's given (#970). Read at each start."""
+    may import or measure (`--media-root`: Hermes's generated audio, where other plugins' results land, and the sounds
+    the dashboard made, `<state>/designs`, so the agent can use one: `designs_as_files`), the ffmpeg they allowed at
+    setup while it's unchanged (`--tool ffmpeg=`, CC-10), and Hermes's homes (`hermes_homes()`: `--hermes-home`,
+    `--hermes-root`), each only when it's a full path: inside them the runtime takes no library root and reads no
+    source, but for a media root it's given (#970). Read at each start."""
     argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
             "--daw", daw]
     for root in library_roots:
         argv += ["--library-root", root]
-    for root in media_roots:
+    for root in [*media_roots, str(state_dir / "designs")]:
         argv += ["--media-root", root]
     if ffmpeg := allowed_tool(install.ffmpeg):
         argv += ["--tool", f"ffmpeg={ffmpeg}"]
@@ -641,6 +643,7 @@ class Runtime:
         if tool not in OPERATIONS:
             raise ValueError(f"{tool!r} isn't in runtime.OPERATIONS: add it there, so the pin is checked for it")
         arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
+        arguments = designs_as_files(arguments, self.state_dir)
         hosts = {key: value for key, value in (private or {}).items() if isinstance(key, str) and key.startswith("_")}
         with self._lock:
             if self.closing:
@@ -674,6 +677,23 @@ class Runtime:
 
 
 Spawn = Callable[..., Client]
+
+
+def designs_as_files(value: Any, state: Path) -> Any:
+    """`value` with each source naming a sound the dashboard made (`{"artifact_id": "a-d…"}`, `designs.py`) as the file
+    it's kept in, which the runtime reads through its media root `<state>/designs` (`Host.media_roots`): the runtime
+    knows only its own artifacts. Only a listed result's own file is named (`snapshots.media`); anything else is left as
+    it is, for the runtime to refuse. The model never sees the path."""
+    if isinstance(value, list):
+        return [designs_as_files(item, state) for item in value]
+    if not isinstance(value, dict):
+        return value
+    artifact = value.get("artifact_id")
+    if isinstance(artifact, str) and snapshots.DESIGN_ID.fullmatch(artifact):
+        found = snapshots.media(state, artifact)
+        if found is not None:
+            return {**{key: item for key, item in value.items() if key != "artifact_id"}, "file": found["path"]}
+    return {key: designs_as_files(item, state) for key, item in value.items()}
 
 
 class Runtimes:

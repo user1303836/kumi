@@ -140,6 +140,32 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
   palette as a kit". With **Tell the agent what you're looking at** on, Kumi's note to the chat names your palette.
 - The palette is kept in this Hermes profile, apart from standalone Kumi's palettes.
 
+### Making sounds
+
+Kumi makes a new sound out of 2 to 16 of yours (map sounds, palette sounds, or sounds Kumi made before). Nothing in
+your project changes: the result is Kumi's own copy until you use it.
+- **Cross** them into one sound:
+  - **blend:** one body morphed from all of them;
+  - **attack:** one sound's hit on the body of the others;
+  - **resonate:** some of them ring through the others, as if struck inside them;
+  - **modulate:** they bend, ring and filter each other into something new.
+- **Fuse** them into something longer:
+  - **texture:** a bed that drifts between them and loops;
+  - **loop:** their hits played as a 1 to 4 bar beat;
+  - **smear:** stretched 4 to 16 times longer, with a long, soft tail.
+- **Stack** 2 to 8 of them into one layered hit, lined up on their attacks and balanced.
+- **Reroll:** each result has a seed. Another seed is another take of the same recipe; the same seed makes exactly the
+  same sound again. Each result comes with a one-line recipe that says what went into it.
+- **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
+- **Use:** ask for it on a pad or a track like any sound; that's a change of its own, asked as your changes are.
+- **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…**,
+  choose a way (a card for each), set its few options or leave them on **Auto** (a loop starts at your project's
+  tempo), and press **Make**: the new sound plays as it arrives. **Reroll**, **Keep** and **Use…** are on each result
+  (the dashboard copies Use's request instead), ‹ › steps through a result's variations, and the results stay after a
+  reload.
+- **Ask Hermes:** "blend these three kicks", "make a texture from my palette", "stack this snare with that clap",
+  "reroll it", "put the second one in my palette", "load it on pad C2".
+
 ### And the everyday ones
 
 - "What am I looking at?" Kumi reads the track, device and clip you have selected.

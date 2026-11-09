@@ -68,7 +68,8 @@ class Runtimes(unittest.TestCase):
         status = live.call("status", {}, self.host(), timeout=10)
         self.assertEqual(status["runtime"], {"version": support.VERSION, "protocol": "kumi-serve/1"})
         self.assertEqual(self.started()["argv"], ["serve", "--stdio", "--state-dir", str(self.data / "state"),
-                                                  "--kumi-home", str(self.data / "kumi-home"), "--daw", "ableton"])
+                                                  "--kumi-home", str(self.data / "kumi-home"), "--daw", "ableton",
+                                                  "--media-root", str(self.data / "state" / "designs")])
         self.assertIs(self.runtimes.get(self.data), live)
         self.assertIs(self.runtimes.start(self.data, live.install, "ableton", "s2", profile="studio"), live,
                       "one runtime a profile")

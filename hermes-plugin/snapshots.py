@@ -473,16 +473,44 @@ def _artifacts(state: Path) -> dict:
     return {key: value for key, value in table.items() if isinstance(value, dict)}
 
 
+# A sound the dashboard made (`designs.py`, `POST /design`): `a-d` and 22 letters or digits.
+DESIGN_ID = re.compile(r"a-d[A-Za-z0-9]{22}")
+
+
+def _designed(state: Path, media_id: str) -> dict | None:
+    """The answer `designs.py` listed for a sound it made (`<state>/designs.json`), or None when it lists none."""
+    if not DESIGN_ID.fullmatch(media_id):
+        return None
+    data = _load(state / "designs.json")
+    listed = data.get("designs") if isinstance(data, dict) and data.get("schema") == SCHEMA else None
+    return next((d for d in listed or [] if isinstance(d, dict) and d.get("artifact_id") == media_id), None)
+
+
+def _design_name(answer: dict) -> str:
+    """What a palette calls a sound the dashboard made: its recipe's lead ("Blend of 3", "Modulate Vox") and its seed,
+    so two variations of one recipe tell apart."""
+    recipe = answer.get("recipe") if isinstance(answer.get("recipe"), str) else ""
+    lead = " ".join(re.split(r"[:;]", recipe, maxsplit=1)[0].split())[:60]
+    if not lead:
+        lead = str(answer.get("mode") or answer.get("op") or "Design").capitalize()
+    seed = answer.get("seed")
+    return f"{lead}, seed {seed}" if isinstance(seed, int) and not isinstance(seed, bool) else lead
+
+
 def media(state: Path, media_id: str, library_folders: list[str] | None = None, *, current: dict | None = None) -> dict | None:
-    """The file behind a media id, `{id, path, kind, mime, bytes}`, or None. Only two kinds of id have one (CC-4):
-    an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
-    sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
+    """The file behind a media id, `{id, path, kind, mime, bytes}`, or None. Only three kinds of id have one (CC-4):
+    an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, a sound
+    the dashboard made (`designs.json`), only as `<state>/designs/<id>.wav`, and a sound of the current map revision
+    whose real path is inside an approved sample folder. Nothing else in the plugin
     data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB. `current`:
     the current map revision, already read (`map_revision`), for a caller asking about many of its sounds at once."""
     approved = _approved(library_folders)
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
         roots = _artifact_roots(state) + approved
+    elif _designed(state, media_id) is not None:
+        entry = {"path": str(state / "designs" / f"{media_id}.wav"), "kind": "audio", "mime": "audio/wav"}
+        roots = [Path(real) for real in [resolved(str(state / "designs"))] if real]
     else:
         if current is not None:
             sounds = current.get("sounds")
@@ -515,14 +543,18 @@ def artifact_file(state: Path, artifact_id: str) -> str | None:
 
 
 def palette_artifact(state: Path, artifact_id: Any, library_folders: list[str] | None = None) -> str | None:
-    """The name a palette keeps for an artifact it gathers (its own `name`, else its file's stem), when it's audio
-    the media guard serves (`media`, so `/audio?id=` plays it); None for anything else, a map sound's id included."""
+    """The name a palette keeps for an artifact it gathers (its own `name`, else its file's stem; a sound the dashboard
+    made, by its recipe and seed), when it's audio the media guard serves (`media`, so `/audio?id=` plays it); None for
+    anything else, a map sound's id included."""
     if not isinstance(artifact_id, str) or len(artifact_id) > 128:
         return None
     entry = _artifacts(state).get(artifact_id)
-    found = media(state, artifact_id, library_folders) if entry is not None else None
+    designed = _designed(state, artifact_id) if entry is None else None
+    found = media(state, artifact_id, library_folders) if entry is not None or designed is not None else None
     if found is None or not found["mime"].startswith("audio/"):
         return None
+    if designed is not None:
+        return _design_name(designed)
     name = entry.get("name")
     if isinstance(name, str) and name.strip():
         return " ".join(name.split())[:200]

@@ -738,6 +738,57 @@ def preset_build(fixture: Fixture, args: dict, host: dict) -> dict:
                                             "values_note")}}
 
 
+def design(fixture: Fixture, args: dict, host: dict) -> dict:
+    """serve's design: a new sound kept as an artifact, answered as the engine answers (the contract's interface).
+    It records the sources it was given, so a test sees what reached it (a dashboard result as its file)."""
+    sources = args.get("sources")
+    if not isinstance(sources, list) or not 2 <= len(sources) <= 16:
+        return error("invalid", f"{args.get('op')} takes 2 to 16 sounds.")
+    if args.get("op") == "cross" and args.get("mode") is None:
+        return error("invalid", "cross needs a mode: blend, attack, resonate, modulate.")
+    artifact = f"a-design{fixture.next_seq()}"
+    media = kept(fixture, artifact)
+    return answer_of(args, artifact) | {"media_tag": media}
+
+
+def answer_of(request: dict, artifact: str | None) -> dict:
+    """The engine's answer for a request: its seed (7 when it gave none), 256 peaks and a recipe line."""
+    names = [source.get("name") or "Sound" for source in request["sources"]]
+    echoed = [{key: value for key, value in source.items() if key != "file"} for source in request["sources"]]
+    answer = {"op": request["op"], "seed": request.get("seed", 7), "sources": echoed, "duration": 1.25,
+              "sample_rate": 48000, "channels": 2, "peaks": [round(i / 255, 4) for i in range(256)],
+              "recipe": f"Blend of {len(names)}: {', '.join(names)}; aligned on the attack"}
+    if request.get("mode"):
+        answer["mode"] = request["mode"]
+    if artifact:
+        answer["artifact_id"] = artifact
+    return answer
+
+
+def design_command(argv: list[str]) -> int:
+    """`kumi design --json - --out <file.wav> [--ffmpeg <path>]`, as the runtime's one-shot answers: the request read
+    from stdin, a WAV written, one JSON line out; a refusal (fewer than two sounds, or a file that isn't there) as
+    `{"error"}` and exit 1. The request it got is kept beside the WAV (`.request.json`) for a test to read."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=["design"])
+    parser.add_argument("--json", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--ffmpeg")
+    known, _ = parser.parse_known_args(argv)
+    request = json.loads(sys.stdin.read() if known.json == "-" else known.json)
+    out = Path(known.out)
+    out.with_suffix(".request.json").write_text(json.dumps(request), encoding="utf-8")
+    sources = request.get("sources") or []
+    missing = [s.get("name") for s in sources if not Path(s.get("file", "")).is_file()]
+    if len(sources) < 2 or missing:
+        print(json.dumps({"error": f"{request.get('op')} takes 2 to 16 sounds." if len(sources) < 2
+                          else f"{missing[0]}: there's no file there ({sources[0].get('file')})."}))
+        return 1
+    out.write_bytes(WAV)
+    print(json.dumps(answer_of({**request, "sources": [{"name": s.get("name")} for s in sources]}, None)))
+    return 0
+
+
 # The refusals serve's preset op gives that --preset-refusal names (#1180): the code and its words, with findings.
 PRESET_REFUSALS = {
     "not_installed": ("Serum 2's VST3 isn't in Live's plug-ins. Install or enable it, then ask again.", None),
@@ -1277,7 +1328,8 @@ TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
          "variations": variations, "device": device, "preset_build": preset_build,
-         "preset": preset, "judge": judged("judge"), "tune": judged("tune"), "wavetable": wavetable}
+         "preset": preset, "judge": judged("judge"), "tune": judged("tune"), "wavetable": wavetable,
+         "design": design}
 
 
 def main() -> None:
@@ -1285,6 +1337,8 @@ def main() -> None:
     # script's U+202E as other characters and hash different code than the plugin sent.
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
+    if sys.argv[1:2] == ["design"]:
+        sys.exit(design_command(sys.argv[1:]))
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["serve"])
     parser.add_argument("--stdio", action="store_true", required=True)

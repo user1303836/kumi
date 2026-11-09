@@ -854,6 +854,25 @@ def kumi_preset_build(host: Host, args: dict, **kwargs: Any) -> dict:
     return host.live().call("preset_build", dict(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
 
 
+DESIGN_FIELDS = frozenset({"op", "mode", "sources", "seed", "options"})
+DESIGN_FIELDS_ONLY = ("Kumi didn't make the sound: kumi_design takes op, mode, sources (by sound_id and map_revision, or "
+                      "artifact_id), seed and options, never a file.")
+
+
+def kumi_design(host: Host, args: dict, **kwargs: Any) -> dict:
+    """A new sound crossed, fused or stacked from 2-16 sounds (serve's `design`), kept as Kumi's private artifact:
+    nothing in the DAW changes. Sources by id only, never a file the model names (CC-4); a sound the dashboard made
+    goes in as its kept file (`runtime.designs_as_files`). It runs unasked in the producer's own turn, never
+    unattended, forked or scheduled (policy). Its MEDIA: line passes only for its kept file. The answer names the
+    sources as the model gave them, so a dashboard design stays its id."""
+    sources = args.get("sources")
+    if not set(args) <= DESIGN_FIELDS or not isinstance(sources, list) or any(
+            not isinstance(source, dict) or "file" in source for source in sources):
+        return {"error": {"code": "invalid", "reason": DESIGN_FIELDS_ONLY}}
+    made = kept_media(host, host.live().call("design", dict(args), host.identity(kwargs), timeout=WRITE_TIMEOUT))
+    return {**made, "sources": sources} if "sources" in made else made
+
+
 # A place whose answer never came: the file may be in the User Library. The same preset always names the same file, and
 # placing it again answers that file without writing another (#1180), so asking again is safe.
 PRESET_UNSURE_HINT = ("Whether the preset was written is unknown. Ask for it again with kumi_preset: placing the same "
@@ -1808,6 +1827,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_judge", schemas.KUMI_JUDGE, kumi_judge, "⚖️"),
     ("kumi_tune", schemas.KUMI_TUNE, kumi_tune, "🎯"),
     ("kumi_wavetable", schemas.KUMI_WAVETABLE, kumi_wavetable, "🌊"),
+    ("kumi_design", schemas.KUMI_DESIGN, kumi_design, "🧪"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
