@@ -406,7 +406,8 @@ impl MapStore {
             .enumerate()
             .map(|(at, group)| (at.to_string(), json!({"name":group.name,"color":group.color,"count":group.count})))
             .collect();
-        let body = json!({"revision":revision, "made":made, "points":points, "groups":groups, "arrangements":arrangements, "sounds":sounds});
+        let body =
+            json!({"revision":revision, "made":made, "points":points, "groups":groups, "arrangements":arrangements, "sounds":sounds});
         let search = worker(entries, sources).await?;
         check(signal)?;
         self.publish(ctx, Current { revision, sounds, files, ids, search }, body, MAX_SNAPSHOT_BYTES, signal).await

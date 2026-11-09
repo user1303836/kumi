@@ -116,7 +116,8 @@ fn character(sounds: &[MapSound], seeds: &[u64]) -> Laid {
     let bright = column(|sound| sound.brightness);
     let quick = column(|sound| sound.attack.map(|attack| -attack));
     let busy = column(|sound| sound.onsets);
-    let punch: Vec<_> = quick.iter().zip(&busy).map(|(quick, busy)| both(*quick, *busy, |a, b| (a + b) / 2.).or(*quick).or(*busy)).collect();
+    let punch: Vec<_> =
+        quick.iter().zip(&busy).map(|(quick, busy)| both(*quick, *busy, |a, b| (a + b) / 2.).or(*quick).or(*busy)).collect();
     let punch = ranks(&punch, seeds);
     let at = (0..sounds.len()).map(|at| [axis(bright[at], seeds[at], 1), 1. - axis(punch[at], seeds[at], 2)]).collect();
     (at, vec![])
@@ -290,10 +291,7 @@ fn folders(sounds: &[MapSound]) -> Laid {
     let shared = parts.first().map_or(0, |first| {
         parts.iter().fold(first.len(), |shared, part| shared.min(part.iter().zip(first).take_while(|(a, b)| a == b).count()))
     });
-    let tops: Vec<&str> = parts
-        .iter()
-        .map(|part| part.get(shared).or_else(|| part.last()).copied().unwrap_or_default())
-        .collect();
+    let tops: Vec<&str> = parts.iter().map(|part| part.get(shared).or_else(|| part.last()).copied().unwrap_or_default()).collect();
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for top in &tops {
         *counts.entry(*top).or_default() += 1;
@@ -444,7 +442,10 @@ mod tests {
             assert_eq!(point.len(), ARRANGEMENTS.len());
             assert!(point.iter().flatten().all(|v| (0. ..=1.).contains(v)));
         }
-        assert!(arrangements.iter().flat_map(|each| &each.labels).all(|label| (0. ..=1.).contains(&label.x) && (0. ..=1.).contains(&label.y)));
+        assert!(arrangements
+            .iter()
+            .flat_map(|each| &each.labels)
+            .all(|label| (0. ..=1.).contains(&label.x) && (0. ..=1.).contains(&label.y)));
         assert_eq!(arrange(&sounds), (arrangements, places.clone()));
         // Spread: within each arrangement no two sounds share a place.
         for k in 0..ARRANGEMENTS.len() {
@@ -519,7 +520,8 @@ mod tests {
         let boxes: Vec<_> = (0..3).map(extent).collect();
         for a in 0..3 {
             for b in a + 1..3 {
-                let apart = boxes[a][2] < boxes[b][0] || boxes[b][2] < boxes[a][0] || boxes[a][3] < boxes[b][1] || boxes[b][3] < boxes[a][1];
+                let apart =
+                    boxes[a][2] < boxes[b][0] || boxes[b][2] < boxes[a][0] || boxes[a][3] < boxes[b][1] || boxes[b][3] < boxes[a][1];
                 assert!(apart, "class islands {a} and {b} overlap: {:?} {:?}", boxes[a], boxes[b]);
             }
         }
