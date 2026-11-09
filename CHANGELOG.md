@@ -3,6 +3,38 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.79 — 2026-11-09
+
+Ships with bridge 1.0.107, as 1.24.78 did.
+
+- Kumi for Hermes can read a whole song's form in Live, playing the Arrangement once while you wait,
+  as long as Hermes's tool deadline allows
+- A sound Kumi made shows its waveform in the sound map's palette.
+- "More like these" works with several sounds picked: Kumi finds sounds near each of them.
+- Make a sound from as many sounds as you pick: the limit of 16 (8 for a stack) is gone.
+- Steer any make before it renders: darker or brighter, punchier or softer, shorter or longer, a
+  filter, drive, lo-fi, width and space, plus a pitch range, reverse, start, delay, pan and level
+  drawn for each sound.
+- Grow one sound toward another and hear the sounds in between; one seed is one path.
+- Loops come as beats or melodies in any meter, steered by swing, density, fills, ghost notes, rolls,
+  each drum's busyness and where the hits cluster; melodies take any key and scale, microtonal tunings
+  included.
+- Resonate lets you choose who rings through whom (in order, every other one, bright through dark, a
+  chain…), and Modulate which sound is shaped and how.
+- The Hermes Make panel gets a Loop tab (a beat or a melody, at your project's tempo), choices for
+  Resonate and Modulate, and Steer with a Surprise button on every way of making a sound.
+- Choose sounds you made and make new ones from them, generation after generation; Back returns to the
+  sounds before.
+- A modulate result shows each of its stages, so you can see how the sounds were shaped.
+- Use… puts just the sound's name and id in the chat, so you say what to do with it.
+- On the Hermes sound map, a left-drag draws a box that picks sounds, Shift adds another box, and the
+  middle button (or a trackpad's two-finger scroll) moves the map.
+- A sound on the Hermes map plays the moment the pointer reaches it.
+- Esc, a click on empty map, or Clear lets go of the picked sounds.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.78 — 2026-11-09
 
 Ships with bridge 1.0.107, as 1.24.77 did.
