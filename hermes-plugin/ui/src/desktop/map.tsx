@@ -327,36 +327,39 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           />
         )}
       </div>
-      <PaletteDock
-        audio={id => audition.url(id)}
-        groups={map?.groups}
-        kit={current => (
-          <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
-            {t('dock.kit')}
-          </TextButton>
-        )}
-        landing={dock}
-        make={palette.makeFromPalette}
-        onDo={action => store.paletteDo(action)}
-        onOpen={open => {
-          ctx.storage.set(PALETTE_OPEN, open)
-          setPaletteOpen(open)
-        }}
-        onPlay={id => palette.play(id)}
-        onStop={() => audition.stop()}
-        open={paletteOpen}
-        palette={state.palette}
-        playing={playing}
-        said={state.paletteSaid}
-        use={item => {
-          const request = itemReference(item, state.palette?.map_revision ?? null)
-          return request ? (
-            <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
-              {t('map.use')}
+      {/* The palette's strip waits for a map: with no sounds yet, the empty map's next step has the pane to itself. */}
+      {(map?.points?.length ?? 0) > 0 && (
+        <PaletteDock
+          audio={id => audition.url(id)}
+          groups={map?.groups}
+          kit={current => (
+            <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
+              {t('dock.kit')}
             </TextButton>
-          ) : null
-        }}
-      />
+          )}
+          landing={dock}
+          make={palette.makeFromPalette}
+          onDo={action => store.paletteDo(action)}
+          onOpen={open => {
+            ctx.storage.set(PALETTE_OPEN, open)
+            setPaletteOpen(open)
+          }}
+          onPlay={id => palette.play(id)}
+          onStop={() => audition.stop()}
+          open={paletteOpen}
+          palette={state.palette}
+          playing={playing}
+          said={state.paletteSaid}
+          use={item => {
+            const request = itemReference(item, state.palette?.map_revision ?? null)
+            return request ? (
+              <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
+                {t('map.use')}
+              </TextButton>
+            ) : null
+          }}
+        />
+      )}
     </div>
   )
 }

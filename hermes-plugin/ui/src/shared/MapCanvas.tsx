@@ -878,16 +878,19 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return () => observer.disconnect()
   }, [hasPicks])
 
+  // No sounds yet: what builds the map, in the middle of the pane it will fill.
   if (!model.points.length) {
     return (
-      <div style={{ ...S.muted, padding: 16 }}>
-        {empty}
-        {(map?.hidden ?? 0) > 0 && (
-          <div role="status" style={{ ...S.row, flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            <span style={{ ...S.faint, flex: '1 1 14rem' }}>{t('map.hidden', map?.hidden ?? 0)}</span>
-            {hiddenActions}
-          </div>
-        )}
+      <div style={{ ...S.muted, fontSize: 13, flex: 1, height: '100%', minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ maxWidth: 380 }}>
+          {empty}
+          {(map?.hidden ?? 0) > 0 && (
+            <div role="status" style={{ ...S.row, flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 8 }}>
+              <span style={{ ...S.faint, flex: '1 1 14rem' }}>{t('map.hidden', map?.hidden ?? 0)}</span>
+              {hiddenActions}
+            </div>
+          )}
+        </div>
       </div>
     )
   }

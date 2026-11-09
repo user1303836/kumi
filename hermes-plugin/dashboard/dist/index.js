@@ -6576,13 +6576,13 @@
       return () => observer.disconnect();
     }, [hasPicks]);
     if (!model.points.length) {
-      return /* @__PURE__ */ jsxs("div", { style: { ...S.muted, padding: 16 }, children: [
+      return /* @__PURE__ */ jsx("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs("div", { style: { maxWidth: 380 }, children: [
         empty,
-        (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs("div", { role: "status", style: { ...S.row, flexWrap: "wrap", gap: 6, marginTop: 8 }, children: [
+        (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs("div", { role: "status", style: { ...S.row, flexWrap: "wrap", justifyContent: "center", gap: 6, marginTop: 8 }, children: [
           /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", map?.hidden ?? 0) }),
           hiddenActions
         ] })
-      ] });
+      ] }) });
     }
     const chosen = selected ? model.sounds[selected] : void 0;
     const chosenIndex = selected ? indexOf.get(selected) : void 0;
@@ -7638,7 +7638,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               )
             }
           ),
-          /* @__PURE__ */ jsx(
+          (state.map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx(
             PaletteDock,
             {
               audio: (id) => audition.url(id),

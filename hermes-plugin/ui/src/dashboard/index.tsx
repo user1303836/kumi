@@ -293,28 +293,31 @@ function Dashboard() {
               />
             }
           />
-          <PaletteDock
-            audio={id => audition.url(id)}
-            groups={state.map?.groups}
-            kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
-            landing={dock}
-            make={palette.makeFromPalette}
-            onDo={action => store.paletteDo(action)}
-            onOpen={open => {
-              globalThis.localStorage?.setItem(PALETTE_OPEN, open ? 'on' : 'off')
-              setPaletteOpen(open)
-            }}
-            onPlay={id => palette.play(id)}
-            onStop={() => audition.stop()}
-            open={paletteOpen}
-            palette={state.palette}
-            playing={playing}
-            said={state.paletteSaid}
-            use={item => {
-              const request = itemReference(item, state.palette?.map_revision ?? null)
-              return request ? <CopyButton label={t('dashboard.copyReference')} text={request} /> : null
-            }}
-          />
+          {/* The palette's strip waits for a map, as in Desktop. */}
+          {(state.map?.points?.length ?? 0) > 0 && (
+            <PaletteDock
+              audio={id => audition.url(id)}
+              groups={state.map?.groups}
+              kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+              landing={dock}
+              make={palette.makeFromPalette}
+              onDo={action => store.paletteDo(action)}
+              onOpen={open => {
+                globalThis.localStorage?.setItem(PALETTE_OPEN, open ? 'on' : 'off')
+                setPaletteOpen(open)
+              }}
+              onPlay={id => palette.play(id)}
+              onStop={() => audition.stop()}
+              open={paletteOpen}
+              palette={state.palette}
+              playing={playing}
+              said={state.paletteSaid}
+              use={item => {
+                const request = itemReference(item, state.palette?.map_revision ?? null)
+                return request ? <CopyButton label={t('dashboard.copyReference')} text={request} /> : null
+              }}
+            />
+          )}
         </div>
         {/* Under the map card, in the grid's own column (the page scrolls): the map keeps its whole height, and the
             dock sits between them, so a kept sound lands in view. */}
