@@ -94,13 +94,17 @@ const GLYPHS: Record<string, ReactNode> = {
   )
 }
 
-function Glyph({ card }: { card: string }) {
+function Glyph({ card, size = 20 }: { card: string; size?: number }) {
   return (
-    <svg aria-hidden height="20" style={{ flex: 'none' }} viewBox="0 0 28 20" width="28">
+    <svg aria-hidden height={size} style={{ flex: 'none' }} viewBox="0 0 28 20" width={(size * 28) / 20}>
       {GLYPHS[card]}
     </svg>
   )
 }
+
+/** Each op's picture on its tab: two sounds becoming one, a long wave, and layers. */
+const OP_GLYPH = { cross: 'blend', fuse: 'smear', stack: 'stack' } as const
+const OPS = ['cross', 'fuse', 'stack'] as const
 
 /** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
  *  shrinking as it goes, while the palette's answer brings the chip in (it pops in as it lands). The panel draws it,
@@ -267,6 +271,8 @@ interface Take {
 export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }: MakePanelProps) {
   const t = useT()
   const [cardKey, setCardKey] = useState('blend')
+  // The mode each op had last, so going back to Cross finds Attack where it was left.
+  const [lastMode, setLastMode] = useState<Record<(typeof OPS)[number], string>>({ cross: 'blend', fuse: 'texture', stack: 'stack' })
   const [options, setOptions] = useState<DesignOptions>(() => (typeof tempo === 'number' && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {}))
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -371,52 +377,89 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
       return <OptionSlider key={name} label={labels[name]} name={name} onChange={next => setOptions(current => ({ ...current, [name]: next }))} value={options[name]} />
     })
 
-  const group = (op: 'cross' | 'fuse' | 'stack') => (
-    <div key={op} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ ...S.heading, fontSize: 10.5 }}>
-        {t(`make.ops.${op}`)} <span style={{ textTransform: 'none', letterSpacing: 0, color: T.faint }}>{t(`make.opHints.${op}`)}</span>
-      </span>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(124px, 1fr))', gap: 6 }}>
-        {CARDS.filter(entry => entry.op === op).map(entry => {
-          const chosen = entry.key === card.key
-          const blocked = refused
+  // The way to make it, in two steps that take little room beside the chat: the op as three tabs, then its modes as
+  // pills, and a line saying what the chosen one does.
+  const tint = `color-mix(in srgb, ${T.accent} 16%, transparent)`
+  const chooser = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div aria-label={t('make.way')} role="radiogroup" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', border: `1px solid ${T.border}`, borderRadius: 8, overflow: 'hidden' }}>
+        {OPS.map((op, index) => {
+          const chosen = card.op === op
           return (
             <button
-              aria-pressed={chosen}
+              aria-checked={chosen}
               className={FOCUSABLE}
-              disabled={Boolean(blocked)}
-              key={entry.key}
-              onClick={() => setCardKey(entry.key)}
-              title={t(`make.cards.${entry.key}.hint`)}
+              disabled={refused}
+              key={op}
+              onClick={() => setCardKey(lastMode[op])}
+              role="radio"
+              title={t(`make.opHints.${op}`)}
               type="button"
               style={{
                 display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 3,
-                textAlign: 'left',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                minWidth: 0,
                 font: 'inherit',
-                padding: '7px 8px',
-                borderRadius: 8,
-                border: `1px solid ${chosen ? T.accent : T.border}`,
-                background: chosen ? `color-mix(in srgb, ${T.accent} 13%, transparent)` : 'transparent',
-                boxShadow: chosen ? `0 0 0 1px ${T.accent}, 0 6px 18px -10px ${T.accent}` : 'none',
-                color: blocked ? T.faint : T.text,
-                cursor: blocked ? 'default' : 'pointer',
-                opacity: blocked ? 0.55 : 1,
-                transition: 'border-color 140ms, background-color 140ms, box-shadow 200ms, transform 140ms',
-                transform: chosen ? 'translateY(-1px)' : 'none'
+                fontSize: 12.5,
+                fontWeight: chosen ? 650 : 500,
+                padding: '6px 4px',
+                border: 'none',
+                borderLeft: index > 0 ? `1px solid ${T.border}` : 'none',
+                background: chosen ? tint : 'transparent',
+                color: refused ? T.faint : chosen ? T.accent : T.secondary,
+                cursor: refused ? 'default' : 'pointer',
+                transition: 'background-color 140ms, color 140ms'
               }}
             >
-              <span style={{ ...S.row, gap: 6, color: chosen ? T.accent : T.secondary }}>
-                <Glyph card={entry.key} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: blocked ? T.faint : T.text }}>{t(`make.cards.${entry.key}.title`)}</span>
-              </span>
-              <span style={{ fontSize: 11, lineHeight: 1.35, color: T.muted }}>{t(`make.cards.${entry.key}.hint`)}</span>
+              <Glyph card={OP_GLYPH[op]} size={14} />
+              <span style={S.ellipsis}>{t(`make.ops.${op}`)}</span>
             </button>
           )
         })}
       </div>
+      {card.op !== 'stack' && (
+        <div aria-label={t(`make.ops.${card.op}`)} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
+          {CARDS.filter(entry => entry.op === card.op).map(entry => {
+            const chosen = entry.key === card.key
+            return (
+              <button
+                aria-checked={chosen}
+                className={FOCUSABLE}
+                disabled={refused}
+                key={entry.key}
+                onClick={() => {
+                  setCardKey(entry.key)
+                  setLastMode(current => ({ ...current, [entry.op]: entry.key }))
+                }}
+                role="radio"
+                title={t(`make.cards.${entry.key}.hint`)}
+                type="button"
+                style={{
+                  ...S.row,
+                  gap: 5,
+                  font: 'inherit',
+                  fontSize: 12,
+                  fontWeight: chosen ? 600 : 500,
+                  padding: '3px 10px 3px 7px',
+                  borderRadius: 14,
+                  border: `1px solid ${chosen ? T.accent : T.border}`,
+                  background: chosen ? tint : 'transparent',
+                  boxShadow: chosen ? `0 4px 14px -8px ${T.accent}` : 'none',
+                  color: refused ? T.faint : chosen ? T.accent : T.secondary,
+                  cursor: refused ? 'default' : 'pointer',
+                  transition: 'border-color 140ms, background-color 140ms, color 140ms, box-shadow 200ms'
+                }}
+              >
+                <Glyph card={entry.key} size={13} />
+                {t(`make.cards.${entry.key}.title`)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <span style={{ ...S.muted, fontSize: 11.5 }}>{t(`make.cards.${card.key}.hint`)}</span>
     </div>
   )
 
@@ -457,9 +500,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
           ))}
           {sources.length > used.length && <span style={{ ...S.faint, flex: 'none' }}>+{sources.length - used.length}</span>}
         </div>
-        {group('cross')}
-        {group('fuse')}
-        {group('stack')}
+        {chooser}
         {card.options.length > 0 && <div style={{ ...S.row, flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>{optionRow(card)}</div>}
         <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -506,20 +547,51 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   }}
                   key={take.key}
                   role="listitem"
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: 'transparent' }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 10px', borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : 'transparent', transition: 'border-color 160ms, background-color 160ms' }}
                 >
-                  <span style={{ ...S.text, fontSize: 12, lineHeight: 1.35 }} title={result.recipe}>
+                  {/* Two lines of the recipe; all of it on hover. */}
+                  <span style={{ ...S.text, fontSize: 12, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={result.recipe}>
                     {clean(result.recipe, 220) || resultName(result)}
                   </span>
-                  <Wave duration={result.duration} peaks={result.peaks} playing={isPlaying} />
+                  {/* A round play button by the waveform; the waveform plays on a click too. */}
+                  <div style={{ ...S.row, gap: 8 }}>
+                    <button
+                      aria-label={isPlaying ? t('make.stop') : t('make.play')}
+                      className={FOCUSABLE}
+                      onClick={() => (isPlaying ? onStop() : onPlay(result.artifact_id))}
+                      type="button"
+                      style={{
+                        flex: 'none',
+                        width: 30,
+                        height: 30,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                        borderRadius: '50%',
+                        border: `1px solid ${T.accent}`,
+                        background: isPlaying ? `color-mix(in srgb, ${T.accent} 30%, transparent)` : `color-mix(in srgb, ${T.accent} 12%, transparent)`,
+                        color: T.accent,
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        transition: 'background-color 140ms'
+                      }}
+                    >
+                      {isPlaying ? '■' : '▶'}
+                    </button>
+                    <div aria-hidden onClick={() => (isPlaying ? onStop() : onPlay(result.artifact_id))} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                      <Wave duration={result.duration} peaks={result.peaks} playing={isPlaying} />
+                    </div>
+                  </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
                     <span style={S.faint}>
                       {t(`make.ops.${result.op}`)}
                       {result.mode ? ` · ${t(`make.cards.${result.mode}.title`)}` : ''} · {seconds(result.duration)}
                     </span>
-                    <span style={{ ...S.faint, fontVariantNumeric: 'tabular-nums' }} title={t('make.seedTitle')}>
+                    <span style={{ ...S.faint, fontSize: 10.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} title={t('make.seedTitle')}>
                       #{result.seed}
                     </span>
+                    <span style={{ flex: 1 }} />
                     {take.results.length > 1 && (
                       <span role="group" aria-label={t('make.variations')} style={{ ...S.row, gap: 2 }}>
                         <TextButton disabled={at === 0} label={t('make.previous')} onClick={() => setShown(current => ({ ...current, [take.key]: at - 1 }))}>
@@ -531,12 +603,17 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                         </TextButton>
                       </span>
                     )}
-                    <span style={{ flex: 1 }} />
-                    <TextButton label={isPlaying ? t('make.stop') : t('make.play')} onClick={() => (isPlaying ? onStop() : onPlay(result.artifact_id))}>
-                      {isPlaying ? '■' : '▶'}
-                    </TextButton>
+                  </div>
+                  <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
                     <TextButton disabled={busy !== null} onClick={() => void make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
-                      {busy === take.key ? t('make.rerolling') : t('make.reroll')}
+                      {busy === take.key ? (
+                        t('make.rerolling')
+                      ) : (
+                        <>
+                          <span aria-hidden>↻ </span>
+                          {t('make.reroll')}
+                        </>
+                      )}
                     </TextButton>
                     <TextButton
                       disabled={inPalette}
@@ -547,6 +624,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                       pressed={inPalette}
                       title={t('make.keepTitle')}
                     >
+                      <span aria-hidden>{inPalette ? '✓ ' : '+ '}</span>
                       {inPalette ? t('make.kept') : t('make.keep')}
                     </TextButton>
                     {use?.(result)}
