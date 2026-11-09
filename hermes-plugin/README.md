@@ -64,6 +64,7 @@ a DAW to work in.
 | `kumi_tune` | Lets Kumi pick a device's numbers in a judged round (fit, home, search or probe), kept or taken back (Live only) | only with Ask before each change on |
 | `kumi_wavetable` | Writes a new wavetable `.wav` for Serum 2 or Vital into the plug-in's wavetable folder or `User Library/Kumi/Wavetables`; it stays after an undo (Live only) | only with Ask before each change on |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
+| `kumi_palette` | Your palette, shared with the sound map in Desktop: lists and searches it, finds what a loose palette brings in, adds, removes and excludes sounds, manages palettes, and says how to load it as a kit in your DAW; changes no project | no (its edits never run from a webhook, a one-shot query or Hermes's background work) |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
 | `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |
@@ -137,16 +138,20 @@ settings:
 ## Hermes Desktop and the dashboard
 
 - **Desktop:** a status chip (DAW, project, tempo), a side pane with FOCUS and HISTORY, the sound map in its own tab,
-  cards for measured audio, and palette commands. While a script or device waits for your approval, the pane shows its
-  whole code (and a device's controls); a script's HISTORY row has **Show code**. Buttons never change your project
-  directly: they write a request into the chat, which goes through the same path as a typed request.
-- **Web dashboard:** a Kumi tab with the same HISTORY, status and map.
+  cards for measured audio, and commands in Hermes's command palette. On the map, a sound plays as the pointer rests on
+  it; a box picks sounds for your palette, which sits under the map (play, remove, reorder, rename, strict or loose,
+  Use as kit…) and is the one `kumi_palette` reads and edits. A sound that can't play there leaves the map quietly,
+  counted in one line. While a script or device waits for your approval, the pane shows its whole code (and a device's
+  controls); a script's HISTORY row has **Show code**. Buttons never change your project directly: they write a
+  request into the chat, which goes through the same path as a typed request.
+- **Web dashboard:** a Kumi tab with the same HISTORY, status, map and palette.
 
 ## Files
 
 Kumi keeps what it writes for Hermes in this profile's `plugin-data/kumi/` folder: the runtime, the library index and
 map, HISTORY, measurements, copies of the audio it measured or made (`state/artifacts`; your originals are never
-changed), the code of each script it ran (`state/scripts`) and job records. Outside it, setup writes only Kumi's
+changed), the code of each script it ran (`state/scripts`), your palettes (`state/palettes.json`), the sounds hidden
+from the map (`state/map-hidden.json`) and job records. Outside it, setup writes only Kumi's
 part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
 (`User Library/Kumi/Instruments` or `Audio Effects`), and each wavetable a new `.wav` file in Vital's wavetable folder

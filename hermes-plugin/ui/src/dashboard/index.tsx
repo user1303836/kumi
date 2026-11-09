@@ -1,14 +1,18 @@
-// Kumi's tab in the Hermes web dashboard: the connection, FOCUS, HISTORY and the sound map, read from the same
-// backend routes as the Desktop half. The dashboard has no chat input to put a request in, so it changes nothing:
-// a row's request can be copied, to paste into a chat.
+// Kumi's tab in the Hermes web dashboard: the connection, FOCUS, HISTORY, the sound map and the palette, read from the
+// same backend routes as the Desktop half. The dashboard has no chat input to put a request in, so it changes nothing
+// in the DAW: a row's request can be copied, to paste into a chat. It edits only what changes no project, as Desktop
+// does: the palette, and the sounds hidden from the map.
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
 import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
-import { Audition, playFailure, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
+import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
+import { kitRequest } from '../shared/palette.ts'
+import { PaletteDock } from '../shared/PaletteDock.tsx'
+import { usePaletteMap } from '../shared/paletteMap.ts'
 import { dawPartWorks, KumiStore } from '../shared/store.ts'
 import type { AudioReply } from '../shared/types.ts'
 import { Dot, FocusStyle, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
@@ -16,6 +20,8 @@ import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
 const POLL_MS = 5000
+/** The browser's own key for hover-to-play: on unless the producer turned it off, as native Kumi's `h`. */
+const HOVER_PLAY = 'kumi.mapHover'
 
 function useNow(every = 30_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -58,7 +64,7 @@ function KumiDashboard() {
 
 function Dashboard() {
   const t = useT()
-  // Reads, and the backend's few writes (the sounds hidden from the map) as JSON POSTs.
+  // Reads, and the backend's few writes (the palette, the sounds hidden from the map) as JSON POSTs.
   const store = useMemo(
     () =>
       new KumiStore((path, init) =>
@@ -68,19 +74,14 @@ function Dashboard() {
   )
   const audition = useMemo(() => new Audition(id => SDK.fetchJSON<AudioReply>(`${BASE}/audio?id=${encodeURIComponent(id)}`)), [])
   useWant(store, 'map')
+  useWant(store, 'palette')
   const state = useKumi(store)
   const playing = usePlaying(audition)
   const now = useNow()
   const [selected, setSelected] = useState<null | string>(null)
+  const [hover, setHover] = useState(() => globalThis.localStorage?.getItem(HOVER_PLAY) !== 'off')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
-  const play = (id: string) => {
-    audition.play(id).catch(error => {
-      const why = playFailure(error)
-      if (why !== 'gone' && why !== 'unplayable') return
-      store.hide(id, why)
-      setSelected(current => (current === id ? null : current))
-    })
-  }
+  const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
 
   useEffect(() => {
     void store.refreshStatus()
@@ -158,7 +159,10 @@ function Dashboard() {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton onClick={() => (playing === id ? audition.stop() : play(id))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
+                  <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
+                  <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
+                    {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
+                  </TextButton>
                   {request && <CopyButton label={t('dashboard.copyRequest')} text={request} />}
                 </>
               )
@@ -175,13 +179,50 @@ function Dashboard() {
             }
             leaving={state.leaving}
             map={state.map}
+            marked={palette.marked}
+            onHover={palette.onHover}
             onPick={id => {
               setSelected(id)
-              play(id)
+              palette.play(id)
             }}
+            onPicked={palette.onPicked}
             onSelect={setSelected}
+            picked={palette.picked}
+            pickedActions={ids => (
+              <>
+                <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
+                  {t('dock.addPicked', ids.length)}
+                </TextButton>
+                <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
+                  {t('dock.clearPicks')}
+                </TextButton>
+              </>
+            )}
             playing={playing}
             selected={selected}
+            tools={
+              <TextButton
+                onClick={() => {
+                  globalThis.localStorage?.setItem(HOVER_PLAY, hover ? 'off' : 'on')
+                  setHover(!hover)
+                }}
+                pressed={hover}
+                title={t('dock.hoverTitle')}
+              >
+                {t('dock.hover')}
+              </TextButton>
+            }
+          />
+          <PaletteDock
+            audio={id => audition.url(id)}
+            groups={state.map?.groups}
+            kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+            onDo={action => store.paletteDo(action)}
+            onPlay={id => palette.play(id)}
+            onStop={() => audition.stop()}
+            palette={state.palette}
+            playing={playing}
+            said={state.paletteSaid}
           />
         </div>
       </div>

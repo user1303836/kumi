@@ -1,5 +1,6 @@
 """Kumi's FOCUS note (RESEARCH.md §3, W2): what the producer is on in the DAW and what changed since Kumi last
-looked, added by `pre_llm_call` to the turns of the chat that holds Kumi's runtime.
+looked, added by `pre_llm_call` to the turns of the chat that holds Kumi's runtime, with the producer's palette as
+native Kumi's turn brief names it (palettes.py).
 
 It's read from what the runtime publishes (CC-7's focus.json, owner.json and status.json, through snapshots.py),
 never by asking the runtime: a turn waits for no DAW.
@@ -24,7 +25,7 @@ import threading
 import time
 from typing import Any
 
-from . import snapshots
+from . import palettes, snapshots
 from .policy import one_line
 
 log = logging.getLogger(__name__)
@@ -44,16 +45,20 @@ SECTIONS = {"scene": "scene", "marker": "marker", "region": "region", "sequence-
 
 
 def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_chars: int = MAX_CHARS,
-               now_ms: int | None = None, changes: list | None = None, session: Any = None) -> str | None:
-    """The fenced note, from focus.json's body (CC-7) and snapshots.owner(); None when no project was published.
-    `connected` is status.json's (None: not known). A stopped runtime gets one line instead of the last state.
-    `changes` are HISTORY's rows, newest first: the latest three are named, so "undo that" has its id, and one
-    another chat than `session` made says so."""
+               now_ms: int | None = None, changes: list | None = None, session: Any = None,
+               palette: str | None = None) -> str | None:
+    """The fenced note, from focus.json's body (CC-7) and snapshots.owner(); None when no project was published and
+    there's no `palette` line. `connected` is status.json's (None: not known). A stopped runtime gets one line instead
+    of the last state. `changes` are HISTORY's rows, newest first: the latest three are named, so "undo that" has its
+    id, and one another chat than `session` made says so. `palette` (`palette_line`) goes last."""
+    tail = [palette] if palette else []
     if owner.get("running") is False:
-        return fenced([STOPPED], max_chars)
+        return fenced([STOPPED, *tail], max_chars)
     project = _dict(focus.get("project"))
     if not project:
-        return fenced([NOT_CONNECTED], max_chars) if connected is False else None
+        if connected is False:
+            return fenced([NOT_CONNECTED, *tail], max_chars)
+        return fenced(tail, max_chars) if tail else None
     lines = [HEADER]
     if owner.get("stale"):
         age = owner.get("age_ms")
@@ -80,7 +85,18 @@ def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_c
         lines.append("Transport: " + ", ".join(said))
     lines += _catch_up(focus.get("catch_up"))
     lines += _latest(changes, session)
-    return fenced(lines, max_chars)
+    return fenced([*lines, *tail], max_chars)
+
+
+def palette_line(state: Path) -> str | None:
+    """Native's palette brief (palette.rs `brief()`), when the current palette has sounds: its name quoted as a
+    project's names are, how many sounds of what class, strict or loose and what that means, and how many it
+    excludes. Never a path."""
+    found = palettes.brief(state)
+    if found is None:
+        return None
+    name, said = found
+    return f"The producer's palette, {quoted(name, palettes.NAME_MAX)}: {said}"
 
 
 def fenced(lines: list[str], max_chars: int, tag: str = "kumi-focus") -> str:
@@ -313,8 +329,11 @@ def pre_llm_call(host: Any, session_id: Any = None, **kwargs: Any) -> dict | Non
         status = snapshots.read(state, "status") or {}
         connected = status.get("connected") if isinstance(status.get("connected"), bool) else None
         history = snapshots.history(state, limit=LATEST)
-        text = focus_text(focus, owner, connected=connected, changes=history["items"], session=session_id)
-        key = (focus.get("seq"), history.get("seq"), bool(owner.get("stale")), owner.get("running"), connected)
+        palette = palette_line(state)
+        text = focus_text(focus, owner, connected=connected, changes=history["items"], session=session_id,
+                          palette=palette)
+        key = (focus.get("seq"), history.get("seq"), bool(owner.get("stale")), owner.get("running"), connected,
+               palette)
         if text is None or not SENT.first((str(state), session_id), key):
             return None
     except Exception:

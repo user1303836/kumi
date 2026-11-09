@@ -1,15 +1,17 @@
 // One store per UI half over Kumi's backend routes (contract C4), shared by every view in it. It reads `/status` on a
-// poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the one it holds, or when
-// the runtime's liveness changed (the routes say per read whether anything can be undone). Its only writes are the
-// contract's map edits, which change no project: the sounds that can't play here, hidden from the map.
+// poll and on events, and reads FOCUS, HISTORY, the map and the palette again when their revision isn't the one it
+// holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone). Its only
+// writes are the contract's edits that change no project: the sounds that can't play here, hidden from the map, and
+// the palette.
 import { clean, plainId } from './format.ts'
 import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
+import type { PaletteAction, PaletteReply } from './palette.ts'
 import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
 /** A read (`GET`), or with `init` one of the backend's few writes, a JSON `POST`. */
 export type Fetch = <T>(path: string, init?: { method: 'POST'; body: unknown }) => Promise<T>
 
-export type Part = 'focus' | 'history' | 'map' | 'setup'
+export type Part = 'focus' | 'history' | 'map' | 'palette' | 'setup'
 
 export interface KumiState {
   /** null until the first answer; false when the backend half isn't mounted (the agent plugin is off). */
@@ -37,6 +39,10 @@ export interface KumiState {
   /** Sounds of the map in hand that couldn't play here: off the map at once (they fade out), and reported, until a map
    *  read no longer has them. */
   leaving: ReadonlySet<string>
+  /** The palette the map and the agent share (`/palette`): read while something shows it. */
+  palette: PaletteReply | null
+  /** What the last palette edit from this window said ("Added 3 sounds to Drums."), or why it was refused. */
+  paletteSaid: { text: string; failed: boolean; at: number } | null
 }
 
 export interface TrackedJob extends Job {
@@ -91,7 +97,7 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set() }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null }
 
 /** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
 export const HIDE_BATCH_MS = 1200
@@ -122,6 +128,22 @@ export function statusOf(error: unknown): number {
   const text = error instanceof Error ? error.message : String(error ?? '')
   const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text)
   return match ? Number(match[1]) : 0
+}
+
+/** Why a request failed, in the backend's words: Desktop's `ctx.rest` rejects with "<status>: <body>", and FastAPI's
+ *  body says why in `detail`; the dashboard's error already is that sentence. */
+export function errorText(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error ?? '')
+  const json = text.indexOf('{')
+  if (json >= 0) {
+    try {
+      const body: unknown = JSON.parse(text.slice(json))
+      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
+    } catch {
+      // not JSON: the text as it came
+    }
+  }
+  return text || 'no answer'
 }
 
 /** What's shown once Kumi stops answering: the last known state, nothing live in it and nothing to undo. */
@@ -240,8 +262,8 @@ export class KumiStore {
       // Any change of liveness (answering, quiet, or stopped) re-reads what the routes judge by it.
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running
       this.set({ available: true, error: null, status: heard(status) })
-      const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null }
-      const moved = (part: 'focus' | 'history' | 'map'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
+      const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null }
+      const moved = (part: 'focus' | 'history' | 'map' | 'palette'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
       const hidden = typeof after.hidden === 'number' ? after.hidden : 0
       const hiddenMoved = this.hiddenSeq !== null && hidden !== this.hiddenSeq
       this.hiddenSeq = hidden
@@ -249,6 +271,8 @@ export class KumiStore {
       if (liveness || moved('focus')) reads.push(this.refresh('focus'))
       if (liveness || moved('history')) reads.push(this.refresh('history'))
       if ((this.wanted.get('map') ?? 0) > 0 && (moved('map') || hiddenMoved)) reads.push(this.refresh('map'))
+      // The palette names its sounds by the current map's ids: a new map revision reads it again too.
+      if ((this.wanted.get('palette') ?? 0) > 0 && (moved('palette') || (this.state.map !== null && moved('map')))) reads.push(this.refresh('palette'))
       // Setup moves while Kumi isn't connected (a step a chat just installed, the DAW restarted to load Kumi's part),
       // and the pane's next step is read from it: read it on every poll until Kumi connects, and when liveness changes.
       if (first || liveness || !status.connected || (this.wanted.get('setup') ?? 0) > 0) reads.push(this.refresh('setup'))
@@ -323,6 +347,22 @@ export class KumiStore {
     if (generation !== this.generation) return
     this.set({ leaving: new Set() })
     await this.refresh('map')
+  }
+
+  /** One palette edit (`POST /palette`): the palette as the backend now has it, at once, and its sentence (with `also`
+   *  after it) as `paletteSaid`; a refusal's reason there instead. True when the edit was made. */
+  async paletteDo(action: PaletteAction, also?: string): Promise<boolean> {
+    const generation = this.generation
+    try {
+      const answer = await this.fetch<{ said?: unknown; palette?: PaletteReply }>('/palette', { method: 'POST', body: action })
+      if (generation !== this.generation) return false
+      const said = [typeof answer?.said === 'string' ? clean(answer.said, 200) : '', also ?? ''].filter(Boolean).join(' ')
+      this.set({ ...(answer?.palette ? { palette: answer.palette } : {}), paletteSaid: said ? { text: said, failed: false, at: Date.now() } : null })
+      return true
+    } catch (error) {
+      if (generation === this.generation) this.set({ paletteSaid: { text: clean(errorText(error), 200), failed: true, at: Date.now() } })
+      return false
+    }
   }
 
   /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each

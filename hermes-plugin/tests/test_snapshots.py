@@ -46,7 +46,7 @@ class Liveness(StateTest):
         status = snapshots.status(self.state, now_ms=NOW + 2_000)
         self.assertTrue(status["connected"])
         self.assertFalse(status["stale"])
-        self.assertEqual(status["revisions"], {"status": 12, "focus": 88, "history": 9, "map": "r7"})
+        self.assertEqual(status["revisions"], {"status": 12, "focus": 88, "history": 9, "map": "r7", "palette": 0})
         self.assertEqual(status["project"]["name"], "Night Drive")
         self.assertEqual(status["owner"]["session_id"], fixtures.OWNER["session_id"])
         self.assertNotIn("schema", status)
@@ -106,7 +106,8 @@ class Liveness(StateTest):
         empty = Path(self.tmp.name) / "nothing" / "state"
         status = snapshots.status(empty, now_ms=NOW)
         self.assertEqual((status["connected"], status["stale"]), (False, True))
-        self.assertEqual(status["revisions"], {"status": None, "focus": None, "history": None, "map": None})
+        self.assertEqual(status["revisions"], {"status": None, "focus": None, "history": None, "map": None,
+                                               "palette": 0})
         self.assertEqual(snapshots.history(empty, now_ms=NOW)["items"], [])
         self.assertFalse(snapshots.focus(empty, now_ms=NOW)["connected"])
         self.assertIsNone(snapshots.map_revision(empty))

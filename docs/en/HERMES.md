@@ -116,10 +116,27 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
   empty. Live's Redo won't bring the sample back: ask Kumi to load it again. Kumi never clears a pad to make room. In
   Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
-- On the map, a click plays a sound in the window, AIFF included; nothing changes in your DAW. A sound whose file is
-  gone, or that the window can't play, fades off the map quietly, and one line under the map counts them: **Show
-  them** puts them back, and **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard,
-  it copies the request).
+- On the map, a sound plays in the window as the pointer rests on it (its first two seconds; **Hover to play** turns
+  that off) or on a click, AIFF included; nothing changes in your DAW. A sound whose file is gone, or that the window
+  can't play, fades off the map quietly, and one line under the map counts them: **Show them** puts them back, and
+  **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard, it copies the request).
+
+### Your palette
+
+The palette is the sounds you gather to work with, as in Kumi's own map; Hermes reads and edits the same one.
+- **Gather:** on the map, drag a box with Shift held (or turn on **Select**), Command or Ctrl-click a sound to pick
+  one more, or **Pick all** for what a search keeps; then **Add to palette**. A picked sound's own **Add to palette**
+  takes just it. The palette's sounds are ringed on the map.
+- **Under the map:** each sound is a chip with its waveform, in its group's colour. A click plays it, × takes it out,
+  and a drag (or Alt with ← or →) moves it. Rename the palette, make another, switch between them, or forget one; its
+  sounds stay in your library.
+- **Strict or loose:** strict, Kumi uses only these sounds when you ask for your palette; loose, it may also offer
+  each one's 5 nearest, and asks before adding any.
+- **Use as kit…** puts "Load the sounds in my palette “…” as a kit" in the chat. In Live, Kumi then loads them onto
+  a Drum Rack's empty pads from C1 up, one pad a change (Live's Undo takes each back).
+- **Ask Hermes:** "add these kicks to my palette", "what's in my palette?", "make my palette loose", "load my
+  palette as a kit". With **Tell the agent what you're looking at** on, Kumi's note to the chat names your palette.
+- The palette is kept in this Hermes profile, apart from standalone Kumi's palettes.
 
 ### And the everyday ones
 
@@ -230,11 +247,11 @@ run without asking there, and Kumi can't tell it from a chat.
 - **Every surface:** Kumi's tools, its skills (`kumi:daw`, `kumi:sounds`, `kumi:listening`, and `kumi:generate` for
   Mirelo), `/kumi` for status, and `@kumi:focus`, `@kumi:history` or `@kumi:status` in a message to attach what Kumi
   last saw.
-- **Hermes Desktop:** a status chip, a side pane with FOCUS and HISTORY, the sound map in its own tab, cards for
-  measured audio, and palette commands. While a script or device waits for your approval, the pane shows its whole
-  code (and a device's controls); a script's HISTORY row has **Show code**. Buttons put a request into the chat; they
-  never change your project by themselves.
-- **Web dashboard:** a Kumi tab with HISTORY, status and the map.
+- **Hermes Desktop:** a status chip, a side pane with FOCUS and HISTORY, the sound map in its own tab with your
+  palette under it, cards for measured audio, and commands in Hermes's command palette. While a script or device waits
+  for your approval, the pane shows its whole code (and a device's controls); a script's HISTORY row has **Show
+  code**. Buttons put a request into the chat; they never change your project by themselves.
+- **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
 
 ## Settings
 
