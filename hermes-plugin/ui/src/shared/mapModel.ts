@@ -213,9 +213,11 @@ const MAC_WHEEL_STEP = 4.000244140625
 
 /** Whether a wheel event that isn't a pinch (the browser sends a pinch as a wheel with Ctrl held) pans the map, as a
  *  trackpad's two-finger scroll does, rather than zooming, as a mouse's wheel does. A delta in lines or pages, or one in
- *  macOS's wheel steps, is a mouse's; otherwise the legacy `wheelDelta` tells: a wheel's notches are 120 each, a
- *  trackpad's fine steps aren't; with no legacy delta, pixel deltas are a trackpad's. A gesture keeps the verdict its
- *  first event had, so one event that looks like a notch doesn't switch a swipe to zooming. */
+ *  macOS's wheel steps, is a mouse's. Otherwise the legacy `wheelDelta` tells: Chromium and Safari give a precise
+ *  device's (a trackpad's) as −3 × its delta, a wheel's notches otherwise (120 per 100 px on Windows, 120 per macOS
+ *  step), and both scale alike with the page's zoom; with no legacy delta at all, pixel deltas are a trackpad's. A
+ *  gesture keeps the verdict its first event had, so one event that looks like a notch doesn't switch a swipe to
+ *  zooming. */
 export function wheelPans(
   event: { deltaX: number; deltaY: number; deltaMode: number; wheelDeltaX?: number; wheelDeltaY?: number },
   memory: WheelMemory,
@@ -228,7 +230,8 @@ export function wheelPans(
   const delta = vertical ? event.deltaY : event.deltaX
   const legacy = vertical ? event.wheelDeltaY : event.wheelDeltaX
   if (event.deltaMode !== 0 || (delta !== 0 && delta % MAC_WHEEL_STEP === 0)) memory.pans = false
-  else if (typeof legacy === 'number' && legacy !== 0) memory.pans = legacy % 120 !== 0
+  // Legacy deltas are whole numbers: within rounding of −3 × the delta is a precise device's.
+  else if (typeof legacy === 'number' && legacy !== 0 && delta !== 0) memory.pans = Math.abs(legacy + 3 * delta) <= 1.5
   else memory.pans = true
   return memory.pans
 }

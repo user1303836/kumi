@@ -288,19 +288,23 @@ test('the map takes only keys no host claims first: the arrows, Shift with an ar
 
 test("a mouse's wheel zooms the map and a trackpad's two-finger scroll pans it; a gesture keeps the verdict it began with", () => {
   const pans = (event, memory = { pans: null, at: 0 }, now = 1000) => map.wheelPans({ deltaX: 0, deltaY: 0, deltaMode: 0, ...event }, memory, now)
-  // A mouse: lines (Firefox), macOS's wheel step (Chromium, Safari), or notches of 120 in the legacy delta.
+  // A mouse: lines (Firefox), macOS's wheel step (Chromium, Safari), or a legacy delta of notches (120 per 100 px), the
+  // same at a page zoom of 125% (both deltas scale).
   assert.equal(pans({ deltaY: 3, deltaMode: 1 }), false)
   assert.equal(pans({ deltaY: -8.00048828125 }), false)
   assert.equal(pans({ deltaY: 100, wheelDeltaY: -120 }), false)
-  // A trackpad: fine steps in the legacy delta, sideways movement, or pixel deltas with no legacy delta at all.
+  assert.equal(pans({ deltaY: 80, wheelDeltaY: -96 }), false)
+  // A trackpad: a legacy delta of −3 × its delta (whole numbers, so within rounding), at any zoom, sideways movement
+  // included, or pixel deltas with no legacy delta at all.
   assert.equal(pans({ deltaY: 2, wheelDeltaY: -6 }), true)
+  assert.equal(pans({ deltaY: 1.6, wheelDeltaY: -5 }), true)
   assert.equal(pans({ deltaX: -14, deltaY: 3, wheelDeltaX: 42, wheelDeltaY: -9 }), true)
   assert.equal(pans({ deltaY: 37.5 }), true)
   // One swipe's events stay a swipe, even one that looks like a notch; a pause starts a new gesture.
   const memory = { pans: null, at: 0 }
   assert.equal(pans({ deltaY: 2, wheelDeltaY: -6 }, memory, 1000), true)
-  assert.equal(pans({ deltaY: 40, wheelDeltaY: -120 }, memory, 1016), true)
-  assert.equal(pans({ deltaY: 40, wheelDeltaY: -120 }, memory, 1016 + map.WHEEL_GESTURE_MS + 1), false)
+  assert.equal(pans({ deltaY: 100, wheelDeltaY: -120 }, memory, 1016), true)
+  assert.equal(pans({ deltaY: 100, wheelDeltaY: -120 }, memory, 1016 + map.WHEEL_GESTURE_MS + 1), false)
 })
 
 test('from the first sound the keys pick, they reach every visible sound: seeded and clustered maps, sounds on one spot included', () => {

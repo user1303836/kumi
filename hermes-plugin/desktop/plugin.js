@@ -4463,7 +4463,7 @@ function wheelPans(event, memory, now) {
   const delta = vertical ? event.deltaY : event.deltaX;
   const legacy = vertical ? event.wheelDeltaY : event.wheelDeltaX;
   if (event.deltaMode !== 0 || delta !== 0 && delta % MAC_WHEEL_STEP === 0) memory.pans = false;
-  else if (typeof legacy === "number" && legacy !== 0) memory.pans = legacy % 120 !== 0;
+  else if (typeof legacy === "number" && legacy !== 0 && delta !== 0) memory.pans = Math.abs(legacy + 3 * delta) <= 1.5;
   else memory.pans = true;
   return memory.pans;
 }
