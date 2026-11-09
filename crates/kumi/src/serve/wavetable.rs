@@ -8,7 +8,6 @@ use super::change::one_line;
 use super::connection::{names_only_said, names_only_text};
 use super::ctx::{Call, Ctx, Effect, OpError, OpFuture, Operation};
 use super::listen::{source_schema, stage_source, Source};
-use kumi_daw_ableton::plugin_tool::PLUGIN_SCHEMA;
 use kumi_types::daw::DawId;
 use serde_json::{json, Map, Value};
 
@@ -26,19 +25,33 @@ pub static WAVETABLE: Operation = Operation {
     run,
 };
 
+/// What a wavetable takes, as Live's plug-in tool words it, but the held note is a source, never a path. The DAW's own
+/// tool checks the whole call against its schema before it runs (the app reaches Live only through its provider).
 fn schema() -> Value {
-    let mut wavetable = PLUGIN_SCHEMA["properties"]["wavetable"].clone();
-    let from = &mut wavetable["properties"]["from_audio"];
-    from["required"] = json!(["source"]);
-    let properties = from["properties"].as_object_mut().expect("from_audio has properties");
-    properties.remove("file");
     let mut source = source_schema();
     source["description"] = json!("The held note: a map sound, a file Kumi made, or an approved file");
-    properties.insert("source".into(), source);
-    wavetable["description"] = json!("What to draw: keyframes (with count), or from_audio");
     json!({"type": "object", "additionalProperties": false, "required": ["device_ref", "wavetable"], "properties": {
         "device_ref": {"type": "string", "minLength": 1, "maxLength": 256, "description": "The plug-in device's ref from the current look"},
-        "wavetable": wavetable
+        "wavetable": {"type": "object", "additionalProperties": false, "description": "What to draw: keyframes (with count), or from_audio",
+            "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 48, "description": "What to call it, as it shows in the synth's menu"},
+                "keyframes": {"type": "array", "minItems": 1, "maxItems": 16, "description": "Frames it morphs through, first to last",
+                    "items": {"type": "object", "additionalProperties": false, "properties": {
+                        "harmonics": {"type": "array", "minItems": 1, "maxItems": 512, "items": {"type": "number"},
+                            "description": "Amplitudes of harmonics 1, 2, 3… (negative flips one)"},
+                        "shape": {"type": "string", "enum": ["sine", "saw", "square", "triangle", "pulse"]},
+                        "width": {"type": "number", "minimum": 0.01, "maximum": 0.99, "description": "A pulse's width"}
+                    }}},
+                "count": {"type": "integer", "minimum": 1, "maximum": 256,
+                    "description": "Frames in all (morphing between keyframes); 64 for a sound cut from audio"},
+                "from_audio": {"type": "object", "additionalProperties": false, "required": ["source"],
+                    "description": "Cut single cycles from a held note instead",
+                    "properties": {
+                        "source": source,
+                        "start": {"type": "number", "minimum": 0},
+                        "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60}
+                    }}
+            }}
     }})
 }
 
