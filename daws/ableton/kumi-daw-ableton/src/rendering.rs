@@ -77,7 +77,10 @@ pub struct LiveRenderer {
     /// When Kumi last couldn't set its listening device up (Live's Browser never showed it, say): an
     /// audition in the next EARS_RETRY_MS records instead, rather than waiting for the same failure.
     ears_failed_at: Cell<Option<i64>>,
-    ears_folder: PathBuf,
+    /// Kumi's own folder for what a pass captures, standalone: `$TMPDIR/kumi-ears/<generation>/`, swept and pruned.
+    shared_ears: PathBuf,
+    /// The plugin host's per-call scratch the tool call under way captures into (`Integration::listen_scratch`).
+    call_scratch: RefCell<Option<PathBuf>>,
     listening_policy: ListeningPolicy,
     rendering: ListenFlag,
     /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
@@ -146,7 +149,7 @@ impl LiveRenderer {
         step: RenderStep,
         clip_file: ResolveAudio,
     ) -> Rc<Self> {
-        let ears_folder = std::env::temp_dir().join("kumi-ears").join(history.connection.generation.chars().take(8).collect::<String>());
+        let shared_ears = std::env::temp_dir().join("kumi-ears").join(history.connection.generation.chars().take(8).collect::<String>());
         Rc::new(Self {
             history,
             observer,
@@ -166,7 +169,8 @@ impl LiveRenderer {
             ears_setup: RefCell::new(None),
             ears_refused: Cell::new(false),
             ears_failed_at: Cell::new(None),
-            ears_folder,
+            shared_ears,
+            call_scratch: RefCell::new(None),
             listening_policy: options.policy.listening.clone(),
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
@@ -274,7 +278,32 @@ impl LiveRenderer {
         } {
             link.close().await;
         }
-        let _ = tokio::fs::remove_dir_all(&self.ears_folder).await;
+        let _ = tokio::fs::remove_dir_all(&self.shared_ears).await;
+        if self.restricted() {
+            let _ = tokio::fs::remove_dir_all(self.kept_captures()).await;
+        }
+    }
+    /// The plugin host's per-call scratch for the tool calls that follow, None once the call ends.
+    pub fn listen_scratch(&self, folder: Option<PathBuf>) {
+        *self.call_scratch.borrow_mut() = folder;
+    }
+    /// Where a pass captures: the plugin host's per-call scratch (a pass under its policy is refused without one, before
+    /// it plays), else Kumi's own folder.
+    fn ears_folder(&self) -> PathBuf {
+        match self.call_scratch.borrow().as_ref() {
+            Some(folder) if self.restricted() => folder.clone(),
+            _ => self.shared_ears.clone(),
+        }
+    }
+    /// Where a judged run keeps the captures it compares later rounds with: the plugin host's own, under its scratch root
+    /// (removed when Live's connection closes), else beside Kumi's own captures.
+    fn kept_captures(&self) -> PathBuf {
+        match &self.listening_policy {
+            ListeningPolicy::Restricted { scratch_root, .. } => {
+                scratch_root.join(format!("judged-{}", self.history.connection.generation.chars().take(8).collect::<String>()))
+            }
+            ListeningPolicy::Standalone => self.shared_ears.join("judge"),
+        }
     }
 }
 impl Rendering {

@@ -294,11 +294,11 @@ impl LiveRenderer {
                 let link = link.clone();
                 let takes = &takes;
                 async move {
-                    let raw = RawFile(self.ears_folder.join(format!("{}.raw", uuid::Uuid::new_v4())));
+                    let raw = RawFile(self.ears_folder().join(format!("{}.raw", uuid::Uuid::new_v4())));
                     let write: Result<(), RuntimeError> = async {
                         let written = link.write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal)).await.map_err(plain)?;
                         let capture = read_capture(&raw.0, written.channels, written.sample_rate).await.map_err(plain)?;
-                        let wav = self.ears_folder.join(format!("{}.wav", uuid::Uuid::new_v4()));
+                        let wav = self.ears_folder().join(format!("{}.wav", uuid::Uuid::new_v4()));
                         write_capture_wav(&wav, &capture, 0., capture.frames() as f64).await.map_err(plain)?;
                         takes.borrow_mut().push(HeardTake {
                             label: label.clone(),

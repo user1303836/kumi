@@ -24,6 +24,10 @@ impl LiveRenderer {
         if let Some(why) = self.no_room_for(rig).await {
             return Err(observation(why));
         }
+        // The plugin host's listening: through Kumi Ears alone, with Live stopped and not recording, a minute at most.
+        if self.restricted() {
+            self.restricted_pass(rig, signal.clone()).await?;
+        }
         if rig.ears.is_some() {
             return self.ears_pass(rig, signal).await;
         }
@@ -259,14 +263,14 @@ impl LiveRenderer {
         let mut recorded: Vec<PathBuf> =
             recorded.into_inner().into_iter().map(PathBuf::from).filter(|file| kumi_recording(file, &tracks)).collect();
         if result.is_ok() {
-            let _ = tokio::fs::create_dir_all(&self.ears_folder).await;
+            let _ = tokio::fs::create_dir_all(self.ears_folder()).await;
             for render in files.values_mut() {
                 let original = PathBuf::from(&render.file);
                 if !recorded.contains(&original) {
                     continue;
                 }
                 let extension = original.extension().and_then(|extension| extension.to_str()).unwrap_or("wav");
-                let copy = self.ears_folder.join(format!("{}.{extension}", uuid::Uuid::new_v4()));
+                let copy = self.ears_folder().join(format!("{}.{extension}", uuid::Uuid::new_v4()));
                 match tokio::fs::copy(&original, &copy).await {
                     Ok(_) => render.file = copy.to_string_lossy().into_owned(),
                     Err(_) => recorded.retain(|file| *file != original),

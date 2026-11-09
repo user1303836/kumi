@@ -44,6 +44,45 @@ pub(super) struct BeforeMainTap {
 }
 /// Its capture's name among a pass's files: no track's (Kumi's own render tracks are named "Kumi · render …").
 pub(super) const BEFORE_MAIN: &str = "Kumi · before Main";
+/// Why the plugin host's listening can't hear through Kumi Ears (it never records to listen, or installs the device).
+pub(super) const EARS_MISSING: &str =
+    "The preinstalled Kumi Ears device is missing or didn't start. It requires Max for Live; listening never installs it: run setup again.";
+/// The longest pass the plugin host's listening plays, seconds: from Live starting to play to stopping, its lead-in and
+/// what follows the stretch included.
+pub(super) const RESTRICTED_SECONDS: f64 = 60.;
+/// Why the plugin host's listening captures nowhere: it was given no private per-call scratch under its root.
+pub(super) const SCRATCH_MISSING: &str = "Restricted listening requires a private per-call scratch directory inside its configured root.";
+/// How long Live plays a Kumi Ears pass over `window`, seconds: its lead-in (a bar, or two when it plays again because
+/// Live reached the stretch late; less when the stretch starts sooner), the stretch, and half a bar after it.
+pub(super) fn played_seconds(window: Window, beats_per_bar: f64, tempo: f64, again: bool) -> f64 {
+    super::super::audition::render_span(window.from, window.beats, beats_per_bar, tempo, again, Some(0.)).wait * 60. / tempo
+}
+/// Why the plugin host's listening won't play a pass of `seconds` (as [`played_seconds`] counts it) with Live's
+/// transport and song as read (Live playing or recording, not following the Arrangement, or a pass over
+/// [`RESTRICTED_SECONDS`]); None when it may.
+pub(super) fn restricted_refusal(seconds: f64, transport: &Value, song: &Value) -> Option<&'static str> {
+    if !seconds.is_finite() || seconds <= 0. || seconds > RESTRICTED_SECONDS {
+        return Some(
+            "Kumi plays at most 60 seconds at a time here, a bar before the stretch and half a bar after it included: hear a shorter stretch (from_beat and beats).",
+        );
+    }
+    if ["playing", "arrangementRecord", "sessionRecord"].iter().any(|key| transport.get(*key) != Some(&Value::Bool(false))) {
+        return Some("Stop playback and recording before listening to an Arrangement window.");
+    }
+    if song.get("backToArranger") != Some(&Value::Bool(false)) {
+        return Some("Live is not following the Arrangement. Resolve Back to Arrangement yourself, then observe again.");
+    }
+    None
+}
+/// The folder a pass of the plugin host's listening captures into: the per-call scratch its host gave (`call`), checked
+/// to be a private folder directly under the policy's root; refused without one. None standalone (Kumi's own folder).
+pub(super) async fn capture_folder(policy: &ListeningPolicy, call: Option<PathBuf>) -> Result<Option<PathBuf>, &'static str> {
+    if matches!(policy, ListeningPolicy::Standalone) {
+        return Ok(None);
+    }
+    let request = kumi_types::contracts::HearRequest { scratch_dir: call, ..Default::default() };
+    policy.scratch_dir(&request).await.map(Some).map_err(|_| SCRATCH_MISSING)
+}
 pub(super) struct Rig {
     pub tag: String,
     /// The Set's tempo as the rig opened: what a pass records at when a look since can't say what it is now.
@@ -70,6 +109,35 @@ pub(super) struct Rig {
 impl Rig {
     pub fn window(&self) -> Window {
         self.window.unwrap_or(Window { from: self.from, beats: self.beats })
+    }
+}
+impl LiveRenderer {
+    /// Whether this is the plugin host's listening: Kumi Ears alone, Live stopped and not recording as a pass starts,
+    /// at most a minute a pass.
+    pub(super) fn restricted(&self) -> bool {
+        matches!(self.listening_policy, ListeningPolicy::Restricted { .. })
+    }
+    /// The plugin host's limits on a pass about to play, read from Live now: Kumi Ears there, a per-call scratch to
+    /// capture into, and the first pass (a bar's lead-in, the stretch, half a bar after) a minute at most.
+    pub(super) async fn restricted_pass(&self, rig: &Rig, signal: Signal) -> Result<(), RuntimeError> {
+        if rig.ears.is_none() {
+            return Err(observation(EARS_MISSING));
+        }
+        let call = self.call_scratch.borrow().clone();
+        capture_folder(&self.listening_policy, call).await.map_err(observation)?;
+        let seconds = played_seconds(rig.window(), self.observer.beats_per_bar.get(), self.pass_tempo(rig)?, false);
+        let unreadable =
+            || observation("This Live bridge can't say whether Live is playing or recording; update its bridge and restart Live.");
+        let playback = self.rows("session-playback", json!({}), signal.clone()).await?;
+        let transport = playback.first().and_then(|row| row.get("transport")).cloned().ok_or_else(unreadable)?;
+        if !self.connection().has("live_song_state") {
+            return Err(unreadable());
+        }
+        let song = super::super::context::payload(&self.connection().call("live_song_state", JsonObject::new(), signal).await?)?;
+        match restricted_refusal(seconds, &transport, &Value::Object(song)) {
+            Some(why) => Err(observation(why)),
+            None => Ok(()),
+        }
     }
 }
 impl LiveRenderer {
@@ -131,6 +199,10 @@ impl LiveRenderer {
             noted: false,
         };
         let link = self.ears_ready(signal.clone()).await?;
+        // The plugin host's listening hears through Kumi Ears alone, never a record pass.
+        if link.is_none() && self.restricted() {
+            return Err(observation(EARS_MISSING));
+        }
         let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
         let mut shared = false;
         for (index, candidate) in candidates.iter().enumerate() {
@@ -205,6 +277,7 @@ impl LiveRenderer {
                     self.remove_taps(&mut rig).await;
                     if error.silent { self.ears_refused.set(true);rig.notes.push("Kumi's listening device didn't start in this Live (it needs Max for Live), so Kumi records to listen instead.".into()); }
                     if shared {return Err(error.error);}
+                    if self.restricted() {return Err(observation(EARS_MISSING));}
                     rig.ears=None;
                     self.add_scratch(&rig.sources,signal.clone()).await?;
                 }
@@ -422,5 +495,72 @@ impl LiveRenderer {
                 let _ = tokio::fs::remove_file(file).await;
             }
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The minute covers all Live plays: a bar before the stretch and half a bar after, and the replay's two bars.
+    #[test]
+    fn the_plugin_hosts_minute_counts_the_lead_in_and_what_follows_the_stretch() {
+        let stopped = json!({"playing": false, "arrangementRecord": false, "sessionRecord": false});
+        let following = json!({"backToArranger": false});
+        let fits =
+            |window: Window, again: bool| restricted_refusal(played_seconds(window, 4., 120., again), &stopped, &following).is_none();
+        // At 120 BPM in 4/4 a beat is half a second: 4 beats before, 2 after.
+        assert_eq!(played_seconds(Window { from: 16., beats: 114. }, 4., 120., false), 60.);
+        assert!(fits(Window { from: 16., beats: 114. }, false));
+        // 116 beats is 58 s of stretch, under a minute alone, but 61 s with its lead-in and what follows.
+        assert!(!fits(Window { from: 16., beats: 116. }, false));
+        // Played again from two bars ahead, the same stretch takes 62 s: it isn't.
+        assert_eq!(played_seconds(Window { from: 16., beats: 114. }, 4., 120., true), 62.);
+        assert!(!fits(Window { from: 16., beats: 114. }, true));
+        assert!(fits(Window { from: 16., beats: 110. }, true));
+        // A stretch from the Arrangement's start has no lead-in to play.
+        assert_eq!(played_seconds(Window { from: 0., beats: 118. }, 4., 120., true), 60.);
+    }
+
+    /// The plugin host's captures go only into the private per-call folder its host gave, directly under the policy's
+    /// root (never Kumi's shared folder); none given, or one elsewhere, and the pass is refused.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_plugin_hosts_captures_go_only_into_its_per_call_scratch() {
+        use std::os::unix::fs::DirBuilderExt;
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("scratch").join("listen");
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&root).unwrap();
+        let call = root.join("1-1");
+        std::fs::DirBuilder::new().mode(0o700).create(&call).unwrap();
+        let policy = ListeningPolicy::Restricted { scratch_root: root.clone(), quarantine_root: home.path().join("quarantine") };
+        let folder = capture_folder(&policy, Some(call.clone())).await.unwrap().unwrap();
+        assert_eq!(folder, std::fs::canonicalize(&call).unwrap());
+        assert_eq!(capture_folder(&policy, None).await, Err(SCRATCH_MISSING));
+        let shared = std::env::temp_dir().join("kumi-ears");
+        std::fs::create_dir_all(&shared).unwrap();
+        assert_eq!(capture_folder(&policy, Some(shared)).await, Err(SCRATCH_MISSING));
+        let deeper = call.join("deeper");
+        std::fs::DirBuilder::new().mode(0o700).create(&deeper).unwrap();
+        assert_eq!(capture_folder(&policy, Some(deeper)).await, Err(SCRATCH_MISSING));
+        assert_eq!(capture_folder(&ListeningPolicy::Standalone, Some(call)).await, Ok(None));
+    }
+
+    #[test]
+    fn the_plugin_hosts_pass_plays_only_a_stopped_unrecording_arrangement_for_a_minute_at_most() {
+        let stopped = json!({"playing": false, "arrangementRecord": false, "sessionRecord": false});
+        let following = json!({"backToArranger": false});
+        assert_eq!(restricted_refusal(60., &stopped, &following), None);
+        assert!(restricted_refusal(60.5, &stopped, &following).unwrap().contains("at most 60 seconds"));
+        assert!(restricted_refusal(f64::NAN, &stopped, &following).is_some());
+        for key in ["playing", "arrangementRecord", "sessionRecord"] {
+            let mut moving = stopped.clone();
+            moving[key] = json!(true);
+            assert!(restricted_refusal(8., &moving, &following).unwrap().starts_with("Stop playback and recording"), "{key}");
+            // A transport Live doesn't say is stopped isn't taken as stopped.
+            moving.as_object_mut().unwrap().remove(key);
+            assert!(restricted_refusal(8., &moving, &following).is_some(), "{key} unread");
+        }
+        assert!(restricted_refusal(8., &stopped, &json!({"backToArranger": true})).unwrap().contains("Back to Arrangement"));
+        assert!(restricted_refusal(8., &stopped, &json!({})).is_some());
     }
 }

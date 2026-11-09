@@ -370,8 +370,27 @@ async fn download(url: &str, signal: Option<Signal>) -> Result<Vec<u8>, VideoFai
     Ok(bytes.to_vec())
 }
 
+/// Set (to anything) in a Kumi that downloads no programs: the runtime a host drives (`kumi serve`), which runs only what
+/// its host installed and allowed. ffmpeg, yt-dlp, whisper.cpp and its speech models are then never fetched: a feature
+/// that needs one that isn't there goes without it, or says so.
+pub const NO_PROGRAM_FETCH: &str = "KUMI_NO_PROGRAM_FETCH";
+
+/// Whether this Kumi downloads no programs ([`NO_PROGRAM_FETCH`]), set in `env` or in the process's own.
+fn fetches_no_programs(env: Option<&Env>) -> bool {
+    env.and_then(|env| env.get(NO_PROGRAM_FETCH)).is_some_and(|set| !set.is_empty())
+        || std::env::var_os(NO_PROGRAM_FETCH).is_some_and(|set| !set.is_empty())
+}
+
+/// Why a Kumi that downloads no programs didn't fetch from `url`.
+fn not_fetched(url: &str) -> VideoFailure {
+    VideoFailure::video(format!("This Kumi doesn't download programs, so it didn't fetch {}.", last_segment(url)))
+}
+
 /// `(options.download ?? download)(url, signal)`.
 async fn fetch_bytes(download_with: &Option<Download>, url: &str, signal: &Option<Signal>) -> Result<Vec<u8>, VideoFailure> {
+    if fetches_no_programs(None) {
+        return Err(not_fetched(url));
+    }
     match download_with {
         Some(download_with) => download_with(url.to_string(), signal.clone()).await,
         None => download(url, signal.clone()).await,
@@ -932,7 +951,7 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
         }
     }
     let (Some(tools_dir), Some(own)) = (tools_dir, own) else { return Ok(None) };
-    if options.installed_only {
+    if options.installed_only || fetches_no_programs(Some(&env)) {
         return Ok(None);
     }
     let arch = options.arch.as_deref().unwrap_or(node_arch());
@@ -1029,6 +1048,9 @@ struct Fetching<'a> {
 /// A download streamed to `path`, with its SHA-256 (hex); nothing is left there on failure. How far it
 /// is goes to on_progress, against its length (or `size`, the length its publisher lists).
 async fn download_to(url: &str, path: &Path, fetching: Fetching<'_>, size: Option<f64>) -> Result<String, VideoFailure> {
+    if fetches_no_programs(None) {
+        return Err(not_fetched(url));
+    }
     if let Some(parent) = path.parent() {
         mkdir_700(parent).await?;
     }
@@ -1317,6 +1339,41 @@ mod ffmpeg_tests {
         assert_eq!(std::fs::read_to_string(&asked).unwrap(), "-version\n", "asked once");
         std::fs::remove_file(&ffmpeg).unwrap();
         assert_ne!(find_ffmpeg(options()).await.unwrap().as_deref(), Some("ffmpeg"), "gone, so looked for again");
+    }
+}
+
+#[cfg(test)]
+mod no_fetch_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A Kumi that downloads no programs (the runtime a host drives) never fetches ffmpeg where it would otherwise: it
+    /// has none, and says so as a missing one.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_kumi_that_downloads_no_programs_never_fetches_ffmpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let counted = asked.clone();
+        let download: Download = Arc::new(move |_, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err(VideoFailure::video("offline")) })
+        });
+        let options = |env: Env| FfmpegOptions {
+            env: Some(env),
+            tools_dir: Some(dir.path().join("tools").to_string_lossy().into_owned()),
+            download: Some(download.clone()),
+            // A computer BtbN builds for, where Kumi would fetch one.
+            platform: Some("linux".into()),
+            arch: Some("x64".into()),
+            ..Default::default()
+        };
+        let mut env = Env::new();
+        env.insert(NO_PROGRAM_FETCH.into(), "1".into());
+        assert_eq!(find_ffmpeg(options(env)).await.unwrap(), None);
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "nothing asked of the network");
+        // Standalone, it would have gone to GitHub for one.
+        let _ = find_ffmpeg(options(Env::new())).await;
+        assert!(asked.load(Ordering::SeqCst) > 0);
     }
 }
 
