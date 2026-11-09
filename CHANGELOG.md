@@ -3,6 +3,43 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.78 — 2026-11-09
+
+Ships with bridge 1.0.107, as 1.24.77 did.
+
+- Kumi's sound map in Hermes Desktop and the dashboard plays a sound as the pointer rests on it, picks
+  sounds with a box, and keeps your palette under the map, where its sounds play, come out, move and
+  load as a kit.
+- Hermes can read and edit the same palette: "add these kicks to my palette", "what's in my palette?",
+  "load my palette as a kit".
+- Kumi's sound map in Hermes has a Tiles view: each sound becomes a square tile in its group's colour,
+  and the dots morph into tiles and back.
+- The sound map moves: sounds pop in, glow under the pointer, ripple while they play, and fly into
+  your palette when you add them.
+- Kumi for Hermes builds Serum 2 presets with mod-matrix routes, such as LFO 1 to the filter cutoff at
+  a set depth.
+- Kumi's sound map in Hermes makes new sounds: pick some (or use your palette), press Make…, and
+  cross, fuse or stack them; reroll for another take, keep the ones you like in your palette, or use
+  one on a pad or track.
+- In Hermes, Kumi makes new sounds from yours: cross them (blend, attack, resonate, modulate), fuse
+  them into a texture, a loop or a long smear, or stack them into one hit, and reroll for another
+  take.
+- Ask Hermes "blend these three kicks" or "make a texture from my palette", keep a result in your
+  palette, and put it on a pad like any sound.
+- Kumi for Hermes can measure several sounds at once, audition candidates against a reference, shape a
+  part's groove and render a track's own audio in Live, as Kumi itself does
+- The sound map's Make panel is compact enough to use beside the chat: pick Cross, Fuse or Stack, then
+  a way, and each result has a play button by its waveform.
+- On a large sound map, the sound under the pointer stands out with a ring and a readable name, and
+  new palette sounds scroll into view as they land.
+- The sound map's Make panel keeps showing the sounds it makes from once its results fill it.
+- Kumi for Hermes can read a whole song's form in Live (its sections, energy and hooks), playing the
+  Arrangement once while you wait: up to about 6½ minutes with Hermes's default tool deadline, or 15
+  if you raise it
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.77 — 2026-11-08
 
 Ships with bridge 1.0.107, as 1.24.76 did.
