@@ -10,7 +10,9 @@ import logging
 import os
 from pathlib import Path
 import signal
+import sys
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -40,6 +42,30 @@ class Unfreeable(ledger.Ledger):
 
     def refuse(self, reservation_id: str, *, not_submitted: bool, reason: str) -> dict:
         raise ledger.LedgerError("ledger_unavailable", "Kumi's credit ledger is busy.")
+
+
+class MireloKey(unittest.TestCase):
+    """The key Kumi sends is the active profile's, as Hermes's secret scope resolves it (catalog rule 11): never what
+    the process environment holds, which can be another profile's, and none at all when Hermes refuses a read made
+    without a profile scope."""
+
+    def key_through(self, get_secret) -> str | None:
+        host, _, _ = support.host(self, dict(ON))
+        host._mirelo_key = None  # as a real host has it: the key comes from Hermes
+        scope = types.ModuleType("agent.secret_scope")
+        scope.get_secret = get_secret
+        with mock.patch.dict(sys.modules, {"agent.secret_scope": scope}), \
+                mock.patch.dict(os.environ, {generate.KEY_ENV: "mk-ANOTHER-PROFILE"}):
+            return host.mirelo_key()
+
+    def test_the_key_is_the_active_profiles_and_none_when_hermes_refuses_an_unscoped_read(self) -> None:
+        self.assertEqual(self.key_through(lambda name, default=None: KEY if name == generate.KEY_ENV else default), KEY)
+
+        def unscoped(name, default=None):
+            raise RuntimeError("get_secret called with no profile secret scope active while multiplexing is on")
+
+        self.assertIsNone(self.key_through(unscoped), "no key, never the environment's")
+        self.assertIsNone(self.key_through(lambda name, default=None: "  "), "a blank secret is no key")
 
 
 class Generation(unittest.TestCase):
