@@ -46,6 +46,9 @@ Then, in your DAW:
 - **REAPER:** restart REAPER.
 - **Renoise:** enable the Kumi tool.
 
+No DAW yet? REAPER's free evaluation takes about two minutes: install it from
+[reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
+
 The first DAW you set up becomes Kumi's DAW (the DAW setting), in the same approval. Setting up another DAW later
 leaves Kumi with the one it has; setup then names the step that switches: `hermes kumi setup --daw <daw> --use` in a
 terminal, which asks before it changes the setting. You can also change the DAW in Kumi's plugin settings
@@ -421,7 +424,9 @@ words are illustrative; Kumi's side is real.
 
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
-- Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
+- Live 12 works on macOS and Windows. Kumi is tested on Live 12.4 (beta); Live 12.0 to 12.3 are untested and have no
+  Extension Host for Kumi's Live extension, so there Kumi can't render offline, write MIDI clips into the Arrangement or
+  clear a range in it. REAPER 7 and Renoise 3.5 or later work on macOS, Windows and Linux.
 - Kumi listens to the window you ask for, up to 60 seconds (in Live, 256 beats at most, in the Arrangement); reading
   a song's form in Live plays the whole Arrangement once, up to about 6½ minutes with Hermes's default tool deadline
   (up to 15 if you raise `timeouts.tools.sequential_call`). In every

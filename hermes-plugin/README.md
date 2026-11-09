@@ -1,11 +1,27 @@
 # Kumi for Hermes
 
-![Kumi for Hermes](../docs/assets/hermes/banner.png)
+**Kumi puts Hermes inside Ableton Live, REAPER and Renoise: it hears your mix, makes the changes you ask for (each
+recorded in HISTORY, most undoable), and turns your own samples into new sounds.**
 
-**Drive Ableton Live, REAPER and Renoise from Hermes.** Kumi reads the project you have open, makes the typed changes
-you ask for in it, records every change in its HISTORY, measures audio on your computer, and
-maps the sample folders you choose so you can find, audition and place sounds. Hermes stays the agent: Kumi gives it
-a DAW to work in.
+![The sound map in Hermes Desktop: your own samples laid out by how they sound, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
+
+## Quick start
+
+1. **Install:** `hermes plugins install kumi`, then `hermes plugins enable kumi`. In Hermes Desktop, also turn on
+   Kumi's **Desktop** switch under **Capabilities → Plugins**.
+2. **Set up:** ask Hermes to "set up Kumi for Live" (or REAPER, or Renoise). Hermes asks before each step: Kumi's
+   runtime, then its part in your DAW. Then choose **AbletonMcpBridge** as a Control Surface in Live, restart REAPER,
+   or enable Kumi's tool in Renoise.
+3. **Ask:** "connect Kumi", then "what am I looking at?", "turn the drums down 2 dB" and "undo that".
+
+No DAW yet? REAPER's free evaluation takes about two minutes: install it from
+[reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
+
+## What it does
+
+Kumi reads the project you have open, makes the typed changes you ask for in it, records every change in its HISTORY,
+measures audio on your computer, and maps the sample folders you choose so you can find, audition and place sounds.
+Hermes stays the agent: Kumi gives it a DAW to work in.
 
 - **Master your mix like a reference track.** "Listen to my mix and master it like this reference track."
   - Kumi listens to a window of your mix (in Live, through the Kumi Ears device, before Main's fader)
@@ -53,10 +69,6 @@ a DAW to work in.
 ![Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
 
 *Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
-
-![The sound map: your own samples, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
-
-*The sound map: your own samples, with the found snares circled and why each matched.*
 
 ![The palette: a box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
@@ -360,8 +372,10 @@ project as…** with **Copy all media into project directory**), or they'll miss
 ## Compatibility
 
 - Hermes 0.22.7 or later.
-- Ableton Live 12.4.15b4 (beta) or later on macOS and Windows; REAPER 7 or later and Renoise 3.5 or later on macOS,
-  Windows and Linux.
+- Ableton Live 12 on macOS and Windows. Kumi is tested on Live 12.4 (beta). Live 12.0 to 12.3 are untested and have no
+  Extension Host for Kumi's Live extension, so there Kumi can't render offline, write MIDI clips into the Arrangement or
+  clear a range in it.
+- REAPER 7 or later and Renoise 3.5 or later on macOS, Windows and Linux.
 - The DAW must run on the machine that runs Hermes: a Desktop app connected to a remote Hermes controls that
   machine's DAW, not its own.
 
