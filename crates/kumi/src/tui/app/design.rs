@@ -50,8 +50,72 @@ impl TuiApp {
 
     /// Makes a sound from `files` (at most as many as the op takes), listed under MADE at once and played when it's
     /// made: its number.
-    pub(super) fn design(&self, op: Op, mode: Option<Mode>, files: Vec<String>, from_map: bool) -> Option<u64> {
-        self.make(design::request(op, mode, &files, None, Options::default()), from_map)
+    pub(super) fn design(&self, op: Op, mode: Option<Mode>, files: Vec<String>, options: Options, from_map: bool) -> Option<u64> {
+        self.make(design::request(op, mode, &files, None, options), from_map)
+    }
+
+    /// The map's path grown from one sound toward another: its points made one after another (each listed under MADE and
+    /// on the map as it's made, and played), until it's done or a newer path takes over.
+    pub(super) fn grow_path(&self, requests: Vec<DesignRequest>) {
+        let Some(folder) = self.0.options.design_dir.clone() else { return };
+        let count = requests.len();
+        let path = {
+            let mut state = self.0.state.borrow_mut();
+            state.map_grow += 1;
+            if let Some(view) = state.map.as_mut() {
+                view.made(Some(format!("Growing {count} sounds along the way…")));
+            }
+            state.map_grow
+        };
+        let app = self.clone();
+        tokio::task::spawn_local(async move {
+            for (at, request) in requests.into_iter().enumerate() {
+                let seed = request.seed.unwrap_or_default();
+                let id = {
+                    let mut state = app.0.state.borrow_mut();
+                    if state.map_grow != path {
+                        return;
+                    }
+                    state.design_seq += 1;
+                    let id = state.design_seq;
+                    state.designs.insert(0, Design { id, request: request.clone(), made: None, error: None });
+                    state.palette_rows = None;
+                    id
+                };
+                let made = design::make(request, &folder, &Signal::new()).await;
+                let mut state = app.0.state.borrow_mut();
+                if let Some(design) = state.designs.iter_mut().find(|d| d.id == id) {
+                    match made.clone() {
+                        Ok(made) => design.made = Some(made),
+                        Err(why) => design.error = Some(why),
+                    }
+                }
+                state.palette_rows = None;
+                if state.map_grow != path {
+                    return;
+                }
+                match made {
+                    Ok(made) => {
+                        state.map_design = Some(id);
+                        if let Some(view) = state.map.as_mut() {
+                            view.bud(seed, at, id, made.path.to_string_lossy().into_owned());
+                            view.made(Some(format!("Grown {} of {count}: {}", at + 1, made.answer.recipe)));
+                        }
+                        drop(state);
+                        app.play_made(&made);
+                    }
+                    Err(why) => {
+                        if let Some(view) = state.map.as_mut() {
+                            view.made(Some(why.clone()));
+                        }
+                        drop(state);
+                        app.notice(&why, NoticeTone::Warn);
+                        return;
+                    }
+                }
+                app.0.scheduler.request();
+            }
+        });
     }
 
     fn make(&self, request: DesignRequest, from_map: bool) -> Option<u64> {
@@ -188,7 +252,7 @@ impl TuiApp {
                     let (app, files) = (app.clone(), files.to_vec());
                     Rc::new(move || {
                         if let Some(app) = app.upgrade() {
-                            TuiApp(app).design(op, mode, files.clone(), false);
+                            TuiApp(app).design(op, mode, files.clone(), Options::default(), false);
                         }
                     })
                 };

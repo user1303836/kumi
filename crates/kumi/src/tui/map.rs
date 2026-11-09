@@ -14,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use kumi_design::{Mode, Op};
+use kumi_design::{Mode, Op, Options, Request};
+
+use super::make_options::{self, Knob, Knobs};
 
 use super::keymap::Keymap;
 use super::pictures::{cells, kitty, scene::Shape, Graphics, Raster, Scene};
@@ -97,12 +99,20 @@ pub enum Asked {
     HoverPlays(bool),
     /// These points into the session's palette (Enter: the ones picked, or the one chosen).
     Gather(Vec<Gathered>),
-    /// d and a way's key: a sound made from these files (the picks, as many as the way takes).
+    /// d and a way's key (or enter in the Make options): a sound made from these files (every pick), with that way's
+    /// options.
     Design {
         op: Op,
         mode: Option<Mode>,
         files: Vec<String>,
+        options: Options,
     },
+    /// v (r, after, for another path): one sound grown toward another, these requests one after another, every one
+    /// with the path's one seed, `at` rising.
+    Grow(Vec<Request>),
+    /// [ or ]: a point along the path grown chosen (a sound made, by its number in the app): it plays, and k and p work
+    /// on it.
+    Bud(u64),
     /// n: the sounds that sound most like these files (the picks), to pick on the map as well.
     Near(Vec<String>),
     /// A sound dragged to a place of its own, or moved sounds put back (shift+r): every move on the maps now, to keep.
@@ -122,6 +132,27 @@ pub type Moves = BTreeMap<String, BTreeMap<String, [f64; 2]>>;
 
 /// Each map's id, by its tab, as `Moves` keeps them.
 const MAP_IDS: [&str; 2] = ["sounds", "songs"];
+
+/// The points along a path grown: at 1/8, 2/8, … 7/8 of the way.
+const BUDS: usize = 7;
+
+/// e: the Make options open, the way they're for (in `make_options::WAYS`) and the row chosen among those it shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Editing {
+    way: usize,
+    row: usize,
+}
+
+/// A path grown from one sound toward another: its ends (their files, and their points on the sounds' map where they
+/// have one), its seed, each point along it as it's made (a sound made, by its number in the app), and the one chosen.
+#[derive(Clone, Debug)]
+struct Vine {
+    files: [String; 2],
+    ends: [Option<u32>; 2],
+    seed: u64,
+    buds: Vec<Option<u64>>,
+    chosen: Option<usize>,
+}
 
 /// The most picks more like these starts from, and how many it brings of each.
 const MOST_NEAR: usize = 16;
@@ -1018,6 +1049,15 @@ pub struct MapView {
     /// from; and where each one's name was drawn in that row (its first and last cell), for a click.
     made_sounds: Vec<MadeSound>,
     made_cells: Vec<(i32, i32)>,
+    /// Each way's Make options, the editor while it's open, the way made last, and the DAW's tempo (a loop's unless its
+    /// options say).
+    knobs: Knobs,
+    editing: Option<Editing>,
+    way: usize,
+    tempo: Option<f64>,
+    /// The path grown last, and whether it was the last thing made (r grows another path).
+    vine: Option<Vine>,
+    growing: bool,
     /// What more like these brought last (picked as well, marked till the picks go), by their place on the sounds' map.
     found: BTreeSet<u32>,
     /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
@@ -1068,6 +1108,12 @@ impl MapView {
             made_sounds: vec![],
             made_cells: vec![],
             found: BTreeSet::new(),
+            knobs: Knobs::default(),
+            editing: None,
+            way: 0,
+            tempo: None,
+            vine: None,
+            growing: false,
             nearest: [None, None],
             keymap: Keymap::default(),
         }
@@ -1132,12 +1178,7 @@ impl MapView {
 
     /// The files to make from, every one: the sounds made that are picked, then the sounds picked on the map.
     fn picked_files(&self) -> Vec<String> {
-        let made = self.made_sounds.iter().filter(|made| made.picked).map(|made| made.path.clone());
-        let picked: Vec<String> = match self.data.as_ref().filter(|_| self.tab == 0) {
-            Some(data) => self.views[0].picked.iter().map(|at| data.sounds.points[*at as usize].path.clone()).collect(),
-            None => vec![],
-        };
-        made.chain(picked).collect()
+        self.sources_with_points().into_iter().map(|(file, _)| file).collect()
     }
 
     /// n: more like the sounds picked (the first MOST_NEAR; none picked, the one chosen), from the library.
@@ -1201,6 +1242,188 @@ impl MapView {
             made.picked = false;
         }
         self.version += 1;
+    }
+
+    /// The Make options kept from before (for each way), and the DAW's tempo now.
+    pub fn with_knobs(mut self, knobs: Knobs) -> MapView {
+        self.knobs = knobs;
+        self
+    }
+
+    /// Each way's Make options, to keep while Kumi runs.
+    pub fn knobs(&self) -> &Knobs {
+        &self.knobs
+    }
+
+    /// The DAW's tempo (None: no DAW, or it says none): a loop's tempo unless its options set one.
+    pub fn daw_tempo(&mut self, tempo: Option<f64>) {
+        self.tempo = tempo;
+    }
+
+    /// What to make from, with their points: the sounds made that are picked, then the picks on the sounds' map.
+    fn sources_with_points(&self) -> Vec<(String, Option<u32>)> {
+        let made = self.made_sounds.iter().filter(|made| made.picked).map(|made| (made.path.clone(), None));
+        let picked: Vec<(String, Option<u32>)> = match self.data.as_ref().filter(|_| self.tab == 0) {
+            Some(data) => self.views[0].picked.iter().map(|at| (data.sounds.points[*at as usize].path.clone(), Some(*at))).collect(),
+            None => vec![],
+        };
+        made.chain(picked).collect()
+    }
+
+    /// A sound made from the picks the way `way` (in `make_options::WAYS`) says, with its options; grow grows the first
+    /// toward the second.
+    fn make(&mut self, way: usize) -> Asked {
+        self.way = way;
+        let id = make_options::WAYS[way];
+        if id == "grow" {
+            return self.grow_toward();
+        }
+        if self.sources() < kumi_design::MIN_SOURCES {
+            self.told = Some("Pick two or more sounds to make one from them (x, drag a box, or a sound made's number).".into());
+            return Asked::Nothing;
+        }
+        let Some((op, mode)) = way_of(id) else { return Asked::Nothing };
+        match self.knobs.options(id, self.tempo) {
+            Ok(options) => {
+                self.growing = false;
+                Asked::Design { op, mode, files: self.picked_files(), options }
+            }
+            Err(why) => {
+                self.told = Some(why);
+                Asked::Nothing
+            }
+        }
+    }
+
+    /// v: a sound grown from one toward another: the two picked (sounds made, or on the map), or the one picked toward
+    /// the point chosen. Seven points along the path, one seed.
+    fn grow_toward(&mut self) -> Asked {
+        let mut ends = self.sources_with_points();
+        let chosen = self.views.first().and_then(|view| view.chosen).filter(|_| self.tab == 0);
+        if let (1, Some(chosen), Some(data)) = (ends.len(), chosen, self.data.as_ref()) {
+            if ends[0].1 != Some(chosen) {
+                ends.push((data.sounds.points[chosen as usize].path.clone(), Some(chosen)));
+            }
+        }
+        let [from, to] = ends.as_slice() else {
+            self.told = Some("Pick one sound and choose another (or pick two) to grow one toward the other.".into());
+            return Asked::Nothing;
+        };
+        let vine = Vine {
+            files: [from.0.clone(), to.0.clone()],
+            ends: [from.1, to.1],
+            seed: kumi_design::fresh_seed(),
+            buds: vec![None; BUDS],
+            chosen: None,
+        };
+        self.grow_path(vine)
+    }
+
+    /// The requests for every point along a path, in order, and the path shown as they come.
+    fn grow_path(&mut self, vine: Vine) -> Asked {
+        let options = match self.knobs.options("grow", None) {
+            Ok(options) => options,
+            Err(why) => {
+                self.told = Some(why);
+                return Asked::Nothing;
+            }
+        };
+        let requests = (1..=BUDS)
+            .map(|k| {
+                let options = Options { at: Some(k as f64 / (BUDS + 1) as f64), ..options.clone() };
+                kumi_agent::core::design::request(Op::Grow, None, &vine.files, Some(vine.seed), options)
+            })
+            .collect();
+        (self.vine, self.growing) = (Some(vine), true);
+        self.version += 1;
+        Asked::Grow(requests)
+    }
+
+    /// A point along the path grown, made (`at`: its place along it, from 0; `seed`: its path's): shown on the path, and
+    /// listed with the sounds made. One of a path grown before is let be.
+    pub fn bud(&mut self, seed: u64, at: usize, id: u64, path: String) {
+        let Some(vine) = self.vine.as_mut().filter(|vine| vine.seed == seed) else { return };
+        if let Some(bud) = vine.buds.get_mut(at) {
+            *bud = Some(id);
+        }
+        self.made_sound(id, path);
+        self.version += 1;
+    }
+
+    /// [ or ]: the point along the path before or after the one chosen (of those made).
+    fn step_bud(&mut self, by: isize) -> Asked {
+        let Some(vine) = self.vine.as_mut() else { return Asked::Nothing };
+        let made: Vec<usize> = (0..vine.buds.len()).filter(|at| vine.buds[*at].is_some()).collect();
+        if made.is_empty() {
+            return Asked::Nothing;
+        }
+        let next = match vine.chosen.and_then(|chosen| made.iter().position(|at| *at == chosen)) {
+            Some(place) => made[(place as isize + by).clamp(0, made.len() as isize - 1) as usize],
+            None if by < 0 => made[made.len() - 1],
+            None => made[0],
+        };
+        vine.chosen = Some(next);
+        self.version += 1;
+        vine.buds[next].map_or(Asked::Nothing, Asked::Bud)
+    }
+
+    /// e: the Make options open (for the way made last), or closed.
+    fn edit(&mut self) -> Asked {
+        self.editing = match self.editing {
+            Some(_) => None,
+            None => Some(Editing { way: self.way, row: 0 }),
+        };
+        Asked::Nothing
+    }
+
+    /// A key while the Make options are open: their own (None for one they don't take).
+    fn editing_key(&mut self, editing: Editing, id: &str) -> Option<Asked> {
+        let way = make_options::WAYS[editing.way];
+        let rows = self.knobs.shown(way);
+        let row = rows.get(editing.row.min(rows.len().saturating_sub(1)))?.clone();
+        let moved = |row: usize| Some(Editing { row: row.min(rows.len() - 1), ..editing });
+        match id {
+            "map.up" => self.editing = moved(editing.row.saturating_sub(1)),
+            "map.down" => self.editing = moved(editing.row + 1),
+            "map.left" | "map.right" | "map.pan-left" | "map.pan-right" => {
+                let by: i64 = match id {
+                    "map.left" => -1,
+                    "map.right" => 1,
+                    "map.pan-left" => -10,
+                    _ => 10,
+                };
+                let by = if matches!(row.knob, Knob::Word { .. } | Knob::Flag { .. }) { by.signum() } else { by };
+                self.knobs.nudge(way, &row, by);
+            }
+            "map.play" => {
+                if matches!(row.knob, Knob::Word { .. } | Knob::Flag { .. }) {
+                    self.knobs.nudge(way, &row, 1);
+                }
+            }
+            "map.steer-unset" => self.knobs.unset(way, &row),
+            "map.steer-reset" => self.knobs.reset(way),
+            "map.steer-roll" => {
+                let mut state = kumi_design::fresh_seed();
+                let mut draw = || {
+                    // xorshift: a roll needs no more than numbers that look drawn.
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    (state >> 11) as f64 / (1u64 << 53) as f64
+                };
+                self.knobs.roll(way, &mut draw);
+            }
+            "map.switch" => self.editing = Some(Editing { way: (editing.way + 1) % make_options::WAYS.len(), row: 0 }),
+            "map.gather" => return Some(self.make(editing.way)),
+            "map.let-go" | "map.steer" => self.editing = None,
+            "map.close" => return Some(Asked::Close),
+            _ => return None,
+        }
+        // A loop's style changes which rows show: the one chosen stays in them.
+        if let Some(editing) = self.editing.as_mut() {
+            editing.row = editing.row.min(self.knobs.shown(make_options::WAYS[editing.way]).len().saturating_sub(1));
+        }
+        Some(Asked::Nothing)
     }
 
     /// A sound made picked to make the next one from, or let go (its number in the list, from 1).
@@ -1682,17 +1905,28 @@ impl MapView {
     pub fn act(&mut self, ids: Vec<&'static str>) -> Asked {
         self.told = None;
         let picks = self.data.is_some() && self.graphics != Graphics::Words;
+        // The Make options take their keys while they're open.
+        if let Some(editing) = self.editing {
+            return ids.iter().find_map(|id| self.editing_key(editing, id)).unwrap_or(Asked::Nothing);
+        }
         // A way's key comes right after d, or d is let go.
         let making = std::mem::take(&mut self.making);
         for id in ids {
             let (way, pan) = match id {
                 "map.let-go" if making => return Asked::Nothing,
                 "map.design" if picks && self.designs => return self.design_menu(),
+                "map.steer" if picks && self.designs => return self.edit(),
+                "map.grow-toward" if picks && self.designs => return self.make(make_options::WAYS.len() - 1),
                 id if making && id.starts_with("map.make-") => {
-                    let Some((op, mode)) = way_of(id) else { continue };
-                    let files = self.picked_files();
-                    return Asked::Design { op, mode, files };
+                    let Some(way) = MAKES.iter().position(|(make, _)| *make == id) else { continue };
+                    return self.make(way);
                 }
+                "map.reroll" if !making && self.growing && self.vine.is_some() => {
+                    let vine = self.vine.take().expect("grown");
+                    return self.grow_path(Vine { seed: kumi_design::fresh_seed(), buds: vec![None; BUDS], chosen: None, ..vine });
+                }
+                "map.bud-back" if self.vine.is_some() => return self.step_bud(-1),
+                "map.bud-next" if self.vine.is_some() => return self.step_bud(1),
                 id if MADE_KEYS.contains(&id) => {
                     let number = MADE_KEYS.iter().position(|key| *key == id).map_or(0, |at| at + 1);
                     if !self.toggle_made(number) {
@@ -2057,6 +2291,7 @@ impl MapView {
             self.draw_map(screen, layer, upload);
         }
         self.draw_point(screen, layer);
+        self.draw_editor(screen);
         self.draw_keys(screen)
     }
 
@@ -2257,6 +2492,35 @@ impl MapView {
             let found = self.tab == 0 && self.found.contains(at);
             screen.put(x, y, if found { "✦" } else { "●" }, &Style { bold: true, ..Style::fg(if found { palette::ACCENT } else { palette::BRIGHT }) });
         }
+        // A path grown, from its first sound toward its second: its points made so far, each ◆ (the one chosen ◈), and
+        // the line to the furthest made; ◇ for those still coming.
+        if let Some(vine) = self.vine.as_ref().filter(|_| self.tab == 0) {
+            if let [Some(from), Some(to)] = vine.ends.map(|end| end.map(|at| frame.dot(spot(&layer.points[at as usize])))) {
+                let along = |t: f64| (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+                let in_cell = |(x, y): (f64, f64)| (area.x + (x / 2.) as i32, area.y + (y / 4.) as i32);
+                let furthest = vine.buds.iter().rposition(Option::is_some).map_or(0., |at| (at + 1) as f64 / (BUDS + 1) as f64);
+                let steps = ((to.0 - from.0).abs() / 2. + (to.1 - from.1).abs() / 4.).ceil().max(1.) as usize;
+                let style = Style::fg(palette::ACCENT);
+                for step in 1..steps {
+                    let t = step as f64 / steps as f64;
+                    let (x, y) = in_cell(along(t));
+                    if t <= furthest && inside(area, x, y) && index(x, y).is_some_and(|at| !taken[at]) {
+                        screen.put(x, y, "·", &style);
+                    }
+                }
+                for (at, bud) in vine.buds.iter().enumerate() {
+                    let (x, y) = in_cell(along((at + 1) as f64 / (BUDS + 1) as f64));
+                    if inside(area, x, y) {
+                        let (glyph, color) = match (bud, vine.chosen == Some(at)) {
+                            (Some(_), true) => ("◈", palette::BRIGHT),
+                            (Some(_), false) => ("◆", palette::ACCENT),
+                            (None, _) => ("◇", palette::FAINT),
+                        };
+                        screen.put(x, y, glyph, &Style { bold: true, ..Style::fg(color) });
+                    }
+                }
+            }
+        }
         if let Some(at) = chosen {
             let (x, y) = cell(at);
             let color = layer.groups[layer.points[at as usize].group as usize].color;
@@ -2326,6 +2590,40 @@ impl MapView {
                 &truncate(&examples.join(" · "), area.x + area.width - x - 1),
                 &Style { bg: ground, ..Style::fg(palette::FAINT) },
             );
+        }
+    }
+
+    /// The Make options, while they're open: a panel over the map's right side, the way's name, then its rows (the one
+    /// chosen marked, scrolled to it) with their values.
+    fn draw_editor(&self, screen: &mut Screen) {
+        let Some(editing) = self.editing else { return };
+        let way = make_options::WAYS[editing.way];
+        let rows = self.knobs.shown(way);
+        let area = self.area;
+        let width = 46.min(area.width - 2);
+        let panel = Rect::new(area.x + area.width - width, area.y, width, area.height);
+        let ground = Style { bg: Some(palette::GROUND), ..Style::fg(palette::TEXT) };
+        screen.fill(panel, &ground);
+        let title = format!("Make options: {}", layout_name(way));
+        let x = screen.put(panel.x + 1, panel.y, &title, &Style { bold: true, ..Style { bg: Some(palette::GROUND), ..Style::fg(palette::BRIGHT) } });
+        let tab = self.keymap.hint(&[(&["map.switch"], "next way")]);
+        screen.put(x + 2, panel.y, &truncate(&tab, panel.x + width - x - 3), &Style { bg: Some(palette::GROUND), ..Style::fg(palette::FAINT) });
+        let height = (panel.height - 1).max(1) as usize;
+        let top = editing.row.saturating_sub(height - 1);
+        for (line, row) in rows.iter().enumerate().skip(top).take(height) {
+            let y = panel.y + 1 + (line - top) as i32;
+            let chosen = line == editing.row;
+            let bg = Some(if chosen { palette::SELECTED } else { palette::GROUND });
+            if chosen {
+                screen.fill(Rect::new(panel.x, y, width, 1), &Style { bg, ..Style::default() });
+            }
+            let value = self.knobs.written(way, row);
+            let set = self.knobs.value(way, row).is_some();
+            let label_width = width - 4 - text_width(&value).min(18);
+            screen.put(panel.x + 1, y, &truncate(&row.label, label_width), &Style { bg, bold: chosen, ..Style::fg(palette::DIM) });
+            let value = truncate(&value, 18);
+            let color = if set { palette::ACCENT } else { palette::FAINT };
+            screen.put(panel.x + width - 1 - text_width(&value), y, &value, &Style { bg, ..Style::fg(color) });
         }
     }
 
@@ -2399,10 +2697,26 @@ impl MapView {
         }
         let other = if self.tab == 0 { "songs" } else { "sounds" };
         let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
+        if self.editing.is_some() {
+            let parts: Vec<(&[&str], &str, &str)> = vec![
+                (&["map.up", "map.down"], "↑ ↓", "choose"),
+                (&["map.left", "map.right"], "← →", "change (shift: more)"),
+                (&["map.play"], "", "next word"),
+                (&["map.steer-unset"], "", "as drawn"),
+                (&["map.steer-reset"], "", "resets"),
+                (&["map.steer-roll"], "", "rolls"),
+                (&["map.gather"], "", "makes"),
+                (&["map.let-go"], "", "closes"),
+            ];
+            let keys = self.keymap.hint_written(&parts);
+            screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
+            return None;
+        }
         if self.making {
             let making = format!("make from {} picks:", grouped(self.sources()));
             let mut parts: Vec<(&[&str], &str, &str)> = vec![(&[], "", &making)];
             parts.extend(MAKES.iter().map(|(id, words)| (std::slice::from_ref(id), "", *words)));
+            parts.push((&["map.steer"], "", "options"));
             parts.push((&["map.let-go"], "", "cancels"));
             let keys = self.keymap.hint_written(&parts);
             screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
@@ -2439,8 +2753,11 @@ impl MapView {
             parts.push((&["map.let-go"], "", &clears));
         } else {
             hover = format!("hover {}", if self.hover { "plays" } else { "quiet" });
+            if self.vine.is_some() {
+                parts.push((&["map.bud-back", "map.bud-next"], "[ ]", "along the path"));
+            }
             if self.made.is_some() {
-                parts.push((&["map.reroll"], "", "another"));
+                parts.push((&["map.reroll"], "", if self.growing { "another path" } else { "another" }));
                 parts.push((&["map.keep"], "", "keeps it"));
                 parts.push((&["map.again"], "", "plays it"));
             }
@@ -2509,17 +2826,17 @@ const MAKES: [(&str, &str); 8] = [
     ("map.make-stack", "stack"),
 ];
 
-/// The op and mode a way's key makes.
+/// The op and mode a way makes, by its id in `make_options::WAYS` (grow: none).
 fn way_of(id: &str) -> Option<(Op, Option<Mode>)> {
     Some(match id {
-        "map.make-blend" => (Op::Cross, Some(Mode::Blend)),
-        "map.make-attack" => (Op::Cross, Some(Mode::Attack)),
-        "map.make-resonate" => (Op::Cross, Some(Mode::Resonate)),
-        "map.make-modulate" => (Op::Cross, Some(Mode::Modulate)),
-        "map.make-texture" => (Op::Fuse, Some(Mode::Texture)),
-        "map.make-loop" => (Op::Fuse, Some(Mode::Loop)),
-        "map.make-smear" => (Op::Fuse, Some(Mode::Smear)),
-        "map.make-stack" => (Op::Stack, None),
+        "blend" => (Op::Cross, Some(Mode::Blend)),
+        "attack" => (Op::Cross, Some(Mode::Attack)),
+        "resonate" => (Op::Cross, Some(Mode::Resonate)),
+        "modulate" => (Op::Cross, Some(Mode::Modulate)),
+        "texture" => (Op::Fuse, Some(Mode::Texture)),
+        "loop" => (Op::Fuse, Some(Mode::Loop)),
+        "smear" => (Op::Fuse, Some(Mode::Smear)),
+        "stack" => (Op::Stack, None),
         _ => return None,
     })
 }
@@ -3249,7 +3566,8 @@ mod tests {
             Asked::Design {
                 op: Op::Cross,
                 mode: Some(Mode::Blend),
-                files: vec!["/d/Blend - p0 + 1 - 42.wav".into(), "/d/Blend - p0 + 1 - 43.wav".into()]
+                files: vec!["/d/Blend - p0 + 1 - 42.wav".into(), "/d/Blend - p0 + 1 - 43.wav".into()],
+                options: Options::default(),
             }
         );
         // With every point picked too: all 32, none left out.
@@ -3362,5 +3680,90 @@ mod tests {
         map.on_text("n");
         map.near_found(Err("Kumi hasn't learned how that sound sounds yet.".into()));
         assert_eq!(map.told.as_deref(), Some("Kumi hasn't learned how that sound sounds yet."));
+    }
+
+    #[test]
+    fn the_make_options_values_reach_the_request_kept_for_each_way() {
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let mut map = gathering(&points).designing(true);
+        map.on_text("x");
+        map.on_key("right", false);
+        map.on_text("x");
+        // e opens them for the way made last (blend): every way's steer is there, dark ↔ bright first.
+        map.on_text("e");
+        let mut screen = Screen::new(140, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        let text = screen.lines().join("\n");
+        assert!(text.contains("Make options: Blend") && text.contains("dark ↔ bright") && text.contains("drawn"), "{text}");
+        assert!(screen.lines()[29].contains("enter makes"), "{}", screen.lines()[29]);
+        // Two steps brighter, then a big step: shift and the arrow.
+        map.on_key("right", false);
+        map.on_key("right", false);
+        map.on_key("down", false);
+        map.on_key("right", true);
+        let Asked::Design { mode, options, files, .. } = map.on_key("enter", false) else { panic!("a make") };
+        assert_eq!((mode, files.len()), (Some(Mode::Blend), 2));
+        let steer = options.steer.expect("steered");
+        assert_eq!((steer.bright, steer.body), (Some(0.2), Some(1.)));
+        // Tab to attack: its own, as drawn; esc closes, and d then a's key makes an attack with them.
+        map.on_key("tab", false);
+        map.on_key("right", false);
+        map.on_key("escape", false);
+        assert!(map.editing.is_none());
+        map.on_text("d");
+        let Asked::Design { mode, options, .. } = map.on_text("a") else { panic!("an attack") };
+        assert_eq!((mode, options.steer.and_then(|steer| steer.bright)), (Some(Mode::Attack), Some(0.1)));
+        // Blend's are still blend's; 0 resets them.
+        map.on_text("d");
+        let Asked::Design { options, .. } = map.on_text("b") else { panic!("a blend") };
+        assert_eq!(options.steer.and_then(|steer| steer.bright), Some(0.2));
+        map.on_text("e");
+        assert_eq!(map.editing.map(|editing| editing.way), Some(0));
+        map.on_text("0");
+        assert_eq!(map.knobs().options("blend", None).unwrap(), Options::default());
+        // A loop takes the DAW's tempo.
+        map.daw_tempo(Some(93.));
+        for _ in 0..5 {
+            map.on_key("tab", false);
+        }
+        let Asked::Design { mode, options, .. } = map.on_key("enter", false) else { panic!("a loop") };
+        assert_eq!((mode, options.bpm), (Some(Mode::Loop), Some(93.)));
+    }
+
+    #[test]
+    fn v_grows_the_pick_toward_the_point_chosen_along_one_path_and_r_another() {
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let mut map = gathering(&points).designing(true);
+        assert_eq!(map.on_text("v"), Asked::Nothing, "nothing picked");
+        map.on_text("x");
+        let from = map.views[0].chosen.unwrap();
+        map.on_key("right", false);
+        map.on_key("right", false);
+        let to = map.views[0].chosen.unwrap();
+        let Asked::Grow(requests) = map.on_text("v") else { panic!("a grow") };
+        assert_eq!(requests.len(), BUDS);
+        let seed = requests[0].seed.expect("a seed");
+        let ats: Vec<f64> = requests.iter().map(|request| request.options.at.expect("at")).collect();
+        assert_eq!(ats, [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875]);
+        for request in &requests {
+            assert_eq!((request.op, request.mode, request.seed), (Op::Grow, None, Some(seed)));
+            let files: Vec<&str> = request.sources.iter().filter_map(|source| source.file.as_deref()).collect();
+            assert_eq!(files, [format!("/s/p{from}.wav"), format!("/s/p{to}.wav")]);
+            request.check().expect("a grow the engine takes");
+        }
+        // The points arrive one by one: drawn on the path, listed with the sounds made; one from an older path is let be.
+        map.made(Some("Grown 1 of 7".into()));
+        map.bud(seed, 0, 31, "/d/Grow - 12%.wav".into());
+        map.bud(seed ^ 1, 1, 32, "/d/old.wav".into());
+        let mut screen = Screen::new(140, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        let text = screen.lines().join("\n");
+        assert!(text.contains('◆') && text.contains('◇'), "{text}");
+        assert_eq!(map.made_sounds.iter().map(|made| made.id).collect::<Vec<_>>(), [31]);
+        // ] chooses it (it plays); r grows another path from the same two, with a seed of its own.
+        assert_eq!(map.on_text("]"), Asked::Bud(31));
+        let Asked::Grow(again) = map.on_text("r") else { panic!("another path") };
+        assert_ne!(again[0].seed, Some(seed));
+        assert_eq!(again[0].sources, requests[0].sources);
     }
 }

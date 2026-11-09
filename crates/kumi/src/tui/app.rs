@@ -608,6 +608,9 @@ struct State {
     designs: Vec<design::Design>,
     design_seq: u64,
     map_design: Option<u64>,
+    /// The path the map grows now (a newer one stops an older one), and each way's Make options, kept while Kumi runs.
+    map_grow: u64,
+    map_knobs: super::make_options::Knobs,
     /// The producer put the pane away (ctrl+\): no side pane at full width, no strip below 24 rows, and the drawer left
     /// folded until they open it.
     pane_away: bool,
@@ -790,6 +793,8 @@ impl State {
             designs: vec![],
             design_seq: 0,
             map_design: None,
+            map_grow: 0,
+            map_knobs: Default::default(),
             pane_away: false,
             drawer: drawer::Drawer::default(),
             toast: None,

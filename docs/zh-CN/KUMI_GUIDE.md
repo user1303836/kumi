@@ -649,6 +649,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `KUMI_RECIPES_DIR`、`KUMI_PROJECTS_DIR`、`KUMI_GOALS_DIR` | 配方；每个工程的对话、笔记和最后状态；进行中的目标和搜索，以及 Kumi 关闭时中断的后台任务 |
 | `KUMI_REFERENCES_DIR` | 测量过的参考 |
 | `KUMI_INPUT_HISTORY_FILE`、`KUMI_GAPS_FILE`、`KUMI_RESTORE_FILE` | 你发送过的内容（供 ↑ 调出）、缺口日志，以及聆听被崩溃打断后留下的渲染轨道 |
+| `KUMI_MAP_MOVES_FILE` | 你在 `/map` 上拖动过的声音所在的位置 |
 | `KUMI_VIDEOS_DIR`、`KUMI_TOOLS_DIR` | 看过的视频，以及 Kumi 下载的程序 |
 | `KUMI_LIBRARY_DIR` | Kumi 学到的你的声音、预设和工程 |
 | `OLLAMA_HOST`、`LM_API_TOKEN` | Ollama 的监听地址（按 Ollama 自己的读法）；LM Studio 的服务器需要时的 API 令牌 |

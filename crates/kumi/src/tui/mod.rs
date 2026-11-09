@@ -12,6 +12,7 @@ pub mod icons;
 pub mod keymap;
 pub mod keys;
 pub mod logo;
+pub mod make_options;
 pub mod map;
 pub mod markdown;
 pub mod overlay;

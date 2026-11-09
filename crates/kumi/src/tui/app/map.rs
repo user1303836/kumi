@@ -47,9 +47,11 @@ impl TuiApp {
         let hover = self.0.options.map_hover.as_ref().is_none_or(|hover| (hover.load)());
         let (gathers, designs) = (self.can().palette, self.designs());
         let moves = self.0.options.map_moves.as_ref().map(|kept| (kept.load)()).unwrap_or_default();
+        let knobs = self.0.state.borrow().map_knobs.clone();
         self.0.state.borrow_mut().map = Some(
             MapView::new(self.0.graphics, hover)
                 .moved(moves)
+                .with_knobs(knobs)
                 .gliding(self.0.options.map_glides)
                 .morphing(self.0.options.map_glides)
                 .gathering(gathers)
@@ -270,7 +272,9 @@ impl TuiApp {
     pub(super) fn draw_map(&self, screen: &mut Screen) -> Option<Cursor> {
         let mut state = self.0.state.borrow_mut();
         let state = &mut *state;
+        let tempo = state.transport.as_ref().and_then(|transport| transport.tempo);
         let (view, images, shown) = (state.map.as_mut()?, &mut state.images, &mut state.map_image);
+        view.daw_tempo(tempo);
         let mut upload = |key: &str, raster: &Raster, cols: usize, rows: usize| {
             if shown.as_deref() != Some(key) {
                 images.forget("map");
@@ -372,8 +376,13 @@ impl TuiApp {
                     (kept.save)(&moves);
                 }
             }
-            Asked::Design { op, mode, files } => {
-                self.design(op, mode, files, true);
+            Asked::Design { op, mode, files, options } => {
+                self.design(op, mode, files, options, true);
+            }
+            Asked::Grow(requests) => self.grow_path(requests),
+            Asked::Bud(id) => {
+                self.0.state.borrow_mut().map_design = Some(id);
+                self.play_design(id);
             }
             Asked::Reroll | Asked::Keep | Asked::PlayMade => {
                 let last = self.0.state.borrow().map_design;
@@ -426,6 +435,9 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         // Kept with the key it was read under, for /map again while that holds.
         let (view, key) = (state.map.take(), state.map_key.take());
+        if let Some(view) = view.as_ref() {
+            state.map_knobs = view.knobs().clone();
+        }
         state.map_kept = view.and_then(MapView::kept).zip(key).map(|(kept, key)| (key, kept));
         state.map_image = None;
         state.map_play += 1;
