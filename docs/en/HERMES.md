@@ -274,10 +274,11 @@ run without asking there, and Kumi can't tell it from a chat.
 - **Wavetables** are new `.wav` files Kumi writes (never over a file) into Vital's wavetable folder
   (`~/Music/Vital/User/Wavetables`; `~/Documents/Vital/User/Wavetables` on Windows) or Live's User Library
   (`User Library/Kumi/Wavetables`, for Serum 2 and others), outside Kumi's own data. They stay after an undo.
-- **Judged rounds and tunes** play the stretch in Live through the Kumi Ears device setup installed (at most 60 s a
-  pass, counting the bar Live plays before the stretch and the half bar after it; a judge or tune pass may play once
-  more when Live started late, under the same limit), keep what they hear in Kumi's own data until the call ends, placed on the track or before Main, with Live stopped and not recording, and remove it after (Live's own
-  Undo history keeps those temporary device steps). A tune's search or probe makes scratch copies of the run's track in
+- **Judged rounds and tunes** play the stretch in Live through the Kumi Ears device setup installed, placed on the
+  track or before Main, with Live stopped and not recording, and remove it after (Live's own Undo history keeps those
+  temporary device steps). A pass lasts at most 60 s, counting the bar Live plays before the stretch and the half bar
+  after it; a judge or tune pass may play once more when Live started late, under the same limit. What Kumi hears stays
+  in its own data until the call ends. A tune's search or probe makes scratch copies of the run's track in
   the Set and removes them after; if Kumi stops partway, its next look (`kumi_observe`) removes leftovers. There's no
   record pass, and no model is downloaded: a run goes by its meters.
 - **Plug-in presets** you put in your User Library are new `.vstpreset` files Kumi writes into Live's User Library
