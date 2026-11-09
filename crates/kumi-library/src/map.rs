@@ -41,8 +41,8 @@ pub fn read_sounds_map(library_dir: &Path) -> Option<SoundsMap> {
     Some(map)
 }
 
-/// A sound on the map, with what the map shows of it.
-#[derive(Debug, Clone, PartialEq)]
+/// A sound on the map, with what the map shows of it and what its arrangements read (`crate::arrange`).
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MapSound {
     pub path: String,
     pub x: f64,
@@ -54,6 +54,21 @@ pub struct MapSound {
     pub class: Option<SoundClass>,
     pub kind: Option<SoundKind>,
     pub seconds: Option<f64>,
+    pub bpm: Option<f64>,
+    /// As the index has them ("A minor", "C3"); the arrangements read only what parses.
+    pub key: Option<String>,
+    pub note: Option<String>,
+    /// Spectral centroid, Hz.
+    pub brightness: Option<f64>,
+    /// Spectral flatness, 0 (tonal) to 1 (noisy).
+    pub flatness: Option<f64>,
+    /// Attack, ms.
+    pub attack: Option<f64>,
+    /// Onsets a second.
+    pub onsets: Option<f64>,
+    /// The shares of its energy in the lows and the highs.
+    pub low: Option<f64>,
+    pub high: Option<f64>,
 }
 
 /// The sounds `index` offers, where the map puts them, in the map's order: a sound the index doesn't offer (gone, or
@@ -98,6 +113,15 @@ fn on_map(index: &SoundIndex, rows: &HashMap<&str, usize>, (path, x, y): &(Strin
         class: entry.r#class,
         kind: entry.kind,
         seconds: entry.seconds,
+        bpm: entry.bpm,
+        key: entry.key.clone(),
+        note: entry.note.clone(),
+        brightness: entry.brightness,
+        flatness: entry.flatness,
+        attack: entry.attack,
+        onsets: entry.onsets,
+        low: entry.low,
+        high: entry.high,
     })
 }
 
@@ -131,6 +155,9 @@ pub struct Layer {
     pub tags: Vec<String>,
     /// Why there's nothing on it yet, said to the producer.
     pub empty: Option<String>,
+    /// The other ways its points are laid out, in `ARRANGEMENTS`' order (the sounds' map's; none on the songs'). The
+    /// k-th one's place of each point is the point's `arranged[k]`.
+    pub arrangements: Vec<Arrangement>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -149,6 +176,19 @@ pub struct Point {
     /// What of it plays: from where, and for how long (seconds).
     pub from: f32,
     pub seconds: f32,
+    /// Where each of the layer's arrangements puts it, `[x, y]` in [0, 1] (y down, like `x`, `y`), in their order.
+    pub arranged: Vec<[f32; 2]>,
+}
+
+impl Point {
+    /// Where it sits in an arrangement (by its place in the layer's), or by similarity (`x`, `y`) for None or one the
+    /// point doesn't have.
+    pub fn place(&self, arrangement: Option<usize>) -> (f32, f32) {
+        match arrangement.and_then(|k| self.arranged.get(k)) {
+            Some([x, y]) => (*x, *y),
+            None => (self.x, self.y),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -161,8 +201,26 @@ pub struct Group {
     pub examples: Vec<u32>,
 }
 
+/// The arrangements' ids, in the order a layer and a point keep them: what each shows is `crate::arrange`'s.
+pub const ARRANGEMENTS: [&str; 7] = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
+
+/// Another way to lay a layer out than similarity: its id (one of `ARRANGEMENTS`) and the data words it writes on
+/// the map where they belong (class ids, keys, BPM, seconds, folder names; axis words are the UI's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Arrangement {
+    pub id: &'static str,
+    pub labels: Vec<Label>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+}
+
 impl Layer {
     pub fn empty(kind: Kind, why: &str) -> Layer {
-        Layer { kind, points: vec![], groups: vec![], places: vec![], tags: vec![], empty: Some(why.into()) }
+        Layer { kind, points: vec![], groups: vec![], places: vec![], tags: vec![], empty: Some(why.into()), arrangements: vec![] }
     }
 }

@@ -17,6 +17,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 
 ## Finding sounds
 - **`kumi_sounds`** searches by words (`query`), or `near` another sound's id.
+  - **More like these:** `near` also takes a list of 1 to 16 ids. Each one contributes its nearest, and the ones given are left out.
   - **Words:** the producer's style words go in `query`. Artist and genre words match names and folders; descriptors such as "dark", "bright", "dusty" or "punchy" rank by what Kumi measured.
   - **Filters,** by the values Kumi indexed at the folder's last scan:
     - `class` says what the sound is (kick, snare, pad…), and `kind` says loop or one-shot: "a kick one-shot" is `{"kind": "one-shot", "class": "kick"}`;

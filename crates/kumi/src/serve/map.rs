@@ -26,10 +26,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// The Python snapshot reader refuses larger files, including the snapshot envelope.
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+/// The most sounds one near search starts from.
+const MOST_NEAR: usize = 16;
 
 pub static SOUNDS: Operation = Operation {
     name: "sounds",
-    description: "Search the current approved sound catalog by words, indexed class, kind, tempo, key or duration, or a current sound_id's measured similarity. Returns revision-scoped IDs, indexed values and match reasons, never file paths. Closeness is relative to this map, not a confidence or percent match. Includes unpositioned sounds; does not scan or remap.",
+    description: "Search the current approved sound catalog by words, indexed class, kind, tempo, key or duration, or measured similarity to one or several current sound_ids. Returns revision-scoped IDs, indexed values and match reasons, never file paths. Closeness is relative to this map, not a confidence or percent match. Includes unpositioned sounds; does not scan or remap.",
     schema: schema,
     effect: reads,
     run: run,
@@ -38,7 +40,10 @@ pub static SOUNDS: Operation = Operation {
 fn schema() -> Value {
     json!({"type":"object", "additionalProperties":false, "required":["query"], "properties":{
         "query":{"type":"string", "maxLength":4096, "description":"Names and folder words, plus measured descriptors such as dark or bright; not genre or artist recognition."},
-        "near":{"type":"string", "minLength":1, "maxLength":128, "description":"A current sound_id. Closeness is relative to this map; the seed itself is omitted."},
+        "near":{"anyOf":[
+            {"type":"string", "minLength":1, "maxLength":128},
+            {"type":"array", "minItems":1, "maxItems":MOST_NEAR, "items":{"type":"string", "minLength":1, "maxLength":128}}
+        ], "description":"A current sound_id, or a list of 1 to 16 (\"more like these\"): the sounds nearest any of them, each one contributing. Closeness is relative to this map; the seeds themselves are omitted."},
         "kind":{"type":"string", "minLength":1, "maxLength":64, "description":"loop or one-shot, optionally combined with class. Class words such as kick remain accepted here."},
         "class":{"type":"string", "enum":CLASSES, "description":"The indexed instrument class; combine with kind for, for example, kick one-shots."},
         "bpm":{"type":"number", "exclusiveMinimum":0, "description":"About this indexed tempo, also half or double time. A missing tempo cannot match."},
@@ -53,7 +58,7 @@ fn schema() -> Value {
 #[serde(deny_unknown_fields)]
 struct Args {
     query: String,
-    near: Option<String>,
+    near: Option<Near>,
     kind: Option<String>,
     class: Option<String>,
     bpm: Option<f64>,
@@ -66,6 +71,29 @@ struct Args {
 
 fn default_limit() -> usize {
     20
+}
+
+/// What a near search starts from: one sound_id, or several. Echoed in the answer as it was given.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum Near {
+    One(String),
+    Several(Vec<String>),
+}
+
+impl Near {
+    /// The sound_ids, each once, in the order given.
+    fn ids(&self) -> Result<Vec<&str>, OpError> {
+        let ids: Vec<&str> = match self {
+            Near::One(id) => vec![id],
+            Near::Several(ids) => ids.iter().map(String::as_str).collect(),
+        };
+        if !(1..=MOST_NEAR).contains(&ids.len()) || ids.iter().any(|id| id.is_empty() || id.len() > 128) {
+            return Err(OpError::Invalid { reason: format!("near is one sound_id or a list of 1 to {MOST_NEAR}") });
+        }
+        let mut seen = HashSet::new();
+        Ok(ids.into_iter().filter(|id| seen.insert(*id)).collect())
+    }
 }
 
 impl Args {
@@ -152,7 +180,8 @@ struct File {
 // bounded, and callers can cancel both queueing and waiting. Dropping a revision closes its worker's channel.
 struct Request {
     query: SoundQuery,
-    near: Option<String>,
+    /// The near search's seeds, by their indexed paths (none for a search by words and filters).
+    near: Vec<String>,
     reply: oneshot::Sender<Result<Vec<Match>, OpError>>,
 }
 
@@ -351,14 +380,34 @@ impl MapStore {
             .filter(|sound| ids.contains_key(&sound.path) && (0.0..=1.0).contains(&sound.x) && (0.0..=1.0).contains(&sound.y))
             .collect();
         let layer = tokio::task::spawn_blocking(move || crate::map::sounds_layer(layer_sounds)).await.map_err(failed)?;
-        let points: Vec<_> = layer.points.iter().map(|point| json!([ids[&point.path], point.x, point.y, point.group])).collect();
+        // `[id, x, y, group, x₁, y₁, …]`: after the similarity place and the group, each arrangement's place in
+        // `arrangements`' order, to 4 decimals.
+        let points: Vec<_> = layer
+            .points
+            .iter()
+            .map(|point| {
+                let mut row = Vec::with_capacity(4 + 2 * point.arranged.len());
+                row.extend([json!(ids[&point.path]), json!(point.x), json!(point.y), json!(point.group)]);
+                row.extend(point.arranged.iter().flatten().map(|v| json!(decimals(*v))));
+                Value::Array(row)
+            })
+            .collect();
+        let arrangements: Vec<_> = layer
+            .arrangements
+            .iter()
+            .map(|each| {
+                let labels: Vec<_> = each.labels.iter().map(|label| json!([label.text, decimals(label.x), decimals(label.y)])).collect();
+                json!({"id":each.id, "labels":labels})
+            })
+            .collect();
         let groups: BTreeMap<_, _> = layer
             .groups
             .iter()
             .enumerate()
             .map(|(at, group)| (at.to_string(), json!({"name":group.name,"color":group.color,"count":group.count})))
             .collect();
-        let body = json!({"revision":revision, "made":made, "points":points, "groups":groups, "sounds":sounds});
+        let body =
+            json!({"revision":revision, "made":made, "points":points, "groups":groups, "arrangements":arrangements, "sounds":sounds});
         let search = worker(entries, sources).await?;
         check(signal)?;
         self.publish(ctx, Current { revision, sounds, files, ids, search }, body, MAX_SNAPSHOT_BYTES, signal).await
@@ -484,12 +533,11 @@ impl MapStore {
     async fn search(&self, ctx: &Ctx, args: Args, signal: &Signal) -> Result<Value, OpError> {
         let query = args.search()?;
         let current = self.ensure(ctx, signal).await?;
-        let near = if let Some(id) = args.near.as_deref() {
+        let mut near = Vec::new();
+        for id in args.near.as_ref().map(Near::ids).transpose()?.unwrap_or_default() {
             self.validate(ctx, &current, id, signal).await?;
-            Some(current.files.get(id).ok_or_else(stale)?.indexed.to_string_lossy().into_owned())
-        } else {
-            None
-        };
+            near.push(current.files.get(id).ok_or_else(stale)?.indexed.to_string_lossy().into_owned());
+        }
         let (reply, receive) = oneshot::channel();
         let request = Request { query, near, reply };
         tokio::select! {
@@ -547,6 +595,11 @@ impl MapStore {
     }
 }
 
+/// A place as the snapshot writes it: 4 decimals, not an f32's widened tail.
+fn decimals(value: f32) -> f64 {
+    (value as f64 * 1e4).round() / 1e4
+}
+
 fn prune(pointer: &Path, current: &str, previous: Option<&str>) {
     let Some(dir) = pointer.parent() else { return };
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -594,27 +647,45 @@ async fn worker(entries: Vec<SoundEntry>, sources: Vec<Source>) -> Result<mpsc::
                     continue;
                 }
                 let result = (|| {
-                    if let Some(path) = request.near {
+                    let mut likes = Vec::with_capacity(request.near.len());
+                    let mut unmeasured = HashSet::new();
+                    for path in std::mem::take(&mut request.near) {
                         let entry = index.vector_of(&path, None).ok_or_else(stale)?;
                         let vector = entry.vector.as_deref().map(unpack_vector).unwrap_or_default();
-                        if vector.len() != VECTOR_LENGTH || vector.iter().any(|v| !v.is_finite()) {
-                            return Err(OpError::Refused {
-                                code: "unmeasured",
-                                reason: "that sound has no learned similarity features".into(),
-                                owner: None,
-                            });
+                        // A seed with nothing measured adds nothing to a search from several; only all of them is
+                        // refused. It is still left out of the answer.
+                        let measured = vector.len() == VECTOR_LENGTH && vector.iter().all(|v| v.is_finite());
+                        if !measured {
+                            unmeasured.insert(path.clone());
                         }
-                        request.query.like = Some(LikeSound {
+                        likes.push(measured.then(|| LikeSound {
                             vector: vector.into_iter().map(f64::from).collect(),
                             name: String::new(),
-                            path: Some(path),
+                            path: Some(path.clone()),
                             brightness: entry.brightness.unwrap_or_default(),
                             attack: entry.attack.unwrap_or_default(),
                             seconds: entry.seconds.unwrap_or_default(),
-                        });
+                        }));
                     }
-                    Ok(index
-                        .search_indexed(&request.query)
+                    let found = if likes.is_empty() {
+                        index.search_indexed(&request.query)
+                    } else if likes.iter().all(Option::is_none) {
+                        return Err(OpError::Refused {
+                            code: "unmeasured",
+                            reason: if likes.len() == 1 {
+                                "that sound has no learned similarity features".into()
+                            } else {
+                                "none of those sounds has learned similarity features".into()
+                            },
+                            owner: None,
+                        });
+                    } else {
+                        let likes: Vec<_> = likes.into_iter().flatten().collect();
+                        let mut found = index.search_near(&request.query, &likes, true);
+                        found.hits.retain(|hit| !unmeasured.contains(&hit.entry.file.path));
+                        found
+                    };
+                    Ok(found
                         .hits
                         .into_iter()
                         .map(|hit| Match {
@@ -742,7 +813,7 @@ mod tests {
                 .maps()
                 .search(
                     &self.ctx,
-                    Args { query: query.into(), near, kind: kind.map(str::to_owned), limit: 20, ..Default::default() },
+                    Args { query: query.into(), near: near.map(Near::One), kind: kind.map(str::to_owned), limit: 20, ..Default::default() },
                     &Signal::new(),
                 )
                 .await
@@ -834,6 +905,100 @@ mod tests {
         assert!(kicks["items"].as_array().unwrap().iter().all(|item| item["class"] == "kick"));
         assert_eq!(fixture.search("", Some(fixture.id("Kick unknown")), None).await.unwrap_err().code(), "unmeasured");
         assert_eq!(fixture.search("", None, Some("unsupported-kind")).await.unwrap_err().code(), "invalid");
+    }
+
+    #[tokio::test]
+    async fn snapshot_points_carry_each_arrangements_place_and_the_arrangements_in_order() {
+        let fixture = Fixture::new();
+        let first = fixture.snapshot(&fixture.publish().await);
+        let ids: Vec<_> = first["arrangements"].as_array().unwrap().iter().map(|each| each["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, crate::map::ARRANGEMENTS);
+        let keys = &first["arrangements"][2]["labels"];
+        assert_eq!(keys[0][0], "C", "labels are [text, x, y]");
+        let places = |snapshot: &Value| -> BTreeMap<String, Vec<f64>> {
+            snapshot["points"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|point| {
+                    let point = point.as_array().unwrap();
+                    assert_eq!(point.len(), 4 + 2 * crate::map::ARRANGEMENTS.len());
+                    let name = snapshot["sounds"][point[0].as_str().unwrap()]["name"].as_str().unwrap().to_owned();
+                    (name, point[4..].iter().map(|v| v.as_f64().unwrap()).collect())
+                })
+                .collect()
+        };
+        let before = places(&first);
+        assert_eq!(before.len(), 3);
+        for value in before.values().flatten() {
+            assert!((0.0..=1.0).contains(value));
+            assert!(((value * 1e4).round() - value * 1e4).abs() < 1e-6, "4 decimals: {value}");
+        }
+        let again = fixture.snapshot(&fixture.publish().await);
+        assert_eq!(places(&again), before, "the same library, the same places");
+    }
+
+    /// The fixture and three more measured sounds: two near the kick seed's features, one near the far pad's.
+    async fn with_neighbours(fixture: &mut Fixture) {
+        let mut entries: Vec<_> = fixture.index.entries.iter().map(|entry| SoundEntry::clone(entry)).collect();
+        for (name, number) in [("Kick next.wav", 0.2), ("Pad near.wav", 9.9), ("Kick third.wav", 0.3)] {
+            let path = fixture.root.join(name);
+            std::fs::write(&path, b"learned fixture").unwrap();
+            entries.push(SoundEntry {
+                file: Entry { path: path.to_string_lossy().into_owned(), size: 15, mtime: 1, gone: None },
+                vector: Some(pack_vector(&[number; VECTOR_LENGTH])),
+                kind: Some(SoundKind::OneShot),
+                ..Default::default()
+            });
+        }
+        fixture.index = SoundIndex::new(entries, &fixture.sources);
+        fixture.publish().await;
+    }
+
+    async fn near(fixture: &Fixture, near: Value, limit: usize) -> Result<Value, OpError> {
+        let args = serde_json::from_value(json!({"query":"", "near":near, "limit":limit})).unwrap();
+        fixture.ctx.maps().search(&fixture.ctx, args, &Signal::new()).await
+    }
+
+    fn names(result: &Value) -> Vec<&str> {
+        result["items"].as_array().unwrap().iter().map(|item| item["name"].as_str().unwrap()).collect()
+    }
+
+    #[tokio::test]
+    async fn near_several_draws_from_each_pick_and_leaves_the_picks_out() {
+        let mut fixture = Fixture::new();
+        with_neighbours(&mut fixture).await;
+        let (kick, pad) = (fixture.id("Kick seed"), fixture.id("Pad far"));
+        assert_eq!(names(&near(&fixture, json!(kick), 2).await.unwrap()), ["Kick close", "Kick next"], "one pick: its nearest");
+        let both = near(&fixture, json!([kick, pad]), 2).await.unwrap();
+        assert_eq!(both["near"], json!([kick, pad]), "near is echoed as given");
+        let mut found = names(&both);
+        found.sort_unstable();
+        assert_eq!(found, ["Kick close", "Pad near"], "each pick gives its nearest");
+        let all = near(&fixture, json!([kick, pad]), 20).await.unwrap();
+        assert_eq!(all["items"].as_array().unwrap().len(), 4);
+        assert!(!names(&all).iter().any(|name| ["Kick seed", "Pad far", "Kick unknown"].contains(name)));
+        assert!(all["items"].as_array().unwrap().iter().all(|hit| hit["closeness"].as_u64().is_some_and(|v| v <= 100)));
+        // A pick with nothing measured adds nothing and stays out; only picks that are all unmeasured are refused.
+        let unknown = fixture.id("Kick unknown");
+        let mixed = near(&fixture, json!([unknown, pad]), 1).await.unwrap();
+        assert_eq!(names(&mixed), ["Pad near"]);
+        assert_eq!(near(&fixture, json!([unknown]), 5).await.unwrap_err().code(), "unmeasured");
+    }
+
+    #[tokio::test]
+    async fn near_refuses_too_many_no_and_stale_sounds() {
+        let fixture = Fixture::new();
+        let old = fixture.publish().await;
+        let stale_id = fixture.id("Kick seed");
+        fixture.publish().await;
+        let kick = fixture.id("Kick seed");
+        assert_ne!(fixture.ctx.maps().revision().unwrap(), old);
+        assert_eq!(near(&fixture, json!(vec![kick.clone(); 17]), 5).await.unwrap_err().code(), "invalid");
+        assert_eq!(near(&fixture, json!([]), 5).await.unwrap_err().code(), "invalid");
+        assert_eq!(near(&fixture, json!([kick, stale_id]), 5).await.unwrap_err().code(), "stale");
+        assert_eq!(near(&fixture, json!([kick, "s-unknown"]), 5).await.unwrap_err().code(), "stale");
+        assert!(near(&fixture, json!(vec![kick.clone(); 16]), 5).await.is_ok(), "16 picks, the same one, are one pick");
     }
 
     #[tokio::test]
@@ -1023,7 +1188,7 @@ mod tests {
             fixture
                 .ctx
                 .maps()
-                .search(&revoked, Args { near: Some(seed.clone()), limit: 20, ..Default::default() }, &Signal::new())
+                .search(&revoked, Args { near: Some(Near::One(seed.clone())), limit: 20, ..Default::default() }, &Signal::new())
                 .await
                 .unwrap_err()
                 .code(),

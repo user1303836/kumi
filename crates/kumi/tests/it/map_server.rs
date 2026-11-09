@@ -193,6 +193,7 @@ fn the_page_gets_both_maps_and_names_points_and_actions_by_id() {
         class,
         kind: Some(SoundKind::OneShot),
         seconds: Some(0.5),
+        ..Default::default()
     };
     let song = |id: i64, cluster: Option<usize>| MapSong {
         id,

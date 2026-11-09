@@ -864,13 +864,16 @@ def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
     on a near search the seed apart and each hit's closeness. One reason here names a path, as a runtime must never:
     the plugin's second guard drops it. A near search for a sound of a map the test published (`map/current` with its
     points) answers that map's nearest points by distance, closest first, as the index ranks them."""
-    near = map_neighbours(fixture, args)
+    seeds = picks(args.get("near"))
+    if seeds is None:
+        return error("invalid", "near is one sound_id or a list of 1 to 16")
+    near = map_neighbours(fixture, args, seeds)
     if near is not None:
         return near
     words = str(args.get("query") or "").lower().split()
     found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)
              and float(args.get("min_seconds") or 0) <= sound["duration"] <= float(args.get("max_seconds") or 1e9)
-             and sound["sound_id"] != args.get("near")]
+             and sound["sound_id"] not in seeds]
     hits = []
     for sound in found[:int(args.get("limit") or 20)]:
         why = [f"name matches '{word}'" for word in words][:3]
@@ -882,19 +885,39 @@ def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
             "items": hits}
 
 
-def map_neighbours(fixture: Fixture, args: dict) -> dict | None:
+def picks(near: Any) -> list | None:
+    """`near` as serve takes it: one sound id, or a list of 1 to 16 (the seeds are left out of the answer); None when
+    it's neither."""
+    if near is None:
+        return []
+    seeds = near if isinstance(near, list) else [near]
+    if not 1 <= len(seeds) <= 16 or not all(isinstance(seed, str) and seed for seed in seeds):
+        return None
+    return seeds
+
+
+def map_neighbours(fixture: Fixture, args: dict, seeds: list) -> dict | None:
+    """Several seeds take turns, as serve's balance does: each seed's nearest not yet given, the seeds left out."""
     try:
         revision = (fixture.state / "map" / "current").read_text(encoding="utf-8").strip()
         published = json.loads((fixture.state / "map" / f"{revision}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     at = {point[0]: (point[1], point[2]) for point in published.get("points") or []}
-    seed = at.get(args.get("near"))
-    if seed is None:
+    if not seeds or not all(seed in at for seed in seeds):
         return None
-    apart = sorted((math.dist(seed, xy), sound_id) for sound_id, xy in at.items() if sound_id != args["near"])
+    lists = [sorted((math.dist(at[seed], xy), sound_id) for sound_id, xy in at.items() if sound_id not in seeds)
+             for seed in seeds]
+    limit, apart, given = int(args.get("limit") or 20), [], set()
+    while len(apart) < limit and any(lists):
+        for each in lists:
+            while each and each[0][1] in given:
+                each.pop(0)
+            if each and len(apart) < limit:
+                given.add(each[0][1])
+                apart.append(each.pop(0))
     hits = []
-    for distance, sound_id in apart[:int(args.get("limit") or 20)]:
+    for distance, sound_id in apart:
         sound = published["sounds"][sound_id]
         hits.append({"sound_id": sound_id, "name": sound["name"], "class": sound.get("class"),
                      "kind": sound.get("kind"), "why": ["near the seed"],

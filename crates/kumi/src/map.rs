@@ -16,7 +16,7 @@ use kumi_listening::music::{
 };
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
-pub use kumi_library::map::{Group, Kind, Layer, LoadMap, MapData, Point};
+pub use kumi_library::map::{Arrangement, Group, Kind, Label, Layer, LoadMap, MapData, Point, ARRANGEMENTS};
 
 /// How many points stand for a group.
 const EXAMPLES: usize = 3;
@@ -130,14 +130,17 @@ fn middles(points: &[Point], groups: usize) -> Vec<Vec<u32>> {
     nearest.into_iter().map(|kept| kept.into_iter().map(|(_, at)| at).collect()).collect()
 }
 
-/// The sounds' map: grouped by class (in the classes' order, then those with none).
+/// The sounds' map: grouped by class (in the classes' order, then those with none), with its other arrangements
+/// (`kumi_library::arrange`).
 pub fn sounds_layer(sounds: Vec<MapSound>) -> Layer {
     let (mut places, mut tags) = (Kept::default(), Kept::default());
     let group_of = |class: Option<SoundClass>| class.and_then(|class| CLASSES.iter().position(|c| *c == class)).unwrap_or(CLASSES.len());
+    let (arrangements, arranged) = kumi_library::arrange::arrange(&sounds);
     let points: Vec<Point> = sounds
         .into_iter()
+        .zip(arranged)
         .enumerate()
-        .map(|(at, sound)| {
+        .map(|(at, (sound, arranged))| {
             let words = [sound.class.map(SoundClass::as_str), sound.kind.map(|kind| kind.as_str())];
             Point {
                 id: at as i64,
@@ -150,6 +153,7 @@ pub fn sounds_layer(sounds: Vec<MapSound>) -> Layer {
                 seconds: sound.seconds.unwrap_or(UNKNOWN_SOUND).clamp(0.05, LONGEST_SOUND) as f32,
                 name: sound.name,
                 path: sound.path,
+                arranged,
             }
         })
         .collect();
@@ -162,7 +166,7 @@ pub fn sounds_layer(sounds: Vec<MapSound>) -> Layer {
         .map(|((name, class), (examples, count))| Group { name: name.into(), color: class_color(class), count, examples })
         .collect();
     let empty = points.is_empty().then(|| "None of the sounds on Kumi's map are in this library now.".to_string());
-    Layer { kind: Kind::Sounds, points, groups, places: places.all, tags: tags.all, empty }
+    Layer { kind: Kind::Sounds, points, groups, places: places.all, tags: tags.all, empty, arrangements }
 }
 
 /// The songs' map: grouped by style (c1 first, then the songs in none), each style named by its words where the
@@ -186,6 +190,7 @@ pub fn songs_layer(songs: Vec<MapSong>, styles: Vec<MapStyle>) -> Layer {
                 seconds: seconds as f32,
                 name: song.name,
                 path: song.path,
+                arranged: vec![],
             }
         })
         .collect();
@@ -209,7 +214,7 @@ pub fn songs_layer(songs: Vec<MapSong>, styles: Vec<MapStyle>) -> Layer {
     let empty = points.is_empty().then(|| {
         "None of your songs are on a map yet: Kumi lays them out once it has heard them (/music says how far it's got).".to_string()
     });
-    Layer { kind: Kind::Songs, points, groups, places: places.all, tags: tags.all, empty }
+    Layer { kind: Kind::Songs, points, groups, places: places.all, tags: tags.all, empty, arrangements: vec![] }
 }
 
 /// What the map offers to ask Kumi about a point.

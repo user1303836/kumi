@@ -581,6 +581,36 @@ impl SoundIndex {
     pub fn search_indexed(&self, query: &SoundQuery) -> SearchResult<SoundHit> {
         self.search_with_reasons(query, true)
     }
+    /// The sounds nearest any of `likes` ("more like these"), the query's other filters as `search` keeps them: each
+    /// like gives its nearest in turn, so every one of them contributes, a round's closest first; a sound near several
+    /// comes once, and the likes themselves (by path) never. One like ranks as `search` does.
+    pub fn search_near(&self, query: &SoundQuery, likes: &[LikeSound], indexed: bool) -> SearchResult<SoundHit> {
+        let picks: std::collections::HashSet<&str> = likes.iter().filter_map(|like| like.path.as_deref()).collect();
+        let mut lists: Vec<std::vec::IntoIter<SoundHit>> = Vec::with_capacity(likes.len());
+        let mut matched = 0;
+        for like in likes {
+            let mut each = query.clone();
+            each.like = Some(like.clone());
+            each.limit = query.limit + likes.len();
+            let found = self.search_with_reasons(&each, indexed);
+            matched = matched.max(found.matched);
+            lists.push(found.hits.into_iter());
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut hits = Vec::with_capacity(query.limit);
+        while hits.len() < query.limit {
+            let mut round: Vec<SoundHit> = lists
+                .iter_mut()
+                .filter_map(|list| list.find(|hit| !picks.contains(hit.entry.path.as_str()) && seen.insert(hit.entry.path.clone())))
+                .collect();
+            if round.is_empty() {
+                break;
+            }
+            round.sort_by(|a, b| compare(b.closeness.unwrap_or(0.), a.closeness.unwrap_or(0.)));
+            hits.extend(round.into_iter().take(query.limit - hits.len()));
+        }
+        SearchResult { hits, matched }
+    }
     fn search_with_reasons(&self, query: &SoundQuery, indexed: bool) -> SearchResult<SoundHit> {
         let words = words(&query.words);
         let describing: Vec<_> = words.iter().filter_map(|word| descriptor(word)).collect();
