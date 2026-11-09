@@ -40,6 +40,21 @@ pub fn peaking(hz: f64, db: f64, q: f64) -> Biquad {
     Biquad::new((1.0 + alpha * a) / a0, -2.0 * w.cos() / a0, (1.0 - alpha * a) / a0, -2.0 * w.cos() / a0, (1.0 - alpha / a) / a0)
 }
 
+/// A shelving equalizer (RBJ, slope 1): everything above `hz` (`high`) or below it moved `db` up or down.
+pub fn shelf(hz: f64, db: f64, high: bool) -> Biquad {
+    let a = 10f64.powf(db / 40.0);
+    let w = 2.0 * PI * hz / RATE;
+    let (cos, k) = (w.cos(), 2.0 * a.sqrt() * w.sin() / std::f64::consts::SQRT_2);
+    let sign = if high { 1.0 } else { -1.0 };
+    let b0 = a * ((a + 1.0) + sign * (a - 1.0) * cos + k);
+    let b1 = -2.0 * sign * a * ((a - 1.0) + sign * (a + 1.0) * cos);
+    let b2 = a * ((a + 1.0) + sign * (a - 1.0) * cos - k);
+    let a0 = (a + 1.0) - sign * (a - 1.0) * cos + k;
+    let a1 = 2.0 * sign * ((a - 1.0) - sign * (a + 1.0) * cos);
+    let a2 = (a + 1.0) - sign * (a - 1.0) * cos - k;
+    Biquad::new(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0)
+}
+
 /// Runs both channels through a fresh copy of the filter.
 pub fn filter(s: &mut Stereo, make: impl Fn() -> Biquad) {
     for channel in s.iter_mut() {

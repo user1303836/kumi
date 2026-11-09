@@ -1,11 +1,11 @@
-//! Sound design for the producer, the same in every DAW: cross, fuse or stack a group of their sounds into a new one
-//! (kumi-design renders it), kept as a file in Kumi's own folder. The app's PALETTE and map run it on what the producer
-//! picked; the `design_sound` tool runs it when they ask Kumi. Nothing in the DAW changes.
+//! Sound design for the producer, the same in every DAW: cross, fuse or stack a group of their sounds into a new one,
+//! or grow one toward another (kumi-design renders it), kept as a file in Kumi's own folder. The app's PALETTE and map
+//! run it on what the producer picked; the `design_sound` tool runs it when they ask Kumi. Nothing in the DAW changes.
 
 use crate::core::palette::Palettes;
 use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_design::{fresh_seed, load_source, render, Answer, Mode, Op, Options, Request, SourceRef, MAX_SEED, MAX_SOURCES, MIN_SOURCES};
+use kumi_design::{fresh_seed, load_source, render, schema, source_seconds, Answer, Mode, Op, Options, Request, SourceRef, MAX_SEED, MIN_SOURCES};
 use kumi_media::audio::DecodeOptions;
 use kumi_types::{
     contracts::{JsonObject, KernelTool, Reach, ToolResult},
@@ -42,15 +42,19 @@ pub fn request(op: Op, mode: Option<Mode>, files: &[String], seed: Option<u64>, 
 /// What a made sound's file is called: the op or mode, its first source, how many more, and the seed, so every
 /// variation keeps a name of its own ("Blend - Kick 909 + 2 - 4821.wav").
 pub fn file_name(request: &Request, seed: u64) -> String {
-    let what = request.mode.map_or("Stack", |mode| match mode {
-        Mode::Blend => "Blend",
-        Mode::Attack => "Attack",
-        Mode::Resonate => "Resonate",
-        Mode::Modulate => "Modulate",
-        Mode::Texture => "Texture",
-        Mode::Loop => "Loop",
-        Mode::Smear => "Smear",
-    });
+    let what = match (request.op, request.mode) {
+        (Op::Grow, _) => "Grow",
+        (_, None) => "Stack",
+        (_, Some(mode)) => match mode {
+            Mode::Blend => "Blend",
+            Mode::Attack => "Attack",
+            Mode::Resonate => "Resonate",
+            Mode::Modulate => "Modulate",
+            Mode::Texture => "Texture",
+            Mode::Loop => "Loop",
+            Mode::Smear => "Smear",
+        },
+    };
     let first: String = request
         .sources
         .first()
@@ -68,10 +72,11 @@ pub fn file_name(request: &Request, seed: u64) -> String {
 pub async fn make(mut request: Request, folder: &Path, signal: &Signal) -> Result<Made, String> {
     request.check().map_err(|e| e.0)?;
     let mut sources = Vec::with_capacity(request.sources.len());
+    let seconds = source_seconds(request.sources.len());
     for source in &request.sources {
         let file = source.file.as_deref().ok_or("Each sound is a file.")?;
         let name = source.name.clone().unwrap_or_else(|| file.to_string());
-        let decoded = load_source(Path::new(file), &name, &DecodeOptions::default(), Some(signal.clone()))
+        let decoded = load_source(Path::new(file), &name, seconds, &DecodeOptions::default(), Some(signal.clone()))
             .await
             .map_err(|e| format!("{name}: {}", e.0))?;
         sources.push(decoded);
@@ -95,11 +100,15 @@ pub async fn make(mut request: Request, folder: &Path, signal: &Signal) -> Resul
 }
 
 const DESCRIPTION: &str = concat!(
-    "Make a new sound from 2-16 of the producer's sound files (stack: 2-8), changing nothing in the DAW. ",
+    "Make a new sound from 2 or more of the producer's sound files, as many as they picked, changing nothing in the DAW. ",
     "cross blend: one body morphed from all of them; cross attack: one's transient (attack_from) onto the blend of the rest; ",
-    "cross resonate: half ring through the other half (split: the exciters); cross modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other; ",
-    "fuse texture: a loopable bed that moves between them (seconds); fuse loop: their hits sequenced on a tempo grid (bpm, bars 1-4); ",
-    "fuse smear: a 4-16x granular stretch with a long diffuse tail (stretch); stack: printed as one hit, aligned and loudness-matched. ",
+    "cross resonate: some ring through the others (options.resonate.pairing: halves, in-order, interleave, bright-dark, dark-bright, hits-tones, tones-hits, one-all, all-one, chain; split names the exciters); ",
+    "cross modulate: one carrier shaped by the others (options.modulate: carrier, kinds of phase, ring, am, fm, filter, gain, vocode, stages); ",
+    "fuse texture: a loopable bed that moves between them (seconds); fuse loop: a beat of their hits or a melody of them repitched ",
+    "(bpm: give the DAW's tempo; bars 1-8; options.loop: style, meter, grid, swing, density, fills, lean, key, scale, tuning and more); ",
+    "fuse smear: a 4-16x granular stretch with a long diffuse tail (stretch); stack: printed as one hit, aligned and loudness-matched; ",
+    "grow: the first file part of the way (options.at, 0 to 1) toward the second (exactly 2 files), its in-between sounds new. ",
+    "options.steer pushes any design before it renders (bright, body, filter, noise, punch, length, drive, crush, width, space; per sound pitch, reverse, start, delay, pan, level). ",
     "A seed picks every choice: a reroll is the same call with another seed (or none), the same seed the same sound. ",
     "keep: put the made sound in the producer's palette (only when they ask or agree). Returns its file, which the palette, ",
     "map_samples and listen take, and a one-line recipe to tell them."
@@ -128,7 +137,7 @@ impl DesignTool {
             .and_then(Value::as_array)
             .map(|f| f.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
-        let op: Op = Self::field(&input, "op")?.ok_or("design_sound takes an op: cross, fuse or stack")?;
+        let op: Op = Self::field(&input, "op")?.ok_or("design_sound takes an op: cross, fuse, stack or grow")?;
         let mode: Option<Mode> = Self::field(&input, "mode")?;
         let options: Options = Self::field(&input, "options")?.unwrap_or_default();
         let seed = input.get("seed").and_then(Value::as_u64);
@@ -169,21 +178,13 @@ impl KernelTool for DesignTool {
             "additionalProperties": false,
             "required": ["op", "files"],
             "properties": {
-                "op": {"type": "string", "enum": ["cross", "fuse", "stack"]},
-                "mode": {"type": "string", "enum": ["blend", "attack", "resonate", "modulate", "texture", "loop", "smear"],
-                    "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack: none"},
-                "files": {"type": "array", "items": {"type": "string"}, "minItems": MIN_SOURCES, "maxItems": MAX_SOURCES,
-                    "description": "The sounds' files, in order (attack_from and split count from 0)"},
+                "op": {"type": "string", "enum": schema::ops()},
+                "mode": {"type": "string", "enum": schema::modes(),
+                    "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack and grow: none"},
+                "files": {"type": "array", "items": {"type": "string"}, "minItems": MIN_SOURCES,
+                    "description": "The sounds' files, in order, as many as wanted (grow: exactly 2; attack_from and split count from 0)"},
                 "seed": {"type": "integer", "minimum": 0, "maximum": MAX_SEED, "description": "The variation; leave it out for a new one"},
-                "options": {"type": "object", "additionalProperties": false, "properties": {
-                    "seconds": {"type": "number", "minimum": 0.1, "maximum": 30},
-                    "bpm": {"type": "number", "minimum": 40, "maximum": 240},
-                    "bars": {"type": "integer", "minimum": 1, "maximum": 4},
-                    "attack_from": {"type": "integer", "minimum": 0},
-                    "split": {"type": "array", "items": {"type": "integer", "minimum": 0}},
-                    "depth": {"type": "number", "minimum": 0, "maximum": 1},
-                    "stretch": {"type": "number", "minimum": 4, "maximum": 16}
-                }},
+                "options": schema::options(),
                 "keep": {"type": "boolean", "description": "Put the made sound in the producer's palette"}
             }
         });
@@ -255,6 +256,6 @@ mod tests {
         // Refusals come back as the tool's error, in words.
         let one = json!({"op": "stack", "files": [files[0]]});
         let refused = tool.execute(one.as_object().unwrap().clone(), Signal::new()).await.unwrap();
-        assert!(refused.is_error && refused.text.contains("2 to 8"), "{}", refused.text);
+        assert!(refused.is_error && refused.text.contains("2 or more"), "{}", refused.text);
     }
 }

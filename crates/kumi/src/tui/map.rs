@@ -890,10 +890,10 @@ impl MapView {
         Asked::Nothing
     }
 
-    /// The picked sounds' files, at most `most`.
-    fn picked_files(&self, most: usize) -> Vec<String> {
+    /// The picked sounds' files, all of them: a make takes as many as are picked.
+    fn picked_files(&self) -> Vec<String> {
         let Some(data) = self.data.as_ref() else { return vec![] };
-        self.views[0].picked.iter().take(most).map(|at| data.sounds.points[*at as usize].path.clone()).collect()
+        self.views[0].picked.iter().map(|at| data.sounds.points[*at as usize].path.clone()).collect()
     }
 
     /// The session's palette's files, and what a loose one brings in (by their paths), marked on the map.
@@ -1144,7 +1144,7 @@ impl MapView {
                 "map.design" if picks && self.designs => return self.design_menu(),
                 id if making && id.starts_with("map.make-") => {
                     let Some((op, mode)) = way_of(id) else { continue };
-                    let files = self.picked_files(op.most_sources());
+                    let files = self.picked_files();
                     return Asked::Design { op, mode, files };
                 }
                 "map.reroll" if !making && self.made.is_some() => return Asked::Reroll,
@@ -1785,7 +1785,7 @@ impl MapView {
         let other = if self.tab == 0 { "songs" } else { "sounds" };
         let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
         if self.making {
-            let making = format!("make from {} picks:", picked.min(kumi_design::MAX_SOURCES));
+            let making = format!("make from {picked} picks:");
             let mut parts: Vec<(&[&str], &str, &str)> = vec![(&[], "", &making)];
             parts.extend(MAKES.iter().map(|(id, words)| (std::slice::from_ref(id), "", *words)));
             parts.push((&["map.let-go"], "", "cancels"));
