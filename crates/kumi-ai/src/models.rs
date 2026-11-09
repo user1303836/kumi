@@ -149,11 +149,25 @@ pub fn dir() -> PathBuf {
 /// How a fetch tells the producer what it's doing ("Kumi is fetching…").
 pub type Say<'a> = &'a dyn Fn(&str);
 
+/// Set (to anything) in a Kumi that fetches no models: the runtime a host drives (`kumi serve`), which downloads
+/// nothing past what its host installed. A model that isn't there yet is then refused, and the job goes on without it.
+pub const NO_FETCH: &str = "KUMI_NO_MODEL_FETCH";
+
+/// Why this Kumi won't fetch `what`, when it fetches no models ([`NO_FETCH`]).
+fn not_fetched(what: &str) -> Option<String> {
+    std::env::var_os(NO_FETCH)
+        .filter(|set| !set.is_empty())
+        .map(|_| format!("This Kumi doesn't download models, so it goes without {what}."))
+}
+
 /// A pinned file, fetched into `to` unless it's there already: downloaded beside it, kept only when its SHA-256 is the
-/// pinned one, and refused (nothing kept) when it isn't.
+/// pinned one, and refused (nothing kept) when it isn't, or when this Kumi fetches no models.
 pub async fn fetch(pinned: &Pinned, to: &Path, what: &str, say: Say<'_>, signal: &Signal) -> Result<(), String> {
     if to.exists() {
         return Ok(());
+    }
+    if let Some(why) = not_fetched(what) {
+        return Err(why);
     }
     // One fetch at a time in this Kumi: two that want the same file wait for the first, then find it there.
     let _turn = tokio::select! {
@@ -248,6 +262,9 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
     }
     if to.exists() {
         return Ok(());
+    }
+    if let Some(why) = not_fetched("that model") {
+        return Err(why);
     }
     let folder = to.parent().ok_or("Kumi has no folder to keep models in.")?;
     std::fs::create_dir_all(folder).map_err(|error| format!("Kumi couldn't make {}: {error}", folder.display()))?;

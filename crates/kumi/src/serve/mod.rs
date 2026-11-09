@@ -16,6 +16,7 @@ pub mod history;
 pub mod import;
 pub mod inflight;
 pub mod jobs;
+pub mod judge;
 pub mod lease;
 pub mod library;
 pub mod listen;
@@ -31,6 +32,7 @@ pub mod setup;
 pub mod snapshots;
 pub mod transport;
 pub mod variations;
+pub mod wavetable;
 
 mod core;
 mod generate;
@@ -148,11 +150,13 @@ fn add_once(paths: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 /// The environment the runtime and the DAW code it drives read: this process's, with the Kumi home it was given, the
-/// update check off (the host moves versions; a runtime never updates itself), and no model key (the host's model
-/// plans; the runtime calls none).
+/// update check off (the host moves versions; a runtime never updates itself), no model fetched (it downloads nothing
+/// its host didn't install: a judged run goes by its meters) and no model key (the host's model plans; the runtime calls
+/// none).
 pub fn environment(args: &Args, mut env: Env) -> Env {
     env.insert("KUMI_HOME".into(), args.kumi_home.display().to_string());
     env.insert("KUMI_NO_UPDATE_CHECK".into(), "1".into());
+    env.insert(kumi_ai::models::NO_FETCH.into(), "1".into());
     for name in crate::report::KEY_VARIABLES {
         env.remove(name);
     }
@@ -164,6 +168,7 @@ pub fn environment(args: &Args, mut env: Env) -> Env {
 fn set_process_environment(args: &Args) {
     std::env::set_var("KUMI_HOME", &args.kumi_home);
     std::env::set_var("KUMI_NO_UPDATE_CHECK", "1");
+    std::env::set_var(kumi_ai::models::NO_FETCH, "1");
     for name in crate::report::KEY_VARIABLES {
         std::env::remove_var(name);
     }
@@ -328,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_reads_its_own_kumi_home_never_checks_for_updates_and_holds_no_model_key() {
+    fn the_runtime_reads_its_own_kumi_home_never_checks_for_updates_fetches_no_model_and_holds_no_model_key() {
         let parsed =
             parse(&args(&["--stdio", "--state-dir", &(home() + "/state"), "--kumi-home", &(home() + "/home"), "--daw", "ableton"]))
                 .unwrap();
@@ -341,6 +346,7 @@ mod tests {
         let env = environment(&parsed, given);
         assert_eq!(env.get("KUMI_HOME"), Some(&(home() + "/home")));
         assert_eq!(env.get("KUMI_NO_UPDATE_CHECK").map(String::as_str), Some("1"));
+        assert_eq!(env.get("KUMI_NO_MODEL_FETCH").map(String::as_str), Some("1"));
         assert!(!env.contains_key("OPENAI_API_KEY") && !env.contains_key("ANTHROPIC_API_KEY"));
         assert_eq!(env.get("PATH").map(String::as_str), Some("/bin"), "the rest is as given");
     }

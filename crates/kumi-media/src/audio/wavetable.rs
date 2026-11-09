@@ -231,8 +231,42 @@ fn normalize(mut frames: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
     }
     frames
 }
-/// Mono 32-bit float WAV at 44.1 kHz, with Serum's marker saying the frame size.
+/// The most names a new wavetable tries in its folder ("Name", then "Name 2" … "Name 999").
+const MOST_NAMES: usize = 999;
+/// Mono 32-bit float WAV at 44.1 kHz, with Serum's marker saying the frame size, as a new file: never over one that's
+/// there.
 pub async fn write_wavetable(file: impl AsRef<std::path::Path>, frames: &[Vec<f32>]) -> Result<(), AudioError> {
+    Ok(create(file.as_ref(), &wavetable_bytes(frames)).await?)
+}
+/// A new wavetable `label` in `folder`: "label.wav", else "label 2.wav" and on, the first name no file has, claimed and
+/// written in one step, so neither a file there before nor one written meanwhile is ever written over. The file.
+pub async fn write_new_wavetable(folder: &std::path::Path, label: &str, frames: &[Vec<f32>]) -> Result<std::path::PathBuf, AudioError> {
+    let bytes = wavetable_bytes(frames);
+    for index in 1..=MOST_NAMES {
+        let file = folder.join(if index == 1 { format!("{label}.wav") } else { format!("{label} {index}.wav") });
+        match create(&file, &bytes).await {
+            Ok(()) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(AudioError(format!("{MOST_NAMES} wavetables called {label} are there already: give this one another name.")))
+}
+/// `bytes` as the new file `file`, refused when one is there; a write that fails part way takes its file back.
+async fn create(file: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut out = tokio::fs::OpenOptions::new().write(true).create_new(true).open(file).await?;
+    let written = async {
+        tokio::io::AsyncWriteExt::write_all(&mut out, bytes).await?;
+        tokio::io::AsyncWriteExt::flush(&mut out).await
+    }
+    .await;
+    if written.is_err() {
+        drop(out);
+        let _ = tokio::fs::remove_file(file).await;
+    }
+    written
+}
+fn wavetable_bytes(frames: &[Vec<f32>]) -> Vec<u8> {
     let samples: usize = frames.iter().map(Vec::len).sum();
     let marker = format!("<!>{FRAME} 00000000 wavetable (Kumi)");
     let mut body = Vec::new();
@@ -259,8 +293,7 @@ pub async fn write_wavetable(file: impl AsRef<std::path::Path>, frames: &[Vec<f3
     out.extend(b"RIFF");
     out.extend((body.len() as u32).to_le_bytes());
     out.extend(body);
-    tokio::fs::write(file, out).await?;
-    Ok(())
+    out
 }
 pub async fn build_wavetable(spec: &WavetableSpec) -> Result<Vec<Vec<f32>>, AudioError> {
     if let Some(audio) = &spec.from_audio {
@@ -272,5 +305,27 @@ pub async fn build_wavetable(spec: &WavetableSpec) -> Result<Vec<Vec<f32>>, Audi
         tokio::task::spawn_blocking(move || frames_from_keyframes(&keyframes, count))
             .await
             .map_err(|error| AudioError(error.to_string()))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_new_wavetable_takes_the_first_free_name_and_never_writes_over_a_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let frames = vec![vec![0.5_f32; FRAME]; 2];
+        let theirs = folder.path().join("Glass.wav");
+        std::fs::write(&theirs, b"the producer's own").unwrap();
+        let made = write_new_wavetable(folder.path(), "Glass", &frames).await.unwrap();
+        assert_eq!(made, folder.path().join("Glass 2.wav"));
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"the producer's own");
+        assert_eq!(std::fs::read(&made).unwrap(), wavetable_bytes(&frames));
+        let next = write_new_wavetable(folder.path(), "Glass", &frames).await.unwrap();
+        assert_eq!(next, folder.path().join("Glass 3.wav"));
+        // Named outright, a file that's there is refused, not replaced.
+        assert!(write_wavetable(&theirs, &frames).await.is_err());
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"the producer's own");
     }
 }

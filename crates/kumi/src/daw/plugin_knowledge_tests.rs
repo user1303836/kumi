@@ -29,6 +29,8 @@ struct Bridge {
     serum: Cell<bool>,
     native: Cell<bool>,
     advance: RefCell<Option<Weak<Ctx>>>,
+    /// Lists what Live's listening tools (judge, tune) need besides.
+    listening: bool,
 }
 
 fn reply(value: Value) -> CallToolResult {
@@ -44,8 +46,11 @@ impl McpEndpoint for Bridge {
         Some(serde_json::from_value(json!({"name": "fixture", "version": "1.0.73"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        let tools =
-            ["live_status", "live_discover", "live_device_read"].map(|name| json!({"name": name, "inputSchema": {"type": "object"}}));
+        let mut names = vec!["live_status", "live_discover", "live_device_read"];
+        if self.listening {
+            names.extend(["live_undo", "live_recording_preview"]);
+        }
+        let tools: Vec<Value> = names.into_iter().map(|name| json!({"name": name, "inputSchema": {"type": "object"}})).collect();
         Ok(serde_json::from_value(json!({"tools": tools})).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
@@ -127,6 +132,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new(name: &str) -> Self {
+        Self::with(name, false).await
+    }
+    /// With `listening`, Live offers its judge and tune tools too, and the look gives them.
+    async fn with(name: &str, listening: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let user_library = dir.path().join("User Library");
         std::fs::create_dir(&user_library).unwrap();
@@ -137,6 +146,7 @@ impl Fixture {
             serum: Cell::new(false),
             native: Cell::new(false),
             advance: RefCell::new(None),
+            listening,
         });
         let endpoint = bridge.clone();
         let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
@@ -163,7 +173,10 @@ impl Fixture {
             refs.refs.insert(DEVICE.into(), "device".into());
             refs.short_ref(DEVICE)
         };
-        let plugin = ObservationHost::definitions(live.as_ref()).into_iter().find(|tool| tool.name() == "plugin").unwrap();
+        let tools: Vec<_> = ObservationHost::definitions(live.as_ref())
+            .into_iter()
+            .filter(|tool| matches!(tool.name(), "plugin" | "judge" | "tune"))
+            .collect();
         ctx.link().connected_for_test(
             live.clone(),
             &Observation {
@@ -172,7 +185,7 @@ impl Fixture {
                 label: "Guide fixture".into(),
                 context: String::new(),
                 instructions: String::new(),
-                tools: vec![plugin],
+                tools,
                 project: None,
                 set: Some("fixture-set".into()),
                 tracks: None,
@@ -211,7 +224,7 @@ async fn an_instance_guide_reads_only_and_quotes_clean_configured_names() {
             );
             assert_eq!(guide["canTurn"][0]["now"], "1 kHz");
             assert_eq!(guide["parameters"]["canTurn"], 1);
-            assert!(guide.get("byRole").is_none() && guide.get("wavetables").is_none() && guide.get("toTurnMore").is_none());
+            assert!(guide.get("wavetables").is_none() && guide.get("toTurnMore").is_none(), "OTT reads no wavetables: {guide}");
             let text = answer["text"].as_str().unwrap();
             assert!(!text.contains("/Library/") && !text.contains('\u{202e}') && !text.contains('\u{200b}') && !text.contains('\u{e0041}'));
             assert_eq!(answer["project_key"], fixture.ctx.link().project().unwrap().key);
@@ -271,8 +284,12 @@ async fn a_serum_guide_keeps_kumis_recipes_and_the_way_to_turn_more() {
             assert!(guide["toTurnMore"].as_str().unwrap().contains("set_device_details (isEditorOpen)"));
             assert!(guide["beyond"].as_str().unwrap().starts_with("Not host parameters"));
             assert_eq!(guide["parameters"]["notConfigured"], 1);
-            assert!(guide.get("byRole").is_none() && guide.get("wavetables").is_none(), "tune and wavetables aren't offered");
-            assert!(answer["note"].as_str().unwrap().contains("set_device_details (family plugin, isEditorOpen)"));
+            // tune (byRole) and the wavetable writer (wavetables) are offered here too, by their own tools.
+            assert!(guide["byRole"].as_str().unwrap().starts_with("tune takes a role"), "{guide}");
+            assert!(guide["wavetables"].as_str().unwrap().contains("plugin with action wavetable"), "{guide}");
+            let note = answer["note"].as_str().unwrap();
+            assert!(note.contains("set_device_details (family plugin, isEditorOpen)"));
+            assert!(note.contains("byRole's tune is kumi_tune") && note.contains("wavetable is kumi_wavetable"), "{note}");
             fixture.unchanged();
             fixture.close().await;
         })
@@ -315,4 +332,76 @@ async fn bundled_catalog_needs_no_connection_and_preserves_read_only_format_evid
     assert!(ctx.connection().is_err());
     assert_eq!(call(&ctx, json!({"action": "catalog", "plugin": "unknown-plugin"})).await.unwrap_err().code(), "invalid");
     assert!(ctx.history().rows(10).is_empty());
+}
+
+async fn wavetable(ctx: &Ctx, args: Value) -> Result<Value, OpError> {
+    let Value::Object(args) = args else { unreachable!() };
+    (super::super::wavetable::WAVETABLE.run)(ctx, Call { args, host: Host::default(), signal: Signal::new(), progress: Progress::none() })
+        .await
+}
+
+/// `wavetable` through serve: Live's own plug-in tool writes the file, as a new one beside the producer's, and the
+/// answer names it and its folder in words, never a path.
+#[tokio::test(flavor = "current_thread")]
+async fn a_wavetable_is_written_by_lives_own_tool_as_a_new_file_and_said_without_its_path() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new("A Level").await;
+            fixture.bridge.serum.set(true);
+            let folder = fixture.user_library.join("Kumi").join("Wavetables");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("Glass.wav"), b"the producer's own").unwrap();
+            let spec = json!({"name": "Glass", "keyframes": [{"shape": "sine"}, {"harmonics": [1, 0.5, 0.25]}], "count": 4});
+            let made = wavetable(&fixture.ctx, json!({"device_ref": fixture.device, "wavetable": spec})).await.unwrap();
+            assert_eq!(
+                (made["made"].clone(), made["file"].clone(), made["folder"].clone(), made["frames"].clone()),
+                (json!("Glass 2"), json!("Glass 2.wav"), json!("User Library/Kumi/Wavetables"), json!(4)),
+                "{made}"
+            );
+            assert!(made["next"].as_str().unwrap().contains("onto Serum 2's oscillator display"), "{made}");
+            assert!(made["in_hermes"].as_str().unwrap().contains("kumi_change"));
+            assert_eq!(std::fs::read(folder.join("Glass.wav")).unwrap(), b"the producer's own");
+            let written = std::fs::read(folder.join("Glass 2.wav")).unwrap();
+            assert!(written.windows(7).any(|bytes| bytes == b"<!>2048"), "Serum's frame marker");
+            assert!(fixture.ctx.history().rows(10).is_empty(), "a file, not a change in the Set");
+            assert_eq!((super::super::wavetable::WAVETABLE.effect)(&JsonObject::new()), crate::serve::ctx::Effect::LibraryWrite);
+
+            // A held note is a source the runtime resolves, never a path: a path, or a file outside the approved
+            // folders, is refused before Live's tool hears of it.
+            let calls = fixture.bridge.calls.borrow().len();
+            let path = json!({"name": "Cut", "from_audio": {"file": "/private/note.wav"}});
+            assert_eq!(
+                wavetable(&fixture.ctx, json!({"device_ref": fixture.device, "wavetable": path})).await.unwrap_err().code(),
+                "invalid"
+            );
+            let outside = fixture._dir.path().join("note.wav");
+            std::fs::write(&outside, b"RIFF").unwrap();
+            let unapproved = json!({"name": "Cut", "from_audio": {"source": {"file": outside}}});
+            assert!(wavetable(&fixture.ctx, json!({"device_ref": fixture.device, "wavetable": unapproved})).await.is_err());
+            assert_eq!(fixture.bridge.calls.borrow().len(), calls, "nothing reached Live");
+            assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+            fixture.close().await;
+        })
+        .await;
+}
+
+/// `judge` and `tune` through serve reach Live's own listening tools: without a judged run, tune is refused in Kumi's
+/// words and nothing reaches Live or HISTORY.
+#[tokio::test(flavor = "current_thread")]
+async fn judge_and_tune_go_to_lives_own_listening_tools() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::with("Gain", true).await;
+            let project = fixture.ctx.link().project().unwrap();
+            let args = json!({"device": fixture.device, "how": "home", "knobs": ["Gain"], "expected_project_key": project.key, "expected_epoch": project.epoch});
+            let Value::Object(args) = args else { unreachable!() };
+            let call = Call { args, host: Host::default(), signal: Signal::new(), progress: Progress::none() };
+            let tuned = (super::super::judge::TUNE.run)(&fixture.ctx, call).await.unwrap();
+            assert_eq!((tuned["state"].clone(), tuned["code"].clone()), (json!("refused"), json!("refused")), "{tuned}");
+            assert!(tuned["reason"].as_str().unwrap().starts_with("Start a judged run first"), "{tuned}");
+            assert!(fixture.bridge.calls.borrow().is_empty(), "nothing reached Live");
+            fixture.unchanged();
+            fixture.close().await;
+        })
+        .await;
 }

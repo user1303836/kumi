@@ -24,6 +24,10 @@ impl LiveRenderer {
         if let Some(why) = self.no_room_for(rig).await {
             return Err(observation(why));
         }
+        // The plugin host's listening: through Kumi Ears alone, with Live stopped and not recording, a minute at most.
+        if self.restricted() {
+            self.restricted_pass(rig, signal.clone()).await?;
+        }
         if rig.ears.is_some() {
             return self.ears_pass(rig, signal).await;
         }

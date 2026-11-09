@@ -82,3 +82,23 @@ async fn a_pinned_file_is_kept_whole_once_and_a_longer_one_is_stopped() {
     assert!(!to.exists());
     assert!(leftovers(folder.path()).is_empty(), "{:?}", leftovers(folder.path()));
 }
+
+/// (nextest runs each test in its own process, so this one's environment is its own.)
+#[tokio::test]
+async fn a_kumi_that_fetches_no_models_downloads_nothing_and_keeps_what_is_there() {
+    let file = b"a model".to_vec();
+    let folder = tempfile::tempdir().unwrap();
+    let to = folder.path().join("model.onnx");
+    let (url, served) = server(file.clone());
+    std::env::set_var(kumi_ai::models::NO_FETCH, "1");
+    let said = fetch(&pinned(url, &file), &to, "its style model", &|_: &str| {}, &Signal::new()).await;
+    assert_eq!(said, Err("This Kumi doesn't download models, so it goes without its style model.".into()));
+    let unpinned = kumi_ai::models::fetch_unpinned("https://example.invalid/model.onnx", &to, &Signal::new()).await;
+    assert!(unpinned.is_err());
+    assert_eq!(served.load(Ordering::SeqCst), 0, "nothing asked for");
+    assert!(std::fs::read_dir(folder.path()).unwrap().next().is_none(), "nothing written");
+    // A model that's there already is used as it is.
+    std::fs::write(&to, &file).unwrap();
+    assert_eq!(fetch(&pinned(url, &file), &to, "its style model", &|_: &str| {}, &Signal::new()).await, Ok(()));
+    std::env::remove_var(kumi_ai::models::NO_FETCH);
+}

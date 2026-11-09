@@ -103,13 +103,18 @@ impl LiveRenderer {
                     if this.open_ears.is_some() {
                         return Ok(Some(link));
                     }
-                    install_ears(this.user_library.clone().unwrap_or_else(|| user_library(None, None)))
-                        .await
-                        .map_err(|e| RuntimeError::plain(e.to_string()))?;
+                    // The plugin host's listening uses the Kumi Ears its setup installed, and never installs it.
+                    let restricted = matches!(this.listening_policy, ListeningPolicy::Restricted { .. });
+                    if !restricted {
+                        install_ears(this.user_library.clone().unwrap_or_else(|| user_library(None, None)))
+                            .await
+                            .map_err(|e| RuntimeError::plain(e.to_string()))?;
+                    }
                     // Live's browser shows a device it already had within moments, but one just written (or any,
-                    // while Live is still indexing after it opened) can take a while.
-                    let deadline = now_ms() + 20_000;
-                    while now_ms() < deadline {
+                    // while Live is still indexing after it opened) can take a while; one that isn't there, the
+                    // plugin host's listening doesn't wait for: it's looked for once.
+                    let deadline = if restricted { now_ms() } else { now_ms() + 20_000 };
+                    loop {
                         let seen = this
                             .connection()
                             .call(
@@ -121,6 +126,9 @@ impl LiveRenderer {
                             .is_ok_and(|read| read.is_error != Some(true));
                         if seen {
                             return Ok(Some(link));
+                        }
+                        if now_ms() >= deadline {
+                            break;
                         }
                         delay(400., this.connection().lifetime.clone()).await?;
                     }

@@ -1561,26 +1561,35 @@ impl CommandTools {
             let frames =
                 wavetable::build_wavetable(&WavetableSpec { keyframes, count: spec.get("count").and_then(Value::as_f64), from_audio })
                     .await?;
-            let folder = folder_for(adapter.and_then(|a| a.folders.as_ref()).and_then(|f| f.wavetables.as_ref()))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    PathBuf::from(self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None)))
-                        .join("Kumi")
-                        .join("Wavetables")
-                });
+            // The plug-in's own wavetable folder when Kumi knows one for this computer (Vital's), else the User Library's.
+            let own = adapter.zip(folder_for(adapter.and_then(|a| a.folders.as_ref()).and_then(|f| f.wavetables.as_ref())));
+            let folder = own.as_ref().map(|(_, folder)| PathBuf::from(folder)).unwrap_or_else(|| {
+                PathBuf::from(self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None)))
+                    .join("Kumi")
+                    .join("Wavetables")
+            });
             tokio::fs::create_dir_all(&folder).await?;
-            let mut file = folder.join(format!("{label}.wav"));
-            for index in 2..1000 {
-                if !file.exists() {
-                    break;
-                }
-                file = folder.join(format!("{label} {index}.wav"));
-            }
-            wavetable::write_wavetable(&file, &frames).await?;
+            // A new file, never over one: a name another file has, there before or written meanwhile, is passed by.
+            let file = wavetable::write_new_wavetable(&folder, &label, &frames).await?;
             let made = file.file_stem().unwrap().to_string_lossy();
             self.tell(format!("Made the wavetable {made} ({} frames)", frames.len()));
-            let next=adapter.map(|a|format!("It's in {}'s wavetable folder: in its window (set_device_details isEditorOpen opens it), the oscillator's wavetable menu lists it. Picking it there is a click for the producer; say where.",a.name)).unwrap_or_else(||"Load it in the synth's oscillator from that file (most read 2048-sample frames).".into());
-            return Ok(ToolResult::text(stringify(&json!({"made":made,"file":file.to_string_lossy(),"frames":frames.len(),"next":next}))));
+            let (place, next) = match (own, adapter.filter(|a| a.wavetable.is_some())) {
+                (Some((a, _)), _) => (
+                    format!("{}'s wavetable folder", a.name),
+                    format!("It's in {}'s wavetable folder: in its window (set_device_details isEditorOpen opens it), the oscillator's wavetable menu lists it. Picking it there is a click for the producer; say where.", a.name),
+                ),
+                (None, Some(a)) => (
+                    "User Library/Kumi/Wavetables".to_string(),
+                    format!("It's in the User Library's Kumi/Wavetables folder: the producer drags it from Live's browser onto {}'s oscillator display (set_device_details isEditorOpen opens its window); say where.", a.name),
+                ),
+                (None, None) => (
+                    "User Library/Kumi/Wavetables".to_string(),
+                    "It's in the User Library's Kumi/Wavetables folder: load it in the synth's oscillator from that file (most read 2048-sample frames).".to_string(),
+                ),
+            };
+            return Ok(ToolResult::text(stringify(
+                &json!({"made":made,"file":file.to_string_lossy(),"folder":place,"frames":frames.len(),"next":next}),
+            )));
         }
         let read = tools
             .call("live_device_read", args(json!({"deviceRef":long,"what":"parameter-names"})), signal.clone(), CallOptions { host: true })

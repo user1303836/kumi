@@ -304,6 +304,11 @@ impl Bench {
         options.fast = Some(false);
         options.ears = Some(EarsSetup::Disabled);
         options.low_disk = Some(Rc::new(|_, _, _| async { None }.boxed_local()));
+        // The plugin host's listening (`kumi serve`): Kumi Ears alone, never a record pass.
+        if config["policy"] == "plugin" {
+            options.policy =
+                kumi_agent::core::context::HostPolicy::plugin(folder.join("scratch"), folder.join("quarantine"), folder.join("variations"));
+        }
         let ears = Rc::new(EarsReplay {
             calls: case["earsCalls"].as_array().cloned().unwrap_or_default(),
             at: Cell::new(0),
@@ -505,6 +510,31 @@ fn a_pass_records_at_the_tempo_its_rig_opened_with_when_a_look_lost_it() {
         bench.observer.tempo.set(None);
         let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
         eq(&value, &case["results"][1]["value"], "recorded and heard as the case did");
+    });
+}
+
+/// The plugin host's listening never falls back to a record pass: where Kumi Ears can't be opened, the listen is refused
+/// before Kumi adds a track, arms one or records, and says to run setup again.
+#[test]
+fn the_plugin_hosts_listening_without_kumi_ears_is_refused_and_never_records() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let mut case = goal_case(folder.path(), "ears-unopenable", "ears-plg");
+        case["config"]["policy"] = json!("plugin");
+        let bench = Bench::new(&case, "ears-plg", folder.path()).await;
+        let mut goal = None;
+        let said = bench.run(&mut goal, &case["operations"][0], Signal::new()).await;
+        let said = match said {
+            Ok(value) => value.to_string(),
+            Err(error) => error.to_string(),
+        };
+        assert!(said.contains("Kumi Ears device is missing or didn't start") && said.contains("run setup again"), "{said}");
+        let asked = bench.endpoint.calls.get();
+        let made: Vec<&str> = case["calls"].as_array().unwrap()[..asked].iter().map(|call| call["name"].as_str().unwrap()).collect();
+        assert!(
+            !made.iter().any(|name| name.contains("track_add") || name.contains("routing") || name.contains("record")),
+            "nothing added, armed or recorded: {made:?}"
+        );
     });
 }
 

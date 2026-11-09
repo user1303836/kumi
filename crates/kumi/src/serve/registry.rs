@@ -5,7 +5,10 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::{device, generate, library, listen, map, plugin_knowledge, preset, preset_build, read, script, setup, transport, variations};
+use super::{
+    device, generate, judge, library, listen, map, plugin_knowledge, preset, preset_build, read, script, setup, transport, variations,
+    wavetable,
+};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
@@ -22,10 +25,13 @@ pub static OPERATIONS: &[&Operation] = &[
     &library::LIBRARY,
     &map::SOUNDS,
     &listen::LISTEN,
+    &judge::JUDGE,
+    &judge::TUNE,
     &generate::GENERATE,
     &device::DEVICE,
     &preset_build::PRESET_BUILD,
     &preset::PRESET,
+    &wavetable::WAVETABLE,
     &script::SCRIPT,
     &variations::VARIATIONS,
 ];
