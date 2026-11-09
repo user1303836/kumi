@@ -159,7 +159,9 @@ const en = {
     showHidden: 'Show them',
     showHiddenTitle: 'Put the hidden sounds back on the map',
     rescan: 'Rescan…',
-    rescanTitle: 'Put a request to rescan your sample folders in the chat, to send when you like'
+    rescanTitle: 'Put a request to rescan your sample folders in the chat, to send when you like',
+    tiles: 'Tiles',
+    tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it"
   },
   measurements: {
     tab: 'Measurements',
@@ -556,7 +558,9 @@ const ja: Shape<typeof en> = {
     showHidden: '表示する',
     showHiddenTitle: '隠したサウンドをマップに戻します',
     rescan: '再スキャン…',
-    rescanTitle: 'サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で'
+    rescanTitle: 'サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で',
+    tiles: 'タイル',
+    tilesTitle: '各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します'
   },
   measurements: {
     tab: '測定結果',
@@ -948,7 +952,9 @@ const zh: Shape<typeof en> = {
     showHidden: '显示它们',
     showHiddenTitle: '把隐藏的声音放回地图',
     rescan: '重新扫描…',
-    rescanTitle: '把重新扫描采样文件夹的请求放进对话，由你决定何时发送'
+    rescanTitle: '把重新扫描采样文件夹的请求放进对话，由你决定何时发送',
+    tiles: '方块',
+    tilesTitle: '把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近'
   },
   measurements: {
     tab: '测量结果',

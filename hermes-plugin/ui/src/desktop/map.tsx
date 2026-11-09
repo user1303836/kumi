@@ -22,6 +22,8 @@ import { ownerSession } from './pane.tsx'
 
 /** Desktop's own storage key for hover-to-play (on unless the producer turned it off, as native Kumi's `h`). */
 export const HOVER_PLAY = 'mapHover'
+/** Desktop's own storage key for the square-tile view (off until the producer turns it on). */
+export const TILES = 'mapTiles'
 
 // The first sixteen pads as Live's Drum Rack shows them: C1 (note 36) bottom left, D#2 (51) top right.
 const PAD_ROWS = [48, 44, 40, 36].map(start => [start, start + 1, start + 2, start + 3])
@@ -75,6 +77,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   // The sound whose pad picker is open: one at a time, and it closes when another sound is picked.
   const [padsFor, setPadsFor] = useState<null | string>(null)
   const [hover, setHover] = useState(() => ctx.storage.get<boolean>(HOVER_PLAY, true) !== false)
+  const [tiles, setTiles] = useState(() => ctx.storage.get<boolean>(TILES, false) === true)
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
@@ -165,6 +168,12 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           )}
           playing={playing}
           selected={selected}
+          flying={palette.flying}
+          onTiles={on => {
+            ctx.storage.set(TILES, on)
+            setTiles(on)
+          }}
+          tiles={tiles}
           tools={
             <TextButton
               onClick={() => {

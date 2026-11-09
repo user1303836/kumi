@@ -74,6 +74,112 @@ export function buildModel(map: SoundMap | null): MapModel {
   return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells }
 }
 
+/** The square-tile view's grid: `side` × `side` tiles over the map's square, each sound on its own tile near where the
+ *  layout put it. `col`/`row` are each point's tile; `cells` the point on each tile (row-major), -1 for none. */
+export interface TileLayout {
+  side: number
+  col: Int32Array
+  row: Int32Array
+  cells: Int32Array
+}
+
+/** How much bigger than the sounds the tiled area is: a few empty tiles keep the clusters' outlines. */
+const TILE_ROOM = 1.12
+
+/** Snap every point to its own tile, keeping the map's shape: the grid is as fine as the area the map covers needs, and
+ *  each point, from the middle out, takes the free tile nearest its own place. Each row's free tiles are found through
+ *  two union-finds (nearest free to the right, to the left), so a crowded cluster spills into its surroundings at the
+ *  cost of a few rows read, and a 25,000-sound map lays out in a few tens of milliseconds. */
+export function tileLayout(model: MapModel): TileLayout {
+  const points = model.points
+  const count = points.length
+  // The area the map covers, on a coarse grid: the tiles fill about that much of the square.
+  const COARSE = 40
+  const covered = new Uint8Array(COARSE * COARSE)
+  for (const point of points) covered[Math.min(COARSE - 1, Math.floor(point.y * COARSE)) * COARSE + Math.min(COARSE - 1, Math.floor(point.x * COARSE))] = 1
+  const area = Math.max(0.05, covered.reduce((sum, cell) => sum + cell, 0) / (COARSE * COARSE))
+  const side = Math.max(2, Math.ceil(Math.sqrt((Math.max(1, count) * TILE_ROOM) / area)))
+  const span = side + 1
+  // Per row: `right[c]` leads to the first free tile at or after c (side: none); `left[c + 1]` to the last free at or
+  // before c (offset by one, 0: none).
+  const right = new Int32Array(side * span)
+  const left = new Int32Array(side * span)
+  for (let r = 0; r < side; r++) {
+    for (let c = 0; c < span; c++) {
+      right[r * span + c] = c
+      left[r * span + c] = c
+    }
+  }
+  const find = (links: Int32Array, base: number, at: number): number => {
+    let x = at
+    while (links[base + x] !== x) {
+      links[base + x] = links[base + links[base + x]]
+      x = links[base + x]
+    }
+    return x
+  }
+  const col = new Int32Array(count)
+  const row = new Int32Array(count)
+  const cells = new Int32Array(side * side).fill(-1)
+  let cx = 0
+  let cy = 0
+  for (const point of points) {
+    cx += point.x / Math.max(1, count)
+    cy += point.y / Math.max(1, count)
+  }
+  const order = points.map((_, index) => index).sort((a, b) => (points[a].x - cx) ** 2 + (points[a].y - cy) ** 2 - ((points[b].x - cx) ** 2 + (points[b].y - cy) ** 2) || a - b)
+  for (const index of order) {
+    const tx = points[index].x * side - 0.5
+    const ty = points[index].y * side - 0.5
+    const r0 = Math.min(side - 1, Math.max(0, Math.round(ty)))
+    const c0 = Math.min(side - 1, Math.max(0, Math.round(tx)))
+    let best = Infinity
+    let bestRow = -1
+    let bestCol = -1
+    const consider = (r: number, c: number) => {
+      const distance = (c - tx) ** 2 + (r - ty) ** 2
+      if (distance < best) {
+        best = distance
+        bestRow = r
+        bestCol = c
+      }
+    }
+    for (let dy = 0; dy < side; dy++) {
+      const near = Math.max(0, dy - 0.5)
+      if (near * near >= best) break
+      for (const r of dy === 0 ? [r0] : [r0 - dy, r0 + dy]) {
+        if (r < 0 || r >= side) continue
+        const base = r * span
+        const after = find(right, base, c0)
+        if (after < side) consider(r, after)
+        const before = find(left, base, c0 + 1) - 1
+        if (before >= 0) consider(r, before)
+      }
+    }
+    // The grid always has room: side² ≥ count by construction.
+    col[index] = bestCol
+    row[index] = bestRow
+    cells[bestRow * side + bestCol] = index
+    right[bestRow * span + bestCol] = bestCol + 1
+    left[bestRow * span + bestCol + 1] = bestCol
+  }
+  return { side, col, row, cells }
+}
+
+/** The map as the tile view draws and picks it: every point at its tile's centre. */
+export function tileModel(model: MapModel, layout: TileLayout): MapModel {
+  const cells = new Map<number, number[]>()
+  const points = model.points.map((point, index) => {
+    const tiled = { ...point, x: (layout.col[index] + 0.5) / layout.side, y: (layout.row[index] + 0.5) / layout.side }
+    const cell = cellOf(tiled.x, tiled.y)
+    const list = cells.get(cell)
+    if (list) list.push(index)
+    else cells.set(cell, [index])
+    return tiled
+  })
+  return { ...model, points, cells }
+}
+
 /** The view that shows the whole map in a `width` × `height` canvas, with a margin. */
 export function fitView(width: number, height: number, margin = 16): MapViewport {
   const size = Math.max(1, Math.min(width, height) - 2 * margin)

@@ -20,6 +20,8 @@ export interface PaletteMap {
   onHover: (id: string | null) => void
   /** Gather sounds into the current palette (native's Enter on the map), then pick nothing. */
   gather: (ids: string[]) => Promise<void>
+  /** The sounds of the last gather, flying from the map into the dock (the map's `flying`). */
+  flying: { ids: string[]; at: number } | null
 }
 
 /** The picks, the marks and the plays for a map. `hover` turns hover-to-play on; `other` hears a play's failure that
@@ -37,6 +39,7 @@ export function usePaletteMap(
   const picked = picks.revision === revision ? picks.ids : new Set<string>()
   useEffect(() => setPicks(current => (current.revision === revision ? current : { revision, ids: new Set() })), [revision])
   const marked = useMemo(() => marksOf(state.palette, revision), [state.palette, revision])
+  const [flying, setFlying] = useState<{ ids: string[]; at: number } | null>(null)
 
   const play = (id: string, preview = false) => {
     audition.play(id, preview ? { preview: PREVIEW_SECONDS } : {}).catch(error => {
@@ -56,6 +59,7 @@ export function usePaletteMap(
     marked,
     play,
     onHover,
+    flying,
     onPicked: (ids, how) =>
       setPicks(current => {
         const base = current.revision === revision ? current.ids : new Set<string>()
@@ -70,6 +74,8 @@ export function usePaletteMap(
     gather: async ids => {
       const { ids: sent, dropped } = gatherIds(ids)
       if (sent.length === 0) return
+      // The sounds take off at once; they land as the palette's answer comes back.
+      setFlying({ ids: sent.filter(id => !marked.has(id)), at: performance.now() })
       const done = await store.paletteDo({ action: 'gather', sound_ids: sent }, dropped > 0 ? t('dock.firstOnly', sent.length + dropped) : undefined)
       if (done) setPicks({ revision, ids: new Set() })
     }
