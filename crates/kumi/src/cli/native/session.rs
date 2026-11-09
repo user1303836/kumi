@@ -812,6 +812,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
     options.web = true;
     options.library = Some(library.clone());
     options.preset_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&env)).join("presets"));
+    options.design_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&env)).join("audio").join("design"));
     options.music = Some(music.clone());
     // /model, /effort, /fast, /login and /logout ask the session, which has the models (the kernel's come from them too).
     options.models = Some(models.clone() as Rc<dyn crate::models::ModelController>);
@@ -1249,6 +1250,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.willington = provider.toggle(&io.env);
         // /map's points play through Kumi's player (Space).
         options.player = Some(Rc::new(kumi_media::audio::player::Player::new()));
+        // PALETTE's MAKE rows and d on the map keep the sounds they make here.
+        options.design_dir = Some(std::path::Path::new(&crate::config::kumi_dir(&io.env)).join("audio").join("design"));
         options.voice = Some(Rc::new(create_voice_control(VoiceControlOptions {
             env: Some(io.env.clone()),
             tools_dir,

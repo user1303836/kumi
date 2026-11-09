@@ -176,6 +176,7 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
     }
     if has.can.palette {
         pane.push(row("space  x", "On a sound in PALETTE: play it, or take it out"));
+        pane.push(row("space  r  k  x", "On a sound made in PALETTE (MAKE's rows make one): play it, make another, keep it, let it go"));
     }
     pane.extend([
         // So do the tree's.

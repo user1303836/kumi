@@ -309,6 +309,7 @@ impl Session {
         // Reuse the conversation's preset folder and discovery cache. Writing a preset file
         // works away from the DAW; preparing, loading and auditioning it stay in the foreground.
         tools.push(self.0.plugins.clone());
+        tools.extend(self.0.design_tool.clone());
         if let Some(service) = self.audio_service() {
             tools.push(crate::core::audio_tools::tool(service, self.audio_notice()));
         }

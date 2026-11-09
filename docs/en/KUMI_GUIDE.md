@@ -1097,6 +1097,31 @@ a reference, sounds or values, it goes by those instead.
   map, never by a file's path. `/map close` closes it, and so does quitting
   Kumi; over SSH, Kumi says how to reach it.
 
+## Making sounds from your sounds
+
+Kumi makes a new sound from two to sixteen of yours: on PALETTE (MAKE), on `/map`
+(pick sounds, then `d` and a way's key), or when you ask ("cross these three
+kicks", "make a texture from my palette", "stack the clap and the snare").
+
+- **Cross** turns them into one sound. **Blend** morphs them into one body (their
+  spectra, aligned on the attack). **Attack** puts one's transient on a blend of
+  the rest. **Resonate** rings half of them through the other half (as a body, or
+  tuned to its partials). **Modulate** has them modulate each other: phase, ring,
+  FM, filters and gain that follow one another, one's spectrum on another.
+- **Fuse** turns them into something that moves between them. **Texture** is a
+  loop that drifts through them; **Loop** slices their hits and plays them as a
+  1-4 bar beat at a tempo you give (120 BPM unless you say); **Smear** stretches
+  them 4-16 times into a long diffuse wash.
+- **Stack** prints two to eight as one hit: lined up on the attack, matched in
+  loudness, each cut so it doesn't mask the others.
+- **Another variation.** Every sound comes from a seed: `r` (or "another one")
+  makes a variation, and the same seed makes the same sound again. Kumi says how
+  each was made in a line ("Blend of 3: 45% Kick 02, 35% Tom 4, 20% Clap").
+- **Where they go.** Into `~/.kumi/audio/design`, as 48 kHz 24-bit WAV at -1 dBTP.
+  `k` (or "keep it") puts one in your palette, where Space plays it and "Load as a
+  kit" puts it on pads. Nothing changes in your project until you ask.
+- Kumi reads up to 30 seconds of each sound.
+
 ## What Kumi remembers
 
 Everything Kumi keeps shows as it happens, as a line in the conversation and a

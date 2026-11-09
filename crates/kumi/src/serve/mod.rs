@@ -36,6 +36,7 @@ pub mod variations;
 pub mod wavetable;
 
 mod core;
+mod design;
 mod generate;
 mod generate_ledger;
 mod generate_output;

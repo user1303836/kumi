@@ -15,6 +15,7 @@ members = [
     "crates/kumi-types",
     "crates/kumi-net",
     "crates/kumi-media",
+    "crates/kumi-design",
     "crates/kumi-ai",
     "crates/kumi-web",
     "crates/kumi-library",
@@ -46,6 +47,7 @@ kumi-testkit = { path = "crates/kumi-testkit" }
 kumi-types = { path = "crates/kumi-types" }
 kumi-net = { path = "crates/kumi-net" }
 kumi-media = { path = "crates/kumi-media" }
+kumi-design = { path = "crates/kumi-design" }
 kumi-ai = { path = "crates/kumi-ai" }
 kumi-web = { path = "crates/kumi-web" }
 kumi-library = { path = "crates/kumi-library" }
@@ -161,6 +163,10 @@ opt-level = 3
 
 # And the map's layout: t-SNE over thousands of points in its tests takes seconds optimized.
 [profile.dev.package.kumi-layout]
+opt-level = 3
+
+# And sound design: blending, resonating and stretching a group of samples is seconds optimized, minutes not.
+[profile.dev.package.kumi-design]
 opt-level = 3
 
 [profile.release]

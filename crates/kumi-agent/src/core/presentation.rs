@@ -51,6 +51,7 @@ fn own(profile: &DawProfile, tool: &str) -> Option<(String, Option<String>, Opti
         "run_recipe" => said("ran a recipe", Some("running a recipe"), None),
         "save_recipe" => said("saved a recipe", None, None),
         "find_sounds" => said("looked for sounds", Some("looking for sounds"), Some(Search)),
+        "design_sound" => said("designed a sound", Some("designing a sound"), None),
         "find_presets" => said("looked for presets", Some("looking for presets"), Some(Search)),
         "my_sets" => Some((format!("looked through your {places}"), Some(format!("looking through your {places}")), Some(Search))),
         "watch_video" => said("watched a video", Some("watching the video"), Some(Watch)),

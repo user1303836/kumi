@@ -3,6 +3,7 @@ pub use helpers::*;
 mod away;
 mod complete;
 mod composer;
+mod design;
 mod details;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
 mod audio;
@@ -132,6 +133,8 @@ pub struct TuiOptions {
     pub willington: Option<kumi_daw::provider::Toggle>,
     /// What plays a point of the map.
     pub player: Option<Rc<kumi_media::audio::player::Player>>,
+    /// Where the sounds made from the palette or the map's picks (cross, fuse, stack) are kept; none makes none.
+    pub design_dir: Option<std::path::PathBuf>,
     /// Whether the map's points play as the mouse comes to them, remembered; they do when None.
     pub map_hover: Option<MapHover>,
     /// What's new since the producer last opened Kumi, shown once as it starts.
@@ -249,6 +252,7 @@ impl TuiOptions {
             connect_live: None,
             willington: None,
             player: None,
+            design_dir: None,
             map_hover: None,
             whats_new: None,
             terminal: None,
@@ -591,6 +595,11 @@ struct State {
     /// the width they were made for, until it changes.
     palette: Option<kumi_agent::core::palette::PaletteView>,
     palette_rows: Option<(i32, Rc<[TabRow]>)>,
+    /// The sounds made this run (cross, fuse, stack), the newest first, PALETTE's MADE rows; the last number given one;
+    /// and the one the map made last, which its r, k and p mean.
+    designs: Vec<design::Design>,
+    design_seq: u64,
+    map_design: Option<u64>,
     /// The producer put the pane away (ctrl+\): no side pane at full width, no strip below 24 rows, and the drawer left
     /// folded until they open it.
     pane_away: bool,
@@ -770,6 +779,9 @@ impl State {
             job_status_sent: std::collections::BTreeMap::new(),
             palette: None,
             palette_rows: None,
+            designs: vec![],
+            design_seq: 0,
+            map_design: None,
             pane_away: false,
             drawer: drawer::Drawer::default(),
             toast: None,

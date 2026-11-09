@@ -1379,6 +1379,7 @@ dependencies = [
  "kumi-daw-reaper",
  "kumi-daw-renoise",
  "kumi-daw-soundcraft",
+ "kumi-design",
  "kumi-library",
  "kumi-listening",
  "kumi-media",
@@ -1420,6 +1421,7 @@ dependencies = [
  "indexmap",
  "kumi-ai",
  "kumi-common",
+ "kumi-design",
  "kumi-genexpr",
  "kumi-layout",
  "kumi-library",
@@ -1635,6 +1637,19 @@ dependencies = [
  "kumi-types",
  "regex",
  "serde_json",
+]
+
+[[package]]
+name = "kumi-design"
+version = "0.1.0"
+dependencies = [
+ "kumi-common",
+ "kumi-media",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

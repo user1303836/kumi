@@ -14,6 +14,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use kumi_design::{Mode, Op};
+
 use super::keymap::Keymap;
 use super::pictures::{cells, kitty, scene::Shape, Graphics, Raster, Scene};
 use super::render::Cursor;
@@ -95,6 +97,18 @@ pub enum Asked {
     HoverPlays(bool),
     /// These points into the session's palette (Enter: the ones picked, or the one chosen).
     Gather(Vec<Gathered>),
+    /// d and a way's key: a sound made from these files (the picks, as many as the way takes).
+    Design {
+        op: Op,
+        mode: Option<Mode>,
+        files: Vec<String>,
+    },
+    /// r, once a sound was made here: another variation of it.
+    Reroll,
+    /// k: the sound made into the palette.
+    Keep,
+    /// p: the sound made, played again.
+    PlayMade,
     Close,
 }
 
@@ -792,6 +806,11 @@ pub struct MapView {
     /// Enter put in only the first MOST_GATHERED.
     told: Option<String>,
     capped: Option<usize>,
+    /// Whether d makes a sound from the picks (this Kumi keeps a folder for them); d was pressed and a way's key is
+    /// next; and what the sound made here last is, said under the map (its recipe), which r, k and p work on.
+    designs: bool,
+    making: bool,
+    made: Option<String>,
     /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
     nearest: [Option<Rc<Vec<u32>>>; 2],
     /// The keys the footer names: Kumi's own, or the app's (`keyed`).
@@ -828,6 +847,9 @@ impl MapView {
             boxed: None,
             told: None,
             capped: None,
+            designs: false,
+            making: false,
+            made: None,
             nearest: [None, None],
             keymap: Keymap::default(),
         }
@@ -843,6 +865,35 @@ impl MapView {
     pub fn gathering(mut self, on: bool) -> MapView {
         self.gathers = on;
         self
+    }
+
+    /// The same map, d making a sound from the picks.
+    pub fn designing(mut self, on: bool) -> MapView {
+        self.designs = on;
+        self
+    }
+
+    /// What the sound made from the picks is (its recipe), or how its making went, said under the map.
+    pub fn made(&mut self, words: Option<String>) {
+        self.made = words;
+    }
+
+    /// d: the picked sounds (two or more, on the sounds' map) wait for a way's key.
+    fn design_menu(&mut self) -> Asked {
+        if self.tab != 0 {
+            self.told = Some("Sounds are made from sounds: tab goes to them.".into());
+        } else if self.views[0].picked.len() < kumi_design::MIN_SOURCES {
+            self.told = Some("Pick two or more sounds to make one from them (x, or drag a box).".into());
+        } else {
+            self.making = true;
+        }
+        Asked::Nothing
+    }
+
+    /// The picked sounds' files, at most `most`.
+    fn picked_files(&self, most: usize) -> Vec<String> {
+        let Some(data) = self.data.as_ref() else { return vec![] };
+        self.views[0].picked.iter().take(most).map(|at| data.sounds.points[*at as usize].path.clone()).collect()
     }
 
     /// The session's palette's files, and what a loose one brings in (by their paths), marked on the map.
@@ -1085,8 +1136,20 @@ impl MapView {
     pub fn act(&mut self, ids: Vec<&'static str>) -> Asked {
         self.told = None;
         let picks = self.data.is_some() && self.graphics != Graphics::Words;
+        // A way's key comes right after d, or d is let go.
+        let making = std::mem::take(&mut self.making);
         for id in ids {
             let (way, pan) = match id {
+                "map.let-go" if making => return Asked::Nothing,
+                "map.design" if picks && self.designs => return self.design_menu(),
+                id if making && id.starts_with("map.make-") => {
+                    let Some((op, mode)) = way_of(id) else { continue };
+                    let files = self.picked_files(op.most_sources());
+                    return Asked::Design { op, mode, files };
+                }
+                "map.reroll" if !making && self.made.is_some() => return Asked::Reroll,
+                "map.keep" if !making && self.made.is_some() => return Asked::Keep,
+                "map.again" if self.made.is_some() => return Asked::PlayMade,
                 "map.filter-erase" => {
                     let Some(prompt) = self.prompt.as_mut() else { continue };
                     prompt.pop();
@@ -1696,7 +1759,7 @@ impl MapView {
             screen.put(x + 2, y, &truncate(said, width - x - 2), &Style::fg(palette::WARN));
         }
         let y = y + 1;
-        if let Some(told) = &self.told {
+        if let Some(told) = self.told.as_ref().or(self.made.as_ref()) {
             screen.put(1, y, &truncate(told, width), &Style::fg(palette::ACCENT));
         } else if self.graphics != Graphics::Words {
             let view = &self.views[self.tab];
@@ -1721,6 +1784,15 @@ impl MapView {
         }
         let other = if self.tab == 0 { "songs" } else { "sounds" };
         let picked = self.views.get(self.tab).map_or(0, |view| view.picked.len());
+        if self.making {
+            let making = format!("make from {} picks:", picked.min(kumi_design::MAX_SOURCES));
+            let mut parts: Vec<(&[&str], &str, &str)> = vec![(&[], "", &making)];
+            parts.extend(MAKES.iter().map(|(id, words)| (std::slice::from_ref(id), "", *words)));
+            parts.push((&["map.let-go"], "", "cancels"));
+            let keys = self.keymap.hint_written(&parts);
+            screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
+            return None;
+        }
         let gather: (&[&str], &str, &str) = (&["map.gather"], "", "adds to the palette");
         let mut parts: Vec<(&[&str], &str, &str)> = vec![];
         let (adds, hover);
@@ -1736,6 +1808,9 @@ impl MapView {
         } else if picked > 0 && self.gathers {
             adds = format!("adds {} to the palette", if picked == 1 { "1 point".into() } else { format!("{} points", grouped(picked)) });
             parts.push((&["map.gather"], "", &adds));
+            if self.designs && self.tab == 0 && picked >= kumi_design::MIN_SOURCES {
+                parts.push((&["map.design"], "", "makes a sound of them"));
+            }
             parts.push((&[], "", "drag picks (ctrl adds)"));
             parts.push((&["map.pick"], "", "picks"));
             parts.push((&["map.pick-all"], "", "all"));
@@ -1743,6 +1818,11 @@ impl MapView {
             parts.push((&["map.let-go"], "", "lets go"));
         } else {
             hover = format!("hover {}", if self.hover { "plays" } else { "quiet" });
+            if self.made.is_some() {
+                parts.push((&["map.reroll"], "", "another"));
+                parts.push((&["map.keep"], "", "keeps it"));
+                parts.push((&["map.again"], "", "plays it"));
+            }
             parts.push((&["map.up", "map.down", "map.left", "map.right"], "arrows", "move"));
             parts.push((&["map.pan-up", "map.pan-down", "map.pan-left", "map.pan-right"], "shift+arrows", "pan"));
             parts.push((&["map.zoom-in", "map.zoom-out"], "+ −", "zoom"));
@@ -1765,6 +1845,33 @@ impl MapView {
         screen.put(1, y, &truncate(&keys, screen.width - 2), &Style::fg(palette::FAINT));
         None
     }
+}
+
+/// The ways to make a sound after d, by their keys' actions, as the footer names them.
+const MAKES: [(&str, &str); 8] = [
+    ("map.make-blend", "blend"),
+    ("map.make-attack", "attack"),
+    ("map.make-resonate", "resonate"),
+    ("map.make-modulate", "modulate"),
+    ("map.make-texture", "texture"),
+    ("map.make-loop", "loop"),
+    ("map.make-smear", "smear"),
+    ("map.make-stack", "stack"),
+];
+
+/// The op and mode a way's key makes.
+fn way_of(id: &str) -> Option<(Op, Option<Mode>)> {
+    Some(match id {
+        "map.make-blend" => (Op::Cross, Some(Mode::Blend)),
+        "map.make-attack" => (Op::Cross, Some(Mode::Attack)),
+        "map.make-resonate" => (Op::Cross, Some(Mode::Resonate)),
+        "map.make-modulate" => (Op::Cross, Some(Mode::Modulate)),
+        "map.make-texture" => (Op::Fuse, Some(Mode::Texture)),
+        "map.make-loop" => (Op::Fuse, Some(Mode::Loop)),
+        "map.make-smear" => (Op::Fuse, Some(Mode::Smear)),
+        "map.make-stack" => (Op::Stack, None),
+        _ => return None,
+    })
 }
 
 /// The layer's groups that have points, the biggest first.
