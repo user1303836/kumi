@@ -1,6 +1,6 @@
 name: kumi
 # The Kumi release the plugin pins (kumi_release.json): the pin pull request sets both.
-version: "1.24.75"
+version: "1.24.76"
 description: >-
   Kumi for Hermes: Hermes reads your Ableton Live, REAPER or Renoise project and makes the changes you ask for,
   each kept in Kumi's HISTORY and undoable while Kumi runs. Kumi measures audio on your computer and maps the
