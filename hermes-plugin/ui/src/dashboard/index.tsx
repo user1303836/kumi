@@ -3,7 +3,7 @@
 // in the DAW: a row's request can be copied, to paste into a chat. It does only what changes no project, as Desktop
 // does: edits the palette and the sounds hidden from the map, and makes new sounds (the Make panel).
 import { T } from '@kumi/theme'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { useRequest } from '../shared/design.ts'
@@ -87,6 +87,8 @@ function Dashboard() {
   const [tiles, setTiles] = useState(() => globalThis.localStorage?.getItem(TILES) === 'on')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
+  // The dock's box: the Make panel flies a kept sound into it.
+  const dock = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     void store.refreshStatus()
@@ -233,6 +235,7 @@ function Dashboard() {
             audio={id => audition.url(id)}
             groups={state.map?.groups}
             kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+            landing={dock}
             make={palette.makeFromPalette}
             onDo={action => store.paletteDo(action)}
             onPlay={id => palette.play(id)}
@@ -248,6 +251,7 @@ function Dashboard() {
           <div style={{ gridColumn: 2, minWidth: 0 }}>
             <MakePanel
               colorOf={palette.colorOf}
+              dock={dock}
               inline
               kept={palette.kept}
               onClose={palette.closeMake}

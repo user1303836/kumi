@@ -3759,7 +3759,7 @@ import { host as host4 } from "@hermes/plugin-sdk";
 import { useEffect as useEffect9, useRef as useRef5, useState as useState8 } from "react";
 
 // src/shared/MakePanel.tsx
-import { useEffect as useEffect5, useMemo, useRef as useRef2, useState as useState4 } from "react";
+import { useEffect as useEffect5, useLayoutEffect, useMemo, useRef as useRef2, useState as useState4 } from "react";
 import { Fragment as Fragment4, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var GLYPHS = {
   blend: /* @__PURE__ */ jsxs11(Fragment4, { children: [
@@ -3794,39 +3794,52 @@ var GLYPHS = {
 function Glyph({ card }) {
   return /* @__PURE__ */ jsx11("svg", { "aria-hidden": true, height: "20", style: { flex: "none" }, viewBox: "0 0 28 20", width: "28", children: GLYPHS[card] });
 }
-function flyToDock(from) {
-  const dock = document.querySelector("[data-kumi-dock-chips]") ?? document.querySelector("[data-kumi-dock]");
-  if (!from || !dock || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const start = from.getBoundingClientRect();
-  const end = dock.getBoundingClientRect();
-  const canvas = from.querySelector("canvas");
-  const ghost = document.createElement("div");
-  ghost.setAttribute("aria-hidden", "true");
-  Object.assign(ghost.style, {
-    position: "fixed",
-    left: `${start.left}px`,
-    top: `${start.top}px`,
-    width: `${start.width}px`,
-    height: `${start.height}px`,
-    borderRadius: "8px",
-    pointerEvents: "none",
-    zIndex: "2147483000",
-    background: canvas ? `center / 100% 100% no-repeat url(${canvas.toDataURL()})` : T.accent,
-    boxShadow: `0 10px 28px -10px ${T.accent}`
-  });
-  document.body.appendChild(ghost);
-  const dx = end.left + Math.min(64, end.width / 2) - (start.left + start.width / 2);
-  const dy = end.top + Math.min(14, end.height / 2) - (start.top + start.height / 2);
-  const flight = ghost.animate(
-    [
-      { transform: "translate(0, 0) scale(1)", opacity: 1 },
-      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
-      { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
-    ],
-    { duration: 640, easing: "cubic-bezier(.35,.6,.4,1)" }
+function Flying({ flight, onDone }) {
+  const ghost = useRef2(null);
+  const done = useRef2(onDone);
+  done.current = onDone;
+  const [origin, setOrigin] = useState4(null);
+  useLayoutEffect(() => {
+    const box = ghost.current?.getBoundingClientRect();
+    setOrigin(box ? { left: box.left, top: box.top } : null);
+  }, []);
+  useEffect5(() => {
+    const element = ghost.current;
+    if (!element || !origin) return;
+    const { from, to } = flight;
+    const dx = to.left + Math.min(64, to.width / 2) - (from.left + from.width / 2);
+    const dy = to.bottom - Math.min(22, to.height / 2) - (from.top + from.height / 2);
+    const animation = element.animate(
+      [
+        { transform: "translate(0, 0) scale(1)", opacity: 1 },
+        { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
+        { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
+      ],
+      { duration: 640, easing: "cubic-bezier(.35,.6,.4,1)", fill: "forwards" }
+    );
+    animation.onfinish = () => done.current();
+    return () => animation.cancel();
+  }, [origin, flight]);
+  return /* @__PURE__ */ jsx11(
+    "div",
+    {
+      "aria-hidden": true,
+      ref: ghost,
+      style: {
+        position: "fixed",
+        left: origin ? flight.from.left - origin.left : 0,
+        top: origin ? flight.from.top - origin.top : 0,
+        width: flight.from.width,
+        height: flight.from.height,
+        borderRadius: 8,
+        pointerEvents: "none",
+        zIndex: 20,
+        visibility: origin ? "visible" : "hidden",
+        background: flight.image ? `center / 100% 100% no-repeat url(${flight.image})` : T.accent,
+        boxShadow: `0 10px 28px -10px ${T.accent}`
+      }
+    }
   );
-  flight.onfinish = () => ghost.remove();
-  flight.oncancel = () => ghost.remove();
 }
 function Wave2({ peaks, playing, duration }) {
   const canvas = useRef2(null);
@@ -3875,7 +3888,7 @@ function Wave2({ peaks, playing, duration }) {
     }
   }, [peaks, width]);
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1e3 / duration) : null;
-  return /* @__PURE__ */ jsxs11("div", { "data-wave": "", ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
+  return /* @__PURE__ */ jsxs11("div", { ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
     /* @__PURE__ */ jsx11(
       "canvas",
       {
@@ -3926,7 +3939,7 @@ function OptionSlider({ name, label, value, onChange }) {
     )
   ] });
 }
-function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false }) {
+function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }) {
   const t = useT();
   const [cardKey, setCardKey] = useState4("blend");
   const [options, setOptions] = useState4(() => typeof tempo === "number" && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {});
@@ -3936,13 +3949,21 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const [shown, setShown] = useState4({});
   const [fresh, setFresh] = useState4(() => /* @__PURE__ */ new Set());
   const [arrived, setArrived] = useState4(null);
-  const list = useRef2(null);
+  const cards = useRef2(/* @__PURE__ */ new Map());
   useEffect5(() => {
     if (!arrived) return;
-    const take = list.current?.querySelector(`[data-made="${arrived}"]`);
-    take?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    cards.current.get(arrived)?.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     setArrived(null);
   }, [arrived, results]);
+  const [flights, setFlights] = useState4([]);
+  const flightKey = useRef2(0);
+  const fly = (id) => {
+    const canvas = cards.current.get(id)?.querySelector("canvas");
+    const to = dock?.current?.getBoundingClientRect();
+    if (!canvas || !to || to.width === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const key = ++flightKey.current;
+    setFlights((current) => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }]);
+  };
   const [open, setOpen] = useState4(false);
   useEffect5(() => {
     const frame2 = requestAnimationFrame(() => setOpen(true));
@@ -4124,7 +4145,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
             note && /* @__PURE__ */ jsx11("span", { style: S.faint, children: note.key === "make.needTwo" ? t(note.key, note.least) : t(note.key, note.most, note.of) }),
             /* @__PURE__ */ jsx11("span", { "aria-live": "polite", style: error ? { ...S.faint, color: T.warn, flex: "1 1 14rem" } : S.hidden, children: error ?? "" })
           ] }),
-          takes.length > 0 && /* @__PURE__ */ jsx11("div", { "aria-label": t("make.results"), ref: list, role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
+          takes.length > 0 && /* @__PURE__ */ jsx11("div", { "aria-label": t("make.results"), role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
             const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1);
             const result = take.results[at];
             const isPlaying = playing === result.artifact_id;
@@ -4133,7 +4154,10 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
               "div",
               {
                 className: fresh.has(result.artifact_id) ? "kumi-pop" : void 0,
-                "data-made": result.artifact_id,
+                ref: (element) => {
+                  if (element) cards.current.set(result.artifact_id, element);
+                  else cards.current.delete(result.artifact_id);
+                },
                 role: "listitem",
                 style: { display: "flex", flexDirection: "column", gap: 4, padding: "8px 10px", borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: "transparent" },
                 children: [
@@ -4163,7 +4187,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                       {
                         disabled: inPalette,
                         onClick: () => {
-                          flyToDock(list.current?.querySelector(`[data-made="${result.artifact_id}"] [data-wave]`));
+                          fly(result.artifact_id);
                           void onKeep(result);
                         },
                         pressed: inPalette,
@@ -4179,7 +4203,8 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
             );
           }) }),
           takes.length === 0 && results !== null && /* @__PURE__ */ jsx11("span", { style: S.faint, children: t("make.none") })
-        ] })
+        ] }),
+        flights.map((flight) => /* @__PURE__ */ jsx11(Flying, { flight, onDone: () => setFlights((current) => current.filter((other) => other.key !== flight.key)) }, flight.key))
       ]
     }
   );
@@ -5374,7 +5399,7 @@ function NameField({ initial, label, onDone }) {
     }
   );
 }
-function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make }) {
+function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make, landing }) {
   const t = useT();
   const current = palette?.current ?? null;
   const [editing, setEditing] = useState6(null);
@@ -5475,7 +5500,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     current && current.items.length > 0 && kit?.(current),
     current && !forgetting && /* @__PURE__ */ jsx13(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") })
   ] });
-  return /* @__PURE__ */ jsxs13("section", { "aria-label": t("dock.title"), "data-kumi-dock": "", style: { display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", borderTop: `1px solid ${T.border}`, color: T.text }, children: [
+  return /* @__PURE__ */ jsxs13("section", { "aria-label": t("dock.title"), ref: landing, style: { display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", borderTop: `1px solid ${T.border}`, color: T.text }, children: [
     header,
     current && forgetting && /* @__PURE__ */ jsxs13("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
       /* @__PURE__ */ jsx13("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
@@ -5492,7 +5517,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       ),
       /* @__PURE__ */ jsx13(TextButton, { onClick: () => setForgetting(false), children: t("dock.keep") })
     ] }),
-    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), "data-kumi-dock-chips": "", role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
+    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
       items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx13(
         Chip2,
         {
@@ -5645,6 +5670,7 @@ function MapWorkspace({ ctx, store, audition }) {
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
     left: (id) => setSelected((current) => current === id ? null : current)
   });
+  const dock = useRef5(null);
   const session = ownerSession(state);
   const map = state.map;
   const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : t("map.empty");
@@ -5727,6 +5753,7 @@ function MapWorkspace({ ctx, store, audition }) {
         MakePanel,
         {
           colorOf: palette.colorOf,
+          dock,
           kept: palette.kept,
           onClose: palette.closeMake,
           onKeep: palette.keep,
@@ -5750,6 +5777,7 @@ function MapWorkspace({ ctx, store, audition }) {
         audio: (id) => audition.url(id),
         groups: map?.groups,
         kit: (current) => /* @__PURE__ */ jsx14(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
+        landing: dock,
         make: palette.makeFromPalette,
         onDo: (action) => store.paletteDo(action),
         onPlay: (id) => palette.play(id),

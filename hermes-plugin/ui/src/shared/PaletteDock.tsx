@@ -5,7 +5,7 @@
 // `kumi_palette` reads and edits the same palette. Both UI halves use it: what "Use as kit" does comes from `kit`, and
 // "Make…" from `make`.
 import { T } from '@kumi/theme'
-import type { DragEvent, KeyboardEvent, ReactNode } from 'react'
+import type { DragEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num } from './format.ts'
@@ -38,6 +38,8 @@ export interface PaletteDockProps {
   kit?: (palette: PaletteView) => ReactNode
   /** "Make…": opens the Make panel on the palette's sounds. */
   make?: (palette: PaletteView) => void
+  /** The dock's own box, for the Make panel to fly a kept sound into. */
+  landing?: RefObject<HTMLElement | null>
 }
 
 // Thumbnails by id, shared by every dock in the window: decoded once, one at a time, kept for the session.
@@ -269,7 +271,7 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make, landing }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
@@ -406,7 +408,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   )
 
   return (
-    <section aria-label={t('dock.title')} data-kumi-dock="" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
+    <section aria-label={t('dock.title')} ref={landing} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
       {header}
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
@@ -424,7 +426,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </div>
       )}
       {open && current && items.length > 0 && (
-        <div aria-label={t('dock.sounds')} data-kumi-dock-chips="" role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
+        <div aria-label={t('dock.sounds')} role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip
               audio={audio}

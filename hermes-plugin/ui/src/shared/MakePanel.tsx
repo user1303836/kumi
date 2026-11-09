@@ -1,12 +1,13 @@
 // The Make panel: a new sound from the picked sounds or the palette, by Kumi's sound-design engine. A card per way of
 // making it (cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack), a few options the card
 // takes (the rest come from the seed), and the results as playable waveforms: Reroll makes the same take again with
-// another seed and keeps every variation, Keep puts one in the palette, Use puts a request for it in the chat. Making
-// a sound changes no project, so it runs at once (`POST /design`). Both UI halves use it; what Use does comes from
-// `use`.
+// another seed and keeps every variation, Keep puts one in the palette (its waveform flies into the dock), Use puts a
+// request for it in the chat. Making a sound changes no project, so it runs at once (`POST /design`). Both UI halves
+// use it; what Use does comes from `use`. Everything it draws is its own: it reads only its own elements and the
+// dock's, through refs, never the app's markup (catalog rule 8).
 import { T } from '@kumi/theme'
-import type { ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { CARDS, cardNote, type DesignCard, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, mostFor, RANGES, requestFor, requestOf, reroll, resultName, takeKey } from './design.ts'
 import { clean, num, seconds } from './format.ts'
@@ -35,6 +36,17 @@ export interface MakePanelProps {
   /** A card in the page's flow (the dashboard's, under the map's card; its page scrolls), rather than floating over the
    *  map's lower part (Desktop's pane, where the dock under the map stays in view). */
   inline?: boolean
+  /** The palette dock (its `landing`), where a kept sound's waveform flies to. */
+  dock?: RefObject<HTMLElement | null>
+}
+
+/** A kept sound's flight: from its waveform's box to the dock's, as the viewport saw them when Keep was pressed, and
+ *  the waveform as drawn then. */
+interface Flight {
+  key: number
+  from: DOMRect
+  to: DOMRect
+  image: string | null
 }
 
 // Each card's little picture of what it does, drawn in the card's colour: two sounds overlapping, a transient on a
@@ -90,42 +102,57 @@ function Glyph({ card }: { card: string }) {
   )
 }
 
-/** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock, shrinking as it
- *  goes, while the palette's answer brings the chip in (it pops in as it lands). Nothing moves for a system that asks
- *  for less motion, or when no dock is on screen. */
-function flyToDock(from: Element | null | undefined) {
-  const dock = document.querySelector('[data-kumi-dock-chips]') ?? document.querySelector('[data-kumi-dock]')
-  if (!from || !dock || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  const start = from.getBoundingClientRect()
-  const end = dock.getBoundingClientRect()
-  const canvas = from.querySelector('canvas')
-  const ghost = document.createElement('div')
-  ghost.setAttribute('aria-hidden', 'true')
-  Object.assign(ghost.style, {
-    position: 'fixed',
-    left: `${start.left}px`,
-    top: `${start.top}px`,
-    width: `${start.width}px`,
-    height: `${start.height}px`,
-    borderRadius: '8px',
-    pointerEvents: 'none',
-    zIndex: '2147483000',
-    background: canvas ? `center / 100% 100% no-repeat url(${canvas.toDataURL()})` : T.accent,
-    boxShadow: `0 10px 28px -10px ${T.accent}`
-  })
-  document.body.appendChild(ghost)
-  const dx = end.left + Math.min(64, end.width / 2) - (start.left + start.width / 2)
-  const dy = end.top + Math.min(14, end.height / 2) - (start.top + start.height / 2)
-  const flight = ghost.animate(
-    [
-      { transform: 'translate(0, 0) scale(1)', opacity: 1 },
-      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
-      { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
-    ],
-    { duration: 640, easing: 'cubic-bezier(.35,.6,.4,1)' }
+/** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
+ *  shrinking as it goes, while the palette's answer brings the chip in (it pops in as it lands). The panel draws it,
+ *  fixed to the viewport; a fixed box sits against a transformed ancestor instead, so it measures where its (0, 0) fell
+ *  and starts from the card's box from there. */
+function Flying({ flight, onDone }: { flight: Flight; onDone: () => void }) {
+  const ghost = useRef<HTMLDivElement | null>(null)
+  // The panel re-renders while the sound plays and the palette answers; the flight mustn't start over each time.
+  const done = useRef(onDone)
+  done.current = onDone
+  const [origin, setOrigin] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const box = ghost.current?.getBoundingClientRect()
+    setOrigin(box ? { left: box.left, top: box.top } : null)
+  }, [])
+  useEffect(() => {
+    const element = ghost.current
+    if (!element || !origin) return
+    const { from, to } = flight
+    // The chips' row is at the dock's foot: land a little in from its left, in the middle of that row.
+    const dx = to.left + Math.min(64, to.width / 2) - (from.left + from.width / 2)
+    const dy = to.bottom - Math.min(22, to.height / 2) - (from.top + from.height / 2)
+    const animation = element.animate(
+      [
+        { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+        { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 36}px) scale(0.5)`, opacity: 0.95, offset: 0.5 },
+        { transform: `translate(${dx}px, ${dy}px) scale(0.12)`, opacity: 0.3 }
+      ],
+      { duration: 640, easing: 'cubic-bezier(.35,.6,.4,1)', fill: 'forwards' }
+    )
+    animation.onfinish = () => done.current()
+    return () => animation.cancel()
+  }, [origin, flight])
+  return (
+    <div
+      aria-hidden
+      ref={ghost}
+      style={{
+        position: 'fixed',
+        left: origin ? flight.from.left - origin.left : 0,
+        top: origin ? flight.from.top - origin.top : 0,
+        width: flight.from.width,
+        height: flight.from.height,
+        borderRadius: 8,
+        pointerEvents: 'none',
+        zIndex: 20,
+        visibility: origin ? 'visible' : 'hidden',
+        background: flight.image ? `center / 100% 100% no-repeat url(${flight.image})` : T.accent,
+        boxShadow: `0 10px 28px -10px ${T.accent}`
+      }}
+    />
   )
-  flight.onfinish = () => ghost.remove()
-  flight.oncancel = () => ghost.remove()
 }
 
 /** A result's waveform, from the engine's 256 peaks, mirrored about the middle; a line runs across it while it plays. */
@@ -178,7 +205,7 @@ function Wave({ peaks, playing, duration }: { peaks: number[]; playing: boolean;
   }, [peaks, width])
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1000 / duration) : null
   return (
-    <div data-wave="" ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
+    <div ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
       <canvas
         aria-hidden
         ref={canvas}
@@ -237,7 +264,7 @@ interface Take {
   request: DesignRequest
 }
 
-export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false }: MakePanelProps) {
+export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }: MakePanelProps) {
   const t = useT()
   const [cardKey, setCardKey] = useState('blend')
   const [options, setOptions] = useState<DesignOptions>(() => (typeof tempo === 'number' && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {}))
@@ -250,13 +277,24 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set())
   // The sound just made, brought into view once it's drawn (the cards above it can fill a narrow pane).
   const [arrived, setArrived] = useState<string | null>(null)
-  const list = useRef<HTMLDivElement | null>(null)
+  // Each shown result's card, by its sound's id: where a new one scrolls to, and where a kept one flies from.
+  const cards = useRef(new Map<string, HTMLDivElement>())
   useEffect(() => {
     if (!arrived) return
-    const take = list.current?.querySelector<HTMLElement>(`[data-made="${arrived}"]`)
-    take?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    cards.current.get(arrived)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
     setArrived(null)
   }, [arrived, results])
+  const [flights, setFlights] = useState<Flight[]>([])
+  const flightKey = useRef(0)
+  /** Keep's flight from the card's waveform into the dock; none for a system that asks for less motion, or with no
+   *  dock on screen. */
+  const fly = (id: string) => {
+    const canvas = cards.current.get(id)?.querySelector('canvas')
+    const to = dock?.current?.getBoundingClientRect()
+    if (!canvas || !to || to.width === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const key = ++flightKey.current
+    setFlights(current => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }])
+  }
   const [open, setOpen] = useState(false)
   useEffect(() => {
     const frame = requestAnimationFrame(() => setOpen(true))
@@ -453,7 +491,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
           </span>
         </div>
         {takes.length > 0 && (
-          <div aria-label={t('make.results')} ref={list} role="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div aria-label={t('make.results')} role="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {takes.map(take => {
               const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1)
               const result = take.results[at]
@@ -462,7 +500,10 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               return (
                 <div
                   className={fresh.has(result.artifact_id) ? 'kumi-pop' : undefined}
-                  data-made={result.artifact_id}
+                  ref={element => {
+                    if (element) cards.current.set(result.artifact_id, element)
+                    else cards.current.delete(result.artifact_id)
+                  }}
                   key={take.key}
                   role="listitem"
                   style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: 'transparent' }}
@@ -500,7 +541,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     <TextButton
                       disabled={inPalette}
                       onClick={() => {
-                        flyToDock(list.current?.querySelector(`[data-made="${result.artifact_id}"] [data-wave]`))
+                        fly(result.artifact_id)
                         void onKeep(result)
                       }}
                       pressed={inPalette}
@@ -517,6 +558,9 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         )}
         {takes.length === 0 && results !== null && <span style={S.faint}>{t('make.none')}</span>}
       </div>
+      {flights.map(flight => (
+        <Flying flight={flight} key={flight.key} onDone={() => setFlights(current => current.filter(other => other.key !== flight.key))} />
+      ))}
     </section>
   )
 }

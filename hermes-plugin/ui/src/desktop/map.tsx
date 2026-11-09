@@ -86,6 +86,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
     left: id => setSelected(current => (current === id ? null : current))
   })
+  // The dock's box: the Make panel flies a kept sound into it.
+  const dock = useRef<HTMLElement | null>(null)
   const session = ownerSession(state)
   const map = state.map
   const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
@@ -199,6 +201,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         {palette.making && (
           <MakePanel
             colorOf={palette.colorOf}
+            dock={dock}
             kept={palette.kept}
             onClose={palette.closeMake}
             onKeep={palette.keep}
@@ -228,6 +231,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             {t('dock.kit')}
           </TextButton>
         )}
+        landing={dock}
         make={palette.makeFromPalette}
         onDo={action => store.paletteDo(action)}
         onPlay={id => palette.play(id)}
