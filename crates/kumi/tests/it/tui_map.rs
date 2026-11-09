@@ -87,6 +87,7 @@ fn fixture(per_class: usize, per_style: usize) -> MapData {
                 class: Some(class),
                 kind: Some(SoundKind::OneShot),
                 seconds: Some(0.3 + n as f64 % 7. * 0.1),
+                ..Default::default()
             });
         }
     }

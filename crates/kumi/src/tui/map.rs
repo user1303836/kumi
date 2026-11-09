@@ -1932,6 +1932,7 @@ mod tests {
                     path: format!("/s/p{at}.wav"),
                     from: 0.,
                     seconds: 1.,
+                    arranged: vec![],
                 })
                 .collect(),
             groups: vec![
@@ -1941,6 +1942,7 @@ mod tests {
             places: vec!["Samples / Drums".into()],
             tags: vec!["kick one-shot".into()],
             empty: None,
+            arrangements: vec![],
         }
     }
 

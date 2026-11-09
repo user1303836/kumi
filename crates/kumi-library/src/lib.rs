@@ -2,6 +2,7 @@
 //! says, and the folders the producer names), learning them in the background, searching them, and the taste their
 //! Sets show; with the plug-ins' preset formats and roles, and finding samples on disk.
 
+pub mod arrange;
 pub mod classify;
 pub mod daw_sources;
 pub mod daws;
