@@ -949,7 +949,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           </ToolGroup>
         </div>
         <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: '100%' }}>
-          {model.groups.map(group => {
+          {/* Serve names every class it knows, most of them empty in a small library: the legend lists those with sounds. */}
+          {model.groups.filter(group => group.count > 0).map(group => {
             const off = hidden.has(group.key)
             return (
               <button

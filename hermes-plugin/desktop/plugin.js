@@ -7914,7 +7914,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           )
         ] })
       ] }),
-      /* @__PURE__ */ jsx17("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.map((group) => {
+      /* @__PURE__ */ jsx17("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
         const off = hidden.has(group.key);
         return /* @__PURE__ */ jsxs17(
           "button",
