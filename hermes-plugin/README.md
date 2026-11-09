@@ -129,9 +129,9 @@ starts off.
 
 Kumi needs two things on the machine that runs Hermes, can use a third, and asks before each:
 
-1. **Its runtime:** Kumi's official release for your platform, 27–34 MB, from
+1. **Its runtime:** Kumi's official release for your platform, 27–35 MB, from
    `github.com/user1303836/kumi/releases/download/v<version>/`. Kumi checks it against the SHA-256 this plugin pins,
-   unpacks it (85–126 MB) into this profile's plugin data, and refuses anything that doesn't match.
+   unpacks it (86–128 MB) into this profile's plugin data, and refuses anything that doesn't match.
 2. **Its part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's extension or Renoise's tool,
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
    If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
