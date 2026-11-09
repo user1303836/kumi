@@ -116,6 +116,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
   empty. Live's Redo won't bring the sample back: ask Kumi to load it again. Kumi never clears a pad to make room. In
   Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
+- On the map, a click plays a sound in the window, AIFF included; nothing changes in your DAW. A sound whose file is
+  gone, or that the window can't play, fades off the map quietly, and one line under the map counts them: **Show
+  them** puts them back, and **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard,
+  it copies the request).
 
 ### And the everyday ones
 

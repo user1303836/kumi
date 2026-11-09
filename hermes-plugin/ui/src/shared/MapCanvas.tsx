@@ -26,10 +26,16 @@ export interface MapCanvasProps {
   onSelect: (id: string) => void
   actions?: (id: string, sound: MapSound) => ReactNode
   empty: ReactNode
+  /** Sounds that couldn't play here (the store's `leaving`): they fade off the map at once, and can't be picked. */
+  leaving?: ReadonlySet<string>
+  /** What the quiet line about hidden sounds offers ("Show them", a rescan), when there are any. */
+  hiddenActions?: ReactNode
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
 const MATCHES_LISTED = 6
+/** How long a sound that couldn't play takes to fade off the map. */
+const FADE_MS = 450
 
 interface Size {
   width: number
@@ -55,7 +61,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -106,17 +112,32 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     () => (found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null),
     [found, model.revision]
   )
-  // Which points the legend and the search keep, once per change of either, so a frame's draw and a hover read one
-  // byte per point instead of a set lookup by id.
+  // Which points the legend and the search keep (1), dim (0), or leave off the map (2: they couldn't play here), once
+  // per change of any of them, so a frame's draw and a hover read one byte per point instead of a set lookup by id.
   const mask = useMemo(() => {
     const out = new Uint8Array(model.points.length)
     model.points.forEach((point, index) => {
-      out[index] = (hidden.size > 0 && hidden.has(point.group)) || (searched !== null && !searched.has(point.id)) ? 0 : 1
+      out[index] = leaving?.has(point.id) ? 2 : (hidden.size > 0 && hidden.has(point.group)) || (searched !== null && !searched.has(point.id)) ? 0 : 1
     })
     return out
-  }, [model, hidden, searched])
+  }, [model, hidden, searched, leaving])
   const visible = useMemo(() => (index: number): boolean => mask[index] === 1, [mask])
-  const shown = useMemo(() => mask.reduce((count, keep) => count + keep, 0), [mask])
+  const shown = useMemo(() => mask.reduce((count, keep) => count + (keep === 1 ? 1 : 0), 0), [mask])
+  const leavingCount = useMemo(() => mask.reduce((count, keep) => count + (keep === 2 ? 1 : 0), 0), [mask])
+  // When each leaving sound started fading, and a clock that moves once a frame while one still fades.
+  const leftAt = useRef(new Map<string, number>())
+  const [clock, setClock] = useState(0)
+  useEffect(() => {
+    const now = performance.now()
+    for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now)
+    for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id)
+  }, [leaving])
+  useEffect(() => {
+    const now = performance.now()
+    if (![...leftAt.current.values()].some(at => now - at < FADE_MS)) return
+    const frame = requestAnimationFrame(setClock)
+    return () => cancelAnimationFrame(frame)
+  }, [clock, leaving])
   // What a search, or else the agent's find, picked out, also as named rows: a keyboard or a screen reader can pick a
   // sound the canvas only draws.
   const matches = useMemo(() => {
@@ -238,6 +259,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         }
       }
     }
+    // A sound that couldn't play shrinks and fades off where it was, drawn on its own: there are only ever a few.
+    const now = performance.now()
+    for (const [id, at] of leftAt.current) {
+      const progress = (now - at) / FADE_MS
+      const index = indexOf.get(id)
+      if (progress >= 1 || index === undefined) continue
+      const eased = 1 - (1 - progress) ** 2
+      const point = points[index]
+      context.globalAlpha = 0.92 * (1 - eased)
+      context.fillStyle = groupColor.get(point.group) ?? colors.faint
+      context.beginPath()
+      context.arc(point.x * unit + view.dx, point.y * unit + view.dy, radius * (1 - eased) + 0.1, 0, Math.PI * 2)
+      context.fill()
+    }
     // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
     // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
     // a tight cluster stays legible (its sounds are named on hover and in the list above).
@@ -270,7 +305,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
     if (playing) ring(playing, colors.accent, 6, 2)
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted])
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -303,7 +338,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }
 
   if (!model.points.length) {
-    return <div style={{ ...S.muted, padding: 16 }}>{empty}</div>
+    return (
+      <div style={{ ...S.muted, padding: 16 }}>
+        {empty}
+        {(map?.hidden ?? 0) > 0 && (
+          <div role="status" style={{ ...S.row, flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            <span style={{ ...S.faint, flex: '1 1 14rem' }}>{t('map.hidden', map?.hidden ?? 0)}</span>
+            {hiddenActions}
+          </div>
+        )}
+      </div>
+    )
   }
 
   const chosen = selected ? model.sounds[selected] : undefined
@@ -323,7 +368,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         />
         {/* The revision is an id (`r` and 32 hex digits): there for anyone who looks, not in the line itself. */}
         <span style={S.faint} title={model.revision ? t('map.revision', model.revision) : undefined}>
-          {shown === model.points.length ? t('map.count', num(model.points.length, 0)) : t('map.countOf', num(shown, 0), num(model.points.length, 0))}
+          {shown === model.points.length - leavingCount
+            ? t('map.count', num(shown, 0))
+            : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))}
         </span>
       </div>
       <div style={{ ...S.row, flexWrap: 'wrap', gap: 4, padding: '6px 10px' }}>
@@ -445,6 +492,13 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           </div>
         )}
       </div>
+      {(map?.hidden ?? 0) + leavingCount > 0 && (
+        // One quiet line for every sound that couldn't play here, never a notice per sound.
+        <div role="status" style={{ ...S.row, flexWrap: 'wrap', gap: 6, padding: '4px 10px', borderTop: `1px solid ${T.border}` }}>
+          <span style={{ ...S.faint, flex: '1 1 14rem' }}>{t('map.hidden', (map?.hidden ?? 0) + leavingCount)}</span>
+          {hiddenActions}
+        </div>
+      )}
       {selected && chosen && (
         // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
         <div style={{ ...S.row, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 10px', borderTop: `1px solid ${T.border}` }}>

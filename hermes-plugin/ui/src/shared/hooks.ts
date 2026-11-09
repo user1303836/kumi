@@ -2,7 +2,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
 import type { AudioReply } from './types.ts'
-import type { KumiState, KumiStore, Part } from './store.ts'
+import { statusOf, type KumiState, type KumiStore, type Part } from './store.ts'
 
 /** The store's state, re-rendered on every change. */
 export function useKumi(store: KumiStore): KumiState {
@@ -91,7 +91,8 @@ export class Audition {
   }
 
   /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
-   *  there's never more than one sound playing, and never one that can't be stopped. */
+   *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
+   *  quietly, whatever happened to it: only the sound still wanted can fail. */
   async play(id: string): Promise<void> {
     this.stop()
     const turn = this.turn
@@ -106,7 +107,8 @@ export class Audition {
       }
       await audio.play()
     } catch (error) {
-      if (turn === this.turn) this.stop()
+      if (turn !== this.turn) return
+      this.stop()
       throw error
     }
   }
@@ -129,4 +131,20 @@ export class Audition {
 
 export function usePlaying(audition: Audition): string | null {
   return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing)
+}
+
+/** Why a play failed, for what to do about it: `gone`, the backend has no audio for the id (the file went, or left the
+ *  approved folders); `unplayable`, the audio came but this window can't decode it; `blocked`, the window may not play
+ *  sound until the producer clicks or presses a key in it; `other` (Kumi's backend didn't answer, a timeout), worth
+ *  saying. The first two take the sound off the map quietly, never with a notice per sound. */
+export type PlayFailure = 'blocked' | 'gone' | 'other' | 'unplayable'
+
+export function playFailure(error: unknown): PlayFailure {
+  const name = error instanceof Error ? error.name : ''
+  if (name === 'NotSupportedError') return 'unplayable'
+  if (name === 'NotAllowedError') return 'blocked'
+  // The dashboard's `fetchJSON` puts the status on its error and says why in the message; Desktop's `ctx.rest` puts
+  // it at the start of the message.
+  const status = error && typeof error === 'object' && 'status' in error ? error.status : statusOf(error)
+  return status === 404 ? 'gone' : 'other'
 }

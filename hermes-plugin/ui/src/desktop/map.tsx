@@ -1,13 +1,14 @@
 // The sound-map workspace: Kumi's map of the approved sample folders. A click auditions a sound here, in the window
 // (a read, nothing reaches the DAW); "Use" puts a request naming that sound into the chat for the producer to finish,
-// and "Use on pad…" one naming a drum pad too.
+// and "Use on pad…" one naming a drum pad too. A sound that can't play here leaves the map quietly (never a notice per
+// sound), and one line under the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { liveNote, nearRequest, padRequest, soundRequest } from '../shared/format.ts'
-import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
+import { liveNote, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { type Audition, playFailure, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import type { KumiStore } from '../shared/store.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
@@ -80,7 +81,15 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   // The sound whose pad picker is open: one at a time, and it closes when another sound is picked.
   const [padsFor, setPadsFor] = useState<null | string>(null)
   const play = (id: string) => {
-    audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))
+    audition.play(id).catch(error => {
+      const why = playFailure(error)
+      if (why === 'gone' || why === 'unplayable') {
+        store.hide(id, why)
+        setSelected(current => (current === id ? null : current))
+      } else if (why === 'other') {
+        host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) })
+      }
+    })
   }
   const map = state.map
   const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
@@ -129,6 +138,17 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
       }}
       empty={empty}
       found={state.found}
+      hiddenActions={
+        <>
+          <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
+            {t('map.showHidden')}
+          </TextButton>
+          <TextButton onClick={() => void ask(ctx, RESCAN_REQUEST, { send: false, session: ownerSession(state) })} title={t('map.rescanTitle')}>
+            {t('map.rescan')}
+          </TextButton>
+        </>
+      }
+      leaving={state.leaving}
       map={map}
       onPick={id => {
         setSelected(id)

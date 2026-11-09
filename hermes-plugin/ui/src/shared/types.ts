@@ -34,7 +34,8 @@ export interface Status extends Liveness {
   /** What `kumi serve` sees of its DAW part (W1); where setup stands is `/setup`'s answer instead. */
   setup?: { component?: { installed?: boolean; version?: string | null; bundled?: string | null }; daw_open?: boolean }
   capabilities?: string[]
-  revisions?: { status?: number | null; focus?: number | null; history?: number | null; map?: string | null }
+  /** Each snapshot's revision; `hidden` counts the edits to the sounds hidden from the map. */
+  revisions?: { status?: number | null; focus?: number | null; history?: number | null; map?: string | null; hidden?: number | null }
   /** An operation whose outcome Kumi couldn't confirm (CC-2 R6), cleared by the next completed look. */
   unsure?: { at?: number; op?: string; reason?: string; cleanup?: string } | null
 }
@@ -192,6 +193,8 @@ export interface SoundMap extends Liveness {
   points: MapPoint[]
   groups: Record<string, MapGroup>
   sounds: Record<string, MapSound>
+  /** How many of this revision's sounds are hidden (their audio couldn't be played here), left out of `points`. */
+  hidden?: number
 }
 
 export interface AudioReply {

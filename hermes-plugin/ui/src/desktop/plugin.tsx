@@ -8,9 +8,10 @@
  * - An inline card for the audio `kumi_listen` measured, in place of the plain player.
  * - Palette commands and a settings page.
  *
- * Everything reads Kumi's backend (`dashboard/plugin_api.py`, GET only) through `ctx.rest`. Nothing here changes the
- * DAW or anything else: a button that would puts a request in Kumi's chat, which goes to the model, its tool and
- * Hermes's approval like any other request (contract C5).
+ * Everything reads Kumi's backend (`dashboard/plugin_api.py`) through `ctx.rest`. Nothing here changes the DAW or
+ * anything else: a button that would puts a request in Kumi's chat, which goes to the model, its tool and Hermes's
+ * approval like any other request (contract C5). The backend's only writes are map edits that change no project (the
+ * sounds that can't play here, hidden from the map).
  */
 import type { HermesPlugin, PaletteContribution, PluginContribution, ToolMediaRendererProps } from '@hermes/plugin-sdk'
 // A namespace import too: on a Desktop without an export (the tool-media seam), a named import would stop the module.
@@ -74,7 +75,7 @@ const plugin: HermesPlugin = {
   register(ctx) {
     // English, Japanese and Simplified Chinese; Desktop drops them when the plugin unloads.
     ctx.i18n?.register(MESSAGES)
-    const store = new KumiStore(path => ctx.rest(path, { timeoutMs: 15_000 }))
+    const store = new KumiStore((path, init) => ctx.rest(path, { timeoutMs: 15_000, ...init }))
     const audition = new Audition(id => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 60_000 }))
     let closeMap: (() => void) | null = null
     let mapPane: (() => void) | null = null

@@ -144,7 +144,12 @@ var en = {
     useOnPadTitle: "Pick a drum pad, an empty one included: the request goes in the chat, to send when you like",
     pads: "Drum pads",
     pad: (name, note) => name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`,
-    playFailed: (error) => `Kumi couldn't play that sound: ${error}`
+    playFailed: (error) => `Kumi couldn't play that sound: ${error}`,
+    hidden: (n) => n === 1 ? "1 sound hidden: its file is missing or can't play here." : `${n} sounds hidden: their files are missing or can't play here.`,
+    showHidden: "Show them",
+    showHiddenTitle: "Put the hidden sounds back on the map",
+    rescan: "Rescan…",
+    rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like"
   },
   measurements: {
     tab: "Measurements",
@@ -478,7 +483,12 @@ var ja = {
     useOnPadTitle: "ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で",
     pads: "ドラムパッド",
     pad: (name, note) => name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`,
-    playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
+    playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`,
+    hidden: (n) => `${n} 個のサウンドを隠しました。ファイルが見つからないか、ここでは再生できません。`,
+    showHidden: "表示する",
+    showHiddenTitle: "隠したサウンドをマップに戻します",
+    rescan: "再スキャン…",
+    rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で"
   },
   measurements: {
     tab: "測定結果",
@@ -811,7 +821,12 @@ var zh = {
     useOnPadTitle: "选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送",
     pads: "打击垫",
     pad: (name, note) => name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`,
-    playFailed: (error) => `Kumi 无法播放这个声音：${error}`
+    playFailed: (error) => `Kumi 无法播放这个声音：${error}`,
+    hidden: (n) => `已隐藏 ${n} 个声音：文件不见了，或无法在这里播放。`,
+    showHidden: "显示它们",
+    showHiddenTitle: "把隐藏的声音放回地图",
+    rescan: "重新扫描…",
+    rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送"
   },
   measurements: {
     tab: "测量结果",
@@ -1212,6 +1227,7 @@ function connectRequest(daw) {
   return `Connect Kumi to ${dawName(daw)}`;
 }
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
+var RESCAN_REQUEST = "Kumi, rescan my sample folders";
 function cleanupWords(cleanup, t = english) {
   if (cleanup === "restored") return t("history.restored");
   if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -1232,113 +1248,6 @@ function chipWords(status, tempo, t = english) {
 
 // src/shared/hooks.ts
 import { useEffect, useSyncExternalStore } from "react";
-function useKumi(store) {
-  return useSyncExternalStore(store.subscribe, store.get, store.get);
-}
-function useWant(store, part) {
-  useEffect(() => store.want(part), [store, part]);
-}
-var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
-var Audition = class {
-  constructor(load, limit = AUDITION_CACHE_CHARS) {
-    this.load = load;
-    this.limit = limit;
-  }
-  load;
-  limit;
-  audio = null;
-  cache = /* @__PURE__ */ new Map();
-  cached = 0;
-  loading = /* @__PURE__ */ new Map();
-  generation = 0;
-  /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
-  turn = 0;
-  listeners = /* @__PURE__ */ new Set();
-  playing = null;
-  subscribe = (fn) => {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  };
-  changed(playing) {
-    this.playing = playing;
-    for (const fn of [...this.listeners]) fn();
-  }
-  /** The data URL for `id`: from the cache, the load already under way, or the backend. */
-  url(id) {
-    const cached = this.cache.get(id);
-    if (cached) {
-      this.cache.delete(id);
-      this.cache.set(id, cached);
-      return Promise.resolve(cached);
-    }
-    const loading = this.loading.get(id);
-    if (loading) return loading;
-    const generation = this.generation;
-    const promise = this.load(id).then((reply) => {
-      if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
-      if (generation === this.generation) this.keep(id, reply.data_url);
-      return reply.data_url;
-    }).finally(() => {
-      if (this.loading.get(id) === promise) this.loading.delete(id);
-    });
-    this.loading.set(id, promise);
-    return promise;
-  }
-  keep(id, url) {
-    if (url.length > this.limit) return;
-    this.cache.set(id, url);
-    this.cached += url.length;
-    for (const [oldest, kept] of this.cache) {
-      if (this.cached <= this.limit) break;
-      this.cache.delete(oldest);
-      this.cached -= kept.length;
-    }
-  }
-  /** Another profile or connection: stop, and forget every sound of the last one. */
-  reset() {
-    this.stop();
-    this.generation += 1;
-    this.cache.clear();
-    this.cached = 0;
-    this.loading.clear();
-  }
-  /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
-   *  there's never more than one sound playing, and never one that can't be stopped. */
-  async play(id) {
-    this.stop();
-    const turn = this.turn;
-    this.changed(id);
-    try {
-      const url = await this.url(id);
-      if (turn !== this.turn) return;
-      const audio = new Audio(url);
-      this.audio = audio;
-      audio.onended = () => {
-        if (this.audio === audio) this.stop();
-      };
-      await audio.play();
-    } catch (error) {
-      if (turn === this.turn) this.stop();
-      throw error;
-    }
-  }
-  stop() {
-    this.turn += 1;
-    if (this.audio) {
-      this.audio.pause();
-      this.audio.onended = null;
-      this.audio = null;
-    }
-    if (this.playing !== null) this.changed(null);
-  }
-  dispose() {
-    this.reset();
-    this.listeners.clear();
-  }
-};
-function usePlaying(audition) {
-  return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
-}
 
 // src/shared/listen.ts
 var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
@@ -1572,7 +1481,9 @@ var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
 var MOST_ROUNDS = 6;
 var MOST_REFERENCES = 8;
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null };
+var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set() };
+var HIDE_BATCH_MS = 1200;
+var HIDE_MOST = 500;
 var SHA256 = /^[0-9a-f]{64}$/;
 function pendingScriptOf(payload) {
   if (!payload || typeof payload !== "object") return null;
@@ -1627,6 +1538,11 @@ var KumiStore = class {
   /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
    *  finished (a scan of folders already indexed ends within a second, before the pane's read). */
   started = /* @__PURE__ */ new Set();
+  /** Failed plays not reported yet, by sound id, and the timer that reports them. */
+  toHide = /* @__PURE__ */ new Map();
+  hideTimer = null;
+  /** `/status`'s count of hidden-sound edits at the last map read: another window's report reads the map again. */
+  hiddenSeq = null;
   get = () => this.state;
   subscribe = (fn) => {
     this.listeners.add(fn);
@@ -1648,6 +1564,10 @@ var KumiStore = class {
     this.reads.clear();
     this.cards.clear();
     this.started.clear();
+    this.toHide.clear();
+    clearTimeout(this.hideTimer ?? void 0);
+    this.hideTimer = null;
+    this.hiddenSeq = null;
     this.state = EMPTY;
     for (const fn of [...this.listeners]) fn();
   }
@@ -1693,10 +1613,13 @@ var KumiStore = class {
       this.set({ available: true, error: null, status: heard(status) });
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
       const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
+      const hidden = typeof after.hidden === "number" ? after.hidden : 0;
+      const hiddenMoved = this.hiddenSeq !== null && hidden !== this.hiddenSeq;
+      this.hiddenSeq = hidden;
       const reads = [];
       if (liveness || moved("focus")) reads.push(this.refresh("focus"));
       if (liveness || moved("history")) reads.push(this.refresh("history"));
-      if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
+      if ((this.wanted.get("map") ?? 0) > 0 && (moved("map") || hiddenMoved)) reads.push(this.refresh("map"));
       if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
       await Promise.all(reads);
     });
@@ -1707,12 +1630,62 @@ var KumiStore = class {
       const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
       try {
         const value = await this.fetch(path);
-        if (generation === this.generation) this.set({ [part]: heard(value) });
+        if (generation !== this.generation) return;
+        this.set({ [part]: heard(value) });
+        if (part === "map") this.mapRead();
       } catch (error) {
         if (generation !== this.generation) return;
         if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });
       }
     });
+  }
+  /** A map read: sounds it left out (hidden, or gone in a new revision) are done leaving. One still on it waits there,
+   *  off the map, while its report is pending or on its way. */
+  mapRead() {
+    if (this.state.leaving.size === 0) return;
+    const on = new Set((this.state.map?.points ?? []).map((point) => point[0]));
+    const leaving = new Set([...this.state.leaving].filter((id) => on.has(id) && (this.toHide.has(id) || this.hideTimer !== null)));
+    if (leaving.size !== this.state.leaving.size) this.set({ leaving });
+  }
+  /** A sound of the map in hand couldn't play here (`playFailure`): off the map now, and reported with the others that
+   *  fail within `HIDE_BATCH_MS`, so the next map read leaves them out and counts them. Never a notice per sound. */
+  hide(id, why) {
+    const map = this.state.map;
+    if (!map?.revision || this.state.leaving.has(id) || !map.points.some((point) => point[0] === id)) return;
+    this.toHide.set(id, why);
+    this.set({ leaving: /* @__PURE__ */ new Set([...this.state.leaving, id]) });
+    if (this.hideTimer === null) this.hideTimer = setTimeout(() => void this.reportHidden(), HIDE_BATCH_MS);
+  }
+  async reportHidden() {
+    this.hideTimer = null;
+    const revision = this.state.map?.revision;
+    const batch = [...this.toHide].map(([id, why]) => ({ id, why }));
+    this.toHide.clear();
+    if (!revision || batch.length === 0) return;
+    const generation = this.generation;
+    for (let at = 0; at < batch.length; at += HIDE_MOST) {
+      try {
+        await this.fetch("/map/hidden", { method: "POST", body: { revision, ids: batch.slice(at, at + HIDE_MOST) } });
+      } catch {
+      }
+      if (generation !== this.generation) return;
+    }
+    await this.refresh("map");
+  }
+  /** "Show them": every hidden sound goes back on the map. */
+  async showHidden() {
+    const generation = this.generation;
+    this.toHide.clear();
+    clearTimeout(this.hideTimer ?? void 0);
+    this.hideTimer = null;
+    try {
+      await this.fetch("/map/hidden", { method: "POST", body: { action: "clear" } });
+    } catch {
+      return;
+    }
+    if (generation !== this.generation) return;
+    this.set({ leaving: /* @__PURE__ */ new Set() });
+    await this.refresh("map");
   }
   /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
    *  (CC-23: an event's `matches` or a result's `items`) and a near search's seed. */
@@ -1863,6 +1836,124 @@ function foundSounds(result) {
     (item) => item && typeof item === "object" && "sound_id" in item && typeof item.sound_id === "string" ? [item.sound_id] : []
   );
   return { revision, ids, near: "near" in value ? value.near : null, matches: value.items };
+}
+
+// src/shared/hooks.ts
+function useKumi(store) {
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
+}
+function useWant(store, part) {
+  useEffect(() => store.want(part), [store, part]);
+}
+var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
+var Audition = class {
+  constructor(load, limit = AUDITION_CACHE_CHARS) {
+    this.load = load;
+    this.limit = limit;
+  }
+  load;
+  limit;
+  audio = null;
+  cache = /* @__PURE__ */ new Map();
+  cached = 0;
+  loading = /* @__PURE__ */ new Map();
+  generation = 0;
+  /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
+  turn = 0;
+  listeners = /* @__PURE__ */ new Set();
+  playing = null;
+  subscribe = (fn) => {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  };
+  changed(playing) {
+    this.playing = playing;
+    for (const fn of [...this.listeners]) fn();
+  }
+  /** The data URL for `id`: from the cache, the load already under way, or the backend. */
+  url(id) {
+    const cached = this.cache.get(id);
+    if (cached) {
+      this.cache.delete(id);
+      this.cache.set(id, cached);
+      return Promise.resolve(cached);
+    }
+    const loading = this.loading.get(id);
+    if (loading) return loading;
+    const generation = this.generation;
+    const promise = this.load(id).then((reply) => {
+      if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
+      if (generation === this.generation) this.keep(id, reply.data_url);
+      return reply.data_url;
+    }).finally(() => {
+      if (this.loading.get(id) === promise) this.loading.delete(id);
+    });
+    this.loading.set(id, promise);
+    return promise;
+  }
+  keep(id, url) {
+    if (url.length > this.limit) return;
+    this.cache.set(id, url);
+    this.cached += url.length;
+    for (const [oldest, kept] of this.cache) {
+      if (this.cached <= this.limit) break;
+      this.cache.delete(oldest);
+      this.cached -= kept.length;
+    }
+  }
+  /** Another profile or connection: stop, and forget every sound of the last one. */
+  reset() {
+    this.stop();
+    this.generation += 1;
+    this.cache.clear();
+    this.cached = 0;
+    this.loading.clear();
+  }
+  /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
+   *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
+   *  quietly, whatever happened to it: only the sound still wanted can fail. */
+  async play(id) {
+    this.stop();
+    const turn = this.turn;
+    this.changed(id);
+    try {
+      const url = await this.url(id);
+      if (turn !== this.turn) return;
+      const audio = new Audio(url);
+      this.audio = audio;
+      audio.onended = () => {
+        if (this.audio === audio) this.stop();
+      };
+      await audio.play();
+    } catch (error) {
+      if (turn !== this.turn) return;
+      this.stop();
+      throw error;
+    }
+  }
+  stop() {
+    this.turn += 1;
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.onended = null;
+      this.audio = null;
+    }
+    if (this.playing !== null) this.changed(null);
+  }
+  dispose() {
+    this.reset();
+    this.listeners.clear();
+  }
+};
+function usePlaying(audition) {
+  return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
+}
+function playFailure(error) {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotSupportedError") return "unplayable";
+  if (name === "NotAllowedError") return "blocked";
+  const status = error && typeof error === "object" && "status" in error ? error.status : statusOf(error);
+  return status === 404 ? "gone" : "other";
 }
 
 // src/desktop/theme.ts
@@ -3315,6 +3406,7 @@ function frame(model, ids, width, height, margin = 48) {
 // src/shared/MapCanvas.tsx
 import { jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
+var FADE_MS = 450;
 function resolve(canvas) {
   const style = getComputedStyle(canvas);
   const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -3328,7 +3420,7 @@ function resolve(canvas) {
 }
 var ROUNDS = 8;
 var maps = 0;
-function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
+function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions }) {
   const t = useT();
   const model = useMemo(() => buildModel(map), [map]);
   const canvasRef = useRef(null);
@@ -3374,12 +3466,26 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const mask = useMemo(() => {
     const out = new Uint8Array(model.points.length);
     model.points.forEach((point, index) => {
-      out[index] = hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
+      out[index] = leaving?.has(point.id) ? 2 : hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
     });
     return out;
-  }, [model, hidden, searched]);
+  }, [model, hidden, searched, leaving]);
   const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
-  const shown = useMemo(() => mask.reduce((count2, keep) => count2 + keep, 0), [mask]);
+  const shown = useMemo(() => mask.reduce((count2, keep) => count2 + (keep === 1 ? 1 : 0), 0), [mask]);
+  const leavingCount = useMemo(() => mask.reduce((count2, keep) => count2 + (keep === 2 ? 1 : 0), 0), [mask]);
+  const leftAt = useRef(/* @__PURE__ */ new Map());
+  const [clock2, setClock] = useState4(0);
+  useEffect5(() => {
+    const now = performance.now();
+    for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
+    for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
+  }, [leaving]);
+  useEffect5(() => {
+    const now = performance.now();
+    if (![...leftAt.current.values()].some((at2) => now - at2 < FADE_MS)) return;
+    const frame2 = requestAnimationFrame(setClock);
+    return () => cancelAnimationFrame(frame2);
+  }, [clock2, leaving]);
   const matches = useMemo(() => {
     const ids = searched ?? foundIds;
     return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -3478,6 +3584,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
       }
     }
+    const now = performance.now();
+    for (const [id, at2] of leftAt.current) {
+      const progress = (now - at2) / FADE_MS;
+      const index = indexOf.get(id);
+      if (progress >= 1 || index === void 0) continue;
+      const eased = 1 - (1 - progress) ** 2;
+      const point = points[index];
+      context.globalAlpha = 0.92 * (1 - eased);
+      context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
+      context.beginPath();
+      context.arc(point.x * unit + view.dx, point.y * unit + view.dy, radius * (1 - eased) + 0.1, 0, Math.PI * 2);
+      context.fill();
+    }
     if (onScreen <= 40) {
       context.globalAlpha = 0.85;
       context.fillStyle = colors.text;
@@ -3507,7 +3626,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
     if (playing) ring(playing, colors.accent, 6, 2);
     if (selected) ring(selected, colors.strong, 4, 2);
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted]);
+  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock2]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -3536,7 +3655,13 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     }
   };
   if (!model.points.length) {
-    return /* @__PURE__ */ jsx11("div", { style: { ...S.muted, padding: 16 }, children: empty });
+    return /* @__PURE__ */ jsxs11("div", { style: { ...S.muted, padding: 16 }, children: [
+      empty,
+      (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs11("div", { role: "status", style: { ...S.row, flexWrap: "wrap", gap: 6, marginTop: 8 }, children: [
+        /* @__PURE__ */ jsx11("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", map?.hidden ?? 0) }),
+        hiddenActions
+      ] })
+    ] });
   }
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
@@ -3554,7 +3679,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           value: query
         }
       ),
-      /* @__PURE__ */ jsx11("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
+      /* @__PURE__ */ jsx11("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0)) })
     ] }),
     /* @__PURE__ */ jsx11("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
       const off = hidden.has(group.key);
@@ -3670,6 +3795,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
       )
     ] }),
+    (map?.hidden ?? 0) + leavingCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
+    /* @__PURE__ */ jsxs11("div", { role: "status", style: { ...S.row, flexWrap: "wrap", gap: 6, padding: "4px 10px", borderTop: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsx11("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", (map?.hidden ?? 0) + leavingCount) }),
+      hiddenActions
+    ] }),
     selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
     /* @__PURE__ */ jsxs11("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
@@ -3744,7 +3874,15 @@ function MapWorkspace({ ctx, store, audition }) {
   const [selected, setSelected] = useState5(null);
   const [padsFor, setPadsFor] = useState5(null);
   const play = (id) => {
-    audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
+    audition.play(id).catch((error) => {
+      const why = playFailure(error);
+      if (why === "gone" || why === "unplayable") {
+        store.hide(id, why);
+        setSelected((current) => current === id ? null : current);
+      } else if (why === "other") {
+        host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) });
+      }
+    });
   };
   const map = state.map;
   const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : t("map.empty");
@@ -3783,6 +3921,11 @@ function MapWorkspace({ ctx, store, audition }) {
       },
       empty,
       found: state.found,
+      hiddenActions: /* @__PURE__ */ jsxs12(Fragment4, { children: [
+        /* @__PURE__ */ jsx12(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+        /* @__PURE__ */ jsx12(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session: ownerSession(state) }), title: t("map.rescanTitle"), children: t("map.rescan") })
+      ] }),
+      leaving: state.leaving,
       map,
       onPick: (id) => {
         setSelected(id);
@@ -3996,7 +4139,7 @@ var plugin = {
   description: "Your DAW beside the chat: FOCUS, HISTORY with undo, a sound map of your sample folders, and Kumi's audio measurements.",
   register(ctx) {
     ctx.i18n?.register(MESSAGES);
-    const store = new KumiStore((path) => ctx.rest(path, { timeoutMs: 15e3 }));
+    const store = new KumiStore((path, init) => ctx.rest(path, { timeoutMs: 15e3, ...init }));
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;

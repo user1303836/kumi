@@ -9,6 +9,7 @@ owner's heartbeat fresh until stopped, so the UI shows a connected runtime.
 from __future__ import annotations
 
 import argparse
+from array import array
 import json
 import math
 import os
@@ -75,6 +76,25 @@ def _tone(path: Path, seconds: float, kind: str, seed: int) -> None:
         file.setsampwidth(2)
         file.setframerate(rate)
         file.writeframes(bytes(frames))
+
+
+def _aiff(path: Path, seconds: float, kind: str, seed: int) -> None:
+    """`_tone`'s sound as a 16-bit AIFF: sample packs ship them, and Chromium (so Hermes Desktop) plays none, so the
+    backend hands them to the UI as WAV."""
+    scratch = path.with_name(f".{path.name}.wav")
+    _tone(scratch, seconds, kind, seed)
+    with wave.open(str(scratch), "rb") as file:
+        rate, frames = file.getframerate(), file.readframes(file.getnframes())
+    scratch.unlink()
+    samples = array("h")
+    samples.frombytes(frames)
+    if sys.byteorder == "little":
+        samples.byteswap()
+    exponent = rate.bit_length() - 1
+    comm = struct.pack(">hIh", 1, len(samples), 16) + struct.pack(">HQ", 16383 + exponent, rate << (63 - exponent))
+    ssnd = struct.pack(">II", 0, 0) + samples.tobytes()
+    body = b"AIFF" + b"COMM" + struct.pack(">I", len(comm)) + comm + b"SSND" + struct.pack(">I", len(ssnd)) + ssnd
+    path.write_bytes(b"FORM" + struct.pack(">I", len(body)) + body)
 
 
 def map_points(revision: str = "r7") -> tuple[list, dict, dict]:
@@ -210,9 +230,11 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
     first_snares = {sound_id for sound_id, sound in sounds.items() if sound["class"] == "snare"}
     first_snares = set(sorted(first_snares)[:4])
     for sound_id, sound in sounds.items():
-        sound["path"] = str(library / sound["folder"] / f"{sound['name']}.wav")
+        # `all`: every fifth sound as AIFF, as a real library mixes them; the tests' `some` stays WAV.
+        aiff = audio == "all" and int(sound_id[-4:]) % 5 == 0
+        sound["path"] = str(library / sound["folder"] / f"{sound['name']}.{'aif' if aiff else 'wav'}")
         if audio == "all" or (audio == "some" and sound_id in first_snares):
-            _tone(Path(sound["path"]), min(sound["duration"], 1.5), sound["kind"], int(sound_id[-4:]))
+            (_aiff if aiff else _tone)(Path(sound["path"]), min(sound["duration"], 1.5), sound["kind"], int(sound_id[-4:]))
     _write_json(state / "map" / "r7.json", {**_envelope(3, now), "revision": "r7", "made": now - 3600_000, "points": points, "groups": groups, "sounds": sounds})
     (state / "map" / "current").write_text("r7\n", encoding="utf-8")
     artifacts_dir = state / "artifacts"
