@@ -384,6 +384,14 @@
     "type": "map-key"
   },
   {
+    "type": "map-near",
+    "paths": [
+      "/Samples/Kick 1.wav",
+      "/Samples/Snare 2.wav"
+    ],
+    "limit": 8
+  },
+  {
     "type": "slots",
     "id": 3,
     "words": "listening off"
