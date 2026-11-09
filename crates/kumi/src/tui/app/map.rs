@@ -51,6 +51,7 @@ impl TuiApp {
             MapView::new(self.0.graphics, hover)
                 .moved(moves)
                 .gliding(self.0.options.map_glides)
+                .morphing(self.0.options.map_glides)
                 .gathering(gathers)
                 .designing(designs)
                 .keyed(&self.0.keymap),
@@ -352,6 +353,19 @@ impl TuiApp {
                 if !on {
                     self.map_leave();
                 }
+            }
+            Asked::Near(paths) => {
+                let (app, limit) = (self.clone(), MapView::near_limit(paths.len()));
+                tokio::task::spawn_local(async move {
+                    let found = match app.session().op(op::MapNear { paths, limit }).await {
+                        Ok(found) => found,
+                        Err(error) => Err(error.to_string()),
+                    };
+                    if let Some(view) = app.0.state.borrow_mut().map.as_mut() {
+                        view.near_found(found);
+                    }
+                    app.0.scheduler.request();
+                });
             }
             Asked::Moved(moves) => {
                 if let Some(kept) = &self.0.options.map_moves {

@@ -82,6 +82,7 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::ForgetMusic(_)
         | Op::Map(_)
         | Op::MapKey(_)
+        | Op::MapNear(_)
         | Op::Slots(_)
         | Op::AudioStatus(_)
         | Op::ConfigureAudio(_)

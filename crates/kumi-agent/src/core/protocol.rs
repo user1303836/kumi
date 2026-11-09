@@ -363,6 +363,9 @@ requests! {
     Map {} -> MapData;
     /// /map: the key the maps would be read under now. The same key as a map read before: that map is the same.
     MapKey {} -> String;
+    /// /map's more like these: the sounds nearest any of these files by how they sound (each one's turn in order, the
+    /// files left out), at most `limit`; or why there are none.
+    MapNear { paths: Vec<String>, limit: u32 } -> Result<Vec<String>, String>;
     /// /slots and its words: what it says. What's under way comes as `slots-progress` events with its `id`, and
     /// [`op::StopSlots`] stops it.
     Slots { id: u32, words: String } -> Said;
@@ -902,6 +905,10 @@ impl Session {
             }
             Op::Map(request) => answered(request, |op::Map {}| async move { Ok(part(session.map_loader())?().await) }).await,
             Op::MapKey(request) => answered(request, |op::MapKey {}| async move { Ok(part(session.map_keyer())?().await) }).await,
+            Op::MapNear(request) => {
+                answered(request, |op::MapNear { paths, limit }| async move { Ok(part(session.map_nearer())?(paths, limit as usize).await) })
+                    .await
+            }
             Op::Slots(request) => {
                 answered(
                     request,

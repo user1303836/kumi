@@ -5,7 +5,10 @@
 
 use futures::FutureExt;
 use kumi_library::{
-    map::{read_sounds_map, sounds_on_map_by_turns, MapKey, MapSound, SOUNDS_MAP},
+    features::VECTOR_LENGTH,
+    map::{read_sounds_map, sounds_on_map_by_turns, MapKey, MapNear, MapSound, SOUNDS_MAP},
+    search::{LikeSound, SoundQuery},
+    store::unpack_vector,
     Library, SoundClass, CLASSES,
 };
 use kumi_listening::music::{
@@ -418,6 +421,43 @@ pub fn loader(library: Rc<Library>, library_dir: PathBuf, music: Rc<Music>) -> L
     Rc::new(move || {
         let (library, dir, music) = (library.clone(), library_dir.clone(), music.clone());
         async move { MapData { sounds: sounds(&library, dir).await, songs: songs(&music).await } }.boxed_local()
+    })
+}
+
+/// More like these (`MapNear`): the sounds in this session's DAW's library nearest any of `paths` by how they sound (by
+/// their learned features), each one's turn in order, `paths` left out; at most `limit`. A file with nothing learned of
+/// it adds nothing; only all of them is refused.
+pub fn nearer(library: Rc<Library>) -> MapNear {
+    Rc::new(move |paths, limit| {
+        let library = library.clone();
+        async move {
+            let index = library.sound_index_in(Some(crate::daw::current().id())).await.map_err(|error| error.to_string())?;
+            let likes: Vec<LikeSound> = paths
+                .iter()
+                .filter_map(|path| {
+                    let entry = index.vector_of(path, None)?;
+                    let vector = entry.vector.as_deref().map(unpack_vector).unwrap_or_default();
+                    (vector.len() == VECTOR_LENGTH && vector.iter().all(|v| v.is_finite())).then(|| LikeSound {
+                        vector: vector.into_iter().map(f64::from).collect(),
+                        name: String::new(),
+                        path: Some(path.clone()),
+                        brightness: entry.brightness.unwrap_or_default(),
+                        attack: entry.attack.unwrap_or_default(),
+                        seconds: entry.seconds.unwrap_or_default(),
+                    })
+                })
+                .collect();
+            if likes.is_empty() {
+                return Err(match paths.len() {
+                    1 => "Kumi hasn't learned how that sound sounds yet.".to_string(),
+                    _ => "Kumi hasn't learned how those sounds sound yet.".to_string(),
+                });
+            }
+            let left_out: std::collections::HashSet<&String> = paths.iter().collect();
+            let found = index.search_near(&SoundQuery { limit, ..SoundQuery::default() }, &likes, true);
+            Ok(found.hits.into_iter().map(|hit| hit.entry.file.path.clone()).filter(|path| !left_out.contains(path)).collect())
+        }
+        .boxed_local()
     })
 }
 

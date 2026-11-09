@@ -103,6 +103,8 @@ pub enum Asked {
         mode: Option<Mode>,
         files: Vec<String>,
     },
+    /// n: the sounds that sound most like these files (the picks), to pick on the map as well.
+    Near(Vec<String>),
     /// A sound dragged to a place of its own, or moved sounds put back (shift+r): every move on the maps now, to keep.
     Moved(Moves),
     /// r, once a sound was made here: another variation of it.
@@ -120,6 +122,10 @@ pub type Moves = BTreeMap<String, BTreeMap<String, [f64; 2]>>;
 
 /// Each map's id, by its tab, as `Moves` keeps them.
 const MAP_IDS: [&str; 2] = ["sounds", "songs"];
+
+/// The most picks more like these starts from, and how many it brings of each.
+const MOST_NEAR: usize = 16;
+const NEAR_EACH: usize = 4;
 
 /// The sounds made on the map this run that it lists (1 to 9 pick them).
 const MOST_MADE: usize = 9;
@@ -294,76 +300,136 @@ struct Fit {
     turn: Turn,
 }
 
-/// How a map's places as read became its places as drawn (`fitted_on`): moved to its middle, turned by its main
-/// direction's angle, its strays brought in, and scaled into its box. A sound dragged to a place is kept as read, so it
-/// lands at the same place among its neighbours however the map is fitted next.
-#[derive(Clone, Copy, Debug, Default)]
-struct Turn {
-    mean: (f64, f64),
-    cos: f64,
-    sin: f64,
-    /// Past `edge` from the middle a place's distance grows as a log, `ease` of it at a time.
-    edge: f64,
-    ease: f64,
-    low: (f64, f64),
-    /// The box's height in places as read (none: every place is one), and how far up a flat map sits in it.
-    span: f64,
-    lift: f64,
+/// How a map's places as read became its places as drawn. Similarity's (`fitted_on`): moved to its middle, turned by
+/// its main direction's angle, its strays brought in, and scaled into its box. An arrangement's: its places ([0, 1], y
+/// down) in a box `aspect` wide, y up. A sound dragged to a place is kept as read, so it lands at the same place among
+/// its neighbours however the map is fitted next.
+#[derive(Clone, Copy, Debug)]
+enum Turn {
+    Fitted {
+        mean: (f64, f64),
+        cos: f64,
+        sin: f64,
+        /// Past `edge` from the middle a place's distance grows as a log, `ease` of it at a time.
+        edge: f64,
+        ease: f64,
+        low: (f64, f64),
+        /// The box's height in places as read (none: every place is one), and how far up a flat map sits in it.
+        span: f64,
+        lift: f64,
+    },
+    Boxed {
+        aspect: f64,
+    },
+}
+
+impl Default for Turn {
+    fn default() -> Turn {
+        Turn::Boxed { aspect: 1. }
+    }
 }
 
 impl Turn {
     /// A place as read, as the map draws it.
     fn forward(&self, (x, y): (f64, f64)) -> (f64, f64) {
-        if self.span <= 0. {
+        let (mean, cos, sin, edge, ease, low, span, lift) = match *self {
+            Turn::Boxed { aspect } => return (x * aspect, 1. - y),
+            Turn::Fitted { mean, cos, sin, edge, ease, low, span, lift } => (mean, cos, sin, edge, ease, low, span, lift),
+        };
+        if span <= 0. {
             return (0.5, 0.5);
         }
-        let (dx, dy) = (x - self.mean.0, y - self.mean.1);
-        let (mut px, mut py) = (dx * self.cos + dy * self.sin, dy * self.cos - dx * self.sin);
+        let (dx, dy) = (x - mean.0, y - mean.1);
+        let (mut px, mut py) = (dx * cos + dy * sin, dy * cos - dx * sin);
         let far = px.hypot(py);
-        if self.ease > 0. && far > self.edge {
-            let kept = (self.edge + self.ease * ((far - self.edge) / self.ease).ln_1p()) / far;
+        if ease > 0. && far > edge {
+            let kept = (edge + ease * ((far - edge) / ease).ln_1p()) / far;
             (px, py) = (px * kept, py * kept);
         }
-        ((px - self.low.0) / self.span, (py - self.low.1) / self.span + self.lift)
+        ((px - low.0) / span, (py - low.1) / span + lift)
     }
 
     /// A place as the map draws it, as read: `forward` undone.
     fn back(&self, (x, y): (f64, f64)) -> (f64, f64) {
-        if self.span <= 0. {
-            return self.mean;
+        let (mean, cos, sin, edge, ease, low, span, lift) = match *self {
+            Turn::Boxed { aspect } => return (x / aspect, 1. - y),
+            Turn::Fitted { mean, cos, sin, edge, ease, low, span, lift } => (mean, cos, sin, edge, ease, low, span, lift),
+        };
+        if span <= 0. {
+            return mean;
         }
-        let (mut px, mut py) = (x * self.span + self.low.0, (y - self.lift) * self.span + self.low.1);
+        let (mut px, mut py) = (x * span + low.0, (y - lift) * span + low.1);
         let far = px.hypot(py);
-        if self.ease > 0. && far > self.edge {
+        if ease > 0. && far > edge {
             // Far out past the strays the log's undoing grows fast: a place dragged off the map stays within reach.
-            let read = self.edge + self.ease * ((far - self.edge) / self.ease).min(30.).exp_m1();
+            let read = edge + ease * ((far - edge) / ease).min(30.).exp_m1();
             (px, py) = (px * read / far, py * read / far);
         }
-        (px * self.cos - py * self.sin + self.mean.0, px * self.sin + py * self.cos + self.mean.1)
+        (px * cos - py * sin + mean.0, px * sin + py * cos + mean.1)
     }
+}
+
+/// How wide an arrangement's box is against its height: a circle's (keys, length) square, the rest wider, as a screen.
+const ARRANGED_ASPECT: f64 = 1.6;
+
+/// One way a map is laid out as it's drawn (by similarity, or one of the sounds' arrangements): its id as `Moves` keeps
+/// it ("sounds", "sounds/character"), its arrangement's id ("similarity" for none), each point's place on it (the moves
+/// placed), its fit (how far apart and how typical its points are, worked out the first time it shows), the words it
+/// writes where they belong, and where it put each point moved, for shift+r.
+#[derive(Clone, Debug, Default)]
+struct Layout {
+    id: String,
+    arrangement: &'static str,
+    places: Vec<(f32, f32)>,
+    fit: Fit,
+    labels: Vec<(String, (f64, f64))>,
+    home: HashMap<u32, (f32, f32)>,
+}
+
+/// Each map's layouts: by similarity (fitted, its points' places in place), then each of its arrangements.
+fn laid_out(layer: &mut Layer, id: &str) -> Vec<Layout> {
+    let fit = fitted(layer);
+    let places = layer.points.iter().map(|point| (point.x, point.y)).collect();
+    let mut layouts = vec![Layout { id: id.into(), arrangement: "similarity", places, fit, ..Layout::default() }];
+    for (k, arrangement) in layer.arrangements.iter().enumerate() {
+        let aspect = if matches!(arrangement.id, "keys" | "length") { 1. } else { ARRANGED_ASPECT };
+        let turn = Turn::Boxed { aspect };
+        let at = |(x, y): (f32, f32)| {
+            let (x, y) = turn.forward((x as f64, y as f64));
+            (x as f32, y as f32)
+        };
+        layouts.push(Layout {
+            id: format!("{id}/{}", arrangement.id),
+            arrangement: arrangement.id,
+            places: layer.points.iter().map(|point| at(point.place(Some(k)))).collect(),
+            fit: Fit { aspect, turn, ..Fit::default() },
+            labels: arrangement.labels.iter().map(|label| (label.text.clone(), turn.forward((label.x as f64, label.y as f64)))).collect(),
+            home: HashMap::new(),
+        });
+    }
+    layouts
 }
 
 /// Both maps as they were made ready to draw, kept after /map closes (`MapView::kept`): their data (its colours as read,
 /// which the theme draws in its own as they show again), and each map's fit.
 pub struct KeptMap {
     data: Rc<MapData>,
-    fits: Vec<Fit>,
+    layouts: [Vec<Layout>; 2],
     colors_read: [Vec<Rgb>; 2],
-    home: [HashMap<u32, (f32, f32)>; 2],
 }
 
 /// Both maps made ready to draw: worked out once as /map opens, off Kumi's thread.
 pub struct Ready {
     data: MapData,
-    fits: [Fit; 2],
+    layouts: [Vec<Layout>; 2],
 }
 
 /// The maps made ready to draw: each turned so its long side runs across (its places' main direction), strays brought
 /// in, and fitted to its own box in place of a square (x from 0 to its aspect, y from 0 to 1), with how far each point
 /// is from its nearest there and how typical it is.
 pub fn ready(mut data: MapData) -> Ready {
-    let fits = [fitted(&mut data.sounds), fitted(&mut data.songs)];
-    Ready { data, fits }
+    let layouts = [laid_out(&mut data.sounds, MAP_IDS[0]), laid_out(&mut data.songs, MAP_IDS[1])];
+    Ready { data, layouts }
 }
 
 /// One map turned, its strays brought in and fitted to its box (its points' places changed in place).
@@ -420,16 +486,26 @@ fn fitted_on(layer: &mut Layer, threads: Option<usize>) -> Fit {
             if span > 0. { (((x - low.0) / span) as f32, ((y - low.1) / span + (1. - tall / span) / 2.) as f32) } else { (0.5, 0.5) };
     }
     let aspect = if span > 0. { (wide / span).max(1e-3) } else { 1. };
-    let turn = Turn { mean, cos, sin, edge, ease, low, span, lift: if span > 0. { (1. - tall / span) / 2. } else { 0. } };
+    let turn = Turn::Fitted { mean, cos, sin, edge, ease, low, span, lift: if span > 0. { (1. - tall / span) / 2. } else { 0. } };
+    let (apart, typical) = closeness(points, aspect, threads);
+    Fit { aspect, apart, typical, turn }
+}
+
+/// How far each point is from its nearest on a map `aspect` wide, and how typical it is (how many others have it among
+/// their NEAREST nearest, against the median: 0.7 to 1.7), searched on `threads` (None: as many as a map that big takes).
+fn closeness(points: &[Point], aspect: f64, threads: Option<usize>) -> (Vec<f32>, Vec<f32>) {
+    if points.is_empty() {
+        return (vec![], vec![]);
+    }
     let (apart, named) = match threads {
         Some(threads) => nearest_named_on(points, aspect, threads),
         None => nearest_named(points, aspect),
     };
     let mut sorted = named.clone();
     sorted.sort_unstable();
-    let median = sorted[count / 2] as f64;
+    let median = sorted[points.len() / 2] as f64;
     let typical = named.iter().map(|named| ((*named as f64 + 1.) / (median + 1.)).sqrt().clamp(0.7, 1.7) as f32).collect();
-    Fit { aspect, apart, typical, turn }
+    (apart, typical)
 }
 
 /// Each point's distance to its nearest other on a map `aspect` wide, and how many others have it among their NEAREST
@@ -839,6 +915,37 @@ struct Picture {
     radius: f64,
 }
 
+/// How long a change of layout glides.
+const MORPH: Duration = Duration::from_millis(450);
+
+/// A change of layout gliding on the sounds' map: each point's place, and the map's aspect, it glides from, since
+/// `started`.
+#[derive(Clone, Debug)]
+struct Morph {
+    from: Vec<(f32, f32)>,
+    aspect: f64,
+    started: Instant,
+}
+
+/// The axis words of an arrangement's map (left, right, top, bottom), by its id: the UI's words, not its data's.
+fn axes(arrangement: &str) -> [&'static str; 4] {
+    match arrangement {
+        "character" => ["dark", "bright", "punchy", "soft"],
+        "texture" => ["tonal", "noisy", "high", "low"],
+        "tempo" => ["slower", "faster", "", ""],
+        _ => ["", "", "", ""],
+    }
+}
+
+/// An arrangement's name as the header and the keys say it.
+fn layout_name(arrangement: &str) -> String {
+    let mut name = arrangement.to_string();
+    if let Some(first) = name.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    name
+}
+
 /// A zoom or a move gliding on a map (by its tab), from the zoom and centre it was shown at, since `started`.
 #[derive(Clone, Copy, Debug)]
 struct Glide {
@@ -851,8 +958,12 @@ struct Glide {
 pub struct MapView {
     graphics: Graphics,
     data: Option<Rc<MapData>>,
-    /// Each map as it's drawn (how wide it is, how far apart its points sit and how typical each is), by tab.
-    fits: Vec<Fit>,
+    /// Each map's layouts as they're drawn (by similarity, then the sounds' arrangements), by tab; the one the sounds'
+    /// map shows; whether a change of layout glides from one to the other, and the one gliding.
+    layouts: [Vec<Layout>; 2],
+    laid: usize,
+    morphs: bool,
+    morph: Option<Morph>,
     tab: usize,
     views: Vec<View>,
     /// The filter being typed.
@@ -891,10 +1002,9 @@ pub struct MapView {
     dragging: bool,
     /// Where the middle button went down and the map's centre then, while it's held: the map follows it.
     panning: Option<((i32, i32), (f64, f64))>,
-    /// The sounds dragged to places of their own (kept between sessions), and where each map put each one first (by its
-    /// place in the layer), for shift+r to put them back.
+    /// The sounds dragged to places of their own, kept between sessions (where each layout put each one first is the
+    /// layout's, for shift+r).
     moves: Moves,
-    home: [HashMap<u32, (f32, f32)>; 2],
     /// What putting points into the palette did, said under the map until the next key; and how many were picked when
     /// Enter put in only the first MOST_GATHERED.
     told: Option<String>,
@@ -908,6 +1018,8 @@ pub struct MapView {
     /// from; and where each one's name was drawn in that row (its first and last cell), for a click.
     made_sounds: Vec<MadeSound>,
     made_cells: Vec<(i32, i32)>,
+    /// What more like these brought last (picked as well, marked till the picks go), by their place on the sounds' map.
+    found: BTreeSet<u32>,
     /// Each point's NEAREST_KEPT nearest on each map (u32::MAX for none), worked out the first time g wants them.
     nearest: [Option<Rc<Vec<u32>>>; 2],
     /// The keys the footer names: Kumi's own, or the app's (`keyed`).
@@ -920,7 +1032,10 @@ impl MapView {
         MapView {
             graphics,
             data: None,
-            fits: vec![],
+            layouts: Default::default(),
+            laid: 0,
+            morphs: false,
+            morph: None,
             tab: 0,
             views: vec![],
             prompt: None,
@@ -945,7 +1060,6 @@ impl MapView {
             dragging: false,
             panning: None,
             moves: Moves::new(),
-            home: [HashMap::new(), HashMap::new()],
             told: None,
             capped: None,
             designs: false,
@@ -953,6 +1067,7 @@ impl MapView {
             made: None,
             made_sounds: vec![],
             made_cells: vec![],
+            found: BTreeSet::new(),
             nearest: [None, None],
             keymap: Keymap::default(),
         }
@@ -1025,6 +1140,52 @@ impl MapView {
         made.chain(picked).collect()
     }
 
+    /// n: more like the sounds picked (the first MOST_NEAR; none picked, the one chosen), from the library.
+    fn near(&mut self) -> Asked {
+        let Some(data) = self.data.clone() else { return Asked::Nothing };
+        if self.tab != 0 {
+            self.told = Some("More like these finds sounds: tab goes to them.".into());
+            return Asked::Nothing;
+        }
+        let view = &self.views[0];
+        let from: Vec<u32> = if view.picked.is_empty() { view.chosen.into_iter().collect() } else { view.picked.iter().copied().collect() };
+        if from.is_empty() {
+            return Asked::Nothing;
+        }
+        self.told = Some(format!("Finding more like {}…", if from.len() == 1 { "this".to_string() } else { format!("these {}", grouped(from.len())) }));
+        Asked::Near(from.into_iter().take(MOST_NEAR).map(|at| data.sounds.points[at as usize].path.clone()).collect())
+    }
+
+    /// The limit more like these asks for, from `count` files.
+    pub fn near_limit(count: usize) -> u32 {
+        (count.clamp(1, MOST_NEAR) * NEAR_EACH).max(8) as u32
+    }
+
+    /// What more like these found (their files), picked on the sounds' map as well as what was, and marked; or why it
+    /// found none.
+    pub fn near_found(&mut self, found: Result<Vec<String>, String>) {
+        let Some(data) = self.data.clone() else { return };
+        let paths = match found {
+            Ok(paths) => paths,
+            Err(why) => {
+                self.told = Some(why);
+                return;
+            }
+        };
+        let wanted: HashSet<&str> = paths.iter().map(String::as_str).collect();
+        let view = &mut self.views[0];
+        self.found = (0..data.sounds.points.len() as u32)
+            .filter(|at| wanted.contains(data.sounds.points[*at as usize].path.as_str()) && view.shown.binary_search(at).is_ok())
+            .collect();
+        view.picked.extend(self.found.iter().copied());
+        self.told = Some(match self.found.len() {
+            0 => "Nothing more like these on the map as it's filtered.".to_string(),
+            1 => "Picked 1 more like these (✦): space plays the one chosen, enter adds them.".to_string(),
+            count => format!("Picked {} more like these (✦): space plays the one chosen, enter adds them.", grouped(count)),
+        });
+        self.version += 1;
+    }
+
     /// How many are picked: on the map on show, and of the sounds made.
     fn picks(&self) -> usize {
         self.views.get(self.tab).map_or(0, |view| view.picked.len()) + self.made_sounds.iter().filter(|made| made.picked).count()
@@ -1035,6 +1196,7 @@ impl MapView {
         if let Some(view) = self.views.get_mut(self.tab) {
             view.picked.clear();
         }
+        self.found.clear();
         for made in &mut self.made_sounds {
             made.picked = false;
         }
@@ -1209,7 +1371,7 @@ impl MapView {
     fn grabbed(&self, x: i32, y: i32) -> Option<u32> {
         let picture = self.picture.as_ref().filter(|picture| !picture.dense)?;
         let at = self.under(x, y)?;
-        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fits.get(self.tab)?);
+        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fit(self.tab)?);
         let (area, frame) = (self.area, Frame::new(self.area, view));
         let (px, py) = frame.dot(spot(&layer.points[at as usize]));
         let dot = (((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64);
@@ -1223,23 +1385,28 @@ impl MapView {
         let (area, tab) = (self.area, self.tab);
         let Some(view) = self.views.get(tab) else { return };
         let place = Frame::new(area, view).at((((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64));
+        let place = (place.0 as f32, place.1 as f32);
+        if let Some(layout) = self.layout_mut(tab) {
+            let was = layout.places[at as usize];
+            layout.home.entry(at).or_insert(was);
+            layout.places[at as usize] = place;
+        }
         let Some(data) = self.data.as_mut() else { return };
         let data = Rc::make_mut(data);
         let layer = if tab == 0 { &mut data.sounds } else { &mut data.songs };
         let point = &mut layer.points[at as usize];
-        self.home[tab].entry(at).or_insert((point.x, point.y));
-        (point.x, point.y) = (place.0 as f32, place.1 as f32);
+        (point.x, point.y) = place;
         self.version += 1;
     }
 
     /// A point let go where it was dragged: its place kept by its file, as the map's data has places, and the point
     /// chosen's nearest and each one's nearest for g worked out again.
     fn keep_move(&mut self, at: u32) -> Asked {
-        let (Some(data), Some(fit)) = (self.data.clone(), self.fits.get(self.tab)) else { return Asked::Nothing };
+        let (Some(data), Some(layout)) = (self.data.clone(), self.layout(self.tab)) else { return Asked::Nothing };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
         let point = &layer.points[at as usize];
-        let (x, y) = fit.turn.back(spot(point));
-        self.moves.entry(MAP_IDS[self.tab].into()).or_default().insert(point.path.clone(), [x, y]);
+        let (x, y) = layout.fit.turn.back(spot(point));
+        self.moves.entry(layout.id.clone()).or_default().insert(point.path.clone(), [x, y]);
         self.nearest[self.tab] = None;
         let view = &mut self.views[self.tab];
         view.choose(layer, view.chosen);
@@ -1250,23 +1417,26 @@ impl MapView {
     fn unmove(&mut self) -> Asked {
         let tab = self.tab;
         let picked = &self.views[tab].picked;
-        let back: Vec<u32> = self.home[tab].keys().copied().filter(|at| picked.is_empty() || picked.contains(at)).collect();
+        let Some(layout) = self.layout(tab) else { return Asked::Nothing };
+        let back: Vec<u32> = layout.home.keys().copied().filter(|at| picked.is_empty() || picked.contains(at)).collect();
         if back.is_empty() {
             self.told = Some(if picked.is_empty() { "Nothing on this map was moved." } else { "None of the points picked was moved." }.into());
             return Asked::Nothing;
         }
-        let Some(data) = self.data.as_mut() else { return Asked::Nothing };
+        let laid = if tab == 0 { self.laid } else { 0 };
+        let (Some(data), Some(layout)) = (self.data.as_mut(), self.layouts[tab].get_mut(laid)) else { return Asked::Nothing };
         let layer = if tab == 0 { &mut Rc::make_mut(data).sounds } else { &mut Rc::make_mut(data).songs };
-        let moved = self.moves.entry(MAP_IDS[tab].into()).or_default();
+        let moved = self.moves.entry(layout.id.clone()).or_default();
         for at in &back {
             let point = &mut layer.points[*at as usize];
-            if let Some(home) = self.home[tab].remove(at) {
+            if let Some(home) = layout.home.remove(at) {
                 (point.x, point.y) = home;
+                layout.places[*at as usize] = home;
             }
             moved.remove(&point.path);
         }
         if moved.is_empty() {
-            self.moves.remove(MAP_IDS[tab]);
+            self.moves.remove(&layout.id);
         }
         self.told = Some(match back.len() {
             1 => "1 point is back where the map put it.".to_string(),
@@ -1286,20 +1456,88 @@ impl MapView {
         self
     }
 
-    /// The moves kept, each point moved drawn where it was put (where its map put it remembered, for shift+r).
+    /// The moves kept, each point moved placed where it was put on each layout (where the layout put it remembered, for
+    /// shift+r), and each map's points where its layout by similarity has them.
     fn place_moved(&mut self) {
         let Some(data) = self.data.as_mut() else { return };
         let data = Rc::make_mut(data);
-        for (tab, layer) in [&mut data.sounds, &mut data.songs].into_iter().enumerate() {
-            let (Some(moved), Some(fit)) = (self.moves.get(MAP_IDS[tab]), self.fits.get(tab)) else { continue };
-            for (at, point) in layer.points.iter_mut().enumerate() {
-                if let Some([x, y]) = moved.get(&point.path) {
-                    self.home[tab].entry(at as u32).or_insert((point.x, point.y));
-                    let (x, y) = fit.turn.forward((*x, *y));
-                    (point.x, point.y) = (x as f32, y as f32);
+        for (layer, layouts) in [&mut data.sounds, &mut data.songs].into_iter().zip(self.layouts.iter_mut()) {
+            for layout in layouts.iter_mut() {
+                let Some(moved) = self.moves.get(&layout.id) else { continue };
+                for (at, point) in layer.points.iter().enumerate() {
+                    if let Some([x, y]) = moved.get(&point.path) {
+                        let was = layout.places[at];
+                        layout.home.entry(at as u32).or_insert(was);
+                        let (x, y) = layout.fit.turn.forward((*x, *y));
+                        layout.places[at] = (x as f32, y as f32);
+                    }
+                }
+            }
+            if let Some(similarity) = layouts.first() {
+                for (point, (x, y)) in layer.points.iter_mut().zip(&similarity.places) {
+                    (point.x, point.y) = (*x, *y);
                 }
             }
         }
+    }
+
+    /// The same map with a change of layout gliding from one to the other.
+    pub fn morphing(mut self, on: bool) -> MapView {
+        self.morphs = on;
+        self
+    }
+
+    /// l (shift+l: back): the sounds' map laid out the next way (by similarity, then each of its arrangements), its
+    /// points gliding there where layouts glide, the map zoomed out.
+    fn arrange(&mut self, by: isize) -> Asked {
+        let count = self.layouts[0].len();
+        if self.tab != 0 || count < 2 {
+            self.told = Some("Only the sounds' map has other layouts.".into());
+            return Asked::Nothing;
+        }
+        let from = self.layouts[0][self.laid].places.clone();
+        let aspect = self.views[0].aspect;
+        self.laid = (self.laid as isize + by).rem_euclid(count as isize) as usize;
+        let view = &mut self.views[0];
+        (view.aspect, view.zoom, view.centre) = (self.layouts[0][self.laid].fit.aspect, 1., (self.layouts[0][self.laid].fit.aspect / 2., 0.5));
+        self.glide = None;
+        self.morph = Some(Morph { from, aspect, started: Instant::now() });
+        if !self.morphs {
+            self.morph_step(true);
+        }
+        let hovering = self.hovered.take().is_some() || self.from_hover;
+        if hovering { Asked::Leave } else { Asked::Nothing }
+    }
+
+    /// A change of layout gliding: each point (and the map's aspect) eased along from where it was to its place on the
+    /// layout shown (`land`: there at once). Once there, the layout's fit is worked out if it never was, and the point
+    /// chosen's nearest again.
+    fn morph_step(&mut self, land: bool) {
+        let Some(morph) = self.morph.as_ref() else { return };
+        let t = if land { 1. } else { (morph.started.elapsed().as_secs_f64() / MORPH.as_secs_f64()).min(1.) };
+        let eased = 1. - (1. - t).powi(3);
+        let (Some(data), Some(layout)) = (self.data.as_mut(), self.layouts[0].get(self.laid)) else { return };
+        let layer = &mut Rc::make_mut(data).sounds;
+        for ((point, from), to) in layer.points.iter_mut().zip(&morph.from).zip(&layout.places) {
+            point.x = from.0 + (to.0 - from.0) * eased as f32;
+            point.y = from.1 + (to.1 - from.1) * eased as f32;
+        }
+        let aspect = morph.aspect + (layout.fit.aspect - morph.aspect) * eased;
+        let view = &mut self.views[0];
+        (view.aspect, view.centre) = (aspect, (aspect / 2., 0.5));
+        self.version += 1;
+        if t < 1. {
+            return;
+        }
+        self.morph = None;
+        let layout = &mut self.layouts[0][self.laid];
+        if layout.fit.apart.is_empty() {
+            (layout.fit.apart, layout.fit.typical) = closeness(&layer.points, layout.fit.aspect, None);
+        }
+        self.nearest[0] = None;
+        let Some(data) = self.data.clone() else { return };
+        let view = &mut self.views[0];
+        view.choose(&data.sounds, view.chosen);
     }
 
     /// The same map with its zooms and moves gliding where it's drawn in cells (an image would go up again each step).
@@ -1311,10 +1549,10 @@ impl MapView {
     /// The map's data, read and made ready to draw: each map zoomed out with the point nearest its middle chosen. The
     /// songs' map comes first when there are no sounds on one yet.
     pub fn loaded(&mut self, ready: Ready) {
-        let Ready { data, fits } = ready;
+        let Ready { data, layouts } = ready;
         // The classes' and styles' colours as read, for each theme's own (`rethemed`).
         let colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
-        self.shown_from(KeptMap { data: Rc::new(data), fits: fits.into(), colors_read, home: Default::default() });
+        self.shown_from(KeptMap { data: Rc::new(data), layouts, colors_read });
     }
 
     /// A map kept from the last time /map was open, still the same (`KeptMap`): shown as it was first shown, without
@@ -1324,12 +1562,13 @@ impl MapView {
     }
 
     fn shown_from(&mut self, kept: KeptMap) {
-        let KeptMap { data, fits, colors_read, home } = kept;
-        (self.colors_read, self.home, self.fits) = (colors_read, home, fits);
+        let KeptMap { data, layouts, colors_read } = kept;
+        (self.colors_read, self.layouts, self.laid, self.morph) = (colors_read, layouts, 0, None);
         self.data = Some(data);
         self.place_moved();
         let data = self.data.clone().expect("given");
-        self.views = vec![View::new(&data.sounds, self.fits[0].aspect), View::new(&data.songs, self.fits[1].aspect)];
+        let aspect = |tab: usize| self.layouts[tab].first().map_or(1., |layout| layout.fit.aspect);
+        self.views = vec![View::new(&data.sounds, aspect(0)), View::new(&data.songs, aspect(1))];
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
         self.version += 1;
         self.mark_palette();
@@ -1339,7 +1578,7 @@ impl MapView {
     /// What to keep of the map as it closes, for /map again while what it was read from stays the same: its data, its
     /// fits and its colours as read. None when it never came.
     pub fn kept(self) -> Option<KeptMap> {
-        Some(KeptMap { data: self.data?, fits: self.fits, colors_read: self.colors_read, home: self.home })
+        Some(KeptMap { data: self.data?, layouts: self.layouts, colors_read: self.colors_read })
     }
 
     /// Each class's and style's colour as it reads on the theme's ground (on light, one too pale deepened), from the
@@ -1375,9 +1614,24 @@ impl MapView {
         }
     }
 
-    /// Whether the map is still gliding: it's drawn again soon.
+    /// Whether the map is still gliding (a zoom, a move, a change of layout): it's drawn again soon.
     pub fn moving(&self) -> bool {
-        self.glide.is_some_and(|glide| glide.tab == self.tab && glide.started.elapsed() < GLIDE)
+        self.glide.is_some_and(|glide| glide.tab == self.tab && glide.started.elapsed() < GLIDE) || self.morph.is_some()
+    }
+
+    /// The layout a map shows (by its tab).
+    fn layout(&self, tab: usize) -> Option<&Layout> {
+        self.layouts.get(tab).and_then(|layouts| layouts.get(if tab == 0 { self.laid } else { 0 }))
+    }
+
+    fn layout_mut(&mut self, tab: usize) -> Option<&mut Layout> {
+        let laid = if tab == 0 { self.laid } else { 0 };
+        self.layouts.get_mut(tab).and_then(|layouts| layouts.get_mut(laid))
+    }
+
+    /// How the layout a map shows is drawn (by its tab).
+    fn fit(&self, tab: usize) -> Option<&Fit> {
+        self.layout(tab).map(|layout| &layout.fit)
     }
 
     fn layer(&self) -> Option<&Layer> {
@@ -1477,6 +1731,9 @@ impl MapView {
                     return Asked::Nothing;
                 }
                 "map.unmove" if picks => return self.unmove(),
+                "map.near" if picks => return self.near(),
+                "map.arrange" if picks => return self.arrange(1),
+                "map.arrange-back" if picks => return self.arrange(-1),
                 "map.let-go" if self.picks() > 0 => {
                     self.let_go_picks();
                     return Asked::Nothing;
@@ -1646,7 +1903,7 @@ impl MapView {
         if self.graphics == Graphics::Words || !inside(area, x, y) {
             return None;
         }
-        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fits.get(self.tab)?);
+        let (layer, view, fit) = (self.layer()?, self.views.get(self.tab)?, self.fit(self.tab)?);
         let frame = Frame::new(area, view);
         let dot = (((x - area.x) * 2 + 1) as f64, ((y - area.y) * 4 + 2) as f64);
         let radius = self.picture.as_ref().map_or(0., |picture| picture.radius);
@@ -1764,6 +2021,7 @@ impl MapView {
         if self.glide.is_some_and(|glide| glide.started.elapsed() >= GLIDE) {
             self.glide = None;
         }
+        self.morph_step(false);
         let (columns, rows) = (screen.width, screen.height);
         if columns < 40 || rows < 12 {
             let words = self.keymap.with_key(
@@ -1817,6 +2075,10 @@ impl MapView {
             };
             x = screen.put(x, 0, &text, &style) + 1;
         }
+        let laid_out = self.tab == 0 && self.layouts[0].len() > 1 && self.graphics != Graphics::Words;
+        if let Some(layout) = self.layout(self.tab).filter(|_| laid_out) {
+            x = screen.put(x + 1, 0, &format!("by {}", layout_name(layout.arrangement)), &Style::fg(palette::DIM)) + 1;
+        }
         if let Some(view) = self.views.get(self.tab) {
             let mut right = String::new();
             if !view.filter.is_empty() {
@@ -1861,7 +2123,7 @@ impl MapView {
     fn draw_map(&mut self, screen: &mut Screen, layer: &Layer, upload: &mut dyn FnMut(&str, &Raster, usize, usize) -> u32) {
         // Where a zoom or a move glides, each step is a picture of its own.
         let (zoom, centre) = self.shown();
-        let (area, view, fit) = (self.area, &self.views[self.tab], &self.fits[self.tab]);
+        let (area, view, fit) = (self.area, &self.views[self.tab], self.fit(self.tab).expect("laid out"));
         let (cols, rows) = (area.width as usize, area.height as usize);
         let key = format!("map {} {} {cols}x{rows} {zoom} {} {}", self.tab, self.version, centre.0, centre.1);
         let frame = Frame::showing(area, view.aspect, zoom, centre);
@@ -1915,7 +2177,9 @@ impl MapView {
             }
         }
         // Names beside their points where there's room, the chosen one's first; then the chosen point itself.
-        let (view, fit) = (&self.views[self.tab], &self.fits[self.tab]);
+        // (The layout by its fields: the picture is borrowed.)
+        let layout = &self.layouts[self.tab][if self.tab == 0 { self.laid } else { 0 }];
+        let (view, fit) = (&self.views[self.tab], &layout.fit);
         // A name starts a cell clear of its point: past the half of it right of its cell (a disc about the cell's right
         // dot reaches half a cell further).
         let gap = |at: u32| ((1. + radius_of(fit, at, picture.radius, frame.scale)) / 2.).floor() as i32 + 2;
@@ -1960,6 +2224,24 @@ impl MapView {
                 screen.put(x + gap, y, &name, &Style { bg: Some(palette::GROUND), ..Style::fg(color) });
             }
         }
+        // An arrangement's words where they belong (keys, tempos, lengths, classes, folders), and its axes' at the edges.
+        if layout.arrangement != "similarity" {
+            let style = Style { bg: Some(palette::GROUND), ..Style::fg(palette::FAINT) };
+            for (text, place) in &layout.labels {
+                let (x, y) = frame.dot(*place);
+                let width = text_width(text);
+                let (x, y) = (area.x + (x / 2.) as i32 - width / 2, area.y + (y / 4.) as i32);
+                if y >= area.y && y < area.y + area.height && x >= area.x && x + width <= area.x + area.width {
+                    screen.put(x, y, text, &style);
+                }
+            }
+            let [left, right, top, bottom] = axes(layout.arrangement);
+            let middle = area.y + area.height / 2;
+            screen.put(area.x, middle, left, &style);
+            screen.put(area.x + area.width - text_width(right), middle, right, &style);
+            screen.put(area.x + (area.width - text_width(top)) / 2, area.y, top, &style);
+            screen.put(area.x + (area.width - text_width(bottom)) / 2, area.y + area.height - 1, bottom, &style);
+        }
         // What a loose palette brings in (·), the palette's points (•), and the points picked (●) over them.
         let shown = |at: &u32| frame.shows(frame.dot(spot(&layer.points[*at as usize])));
         for at in self.halo[self.tab].iter().filter(|at| !view.picked.contains(at)).filter(|at| shown(at)) {
@@ -1972,7 +2254,8 @@ impl MapView {
         }
         for at in view.picked.iter().filter(|at| shown(at)) {
             let (x, y) = cell(*at);
-            screen.put(x, y, "●", &Style { bold: true, ..Style::fg(palette::BRIGHT) });
+            let found = self.tab == 0 && self.found.contains(at);
+            screen.put(x, y, if found { "✦" } else { "●" }, &Style { bold: true, ..Style::fg(if found { palette::ACCENT } else { palette::BRIGHT }) });
         }
         if let Some(at) = chosen {
             let (x, y) = cell(at);
@@ -2128,6 +2411,8 @@ impl MapView {
         let gather: (&[&str], &str, &str) = (&["map.gather"], "", "adds to the palette");
         let mut parts: Vec<(&[&str], &str, &str)> = vec![];
         let (adds, hover);
+        let more = if picked == 1 { "more like this".to_string() } else { format!("more like these ({})", grouped(picked.min(MOST_NEAR))) };
+        let laid = format!("lays out: {}", self.layout(0).map_or("similarity", |layout| layout.arrangement));
         let clears = format!("clears {}", if self.picks() == 1 { "the pick".into() } else { format!("{} picks", grouped(self.picks())) });
         if self.graphics == Graphics::Words {
             parts.push((&["map.up", "map.down"], "up and down", "choose"));
@@ -2143,6 +2428,9 @@ impl MapView {
             parts.push((&["map.gather"], "", &adds));
             if self.designs && self.sources() >= kumi_design::MIN_SOURCES {
                 parts.push((&["map.design"], "", "makes a sound of them"));
+            }
+            if self.tab == 0 {
+                parts.push((&["map.near"], "", &more));
             }
             parts.push((&[], "", "drag picks (shift adds)"));
             parts.push((&["map.pick"], "", "picks"));
@@ -2168,6 +2456,9 @@ impl MapView {
             parts.push((&["map.up", "map.down", "map.left", "map.right"], "arrows", "move"));
             parts.push((&["map.pan-up", "map.pan-down", "map.pan-left", "map.pan-right"], "shift+arrows", "pan"));
             parts.push((&["map.zoom-in", "map.zoom-out"], "+ −", "zoom"));
+            if self.tab == 0 && self.layouts[0].len() > 1 {
+                parts.push((&["map.arrange"], "", &laid));
+            }
             if self.gathers {
                 // A drag picks whatever x is.
                 parts.push(if self.keymap.key("map.pick").is_some() {
@@ -2180,7 +2471,7 @@ impl MapView {
             parts.push((&["map.filter"], "", "filters"));
             parts.push((&["map.play"], "", "plays"));
             parts.push((&["map.hover"], "", &hover));
-            if !self.home[self.tab].is_empty() {
+            if self.layout(self.tab).is_some_and(|layout| !layout.home.is_empty()) {
                 parts.push((&["map.unmove"], "", "puts moved points back"));
             }
             parts.push((&[], "", "middle-drag pans"));
@@ -2994,5 +3285,82 @@ mod tests {
         map.on_click(x, y, false);
         map.on_release(x, y);
         assert!(map.views[0].picked.is_empty());
+    }
+
+    #[test]
+    fn l_lays_the_sounds_out_another_way_with_every_point_on_its_place_there() {
+        use crate::map::{Arrangement, Label};
+        let mut sounds = layer(&[(0.1, 0.2, 0), (0.6, 0.4, 1), (0.9, 0.9, 0), (0.3, 0.8, 1)]);
+        sounds.arrangements = vec![
+            Arrangement { id: "character", labels: vec![] },
+            Arrangement { id: "keys", labels: vec![Label { text: "C".into(), x: 0.5, y: 0.05 }] },
+        ];
+        for (n, point) in sounds.points.iter_mut().enumerate() {
+            point.arranged = vec![[n as f32 / 4., 1. - n as f32 / 4.], [0.2 + n as f32 / 5., 0.5]];
+        }
+        let arranged: Vec<Vec<[f32; 2]>> = sounds.points.iter().map(|point| point.arranged.clone()).collect();
+        let mut map = MapView::new(Graphics::Cells, true);
+        map.loaded(ready(MapData { sounds, songs: layer(&[]) }));
+        let draw = |map: &mut MapView| {
+            let mut screen = Screen::new(120, 30);
+            map.draw(&mut screen, &mut |_, _, _, _| 0);
+            screen.lines()
+        };
+        let spots = |map: &MapView| map.layer().unwrap().points.iter().map(spot).collect::<Vec<_>>();
+        let lines = draw(&mut map);
+        assert!(lines[0].contains("by Similarity") && lines[29].contains("l lays out: similarity"), "{}\n{}", lines[0], lines[29]);
+        let similarity = spots(&map);
+        // Character, then keys: every point on its place there (x across the box, y up), the map named in the header and
+        // the keys, its axes' and data's words drawn.
+        for (k, aspect, name, word) in [(0, ARRANGED_ASPECT, "character", "bright"), (1, 1., "keys", "C")] {
+            assert_eq!(map.on_text("l"), Asked::Nothing);
+            for (at, (x, y)) in spots(&map).into_iter().enumerate() {
+                let [ax, ay] = arranged[at][k];
+                assert!((x - ax as f64 * aspect).abs() < 1e-6 && (y - (1. - ay as f64)).abs() < 1e-6, "{name}: {at} at {x}, {y}");
+            }
+            assert_eq!(map.views[0].aspect, aspect);
+            let lines = draw(&mut map);
+            assert!(lines[29].contains(&format!("lays out: {name}")), "{}", lines[29]);
+            assert!(lines.iter().any(|line| line.contains(word)), "{word}:\n{}", lines.join("\n"));
+        }
+        // Round to similarity again, where every point was; shift+l goes back the other way.
+        map.on_text("l");
+        assert_eq!(spots(&map), similarity);
+        map.on_text("L");
+        assert!(draw(&mut map)[0].contains("by Keys"));
+        // The songs' map has one layout.
+        map.on_key("tab", false);
+        map.on_text("l");
+        assert_eq!(map.told.as_deref(), Some("Only the sounds' map has other layouts."));
+    }
+
+    #[test]
+    fn n_asks_for_more_like_the_picks_and_picks_what_it_finds_as_well() {
+        let points: Vec<(f32, f32, u16)> = (0..9).map(|n| (0.1 + n as f32 * 0.1, 0.5, (n % 2) as u16)).collect();
+        let mut map = gathering(&points);
+        map.on_text("x");
+        map.on_key("right", false);
+        map.on_text("x");
+        let picked = map.views[0].picked.clone();
+        assert_eq!(picked.len(), 2);
+        let mut screen = Screen::new(140, 30);
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines()[29].contains("n more like these (2)"), "{}", screen.lines()[29]);
+        let Asked::Near(paths) = map.on_text("n") else { panic!("more like these") };
+        let want: Vec<String> = picked.iter().map(|at| format!("/s/p{at}.wav")).collect();
+        assert_eq!(paths, want);
+        // What it found is picked as well and marked; Esc lets it all go.
+        map.near_found(Ok(vec!["/s/p0.wav".into(), "/s/p8.wav".into(), "/elsewhere.wav".into()]));
+        assert_eq!(map.views[0].picked, picked.iter().copied().chain([0, 8]).collect());
+        map.draw(&mut screen, &mut |_, _, _, _| 0);
+        assert!(screen.lines().iter().any(|line| line.contains('✦')));
+        assert!(map.told.as_deref().is_some_and(|told| told.starts_with("Picked 2 more like these")));
+        map.on_key("escape", false);
+        assert!(map.views[0].picked.is_empty() && map.found.is_empty());
+        // Why it found none is said.
+        map.on_text("x");
+        map.on_text("n");
+        map.near_found(Err("Kumi hasn't learned how that sound sounds yet.".into()));
+        assert_eq!(map.told.as_deref(), Some("Kumi hasn't learned how that sound sounds yet."));
     }
 }
