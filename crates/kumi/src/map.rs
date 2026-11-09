@@ -294,6 +294,17 @@ struct PageLayer<'a> {
     places: &'a [String],
     tags: &'a [String],
     points: PagePoints<'a>,
+    /// The other ways its points are laid out (the sounds' map's), each one's places column by column, y up.
+    arrangements: Vec<PageArrangement<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct PageArrangement<'a> {
+    id: &'static str,
+    /// The data's words where they belong: text, x, y.
+    labels: Vec<(&'a str, f64, f64)>,
+    x: Vec<f64>,
+    y: Vec<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -352,6 +363,18 @@ fn page_layer<'a>(layer: &'a Layer, title: &'static str) -> PageLayer<'a> {
             place: points.iter().map(|point| point.place).collect(),
             tags: points.iter().map(|point| point.tags).collect(),
         },
+        // An arrangement's places are y down: the page's are y up.
+        arrangements: layer
+            .arrangements
+            .iter()
+            .enumerate()
+            .map(|(k, arrangement)| PageArrangement {
+                id: arrangement.id,
+                labels: arrangement.labels.iter().map(|label| (label.text.as_str(), short(label.x), short(1. - label.y))).collect(),
+                x: points.iter().map(|point| short(point.place(Some(k)).0)).collect(),
+                y: points.iter().map(|point| short(1. - point.place(Some(k)).1)).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -407,11 +430,25 @@ impl Page {
         ids.iter().filter_map(|id| self.place(id)).map(|(kind, at)| gathered(self.layer(kind), at as u32)).collect()
     }
 
-    /// What an action chosen on the page asks Kumi, for the input box: none for an action or a point it doesn't have.
-    pub fn asked(&self, action: &str, id: &str) -> Option<String> {
+    /// What an action chosen on the page asks Kumi, for the input box (`ids`: one point, or for more like these several
+    /// picked on one map): none for an action or a point it doesn't have.
+    pub fn asked(&self, action: &str, ids: &[String]) -> Option<String> {
         let (action, _) = ACTIONS.iter().find(|(each, _)| action_called(*each) == action)?;
-        let (kind, point) = self.point(id)?;
-        Some(asked(kind, point, *action))
+        let points: Vec<(Kind, &Point)> = ids.iter().map(|id| self.point(id)).collect::<Option<_>>()?;
+        match points.as_slice() {
+            [(kind, point)] => Some(asked(*kind, point, *action)),
+            [(kind, _), ..] if *action == Action::More && points.iter().all(|(each, _)| each == kind) => Some(match kind {
+                Kind::Sounds => format!(
+                    "Find sounds like these: {}",
+                    points.iter().map(|(_, point)| point.path.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+                Kind::Songs => format!(
+                    "Find songs in my music like these: {}",
+                    points.iter().map(|(_, point)| format!("“{}”: {}", point.name, point.path)).collect::<Vec<_>>().join(", ")
+                ),
+            }),
+            _ => None,
+        }
     }
 }
 

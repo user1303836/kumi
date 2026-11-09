@@ -160,7 +160,7 @@ impl TuiApp {
             }),
             action: Box::new({
                 let (page, app) = (page.clone(), app.clone());
-                move |action, id| match (page.asked(action, id), app.upgrade()) {
+                move |action, ids| match (page.asked(action, ids), app.upgrade()) {
                     (Some(words), Some(app)) => {
                         TuiApp(app).from_map_page(&words);
                         true

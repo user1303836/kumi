@@ -67,6 +67,7 @@ impl Numbers {
 /// in three styles (two named by their words, one by its genre).
 fn fixture(per_class: usize, per_style: usize) -> MapData {
     let mut numbers = Numbers(7);
+    let mut measures = Numbers(11);
     let classes = [
         (SoundClass::Kick, 0.22, 0.32, "Kick"),
         (SoundClass::Snare, 0.42, 0.62, "Snare"),
@@ -87,13 +88,13 @@ fn fixture(per_class: usize, per_style: usize) -> MapData {
                 class: Some(class),
                 kind: Some(SoundKind::OneShot),
                 seconds: Some(0.3 + n as f64 % 7. * 0.1),
-                // What the arrangements read: brighter up the classes, punchier for drums.
-                brightness: Some(numbers.near(x, 0.2) * 9000.),
-                flatness: Some(numbers.near(y, 0.2).clamp(0., 1.)),
-                attack: Some(numbers.near(y, 0.3).abs() * 80.),
-                onsets: Some(numbers.near(0.5, 0.4).abs() * 6.),
-                low: Some(numbers.near(1. - x, 0.2).clamp(0., 1.)),
-                high: Some(numbers.near(x, 0.2).clamp(0., 1.)),
+                // What the arrangements read (from numbers of their own, so the places stay as they were).
+                brightness: Some(measures.near(x, 0.2) * 9000.),
+                flatness: Some(measures.near(y, 0.2).clamp(0., 1.)),
+                attack: Some(measures.near(y, 0.3).abs() * 80.),
+                onsets: Some(measures.near(0.5, 0.4).abs() * 6.),
+                low: Some(measures.near(1. - x, 0.2).clamp(0., 1.)),
+                high: Some(measures.near(x, 0.2).clamp(0., 1.)),
                 ..Default::default()
             });
         }
@@ -620,6 +621,9 @@ fn the_map_drawn_for_a_look() {
         shots.push((format!("{name}-braille.txt"), (screen.lines().join("\n") + "\n").into_bytes()));
         shots.push((format!("{name}-braille.png"), braille_png(&screen)));
     }
+    // The browser's map and what it draws, to serve from the folder and look at (`/map open`'s page as it is).
+    shots.push(("index.html".into(), kumi::map_server::PAGE.as_bytes().to_vec()));
+    shots.push(("points".into(), kumi::map::Page::new(data.clone()).points().into_bytes()));
     if let Some(folder) = std::env::var_os("KUMI_MAP_SHOTS") {
         for (name, bytes) in shots {
             std::fs::write(std::path::Path::new(&folder).join(name), bytes).unwrap();

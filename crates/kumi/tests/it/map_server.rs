@@ -51,10 +51,10 @@ async fn the_server_answers_only_its_own_page_by_its_token_and_plays_points_by_i
         }),
         action: Box::new({
             let asked = asked.clone();
-            move |action, id| {
+            move |action, ids| {
                 let known = ["more", "reference", "grow"].contains(&action);
                 if known {
-                    asked.borrow_mut().push((action.to_string(), id.to_string()));
+                    asked.borrow_mut().push((action.to_string(), ids.join(" ")));
                 }
                 known
             }
@@ -125,7 +125,18 @@ async fn the_server_answers_only_its_own_page_by_its_token_and_plays_points_by_i
             );
             assert_eq!(ask(port, &post(&action, &host, &format!("http://{host}"), "not json")).await.0, 400);
             assert_eq!(ask(port, &get(&action, &host, "")).await.0, 405);
-            assert_eq!(*asked.borrow(), [("more".to_string(), "songs:1".to_string())]);
+            // More like these from several picked: their ids, at most 16 of them, and never one and several at once.
+            let several = r#"{"action":"more","ids":["sounds:0","sounds:1"]}"#;
+            assert_eq!(ask(port, &post(&action, &host, &format!("http://{host}"), several)).await.0, 204);
+            let many =
+                serde_json::json!({ "action": "more", "ids": (0..17).map(|n| format!("sounds:{n}")).collect::<Vec<_>>() }).to_string();
+            assert_eq!(ask(port, &post(&action, &host, &format!("http://{host}"), &many)).await.0, 400);
+            let both = r#"{"action":"more","id":"sounds:0","ids":["sounds:1"]}"#;
+            assert_eq!(ask(port, &post(&action, &host, &format!("http://{host}"), both)).await.0, 400);
+            assert_eq!(
+                *asked.borrow(),
+                [("more".to_string(), "songs:1".to_string()), ("more".to_string(), "sounds:0 sounds:1".to_string())]
+            );
 
             // Points picked go into the palette, answered with what happened; ids only, never a path.
             let palette = format!("{home}palette");
@@ -238,9 +249,19 @@ fn the_page_gets_both_maps_and_names_points_and_actions_by_id() {
         assert!(page.point(none).is_none(), "{none}");
     }
     // An action asks what the terminal's map asks; one it doesn't offer asks nothing.
-    assert_eq!(page.asked("more", "songs:40").as_deref(), Some(asked(Kind::Songs, &data.songs.points[0], Action::More).as_str()));
-    assert_eq!(page.asked("grow", "sounds:0").unwrap(), "Make a sound like this one, with a match run aimed at it: /Samples/One 1.wav");
-    assert!(page.asked("delete", "songs:40").is_none() && page.asked("more", "songs:41").is_none());
+    let ids = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    assert_eq!(page.asked("more", &ids(&["songs:40"])).as_deref(), Some(asked(Kind::Songs, &data.songs.points[0], Action::More).as_str()));
+    assert_eq!(
+        page.asked("grow", &ids(&["sounds:0"])).unwrap(),
+        "Make a sound like this one, with a match run aimed at it: /Samples/One 1.wav"
+    );
+    assert!(page.asked("delete", &ids(&["songs:40"])).is_none() && page.asked("more", &ids(&["songs:41"])).is_none());
+    // More like these, from several picked on one map; no other action takes several, nor two maps' points.
+    assert_eq!(
+        page.asked("more", &ids(&["sounds:0", "sounds:1"])).unwrap(),
+        "Find sounds like these: /Samples/One 1.wav, /Samples/One 2.wav"
+    );
+    assert!(page.asked("grow", &ids(&["sounds:0", "sounds:1"])).is_none() && page.asked("more", &ids(&["sounds:0", "songs:40"])).is_none());
     // Picked points as the palette gathers them (those it has), and whether the page offers the palette.
     let gathered = page.gathered(&["sounds:0".into(), "songs:40".into(), "songs:8".into(), "sounds:1".into()]);
     let gathered: Vec<(&str, &str, bool, Option<&str>)> =
