@@ -14,7 +14,7 @@ use super::connection;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::history::{CallIdentity, Row, KEPT};
 use super::listen::{source_schema, Source};
-use super::live_pass::{readable_reference, window_refusal, Capturing};
+use super::live_pass::{readable_clip, readable_reference, window_refusal, Capturing};
 use kumi_listening::tools::{judge_tool, tune_tool};
 use kumi_types::contracts::ToolResult;
 use kumi_types::daw::{DawId, DawProfile};
@@ -147,7 +147,7 @@ async fn judge_input(
     let mut staged = None;
     if let Some(reference) = goal.get_mut("reference") {
         let resolved = if let Some(clip) = reference.get("clip_ref").and_then(Value::as_str) {
-            clip.to_string()
+            readable_clip(ctx, clip, capturing.folder(), &call.signal).await.map_err(refusal)?
         } else {
             let source = Source::parse(reference).map_err(refusal)?;
             let (path, copy) = readable_reference(ctx, &source, capturing.folder(), &call.signal).await.map_err(refusal)?;

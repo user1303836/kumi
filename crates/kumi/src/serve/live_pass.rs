@@ -72,9 +72,30 @@ impl Drop for Capturing {
     }
 }
 
+/// Whether Live's listening reads `file` as it is (WAV or AIFF), with no decoder.
+fn pcm(file: &Path) -> bool {
+    let extension = file.extension().map(|extension| extension.to_string_lossy().to_lowercase()).unwrap_or_default();
+    ["wav", "wave", "aif", "aiff", "aifc"].contains(&extension.as_str())
+}
+
+/// `file` decoded into `folder` as a WAV through the ffmpeg setup allowed, refused in the runtime's words without one.
+async fn decoded(ctx: &Ctx, file: &Path, folder: &Path, signal: &Signal) -> Result<PathBuf, OpError> {
+    let decode = DecodeOptions { installed_only: true, ffmpeg: ctx.media().tool("ffmpeg").map(Path::to_path_buf) };
+    let prepared = prepare_audio_to_with_options(file, Some(signal.clone()), None, &decode).await.map_err(|error| OpError::Refused {
+        code: "unreadable_reference",
+        reason: error.0,
+        owner: None,
+    })?;
+    // One reference a call, and the folder is the call's own.
+    let wav = folder.join("reference.wav");
+    let copied = tokio::fs::copy(&prepared.path, &wav).await;
+    prepared.cleanup().await;
+    copied.map_err(|error| OpError::Failed { reason: format!("Kumi couldn't keep the decoded reference: {error}") })?;
+    Ok(wav)
+}
+
 /// A reference source staged for Live's listening to read: the staged copy when it's WAV or AIFF, else a WAV decoded
-/// into `folder` through the ffmpeg setup allowed, refused in the runtime's words without one. The staged copy lives
-/// as long as what's returned.
+/// into `folder` ([`decoded`]). The staged copy lives as long as what's returned.
 pub(super) async fn readable_reference(
     ctx: &Ctx,
     source: &Source<'_>,
@@ -82,20 +103,29 @@ pub(super) async fn readable_reference(
     signal: &Signal,
 ) -> Result<(PathBuf, StagedArtifact), OpError> {
     let staged = stage_source(ctx, source, signal).await?;
-    let extension = staged.path().extension().map(|extension| extension.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if ["wav", "wave", "aif", "aiff", "aifc"].contains(&extension.as_str()) {
+    if pcm(staged.path()) {
         return Ok((staged.path().to_path_buf(), staged));
     }
-    let decode = DecodeOptions { installed_only: true, ffmpeg: ctx.media().tool("ffmpeg").map(Path::to_path_buf) };
-    let prepared = prepare_audio_to_with_options(staged.path(), Some(signal.clone()), None, &decode)
-        .await
-        .map_err(|error| OpError::Refused { code: "unreadable_reference", reason: error.0, owner: None })?;
-    // One reference a call, and the folder is the call's own.
-    let wav = folder.join("reference.wav");
-    let copied = tokio::fs::copy(&prepared.path, &wav).await;
-    prepared.cleanup().await;
-    copied.map_err(|error| OpError::Failed { reason: format!("Kumi couldn't keep the decoded reference: {error}") })?;
+    let wav = decoded(ctx, staged.path(), folder, signal).await?;
     Ok((wav, staged))
+}
+
+/// An audio clip named as a reference, for Live's listening to read: the clip ref itself when its file is WAV or AIFF
+/// (or Live doesn't say what it is: the integration reads it then, or says why not), else its file decoded into
+/// `folder` ([`decoded`]), so a reference is never decoded another way.
+pub(super) async fn readable_clip(ctx: &Ctx, clip_ref: &str, folder: &Path, signal: &Signal) -> Result<String, OpError> {
+    let integration = ctx.connection()?.integration.clone();
+    if !integration.has_audio_file() {
+        return Ok(clip_ref.to_string());
+    }
+    let file = integration
+        .audio_file(clip_ref, signal.clone())
+        .await
+        .map_err(|error| OpError::Failed { reason: super::connection::names_only_text(&error.to_string()) })?;
+    match file.map(PathBuf::from) {
+        Some(file) if !pcm(&file) => Ok(decoded(ctx, &file, folder, signal).await?.to_string_lossy().into_owned()),
+        _ => Ok(clip_ref.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -148,7 +178,7 @@ mod tests {
         assert!(refused.reason().contains("approve a local decoder at setup, or export as WAV/AIFF"), "{}", refused.reason());
         assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 0, "nothing decoded");
         let wav = root.join("ref.wav");
-        kumi_media::audio::decode::write_test_wav(&wav, &[0.; 4800], 48_000);
+        std::fs::write(&wav, kumi_media::audio::decode::float_wav(&[vec![0.; 4800]], 48_000)).unwrap();
         let file = wav.to_string_lossy().into_owned();
         let (path, staged) = readable_reference(&ctx, &Source::File(&file), folder.path(), &signal).await.unwrap();
         assert_eq!(path, staged.path());
