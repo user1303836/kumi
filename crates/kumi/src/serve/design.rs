@@ -86,8 +86,8 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             check(&call.signal)?;
             file.verify()?;
             let name = names[i].clone().unwrap_or_else(|| format!("made sound {}", i + 1));
-            let source = load_source(file.path(), &name, seconds, &decode, Some(call.signal.clone())).await.map_err(|e| OpError::Failed {
-                reason: format!("{name}: {}", e.0.replace(&file.path().display().to_string(), "the sound")),
+            let source = load_source(file.path(), &name, seconds, &decode, Some(call.signal.clone())).await.map_err(|e| {
+                OpError::Failed { reason: format!("{name}: {}", e.0.replace(&file.path().display().to_string(), "the sound")) }
             })?;
             decoded.push(source);
         }

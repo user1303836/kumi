@@ -1,7 +1,7 @@
-"""Sound design for the Desktop and web dashboard (`POST /design`, `GET /designs`): two to sixteen sounds of the map or
-earlier results crossed, fused or stacked into a new one by the pinned runtime's one-shot `kumi design`, which takes
-files and needs no DAW, session or network. The runtime the chat holds is never started, stopped or asked (C3): the
-agent's own designs go through its `design` operation instead.
+"""Sound design for the Desktop and web dashboard (`POST /design`, `GET /designs`): two or more sounds of the map or
+earlier results crossed, fused or stacked into a new one, or one grown toward another, by the pinned runtime's one-shot
+`kumi design`, which takes files and needs no DAW, session or network. The runtime the chat holds is never started,
+stopped or asked (C3): the agent's own designs go through its `design` operation instead.
 
 A request names its sounds by id only; the caller resolves each to an approved file (`snapshots.media`, the one media
 guard) and hands it in. A result is `<state>/designs/<artifact_id>.wav`, its id `a-d` and 22 letters or digits, listed
@@ -37,16 +37,18 @@ FOLDER = "designs"
 # The results kept, and how many `GET /designs` answers.
 KEEP = 200
 HISTORY = 50
-# The longest a render may take: a 30-second smear of sixteen 30-second sounds takes a few seconds.
-TIMEOUT_S = 120
+# The longest a render may take: a design reads at most 300 s of audio across its sounds, however many it has.
+TIMEOUT_S = 300
 # Renders at once: each is a process of its own, and a second click shouldn't queue behind a slow one.
 SLOTS = 2
 DESIGN_ID = re.compile(r"a-d[A-Za-z0-9]{22}")
-OPS = {"cross": ("blend", "attack", "resonate", "modulate"), "fuse": ("texture", "loop", "smear"), "stack": ()}
-MIN_SOURCES, MAX_SOURCES, MAX_STACK = 2, 16, 8
+OPS = {"cross": ("blend", "attack", "resonate", "modulate"), "fuse": ("texture", "loop", "smear"), "stack": (), "grow": ()}
+MIN_SOURCES = 2
 MAX_SEED = 2**53 - 1
 ID_MAX, NAME_MAX = 200, 120
-OPTIONS = {"seconds", "bpm", "bars", "attack_from", "split", "depth", "stretch"}
+OPTIONS = {"seconds", "bpm", "bars", "attack_from", "split", "depth", "stretch", "at"}
+# The choices that are objects of their own: the engine checks their names and ranges and says what's wrong.
+CHOICES = {"steer", "resonate", "modulate", "loop"}
 # What the runtime's process gets of the environment: what a program needs to start and find temporary space.
 _LAUNCH = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "USERPROFILE")
 _FILE_MAX_BYTES = 16 * 1024 * 1024
@@ -87,9 +89,16 @@ def _text(value: object, most: int) -> bool:
     return isinstance(value, str) and 0 < len(value) <= most and value.isprintable()
 
 
+def _plain(value: object) -> bool:
+    """A choice's value: a number, a short text, or a short list of them."""
+    if isinstance(value, list):
+        return len(value) <= 16 and all(_number(v) or _text(v, 40) for v in value)
+    return _number(value) or _text(value, 40)
+
+
 def parse(body: object) -> dict:
     """The request a body is (`{op, mode?, sources, seed?, options?}`, sources by id only), its shape checked; the
-    engine checks the ranges and says what's wrong in its own words."""
+    engine checks the ranges and the choices' names and says what's wrong in its own words."""
     if not isinstance(body, dict):
         raise Invalid("A design request is a JSON object.")
     unknown = set(body) - {"op", "mode", "sources", "seed", "options"}
@@ -101,11 +110,12 @@ def parse(body: object) -> dict:
     if OPS[op] and mode not in OPS[op]:
         raise Invalid(f"{op} needs a mode: {', '.join(OPS[op])}.")
     if not OPS[op] and mode is not None:
-        raise Invalid("stack takes no mode.")
+        raise Invalid(f"{op} takes no mode.")
     sources = body.get("sources")
-    most = MAX_STACK if op == "stack" else MAX_SOURCES
-    if not isinstance(sources, list) or not MIN_SOURCES <= len(sources) <= most:
-        raise Invalid(f"{op} takes {MIN_SOURCES} to {most} sounds.")
+    if op == "grow" and (not isinstance(sources, list) or len(sources) != 2):
+        raise Invalid("grow takes 2 sounds: the one to grow from and the one to grow toward.")
+    if not isinstance(sources, list) or len(sources) < MIN_SOURCES:
+        raise Invalid(f"{op} takes {MIN_SOURCES} or more sounds.")
     checked = []
     for source in sources:
         if not isinstance(source, dict) or set(source) - {"sound_id", "map_revision", "artifact_id", "name"}:
@@ -123,12 +133,19 @@ def parse(body: object) -> dict:
             raise Invalid(f"seed is a whole number from 0 to {MAX_SEED}.")
         request["seed"] = body["seed"]
     options = body.get("options", {})
-    if not isinstance(options, dict) or set(options) - OPTIONS:
-        raise Invalid(f"options are {', '.join(sorted(OPTIONS))}.")
+    if not isinstance(options, dict) or set(options) - OPTIONS - CHOICES:
+        raise Invalid(f"options are {', '.join(sorted(OPTIONS | CHOICES))}.")
     for key, value in options.items():
-        ok = all(_whole(i) for i in value) and len(value) <= MAX_SOURCES if key == "split" and isinstance(value, list) else _number(value)
+        if key in CHOICES:
+            ok = isinstance(value, dict) and len(value) <= 40 and all(
+                isinstance(k, str) and _plain(v) for k, v in value.items())
+            what = "a set of choices"
+        elif key == "split":
+            ok, what = isinstance(value, list) and all(_whole(i) for i in value), "a number list"
+        else:
+            ok, what = _number(value), "a number"
         if not ok:
-            raise Invalid(f"{key} is a number{' list' if key == 'split' else ''}.")
+            raise Invalid(f"{key} is {what}.")
     request["options"] = dict(options)
     return request
 

@@ -1,9 +1,12 @@
 //! Cross: two to sixteen sounds into one. **Blend** morphs their spectra into one body; **attack** puts one's transient
-//! on the blend of the rest; **resonate** rings half of them through the other half; **modulate** has them modulate each
-//! other (phase, ring, FM, envelope-driven filter and gain, spectral cross-synthesis).
+//! on the blend of the rest; **resonate** rings some of them through the others (a seeded half by default, or paired in
+//! order, interleaved, by brightness, hits against tones, one against all, or in a chain); **modulate** has them modulate
+//! each other (phase, ring, AM, FM, envelope-driven filter and gain, spectral cross-synthesis), its carrier, ways and
+//! stages drawn or chosen.
 
 use super::{
     analysis::{self, envelope, frame_at, hann, read_at, wrap, Frame, Stereo, Synth},
+    choices::{Carrier, Modulation, Pairing, Ring},
     fx,
     rng::Rng,
     shares, short, Ending, Options, Prepared, RATE,
@@ -302,17 +305,112 @@ fn modal(exciter: &Stereo, partials: &[analysis::Partial], decay: f64, rng: &mut
     out
 }
 
+/// A resonator rung by `exciter`: by its partials (kind 0), as a body (its own sound as an impulse response, kind 1), or
+/// both (kind 2), each part brought to `level`. Unscaled overall, with what it did in words.
+fn ring_through(
+    exciter: &Stereo,
+    level: f64,
+    resonator: &Prepared,
+    kind: usize,
+    decay: f64,
+    len: usize,
+    rng: &mut Rng,
+) -> (Stereo, String) {
+    let mut ringing = fx::silence(len);
+    let mut said = Vec::new();
+    if kind != 1 {
+        let count = 8 + rng.below(25);
+        let partials = analysis::partials(&resonator.mono, resonator.peak, count);
+        if !partials.is_empty() {
+            let mut m = modal(exciter, &partials, decay, rng, len);
+            let own = fx::rms(&m, 0, len).max(1e-12);
+            fx::scale(&mut m, level / own);
+            fx::mix_into(&mut ringing, &m, 0, [1.0, 1.0]);
+            said.push(format!("{} partials, decay ×{:.1}", partials.len(), decay));
+        }
+    }
+    if kind != 0 || said.is_empty() {
+        // Its own sound as a body: trimmed, faded, its energy one.
+        let ir_len = resonator.len().min((rng.range(0.3, 2.0) * RATE) as usize).max(64);
+        let mut ir: Stereo = [resonator.audio[0][..ir_len].to_vec(), resonator.audio[1][..ir_len].to_vec()];
+        fx::fade_out(&mut ir, ir_len * 3 / 10);
+        let energy = fx::rms(&ir, 0, ir_len) * (ir_len as f64).sqrt();
+        fx::scale(&mut ir, 1.0 / energy.max(1e-9));
+        let mut driven = exciter.clone();
+        fx::filter(&mut driven, || high_pass(RATE, 60.0));
+        let mono = analysis::mono(&driven);
+        let mut b: Stereo = [fx_conv(&mono, &ir[0], len), fx_conv(&mono, &ir[1], len)];
+        let own = fx::rms(&b, 0, len).max(1e-12);
+        fx::scale(&mut b, level / own);
+        fx::mix_into(&mut ringing, &b, 0, [1.0, 1.0]);
+        said.push("body".into());
+    }
+    (ringing, said.join(" and "))
+}
+
+/// How bright a sound is: its spectral centroid around its start.
+fn brightness(source: &Prepared) -> f64 {
+    analysis::colour(&source.mono, 0).centroid
+}
+
+/// How much a sound is a hit rather than a tone: short against the longest, peaking early, noisy, and without a pitch
+/// each score higher.
+fn hitness(source: &Prepared, longest: usize) -> f64 {
+    let unpitched = if analysis::pitch(&source.mono, source.peak).is_none() { 1.0 } else { 0.0 };
+    let shortness = 1.0 - source.len() as f64 / longest.max(1) as f64;
+    let early = 1.0 - (source.peak as f64 / (0.05 * RATE)).min(1.0);
+    unpitched + analysis::colour(&source.mono, 0).flatness + shortness + 0.5 * early
+}
+
+/// The half (rounded up) that scores highest, in their given order.
+fn top_half(scores: &[f64]) -> Vec<usize> {
+    let mut ranked: Vec<usize> = (0..scores.len()).collect();
+    ranked.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
+    let mut top = ranked[..scores.len().div_ceil(2)].to_vec();
+    top.sort_unstable();
+    top
+}
+
+/// A pairing in a recipe's words.
+fn pairing_words(pairing: Pairing) -> &'static str {
+    match pairing {
+        Pairing::Halves => "halves",
+        Pairing::InOrder => "in order",
+        Pairing::Interleave => "interleaved",
+        Pairing::BrightDark => "bright through dark",
+        Pairing::DarkBright => "dark through bright",
+        Pairing::HitsTones => "hits through tones",
+        Pairing::TonesHits => "tones through hits",
+        Pairing::OneAll => "one through all",
+        Pairing::AllOne => "all through one",
+        Pairing::Chain => "chain",
+    }
+}
+
 pub(super) fn resonate(sources: &[Prepared], options: &Options, mut rng: Rng) -> (Stereo, String, Ending) {
     let n = sources.len();
-    let exciters: Vec<usize> = match &options.split {
-        Some(split) => split.clone(),
-        None => {
+    let choices = options.resonate.clone().unwrap_or_default();
+    // A split names the exciters itself, whatever the pairing.
+    let pairing = if options.split.is_some() { None } else { choices.pairing };
+    let chain = pairing == Some(Pairing::Chain);
+    let longest = sources.iter().map(Prepared::len).max().unwrap_or(0);
+    let exciters: Vec<usize> = match (&options.split, pairing) {
+        (Some(split), _) => split.clone(),
+        (None, None | Some(Pairing::Halves)) => {
             let order = rng.shuffled(n);
             let half = if n % 2 == 1 && rng.chance(0.5) { n / 2 + 1 } else { n / 2 };
             let mut e = order[..half.max(1)].to_vec();
             e.sort_unstable();
             e
         }
+        (None, Some(Pairing::InOrder)) => (0..n.div_ceil(2)).collect(),
+        (None, Some(Pairing::Interleave)) => (0..n).step_by(2).collect(),
+        (None, Some(Pairing::BrightDark)) => top_half(&sources.iter().map(brightness).collect::<Vec<_>>()),
+        (None, Some(Pairing::DarkBright)) => top_half(&sources.iter().map(|s| -brightness(s)).collect::<Vec<_>>()),
+        (None, Some(Pairing::HitsTones)) => top_half(&sources.iter().map(|s| hitness(s, longest)).collect::<Vec<_>>()),
+        (None, Some(Pairing::TonesHits)) => top_half(&sources.iter().map(|s| -hitness(s, longest)).collect::<Vec<_>>()),
+        (None, Some(Pairing::OneAll | Pairing::Chain)) => vec![0],
+        (None, Some(Pairing::AllOne)) => (0..n - 1).collect(),
     };
     let resonators: Vec<usize> = (0..n).filter(|i| !exciters.contains(i)).collect();
     let most = options.seconds.map_or(15.0, |s| s.min(15.0));
@@ -323,56 +421,48 @@ pub(super) fn resonate(sources: &[Prepared], options: &Options, mut rng: Rng) ->
         let source = [sources[i].audio[0].clone(), sources[i].audio[1].clone()];
         fx::mix_into(&mut exciter, &source, offset, [1.0, 1.0]);
     }
-    let decay = rng.range(0.6, 2.4) * (0.5 + options.depth.unwrap_or(0.5));
+    // 0.6 to 2.4 times each partial's own ring, drawn or chosen.
+    let decay = choices.decay.map_or_else(|| rng.range(0.6, 2.4), |d| 0.6 + 1.8 * d) * (0.5 + options.depth.unwrap_or(0.5));
     let wet = options.depth.map_or_else(|| rng.range(0.6, 0.92), |d| 0.3 + 0.7 * d);
     let tail =
         resonators.iter().map(|&i| sources[i].len().min((2.0 * RATE) as usize)).max().unwrap_or(0).max((decay.min(3.0) * RATE) as usize);
     let len = options.seconds.map_or(exciter_len + tail, |s| (s * RATE) as usize).min((super::MAX_SECONDS * RATE) as usize);
     let exciter_level = fx::rms(&exciter, 0, exciter_len).max(1e-9);
+    let count = (resonators.len() as f64).sqrt();
     let mut wet_sum = fx::silence(len);
     let mut words = Vec::new();
+    // In a chain, each link's ringing excites the next.
+    let mut driver: Option<Stereo> = None;
     for &i in &resonators {
         let resonator = &sources[i];
-        let kind = rng.below(3);
-        let mut ringing = fx::silence(len);
-        let mut said = Vec::new();
-        if kind != 1 {
-            let count = 8 + rng.below(25);
-            let partials = analysis::partials(&resonator.mono, resonator.peak, count);
-            if !partials.is_empty() {
-                let mut m = modal(&exciter, &partials, decay, &mut rng, len);
-                let level = fx::rms(&m, 0, len).max(1e-12);
-                fx::scale(&mut m, exciter_level / level);
-                fx::mix_into(&mut ringing, &m, 0, [1.0, 1.0]);
-                said.push(format!("{} partials, decay ×{:.1}", partials.len(), decay));
-            }
-        }
-        if kind != 0 || said.is_empty() {
-            // Its own sound as a body: trimmed, faded, its energy one.
-            let ir_len = resonator.len().min((rng.range(0.3, 2.0) * RATE) as usize).max(64);
-            let mut ir: Stereo = [resonator.audio[0][..ir_len].to_vec(), resonator.audio[1][..ir_len].to_vec()];
-            fx::fade_out(&mut ir, ir_len * 3 / 10);
-            let energy = fx::rms(&ir, 0, ir_len) * (ir_len as f64).sqrt();
-            fx::scale(&mut ir, 1.0 / energy.max(1e-9));
-            let mut driven = exciter.clone();
-            fx::filter(&mut driven, || high_pass(RATE, 60.0));
-            let mono = analysis::mono(&driven);
-            let mut b: Stereo = [fx_conv(&mono, &ir[0], len), fx_conv(&mono, &ir[1], len)];
-            let level = fx::rms(&b, 0, len).max(1e-12);
-            fx::scale(&mut b, exciter_level / level);
-            fx::mix_into(&mut ringing, &b, 0, [1.0, 1.0]);
-            said.push("body".into());
-        }
+        let kind = match choices.ring {
+            None => rng.below(3),
+            Some(Ring::Partials) => 0,
+            Some(Ring::Body) => 1,
+            Some(Ring::Both) => 2,
+        };
+        let (mut ringing, said) = ring_through(driver.as_ref().unwrap_or(&exciter), exciter_level, resonator, kind, decay, len, &mut rng);
         let level = fx::rms(&ringing, 0, len).max(1e-12);
-        fx::scale(&mut ringing, exciter_level / level / (resonators.len() as f64).sqrt());
-        fx::mix_into(&mut wet_sum, &ringing, 0, [1.0, 1.0]);
-        words.push(format!("{} ({})", short(&resonator.name), said.join(" and ")));
+        if chain {
+            fx::scale(&mut ringing, exciter_level / level);
+            fx::mix_into(&mut wet_sum, &ringing, 0, [1.0 / count, 1.0 / count]);
+            driver = Some(ringing);
+        } else {
+            fx::scale(&mut ringing, exciter_level / level / count);
+            fx::mix_into(&mut wet_sum, &ringing, 0, [1.0, 1.0]);
+        }
+        words.push(format!("{} ({said})", short(&resonator.name)));
     }
     let mut out = fx::silence(len);
     fx::mix_into(&mut out, &exciter, 0, [1.0 - wet, 1.0 - wet]);
     fx::mix_into(&mut out, &wet_sum, 0, [wet, wet]);
     let exciter_names: Vec<String> = exciters.iter().map(|&i| short(&sources[i].name)).collect();
-    let recipe = format!("{} through {}; {}% wet", exciter_names.join(" + "), words.join(" and "), (wet * 100.0).round());
+    let rung = words.join(if chain { " → " } else { " and " });
+    let recipe = format!("{} through {rung}; {}% wet", exciter_names.join(" + "), (wet * 100.0).round());
+    let recipe = match pairing {
+        Some(pairing) => format!("{}: {recipe}", pairing_words(pairing)),
+        None => recipe,
+    };
     (out, recipe, Ending::OneShot { fade: (0.08 * RATE) as usize })
 }
 
@@ -385,11 +475,35 @@ fn fx_conv(x: &[f32], h: &[f32], len: usize) -> Vec<f32> {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Stage {
     Phase,
+    /// Ring or AM, drawn: the way a stage multiplies when the ways aren't chosen.
+    RingOrAm,
     Ring,
+    Am,
     Fm,
     Filter,
     Gain,
     Vocode,
+}
+
+impl Stage {
+    /// A chosen way as a stage, at its usual odds.
+    fn of(way: Modulation) -> (Stage, f64) {
+        match way {
+            Modulation::Phase => (Stage::Phase, 0.26),
+            Modulation::Ring => (Stage::Ring, 0.2),
+            Modulation::Am => (Stage::Am, 0.2),
+            Modulation::Fm => (Stage::Fm, 0.14),
+            Modulation::Filter => (Stage::Filter, 0.2),
+            Modulation::Gain => (Stage::Gain, 0.08),
+            Modulation::Vocode => (Stage::Vocode, 0.12),
+        }
+    }
+}
+
+/// The source scoring highest (the first of equals).
+fn most(sources: &[Prepared], score: impl Fn(&Prepared) -> f64) -> usize {
+    let scores: Vec<f64> = sources.iter().map(score).collect();
+    (0..scores.len()).fold(0, |best, i| if scores[i] > scores[best] { i } else { best })
 }
 
 /// A modulator made ready: its mono signal at peak 1, and how present it is at each moment (0 to 1). One much shorter
@@ -457,7 +571,23 @@ fn vocode(x: &Stereo, envelope_of: &[f32]) -> Stereo {
 
 pub(super) fn modulate(sources: &[Prepared], options: &Options, mut rng: Rng) -> (Stereo, String, Ending) {
     let n = sources.len();
-    let carrier = rng.below(n);
+    let choices = options.modulate.clone().unwrap_or_default();
+    let rule = choices.carrier.unwrap_or(Carrier::Random);
+    let carrier = match rule {
+        Carrier::Random => rng.below(n),
+        Carrier::First => 0,
+        Carrier::Last => n - 1,
+        Carrier::Brightest => most(sources, brightness),
+        Carrier::Darkest => most(sources, |s| -brightness(s)),
+        Carrier::Longest => most(sources, |s| s.len() as f64),
+        Carrier::Shortest => most(sources, |s| -(s.len() as f64)),
+        // A pitched sound before any unpitched one, the least noisy of them first.
+        Carrier::Tonal => most(sources, |s| {
+            let pitched = if analysis::pitch(&s.mono, s.peak).is_some() { 2.0 } else { 0.0 };
+            pitched - analysis::colour(&s.mono, 0).flatness
+        }),
+        Carrier::Noisy => most(sources, |s| analysis::colour(&s.mono, 0).flatness),
+    };
     let longest = sources.iter().map(Prepared::len).max().unwrap_or(0);
     let natural = sources[carrier].len().max(longest / 2) + (0.15 * RATE) as usize;
     let len = options.seconds.map_or(natural, |s| (s * RATE) as usize).clamp((0.2 * RATE) as usize, (super::MAX_SECONDS * RATE) as usize);
@@ -466,18 +596,19 @@ pub(super) fn modulate(sources: &[Prepared], options: &Options, mut rng: Rng) ->
         c.resize(len, 0.0);
     }
     let mut order: Vec<usize> = rng.shuffled(n).into_iter().filter(|&i| i != carrier).collect();
-    let stages = order.len().max(2).min(6);
+    let stages = choices.stages.map_or_else(|| order.len().clamp(2, 6), |s| s as usize);
     while order.len() < stages {
         let extra = order[rng.below(order.len())];
         order.push(extra);
     }
-    // A modulator under 60% of the carrier's length retriggers along it more often than not, every whole sixteenth
-    // (at 120 BPM) it takes to play.
+    // A modulator under 60% of the carrier's length retriggers along it more often than not (or at the chosen chance),
+    // every whole sixteenth (at 120 BPM) it takes to play.
+    let retrigger = choices.retrigger.unwrap_or(0.6);
     let sixteenth = (0.125 * RATE) as usize;
     let modulators: Vec<Modulator> = (0..n)
         .map(|i| {
             let own = sources[i].len();
-            let every = (own * 5 < len * 3 && rng.chance(0.6)).then(|| own.div_ceil(sixteenth).max(1) * sixteenth);
+            let every = (own * 5 < len * 3 && rng.chance(retrigger)).then(|| own.div_ceil(sixteenth).max(1) * sixteenth);
             let mut m = modulator(&sources[i], len, every);
             if every.is_some() {
                 m.name.push_str(" (retriggered)");
@@ -486,15 +617,35 @@ pub(super) fn modulate(sources: &[Prepared], options: &Options, mut rng: Rng) ->
         })
         .collect();
     let depth = options.depth.unwrap_or_else(|| rng.range(0.4, 0.85));
-    let kinds = [Stage::Phase, Stage::Ring, Stage::Fm, Stage::Filter, Stage::Gain, Stage::Vocode];
-    let odds = [0.26, 0.2, 0.14, 0.2, 0.08, 0.12];
+    let mut kinds: Vec<(Stage, f64)> = Vec::new();
+    match &choices.kinds {
+        None => kinds.extend([
+            (Stage::Phase, 0.26),
+            (Stage::RingOrAm, 0.2),
+            (Stage::Fm, 0.14),
+            (Stage::Filter, 0.2),
+            (Stage::Gain, 0.08),
+            (Stage::Vocode, 0.12),
+        ]),
+        Some(ways) => {
+            for &way in ways {
+                let kind = Stage::of(way);
+                if !kinds.iter().any(|k| k.0 == kind.0) {
+                    kinds.push(kind);
+                }
+            }
+        }
+    }
+    let odds: Vec<f64> = kinds.iter().map(|k| k.1).collect();
     let mut last: Option<Stage> = None;
     let mut used_fm = false;
     let mut words = Vec::new();
+    // No way twice running, unless it's the only one; FM once, unless nothing else is left to draw.
+    let fm_again_avoidable = |last: Option<Stage>| kinds.iter().any(|k| k.0 != Stage::Fm && Some(k.0) != last);
     for &m in order.iter().take(stages) {
-        let mut stage = kinds[rng.weighted(&odds)];
-        while Some(stage) == last || (stage == Stage::Fm && used_fm) {
-            stage = kinds[rng.weighted(&odds)];
+        let mut stage = kinds[rng.weighted(&odds)].0;
+        while (Some(stage) == last && kinds.len() > 1) || (stage == Stage::Fm && used_fm && fm_again_avoidable(last)) {
+            stage = kinds[rng.weighted(&odds)].0;
         }
         last = Some(stage);
         used_fm |= stage == Stage::Fm;
@@ -508,8 +659,11 @@ pub(super) fn modulate(sources: &[Prepared], options: &Options, mut rng: Rng) ->
                 });
                 (y, format!("read by {} (PM {:.0} smp)", modulator.name, reach))
             }
-            Stage::Ring => {
-                let ring = rng.chance(0.5);
+            Stage::RingOrAm | Stage::Ring | Stage::Am => {
+                let ring = match stage {
+                    Stage::RingOrAm => rng.chance(0.5),
+                    other => other == Stage::Ring,
+                };
                 let y: Stereo = std::array::from_fn(|c| {
                     (0..len)
                         .map(|i| {
@@ -599,6 +753,17 @@ pub(super) fn modulate(sources: &[Prepared], options: &Options, mut rng: Rng) ->
         }
         words.push(said);
     }
-    let recipe = format!("Modulate {}: {}; depth {:.0}%", short(&sources[carrier].name), words.join(" → "), depth * 100.0);
+    let rule = match rule {
+        Carrier::Random => String::new(),
+        Carrier::First => " (the first)".into(),
+        Carrier::Last => " (the last)".into(),
+        Carrier::Brightest => " (the brightest)".into(),
+        Carrier::Darkest => " (the darkest)".into(),
+        Carrier::Longest => " (the longest)".into(),
+        Carrier::Shortest => " (the shortest)".into(),
+        Carrier::Tonal => " (the most tonal)".into(),
+        Carrier::Noisy => " (the noisiest)".into(),
+    };
+    let recipe = format!("Modulate {}{rule}: {}; depth {:.0}%", short(&sources[carrier].name), words.join(" → "), depth * 100.0);
     (x, recipe, Ending::OneShot { fade: (0.04 * RATE) as usize })
 }

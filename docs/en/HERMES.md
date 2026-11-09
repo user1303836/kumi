@@ -147,8 +147,8 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 
 ### Making sounds
 
-Kumi makes a new sound out of 2 to 16 of yours (map sounds, palette sounds, or sounds Kumi made before). Nothing in
-your project changes: the result is Kumi's own copy until you use it.
+Kumi makes a new sound out of two or more of yours, as many as you pick (map sounds, palette sounds, or sounds Kumi
+made before). Nothing in your project changes: the result is Kumi's own copy until you use it.
 
 ![The Make panel: a Cross blend, a Fuse loop at the project's 124 BPM (playing, already kept in the palette) and a Stack, each with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
 
@@ -157,13 +157,24 @@ your project changes: the result is Kumi's own copy until you use it.
 - **Cross** them into one sound:
   - **blend:** one body morphed from all of them;
   - **attack:** one sound's hit on the body of the others;
-  - **resonate:** some of them ring through the others, as if struck inside them;
-  - **modulate:** they bend, ring and filter each other into something new.
+  - **resonate:** some of them ring through the others, as if struck inside them. Choose who rings through whom (half
+    through half, in order, every other one, bright through dark, hits through tones, one through all, or a chain),
+    how they ring and for how long;
+  - **modulate:** one sound shaped by the others. Choose which sound, which ways (phase, ring, AM, FM, filter, gain,
+    spectrum) and how many stages; the recipe names each one.
 - **Fuse** them into something longer:
   - **texture:** a bed that drifts between them and loops;
-  - **loop:** their hits played as a 1 to 4 bar beat;
+  - **loop:** a beat of their hits, or a melody of them repitched, 1 to 8 bars in any meter (7/8, 6/8…) at your
+    project's tempo. Steer a beat by its swing, density, how busy each drum is, ghost notes, fills, rolls, open hats
+    and whether its hits cluster at the start or the end; a melody by its key, scale (pentatonic to pelog), tuning (19,
+    24 or 31-TET, just, Bohlen–Pierce…), notes bent off the scale, chords, glides and a held root;
   - **smear:** stretched 4 to 16 times longer, with a long, soft tail.
-- **Stack** 2 to 8 of them into one layered hit, lined up on their attacks and balanced.
+- **Stack** them into one layered hit, lined up on their attacks and balanced.
+- **Grow** one sound toward another: the sounds in between, from just like the first to just like the second. One seed
+  is one path; another seed takes another.
+- **Steer** any of them before it's made: darker or brighter, thinner or fuller, a filter, more tonal or noisier, softer
+  or punchier, shorter or longer, drive, lo-fi, width and space; and for each sound, a pitch range, a chance to play
+  backwards, a start point, a delay, pan and level, each sound drawing its own.
 - **Reroll:** each result has a seed. Another seed is another take of the same recipe; the same seed makes exactly the
   same sound again. Each result comes with a one-line recipe that says what went into it.
 - **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
