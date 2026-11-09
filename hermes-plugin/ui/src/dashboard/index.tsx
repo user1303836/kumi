@@ -29,6 +29,8 @@ const HOVER_PLAY = 'kumi.mapHover'
 const TILES = 'kumi.mapTiles'
 /** The browser's own key for whether the palette drawer is open: open until the producer folds it. */
 const PALETTE_OPEN = 'kumi.paletteOpen'
+/** The browser's own key for the map's layout: similarity ('') until the producer picks another. */
+const LAYOUT = 'kumi.mapLayout'
 
 function useNow(every = 30_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -89,6 +91,7 @@ function Dashboard() {
   const [hover, setHover] = useState(() => globalThis.localStorage?.getItem(HOVER_PLAY) !== 'off')
   const [tiles, setTiles] = useState(() => globalThis.localStorage?.getItem(TILES) === 'on')
   const [paletteOpen, setPaletteOpen] = useState(() => globalThis.localStorage?.getItem(PALETTE_OPEN) !== 'off')
+  const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? '')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
   // The dock's box: the Make panel flies a kept sound into it.
@@ -223,6 +226,11 @@ function Dashboard() {
               setTiles(on)
             }}
             tiles={tiles}
+            arrangement={layout}
+            onArrangement={id => {
+              globalThis.localStorage?.setItem(LAYOUT, id)
+              setLayout(id)
+            }}
             tools={
               <ToolButton
                 icon="hover"

@@ -3,7 +3,8 @@
 // the round buttons and pill groups the toolbar is made of. Every icon is drawn here in SVG, in `currentColor`, so it
 // follows the theme and needs no font.
 import { T } from '@kumi/theme'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { FOCUSABLE, S } from './ui.tsx'
 
@@ -95,12 +96,15 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   )
 }
 
-/** A round tool button: an icon, its name for a screen reader and a tooltip, pressed while its tool or toggle is on. */
-export function ToolButton({ icon, label, title, pressed, onClick, children, disabled }: { icon: IconName; label: string; title?: string; pressed?: boolean; onClick: () => void; children?: ReactNode; disabled?: boolean }) {
+/** A round tool button: an icon, its name for a screen reader and a tooltip, pressed while its tool or toggle is on;
+ *  with `expanded`, the button of a menu (open or not) instead of a toggle. */
+export function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }: { icon: IconName; label: string; title?: string; pressed?: boolean; onClick: () => void; children?: ReactNode; disabled?: boolean; expanded?: boolean }) {
   return (
     <button
+      aria-expanded={expanded}
+      aria-haspopup={expanded === undefined ? undefined : 'menu'}
       aria-label={children ? undefined : label}
-      aria-pressed={pressed}
+      aria-pressed={expanded === undefined ? pressed : undefined}
       className={FOCUSABLE}
       disabled={disabled}
       onClick={onClick}
@@ -132,10 +136,11 @@ export function ToolButton({ icon, label, title, pressed, onClick, children, dis
   )
 }
 
-/** A pill of tool buttons, with a hairline between groups (`Rule`). */
+/** A pill of tool buttons, with a hairline between groups (`Rule`). It stacks above the legend and cards under it
+ *  (its blur makes it a layer of its own), so a menu opening from it lands on top of them. */
 export function ToolGroup({ children, label }: { children: ReactNode; label: string }) {
   return (
-    <div aria-label={label} role="toolbar" style={{ ...glass, ...S.row, gap: 2, padding: 3, borderRadius: 18, pointerEvents: 'auto' }}>
+    <div aria-label={label} role="toolbar" style={{ ...glass, ...S.row, position: 'relative', zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: 'auto' }}>
       {children}
     </div>
   )
@@ -143,4 +148,82 @@ export function ToolGroup({ children, label }: { children: ReactNode; label: str
 
 export function Rule() {
   return <span aria-hidden style={{ width: 1, height: 18, margin: '0 3px', background: T.border, flex: 'none' }} />
+}
+
+/** One way to lay the map out, as the layout menu lists it. */
+export interface LayoutChoice {
+  id: string
+  name: string
+  title: string
+}
+
+/** The layout menu: a tool button (naming the layout shown, unless it's the first), opening a menu of `choices`. A
+ *  choice closes it, as do Escape and a press anywhere else; the arrow keys move between choices. */
+export function LayoutMenu({ label, choices, current, onChoose }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (event: PointerEvent) => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('pointerdown', away, true)
+    return () => window.removeEventListener('pointerdown', away, true)
+  }, [open])
+  const shown = choices.find(choice => choice.id === current) ?? choices[0]
+  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!open) return
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      setOpen(false)
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+    const at = items.findIndex(item => item === event.target)
+    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+  }
+  return (
+    <div onKeyDown={keys} ref={box} style={{ position: 'relative', display: 'flex' }}>
+      <ToolButton expanded={open} icon="layers" label={label} onClick={() => setOpen(!open)} pressed={open || shown !== choices[0]} title={`${label}: ${shown?.name ?? ''}`}>
+        {shown !== choices[0] ? shown?.name : undefined}
+      </ToolButton>
+      {open && (
+        <div aria-label={label} className="kumi-pop" role="menu" style={{ ...glass, position: 'absolute', top: 38, right: -4, width: 'max-content', maxWidth: 300, padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}>
+          {choices.map(choice => (
+            <button
+              aria-checked={choice.id === shown?.id}
+              className={FOCUSABLE}
+              key={choice.id}
+              onClick={() => {
+                onChoose(choice.id)
+                setOpen(false)
+              }}
+              ref={choice.id === shown?.id ? element => element?.focus() : undefined}
+              role="menuitemradio"
+              type="button"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 1,
+                font: 'inherit',
+                textAlign: 'left',
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: 'none',
+                cursor: 'pointer',
+                color: T.text,
+                background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent'
+              }}
+            >
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }}>{choice.name}</span>
+              <span style={{ fontSize: 11, color: T.muted }}>{choice.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }

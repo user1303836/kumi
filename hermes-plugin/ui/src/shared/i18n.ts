@@ -177,6 +177,18 @@ const en = {
     player: (name: string) => `Picked sound: ${name}`,
     letGo: 'Close'
   },
+  // The map's layouts: similarity, then serve's arrangements by id (their labels are data; these are UI words).
+  arrange: {
+    label: 'Layout',
+    similar: { name: 'Similarity', title: 'Sounds that sound alike sit together' },
+    character: { name: 'Character', title: 'Dark to bright, punchy to soft', left: 'Dark', right: 'Bright', top: 'Punchy', bottom: 'Soft' },
+    texture: { name: 'Texture', title: 'Tonal to noisy, high to low', left: 'Tonal', right: 'Noisy', top: 'High', bottom: 'Low' },
+    keys: { name: 'Keys', title: 'Round the circle of fifths: majors outside, minors inside, untuned sounds in the middle' },
+    tempo: { name: 'Tempo', title: 'By BPM, a lane for each kind; sounds with no tempo along the bottom', left: 'Slower', right: 'Faster', bottom: 'No tempo' },
+    families: { name: 'Families', title: 'An island for each kind, alike sounds together inside it' },
+    length: { name: 'Length', title: 'A spiral from the shortest sound in the middle out to the longest' },
+    folders: { name: 'Folders', title: 'An island for each top folder, alike sounds together inside it' }
+  },
   measurements: {
     tab: 'Measurements',
     nothing: 'Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.',
@@ -885,6 +897,17 @@ const ja: Shape<typeof en> = {
     player: name => `選んだサウンド：${name}`,
     letGo: '閉じる'
   },
+  arrange: {
+    label: 'レイアウト',
+    similar: { name: '似ている順', title: '似た響きのサウンドどうしが近くに並びます' },
+    character: { name: 'キャラクター', title: '暗い〜明るい、パンチのある〜やわらかい', left: '暗い', right: '明るい', top: 'パンチ', bottom: 'やわらか' },
+    texture: { name: 'テクスチャ', title: '音程感〜ノイズ、高い〜低い', left: '音程感', right: 'ノイズ', top: '高い', bottom: '低い' },
+    keys: { name: 'キー', title: '五度圏に沿って並びます。外側にメジャー、内側にマイナー、中央にキーのないサウンド' },
+    tempo: { name: 'テンポ', title: 'BPM 順に、種類ごとのレーンで並びます。テンポのないサウンドは下段に', left: '遅い', right: '速い', bottom: 'テンポなし' },
+    families: { name: '種類', title: '種類ごとの島。島の中では似たサウンドどうしが近くに並びます' },
+    length: { name: '長さ', title: '中央の最も短いサウンドから、外側の最も長いサウンドへのらせん' },
+    folders: { name: 'フォルダ', title: '最上位フォルダごとの島。島の中では似たサウンドどうしが近くに並びます' }
+  },
   measurements: {
     tab: '測定結果',
     nothing: 'まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。',
@@ -1586,6 +1609,17 @@ const zh: Shape<typeof en> = {
     legend: '分组：点击可隐藏或显示',
     player: name => `选中的声音：${name}`,
     letGo: '关闭'
+  },
+  arrange: {
+    label: '布局',
+    similar: { name: '相似度', title: '听起来相似的声音挨在一起' },
+    character: { name: '性格', title: '从暗到亮，从有冲击力到柔和', left: '暗', right: '亮', top: '有冲击力', bottom: '柔和' },
+    texture: { name: '质感', title: '从有音高到噪声，从高到低', left: '有音高', right: '噪声', top: '高', bottom: '低' },
+    keys: { name: '调性', title: '沿五度圈排列：大调在外圈，小调在内圈，没有调的声音在中间' },
+    tempo: { name: '速度', title: '按 BPM 排列，每种声音一条通道；没有速度的声音排在底部', left: '更慢', right: '更快', bottom: '没有速度' },
+    families: { name: '类别', title: '每个类别一座岛，岛里相似的声音挨在一起' },
+    length: { name: '长度', title: '一条螺旋：最短的声音在中心，越往外越长' },
+    folders: { name: '文件夹', title: '每个顶层文件夹一座岛，岛里相似的声音挨在一起' }
   },
   measurements: {
     tab: '测量结果',

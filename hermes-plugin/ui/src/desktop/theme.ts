@@ -24,5 +24,7 @@ export const CANVAS = {
   faint: '--ui-text-quaternary',
   border: '--ui-stroke-secondary',
   accent: '--ui-accent',
-  strong: '--ui-text-primary'
+  strong: '--ui-text-primary',
+  // What the map's words are haloed in, so they read over the points.
+  ground: '--ui-bg-elevated'
 } as const

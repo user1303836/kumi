@@ -374,6 +374,43 @@ test('the map keeps valid points, colours each group, and picks the nearest poin
   assert.equal(model.points[map.pick(model, view, size, x, y, 8, index => model.points[index].id !== 's-2')].id, 's-1')
 })
 
+test("each of a snapshot's layouts places every sound: one a sound lacks leaves it where similarity put it, and the pointer finds sounds where the layout shown put them", () => {
+  const snapshot = {
+    revision: 'r1',
+    points: [
+      ['s-1', 0.1, 0.1, 0, 0.9, 0.9, 0.5, 0.5],
+      ['s-2', 0.2, 0.2, 0, 0.3, null, 0.6, 0.6],
+      ['s-3', 0.3, 0.3, 1]
+    ],
+    groups: { 0: { name: 'snare' }, 1: { name: 'kick' } },
+    sounds: { 's-1': { name: 'A' }, 's-2': { name: 'B' }, 's-3': { name: 'C' } },
+    arrangements: [
+      { id: 'character', labels: [] },
+      { id: 'keys', labels: [['C', 0.5, 0.05], ['broken'], ['Am', 0.5, 0.2]] }
+    ]
+  }
+  const model = map.buildModel(snapshot)
+  const at = arranged => arranged.points.map(point => [point.id, Math.round(point.x * 1e4) / 1e4, Math.round(point.y * 1e4) / 1e4])
+  // Similarity stays the map's own places; character moves s-1 only (s-2's place there is broken, s-3 has none).
+  assert.deepEqual(at(model), [['s-1', 0.1, 0.1], ['s-2', 0.2, 0.2], ['s-3', 0.3, 0.3]])
+  assert.deepEqual(at(map.arrangedModel(model, 0)), [['s-1', 0.9, 0.9], ['s-2', 0.2, 0.2], ['s-3', 0.3, 0.3]])
+  const keys = map.arrangedModel(model, 1)
+  assert.deepEqual(at(keys), [['s-1', 0.5, 0.5], ['s-2', 0.6, 0.6], ['s-3', 0.3, 0.3]])
+  assert.deepEqual(model.arrangements[1].labels.map(label => label.text), ['C', 'Am'])
+  assert.equal(map.arrangedModel(model, 7), model)
+  // The pointer and a box work on the layout shown: s-1 is found at its keys place, not at its similarity place.
+  const view = map.fitView(400, 400)
+  const size = map.mapSide(400, 400)
+  const [kx, ky] = map.toScreen(view, size, 0.5, 0.5)
+  assert.equal(keys.points[map.pick(keys, view, size, kx, ky, 8)].id, 's-1')
+  const [sx, sy] = map.toScreen(view, size, 0.1, 0.1)
+  assert.equal(map.pick(keys, view, size, sx, sy, 8), -1)
+  assert.deepEqual(
+    map.pointsInBox(keys, view, size, [kx - 4, ky - 4, kx + 44, ky + 44]).map(index => keys.points[index].id),
+    ['s-1', 's-2']
+  )
+})
+
 test('zoom keeps the point under the pointer still, search needs every word, and framing shows what was found', () => {
   const model = map.buildModel(sample)
   const view = map.fitView(400, 300)

@@ -124,6 +124,105 @@ def map_points(revision: str = "r7") -> tuple[list, dict, dict]:
     return points, groups, sounds
 
 
+# The map's other layouts, in serve's order (contract B): each point's place in each follows its similarity place.
+LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"]
+# By class: how bright (character's x), how noisy (texture's x) and how high (texture's y, top is high).
+_TRAITS = {
+    "kick": (0.2, 0.35, 0.8),
+    "snare": (0.55, 0.65, 0.42),
+    "clap": (0.62, 0.7, 0.32),
+    "hat": (0.86, 0.86, 0.14),
+    "perc": (0.48, 0.5, 0.46),
+    "bass": (0.14, 0.16, 0.86),
+    "pad": (0.32, 0.26, 0.56),
+    "fx": (0.7, 0.76, 0.5),
+}
+_FIFTHS = ["C", "G", "D", "A", "E", "B", "F#", "C#", "G#", "D#", "A#", "F"]
+
+
+def arrange(points: list, sounds: dict) -> list:
+    """Append each point's place in each layout to it, as serve does, and return the layouts with their data words
+    (`[text, x, y]`). Seeded apart from `map_points`, so the similarity places stay where they are."""
+    rng = random.Random(11)
+    unit = lambda value: round(min(0.98, max(0.02, value)), 4)  # noqa: E731
+    classes = [group[0] for group in GROUPS]
+    sound_of = {point[0]: sounds[point[0]] for point in points}
+    centre = {name: (cx, cy) for name, _, (cx, cy), *_ in GROUPS}
+    places: dict[str, list] = {point[0]: [] for point in points}
+    layouts: list = []
+    # character: dark → bright × punchy (one-shots, top) → soft (loops, bottom).
+    for point in points:
+        sound = sound_of[point[0]]
+        bright = _TRAITS[sound["class"]][0]
+        punch = 0.3 if sound["kind"] == "one-shot" else 0.74
+        places[point[0]].append((unit(rng.gauss(bright, 0.08)), unit(rng.gauss(punch, 0.11))))
+    layouts.append({"id": "character", "labels": []})
+    # texture: tonal → noisy × high (top) → low.
+    for point in points:
+        _, noisy, high = _TRAITS[sound_of[point[0]]["class"]]
+        places[point[0]].append((unit(rng.gauss(noisy, 0.07)), unit(rng.gauss(high, 0.07))))
+    layouts.append({"id": "texture", "labels": []})
+    # keys: the circle of fifths from the top, clockwise; majors on the outer ring, minors inside; untuned sounds in
+    # the middle, by class.
+    ring = lambda step, radius: (0.5 + radius * math.sin(step * math.pi / 6), 0.5 - radius * math.cos(step * math.pi / 6))  # noqa: E731
+    for point in points:
+        sound = sound_of[point[0]]
+        if sound["class"] in ("bass", "pad") or (sound["class"] == "perc" and rng.random() < 0.3):
+            step, minor = rng.randrange(12), rng.random() < 0.45
+            x, y = ring(step + rng.uniform(-0.3, 0.3), (0.22 if minor else 0.37) + rng.uniform(-0.025, 0.025))
+        else:
+            turn = classes.index(sound["class"]) * math.tau / len(classes)
+            x, y = 0.5 + 0.06 * math.cos(turn) + rng.gauss(0, 0.025), 0.5 + 0.06 * math.sin(turn) + rng.gauss(0, 0.025)
+        places[point[0]].append((unit(x), unit(y)))
+    labels = [[key, *map(unit, ring(step, 0.45))] for step, key in enumerate(_FIFTHS)]
+    labels += [[f"{_FIFTHS[(step + 3) % 12]}m", *map(unit, ring(step, 0.295))] for step in range(12)]
+    layouts.append({"id": "keys", "labels": labels})
+    # tempo: BPM across (60–200), a lane per class with one; no tempo along the bottom, shortest first.
+    tempo_x = lambda bpm: 0.05 + 0.9 * (bpm - 60) / 140  # noqa: E731
+    timed = {p[0]: rng.choice([70, 85, 90, 100, 110, 120, 124, 128, 140, 160, 174]) for p in points if sound_of[p[0]]["kind"] == "loop" or (sound_of[p[0]]["class"] == "fx" and rng.random() < 0.4)}
+    lanes = sorted({sound_of[sound_id]["class"] for sound_id in timed}, key=classes.index)
+    untimed = sorted((p[0] for p in points if p[0] not in timed), key=lambda sound_id: sound_of[sound_id]["duration"])
+    for point in points:
+        if point[0] in timed:
+            place = (tempo_x(timed[point[0]]) + rng.uniform(-0.012, 0.012), 0.18 + 0.2 * lanes.index(sound_of[point[0]]["class"]) + rng.uniform(-0.06, 0.06))
+        else:
+            rank = untimed.index(point[0]) / max(1, len(untimed) - 1)
+            place = (0.04 + 0.92 * rank, 0.88 + rng.uniform(-0.05, 0.05))
+        places[point[0]].append(tuple(map(unit, place)))
+    layouts.append({"id": "tempo", "labels": [[str(bpm), unit(tempo_x(bpm)), 0.8] for bpm in range(60, 201, 20)]})
+    # families: an island per class (classes' order), its sounds inside it as similarity placed them.
+    islands = {name: (0.2 + 0.3 * (index % 3), 0.2 + 0.3 * (index // 3)) for index, name in enumerate(classes)}
+    for point in points:
+        name = sound_of[point[0]]["class"]
+        (ix, iy), (cx, cy) = islands[name], centre[name]
+        places[point[0]].append((unit(ix + (point[1] - cx) * 1.2), unit(iy + (point[2] - cy) * 1.2)))
+    layouts.append({"id": "families", "labels": [[name, unit(ix), unit(iy - 0.13)] for name, (ix, iy) in islands.items()]})
+    # length: a spiral, the shortest sound in the middle winding out to the longest.
+    by_length = sorted((p[0] for p in points), key=lambda sound_id: sound_of[sound_id]["duration"])
+    spiral = lambda rank: (0.5 + (0.05 + 0.4 * rank) * math.cos(rank * 6 * math.pi), 0.5 + (0.05 + 0.4 * rank) * math.sin(rank * 6 * math.pi))  # noqa: E731
+    for point in points:
+        places[point[0]].append(tuple(map(unit, spiral(by_length.index(point[0]) / max(1, len(by_length) - 1)))))
+    seconds = [sound_of[sound_id]["duration"] for sound_id in by_length]
+    marks = []
+    for value, text in ((0.1, "0.1 s"), (1.0, "1 s"), (10.0, "10 s")):
+        rank = min(range(len(seconds)), key=lambda index: abs(math.log(seconds[index] / value)))
+        x, y = spiral(rank / max(1, len(seconds) - 1))
+        marks.append([text, unit(x + (x - 0.5) * 0.12), unit(y + (y - 0.5) * 0.12)])
+    layouts.append({"id": "length", "labels": marks})
+    # folders: an island per top folder, its sounds inside it as similarity placed them.
+    tops = sorted({sound["folder"].split("/")[0] for sound in sounds.values()})
+    homes = {top: (0.27 + 0.46 * (index % 2), 0.27 + 0.46 * (index // 2)) for index, top in enumerate(tops)}
+    for point in points:
+        hx, hy = homes[sound_of[point[0]]["folder"].split("/")[0]]
+        places[point[0]].append((unit(hx + (point[1] - 0.5) * 0.36), unit(hy + (point[2] - 0.5) * 0.36)))
+    layouts.append({"id": "folders", "labels": [[top, unit(hx), unit(hy - 0.2)] for top, (hx, hy) in homes.items()]})
+    for point in points:
+        for x, y in places[point[0]]:
+            point.extend([x, y])
+    assert [layout["id"] for layout in layouts] == LAYOUTS
+    return layouts
+
+
 def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms: int | None = None) -> Path:
     """Write the whole state folder under `plugin_data` (the plugin's `plugin-data/kumi`). `audio`: `all` writes a
     WAV for every map sound, `some` for the snares and the measured files, `none` for none. Returns the state folder."""
@@ -226,6 +325,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
         },
     )
     points, groups, sounds = map_points("r7")
+    layouts = arrange(points, sounds)
     # `some`: the first snares only (the ones a test or a screenshot auditions), so writing the state stays quick.
     first_snares = {sound_id for sound_id, sound in sounds.items() if sound["class"] == "snare"}
     first_snares = set(sorted(first_snares)[:4])
@@ -235,7 +335,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
         sound["path"] = str(library / sound["folder"] / f"{sound['name']}.{'aif' if aiff else 'wav'}")
         if audio == "all" or (audio == "some" and sound_id in first_snares):
             (_aiff if aiff else _tone)(Path(sound["path"]), min(sound["duration"], 1.5), sound["kind"], int(sound_id[-4:]))
-    _write_json(state / "map" / "r7.json", {**_envelope(3, now), "revision": "r7", "made": now - 3600_000, "points": points, "groups": groups, "sounds": sounds})
+    _write_json(state / "map" / "r7.json", {**_envelope(3, now), "revision": "r7", "made": now - 3600_000, "points": points, "groups": groups, "arrangements": layouts, "sounds": sounds})
     (state / "map" / "current").write_text("r7\n", encoding="utf-8")
     artifacts_dir = state / "artifacts"
     original = artifacts_dir / "a-7f31-original.wav"

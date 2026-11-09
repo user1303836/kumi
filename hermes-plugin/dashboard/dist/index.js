@@ -22,7 +22,8 @@
     faint: "--color-muted-foreground",
     border: "--color-border",
     accent: "--color-primary",
-    strong: "--color-foreground"
+    strong: "--color-foreground",
+    ground: "--color-card"
   };
 
   // src/dashboard/react.ts
@@ -207,6 +208,18 @@
       legend: "Groups: click one to hide or show it",
       player: (name) => `Picked sound: ${name}`,
       letGo: "Close"
+    },
+    // The map's layouts: similarity, then serve's arrangements by id (their labels are data; these are UI words).
+    arrange: {
+      label: "Layout",
+      similar: { name: "Similarity", title: "Sounds that sound alike sit together" },
+      character: { name: "Character", title: "Dark to bright, punchy to soft", left: "Dark", right: "Bright", top: "Punchy", bottom: "Soft" },
+      texture: { name: "Texture", title: "Tonal to noisy, high to low", left: "Tonal", right: "Noisy", top: "High", bottom: "Low" },
+      keys: { name: "Keys", title: "Round the circle of fifths: majors outside, minors inside, untuned sounds in the middle" },
+      tempo: { name: "Tempo", title: "By BPM, a lane for each kind; sounds with no tempo along the bottom", left: "Slower", right: "Faster", bottom: "No tempo" },
+      families: { name: "Families", title: "An island for each kind, alike sounds together inside it" },
+      length: { name: "Length", title: "A spiral from the shortest sound in the middle out to the longest" },
+      folders: { name: "Folders", title: "An island for each top folder, alike sounds together inside it" }
     },
     measurements: {
       tab: "Measurements",
@@ -910,6 +923,17 @@
       player: (name) => `選んだサウンド：${name}`,
       letGo: "閉じる"
     },
+    arrange: {
+      label: "レイアウト",
+      similar: { name: "似ている順", title: "似た響きのサウンドどうしが近くに並びます" },
+      character: { name: "キャラクター", title: "暗い〜明るい、パンチのある〜やわらかい", left: "暗い", right: "明るい", top: "パンチ", bottom: "やわらか" },
+      texture: { name: "テクスチャ", title: "音程感〜ノイズ、高い〜低い", left: "音程感", right: "ノイズ", top: "高い", bottom: "低い" },
+      keys: { name: "キー", title: "五度圏に沿って並びます。外側にメジャー、内側にマイナー、中央にキーのないサウンド" },
+      tempo: { name: "テンポ", title: "BPM 順に、種類ごとのレーンで並びます。テンポのないサウンドは下段に", left: "遅い", right: "速い", bottom: "テンポなし" },
+      families: { name: "種類", title: "種類ごとの島。島の中では似たサウンドどうしが近くに並びます" },
+      length: { name: "長さ", title: "中央の最も短いサウンドから、外側の最も長いサウンドへのらせん" },
+      folders: { name: "フォルダ", title: "最上位フォルダごとの島。島の中では似たサウンドどうしが近くに並びます" }
+    },
     measurements: {
       tab: "測定結果",
       nothing: "まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。",
@@ -1608,6 +1632,17 @@
       legend: "分组：点击可隐藏或显示",
       player: (name) => `选中的声音：${name}`,
       letGo: "关闭"
+    },
+    arrange: {
+      label: "布局",
+      similar: { name: "相似度", title: "听起来相似的声音挨在一起" },
+      character: { name: "性格", title: "从暗到亮，从有冲击力到柔和", left: "暗", right: "亮", top: "有冲击力", bottom: "柔和" },
+      texture: { name: "质感", title: "从有音高到噪声，从高到低", left: "有音高", right: "噪声", top: "高", bottom: "低" },
+      keys: { name: "调性", title: "沿五度圈排列：大调在外圈，小调在内圈，没有调的声音在中间" },
+      tempo: { name: "速度", title: "按 BPM 排列，每种声音一条通道；没有速度的声音排在底部", left: "更慢", right: "更快", bottom: "没有速度" },
+      families: { name: "类别", title: "每个类别一座岛，岛里相似的声音挨在一起" },
+      length: { name: "长度", title: "一条螺旋：最短的声音在中心，越往外越长" },
+      folders: { name: "文件夹", title: "每个顶层文件夹一座岛，岛里相似的声音挨在一起" }
     },
     measurements: {
       tab: "测量结果",
@@ -4740,7 +4775,15 @@
     path.closePath();
   }
   var cellOf = (x, y) => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID));
+  var MOST_ARRANGEMENTS = 16;
+  var MOST_LABELS = 400;
+  var unitOf = (value) => typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : NaN;
   function buildModel(map) {
+    const arrangements = (Array.isArray(map?.arrangements) ? map.arrangements : []).slice(0, MOST_ARRANGEMENTS).map((raw) => ({
+      id: typeof raw?.id === "string" ? clean(raw.id, 24) : "",
+      labels: (Array.isArray(raw?.labels) ? raw.labels : []).slice(0, MOST_LABELS).filter((label) => Array.isArray(label) && typeof label[0] === "string" && Number.isFinite(label[1]) && Number.isFinite(label[2])).map(([text, x, y]) => ({ text: clean(text, 40), x: unitOf(x), y: unitOf(y) }))
+    }));
+    const placed = arrangements.map(() => []);
     const points = [];
     const cells = /* @__PURE__ */ new Map();
     for (const raw of Array.isArray(map?.points) ? map.points : []) {
@@ -4753,6 +4796,7 @@
       if (list) list.push(points.length);
       else cells.set(cell, [points.length]);
       points.push(point);
+      placed.forEach((values, k) => values.push(unitOf(raw[4 + 2 * k]), unitOf(raw[5 + 2 * k])));
     }
     const groups = Object.entries(map?.groups ?? {}).map(([key, group]) => ({
       key: Number(key),
@@ -4760,7 +4804,22 @@
       color: groupColor(group?.color, Number(key)),
       count: typeof group?.count === "number" ? group.count : points.filter((point) => point.group === Number(key)).length
     })).filter((group) => Number.isInteger(group.key)).sort((a, b) => a.key - b.key);
-    return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells };
+    return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells, arrangements, places: placed.map((values) => Float32Array.from(values)) };
+  }
+  function arrangedModel(model, k) {
+    const place = model.places[k];
+    if (!place) return model;
+    const cells = /* @__PURE__ */ new Map();
+    const points = model.points.map((point, index) => {
+      const [x, y] = [place[2 * index], place[2 * index + 1]];
+      const at = Number.isNaN(x) || Number.isNaN(y) ? point : { ...point, x, y };
+      const cell = cellOf(at.x, at.y);
+      const list = cells.get(cell);
+      if (list) list.push(index);
+      else cells.set(cell, [index]);
+      return at;
+    });
+    return { ...model, points, cells };
   }
   var TILE_ROOM = 1.12;
   function tileLayout(model) {
@@ -5112,12 +5171,14 @@
   function Icon({ name, size = 16 }) {
     return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none", display: "block" }, viewBox: "0 0 16 16", width: size, children: PATHS[name] });
   }
-  function ToolButton({ icon, label, title, pressed, onClick, children, disabled }) {
+  function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }) {
     return /* @__PURE__ */ jsxs(
       "button",
       {
+        "aria-expanded": expanded,
+        "aria-haspopup": expanded === void 0 ? void 0 : "menu",
         "aria-label": children ? void 0 : label,
-        "aria-pressed": pressed,
+        "aria-pressed": expanded === void 0 ? pressed : void 0,
         className: FOCUSABLE,
         disabled,
         onClick,
@@ -5150,10 +5211,72 @@
     );
   }
   function ToolGroup({ children, label }) {
-    return /* @__PURE__ */ jsx("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
+    return /* @__PURE__ */ jsx("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, position: "relative", zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
   }
   function Rule() {
     return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
+  }
+  function LayoutMenu({ label, choices, current, onChoose }) {
+    const [open, setOpen] = useState(false);
+    const box = useRef(null);
+    useEffect(() => {
+      if (!open) return;
+      const away = (event) => {
+        if (!box.current?.contains(event.target)) setOpen(false);
+      };
+      window.addEventListener("pointerdown", away, true);
+      return () => window.removeEventListener("pointerdown", away, true);
+    }, [open]);
+    const shown = choices.find((choice) => choice.id === current) ?? choices[0];
+    const keys = (event) => {
+      if (!open) return;
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const items = [...event.currentTarget.querySelectorAll('[role="menuitemradio"]')];
+      const at = items.findIndex((item) => item === event.target);
+      items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+    };
+    return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
+      /* @__PURE__ */ jsx(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
+      open && /* @__PURE__ */ jsx("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice) => /* @__PURE__ */ jsxs(
+        "button",
+        {
+          "aria-checked": choice.id === shown?.id,
+          className: FOCUSABLE,
+          onClick: () => {
+            onChoose(choice.id);
+            setOpen(false);
+          },
+          ref: choice.id === shown?.id ? (element) => element?.focus() : void 0,
+          role: "menuitemradio",
+          type: "button",
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: 1,
+            font: "inherit",
+            textAlign: "left",
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "none",
+            cursor: "pointer",
+            color: T.text,
+            background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent"
+          },
+          children: [
+            /* @__PURE__ */ jsx("span", { style: { fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }, children: choice.name }),
+            /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.muted }, children: choice.title })
+          ]
+        },
+        choice.id
+      )) })
+    ] });
   }
 
   // src/shared/palette.ts
@@ -5409,6 +5532,13 @@
   var FLY_MOST = 48;
   var RIPPLE_MS = 1100;
   var STAGGER = 0.55;
+  var ARRANGE_MS = 1e3;
+  var LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
+  var AXES = {
+    character: ["left", "right", "top", "bottom"],
+    texture: ["left", "right", "top", "bottom"],
+    tempo: ["left", "right", "bottom"]
+  };
   var clamp01 = (value) => Math.min(1, Math.max(0, value));
   var easeInOut = (t) => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
   var easeOutBack = (t) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
@@ -5423,12 +5553,13 @@
       faint: read(CANVAS.faint, "#666"),
       border: read(CANVAS.border, "#444"),
       accent: read(CANVAS.accent, "#4a90e2"),
-      strong: read(CANVAS.strong, "#ddd")
+      strong: read(CANVAS.strong, "#ddd"),
+      ground: read(CANVAS.ground, "#151515")
     };
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0 }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -5559,9 +5690,32 @@
       const frame2 = requestAnimationFrame(setClock);
       return () => cancelAnimationFrame(frame2);
     }, [clock, playingHere]);
-    const layout = useMemo(() => tiles || morph.from > 0 ? tileLayout(model) : null, [model, tiles, morph.from > 0]);
-    const tiled = useMemo(() => layout ? tileModel(model, layout) : null, [model, layout]);
-    const active = tiles && tiled ? tiled : model;
+    const [ownArrangement, setOwnArrangement] = useState("");
+    const arrangementId = arrangement ?? ownArrangement;
+    const arrangementIndex = LAYOUTS.includes(arrangementId) ? model.arrangements.findIndex((each) => each.id === arrangementId) : -1;
+    const arranged = useMemo(() => arrangedModel(model, arrangementIndex), [model, arrangementIndex]);
+    const chooseArrangement = (id) => {
+      if (arrangement === void 0) setOwnArrangement(id);
+      onArrangement?.(id);
+    };
+    const layoutChoices = useMemo(() => {
+      const named = LAYOUTS.filter((id) => model.arrangements.some((each) => each.id === id));
+      return named.length === 0 ? [] : [{ id: "", name: t("arrange.similar.name"), title: t("arrange.similar.title") }, ...named.map((id) => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))];
+    }, [model, t]);
+    const drawn = useRef(null);
+    const shift = useRef(null);
+    const shiftedTo = useRef(arranged);
+    if (shiftedTo.current !== arranged) {
+      shiftedTo.current = arranged;
+      const last = drawn.current;
+      shift.current = !still && last && last.model === model && last.places.length === model.points.length * 2 ? { from: last.places.slice(), at: performance.now() } : null;
+    }
+    useEffect(() => {
+      if (shift.current) animate(ARRANGE_MS);
+    }, [arranged]);
+    const layout = useMemo(() => tiles || morph.from > 0 ? tileLayout(arranged) : null, [arranged, tiles, morph.from > 0]);
+    const tiled = useMemo(() => layout ? tileModel(arranged, layout) : null, [arranged, layout]);
+    const active = tiles && tiled ? tiled : arranged;
     const spread = useMemo(() => {
       const points = model.points;
       const out = new Float32Array(points.length);
@@ -5627,7 +5781,7 @@
     }, [topInset, coverRight]);
     useEffect(() => {
       if (!foundIds || size.width === 0) return;
-      const framed = frame(model, foundIds, size.width, size.height, topInset, coverRight);
+      const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
       if (framed) setView(framed);
     }, [foundIds, model, size.width, size.height]);
     const wheelMode = useRef(wheel);
@@ -5682,11 +5836,24 @@
       const tilePoints = tiled && morphed > 0 ? tiled.points : null;
       const tileSide = layout ? unit / layout.side * 0.86 : 0;
       const blendOf = (index) => tilePoints ? clamp01(morphed * (1 + STAGGER) - spread[index] * STAGGER) : 0;
+      const dots = arranged.points;
+      const moving = shift.current;
+      const shifting = moving && !still ? clamp01((now - moving.at) / ARRANGE_MS) : 1;
+      const from = moving && shifting < 1 && moving.from.length === count * 2 ? moving.from : null;
+      const places = drawn.current?.model === model && drawn.current.places.length === count * 2 ? drawn.current.places : new Float32Array(count * 2);
+      drawn.current = { model, places };
       const placeOf = (index) => {
-        const point = points[index];
+        const dot = dots[index];
         const blend = blendOf(index);
-        const x = tilePoints ? point.x + (tilePoints[index].x - point.x) * blend : point.x;
-        const y = tilePoints ? point.y + (tilePoints[index].y - point.y) * blend : point.y;
+        let x = tilePoints ? dot.x + (tilePoints[index].x - dot.x) * blend : dot.x;
+        let y = tilePoints ? dot.y + (tilePoints[index].y - dot.y) * blend : dot.y;
+        if (from) {
+          const along = easeInOut(clamp01(shifting * (1 + STAGGER) - spread[index] * STAGGER));
+          x = from[2 * index] + (x - from[2 * index]) * along;
+          y = from[2 * index + 1] + (y - from[2 * index + 1]) * along;
+        }
+        places[2 * index] = x;
+        places[2 * index + 1] = y;
         return [x * unit + view.dx, y * unit + view.dy, blend];
       };
       const introFor = (index) => {
@@ -5762,6 +5929,40 @@
           placed.push(box2);
           context.fillText(text, box2[0], y);
         }
+      }
+      const layoutShown = arrangementIndex >= 0 ? model.arrangements[arrangementIndex] : null;
+      const wordsIn = clamp01((shifting - 0.55) / 0.45);
+      if (layoutShown && wordsIn > 0) {
+        const family = getComputedStyle(canvas).fontFamily || "sans-serif";
+        context.textBaseline = "middle";
+        context.lineJoin = "round";
+        context.strokeStyle = colors.ground;
+        context.lineWidth = 3;
+        context.textAlign = "center";
+        context.font = `600 11px ${family}`;
+        context.fillStyle = colors.strong;
+        context.globalAlpha = 0.9 * wordsIn;
+        for (const label of layoutShown.labels) {
+          const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy];
+          if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue;
+          context.strokeText(label.text, x, y);
+          context.fillText(label.text, x, y);
+        }
+        context.font = `11px ${family}`;
+        context.fillStyle = colors.text;
+        context.globalAlpha = 0.85 * wordsIn;
+        const [x0, y0, x1, y1] = [view.dx, view.dy, view.dx + unit, view.dy + unit];
+        const [minX, maxX, minY, maxY] = [8, size.width - coverRight - 8, topInset + 10, size.height - 12];
+        const keepY = (y) => Math.min(Math.max(y, minY), maxY);
+        const middleX = Math.min(Math.max((x0 + x1) / 2, minX + 60), maxX - 60);
+        for (const side of AXES[layoutShown.id] ?? []) {
+          const word = t(`arrange.${layoutShown.id}.${side}`);
+          const [text, x, y, align] = side === "left" ? [`← ${word}`, Math.max(x0 + 6, minX), keepY((y0 + y1) / 2), "left"] : side === "right" ? [`${word} →`, Math.min(x1 - 6, maxX), keepY((y0 + y1) / 2), "right"] : side === "top" ? [`↑ ${word}`, middleX, keepY(y0 + 10), "center"] : [`↓ ${word}`, middleX, keepY(y1 - 10), "center"];
+          context.textAlign = align;
+          context.strokeText(text, x, y);
+          context.fillText(text, x, y);
+        }
+        context.textAlign = "start";
       }
       context.globalAlpha = 1;
       const rings = (ids, extra) => {
@@ -5861,7 +6062,7 @@
         });
         context.globalAlpha = 1;
       }
-    }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt]);
+    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, t, topInset, coverRight]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -6007,6 +6208,7 @@
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
             onPicked && /* @__PURE__ */ jsx(Rule, {}),
+            layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), onChoose: chooseArrangement }),
             onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
             tools,
             /* @__PURE__ */ jsx(Rule, {}),
@@ -6797,6 +6999,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
   var HOVER_PLAY = "kumi.mapHover";
   var TILES = "kumi.mapTiles";
   var PALETTE_OPEN = "kumi.paletteOpen";
+  var LAYOUT = "kumi.mapLayout";
   function useNow(every = 3e4) {
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => {
@@ -6848,6 +7051,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [hover, setHover] = useState(() => globalThis.localStorage?.getItem(HOVER_PLAY) !== "off");
     const [tiles, setTiles] = useState(() => globalThis.localStorage?.getItem(TILES) === "on");
     const [paletteOpen, setPaletteOpen] = useState(() => globalThis.localStorage?.getItem(PALETTE_OPEN) !== "off");
+    const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? "");
     const palette = usePaletteMap(store, state, audition, t, { hover, left: (id) => setSelected((current) => current === id ? null : current) });
     const dock = useRef(null);
     useEffect(() => {
@@ -6948,6 +7152,11 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 setTiles(on);
               },
               tiles,
+              arrangement: layout,
+              onArrangement: (id) => {
+                globalThis.localStorage?.setItem(LAYOUT, id);
+                setLayout(id);
+              },
               tools: /* @__PURE__ */ jsx(
                 ToolButton,
                 {

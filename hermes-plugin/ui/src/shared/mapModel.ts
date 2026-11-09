@@ -19,6 +19,13 @@ export interface MapGroupView {
   count: number
 }
 
+/** Another way the map lays its sounds out than similarity (the snapshot's `arrangements`): its id, and the data
+ *  words it writes where they belong (class ids, keys, BPM, seconds, folder names), cleaned; x, y in [0, 1]. */
+export interface MapArrangement {
+  id: string
+  labels: { text: string; x: number; y: number }[]
+}
+
 export interface MapModel {
   revision: string | null
   points: MapPointView[]
@@ -26,6 +33,10 @@ export interface MapModel {
   sounds: Record<string, MapSound>
   /** Point indexes by grid cell (`GRID` × `GRID` over [0, 1]²). */
   cells: Map<number, number[]>
+  /** The map's other arrangements, in the snapshot's order; `places[k]` holds each point's place in the k-th (x, y
+   *  pairs in the points' order; NaN where the snapshot gave a point none, which then keeps its similarity place). */
+  arrangements: MapArrangement[]
+  places: Float32Array[]
 }
 
 /** Where the map sits in its canvas: map x in [0, 1] → `x * size * scale + dx` pixels. */
@@ -113,7 +124,24 @@ export function traceGlyph(path: Pick<Path2D, 'arc' | 'closePath' | 'lineTo' | '
 
 const cellOf = (x: number, y: number): number => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID))
 
+/** How many arrangements, and labels in each, a snapshot may bring: Kumi sends seven, with at most tens of labels. */
+const MOST_ARRANGEMENTS = 16
+const MOST_LABELS = 400
+
+/** A place on the map's unit square, or NaN for none. */
+const unitOf = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : NaN)
+
 export function buildModel(map: SoundMap | null): MapModel {
+  // The arrangements keep the snapshot's order (the k-th's places are each point's fields 4+2k and 5+2k), even one
+  // this plug-in can't name.
+  const arrangements: MapArrangement[] = (Array.isArray(map?.arrangements) ? map.arrangements : []).slice(0, MOST_ARRANGEMENTS).map(raw => ({
+    id: typeof raw?.id === 'string' ? clean(raw.id, 24) : '',
+    labels: (Array.isArray(raw?.labels) ? raw.labels : [])
+      .slice(0, MOST_LABELS)
+      .filter(label => Array.isArray(label) && typeof label[0] === 'string' && Number.isFinite(label[1]) && Number.isFinite(label[2]))
+      .map(([text, x, y]) => ({ text: clean(text, 40), x: unitOf(x), y: unitOf(y) }))
+  }))
+  const placed: number[][] = arrangements.map(() => [])
   const points: MapPointView[] = []
   const cells = new Map<number, number[]>()
   for (const raw of Array.isArray(map?.points) ? map.points : []) {
@@ -126,6 +154,7 @@ export function buildModel(map: SoundMap | null): MapModel {
     if (list) list.push(points.length)
     else cells.set(cell, [points.length])
     points.push(point)
+    placed.forEach((values, k) => values.push(unitOf(raw[4 + 2 * k]), unitOf(raw[5 + 2 * k])))
   }
   const groups = Object.entries(map?.groups ?? {})
     .map(([key, group]) => ({
@@ -136,7 +165,25 @@ export function buildModel(map: SoundMap | null): MapModel {
     }))
     .filter(group => Number.isInteger(group.key))
     .sort((a, b) => a.key - b.key)
-  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells }
+  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells, arrangements, places: placed.map(values => Float32Array.from(values)) }
+}
+
+/** The map laid out by its `k`-th arrangement: each point at its place there (its similarity place where it has none),
+ *  the grid rebuilt for the pointer and the box. Any other `k` is the map as it is. */
+export function arrangedModel(model: MapModel, k: number): MapModel {
+  const place = model.places[k]
+  if (!place) return model
+  const cells = new Map<number, number[]>()
+  const points = model.points.map((point, index) => {
+    const [x, y] = [place[2 * index], place[2 * index + 1]]
+    const at = Number.isNaN(x) || Number.isNaN(y) ? point : { ...point, x, y }
+    const cell = cellOf(at.x, at.y)
+    const list = cells.get(cell)
+    if (list) list.push(index)
+    else cells.set(cell, [index])
+    return at
+  })
+  return { ...model, points, cells }
 }
 
 /** The square-tile view's grid: `side` × `side` tiles over the map's square, each sound on its own tile near where the

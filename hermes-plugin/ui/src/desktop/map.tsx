@@ -30,6 +30,8 @@ export const HOVER_PLAY = 'mapHover'
 export const TILES = 'mapTiles'
 /** Desktop's own storage key for whether the palette drawer is open (open until the producer folds it). */
 export const PALETTE_OPEN = 'paletteOpen'
+/** Desktop's own storage key for the map's layout (similarity, '', until the producer picks another). */
+export const LAYOUT = 'mapLayout'
 /** How wide the map must be for the Make panel to float beside it rather than over its lower part. */
 const SIDE_SHEET = 820
 
@@ -86,6 +88,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const [padsFor, setPadsFor] = useState<null | string>(null)
   const [hover, setHover] = useState(() => ctx.storage.get<boolean>(HOVER_PLAY, true) !== false)
   const [tiles, setTiles] = useState(() => ctx.storage.get<boolean>(TILES, false) === true)
+  const [layout, setLayout] = useState(() => ctx.storage.get<string>(LAYOUT, '') ?? '')
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
@@ -213,6 +216,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             setTiles(on)
           }}
           tiles={tiles}
+          arrangement={layout}
+          onArrangement={id => {
+            ctx.storage.set(LAYOUT, id)
+            setLayout(id)
+          }}
           tools={
             <ToolButton
               icon="hover"

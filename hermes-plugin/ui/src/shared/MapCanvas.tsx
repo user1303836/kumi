@@ -13,8 +13,8 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num } from './format.ts'
-import { buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
-import { glass, Icon, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
+import { arrangedModel, buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
+import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
@@ -62,6 +62,10 @@ export interface MapCanvasProps {
   /** How much of the map's right a side sheet covers (the Make panel beside a wide map): the fit, a find's frame and
    *  the picks' actions keep to the room left of it. */
   coverRight?: number
+  /** The layout shown: '' for similarity, else one of the map's arrangements by id (one it lacks is similarity); the
+   *  parent keeps it, hearing each choice in `onArrangement`. Without it the map keeps its own. */
+  arrangement?: string
+  onArrangement?: (id: string) => void
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -78,6 +82,16 @@ const FLY_MOST = 48
 const RIPPLE_MS = 1100
 /** How far apart, in a morph's span, the middle's points and the edge's move: the middle leads. */
 const STAGGER = 0.55
+/** How long the sounds take to move to a new layout. */
+const ARRANGE_MS = 1000
+/** The layouts this plug-in can name, in the order the menu lists them (serve's `arrangements` ids). */
+const LAYOUTS = ['character', 'texture', 'keys', 'tempo', 'families', 'length', 'folders'] as const
+/** The axis words each layout has (`arrange.<id>.<side>`): its x axis's ends, then its y axis's. */
+const AXES: Record<string, readonly ('bottom' | 'left' | 'right' | 'top')[]> = {
+  character: ['left', 'right', 'top', 'bottom'],
+  texture: ['left', 'right', 'top', 'bottom'],
+  tempo: ['left', 'right', 'bottom']
+}
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value))
 const easeInOut = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
@@ -107,7 +121,8 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
     faint: read(CANVAS.faint, '#666'),
     border: read(CANVAS.border, '#444'),
     accent: read(CANVAS.accent, '#4a90e2'),
-    strong: read(CANVAS.strong, '#ddd')
+    strong: read(CANVAS.strong, '#ddd'),
+    ground: read(CANVAS.ground, '#151515')
   }
 }
 
@@ -118,7 +133,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0 }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -271,11 +286,41 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const frame = requestAnimationFrame(setClock)
     return () => cancelAnimationFrame(frame)
   }, [clock, playingHere])
-  // The tile view's model: laid out the first time tiles show, and kept while the morph runs back to dots.
-  const layout = useMemo(() => (tiles || morph.from > 0 ? tileLayout(model) : null), [model, tiles, morph.from > 0]) // eslint-disable-line react-hooks/exhaustive-deps
-  const tiled = useMemo(() => (layout ? tileModel(model, layout) : null), [model, layout])
-  // What the pointer, the keyboard, a box and a find's frame work on: the tiles once they show, else the dots.
-  const active = tiles && tiled ? tiled : model
+  // The layout: similarity (''), or one of the map's arrangements that this plug-in can name. The parent keeps the
+  // choice when it listens; a choice the map lacks is similarity.
+  const [ownArrangement, setOwnArrangement] = useState('')
+  const arrangementId = arrangement ?? ownArrangement
+  const arrangementIndex = (LAYOUTS as readonly string[]).includes(arrangementId) ? model.arrangements.findIndex(each => each.id === arrangementId) : -1
+  const arranged = useMemo(() => arrangedModel(model, arrangementIndex), [model, arrangementIndex])
+  const chooseArrangement = (id: string) => {
+    if (arrangement === undefined) setOwnArrangement(id)
+    onArrangement?.(id)
+  }
+  const layoutChoices = useMemo((): LayoutChoice[] => {
+    const named = LAYOUTS.filter(id => model.arrangements.some(each => each.id === id))
+    return named.length === 0 ? [] : [{ id: '', name: t('arrange.similar.name'), title: t('arrange.similar.title') }, ...named.map(id => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))]
+  }, [model, t])
+  // A new layout moves every sound from where it was last drawn to its new place, the middle leading, as the tiles do;
+  // from where it was drawn, so a change in the middle of a move turns smoothly. A new map starts where it is. The
+  // move is noted as the layout changes, before the frame that first draws it, so no frame jumps ahead.
+  const drawn = useRef<{ model: MapModel; places: Float32Array } | null>(null)
+  const shift = useRef<{ from: Float32Array; at: number } | null>(null)
+  const shiftedTo = useRef(arranged)
+  if (shiftedTo.current !== arranged) {
+    shiftedTo.current = arranged
+    const last = drawn.current
+    shift.current = !still && last && last.model === model && last.places.length === model.points.length * 2 ? { from: last.places.slice(), at: performance.now() } : null
+  }
+  useEffect(() => {
+    if (shift.current) animate(ARRANGE_MS)
+  }, [arranged]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The tile view's model: laid out (in the layout shown) the first time tiles show, and kept while the morph runs
+  // back to dots.
+  const layout = useMemo(() => (tiles || morph.from > 0 ? tileLayout(arranged) : null), [arranged, tiles, morph.from > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tiled = useMemo(() => (layout ? tileModel(arranged, layout) : null), [arranged, layout])
+  // What the pointer, the keyboard, a box and a find's frame work on: the tiles once they show, else the dots, in the
+  // layout shown.
+  const active = tiles && tiled ? tiled : arranged
   // Each point's place in the motion: 0 at the map's middle, 1 at its edge.
   const spread = useMemo(() => {
     const points = model.points
@@ -360,7 +405,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What the agent found: frame it.
   useEffect(() => {
     if (!foundIds || size.width === 0) return
-    const framed = frame(model, foundIds, size.width, size.height, topInset, coverRight)
+    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight)
     if (framed) setView(framed)
   }, [foundIds, model, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -428,11 +473,26 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const tilePoints = tiled && morphed > 0 ? tiled.points : null
     const tileSide = layout ? (unit / layout.side) * 0.86 : 0
     const blendOf = (index: number): number => (tilePoints ? clamp01(morphed * (1 + STAGGER) - spread[index] * STAGGER) : 0)
+    // The layout's move: how far it is, and where each sound set off from (map units, as last drawn).
+    const dots = arranged.points
+    const moving = shift.current
+    const shifting = moving && !still ? clamp01((now - moving.at) / ARRANGE_MS) : 1
+    const from = moving && shifting < 1 && moving.from.length === count * 2 ? moving.from : null
+    // Where each sound is drawn this frame (map units), for the next layout's move to start from.
+    const places = drawn.current?.model === model && drawn.current.places.length === count * 2 ? drawn.current.places : new Float32Array(count * 2)
+    drawn.current = { model, places }
     const placeOf = (index: number): [number, number, number] => {
-      const point = points[index]
+      const dot = dots[index]
       const blend = blendOf(index)
-      const x = tilePoints ? point.x + (tilePoints[index].x - point.x) * blend : point.x
-      const y = tilePoints ? point.y + (tilePoints[index].y - point.y) * blend : point.y
+      let x = tilePoints ? dot.x + (tilePoints[index].x - dot.x) * blend : dot.x
+      let y = tilePoints ? dot.y + (tilePoints[index].y - dot.y) * blend : dot.y
+      if (from) {
+        const along = easeInOut(clamp01(shifting * (1 + STAGGER) - spread[index] * STAGGER))
+        x = from[2 * index] + (x - from[2 * index]) * along
+        y = from[2 * index + 1] + (y - from[2 * index + 1]) * along
+      }
+      places[2 * index] = x
+      places[2 * index + 1] = y
       return [x * unit + view.dx, y * unit + view.dy, blend]
     }
     // A new map's points pop in from the middle out: each grows from nothing, just past its size, then settles.
@@ -518,6 +578,49 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         placed.push(box)
         context.fillText(text, box[0], y)
       }
+    }
+    // The layout's words: its data words where they belong (keys, BPM, folder names…), then its axis words inside the
+    // map's edges, kept in view. They fade in as the sounds arrive, haloed in the ground colour to read over points.
+    const layoutShown = arrangementIndex >= 0 ? model.arrangements[arrangementIndex] : null
+    const wordsIn = clamp01((shifting - 0.55) / 0.45)
+    if (layoutShown && wordsIn > 0) {
+      const family = getComputedStyle(canvas).fontFamily || 'sans-serif'
+      context.textBaseline = 'middle'
+      context.lineJoin = 'round'
+      context.strokeStyle = colors.ground
+      context.lineWidth = 3
+      context.textAlign = 'center'
+      context.font = `600 11px ${family}`
+      context.fillStyle = colors.strong
+      context.globalAlpha = 0.9 * wordsIn
+      for (const label of layoutShown.labels) {
+        const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy]
+        if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue
+        context.strokeText(label.text, x, y)
+        context.fillText(label.text, x, y)
+      }
+      context.font = `11px ${family}`
+      context.fillStyle = colors.text
+      context.globalAlpha = 0.85 * wordsIn
+      const [x0, y0, x1, y1] = [view.dx, view.dy, view.dx + unit, view.dy + unit]
+      const [minX, maxX, minY, maxY] = [8, size.width - coverRight - 8, topInset + 10, size.height - 12]
+      const keepY = (y: number) => Math.min(Math.max(y, minY), maxY)
+      const middleX = Math.min(Math.max((x0 + x1) / 2, minX + 60), maxX - 60)
+      for (const side of AXES[layoutShown.id] ?? []) {
+        const word = t(`arrange.${layoutShown.id}.${side}`)
+        const [text, x, y, align]: [string, number, number, CanvasTextAlign] =
+          side === 'left'
+            ? [`← ${word}`, Math.max(x0 + 6, minX), keepY((y0 + y1) / 2), 'left']
+            : side === 'right'
+              ? [`${word} →`, Math.min(x1 - 6, maxX), keepY((y0 + y1) / 2), 'right']
+              : side === 'top'
+                ? [`↑ ${word}`, middleX, keepY(y0 + 10), 'center']
+                : [`↓ ${word}`, middleX, keepY(y1 - 10), 'center']
+        context.textAlign = align
+        context.strokeText(text, x, y)
+        context.fillText(text, x, y)
+      }
+      context.textAlign = 'start'
     }
     context.globalAlpha = 1
     // The palette's sounds, and the picks, as rings: one path each, however many there are.
@@ -625,7 +728,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       })
       context.globalAlpha = 1
     }
-  }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt])
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, t, topInset, coverRight])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -797,6 +900,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             {onPicked && <ToolButton icon="pick" label={t('map.pickTool')} onClick={() => setHandTool(false)} pressed={!handTool} title={t('map.pickToolTitle')} />}
             {onPicked && <ToolButton icon="hand" label={t('map.hand')} onClick={() => setHandTool(true)} pressed={handTool} title={t('map.handTitle')} />}
             {onPicked && <Rule />}
+            {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} onChoose={chooseArrangement} />}
             {onTiles && <ToolButton icon="tiles" label={t('map.tiles')} onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')} />}
             {tools}
             <Rule />

@@ -183,8 +183,15 @@ export interface MapSound {
   note?: string | null
 }
 
-/** `[sound_id, x, y, group]`, x and y in [0, 1]. */
-export type MapPoint = [string, number, number, number]
+/** `[sound_id, x, y, group, x₁, y₁, x₂, y₂, …]`, places in [0, 1]: similarity's, then the k-th arrangement's at
+ *  `4+2k`, `5+2k`. */
+export type MapPoint = [string, number, number, number, ...number[]]
+
+/** Another way to lay the map out (serve's `arrangements`, in order): its id and its data words, `[text, x, y]`. */
+export interface MapArrangementWire {
+  id: string
+  labels: [string, number, number][]
+}
 
 export interface SoundMap extends Liveness {
   revision: string | null
@@ -193,6 +200,7 @@ export interface SoundMap extends Liveness {
   points: MapPoint[]
   groups: Record<string, MapGroup>
   sounds: Record<string, MapSound>
+  arrangements?: MapArrangementWire[]
   /** How many of this revision's sounds are hidden (their audio couldn't be played here), left out of `points`. */
   hidden?: number
 }
