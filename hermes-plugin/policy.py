@@ -63,7 +63,7 @@ PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_histor
 # What the producer approves first: always for setup, and for the rest while "Ask before each change" is on.
 # What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
-         "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_groove", "kumi_render"}
+         "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_groove", "kumi_render", "kumi_form"}
 # The owner's decision: by default Kumi makes the changes the producer asks for in the DAW without asking, each in
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
@@ -71,7 +71,7 @@ ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device",
 # and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
 UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
                       "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound",
-                      "kumi_audition", "kumi_groove", "kumi_render"}
+                      "kumi_audition", "kumi_groove", "kumi_render", "kumi_form"}
 _ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build", "kumi_design"}
@@ -276,7 +276,7 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _wavetable(host, args), {}
     if tool == "kumi_design":  # a new sound kept as Kumi's private copy: nothing in the DAW changes
         return None, {}
-    if tool in ("kumi_sound", "kumi_audition", "kumi_groove", "kumi_render"):
+    if tool in ("kumi_sound", "kumi_audition", "kumi_groove", "kumi_render", "kumi_form"):
         return _live_listening(host, tool[len("kumi_"):], args), {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
@@ -444,14 +444,23 @@ def _wavetable(host: Any, args: dict) -> dict:
 # the playback class kumi_listen's captures use, and a groove round that changes notes as a change; a groove start or
 # done only reads the notes, so it's never asked. No runtime preview exists for them: they're asked in words built from
 # their arguments, after the plugin's own checks.
-LISTENING_ONLY_LIVE = f"{JUDGED}. Kumi measures, auditions, grooves and renders tracks only in Ableton Live."
+LISTENING_ONLY_LIVE = (f"{JUDGED}. Kumi measures, auditions, grooves, renders and reads the form of tracks only in "
+                       "Ableton Live.")
 LISTENING_PLAYS = ("Live plays it through Kumi Ears with Live stopped and not recording (at most 60 s, a bar before and "
                    "half a bar after included), and puts it back after.")
 AUDITION_COPIES = "Their Session clips play from temporary copies in the Arrangement, removed after."
 RENDER_KEPT = ("Offline, with no playback: the file is kept in Kumi's own data, and Live's temporary render file is "
                "deleted.")
+FORM_PLAYS = ("Live plays it once through Kumi Ears with Live stopped and not recording, as long as the song (15 "
+              "minutes at most) while you wait; Stop ends it. Everything is put back after.")
+FORM_PLAYS_PART = FORM_PLAYS.replace("as long as the song (15 minutes at most)", "that stretch (15 minutes at most)")
 GROOVE_KEEPS = "Kumi keeps the change only if the feel moved toward the reference; otherwise it takes it back itself."
 GROOVE_APPLY = "A change in HISTORY: kumi_undo takes it back."
+
+
+def _reference_name(reference: dict) -> str:
+    return reference.get("clip_ref") or reference.get("sound_id") or reference.get("artifact_id") or (
+        Path(str(reference.get("file", ""))).name)
 
 
 def _beats(args: dict, default: str) -> str:
@@ -487,13 +496,21 @@ def _live_listening(host: Any, tool: str, args: dict) -> dict | None:
         where = "their Session clips" if clips else _beats(args, "8 beats")
         lines = [f"Kumi: audition {', '.join(named)}, {where}"]
         if "reference" in args:
-            reference = args["reference"]
-            name = reference.get("clip_ref") or reference.get("sound_id") or reference.get("artifact_id") or (
-                Path(str(reference.get("file", ""))).name)
+            name = _reference_name(args["reference"])
             lines.append(f"Against {quoted(name, 60)}, {args.get('reference_seconds', tools.REFERENCE_SECONDS):g} s of it")
         lines.append(LISTENING_PLAYS)
         if any("clip" in candidate for candidate in args["candidates"]):
             lines.append(AUDITION_COPIES)
+    elif tool == "form":
+        if "beats" in args:
+            start = args.get("from_beat", 0)
+            lines = [f"Kumi: read the form of beats {start:g}–{start + args['beats']:g}", FORM_PLAYS_PART]
+        else:
+            start = args.get("from_beat", 0)
+            what = "the whole Arrangement" if not start else f"the Arrangement from beat {start:g} to its end"
+            lines = [f"Kumi: read the form of {what}", FORM_PLAYS]
+        if "reference" in args:
+            lines.append(f"Beside the form of {quoted(_reference_name(args['reference']), 60)}")
     else:
         start = args["from_beat"]
         lines = [f"Kumi: render track {quoted(args['track'], 60)}'s own clips, beats {start:g}–{start + args['beats']:g}",

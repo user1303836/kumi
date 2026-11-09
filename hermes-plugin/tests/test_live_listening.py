@@ -25,9 +25,12 @@ CHANGE = {"change": "Pushed the hats later", **PROJECT}
 APPLY = {"apply": True, "amount": 0.5, **PROJECT}
 DONE = {"done": True, **PROJECT}
 RENDER = {"track": "t3", "from_beat": 0, "beats": 16, **PROJECT}
+FORM = {**PROJECT}
+FORM_PART = {"from_beat": 64, "beats": 128, "reference": {"clip_ref": "1:clip:9"}, **PROJECT}
 ASKED = (("kumi_sound", SOUND, "kumi:playback:sound:s1"), ("kumi_audition", AUDITION, "kumi:playback:audition:s1"),
          ("kumi_audition", CLIPS, "kumi:playback:audition:s1"), ("kumi_groove", CHANGE, "kumi:write:groove:s1"),
-         ("kumi_groove", APPLY, "kumi:write:groove:s1"), ("kumi_render", RENDER, "kumi:playback:render:s1"))
+         ("kumi_groove", APPLY, "kumi:write:groove:s1"), ("kumi_render", RENDER, "kumi:playback:render:s1"),
+         ("kumi_form", FORM, "kumi:playback:form:s1"), ("kumi_form", FORM_PART, "kumi:playback:form:s1"))
 READS = (("kumi_groove", START), ("kumi_groove", DONE))
 
 
@@ -92,6 +95,13 @@ class LiveListening(unittest.TestCase):
         self.assertIn(policy.AUDITION_COPIES, clips)
         render = self.hook("kumi_render", RENDER, "c4")["message"].split("\n")
         self.assertEqual(render[:2], ['Kumi: render track "t3"\'s own clips, beats 0–16', policy.RENDER_KEPT])
+        whole = self.hook("kumi_form", FORM, "c7")["message"].split("\n")
+        self.assertEqual(whole[:2], ["Kumi: read the form of the whole Arrangement", policy.FORM_PLAYS])
+        self.assertIn("15 minutes at most", policy.FORM_PLAYS)
+        self.assertIn("Stop ends it", policy.FORM_PLAYS)
+        part = self.hook("kumi_form", FORM_PART, "c8")["message"].split("\n")
+        self.assertEqual(part[:3], ["Kumi: read the form of beats 64–192", policy.FORM_PLAYS_PART,
+                                    'Beside the form of "1:clip:9"'])
         change = self.hook("kumi_groove", CHANGE, "c5")["message"].split("\n")
         self.assertEqual(change[:2], ['Kumi: judge this groove change, "Pushed the hats later"', policy.GROOVE_KEEPS])
         apply = self.hook("kumi_groove", APPLY, "c6")["message"].split("\n")
@@ -120,6 +130,11 @@ class LiveListening(unittest.TestCase):
             ("kumi_render", {key: value for key, value in RENDER.items() if key != "beats"}),
             ("kumi_render", {**RENDER, "file": "/tmp/x.wav"}),
             ("kumi_render", {**RENDER, "expected_epoch": True}),
+            ("kumi_form", {**FORM, "reference": "~/Refs/song.wav"}),
+            ("kumi_form", {**FORM, "beats": 0}),
+            ("kumi_form", {**FORM, "from_beat": -4}),
+            ("kumi_form", {**FORM, "seconds": 900}),
+            ("kumi_form", {}),
         )
         for ask in (False, True):
             self.use(ask)
@@ -139,7 +154,8 @@ class LiveListening(unittest.TestCase):
     def test_handler_sends_the_cleared_args_once_without_preview(self):
         self.use()
         for tool, args, op in (("kumi_sound", SOUND, "sound"), ("kumi_audition", AUDITION, "audition"),
-                               ("kumi_groove", APPLY, "groove"), ("kumi_render", RENDER, "render")):
+                               ("kumi_groove", APPLY, "groove"), ("kumi_render", RENDER, "render"),
+                               ("kumi_form", FORM_PART, "form")):
             with self.subTest(tool=tool):
                 asked = {**args, "preview": True}
                 self.assertIsNone(self.hook(tool, asked, f"{tool}-1"))
@@ -173,6 +189,16 @@ class LiveListening(unittest.TestCase):
         rendered = support.call(self.host, "kumi_render", RENDER, session_id="s1")
         self.assertEqual(rendered["round"]["artifact_id"], "a-render-1")
         self.assertNotIn("file", rendered["round"])
+
+    def test_form_waits_for_the_whole_song_and_answers_its_sections(self):
+        self.use()
+        read = support.call(self.host, "kumi_form", FORM, session_id="s1")
+        self.assertEqual((read["state"], read["round"]["firstHook"]), ("done", 9))
+        self.assertEqual(self.sent("form")[-1], FORM, "the whole Arrangement: no stretch added")
+        with mock.patch.object(tools, "_write", wraps=tools._write) as write:
+            support.call(self.host, "kumi_form", FORM, session_id="s1")
+        self.assertEqual(write.call_args.kwargs["timeout"], tools.FORM_TIMEOUT)
+        self.assertGreater(tools.FORM_TIMEOUT, 15 * 60, "it waits out a 15-minute song and what follows")
 
     def test_a_lost_answer_is_unsure_and_never_sent_again(self):
         self.host, self.ctx, self.data = support.host(self, None, "--slow", "sound=2")

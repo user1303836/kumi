@@ -254,7 +254,7 @@ HISTORY that you can undo; Live plays the stretch through Kumi Ears with Live st
 first with Ask before each change on). For Serum 2 or Vital, `kumi_wavetable` writes a new wavetable file you then pick
 in the plug-in's window; it stays after an undo.
 
-### Sounds, auditions, grooves and renders (Live)
+### Sounds, auditions, grooves, renders and form (Live)
 
 "How do the kick and bass sit together?" `kumi_sound` measures up to 8 tracks heard side by side in one pass: each
 sound's envelope, tone, effects (reverb time, echoes, pumping), its problems, a kit verdict and how one ducks under
@@ -264,7 +264,9 @@ most). Both play through Kumi Ears with Live stopped, at most 60 s a pass counti
 and put everything back (asked first with Ask before each change on). "Make my hats swing like this loop."
 `kumi_groove` shapes a MIDI part's feel toward a reference MIDI clip's on the notes, without listening; `apply` moves
 the notes as a change you can undo. `kumi_render` renders up to 60 s of an audio track's own clips offline and keeps the
-file for `kumi_listen`. Hearing a whole song's form at once stays in standalone Kumi.
+file for `kumi_listen`. "Where does the chorus first hit, and does the second verse drag?" `kumi_form` plays the whole
+Arrangement once while you wait (up to 15 minutes; Stop ends it) and reads it bar by bar: energy over the song,
+sections, turns, the first hook and which tracks play where, beside a reference's form if you give one.
 
 **What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes, presets, and
 scripts and devices in a chat that hasn't read outside content without asking: each goes into HISTORY, and most can be
@@ -337,6 +339,8 @@ words are illustrative; Kumi's side is real.
 - **Listening to a track or the mix:**
   - **Window:** it listens only to the window you ask for, 60 seconds at most (in Live, 256 beats at most, in the
     Arrangement), with the DAW stopped; it asks first with Ask before each change on. Kumi won't stop playback for you.
+    The one exception is reading a song's form (`kumi_form`): it plays the whole Arrangement once while you wait, up
+    to 15 minutes, and Stop ends it.
   - **Your project:** the render's temporary transport, routing and device settings are put back after. REAPER may
     show the project as modified after a listen, since only saving clears that flag; Kumi never saves.
   - **Renoise's tempo:** rendering can change its BPM and lines per beat. Kumi puts them back only if they're still
@@ -361,7 +365,8 @@ words are illustrative; Kumi's side is real.
   in its own data until the call ends. Measuring sounds and auditioning play the same way; an audition of Session clips
   plays them from temporary copies in the Arrangement, removed after. A groove's `apply` and a groove round taken back
   change a MIDI clip's notes as changes in HISTORY. A render keeps up to 60 s of a track's own clips in Kumi's own data
-  and deletes Live's temporary render file. A tune's search or probe makes scratch copies of the run's track in
+  and deletes Live's temporary render file. Reading a song's form plays the whole Arrangement once the same way while
+  you wait, up to 15 minutes in all (not a minute a pass), and Stop ends it at once. A tune's search or probe makes scratch copies of the run's track in
   the Set and removes them after; if Kumi stops partway, its next look (`kumi_observe`) removes leftovers. There's no
   record pass, and no model is downloaded: a run goes by its meters.
 - **Plug-in presets** you put in your User Library are new `.vstpreset` files Kumi writes into Live's User Library
@@ -387,7 +392,8 @@ words are illustrative; Kumi's side is real.
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
-- Kumi listens to the window you ask for, up to 60 seconds (in Live, 256 beats at most, in the Arrangement). In every
+- Kumi listens to the window you ask for, up to 60 seconds (in Live, 256 beats at most, in the Arrangement); reading
+  a song's form in Live plays the whole Arrangement once, up to 15 minutes. In every
   DAW it measures audio files, library sounds and Kumi's own results.
 - Kumi reads only the open project, the audio files in the sample folders you list, its renders and captures of the
   windows you ask for, and finished audio other Hermes plugins saved in Hermes's generated-audio folder

@@ -1264,7 +1264,29 @@ def render_refusal(args: dict) -> str | None:
     return _stretch_refusal(args, True) or _expected_refusal(args)
 
 
-LISTENING_REFUSALS = {"sound": sound_refusal, "audition": audition_refusal, "groove": groove_refusal,
+FORM_FIELDS = frozenset({"from_beat", "beats", "reference", "expected_project_key", "expected_epoch"})
+# form plays the whole Arrangement once (the owner's call), up to 15 minutes: its answer can take that long and more.
+FORM_TIMEOUT = 1200.0
+
+
+def form_refusal(args: dict) -> str | None:
+    """Why serve's form wouldn't take these arguments, or None: the whole Arrangement, or from_beat and beats of it
+    (serve refuses over 15 minutes at the tempo), a reference as {clip_ref} or a source (never a path), and the project
+    key and epoch."""
+    if not set(args) <= FORM_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(FORM_FIELDS))}."
+    start, beats = args.get("from_beat"), args.get("beats")
+    if start is not None and (not _number(start) or start < 0):
+        return "from_beat is where it starts, in beats (0 or more); leave it out for the Arrangement's start."
+    if beats is not None and (not _number(beats) or beats <= 0):
+        return "beats is above 0 (at most 15 minutes at the tempo); leave it out for the whole song."
+    if "reference" in args and not _judge_reference(args["reference"]):
+        return ("a reference is {\"clip_ref\"} for an audio clip in the Set, or a source: {\"sound_id\", "
+                "\"map_revision\"}, {\"artifact_id\"} or {\"file\"} in an approved folder, never a path.")
+    return _expected_refusal(args)
+
+
+LISTENING_REFUSALS = {"sound": sound_refusal, "audition": audition_refusal, "groove": groove_refusal, "form": form_refusal,
                       "render": render_refusal}
 
 
@@ -1277,7 +1299,8 @@ def _listening(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
         return {"state": "refused", "code": "invalid", "reason": f"Kumi didn't run this: {refusal}"}
     asked = {key: value for key, value in args.items() if key != "preview"}
     asked["expected_epoch"] = str(asked["expected_epoch"])
-    answer = _write(host, tool, asked, kwargs, timeout=JUDGED_TIMEOUT, remember=tool == "groove")
+    timeout = FORM_TIMEOUT if tool == "form" else JUDGED_TIMEOUT
+    answer = _write(host, tool, asked, kwargs, timeout=timeout, remember=tool == "groove")
     taken = answer.get("taken_back") if isinstance(answer, dict) else None
     if isinstance(taken, list) and taken:
         host.remember_undo({}, {"rows": [{"history_id": each, "state": "undone"} for each in taken]})
@@ -1294,6 +1317,10 @@ def kumi_audition(host: Host, args: dict, **kwargs: Any) -> dict:
 
 def kumi_groove(host: Host, args: dict, **kwargs: Any) -> dict:
     return _listening(host, "groove", args, kwargs)
+
+
+def kumi_form(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "form", args, kwargs)
 
 
 def kumi_render(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -1991,6 +2018,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_audition", schemas.KUMI_AUDITION, kumi_audition, "🎧"),
     ("kumi_groove", schemas.KUMI_GROOVE, kumi_groove, "🥁"),
     ("kumi_render", schemas.KUMI_RENDER, kumi_render, "💿"),
+    ("kumi_form", schemas.KUMI_FORM, kumi_form, "🗺️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -2001,7 +2029,8 @@ def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py clears, asking the producer or (for a change, by default) not: they run only as cleared,
     with what the hook's preview bound (CC-5)."""
     return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
-                     "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_render")
+                     "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_render",
+                     "kumi_form")
             or (name == "kumi_groove" and groove_changes(args))
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))

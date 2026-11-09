@@ -43,7 +43,7 @@ OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "ch
                         "sounds", "library", "job", "generate", "transport", "script", "variations",
                         "device", "plugin_knowledge",
                         "preset", "preset_build", "judge", "tune", "wavetable", "design", "sound",
-                        "audition", "groove", "render"})
+                        "audition", "groove", "render", "form"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
