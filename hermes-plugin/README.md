@@ -177,12 +177,12 @@ settings:
 ## Hermes Desktop and the dashboard
 
 - **Desktop:** a status chip (DAW, project, tempo), a side pane with FOCUS and HISTORY, the sound map in its own tab,
-  cards for measured audio, and commands in Hermes's command palette. On the map, a sound plays as the pointer rests on
-  it; a box picks sounds for your palette, which sits under the map (play, remove, reorder, rename, strict or loose,
-  Use as kit…) and is the one `kumi_palette` reads and edits. A sound that can't play there leaves the map quietly,
-  counted in one line. While a script or device waits for your approval, the pane shows its whole code (and a device's
-  controls); a script's HISTORY row has **Show code**. Buttons never change your project directly: they write a
-  request into the chat, which goes through the same path as a typed request.
+  cards for measured audio, and commands in Hermes's command palette. On the map, a sound plays as soon as the pointer
+  reaches it; a box picks sounds (Shift adds another) for your palette, which sits under the map (play, remove,
+  reorder, rename, strict or loose, Use as kit…) and is the one `kumi_palette` reads and edits. A sound that can't play
+  there leaves the map quietly, counted in one line. While a script or device waits for your approval, the pane shows
+  its whole code (and a device's controls); a script's HISTORY row has **Show code**. Buttons never change your
+  project directly: they write a request into the chat, which goes through the same path as a typed request.
 - **Web dashboard:** a Kumi tab with the same HISTORY, status, map and palette.
 
 ## Files

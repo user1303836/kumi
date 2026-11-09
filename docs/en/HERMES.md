@@ -107,7 +107,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   or a one-shot's root note; the answer says which, and nothing is transposed. A sound with no indexed tempo or key
   isn't found by that filter. Artist and genre words match only names and folders: Kumi doesn't recognise genres or
   artists. "More like this" ranks by closeness to that sound among yours on this map, never a percentage. In Hermes
-  Desktop, the map's list shows each sound's indexed values and why it matched.
+  Desktop, the map's list shows each sound's indexed values and why it matched. With several sounds picked, **More like
+  these (N)** asks for sounds like all of them at once (up to 16); what Kumi finds lights up on the map, and **Pick
+  all** picks it.
 - "Use it on the snare" puts it in the snare's Simpler in Live (a Drum Rack pad's included), on a new track in REAPER,
   or in a new instrument in Renoise, as one change. "Put it on a new track" puts it in a new Simpler
   in Live.
@@ -116,12 +118,19 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   usually takes it back in two steps, so press Cmd+Z one step at a time, right away, and stop as soon as the pad is
   empty. Live's Redo won't bring the sample back: ask Kumi to load it again. Kumi never clears a pad to make room. In
   Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
-- On the map, a sound plays in the window as the pointer rests on it (its first two seconds; **Hover to play** turns
-  that off) or on a click, AIFF included; nothing changes in your DAW. A sound whose file is gone, or that the window
-  can't play, fades off the map quietly, and one line under the map counts them: **Show them** puts them back, and
-  **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard, it copies the request).
+- **Use…** on a map sound puts only its reference in the chat, its name and ids (“Rim Brixton” (sound … from map …)),
+  so you say what to do with it; the dashboard copies the same words.
+- On the map, a sound plays in the window as soon as the pointer reaches it (its first two seconds; **Hover to play**
+  turns that off) or on a click, AIFF included; nothing changes in your DAW. A sound whose file is gone, or that the
+  window can't play, fades off the map quietly, and one line under the map counts them: **Show them** puts them back,
+  and **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard, it copies the request).
   **Tiles** turns the map into square tiles in each group's colour, every sound on its own tile near its place; the
   dots morph into them and back.
+- **Picking and moving on the map:** a drag draws a box that picks the sounds in it, and Shift with a drag adds
+  another box; Command or Ctrl with a click picks or unpicks one sound, and Shift with a click adds one. The middle
+  button moves the map, as does a drag with **Move map** on (or with Space held, in the web dashboard). A mouse's wheel
+  zooms; a trackpad's two-finger scroll moves the map and a pinch zooms. **Esc**, a click on empty map, or **Clear
+  (N)** lets go of the picks.
 
 ### Your palette
 
@@ -131,8 +140,8 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 
 *Kumi 1.24.77 in Hermes Desktop; the 8,830-sound map and its samples are generated test data.*
 
-- **Gather:** on the map, drag a box with Shift held (or turn on **Select**), Command or Ctrl-click a sound to pick
-  one more, or **Pick all** for what a search keeps; then **Add to palette**. A picked sound's own **Add to palette**
+- **Gather:** on the map, drag a box (Shift adds another), Command or Ctrl-click a sound to pick or unpick it, or
+  **Pick all** for what a search or Kumi's find keeps; then **Add to palette**. A picked sound's own **Add to palette**
   takes just it. The palette's sounds are ringed on the map.
 - **Under the map:** each sound is a chip with its waveform, in its group's colour. A click plays it, × takes it out,
   and a drag (or Alt with ← or →) moves it. Rename the palette, make another, switch between them, or forget one; its
@@ -178,13 +187,19 @@ made before). Nothing in your project changes: the result is Kumi's own copy unt
 - **Reroll:** each result has a seed. Another seed is another take of the same recipe; the same seed makes exactly the
   same sound again. Each result comes with a one-line recipe that says what went into it.
 - **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
-- **Use:** ask for it on a pad or a track like any sound; that's a change of its own, asked as your changes are.
+- **Use…** puts only the result's reference in the chat, its name and id (“Smear of 8 at 9.8×…, seed …” (artifact
+  …)), so you say what to do with it; putting it on a pad or a track is a change of its own, asked as your changes are.
 - **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…**,
-  choose **Cross**, **Fuse** or **Stack** and then a way to do it, set its few options or leave them on **Auto** (a
-  loop starts at your project's tempo), and press **Make**: the new sound plays as it arrives (press ▶ or its
-  waveform to hear it again). **Reroll**, **Keep** and **Use…** are on each result (the dashboard copies Use's request
-  instead), ‹ › steps through a result's variations, and the results stay after a reload. A kept sound flies into
-  your palette.
+  choose **Cross**, **Fuse**, **Loop** or **Stack** and then a way to do it. Set its choices or leave any on **Auto**
+  (the seed draws it, so **Reroll** varies it): Resonate's pairing, what rings and the ring time; Modulate's played
+  sound, the stages it may use, how many and how often they retrigger; the **Loop** tab's **Beat** or **Melody**, its
+  tempo (your project's until you move it), bars, and its **Rhythm**, **Voices**, **Feel**, **Harmony** and **Line**.
+  **Steer** shapes any of them (**Surprise** moves a few controls at random, **Reset** puts them back; each way keeps
+  its own steer). Press **Make**: the new sound plays as it arrives (press ▶ or its waveform to hear it again), and a
+  modulate result shows its stages in a row. **Reroll**, **Keep** and **Use…** are on each result (the dashboard copies
+  Use's words instead), ‹ › steps through a result's variations, and the results stay after a reload. A kept sound
+  flies into your palette. Choose results (✓) and **Make from these**, or **Add to the sounds**, to make from what you
+  made, generation after generation; **Back** returns to the sounds before.
 - **Ask Hermes:** "blend these three kicks", "make a texture from my palette", "stack this snare with that clap",
   "reroll it", "put the second one in my palette", "load it on pad C2".
 
