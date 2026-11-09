@@ -20,6 +20,7 @@ pub mod judge;
 pub mod lease;
 pub mod library;
 pub mod listen;
+pub mod listening;
 pub mod map;
 pub mod mcp;
 pub mod plugin_knowledge;

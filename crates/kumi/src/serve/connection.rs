@@ -143,6 +143,12 @@ impl Connection {
         self.reported.transport.borrow().clone()
     }
 
+    /// The transport as a test's DAW said it.
+    #[cfg(test)]
+    pub(crate) fn transport_for_test(&self, transport: Option<Transport>) {
+        *self.reported.transport.borrow_mut() = transport;
+    }
+
     /// What changed while no one looked, since the last time this was asked: bounded (see [`bounded_catch_up`]).
     pub fn take_catch_up(&self) -> Vec<CatchUp> {
         bounded_catch_up(std::mem::take(&mut *self.reported.catch_up.borrow_mut()))

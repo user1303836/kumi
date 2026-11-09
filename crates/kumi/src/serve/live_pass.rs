@@ -28,12 +28,22 @@ pub(super) fn played_seconds(from_beat: f64, beats: f64, tempo: f64, beats_per_b
     (lead + beats + beats_per_bar / 2.) * 60. / tempo
 }
 
+/// The Set's beats a bar as Live last said, 4 when it hasn't.
+pub(super) fn beats_per_bar(ctx: &Ctx) -> f64 {
+    ctx.link()
+        .connection()
+        .and_then(|connection| connection.transport())
+        .and_then(|transport| transport.beats_per_bar)
+        .filter(|beats| *beats > 0.)
+        .unwrap_or(4.)
+}
+
 /// Why a pass over `beats` from `from_beat` won't play here, at the tempo and meter Live last said: over a minute with
 /// its lead-in and what follows. None when it fits, or Live hasn't said its tempo (its integration says it then).
 pub(super) fn window_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<OpError> {
     let transport = ctx.link().connection().and_then(|connection| connection.transport())?;
     let tempo = transport.tempo.filter(|tempo| *tempo > 0.)?;
-    let meter = transport.beats_per_bar.filter(|beats| *beats > 0.).unwrap_or(4.);
+    let meter = beats_per_bar(ctx);
     let seconds = played_seconds(from_beat, beats, tempo, meter);
     (seconds > MOST_SECONDS).then(|| OpError::Refused {
         code: "window_too_long",
@@ -63,6 +73,10 @@ impl Capturing {
 
     pub(super) fn folder(&self) -> &Path {
         self.scratch.path()
+    }
+
+    pub(super) fn scratch(&self) -> &Scratch {
+        &self.scratch
     }
 }
 

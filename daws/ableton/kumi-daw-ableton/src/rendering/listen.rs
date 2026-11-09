@@ -70,6 +70,12 @@ impl LiveRenderer {
         beats: f64,
         signal: Signal,
     ) -> Result<Result<JsonObject, String>, RuntimeError> {
+        // The plugin host's listening renders a minute at most, at the Set's tempo as Live last said.
+        if self.restricted() {
+            if let Some(why) = restricted_render_refusal(beats, self.observer.tempo.get()) {
+                return Ok(Err(why.into()));
+            }
+        }
         let mut args = strict_object(&self.connection().references.borrow().lengthen(&json!({"trackRef":track})))?;
         if let Err(error) = self.connection().references.borrow().require_fresh_references(&args) {
             return Ok(Err(error.to_string()));
@@ -381,4 +387,28 @@ fn clock(seconds: f64) -> String {
 }
 fn plain(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::plain(error.to_string())
+}
+
+/// Why the plugin host's listening won't render `beats` at `tempo`: over a minute, or a tempo Live hasn't said.
+pub(super) fn restricted_render_refusal(beats: f64, tempo: Option<f64>) -> Option<&'static str> {
+    let Some(tempo) = tempo.filter(|tempo| *tempo > 0.) else {
+        return Some("Kumi doesn't know the Set's tempo yet; try again.");
+    };
+    let seconds = beats * 60. / tempo;
+    (!seconds.is_finite() || seconds > super::rig::RESTRICTED_SECONDS)
+        .then_some("Kumi renders at most 60 seconds at a time here: render a shorter stretch (from_beat and beats).")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The plugin host's render is a minute of the track at most, at a tempo Live has said.
+    #[test]
+    fn the_plugin_hosts_render_is_a_minute_at_most() {
+        assert_eq!(restricted_render_refusal(120., Some(120.)), None);
+        assert!(restricted_render_refusal(121., Some(120.)).unwrap().contains("at most 60 seconds"));
+        assert!(restricted_render_refusal(8., None).is_some());
+        assert!(restricted_render_refusal(f64::INFINITY, Some(120.)).is_some());
+    }
 }
