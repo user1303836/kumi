@@ -530,14 +530,19 @@ class Blocked(unittest.TestCase):
     def hook(self, host, tool: str, args: dict) -> dict | None:
         return policy.pre_tool_call(host, tool_name=tool, args=args, session_id="s1", tool_call_id="c1")
 
-    def test_without_a_running_runtime_a_change_undo_or_folder_read_is_blocked(self):
+    def test_without_a_running_runtime_a_change_or_undo_is_blocked_and_a_folder_read_asked_once_kumi_is_set_up(self):
         host, _, _ = support.host(self)
-        for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"}),
-                           ("kumi_library", {"action": "add_folder", "folder": support.DRUMS}),
-                           ("kumi_library", {"action": "scan"})):
+        for tool, args in (("kumi_change", change()), ("kumi_undo", {"history_id": "h-1"})):
             decision = self.hook(host, tool, args)
             self.assertEqual(decision["action"], "block", tool)
             self.assertIn("kumi_connect", decision["message"])
+        folder = {"action": "add_folder", "folder": support.DRUMS}
+        self.assertEqual(self.hook(host, "kumi_library", folder)["action"], "approve", "a sound map needs no DAW")
+        unset, _, _ = support.host(self, installed=False)
+        for args in (folder, {"action": "scan"}):
+            decision = self.hook(unset, "kumi_library", args)
+            self.assertEqual(decision["action"], "block", args)
+            self.assertIn("isn't set up", decision["message"])
 
     def test_a_preview_gets_half_the_hook_timeout_and_one_that_doesnt_answer_blocks(self):
         self.assertEqual([policy.preview_timeout(t) for t in (None, 0, -1, 30, 8, 1)], [10, 10, 10, 10, 4, 0.5])

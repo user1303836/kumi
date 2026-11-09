@@ -46,8 +46,11 @@ Then, in your DAW:
 - **REAPER:** restart REAPER.
 - **Renoise:** enable the Kumi tool.
 
-No DAW yet? REAPER's free evaluation takes about two minutes: install it from
-[reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
+**No DAW?** The sound map, the palette and making sounds don't need one: once setup has installed Kumi's runtime (its
+first step), ask Hermes to "add ~/Samples to Kumi's library and scan it" (any folder of WAV or AIFF files), then open
+the sound map in its tab in Hermes Desktop, or in the web dashboard's Kumi tab. For the DAW side too, REAPER's free
+evaluation takes about two minutes: install it from [reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to
+"set up Kumi for REAPER".
 
 The first DAW you set up becomes Kumi's DAW (the DAW setting), in the same approval. Setting up another DAW later
 leaves Kumi with the one it has; setup then names the step that switches: `hermes kumi setup --daw <daw> --use` in a

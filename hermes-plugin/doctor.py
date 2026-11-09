@@ -274,7 +274,7 @@ def _library(host: tools.Host, state: Path, *, live: bool) -> dict:
     approved = f"{len(folders)} approved folder{'s' if len(folders) != 1 else ''}"
     if scan.get("state") == "running" and not live:
         return _item(name, FIX, "The last scan stopped when Kumi's runtime did (its record still says running).",
-                     "Connect again, then ask Hermes to scan the folders again.")
+                     "Ask Hermes to scan the folders again.")
     if scan.get("state") == "running":
         done, total = progress.get("done"), progress.get("total")
         so_far = f" ({_said(done, 12)} of {_said(total, 12)})" if done is not None and total is not None else ""

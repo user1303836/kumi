@@ -234,8 +234,9 @@ class Tools(unittest.TestCase):
                                                     if m.get("method") == "notifications/cancelled"]
                                            == sent()[before:]), "the runtime is told to stop that call, and only it")
 
-    def test_an_approved_folder_is_kept_for_the_next_runtime(self):
-        support.call(self.host, "kumi_connect", {}, session_id="s1")
+    def test_an_approved_folder_is_kept_for_the_next_runtime_and_a_sound_map_needs_no_daw(self):
+        """Nothing connected (no DAW open): adding a folder and scanning start Kumi's runtime themselves, and a scan
+        asked with none running names the settings' folders, the ones the runtime it starts is given."""
         added = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS + os.sep})
         self.assertEqual(added["folders"], [support.DRUMS])
         self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS])
@@ -244,10 +245,14 @@ class Tools(unittest.TestCase):
         self.assertIn("isn't a full path", support.call(self.host, "kumi_library", {"action": "add_folder",
                                                                                    "folder": "Drums"})["blocked"])
         self.host.runtimes.stop_all()
-        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        asked = policy.pre_tool_call(self.host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
+                                     tool_call_id="c-scan")
+        self.assertEqual(asked["message"].splitlines()[1], f"• {support.DRUMS}")
+        self.assertIn("job_id", support.call(self.host, "kumi_library", {"action": "scan"}, session_id="s1"))
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
         at = started["argv"].index("--library-root")
         self.assertEqual(started["argv"][at:at + 2], ["--library-root", support.DRUMS])
+        self.assertEqual(self.received("connect"), [], "no DAW was asked for")
 
     def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio_and_kumis_own_designs(self):
         generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
