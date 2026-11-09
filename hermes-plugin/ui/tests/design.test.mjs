@@ -159,6 +159,25 @@ test('the store makes a sound: it goes first in the history once; a refusal says
   assert.equal(kumi.get().designs.length, 2, 'a refusal adds nothing')
 })
 
+test("a sound made before the Make panel's first open keeps the earlier results: the history follows it, each once, read once", async () => {
+  let reads = 0
+  const kumi = new store.KumiStore(async path => {
+    if (path !== '/designs') return answer()
+    reads += 1
+    // The backend's history already holds the sound this window made.
+    return { designs: [answer(), answer({ artifact_id: 'a-dOLDOLDOLDOLDOLDOLDOLDO' })] }
+  })
+  // A grow's bud renders before Make… was ever opened.
+  await kumi.design(design.requestFor(card('blend'), sounds(2)))
+  await kumi.readDesignsOnce()
+  await kumi.readDesignsOnce()
+  assert.deepEqual(
+    kumi.get().designs.map(made => made.artifact_id),
+    ['a-dAAAAAAAAAAAAAAAAAAAAAA', 'a-dOLDOLDOLDOLDOLDOLDOLDO']
+  )
+  assert.equal(reads, 1, 'a second open reads nothing more')
+})
+
 test("grow's vine runs from one sound to the other, a drag finds its point, and renders go handle first, then buds in order, two at a time", async () => {
   const grow = await load('src/shared/grow.ts')
   const [a, b] = [

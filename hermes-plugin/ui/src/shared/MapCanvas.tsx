@@ -93,9 +93,9 @@ const STAGGER = 0.55
 /** How long the sounds take to move to a new layout. */
 const ARRANGE_MS = 1000
 /** The layouts this plug-in can name, in the order the menu lists them (serve's `arrangements` ids). */
-const LAYOUTS = ['character', 'texture', 'keys', 'tempo', 'families', 'length', 'folders'] as const
+export const LAYOUTS = ['character', 'texture', 'keys', 'tempo', 'families', 'length', 'folders'] as const
 /** The axis words each layout has (`arrange.<id>.<side>`): its x axis's ends, then its y axis's. */
-const AXES: Record<string, readonly ('bottom' | 'left' | 'right' | 'top')[]> = {
+export const AXES: Record<string, readonly ('bottom' | 'left' | 'right' | 'top')[]> = {
   character: ['left', 'right', 'top', 'bottom'],
   texture: ['left', 'right', 'top', 'bottom'],
   tempo: ['left', 'right', 'bottom']
@@ -398,27 +398,34 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return () => observer.disconnect()
   }, [hasPoints])
 
-  // A new map, or a new size before the user moved the view: fit the whole map, below what floats over its top.
+  // Whether the producer moved the view since it was last fitted, or a find framed it: a view nobody moved follows the
+  // map's size, its top and a side sheet; a moved one stays where it was put until the map is fitted again.
+  const moved = useRef(false)
+  // A new map, or a new size of a view nobody has moved: fit the whole map, below what floats over its top.
   useEffect(() => {
-    if (size.width > 0 && size.height > 0) setView(current => current ?? fit())
+    if (size.width > 0 && size.height > 0) setView(current => (current && moved.current ? current : fit()))
   }, [size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => setView(size.width > 0 ? fit() : null), [model.revision]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    moved.current = false
+    setView(size.width > 0 ? fit() : null)
+  }, [model.revision]) // eslint-disable-line react-hooks/exhaustive-deps
   // The top's height settles once its legend has laid out, and a side sheet opens and closes: a view nobody has moved
   // yet follows them.
-  const moved = useRef(false)
   useEffect(() => {
     if (!moved.current && size.width > 0) setView(fit())
   }, [topInset, coverRight]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // What the agent found: frame it, once the map has a size. Only once: a later resize (the palette drawer opening, a
-  // side sheet) leaves the producer's own view alone.
+  // What the agent found: frame it, once the map has a size and its top has laid out, and once only. The frame counts
+  // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again.
   const framedFound = useRef<ReadonlySet<string> | null>(null)
   useEffect(() => {
-    if (!foundIds || size.width === 0 || framedFound.current === foundIds) return
+    if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return
     framedFound.current = foundIds
     const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight)
-    if (framed) setView(framed)
-  }, [foundIds, model, size.width, size.height]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!framed) return
+    moved.current = true
+    setView(framed)
+  }, [foundIds, model, size.width, size.height, topInset]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The wheel (a native listener: React's wheel handler can't stop the page from scrolling). A pinch, which comes as a
   // wheel with Ctrl held, zooms; so does a mouse's wheel; a trackpad's two-finger scroll pans (`wheelPans`).
@@ -939,7 +946,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             {onPicked && <ToolButton icon="hand" label={t('map.hand')} onClick={() => setHandTool(true)} pressed={handTool} title={t('map.handTitle')} />}
             {grow && <ToolButton icon="grow" label={t('grow.tool')} onClick={() => grow.choose(!grow.choosing)} pressed={grow.choosing !== null} title={t('grow.toolTitle')} />}
             {onPicked && <Rule />}
-            {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} onChoose={chooseArrangement} />}
+            {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - 60)} onChoose={chooseArrangement} />}
             {onTiles && <ToolButton icon="tiles" label={t('map.tiles')} onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')} />}
             {tools}
             <Rule />
@@ -1138,6 +1145,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         {grow && (grow.from || grow.to) && (
           <GrowLayer
             actions={growActions}
+            bottom={chosen ? 120 : 10}
             from={screenOf(placeOfEnd(grow.from))}
             fromColor={colorOfEnd(grow.from)}
             fromMap={placeOfEnd(grow.from)}
@@ -1192,7 +1200,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               color={chosenColor}
               id={selected}
               key={selected}
-              onClose={() => onSelect(null)}
+              onClose={() => {
+                // The player is the stop control: closing it while its sound plays stops that sound.
+                if (playing === selected) onStop?.()
+                onSelect(null)
+              }}
               onPlay={() => onPick(selected)}
               onStop={() => onStop?.()}
               playing={playing === selected}

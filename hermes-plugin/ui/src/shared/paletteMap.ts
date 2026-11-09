@@ -64,8 +64,9 @@ export function usePaletteMap(
   useEffect(() => setMaking(current => (current?.some(source => source.sound_id && source.map_revision !== revision) ? null : current)), [revision])
   const open = (sources: DesignSource[]) => {
     setMaking(sources)
-    // The engine's earlier results, once: a variation history that survives a reload.
-    if (state.designs === null) void store.readDesigns()
+    // The engine's earlier results, once a window: a variation history that survives a reload, kept after what this
+    // window made already (a grow renders before the panel ever opens).
+    void store.readDesignsOnce()
   }
 
   const play = (id: string, preview = false) => {

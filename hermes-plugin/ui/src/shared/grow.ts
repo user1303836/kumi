@@ -129,6 +129,13 @@ export function useGrow(design: (request: ReturnType<typeof growRequest>) => Pro
     setPending(null)
   }
   useEffect(close, [revision]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The map closed: an answer still on its way marks nothing and plays nothing.
+  useEffect(
+    () => () => {
+      generation.current += 1
+    },
+    []
+  )
 
   // Start the next render whenever one is waiting and a slot is free.
   useEffect(() => {
@@ -154,8 +161,9 @@ export function useGrow(design: (request: ReturnType<typeof growRequest>) => Pro
 
   return {
     choosing,
-    from: path?.from ?? pending,
-    to: path?.to ?? null,
+    // A new vine's first sound, once named, is the one shown and named in the prompt, even with another vine open.
+    from: pending ?? path?.from ?? null,
+    to: pending ? null : (path?.to ?? null),
     buds,
     handle,
     scrub,
@@ -176,6 +184,13 @@ export function useGrow(design: (request: ReturnType<typeof growRequest>) => Pro
     scrubTo: (at, done) => {
       setHandle(at)
       if (done) setPicked(at)
+      // A point a bud already grew (the arrow keys land on 25%, 50% and 75%) is that bud: heard, never grown again.
+      const grown = buds.find(each => each.at === at)
+      if (grown?.state === 'ready') {
+        scrubAt.current = at
+        if (done) heardRef.current(grown.result)
+        return
+      }
       // Latest wins: a release asks for where the handle stopped; a drag asks once the handle is a step from the point
       // last asked for, and only while nothing it asked for is still on its way (that lands, then the drag asks again).
       const asks = done || !scrub || (scrub.state !== 'growing' && scrub.state !== 'waiting' && Math.abs(scrub.at - at) >= SCRUB_STEP)

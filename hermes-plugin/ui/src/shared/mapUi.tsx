@@ -158,10 +158,12 @@ export interface LayoutChoice {
 }
 
 /** The layout menu: a tool button (naming the layout shown, unless it's the first), opening a menu of `choices`. A
- *  choice closes it, as do Escape and a press anywhere else; the arrow keys move between choices. */
-export function LayoutMenu({ label, choices, current, onChoose }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void }) {
+ *  choice closes it, as do Escape and a press anywhere else; the arrow keys move between choices. The menu scrolls
+ *  within `maxHeight` (the room below the map's top bar), so every choice can be reached on a short map. */
+export function LayoutMenu({ label, choices, current, onChoose, maxHeight }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void; maxHeight?: number }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
+  const items = useRef<(HTMLButtonElement | null)[]>([])
   useEffect(() => {
     if (!open) return
     const away = (event: PointerEvent) => {
@@ -171,18 +173,23 @@ export function LayoutMenu({ label, choices, current, onChoose }: { label: strin
     return () => window.removeEventListener('pointerdown', away, true)
   }, [open])
   const shown = choices.find(choice => choice.id === current) ?? choices[0]
+  // The layout shown takes the focus once, as the menu opens: later renders (a status poll, a sound playing) leave it
+  // where the arrow keys put it.
+  useEffect(() => {
+    if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus()
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!open) return
     if (event.key === 'Escape') {
+      event.preventDefault()
       event.stopPropagation()
       setOpen(false)
       return
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     event.preventDefault()
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
-    const at = items.findIndex(item => item === event.target)
-    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+    const at = items.current.findIndex(item => item === event.target)
+    items.current[(at + (event.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length]?.focus()
   }
   return (
     <div onKeyDown={keys} ref={box} style={{ position: 'relative', display: 'flex' }}>
@@ -190,8 +197,8 @@ export function LayoutMenu({ label, choices, current, onChoose }: { label: strin
         {shown !== choices[0] ? shown?.name : undefined}
       </ToolButton>
       {open && (
-        <div aria-label={label} className="kumi-pop" role="menu" style={{ ...glass, position: 'absolute', top: 38, right: -4, width: 'max-content', maxWidth: 300, padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}>
-          {choices.map(choice => (
+        <div aria-label={label} className="kumi-pop" role="menu" style={{ ...glass, position: 'absolute', top: 38, right: -4, width: 'max-content', maxWidth: 300, maxHeight, overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}>
+          {choices.map((choice, index) => (
             <button
               aria-checked={choice.id === shown?.id}
               className={FOCUSABLE}
@@ -200,7 +207,9 @@ export function LayoutMenu({ label, choices, current, onChoose }: { label: strin
                 onChoose(choice.id)
                 setOpen(false)
               }}
-              ref={choice.id === shown?.id ? element => element?.focus() : undefined}
+              ref={element => {
+                items.current[index] = element
+              }}
               role="menuitemradio"
               type="button"
               style={{

@@ -6,7 +6,7 @@ import { T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useRef } from 'react'
 
-import type { DesignResult } from './design.ts'
+import { type DesignResult, sourceOfResult } from './design.ts'
 import { clean, seconds } from './format.ts'
 import { type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
 import { floatBeside } from './mapModel.ts'
@@ -31,6 +31,7 @@ export function GrowLayer({
   width,
   height,
   top,
+  bottom,
   playing,
   onPlay,
   onStop,
@@ -44,10 +45,11 @@ export function GrowLayer({
   toMap: Point | null
   fromColor: string
   toColor: string
-  /** The map's size, and what floats over its top, for the card's place. */
+  /** The map's size, and what floats over its top and its foot (the player), for the card's place. */
   width: number
   height: number
   top: number
+  bottom: number
   playing: string | null
   onPlay: (result: DesignResult) => void
   onStop: () => void
@@ -85,11 +87,19 @@ export function GrowLayer({
   // The point picked: a bud, or the handle's point.
   const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : (grow.buds.find(bud => bud.at === grow.picked) ?? null)
   const pickedAt = picked ? at(picked.at) : null
+  // Nothing grew and nothing is on its way: the first failure says why, without a click.
+  const failed = grow.buds.some(bud => bud.state !== 'failed') ? undefined : grow.buds.find((bud): bud is Extract<Bud, { state: 'failed' }> => bud.state === 'failed')
+  // Another path: the same two sounds on a new seed, offered with a grown point and with a failure.
+  const another = (
+    <TextButton onClick={grow.reroll} title={t('grow.rerollTitle')}>
+      {t('grow.reroll')}
+    </TextButton>
+  )
   // The card floats beside the point picked, else beside the whole vine (its ends and its bow), never over them.
   const xs = [from[0], to[0], cx]
   const ys = [from[1], to[1], cy]
   const anchor: [number, number, number, number] = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
-  const card = floatBeside(anchor, 300, picked?.state === 'ready' ? 132 : 70, width, height, top, 10)
+  const card = floatBeside(anchor, 300, picked?.state === 'ready' ? 132 : failed || picked?.state === 'failed' ? 96 : 70, width, height, top, bottom)
   const budView = (bud: Bud, scrubbed = false) => {
     const [x, y] = at(bud.at)
     const color = mixed(fromColor, toColor, bud.at)
@@ -176,6 +186,9 @@ export function GrowLayer({
             if (under) grow.pick(under.at)
             else grow.scrubTo(nearestOnVine(from, to, at), true)
           }}
+          onPointerCancel={() => {
+            press.current = null
+          }}
           role="slider"
           style={{ cursor: 'grab', pointerEvents: 'auto' }}
           tabIndex={0}
@@ -202,7 +215,15 @@ export function GrowLayer({
           </button>
         </div>
         {!picked ? (
-          <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.hint')}</span>
+          failed ? (
+            // Nothing grew and nothing is on its way (a sound's file is gone, the map moved on): why, at once.
+            <>
+              <span style={{ fontSize: 11, color: T.bad }}>{t('grow.failed', clean(failed.error, 160))}</span>
+              <div style={S.row}>{another}</div>
+            </>
+          ) : (
+            <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.hint')}</span>
+          )
         ) : picked.state === 'ready' ? (
           <>
             <span style={{ fontSize: 11, color: T.secondary }} title={picked.result.recipe}>
@@ -216,7 +237,7 @@ export function GrowLayer({
                 <TextButton
                   onClick={() => {
                     const place = vinePoint(fromMap, toMap, picked.at)
-                    const end: GrowEnd = { source: { artifact_id: picked.result.artifact_id, name: clean(picked.result.recipe, 120) }, id: null, place, name: t('grow.bud', percent(picked.at)) }
+                    const end: GrowEnd = { source: sourceOfResult(picked.result), id: null, place, name: t('grow.bud', percent(picked.at)) }
                     if (grow.to) grow.between(end, grow.to)
                   }}
                   title={t('grow.againTitle')}
@@ -224,13 +245,14 @@ export function GrowLayer({
                   {t('grow.again')}
                 </TextButton>
               )}
-              <TextButton onClick={grow.reroll} title={t('grow.rerollTitle')}>
-                {t('grow.reroll')}
-              </TextButton>
+              {another}
             </div>
           </>
         ) : picked.state === 'failed' ? (
-          <span style={{ fontSize: 11, color: T.bad }}>{t('grow.failed', clean(picked.error, 160))}</span>
+          <>
+            <span style={{ fontSize: 11, color: T.bad }}>{t('grow.failed', clean(picked.error, 160))}</span>
+            <div style={S.row}>{another}</div>
+          </>
         ) : (
           <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.growing', percent(picked.at))}</span>
         )}

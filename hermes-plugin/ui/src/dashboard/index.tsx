@@ -5,8 +5,8 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, dawName, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, setupRequest, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
-import { sourcesOf, useRequest } from '../shared/design.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
@@ -17,7 +17,8 @@ import { ToolButton } from '../shared/mapUi.tsx'
 import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
-import { dawPartWorks, KumiStore } from '../shared/store.ts'
+import { KumiStore } from '../shared/store.ts'
+import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
 import { Dot, FocusStyle, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
@@ -124,19 +125,21 @@ function Dashboard() {
     )
   }
 
+  // Setup's words and next steps, as the pane has them: one step per DAW until one is chosen, none that setup can't
+  // take (no pin, an unsupported system), and no words that name a DAW nobody chose.
+  const setupMessage = setupWords(state)
+  const steps = nextSteps(state, t)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: T.text, minHeight: 'calc(100vh - 160px)' }}>
       <div style={{ ...S.row, gap: 10, padding: '4px 2px' }}>
         <Dot color={tone} size={9} />
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
-        {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && !dawPartWorks(state) && (
-          <>
-            <span style={S.muted}>{state.setup.message}</span>
-            {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}
-            <CopyButton label={t('step.setup', dawName(state.setup.daw ?? state.status?.daw, t))} text={setupRequest(state.setup.daw ?? state.status?.daw)} />
-          </>
-        )}
+        {setupMessage && <span style={S.muted}>{setupMessage}</span>}
+        {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}
+        {steps.map(step => (
+          <CopyButton key={step.request} label={step.label} text={step.request} />
+        ))}
       </div>
       {state.status?.unsure && (
         <div style={{ ...S.row, gap: 10, padding: '0 2px', alignItems: 'flex-start' }}>
@@ -235,7 +238,8 @@ function Dashboard() {
                     {kept ? t('make.kept') : t('make.keep')}
                   </TextButton>
                   {request && <CopyButton label={t('make.copyUse')} text={request} />}
-                  <TextButton onClick={() => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null))} title={t('make.openTitle')}>
+                  {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
+                  <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
                     {t('make.open')}
                   </TextButton>
                 </>
@@ -257,7 +261,14 @@ function Dashboard() {
                   (() => {
                     const [from, to] = ids.map(id => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null))
                     return from && to ? (
-                      <TextButton onClick={() => grow.between(from, to)} title={t('grow.betweenTitle')}>
+                      // The vine takes over from the picks: their actions would float over its card.
+                      <TextButton
+                        onClick={() => {
+                          grow.between(from, to)
+                          palette.clearPicks()
+                        }}
+                        title={t('grow.betweenTitle')}
+                      >
                         {t('grow.between')}
                       </TextButton>
                     ) : null

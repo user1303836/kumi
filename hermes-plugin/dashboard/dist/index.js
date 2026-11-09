@@ -2393,6 +2393,9 @@
   function setupRequest(daw) {
     return `Set up Kumi for ${dawName(daw)}`;
   }
+  function connectRequest(daw) {
+    return `Connect Kumi to ${dawName(daw)}`;
+  }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   var RESCAN_REQUEST = "Kumi, rescan my sample folders";
   var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
@@ -2791,6 +2794,12 @@
       setPending(null);
     };
     useEffect(close, [revision]);
+    useEffect(
+      () => () => {
+        generation.current += 1;
+      },
+      []
+    );
     useEffect(() => {
       if (!path) return;
       const next = nextToGrow(buds, scrub, running);
@@ -2813,8 +2822,9 @@
     }, [path, buds, scrub, running]);
     return {
       choosing,
-      from: path?.from ?? pending,
-      to: path?.to ?? null,
+      // A new vine's first sound, once named, is the one shown and named in the prompt, even with another vine open.
+      from: pending ?? path?.from ?? null,
+      to: pending ? null : path?.to ?? null,
       buds,
       handle,
       scrub,
@@ -2835,6 +2845,12 @@
       scrubTo: (at, done) => {
         setHandle(at);
         if (done) setPicked(at);
+        const grown = buds.find((each) => each.at === at);
+        if (grown?.state === "ready") {
+          scrubAt.current = at;
+          if (done) heardRef.current(grown.result);
+          return;
+        }
         const asks = done || !scrub || scrub.state !== "growing" && scrub.state !== "waiting" && Math.abs(scrub.at - at) >= SCRUB_STEP;
         if (!asks) return;
         scrubAt.current = at;
@@ -3026,6 +3042,9 @@
     reads = /* @__PURE__ */ new Map();
     wanted = /* @__PURE__ */ new Map();
     generation = 0;
+    /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
+     *  window made before (a grow renders before the Make panel ever opens). */
+    designsRead = false;
     /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
     cards = /* @__PURE__ */ new Map();
     /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
@@ -3054,6 +3073,7 @@
     /** Forget everything (another profile or connection): what's shown must be that profile's. */
     reset() {
       this.generation += 1;
+      this.designsRead = false;
       this.reads.clear();
       this.cards.clear();
       this.started.clear();
@@ -3196,18 +3216,27 @@
         return false;
       }
     }
-    /** The engine's recent results, newest first (`GET /designs`), for the Make panel's history. None when the backend
-     *  has no sound design (an older plugin) or can't read them. */
+    /** The engine's recent results, newest first (`GET /designs`), for the Make panel's history, after the ones this
+     *  window made already (a grow's buds, a make before the read answered), each once. None when the backend has no
+     *  sound design (an older plugin) or can't read them. */
     async readDesigns() {
       const generation = this.generation;
       try {
         const answer = await this.fetch("/designs");
         if (generation !== this.generation) return;
-        const designs = (Array.isArray(answer?.designs) ? answer.designs : []).map(resultOf).filter((result) => result !== null);
-        this.set({ designs });
+        const history = (Array.isArray(answer?.designs) ? answer.designs : []).map(resultOf).filter((result) => result !== null);
+        const made = this.state.designs ?? [];
+        const have = new Set(made.map((result) => result.artifact_id));
+        this.set({ designs: [...made, ...history.filter((result) => !have.has(result.artifact_id))] });
       } catch {
         if (generation === this.generation && this.state.designs === null) this.set({ designs: [] });
       }
+    }
+    /** `readDesigns`, the first time this window asks (the Make panel opening); later opens read nothing more. */
+    readDesignsOnce() {
+      if (this.designsRead) return Promise.resolve();
+      this.designsRead = true;
+      return this.readDesigns();
     }
     /** Make a sound (`POST /design`): the result goes first in `designs`. Renders are quick (well under a second for
      *  one-shots, a few for a long smear), so this waits for the answer. */
@@ -5425,9 +5454,10 @@
   function Rule() {
     return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
   }
-  function LayoutMenu({ label, choices, current, onChoose }) {
+  function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
     const [open, setOpen] = useState(false);
     const box = useRef(null);
+    const items = useRef([]);
     useEffect(() => {
       if (!open) return;
       const away = (event) => {
@@ -5437,22 +5467,25 @@
       return () => window.removeEventListener("pointerdown", away, true);
     }, [open]);
     const shown = choices.find((choice) => choice.id === current) ?? choices[0];
+    useEffect(() => {
+      if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus();
+    }, [open]);
     const keys = (event) => {
       if (!open) return;
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
         setOpen(false);
         return;
       }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       event.preventDefault();
-      const items = [...event.currentTarget.querySelectorAll('[role="menuitemradio"]')];
-      const at = items.findIndex((item) => item === event.target);
-      items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+      const at = items.current.findIndex((item) => item === event.target);
+      items.current[(at + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length]?.focus();
     };
     return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
       /* @__PURE__ */ jsx(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
-      open && /* @__PURE__ */ jsx("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice) => /* @__PURE__ */ jsxs(
+      open && /* @__PURE__ */ jsx("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, maxHeight, overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice, index) => /* @__PURE__ */ jsxs(
         "button",
         {
           "aria-checked": choice.id === shown?.id,
@@ -5461,7 +5494,9 @@
             onChoose(choice.id);
             setOpen(false);
           },
-          ref: choice.id === shown?.id ? (element) => element?.focus() : void 0,
+          ref: (element) => {
+            items.current[index] = element;
+          },
           role: "menuitemradio",
           type: "button",
           style: {
@@ -5502,6 +5537,7 @@
     width,
     height,
     top,
+    bottom,
     playing,
     onPlay,
     onStop,
@@ -5530,10 +5566,12 @@
     };
     const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : grow.buds.find((bud) => bud.at === grow.picked) ?? null;
     const pickedAt = picked ? at(picked.at) : null;
+    const failed = grow.buds.some((bud) => bud.state !== "failed") ? void 0 : grow.buds.find((bud) => bud.state === "failed");
+    const another = /* @__PURE__ */ jsx(TextButton, { onClick: grow.reroll, title: t("grow.rerollTitle"), children: t("grow.reroll") });
     const xs = [from[0], to[0], cx];
     const ys = [from[1], to[1], cy];
     const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-    const card = floatBeside(anchor, 300, picked?.state === "ready" ? 132 : 70, width, height, top, 10);
+    const card = floatBeside(anchor, 300, picked?.state === "ready" ? 132 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
     const budView = (bud, scrubbed = false) => {
       const [x, y] = at(bud.at);
       const color = mixed(fromColor, toColor, bud.at);
@@ -5615,6 +5653,9 @@
               if (under) grow.pick(under.at);
               else grow.scrubTo(nearestOnVine(from, to, at2), true);
             },
+            onPointerCancel: () => {
+              press.current = null;
+            },
             role: "slider",
             style: { cursor: "grab", pointerEvents: "auto" },
             tabIndex: 0,
@@ -5640,7 +5681,13 @@
               /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }, children: t("grow.title", clean(grow.from?.name ?? "", 40), clean(grow.to.name, 40)) }),
               /* @__PURE__ */ jsx("button", { "aria-label": t("grow.close"), className: FOCUSABLE, onClick: grow.close, title: t("grow.close"), type: "button", style: { display: "flex", padding: 3, border: "none", borderRadius: 10, background: "transparent", color: T.faint, cursor: "pointer" }, children: /* @__PURE__ */ jsx(Icon, { name: "close", size: 11 }) })
             ] }),
-            !picked ? /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs(Fragment2, { children: [
+            !picked ? failed ? (
+              // Nothing grew and nothing is on its way (a sound's file is gone, the map moved on): why, at once.
+              /* @__PURE__ */ jsxs(Fragment2, { children: [
+                /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(failed.error, 160)) }),
+                /* @__PURE__ */ jsx("div", { style: S.row, children: another })
+              ] })
+            ) : /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs(Fragment2, { children: [
               /* @__PURE__ */ jsxs("span", { style: { fontSize: 11, color: T.secondary }, title: picked.result.recipe, children: [
                 /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
                 /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
@@ -5653,16 +5700,19 @@
                   {
                     onClick: () => {
                       const place = vinePoint(fromMap, toMap, picked.at);
-                      const end = { source: { artifact_id: picked.result.artifact_id, name: clean(picked.result.recipe, 120) }, id: null, place, name: t("grow.bud", percent2(picked.at)) };
+                      const end = { source: sourceOfResult(picked.result), id: null, place, name: t("grow.bud", percent2(picked.at)) };
                       if (grow.to) grow.between(end, grow.to);
                     },
                     title: t("grow.againTitle"),
                     children: t("grow.again")
                   }
                 ),
-                /* @__PURE__ */ jsx(TextButton, { onClick: grow.reroll, title: t("grow.rerollTitle"), children: t("grow.reroll") })
+                another
               ] })
-            ] }) : picked.state === "failed" ? /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }) : /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
+            ] }) : picked.state === "failed" ? /* @__PURE__ */ jsxs(Fragment2, { children: [
+              /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }),
+              /* @__PURE__ */ jsx("div", { style: S.row, children: another })
+            ] }) : /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
           ]
         }
       )
@@ -5729,14 +5779,21 @@
   var DECODE_MOST = 12 * 1024 * 1024;
   var kept = /* @__PURE__ */ new Map();
   var loading = /* @__PURE__ */ new Map();
+  var askers = /* @__PURE__ */ new Map();
   var queue = Promise.resolve();
-  function peaksFor(id, bars, audio) {
+  var SKIPPED = /* @__PURE__ */ Symbol("skipped");
+  function peaksFor(id, bars, audio, wanted = () => true) {
     const key = `${bars}:${id}`;
     const done = kept.get(key);
     if (done !== void 0) return Promise.resolve(done);
     const running = loading.get(key);
-    if (running) return running;
+    if (running) {
+      askers.get(key)?.push(wanted);
+      return running;
+    }
+    askers.set(key, [wanted]);
     const run = async () => {
+      if (!(askers.get(key) ?? []).some((ask) => ask())) return SKIPPED;
       const url = await audio(id);
       const comma = url.indexOf(",");
       if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
@@ -5752,8 +5809,10 @@
       return peaksOf(mixed2, bars);
     };
     const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-      kept.set(key, peaks);
       loading.delete(key);
+      askers.delete(key);
+      if (peaks === SKIPPED) return null;
+      kept.set(key, peaks);
       return peaks;
     });
     queue = promise;
@@ -5775,7 +5834,7 @@
     useEffect(() => {
       let live = true;
       setPeaks(peaksKept(id, BARS));
-      void peaksFor(id, BARS, audio).then((found) => live && setPeaks(found));
+      void peaksFor(id, BARS, audio, () => live).then((found) => live && setPeaks(found));
       return () => {
         live = false;
       };
@@ -6161,21 +6220,26 @@
       observer.observe(top);
       return () => observer.disconnect();
     }, [hasPoints]);
-    useEffect(() => {
-      if (size.width > 0 && size.height > 0) setView((current) => current ?? fit());
-    }, [size.width, size.height]);
-    useEffect(() => setView(size.width > 0 ? fit() : null), [model.revision]);
     const moved2 = useRef(false);
+    useEffect(() => {
+      if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
+    }, [size.width, size.height]);
+    useEffect(() => {
+      moved2.current = false;
+      setView(size.width > 0 ? fit() : null);
+    }, [model.revision]);
     useEffect(() => {
       if (!moved2.current && size.width > 0) setView(fit());
     }, [topInset, coverRight]);
     const framedFound = useRef(null);
     useEffect(() => {
-      if (!foundIds || size.width === 0 || framedFound.current === foundIds) return;
+      if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
       framedFound.current = foundIds;
       const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
-      if (framed) setView(framed);
-    }, [foundIds, model, size.width, size.height]);
+      if (!framed) return;
+      moved2.current = true;
+      setView(framed);
+    }, [foundIds, model, size.width, size.height, topInset]);
     const wheelMode = useRef(wheel);
     wheelMode.current = wheel;
     useEffect(() => {
@@ -6622,7 +6686,7 @@
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
             grow && /* @__PURE__ */ jsx(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
             onPicked && /* @__PURE__ */ jsx(Rule, {}),
-            layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), onChoose: chooseArrangement }),
+            layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
             onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
             tools,
             /* @__PURE__ */ jsx(Rule, {}),
@@ -6811,6 +6875,7 @@
           GrowLayer,
           {
             actions: growActions,
+            bottom: chosen ? 120 : 10,
             from: screenOf(placeOfEnd(grow.from)),
             fromColor: colorOfEnd(grow.from),
             fromMap: placeOfEnd(grow.from),
@@ -6865,7 +6930,10 @@
           audio: audio ?? (() => Promise.reject(new Error("no audio"))),
           color: chosenColor,
           id: selected,
-          onClose: () => onSelect(null),
+          onClose: () => {
+            if (playing === selected) onStop?.();
+            onSelect(null);
+          },
           onPlay: () => onPick(selected),
           onStop: () => onStop?.(),
           playing: playing === selected,
@@ -7381,7 +7449,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     useEffect(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
     const open = (sources) => {
       setMaking(sources);
-      if (state.designs === null) void store.readDesigns();
+      void store.readDesignsOnce();
     };
     const play = (id, preview = false) => {
       audition.play(id, preview ? { preview: PREVIEW_SECONDS } : {}).catch((error) => {
@@ -7430,6 +7498,31 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         if (done) setPicks({ revision, ids: /* @__PURE__ */ new Set() });
       }
     };
+  }
+
+  // src/shared/steps.ts
+  var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true };
+  var SETUP_DAWS = ["ableton", "reaper", "renoise"];
+  var IN_DAW = { choose_control_surface: true, restart_daw: true, enable_tool: true };
+  function dawChosen(state) {
+    return state.setup?.daw_chosen !== false;
+  }
+  function nextSteps(state, t = english) {
+    const setup = state.setup;
+    const daw = state.status?.daw ?? setup?.daw;
+    if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
+      return (dawChosen(state) ? [daw] : SETUP_DAWS).map((each) => ({ label: t("step.setup", dawName(each, t)), request: setupRequest(each) }));
+    }
+    if (setup?.state === "ready" && !state.status?.connected) return [{ label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) }];
+    return [];
+  }
+  function setupWords(state) {
+    const setup = state.setup;
+    const said = setup?.state;
+    if (typeof setup?.message !== "string" || !setup.message || !said || said === "unknown" || dawPartWorks(state)) return null;
+    if (said === "ready") return !state.status?.connected && IN_DAW[setup.next_step ?? ""] ? setup.message : null;
+    if (said === "needs_daw_component" && !dawChosen(state)) return null;
+    return setup.message;
   }
 
   // src/dashboard/index.tsx
@@ -7514,6 +7607,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         /* @__PURE__ */ jsx("p", { style: S.muted, children: t("dashboard.agentOffHow") })
       ] });
     }
+    const setupMessage = setupWords(state);
+    const steps = nextSteps(state, t);
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 12, color: T.text, minHeight: "calc(100vh - 160px)" }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "4px 2px" }, children: [
         /* @__PURE__ */ jsx(Dot, { color: tone, size: 9 }),
@@ -7522,10 +7617,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           "Kumi ",
           state.status.runtime.version
         ] }),
-        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && !dawPartWorks(state) && /* @__PURE__ */ jsxs(Fragment2, { children: [
-          /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message }),
-          /* @__PURE__ */ jsx(CopyButton, { label: t("step.setup", dawName(state.setup.daw ?? state.status?.daw, t)), text: setupRequest(state.setup.daw ?? state.status?.daw) })
-        ] })
+        setupMessage && /* @__PURE__ */ jsx("span", { style: S.muted, children: setupMessage }),
+        steps.map((step2) => /* @__PURE__ */ jsx(CopyButton, { label: step2.label, text: step2.request }, step2.request))
       ] }),
       state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
         /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [
@@ -7596,7 +7689,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
                   /* @__PURE__ */ jsx(TextButton, { disabled: kept2, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept2 ? t("make.kept") : t("make.keep") }),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("make.copyUse"), text: request }),
-                  /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null)), title: t("make.openTitle"), children: t("make.open") })
+                  /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
                 ] });
               },
               onSelect: setSelected,
@@ -7606,7 +7699,20 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 ids.length > 1 && /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
                 ids.length === 2 && (() => {
                   const [from, to] = ids.map((id) => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null));
-                  return from && to ? /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.between(from, to), title: t("grow.betweenTitle"), children: t("grow.between") }) : null;
+                  return from && to ? (
+                    // The vine takes over from the picks: their actions would float over its card.
+                    /* @__PURE__ */ jsx(
+                      TextButton,
+                      {
+                        onClick: () => {
+                          grow.between(from, to);
+                          palette.clearPicks();
+                        },
+                        title: t("grow.betweenTitle"),
+                        children: t("grow.between")
+                      }
+                    )
+                  ) : null;
                 })(),
                 /* @__PURE__ */ jsx(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
               ] }),

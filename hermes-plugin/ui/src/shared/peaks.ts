@@ -7,17 +7,28 @@ const DECODE_MOST = 12 * 1024 * 1024
 
 const kept = new Map<string, number[] | null>()
 const loading = new Map<string, Promise<number[] | null>>()
+// Who asked for each job still queued: it runs if any of them still wants it.
+const askers = new Map<string, (() => boolean)[]>()
 let queue: Promise<unknown> = Promise.resolve()
 
+/** What a job returns when, at the head of the queue, nobody wants it any more: not kept, so a later ask decodes. */
+const SKIPPED = Symbol('skipped')
+
 /** The waveform of `id` in `bars` bars, 0 to 1, from the cache or decoded now; null for audio that can't be decoded
- *  here (or is too big to). */
-export function peaksFor(id: string, bars: number, audio: (id: string) => Promise<string>): Promise<number[] | null> {
+ *  here (or is too big to). `wanted` is asked as the job reaches the head of the queue: the map's player passes false
+ *  once the keyboard has moved on, so stepping through sounds fetches and decodes only the one that stays. */
+export function peaksFor(id: string, bars: number, audio: (id: string) => Promise<string>, wanted: () => boolean = () => true): Promise<number[] | null> {
   const key = `${bars}:${id}`
   const done = kept.get(key)
   if (done !== undefined) return Promise.resolve(done)
   const running = loading.get(key)
-  if (running) return running
-  const run = async (): Promise<number[] | null> => {
+  if (running) {
+    askers.get(key)?.push(wanted)
+    return running
+  }
+  askers.set(key, [wanted])
+  const run = async (): Promise<number[] | null | typeof SKIPPED> => {
+    if (!(askers.get(key) ?? []).some(ask => ask())) return SKIPPED
     const url = await audio(id)
     const comma = url.indexOf(',')
     if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== 'function') return null
@@ -36,8 +47,10 @@ export function peaksFor(id: string, bars: number, audio: (id: string) => Promis
     .then(run, run)
     .catch(() => null)
     .then(peaks => {
-      kept.set(key, peaks)
       loading.delete(key)
+      askers.delete(key)
+      if (peaks === SKIPPED) return null
+      kept.set(key, peaks)
       return peaks
     })
   queue = promise

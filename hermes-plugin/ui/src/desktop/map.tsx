@@ -11,7 +11,7 @@ import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
-import { sourcesOf, useRequest } from '../shared/design.ts'
+import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
@@ -21,9 +21,10 @@ import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
 import { errorText, type KumiStore } from '../shared/store.ts'
+import { nextSteps } from '../shared/steps.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
-import { nextSteps, ownerSession } from './pane.tsx'
+import { ownerSession } from './pane.tsx'
 
 /** Desktop's own storage key for hover-to-play (on unless the producer turned it off, as native Kumi's `h`). */
 export const HOVER_PLAY = 'mapHover'
@@ -116,10 +117,10 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const beside = areaWidth >= SIDE_SHEET
   const session = ownerSession(state)
   const map = state.map
-  // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own step,
-  // sent as the pane sends it), the scan's progress while one runs, else a request to scan (Kumi asks which folder
-  // when none is set up).
-  const setupFirst = RUNTIME_MISSING[state.setup?.state ?? ''] ? (nextSteps(state, t)[0] ?? null) : null
+  // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own steps,
+  // one per DAW until one is chosen, sent as the pane sends them), the scan's progress while one runs, else a request
+  // to scan (Kumi asks which folder when none is set up).
+  const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ''] ? nextSteps(state, t) : []
   const scanning = Object.values(state.jobs).find(job => job.kind === 'scan' && (job.state === 'running' || job.state === undefined))
   const empty =
     state.available === false ? (
@@ -133,12 +134,14 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
       </>
     ) : (
       <>
-        {setupFirst ? t('map.setupFirst') : t('map.empty')}
-        <div style={{ marginTop: 10 }}>
-          {setupFirst ? (
-            <TextButton onClick={() => void ask(ctx, setupFirst.request, { send: true, session: null })} strong>
-              {setupFirst.label}
-            </TextButton>
+        {setupSteps.length > 0 ? t('map.setupFirst') : t('map.empty')}
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
+          {setupSteps.length > 0 ? (
+            setupSteps.map(step => (
+              <TextButton key={step.request} onClick={() => void ask(ctx, step.request, { send: true, session: null })} strong={setupSteps.length === 1}>
+                {step.label}
+              </TextButton>
+            ))
           ) : (
             <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} strong title={t('map.scanTitle')}>
               {t('map.scan')}
@@ -228,7 +231,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                     {t('make.use')}
                   </TextButton>
                 )}
-                <TextButton onClick={() => palette.makeFrom(sourcesOf([{ artifact_id: result.artifact_id, name: result.recipe }], null))} title={t('make.openTitle')}>
+                {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
+                <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
                   {t('make.open')}
                 </TextButton>
               </>
@@ -255,7 +259,14 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                   (() => {
                     const [from, to] = ids.map(id => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null))
                     return from && to ? (
-                      <TextButton onClick={() => grow.between(from, to)} title={t('grow.betweenTitle')}>
+                      // The vine takes over from the picks: their actions would float over its card.
+                      <TextButton
+                        onClick={() => {
+                          grow.between(from, to)
+                          palette.clearPicks()
+                        }}
+                        title={t('grow.betweenTitle')}
+                      >
                         {t('grow.between')}
                       </TextButton>
                     ) : null

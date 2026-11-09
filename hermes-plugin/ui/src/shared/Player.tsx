@@ -23,7 +23,8 @@ function Waveform({ id, color, playing, duration, audio, onClick }: { id: string
   useEffect(() => {
     let live = true
     setPeaks(peaksKept(id, BARS))
-    void peaksFor(id, BARS, audio).then(found => live && setPeaks(found))
+    // Wanted only while this sound is the one shown: arrow keys stepping past it fetch and decode nothing for it.
+    void peaksFor(id, BARS, audio, () => live).then(found => live && setPeaks(found))
     return () => {
       live = false
     }
