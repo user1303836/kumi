@@ -32,7 +32,7 @@ export function sdkStub({ toolMedia = true, settingsHref = true, composer = true
 }
 
 const reactStub = `
-  export const useEffect = () => {}, useMemo = f => f(), useCallback = f => f, useRef = v => ({ current: v })
+  export const useEffect = () => {}, useLayoutEffect = () => {}, useMemo = f => f(), useCallback = f => f, useRef = v => ({ current: v })
   export const useState = v => [typeof v === 'function' ? v() : v, () => {}]
   export const useSyncExternalStore = (subscribe, get) => get()
   export const createContext = value => ({ value, Provider: props => props.children ?? null })

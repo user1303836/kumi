@@ -7,6 +7,8 @@ export const T = {
   faint: 'var(--ui-text-quaternary)',
   border: 'var(--ui-stroke-secondary)',
   card: 'var(--ui-bg-card)',
+  // An opaque surface for what floats over other views (the Make panel over the map): the card colour is see-through.
+  raised: 'var(--ui-bg-elevated)',
   chip: 'var(--ui-bg-tertiary)',
   accent: 'var(--ui-accent)',
   good: 'var(--ui-green)',

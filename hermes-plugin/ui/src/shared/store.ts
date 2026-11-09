@@ -5,6 +5,7 @@
 // the palette.
 import { clean, plainId } from './format.ts'
 import { parseListen, roundKey, roundOf, type Round } from './listen.ts'
+import { type DesignRequest, type DesignResult, resultOf } from './design.ts'
 import type { PaletteAction, PaletteReply } from './palette.ts'
 import type { Focus, History, Job, PendingScript, ScriptCode, ScriptLanguage, SetupStatus, SoundMap, Status } from './types.ts'
 
@@ -43,7 +44,14 @@ export interface KumiState {
   palette: PaletteReply | null
   /** What the last palette edit from this window said ("Added 3 sounds to Drums."), or why it was refused. */
   paletteSaid: { text: string; failed: boolean; at: number } | null
+  /** The sound-design engine's results (`GET /designs`, then each new one first): null until the Make panel reads them. */
+  designs: DesignResult[] | null
 }
+
+/** How a design request ended: its result, or why not, in the backend's words, with the HTTP status (400: refused, a
+ *  sound picked on an older map among the reasons; 404: this plugin's backend has no sound design yet; 503: two renders
+ *  already running, or the runtime isn't set up; 504: it took too long). */
+export type Designed = { result: DesignResult } | { error: string; status: number }
 
 export interface TrackedJob extends Job {
   /** When this window saw it finish (ms, this window's clock); null while it runs. */
@@ -97,7 +105,7 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
 
 /** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
 export const HIDE_BATCH_MS = 1200
@@ -362,6 +370,36 @@ export class KumiStore {
     } catch (error) {
       if (generation === this.generation) this.set({ paletteSaid: { text: clean(errorText(error), 200), failed: true, at: Date.now() } })
       return false
+    }
+  }
+
+  /** The engine's recent results, newest first (`GET /designs`), for the Make panel's history. None when the backend
+   *  has no sound design (an older plugin) or can't read them. */
+  async readDesigns(): Promise<void> {
+    const generation = this.generation
+    try {
+      const answer = await this.fetch<{ designs?: unknown }>('/designs')
+      if (generation !== this.generation) return
+      const designs = (Array.isArray(answer?.designs) ? answer.designs : []).map(resultOf).filter((result): result is DesignResult => result !== null)
+      this.set({ designs })
+    } catch {
+      if (generation === this.generation && this.state.designs === null) this.set({ designs: [] })
+    }
+  }
+
+  /** Make a sound (`POST /design`): the result goes first in `designs`. Renders are quick (well under a second for
+   *  one-shots, a few for a long smear), so this waits for the answer. */
+  async design(request: DesignRequest): Promise<Designed> {
+    const generation = this.generation
+    try {
+      const answer = await this.fetch<unknown>('/design', { method: 'POST', body: request })
+      const result = resultOf(answer)
+      if (!result) return { error: 'Kumi sent no sound back.', status: 0 }
+      if (generation === this.generation) this.set({ designs: [result, ...(this.state.designs ?? []).filter(other => other.artifact_id !== result.artifact_id)] })
+      return { result }
+    } catch (error) {
+      const status = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : statusOf(error)
+      return { error: clean(errorText(error), 300), status }
     }
   }
 

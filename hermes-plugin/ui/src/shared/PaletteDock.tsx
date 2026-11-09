@@ -1,10 +1,11 @@
 // The palette dock under the sound map: the sounds the producer gathered to work with, as chips with a waveform in
 // their group's colour. A chip plays on a click; × takes it out; a drag (or Alt with ← or →) moves it. The header
-// names the palette, switches, renames, makes or forgets one, sets it strict or loose, and offers it as a kit. Every
-// edit changes no project, so it runs at once (`POST /palette`); the agent's `kumi_palette` reads and edits the same
-// palette. Both UI halves use it: what "Use as kit" does comes from `kit`.
+// names the palette, switches, renames, makes or forgets one, sets it strict or loose, and offers it as a kit or as
+// the sounds to make a new one from. Every edit changes no project, so it runs at once (`POST /palette`); the agent's
+// `kumi_palette` reads and edits the same palette. Both UI halves use it: what "Use as kit" does comes from `kit`, and
+// "Make…" from `make`.
 import { T } from '@kumi/theme'
-import type { DragEvent, KeyboardEvent, ReactNode } from 'react'
+import type { DragEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num } from './format.ts'
@@ -35,6 +36,10 @@ export interface PaletteDockProps {
   audio: (id: string) => Promise<string>
   /** "Use as kit": Desktop drafts a chat request, the dashboard copies it. */
   kit?: (palette: PaletteView) => ReactNode
+  /** "Make…": opens the Make panel on the palette's sounds. */
+  make?: (palette: PaletteView) => void
+  /** The dock's own box, for the Make panel to fly a kept sound into. */
+  landing?: RefObject<HTMLElement | null>
 }
 
 // Thumbnails by id, shared by every dock in the window: decoded once, one at a time, kept for the session.
@@ -266,7 +271,7 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make, landing }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
@@ -388,6 +393,11 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </span>
       )}
       <span style={{ flex: 1 }} />
+      {current && current.items.length > 1 && make && (
+        <TextButton onClick={() => make(current)} title={t('make.openTitle')}>
+          {t('make.open')}
+        </TextButton>
+      )}
       {current && current.items.length > 0 && kit?.(current)}
       {current && !forgetting && (
         <TextButton onClick={() => setForgetting(true)} title={t('dock.forgetTitle', clean(current.name, 40))}>
@@ -398,7 +408,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   )
 
   return (
-    <section aria-label={t('dock.title')} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
+    <section aria-label={t('dock.title')} ref={landing} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
       {header}
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
