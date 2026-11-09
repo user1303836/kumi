@@ -24,7 +24,8 @@ use std::collections::HashMap;
 
 /// How the integration's words map here, said with every round.
 const IN_HERMES: &str = "In Kumi for Hermes: make_changes is kumi_change, judge is kumi_judge, tune is kumi_tune, \
-                         discovery is kumi_observe and kumi_read. A change a round took back is undone already (taken_back): \
+                         sound is kumi_sound, audition is kumi_audition, groove is kumi_groove, render is kumi_render, listen \
+                         (file) is kumi_listen with an artifact_id as its source, discovery is kumi_observe and kumi_read. A change a round took back is undone already (taken_back): \
                          don't undo it again. Each call goes on the project_key and epoch this answer gives.";
 
 pub static JUDGE: Operation = Operation {
@@ -106,11 +107,11 @@ fn run_tune(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(listened(ctx, call, "tune"))
 }
 
-fn refused(code: &str, reason: impl Into<String>) -> Value {
+pub(super) fn refused(code: &str, reason: impl Into<String>) -> Value {
     json!({"state": "refused", "code": code, "reason": reason.into(), "history_ids": [], "taken_back": []})
 }
 
-fn refusal(error: OpError) -> Value {
+pub(super) fn refusal(error: OpError) -> Value {
     refused(error.code(), error.reason())
 }
 
@@ -159,12 +160,18 @@ async fn judge_input(
     Ok((input, staged))
 }
 
-/// One judge or tune call, through the integration's tool of that name.
-async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, OpError> {
+/// A call's arguments without the runtime's own: what the integration's tool takes.
+pub(super) fn tools_input(args: &JsonObject) -> Map<String, Value> {
+    args.iter().filter(|(key, _)| !key.starts_with("expected_")).map(|(key, value)| (key.clone(), value.clone())).collect()
+}
+
+/// One call of Live's listening tool `name` (judge, tune, sound, audition, groove, render), through the integration's
+/// tool of that name.
+pub(super) async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, OpError> {
     let args = &call.args;
     if ctx.daw() != DawId::Ableton {
         let app = ctx.daw().profile().words.app;
-        return Ok(refused("unsupported", format!("Kumi's judged runs and tune work in Live here, not {app}.")));
+        return Ok(refused("unsupported", format!("Kumi's judged runs, tune and Live's listening tools work in Live here, not {app}.")));
     }
     if let Err(error) = ctx.connection() {
         return Ok(refusal(error));
@@ -190,13 +197,14 @@ async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, Op
         Ok(capturing) => capturing,
         Err(error) => return Ok(refusal(error)),
     };
-    let (input, _staged) = if name == "judge" {
-        match judge_input(ctx, args, &call, &capturing).await {
-            Ok(input) => input,
-            Err(refusal) => return Ok(refusal),
-        }
-    } else {
-        (args.iter().filter(|(key, _)| !key.starts_with("expected_")).map(|(key, value)| (key.clone(), value.clone())).collect(), None)
+    let prepared = match name {
+        "judge" => judge_input(ctx, args, &call, &capturing).await,
+        "tune" => Ok((tools_input(args), None)),
+        _ => super::listening::input(ctx, name, args, &call, &capturing).await,
+    };
+    let (input, _staged) = match prepared {
+        Ok(input) => input,
+        Err(refusal) => return Ok(refusal),
     };
     if let Some(problem) = kumi_agent::kernel::schema::problem(&Value::Object(tool.input_schema()), &Value::Object(input.clone())) {
         return Ok(refused("invalid", problem));
@@ -207,6 +215,8 @@ async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, Op
     let identity = CallIdentity::of(&call.host, &identity_digest);
     history.begin_call();
     let ran = tool.execute(input, call.signal.clone()).await;
+    // A render's file is kept as the runtime's own audio, and Live's copy goes.
+    let ran = if name == "render" { super::listening::kept_render(ctx, &capturing, ran, &call.signal).await } else { ran };
     let rows = history.end_call(identity, ctx.snapshots());
     // A change of an earlier call that this round took back: its row is undone now.
     let taken_back: Vec<String> = history
@@ -224,7 +234,14 @@ async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, Op
             .map(str::to_string)
             .unwrap_or_else(|| "Kumi didn't confirm how the round ended: look at the project before another change.".into());
         answer["reason"] = json!(reason);
-        let title = if name == "judge" { "Judged round" } else { "Tune" };
+        let title = match name {
+            "judge" => "Judged round",
+            "tune" => "Tune",
+            "sound" => "Sound measured",
+            "audition" => "Audition",
+            "groove" => "Groove round",
+            _ => "Render",
+        };
         ids.push(history.audit(title, &project.key, &reason, identity, ctx.snapshots()).id);
         ctx.link().note_unsure(name, &reason, "unsure");
     }
