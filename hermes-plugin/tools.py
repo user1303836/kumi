@@ -376,6 +376,16 @@ class Host:
         self.install(data_dir)
         return self.runtimes.require(data_dir)
 
+    def started(self, session_id: str | None) -> runtime.Runtime:
+        """This profile's running runtime, else one started now for the DAW in Kumi's settings and not connected to
+        it: adding a sample folder and scanning need Kumi's runtime, not a DAW, so the sound map can be built with none
+        open. It starts with the settings' sample folders, as kumi_connect's does."""
+        data_dir = self.data_dir()
+        install = self.install(data_dir)
+        return self.runtimes.get(data_dir) or self.runtimes.start(
+            data_dir, install, self.daw(), session_id, library_roots=self.library_folders(),
+            media_roots=self.media_roots(), profile=self.profile())
+
     def profile(self) -> str:
         """The Hermes profile this call runs in (its plugin data is that profile's)."""
         return str(getattr(self._ctx, "profile_name", "") or "")
@@ -1962,7 +1972,8 @@ def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
         if refusal is not None:
             return {"error": {"code": "invalid", "reason": refusal}}
         args = {**args, "folder": folder}
-    result = host.live().call("library", args, host.identity(kwargs), timeout=READ_TIMEOUT)
+    live = host.started(kwargs.get("session_id")) if action in ("add_folder", "scan") else host.live()
+    result = live.call("library", args, host.identity(kwargs), timeout=READ_TIMEOUT)
     if action == "add_folder" and "error" not in result:
         folders = host.library_folders()
         if args["folder"] not in folders:

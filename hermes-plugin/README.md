@@ -14,8 +14,10 @@ recorded in HISTORY, most undoable), and turns your own samples into new sounds.
    or enable Kumi's tool in Renoise.
 3. **Ask:** "connect Kumi", then "what am I looking at?", "turn the drums down 2 dB" and "undo that".
 
-No DAW yet? REAPER's free evaluation takes about two minutes: install it from
-[reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
+**No DAW?** The sound map, the palette and Make don't need one: once setup has installed Kumi's runtime (its first
+step), ask Hermes to "add ~/Samples to Kumi's library and scan it" (any folder of WAV or AIFF files), then open the
+sound map in its tab in Hermes Desktop. For the DAW side too, REAPER's free evaluation takes about two minutes: install
+it from [reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
 
 ## What it does
 

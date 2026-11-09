@@ -32,7 +32,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 - **REAPER：** 重启 REAPER。
 - **Renoise：** 启用 Kumi 工具。
 
-还没有 DAW？REAPER 的免费评估版大约两分钟就能用上：从 [reaper.fm](https://www.reaper.fm/download.php) 安装，然后让 Hermes“为 REAPER 设置 Kumi”。
+**没有 DAW？** 声音地图、调色板和制作声音都不需要 DAW：设置装好 Kumi 的运行时（第一步）后，让 Hermes“把 ~/Samples 加入 Kumi 的音色库并扫描”（任何装有 WAV 或 AIFF 文件的文件夹都可以），然后打开 Hermes Desktop 中声音地图的标签页，或网页仪表盘中的 Kumi 标签页。如果也想试试 DAW 这一侧，REAPER 的免费评估版大约两分钟就能用上：从 [reaper.fm](https://www.reaper.fm/download.php) 安装，然后让 Hermes“为 REAPER 设置 Kumi”。
 
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 

@@ -32,7 +32,7 @@ Hermes Desktop は各段階の確認内容をすべて表示します。ター�
 - **REAPER:** REAPER を再起動します。
 - **Renoise:** Kumi のツールを有効にします。
 
-DAW がまだない場合は、REAPER の無料評価版なら 2 分ほどで始められます。[reaper.fm](https://www.reaper.fm/download.php) からインストールし、Hermes に「REAPER 用に Kumi をセットアップして」と頼みます。
+**DAW がなくても:** サウンドマップ、パレット、サウンドを作る機能は DAW なしで使えます。セットアップが Kumi のランタイムを入れたら（最初の段階）、Hermes に「~/Samples を Kumi のライブラリに追加してスキャンして」と頼み（WAV か AIFF のファイルがあるフォルダーなら何でも）、Hermes Desktop のサウンドマップのタブか、Web ダッシュボードの Kumi タブを開きます。DAW 側も試すなら、REAPER の無料評価版なら 2 分ほどで始められます。[reaper.fm](https://www.reaper.fm/download.php) からインストールし、Hermes に「REAPER 用に Kumi をセットアップして」と頼みます。
 
 最初にセットアップした DAW が、同じ確認のなかで Kumi の DAW（DAW 設定）になります。あとから別の DAW をセットアップしても、Kumi は今の DAW のままです。その場合、セットアップの最後に切り替える手順（ターミナルで `hermes kumi setup --daw <daw> --use`）が示され、設定を変える前に確認されます。Kumi のプラグイン設定（プロファイルの config.yaml の `plugins.entries.kumi.settings.daw`）で DAW を変えることもできます。Hermes の設定に書き込めない環境では、セットアップがそのことと、DAW を設定する場所を伝えます。
 

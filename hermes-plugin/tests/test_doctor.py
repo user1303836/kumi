@@ -192,7 +192,7 @@ class Doctor(unittest.TestCase):
         self.assertIn("Save the project", project["fix"])
         for scan, sounds, stopped, state, said in (
                 ("running", 0, False, doctor.CHECK, "Wait until it shows done"),
-                ("running", 0, True, doctor.FIX, "Connect again"),
+                ("running", 0, True, doctor.FIX, "scan the folders again"),
                 ("failed", 3, False, doctor.FIX, "scan the folders again"),
                 (None, 0, False, doctor.FIX, "scan them"),
                 ("done", 0, False, doctor.FIX, "WAV or AIFF"),

@@ -830,20 +830,29 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     if action in ("status", "cancel"):  # reads: a cancel only stops this runtime's own scan (CC-14)
         return None
     try:
-        _live(host)
+        live = _live(host)
     except runtime.Unavailable as failure:
-        return block(refused("Kumi didn't read any folder", _reason(failure)))
+        if failure.code != "not_connected":  # one is still stopping
+            return block(refused("Kumi didn't read any folder", _reason(failure)))
+        try:  # none runs: the tool starts one, with no DAW needed, once Kumi is set up (a read of its record)
+            host.install(host.data_dir())
+        except runtime.Unavailable as unset:
+            return block(refused("Kumi didn't read any folder", _reason(unset)))
+        live = None
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return block(refused("Kumi didn't add the folder", refusal))
         return approve(["Kumi: read the audio files in this folder and its subfolders, to build your sound map:",
                         *_path_lines(folder), AUDIO_ONLY], f"kumi:folder_read:{folder}")
-    try:
-        status = _ask(host, "library", {"action": "status"}, kwargs)
-    except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(refused("Kumi didn't scan anything", _reason(failure)))
-    folders = [folder for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
+    if live is None:  # the runtime the tool starts scans the settings' folders (its --library-root)
+        folders = host.library_folders()
+    else:
+        try:
+            status = _ask(host, "library", {"action": "status"}, kwargs)
+        except (runtime.Unavailable, runtime.Refused) as failure:
+            return block(refused("Kumi didn't scan anything", _reason(failure)))
+        folders = [folder for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
     if not folders:
         return block("Kumi didn't scan anything: it has no approved sample folders yet. Add one first.")
     return approve(["Kumi: scan these sample folders and update your sound map, in the background:",
