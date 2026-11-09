@@ -14,7 +14,7 @@ import time
 from typing import Any, Callable
 import uuid
 
-from . import calls, devices, generate, listening, runtime, schemas, scripts, setup, snapshots
+from . import calls, devices, generate, listening, palettes, runtime, schemas, scripts, setup, snapshots
 
 log = logging.getLogger(__name__)
 
@@ -1336,6 +1336,199 @@ def _sound(item: dict) -> dict:
     return sound
 
 
+# The palette (palettes.py): reads pass like kumi_sounds; edits change no project, so they're never asked, but like
+# every write they never run with nobody in the chat (policy.py).
+PALETTE_READS = frozenset({"list", "search", "neighbours", "kit"})
+PALETTE_LISTED = 50
+# A kit's most sounds (Live's Drum Rack has 128 pads), and how many palette sounds a neighbours read asks about.
+KIT_MOST = 128
+NEIGHBOUR_SEEDS = 20
+PALETTE_NONE = ("The producer has no palette yet: gathering sounds on the map in Desktop, or kumi_palette add, makes "
+                "one; so does kumi_palette new with a name.")
+PALETTE_OFF_MAP = ("Those sound ids aren't on the current map (ids belong to one map revision): find them again with "
+                   "kumi_sounds or kumi_palette list.")
+PALETTE_STRICT = ("The palette is strict: it brings nothing in. kumi_palette loose makes it loose, when the producer "
+                  "agrees.")
+PALETTE_NOTHING_HERE = "None of the palette's sounds is on this sound map, so there's nothing of it to use here."
+KIT_SAY = {
+    "ableton": ("To load them as a kit in Live: look (kumi_observe, scope focus) for the Drum Rack on the selected "
+                "track; with none, say so and offer to load one first. Then one kumi_change per sound, in this order, "
+                "each alone in its change: load_sample_to_pad with the rack's deviceRef, the sound as sample "
+                "{sound_id, map_revision}, on the next empty pad from note 36 (C1) up. Never clear a pad to make room. "
+                "Kumi can't undo a pad load: Live's own Undo takes each one back, one step at a time, right away."),
+    "renoise": ("To load them as a kit in Renoise: sample_load each into the selected instrument as a new sample "
+                "(the sound as {sound_id, map_revision}), then keyzone_set each to its own key (noteRange and "
+                "baseNote), consecutive from C-3 (note 36) up, in this order."),
+    "reaper": ("REAPER has no drum pads Kumi can load: say so, and offer to place them as items on a track "
+               "(item_import)."),
+}
+
+
+def kumi_palette(host: Host, args: dict, **kwargs: Any) -> dict:
+    """The producer's palette, shared with the map UI (palettes.py). Sound ids in and out are the current map
+    revision's; no path ever leaves. Every edit tells Desktop (`palette.changed`)."""
+    state = Path(host.data_dir()) / "state"
+    action = args.get("action")
+    the_map = palettes.current_map(state, snapshots.map_current(state),
+                                   lambda revision: snapshots.map_revision(state, revision))
+    try:
+        if action in PALETTE_READS:
+            return palette_read(host, state, the_map, action, args, kwargs)
+        result = palette_edit(host, state, the_map, action, args)
+    except palettes.NoPalette:
+        return palette_none(state)
+    except palettes.OffMap:
+        return {"error": {"code": "not_on_map", "reason": PALETTE_OFF_MAP}}
+    except palettes.Invalid as invalid:
+        return {"error": {"code": "invalid", "reason": str(invalid)}}
+    except palettes.Busy as busy:
+        return {"error": {"code": "busy", "reason": str(busy)}}
+    try:
+        broadcast("palette.changed", {"seq": palettes.seq(state), "profile": host.profile()})
+    except Exception:
+        log.exception("Kumi couldn't tell Desktop its palette changed")
+    return result
+
+
+def palette_none(state: Path) -> dict:
+    """Native's "no palette" answer, with the palettes there are to `use`."""
+    others = palettes.listed(state)
+    return {"palette": None, "say": PALETTE_NONE, **({"palettes": others} if others else {})}
+
+
+def _palette_ids(args: dict, field: str, most: int, action: str) -> list[str]:
+    value = args.get(field)
+    if value is None:
+        return []
+    if not isinstance(value, list) or not 1 <= len(value) <= most or any(not isinstance(v, str) for v in value):
+        raise palettes.Invalid(f"{action}'s {field} is a list of 1 to {most} ids.")
+    return value
+
+
+def palette_edit(host: Host, state: Path, the_map: Any, action: Any, args: dict) -> dict:
+    if action == "add":
+        sound_ids = _palette_ids(args, "sound_ids", 200, "add")
+        artifact_ids = _palette_ids(args, "artifact_ids", palettes.MOST_ARTIFACTS, "add")
+        if not sound_ids and not artifact_ids:
+            raise palettes.Invalid("add takes sound_ids (from kumi_sounds or list) or artifact_ids (Kumi results).")
+        folders = host.library_folders() if artifact_ids else []
+        artifacts = [(each, snapshots.palette_artifact(state, each, folders)) for each in artifact_ids]
+        if any(name is None for _, name in artifacts):
+            raise palettes.Invalid("Kumi can't play one of those results here, so it can't go in the palette: "
+                                   "artifact_ids are Kumi results' artifact_id.")
+        return {"said": palettes.gather(state, the_map, sound_ids, artifacts)}
+    if action == "remove":
+        sound_ids = _palette_ids(args, "sound_ids", 200, "remove")
+        keys = _palette_ids(args, "keys", 200, "remove")
+        if bool(sound_ids) == bool(keys):
+            raise palettes.Invalid("remove takes sound_ids or keys (as list gives them), one of the two.")
+        if keys:
+            return {"said": palettes.remove_keys(state, keys)}
+        return {"removed": palettes.remove_sounds(state, the_map, sound_ids)}
+    if action == "exclude":
+        sound_ids = _palette_ids(args, "sound_ids", 200, "exclude")
+        if not sound_ids:
+            raise palettes.Invalid("exclude takes sound_ids: the sounds the palette must never bring in.")
+        return {"excluded": palettes.exclude_sounds(state, the_map, sound_ids)}
+    if action in ("new", "use", "rename", "forget"):
+        if not isinstance(args.get("name"), str) or not args["name"].strip():
+            raise palettes.Invalid(f"{action} takes name: a palette's name.")
+        edit = {"new": palettes.new, "use": palettes.use, "rename": palettes.rename, "forget": palettes.forget}
+        return {"said": edit[action](state, args["name"])}
+    if action == "strict":
+        return {"said": palettes.reach(state, 0)}
+    if action == "loose":
+        reach = args.get("reach", palettes.LOOSE)
+        if not isinstance(reach, int) or isinstance(reach, bool) or not 1 <= reach <= palettes.FARTHEST:
+            raise palettes.Invalid(f"loose takes reach: how many of each sound's nearest to bring, from 1 to "
+                                   f"{palettes.FARTHEST}.")
+        return {"said": palettes.reach(state, reach)}
+    if action == "move":
+        key, to = args.get("key"), args.get("to")
+        if not isinstance(key, str) or not isinstance(to, int) or isinstance(to, bool) or to < 0:
+            raise palettes.Invalid("move takes key (as list gives it) and to (its new place, 0 first).")
+        return {"said": palettes.move(state, key, to)}
+    raise palettes.Invalid(f"action is one of {', '.join(schemas.PALETTE_ACTIONS)}.")
+
+
+def _described(item: dict) -> dict:
+    """A palette item for the model: its key, its sound id on this map (or null) or its artifact id, name and class."""
+    if item["source"] == "artifact":
+        return {"key": item["key"], "sound_id": None, "artifact_id": item["artifact_id"], "name": item["name"]}
+    return {"key": item["key"], "sound_id": item["sound_id"], "name": item["name"],
+            **({"class": item["class"]} if item["class"] else {})}
+
+
+def palette_read(host: Host, state: Path, the_map: Any, action: str, args: dict, kwargs: dict) -> dict:
+    palette = palettes.current(state, the_map)
+    if palette is None:
+        return palette_none(state)
+    limit = args.get("limit", PALETTE_LISTED)
+    limit = min(max(limit, 1), 200) if isinstance(limit, int) and not isinstance(limit, bool) else PALETTE_LISTED
+    items = palette["items"]
+    out = {"palette": {"name": palette["name"], "mode": palette["mode"], "items": len(items)},
+           "map_revision": the_map.revision if the_map else None}
+    if action == "list":
+        out["sounds"] = [_described(item) for item in items[:limit]]
+        if len(items) > limit:
+            out["more"] = len(items) - limit
+        if palette["excluded"]:
+            out["excluded"] = [_described(item) for item in palette["excluded"][:limit]]
+        out["palettes"] = palette["palettes"]
+        return out
+    if action == "search":
+        words = str(args.get("words") or "").lower().split()
+        if not words:
+            raise palettes.Invalid("search takes words: what its sounds have in their name, class or folder.")
+        found = [item for item in items
+                 if all(word in " ".join(filter(None, (item["name"], item["class"], item["folder"]))).lower()
+                        for word in words)]
+        out["sounds"] = [_described(item) for item in found[:limit]]
+        if len(found) > limit:
+            out["more"] = len(found) - limit
+        return out
+    on_map = [item for item in items if item["sound_id"]]
+    if action == "kit":
+        kit = on_map[:KIT_MOST]
+        out["sounds"] = [{"sound_id": item["sound_id"], "name": item["name"],
+                          **({"class": item["class"]} if item["class"] else {})} for item in kit]
+        out["left_out"] = len(items) - len(kit)
+        out["say"] = KIT_SAY[host.daw()] if kit else PALETTE_NOTHING_HERE
+        return out
+    if palette["reach"] == 0:
+        return {**out, "say": PALETTE_STRICT}
+    if not on_map:
+        return {**out, "say": PALETTE_NOTHING_HERE}
+    return {**out, **palette_neighbours(host, palette, on_map, limit, kwargs)}
+
+
+def palette_neighbours(host: Host, palette: dict, on_map: list[dict], limit: int, kwargs: dict) -> dict:
+    """What a loose palette brings in: for each of its first 20 sounds on this map, its `reach` nearest by serve's
+    `sounds` near search (none of the palette's own or excluded), the ones near more of its sounds first, then the
+    closest."""
+    reach = palette["reach"]
+    own = {item["sound_id"] for item in palette["items"] + palette["excluded"] if item["sound_id"]}
+    live = host.live()
+    found: dict[str, dict] = {}
+    for seed in on_map[:NEIGHBOUR_SEEDS]:
+        answer = live.call("sounds", {"query": "", "near": seed["sound_id"], "limit": 2 * reach},
+                           host.identity(kwargs), timeout=READ_TIMEOUT)
+        hits = [hit for hit in answer.get("items") or []
+                if isinstance(hit, dict) and isinstance(hit.get("sound_id"), str) and hit["sound_id"] not in own]
+        for hit in hits[:reach]:
+            closeness = hit.get("closeness") if isinstance(hit.get("closeness"), int) else 0
+            entry = found.setdefault(hit["sound_id"], {"sound_id": hit["sound_id"], "name": hit.get("name"),
+                                                       "class": hit.get("class"), "near": [], "closeness": closeness})
+            if seed["name"] not in entry["near"]:
+                entry["near"].append(seed["name"])
+            entry["closeness"] = max(entry["closeness"], closeness)
+    ranked = sorted(found.values(), key=lambda each: (-len(each["near"]), -each["closeness"], str(each["name"])))
+    sounds = [{"sound_id": each["sound_id"], "name": each["name"],
+               **({"class": each["class"]} if isinstance(each["class"], str) else {}), "near": each["near"]}
+              for each in ranked[:limit]]
+    return {"sounds": sounds, **({"more": len(ranked) - limit} if len(ranked) > limit else {})}
+
+
 LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")
 
 
@@ -1462,6 +1655,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_history", schemas.KUMI_HISTORY, kumi_history, "🕘"),
     ("kumi_listen", schemas.KUMI_LISTEN, kumi_listen, "📈"),
     ("kumi_sounds", schemas.KUMI_SOUNDS, kumi_sounds, "🔎"),
+    ("kumi_palette", schemas.KUMI_PALETTE, kumi_palette, "🎨"),
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),
     ("kumi_job", schemas.KUMI_JOB, kumi_job, "⏳"),
     ("kumi_generate", schemas.KUMI_GENERATE, kumi_generate, "🪄"),
