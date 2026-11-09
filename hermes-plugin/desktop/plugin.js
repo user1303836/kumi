@@ -154,6 +154,10 @@ var en = {
     showHiddenTitle: "Put the hidden sounds back on the map",
     rescan: "Rescan…",
     rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like",
+    scan: "Scan my samples…",
+    scanTitle: "Put a request to scan your sample folders in the chat (Kumi asks which folder to add if none is set up), to send when you like",
+    scanCopy: "Copy the request",
+    setupFirst: "Kumi's runtime isn't set up yet. Once it is, Kumi builds the map from your sample folders.",
     tiles: "Tiles",
     tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it",
     hand: "Move map",
@@ -889,6 +893,10 @@ var ja = {
     showHiddenTitle: "隠したサウンドをマップに戻します",
     rescan: "再スキャン…",
     rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で",
+    scan: "サンプルをスキャン…",
+    scanTitle: "サンプルフォルダをスキャンする依頼をチャットに入れます（まだフォルダがなければ、どれを加えるか Kumi が尋ねます）。送信はご自身で",
+    scanCopy: "依頼をコピー",
+    setupFirst: "Kumi のランタイムはまだセットアップされていません。セットアップすると、サンプルフォルダからマップを作ります。",
     tiles: "タイル",
     tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します",
     hand: "マップを移動",
@@ -1619,6 +1627,10 @@ var zh = {
     showHiddenTitle: "把隐藏的声音放回地图",
     rescan: "重新扫描…",
     rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送",
+    scan: "扫描我的采样…",
+    scanTitle: "把扫描采样文件夹的请求放进对话（还没有文件夹时，Kumi 会问你要加哪个），由你决定何时发送",
+    scanCopy: "复制请求",
+    setupFirst: "Kumi 的运行时还没有设置好。设置好后，Kumi 会根据你的采样文件夹生成地图。",
     tiles: "方块",
     tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近",
     hand: "移动地图",
@@ -2422,6 +2434,7 @@ function connectRequest(daw) {
 }
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
 var RESCAN_REQUEST = "Kumi, rescan my sample folders";
+var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
 function cleanupWords(cleanup, t = english) {
   if (cleanup === "restored") return t("history.restored");
   if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -8716,6 +8729,7 @@ var TILES = "mapTiles";
 var PALETTE_OPEN = "paletteOpen";
 var LAYOUT = "mapLayout";
 var SIDE_SHEET = 820;
+var RUNTIME_MISSING = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true };
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
@@ -8784,7 +8798,11 @@ function MapWorkspace({ ctx, store, audition }) {
   const beside = areaWidth >= SIDE_SHEET;
   const session = ownerSession(state);
   const map = state.map;
-  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : t("map.empty");
+  const setupFirst = RUNTIME_MISSING[state.setup?.state ?? ""] ? nextSteps(state, t)[0] ?? null : null;
+  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : /* @__PURE__ */ jsxs19(Fragment9, { children: [
+    setupFirst ? t("map.setupFirst") : t("map.empty"),
+    /* @__PURE__ */ jsx19("div", { style: { marginTop: 10 }, children: setupFirst ? /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, setupFirst.request, { send: true, session: null }), strong: true, children: setupFirst.label }) : /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), strong: true, title: t("map.scanTitle"), children: t("map.scan") }) })
+  ] });
   return /* @__PURE__ */ jsxs19("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
     /* @__PURE__ */ jsxs19("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
       /* @__PURE__ */ jsx19(

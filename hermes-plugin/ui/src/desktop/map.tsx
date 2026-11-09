@@ -10,7 +10,7 @@ import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { sourcesOf, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -23,7 +23,7 @@ import { usePaletteMap } from '../shared/paletteMap.ts'
 import { errorText, type KumiStore } from '../shared/store.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
-import { ownerSession } from './pane.tsx'
+import { nextSteps, ownerSession } from './pane.tsx'
 
 /** Desktop's own storage key for hover-to-play (on unless the producer turned it off, as native Kumi's `h`). */
 export const HOVER_PLAY = 'mapHover'
@@ -35,6 +35,8 @@ export const PALETTE_OPEN = 'paletteOpen'
 export const LAYOUT = 'mapLayout'
 /** How wide the map must be for the Make panel to float beside it rather than over its lower part. */
 const SIDE_SHEET = 820
+/** Setup's states with no usable runtime: nothing builds the map until setup runs. */
+const RUNTIME_MISSING: Record<string, true> = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true }
 
 // The first sixteen pads as Live's Drum Rack shows them: C1 (note 36) bottom left, D#2 (51) top right.
 const PAD_ROWS = [48, 44, 40, 36].map(start => [start, start + 1, start + 2, start + 3])
@@ -114,7 +116,30 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const beside = areaWidth >= SIDE_SHEET
   const session = ownerSession(state)
   const map = state.map
-  const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
+  // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own step,
+  // sent as the pane sends it), else a request to scan (Kumi asks which folder when none is set up).
+  const setupFirst = RUNTIME_MISSING[state.setup?.state ?? ''] ? (nextSteps(state, t)[0] ?? null) : null
+  const empty =
+    state.available === false ? (
+      t('map.agentOff')
+    ) : map === null ? (
+      t('map.reading')
+    ) : (
+      <>
+        {setupFirst ? t('map.setupFirst') : t('map.empty')}
+        <div style={{ marginTop: 10 }}>
+          {setupFirst ? (
+            <TextButton onClick={() => void ask(ctx, setupFirst.request, { send: true, session: null })} strong>
+              {setupFirst.label}
+            </TextButton>
+          ) : (
+            <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} strong title={t('map.scanTitle')}>
+              {t('map.scan')}
+            </TextButton>
+          )}
+        </div>
+      </>
+    )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* The Make panel floats over the map, not the palette: a kept sound lands in the palette in view. */}

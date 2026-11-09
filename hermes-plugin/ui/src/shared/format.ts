@@ -312,6 +312,9 @@ export const LOOK_AGAIN_REQUEST = 'Kumi, look at my project again before changin
 /** From the map's line about hidden sounds: a scan finds what moved, and drops what's gone, for good. */
 export const RESCAN_REQUEST = 'Kumi, rescan my sample folders'
 
+/** From an empty map: build it. A folder already approved is scanned; with none, the agent asks which one to add. */
+export const SCAN_REQUEST = 'Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none'
+
 /** What an unsure or partial outcome's `cleanup` says Kumi did about it (CC-2), as a sentence or nothing. */
 export function cleanupWords(cleanup: unknown, t: Translate = english): string {
   if (cleanup === 'restored') return t('history.restored')

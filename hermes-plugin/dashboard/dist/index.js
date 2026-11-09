@@ -196,6 +196,10 @@
       showHiddenTitle: "Put the hidden sounds back on the map",
       rescan: "Rescan…",
       rescanTitle: "Put a request to rescan your sample folders in the chat, to send when you like",
+      scan: "Scan my samples…",
+      scanTitle: "Put a request to scan your sample folders in the chat (Kumi asks which folder to add if none is set up), to send when you like",
+      scanCopy: "Copy the request",
+      setupFirst: "Kumi's runtime isn't set up yet. Once it is, Kumi builds the map from your sample folders.",
       tiles: "Tiles",
       tilesTitle: "Each sound as a square tile in its group's colour, near where the map put it",
       hand: "Move map",
@@ -931,6 +935,10 @@
       showHiddenTitle: "隠したサウンドをマップに戻します",
       rescan: "再スキャン…",
       rescanTitle: "サンプルフォルダを再スキャンする依頼をチャットに入れます。送信はご自身で",
+      scan: "サンプルをスキャン…",
+      scanTitle: "サンプルフォルダをスキャンする依頼をチャットに入れます（まだフォルダがなければ、どれを加えるか Kumi が尋ねます）。送信はご自身で",
+      scanCopy: "依頼をコピー",
+      setupFirst: "Kumi のランタイムはまだセットアップされていません。セットアップすると、サンプルフォルダからマップを作ります。",
       tiles: "タイル",
       tilesTitle: "各サウンドを、マップ上の位置の近くに、グループの色の四角いタイルとして表示します",
       hand: "マップを移動",
@@ -1661,6 +1669,10 @@
       showHiddenTitle: "把隐藏的声音放回地图",
       rescan: "重新扫描…",
       rescanTitle: "把重新扫描采样文件夹的请求放进对话，由你决定何时发送",
+      scan: "扫描我的采样…",
+      scanTitle: "把扫描采样文件夹的请求放进对话（还没有文件夹时，Kumi 会问你要加哪个），由你决定何时发送",
+      scanCopy: "复制请求",
+      setupFirst: "Kumi 的运行时还没有设置好。设置好后，Kumi 会根据你的采样文件夹生成地图。",
       tiles: "方块",
       tilesTitle: "把每个声音显示为它所在分组颜色的方块，放在地图上它原来位置的附近",
       hand: "移动地图",
@@ -2375,8 +2387,12 @@
     const said = quotable(name);
     return said ? `“${said}” (artifact ${id})` : `artifact ${id}`;
   }
+  function setupRequest(daw) {
+    return `Set up Kumi for ${dawName(daw)}`;
+  }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   var RESCAN_REQUEST = "Kumi, rescan my sample folders";
+  var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
   function cleanupWords(cleanup, t = english) {
     if (cleanup === "restored") return t("history.restored");
     if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -7501,7 +7517,10 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           "Kumi ",
           state.status.runtime.version
         ] }),
-        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && !dawPartWorks(state) && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
+        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && !dawPartWorks(state) && /* @__PURE__ */ jsxs(Fragment2, { children: [
+          /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message }),
+          /* @__PURE__ */ jsx(CopyButton, { label: t("step.setup", dawName(state.setup.daw ?? state.status?.daw, t)), text: setupRequest(state.setup.daw ?? state.status?.daw) })
+        ] })
       ] }),
       state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
         /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [
@@ -7542,7 +7561,13 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyReference"), text: request })
                 ] });
               },
-              empty: state.map === null ? t("map.reading") : t("dashboard.mapEmpty"),
+              empty: state.map === null ? t("map.reading") : ["needs_runtime", "outdated_runtime", "damaged_runtime"].includes(state.setup?.state ?? "") ? (
+                // No runtime yet: setup comes first (the dashboard's header says how).
+                t("map.setupFirst")
+              ) : /* @__PURE__ */ jsxs(Fragment2, { children: [
+                t("dashboard.mapEmpty"),
+                /* @__PURE__ */ jsx("div", { style: { marginTop: 10 }, children: /* @__PURE__ */ jsx(CopyButton, { label: t("map.scanCopy"), text: SCAN_REQUEST }) })
+              ] }),
               found: state.found,
               hiddenActions: /* @__PURE__ */ jsxs(Fragment2, { children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),

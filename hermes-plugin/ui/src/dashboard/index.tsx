@@ -5,7 +5,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, dawName, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, setupRequest, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { sourcesOf, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -131,7 +131,11 @@ function Dashboard() {
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && !dawPartWorks(state) && (
-          <span style={S.muted}>{state.setup.message}</span>
+          <>
+            <span style={S.muted}>{state.setup.message}</span>
+            {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}
+            <CopyButton label={t('step.setup', dawName(state.setup.daw ?? state.status?.daw, t))} text={setupRequest(state.setup.daw ?? state.status?.daw)} />
+          </>
         )}
       </div>
       {state.status?.unsure && (
@@ -185,7 +189,21 @@ function Dashboard() {
                 </>
               )
             }}
-            empty={state.map === null ? t('map.reading') : t('dashboard.mapEmpty')}
+            empty={
+              state.map === null ? (
+                t('map.reading')
+              ) : ['needs_runtime', 'outdated_runtime', 'damaged_runtime'].includes(state.setup?.state ?? '') ? (
+                // No runtime yet: setup comes first (the dashboard's header says how).
+                t('map.setupFirst')
+              ) : (
+                <>
+                  {t('dashboard.mapEmpty')}
+                  <div style={{ marginTop: 10 }}>
+                    <CopyButton label={t('map.scanCopy')} text={SCAN_REQUEST} />
+                  </div>
+                </>
+              )
+            }
             found={state.found}
             hiddenActions={
               <>
