@@ -1264,7 +1264,79 @@ def render_refusal(args: dict) -> str | None:
     return _stretch_refusal(args, True) or _expected_refusal(args)
 
 
-LISTENING_REFUSALS = {"sound": sound_refusal, "audition": audition_refusal, "groove": groove_refusal,
+FORM_FIELDS = frozenset({"from_beat", "beats", "reference", "expected_project_key", "expected_epoch"})
+# form plays the whole Arrangement once (the owner's call), up to 15 minutes: its answer can take that long and more.
+FORM_TIMEOUT = 1200.0
+FORM_MOST_SECONDS = 900.0
+# Hermes v0.23.0 gives every sequential tool call one deadline (agent/tool_executor.py
+# `_resolve_sequential_tool_timeout`), which a plugin's tool can't extend: a form must finish within it, with this much
+# left for Kumi to read the capture and answer.
+HERMES_TOOL_DEADLINE = 420.0
+HERMES_DEADLINE_ENV = "HERMES_CONCURRENT_TOOL_TIMEOUT_S"
+FORM_MARGIN_SECONDS = 30.0
+
+
+def _timeout_setting(value: Any) -> float | None | bool:
+    """A `timeouts:` value as Hermes reads it (agent/deadline.py `resolve_timeout`): seconds; None when 0 or less
+    (no deadline); False when it isn't a number (a bool, text, NaN), which Hermes passes over to the next source."""
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return False
+    if seconds != seconds:
+        return False
+    return None if seconds <= 0 else seconds
+
+
+def tool_deadline(host: Host) -> float | None:
+    """Hermes's deadline for one sequential tool call, as v0.23.0 resolves it: `timeouts.tools.sequential_call`, else
+    `timeouts.tools.concurrent_batch`, else the environment's HERMES_CONCURRENT_TOOL_TIMEOUT_S, else 420 s. None when
+    the one that applies is 0 or less (no deadline)."""
+    timeouts = host.hermes_config().get("timeouts")
+    tools_section = timeouts.get("tools") if isinstance(timeouts, dict) else None
+    tools_section = tools_section if isinstance(tools_section, dict) else {}
+    for key in ("sequential_call", "concurrent_batch"):
+        if key in tools_section:
+            seconds = _timeout_setting(tools_section[key])
+            if seconds is not False:
+                return seconds
+    raw = os.environ.get(HERMES_DEADLINE_ENV, "").strip()
+    if raw:
+        seconds = _timeout_setting(raw)
+        if seconds is not False:
+            return seconds
+    return HERMES_TOOL_DEADLINE
+
+
+def form_budget(host: Host) -> float:
+    """How long a form may play in this Hermes, seconds: its tool deadline less Kumi's margin, at most 15 minutes (all
+    of them with no deadline). The runtime refuses a song that doesn't fit before anything plays."""
+    deadline = tool_deadline(host)
+    if deadline is None:
+        return FORM_MOST_SECONDS
+    return max(1.0, min(FORM_MOST_SECONDS, deadline - FORM_MARGIN_SECONDS))
+
+
+def form_refusal(args: dict) -> str | None:
+    """Why serve's form wouldn't take these arguments, or None: the whole Arrangement, or from_beat and beats of it
+    (serve refuses over 15 minutes at the tempo), a reference as {clip_ref} or a source (never a path), and the project
+    key and epoch."""
+    if not set(args) <= FORM_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(FORM_FIELDS))}."
+    start, beats = args.get("from_beat"), args.get("beats")
+    if start is not None and (not _number(start) or start < 0):
+        return "from_beat is where it starts, in beats (0 or more); leave it out for the Arrangement's start."
+    if beats is not None and (not _number(beats) or beats <= 0):
+        return "beats is above 0 (at most 15 minutes at the tempo); leave it out for the whole song."
+    if "reference" in args and not _judge_reference(args["reference"]):
+        return ("a reference is {\"clip_ref\"} for an audio clip in the Set, or a source: {\"sound_id\", "
+                "\"map_revision\"}, {\"artifact_id\"} or {\"file\"} in an approved folder, never a path.")
+    return _expected_refusal(args)
+
+
+LISTENING_REFUSALS = {"sound": sound_refusal, "audition": audition_refusal, "groove": groove_refusal, "form": form_refusal,
                       "render": render_refusal}
 
 
@@ -1277,7 +1349,10 @@ def _listening(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
         return {"state": "refused", "code": "invalid", "reason": f"Kumi didn't run this: {refusal}"}
     asked = {key: value for key, value in args.items() if key != "preview"}
     asked["expected_epoch"] = str(asked["expected_epoch"])
-    answer = _write(host, tool, asked, kwargs, timeout=JUDGED_TIMEOUT, remember=tool == "groove")
+    if tool == "form":  # within Hermes's own deadline for this call, set here, never by the model
+        asked["max_seconds"] = form_budget(host)
+    timeout = FORM_TIMEOUT if tool == "form" else JUDGED_TIMEOUT
+    answer = _write(host, tool, asked, kwargs, timeout=timeout, remember=tool == "groove")
     taken = answer.get("taken_back") if isinstance(answer, dict) else None
     if isinstance(taken, list) and taken:
         host.remember_undo({}, {"rows": [{"history_id": each, "state": "undone"} for each in taken]})
@@ -1294,6 +1369,10 @@ def kumi_audition(host: Host, args: dict, **kwargs: Any) -> dict:
 
 def kumi_groove(host: Host, args: dict, **kwargs: Any) -> dict:
     return _listening(host, "groove", args, kwargs)
+
+
+def kumi_form(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "form", args, kwargs)
 
 
 def kumi_render(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -1991,6 +2070,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_audition", schemas.KUMI_AUDITION, kumi_audition, "🎧"),
     ("kumi_groove", schemas.KUMI_GROOVE, kumi_groove, "🥁"),
     ("kumi_render", schemas.KUMI_RENDER, kumi_render, "💿"),
+    ("kumi_form", schemas.KUMI_FORM, kumi_form, "🗺️"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -2001,7 +2081,8 @@ def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py clears, asking the producer or (for a change, by default) not: they run only as cleared,
     with what the hook's preview bound (CC-5)."""
     return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
-                     "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_render")
+                     "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_render",
+                     "kumi_form")
             or (name == "kumi_groove" and groove_changes(args))
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))

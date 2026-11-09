@@ -1335,7 +1335,7 @@ def listening(name: str):
             return {"state": "refused", "code": "not_connected", "reason": "Kumi isn't connected.", **same}
         if (args.get("expected_project_key"), args.get("expected_epoch")) != (fixture.set["key"], fixture.epoch):
             return {"state": "refused", "code": "stale", "reason": "The project changed: observe again.", **same}
-        if isinstance(args.get("reference"), str) and name == "audition":
+        if isinstance(args.get("reference"), str) and name in ("audition", "form"):
             return {"state": "refused", "code": "invalid", "reason": "A reference is a clip_ref or a source.", **same}
         if name == "groove" and ({"audio", "reference_tempo"} & set(args) or "/" in str(args.get("reference", ""))):
             return {"state": "refused", "code": "unsupported", "reason": "A groove's reference is a MIDI clip.", **same}
@@ -1354,6 +1354,9 @@ def listening(name: str):
                                     "call_outcome": "heard" if heard else "applied",
                                     "change_id": f"ch-{len(fixture.history) + 1}", "before": copy.deepcopy(fixture.set)})
             ids = [ident]
+        if name == "form":
+            round_ = {"kind": "form", "bars": 64, "sections": [{"role": "intro", "bars": "1-8"}, {"role": "chorus", "bars": "9-24"}],
+                      "firstHook": 9}
         if name == "render":
             round_ = {"seconds": 4, "channels": 2, "sampleRate": 48000, "artifact_id": "a-render-1",
                       "verdict_text": "Quiet, dark.", "note": "Hear it with listen (file)."}
@@ -1370,7 +1373,8 @@ TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read,
          "variations": variations, "device": device, "preset_build": preset_build,
          "preset": preset, "judge": judged("judge"), "tune": judged("tune"), "wavetable": wavetable,
          "design": design, "sound": listening("sound"), "audition": listening("audition"),
-         "groove": listening("groove"), "render": listening("render")}
+         "groove": listening("groove"), "render": listening("render"),
+         "form": listening("form")}
 
 
 def main() -> None:

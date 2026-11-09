@@ -704,3 +704,21 @@ KUMI_RENDER = _tool(
                "description": "How long, in beats: at most 60 s at the tempo."},
      **_PROJECT},
     ("track", "from_beat", "beats", "expected_project_key", "expected_epoch"))
+
+KUMI_FORM = _tool(
+    "kumi_form",
+    "Read a song's form in Live (skill kumi:listening, A song's form): Kumi plays the Arrangement once through Kumi Ears "
+    "and reads it bar by bar: energy over the song, sections (role and letter), turns, intro and outro, the first hook, "
+    "which tracks play where, form problems; with a reference, its form and the differences. It hears the whole "
+    "Arrangement by default (from_beat and beats for part of it), so it plays as long as the song while the producer "
+    "waits, with Live stopped and not recording, everything put back after; Stop ends it at once. It may play only as "
+    "long as Hermes's tool deadline allows (about 6½ minutes by default; up to 15 if timeouts.tools.sequential_call is "
+    "raised): a longer song is refused before anything plays, so read it in parts with from_beat and beats. "
+    "Pass the project key and epoch from kumi_observe. Live only.",
+    {"from_beat": {"type": "number", "minimum": 0, "description": "Where to start, in beats (the Arrangement's start "
+                                                                   "when left out)."},
+     "beats": {"type": "number", "exclusiveMinimum": 0,
+               "description": "How long, in beats (to the song's last clip when left out)."},
+     "reference": _REFERENCE,
+     **_PROJECT},
+    ("expected_project_key", "expected_epoch"))
