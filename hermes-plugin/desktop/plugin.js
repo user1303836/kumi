@@ -387,6 +387,7 @@ var en = {
     from: (n) => n === 1 ? "from 1 sound" : `from ${n} sounds`,
     close: "Close",
     sources: "The sounds it makes from",
+    way: "How to make it",
     results: "Sounds made",
     none: "Sounds you make show here: play them, reroll them, and keep the ones you like.",
     ops: { cross: "Cross", fuse: "Fuse", stack: "Stack" },
@@ -833,6 +834,7 @@ var ja = {
     from: (n) => `${n} 個のサウンドから`,
     close: "閉じる",
     sources: "元にするサウンド",
+    way: "作り方",
     results: "作ったサウンド",
     none: "作ったサウンドはここに並びます。再生し、リロールし、気に入ったものはキープしてパレットに入れられます。",
     ops: { cross: "クロス", fuse: "フューズ", stack: "スタック" },
@@ -1279,6 +1281,7 @@ var zh = {
     from: (n) => `来自 ${n} 个声音`,
     close: "关闭",
     sources: "用来制作的声音",
+    way: "做法",
     results: "做出的声音",
     none: "做出的声音会列在这里：可以播放、重掷，把喜欢的保留在调色板里。",
     ops: { cross: "交叉", fuse: "熔合", stack: "叠加" },
@@ -3791,9 +3794,11 @@ var GLYPHS = {
     /* @__PURE__ */ jsx11("rect", { fill: "currentColor", fillOpacity: "0.35", height: "3", rx: "1.5", width: "20", x: "4", y: "14" })
   ] })
 };
-function Glyph({ card }) {
-  return /* @__PURE__ */ jsx11("svg", { "aria-hidden": true, height: "20", style: { flex: "none" }, viewBox: "0 0 28 20", width: "28", children: GLYPHS[card] });
+function Glyph({ card, size = 20 }) {
+  return /* @__PURE__ */ jsx11("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "0 0 28 20", width: size * 28 / 20, children: GLYPHS[card] });
 }
+var OP_GLYPH = { cross: "blend", fuse: "smear", stack: "stack" };
+var OPS = ["cross", "fuse", "stack"];
 function Flying({ flight, onDone }) {
   const ghost = useRef2(null);
   const done = useRef2(onDone);
@@ -3942,6 +3947,7 @@ function OptionSlider({ name, label, value, onChange }) {
 function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock }) {
   const t = useT();
   const [cardKey, setCardKey] = useState4("blend");
+  const [lastMode, setLastMode] = useState4({ cross: "blend", fuse: "texture", stack: "stack" });
   const [options, setOptions] = useState4(() => typeof tempo === "number" && tempo >= 40 && tempo <= 240 ? { bpm: Math.round(tempo) } : {});
   const [busy, setBusy] = useState4(null);
   const [error, setError] = useState4(null);
@@ -4028,54 +4034,85 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     };
     return /* @__PURE__ */ jsx11(OptionSlider, { label: labels[name], name, onChange: (next) => setOptions((current) => ({ ...current, [name]: next })), value: options[name] }, name);
   });
-  const group = (op) => /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-    /* @__PURE__ */ jsxs11("span", { style: { ...S.heading, fontSize: 10.5 }, children: [
-      t(`make.ops.${op}`),
-      " ",
-      /* @__PURE__ */ jsx11("span", { style: { textTransform: "none", letterSpacing: 0, color: T.faint }, children: t(`make.opHints.${op}`) })
-    ] }),
-    /* @__PURE__ */ jsx11("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(124px, 1fr))", gap: 6 }, children: CARDS.filter((entry) => entry.op === op).map((entry) => {
-      const chosen = entry.key === card.key;
-      const blocked = refused;
+  const tint = `color-mix(in srgb, ${T.accent} 16%, transparent)`;
+  const chooser = /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 7 }, children: [
+    /* @__PURE__ */ jsx11("div", { "aria-label": t("make.way"), role: "radiogroup", style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: `1px solid ${T.border}`, borderRadius: 8, overflow: "hidden" }, children: OPS.map((op, index) => {
+      const chosen = card.op === op;
       return /* @__PURE__ */ jsxs11(
         "button",
         {
-          "aria-pressed": chosen,
+          "aria-checked": chosen,
           className: FOCUSABLE,
-          disabled: Boolean(blocked),
-          onClick: () => setCardKey(entry.key),
-          title: t(`make.cards.${entry.key}.hint`),
+          disabled: refused,
+          onClick: () => setCardKey(lastMode[op]),
+          role: "radio",
+          title: t(`make.opHints.${op}`),
           type: "button",
           style: {
             display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-            gap: 3,
-            textAlign: "left",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            minWidth: 0,
             font: "inherit",
-            padding: "7px 8px",
-            borderRadius: 8,
-            border: `1px solid ${chosen ? T.accent : T.border}`,
-            background: chosen ? `color-mix(in srgb, ${T.accent} 13%, transparent)` : "transparent",
-            boxShadow: chosen ? `0 0 0 1px ${T.accent}, 0 6px 18px -10px ${T.accent}` : "none",
-            color: blocked ? T.faint : T.text,
-            cursor: blocked ? "default" : "pointer",
-            opacity: blocked ? 0.55 : 1,
-            transition: "border-color 140ms, background-color 140ms, box-shadow 200ms, transform 140ms",
-            transform: chosen ? "translateY(-1px)" : "none"
+            fontSize: 12.5,
+            fontWeight: chosen ? 650 : 500,
+            padding: "6px 4px",
+            border: "none",
+            borderLeft: index > 0 ? `1px solid ${T.border}` : "none",
+            background: chosen ? tint : "transparent",
+            color: refused ? T.faint : chosen ? T.accent : T.secondary,
+            cursor: refused ? "default" : "pointer",
+            transition: "background-color 140ms, color 140ms"
           },
           children: [
-            /* @__PURE__ */ jsxs11("span", { style: { ...S.row, gap: 6, color: chosen ? T.accent : T.secondary }, children: [
-              /* @__PURE__ */ jsx11(Glyph, { card: entry.key }),
-              /* @__PURE__ */ jsx11("span", { style: { fontSize: 12.5, fontWeight: 600, color: blocked ? T.faint : T.text }, children: t(`make.cards.${entry.key}.title`) })
-            ] }),
-            /* @__PURE__ */ jsx11("span", { style: { fontSize: 11, lineHeight: 1.35, color: T.muted }, children: t(`make.cards.${entry.key}.hint`) })
+            /* @__PURE__ */ jsx11(Glyph, { card: OP_GLYPH[op], size: 14 }),
+            /* @__PURE__ */ jsx11("span", { style: S.ellipsis, children: t(`make.ops.${op}`) })
+          ]
+        },
+        op
+      );
+    }) }),
+    card.op !== "stack" && /* @__PURE__ */ jsx11("div", { "aria-label": t(`make.ops.${card.op}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: CARDS.filter((entry) => entry.op === card.op).map((entry) => {
+      const chosen = entry.key === card.key;
+      return /* @__PURE__ */ jsxs11(
+        "button",
+        {
+          "aria-checked": chosen,
+          className: FOCUSABLE,
+          disabled: refused,
+          onClick: () => {
+            setCardKey(entry.key);
+            setLastMode((current) => ({ ...current, [entry.op]: entry.key }));
+          },
+          role: "radio",
+          title: t(`make.cards.${entry.key}.hint`),
+          type: "button",
+          style: {
+            ...S.row,
+            gap: 5,
+            font: "inherit",
+            fontSize: 12,
+            fontWeight: chosen ? 600 : 500,
+            padding: "3px 10px 3px 7px",
+            borderRadius: 14,
+            border: `1px solid ${chosen ? T.accent : T.border}`,
+            background: chosen ? tint : "transparent",
+            boxShadow: chosen ? `0 4px 14px -8px ${T.accent}` : "none",
+            color: refused ? T.faint : chosen ? T.accent : T.secondary,
+            cursor: refused ? "default" : "pointer",
+            transition: "border-color 140ms, background-color 140ms, color 140ms, box-shadow 200ms"
+          },
+          children: [
+            /* @__PURE__ */ jsx11(Glyph, { card: entry.key, size: 13 }),
+            t(`make.cards.${entry.key}.title`)
           ]
         },
         entry.key
       );
-    }) })
-  ] }, op);
+    }) }),
+    /* @__PURE__ */ jsx11("span", { style: { ...S.muted, fontSize: 11.5 }, children: t(`make.cards.${card.key}.hint`) })
+  ] });
   return /* @__PURE__ */ jsxs11(
     "section",
     {
@@ -4112,9 +4149,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
               sources.length - used.length
             ] })
           ] }),
-          group("cross"),
-          group("fuse"),
-          group("stack"),
+          chooser,
           card.options.length > 0 && /* @__PURE__ */ jsx11("div", { style: { ...S.row, flexWrap: "wrap", gap: 10, alignItems: "flex-end" }, children: optionRow(card) }),
           /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
             /* @__PURE__ */ jsx11(
@@ -4159,10 +4194,38 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                   else cards.current.delete(result.artifact_id);
                 },
                 role: "listitem",
-                style: { display: "flex", flexDirection: "column", gap: 4, padding: "8px 10px", borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: "transparent" },
+                style: { display: "flex", flexDirection: "column", gap: 5, padding: "8px 10px", borderRadius: 10, border: `1px solid ${isPlaying ? T.accent : T.border}`, background: isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent", transition: "border-color 160ms, background-color 160ms" },
                 children: [
-                  /* @__PURE__ */ jsx11("span", { style: { ...S.text, fontSize: 12, lineHeight: 1.35 }, title: result.recipe, children: clean(result.recipe, 220) || resultName(result) }),
-                  /* @__PURE__ */ jsx11(Wave2, { duration: result.duration, peaks: result.peaks, playing: isPlaying }),
+                  /* @__PURE__ */ jsx11("span", { style: { ...S.text, fontSize: 12, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }, title: result.recipe, children: clean(result.recipe, 220) || resultName(result) }),
+                  /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 8 }, children: [
+                    /* @__PURE__ */ jsx11(
+                      "button",
+                      {
+                        "aria-label": isPlaying ? t("make.stop") : t("make.play"),
+                        className: FOCUSABLE,
+                        onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id),
+                        type: "button",
+                        style: {
+                          flex: "none",
+                          width: 30,
+                          height: 30,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          borderRadius: "50%",
+                          border: `1px solid ${T.accent}`,
+                          background: isPlaying ? `color-mix(in srgb, ${T.accent} 30%, transparent)` : `color-mix(in srgb, ${T.accent} 12%, transparent)`,
+                          color: T.accent,
+                          fontSize: 11,
+                          cursor: "pointer",
+                          transition: "background-color 140ms"
+                        },
+                        children: isPlaying ? "■" : "▶"
+                      }
+                    ),
+                    /* @__PURE__ */ jsx11("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx11(Wave2, { duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
+                  ] }),
                   /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                     /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
                       t(`make.ops.${result.op}`),
@@ -4170,19 +4233,23 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                       " · ",
                       seconds(result.duration)
                     ] }),
-                    /* @__PURE__ */ jsxs11("span", { style: { ...S.faint, fontVariantNumeric: "tabular-nums" }, title: t("make.seedTitle"), children: [
+                    /* @__PURE__ */ jsxs11("span", { style: { ...S.faint, fontSize: 10.5, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }, title: t("make.seedTitle"), children: [
                       "#",
                       result.seed
                     ] }),
+                    /* @__PURE__ */ jsx11("span", { style: { flex: 1 } }),
                     take.results.length > 1 && /* @__PURE__ */ jsxs11("span", { role: "group", "aria-label": t("make.variations"), style: { ...S.row, gap: 2 }, children: [
                       /* @__PURE__ */ jsx11(TextButton, { disabled: at === 0, label: t("make.previous"), onClick: () => setShown((current) => ({ ...current, [take.key]: at - 1 })), children: "‹" }),
                       /* @__PURE__ */ jsx11("span", { style: { ...S.faint, fontVariantNumeric: "tabular-nums" }, children: t("make.variation", at + 1, take.results.length) }),
                       /* @__PURE__ */ jsx11(TextButton, { disabled: at === take.results.length - 1, label: t("make.next"), onClick: () => setShown((current) => ({ ...current, [take.key]: at + 1 })), children: "›" })
-                    ] }),
-                    /* @__PURE__ */ jsx11("span", { style: { flex: 1 } }),
-                    /* @__PURE__ */ jsx11(TextButton, { label: isPlaying ? t("make.stop") : t("make.play"), onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), children: isPlaying ? "■" : "▶" }),
-                    /* @__PURE__ */ jsx11(TextButton, { disabled: busy !== null, onClick: () => void make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : t("make.reroll") }),
-                    /* @__PURE__ */ jsx11(
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+                    /* @__PURE__ */ jsx11(TextButton, { disabled: busy !== null, onClick: () => void make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs11(Fragment4, { children: [
+                      /* @__PURE__ */ jsx11("span", { "aria-hidden": true, children: "↻ " }),
+                      t("make.reroll")
+                    ] }) }),
+                    /* @__PURE__ */ jsxs11(
                       TextButton,
                       {
                         disabled: inPalette,
@@ -4192,7 +4259,10 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                         },
                         pressed: inPalette,
                         title: t("make.keepTitle"),
-                        children: inPalette ? t("make.kept") : t("make.keep")
+                        children: [
+                          /* @__PURE__ */ jsx11("span", { "aria-hidden": true, children: inPalette ? "✓ " : "+ " }),
+                          inPalette ? t("make.kept") : t("make.keep")
+                        ]
                       }
                     ),
                     use?.(result)
@@ -4846,6 +4916,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.fillStyle = color;
       context.fill(path);
       context.restore();
+      const ring2 = new Path2D();
+      shape(ring2, x, y, blend, 2.3);
+      context.strokeStyle = colors.strong;
+      context.lineWidth = 1.25;
+      context.stroke(ring2);
     }
     if (playing) {
       ring(playing, colors.accent, 6, 2);
@@ -4879,8 +4954,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         context.globalAlpha = 0.95 - 0.5 * progress;
         context.fillStyle = groupColor2.get(points[index].group) ?? colors.accent;
         context.beginPath();
-        context.arc(x, y, Math.max(1.2, (radius + 1.5) * (1 - 0.55 * progress)), 0, Math.PI * 2);
+        context.arc(x, y, Math.max(1.4, (radius + 2.5) * (1 - 0.55 * progress)), 0, Math.PI * 2);
         context.fill();
+        context.strokeStyle = colors.strong;
+        context.lineWidth = 0.9;
+        context.stroke();
       });
       context.globalAlpha = 1;
     }
@@ -4952,20 +5030,30 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
+  const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsx12(
-        "input",
-        {
-          "aria-label": t("map.search"),
-          className: FOCUSABLE,
-          onChange: (event) => setQuery(event.target.value),
-          placeholder: t("map.searchHint"),
-          style: { flex: "1 1 180px", minWidth: 140, font: "inherit", fontSize: 12, padding: "3px 8px", borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
-          value: query
-        }
-      ),
-      /* @__PURE__ */ jsx12("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0)) }),
+      /* @__PURE__ */ jsxs12("div", { style: { position: "relative", display: "flex", flex: "1 1 160px", minWidth: 130 }, children: [
+        /* @__PURE__ */ jsx12(
+          "input",
+          {
+            "aria-label": t("map.search"),
+            className: FOCUSABLE,
+            onChange: (event) => setQuery(event.target.value),
+            placeholder: t("map.searchHint"),
+            style: { flex: 1, minWidth: 0, font: "inherit", fontSize: 12, padding: "3px 8px", paddingRight: `${countWords.length * 0.55 + 1.2}em`, borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
+            value: query
+          }
+        ),
+        /* @__PURE__ */ jsx12(
+          "span",
+          {
+            style: { ...S.faint, fontSize: 10.5, lineHeight: "16px", padding: "0 6px", borderRadius: 8, background: T.chip, position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
+            title: model.revision ? t("map.revision", model.revision) : void 0,
+            children: countWords
+          }
+        )
+      ] }),
       onPicked && searched !== null && matches.length > 0 && // Native's `a`: every sound the search keeps.
       /* @__PURE__ */ jsx12(TextButton, { onClick: () => onPicked(matches, "replace"), title: t("dock.pickAllTitle"), children: t("dock.pickAll", matches.length) }),
       onPicked && /* @__PURE__ */ jsx12(TextButton, { onClick: () => setSelecting(!selecting), pressed: selecting, title: t("dock.selectTitle"), children: t("dock.select") }),
@@ -5093,7 +5181,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       hovered && hoveredSound && hover && /* @__PURE__ */ jsxs12(
         "div",
         {
-          style: { position: "absolute", left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: "none", padding: "3px 7px", borderRadius: 3, background: T.card, border: `1px solid ${T.border}`, fontSize: 11.5, color: T.text, ...S.ellipsis },
+          style: { position: "absolute", left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: "none", padding: "3px 7px", borderRadius: 4, background: T.raised, border: `1px solid ${T.border}`, boxShadow: "0 6px 16px -8px rgba(0,0,0,.6)", fontSize: 11.5, color: T.text, ...S.ellipsis },
           children: [
             clean(hoveredSound.name, 48),
             " ",
@@ -5416,6 +5504,12 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     known.current = { id: current?.id ?? null, keys };
     return new Map(fresh.map((key, order2) => [key, order2]));
   }, [current]);
+  const strip = useRef4(null);
+  useEffect7(() => {
+    const element = strip.current;
+    if (!element || arrived.size === 0) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }, [arrived]);
   const [now, setNow] = useState6(() => Date.now());
   const shownFor = said?.failed ? 8e3 : 4e3;
   useEffect7(() => {
@@ -5517,7 +5611,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       ),
       /* @__PURE__ */ jsx13(TextButton, { onClick: () => setForgetting(false), children: t("dock.keep") })
     ] }),
-    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
+    open && current && items.length > 0 && /* @__PURE__ */ jsxs13("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 116, overflowY: "auto", paddingBottom: 1 }, children: [
       items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx13(
         Chip2,
         {

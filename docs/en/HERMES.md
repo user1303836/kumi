@@ -159,10 +159,11 @@ your project changes: the result is Kumi's own copy until you use it.
 - **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
 - **Use:** ask for it on a pad or a track like any sound; that's a change of its own, asked as your changes are.
 - **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…**,
-  choose a way (a card for each), set its few options or leave them on **Auto** (a loop starts at your project's
-  tempo), and press **Make**: the new sound plays as it arrives. **Reroll**, **Keep** and **Use…** are on each result
-  (the dashboard copies Use's request instead), ‹ › steps through a result's variations, and the results stay after a
-  reload.
+  choose **Cross**, **Fuse** or **Stack** and then a way to do it, set its few options or leave them on **Auto** (a
+  loop starts at your project's tempo), and press **Make**: the new sound plays as it arrives (press ▶ or its
+  waveform to hear it again). **Reroll**, **Keep** and **Use…** are on each result (the dashboard copies Use's request
+  instead), ‹ › steps through a result's variations, and the results stay after a reload. A kept sound flies into
+  your palette.
 - **Ask Hermes:** "blend these three kicks", "make a texture from my palette", "stack this snare with that clap",
   "reroll it", "put the second one in my palette", "load it on pad C2".
 

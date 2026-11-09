@@ -482,6 +482,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.fillStyle = color
       context.fill(path)
       context.restore()
+      // And a fine ring in the text colour, so one sound stands out of a dense cluster of its own colour.
+      const ring = new Path2D()
+      shape(ring, x, y, blend, 2.3)
+      context.strokeStyle = colors.strong
+      context.lineWidth = 1.25
+      context.stroke(ring)
     }
     // A playing sound ripples: two rings spread from it and fade, half a beat apart.
     if (playing) {
@@ -518,8 +524,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         context.globalAlpha = 0.95 - 0.5 * progress
         context.fillStyle = groupColor.get(points[index].group) ?? colors.accent
         context.beginPath()
-        context.arc(x, y, Math.max(1.2, (radius + 1.5) * (1 - 0.55 * progress)), 0, Math.PI * 2)
+        context.arc(x, y, Math.max(1.4, (radius + 2.5) * (1 - 0.55 * progress)), 0, Math.PI * 2)
         context.fill()
+        // Outlined in the text colour, so they read as leaving even over a dense cluster of their own colour.
+        context.strokeStyle = colors.strong
+        context.lineWidth = 0.9
+        context.stroke()
       })
       context.globalAlpha = 1
     }
@@ -604,24 +614,30 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const chosen = selected ? model.sounds[selected] : undefined
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
+  const countWords =
+    shown === model.points.length - leavingCount ? t('map.count', num(shown, 0)) : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 240, color: T.text }}>
       <div style={{ ...S.row, flexWrap: 'wrap', padding: '8px 10px', gap: 6, borderBottom: `1px solid ${T.border}` }}>
-        <input
-          aria-label={t('map.search')}
-          className={FOCUSABLE}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={t('map.searchHint')}
-          style={{ flex: '1 1 180px', minWidth: 140, font: 'inherit', fontSize: 12, padding: '3px 8px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
-          value={query}
-        />
-        {/* The revision is an id (`r` and 32 hex digits): there for anyone who looks, not in the line itself. */}
-        <span style={S.faint} title={model.revision ? t('map.revision', model.revision) : undefined}>
-          {shown === model.points.length - leavingCount
-            ? t('map.count', num(shown, 0))
-            : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))}
-        </span>
+        {/* The count sits inside the search field, so the field and the toggles fit one line beside the chat. The
+            revision is an id (`r` and 32 hex digits): there for anyone who looks, not in the line itself. */}
+        <div style={{ position: 'relative', display: 'flex', flex: '1 1 160px', minWidth: 130 }}>
+          <input
+            aria-label={t('map.search')}
+            className={FOCUSABLE}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('map.searchHint')}
+            style={{ flex: 1, minWidth: 0, font: 'inherit', fontSize: 12, padding: '3px 8px', paddingRight: `${countWords.length * 0.55 + 1.2}em`, borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
+            value={query}
+          />
+          <span
+            style={{ ...S.faint, fontSize: 10.5, lineHeight: '16px', padding: '0 6px', borderRadius: 8, background: T.chip, position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', cursor: 'default' }}
+            title={model.revision ? t('map.revision', model.revision) : undefined}
+          >
+            {countWords}
+          </span>
+        </div>
         {onPicked && searched !== null && matches.length > 0 && (
           // Native's `a`: every sound the search keeps.
           <TextButton onClick={() => onPicked(matches, 'replace')} title={t('dock.pickAllTitle')}>
@@ -769,7 +785,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         </span>
         {hovered && hoveredSound && hover && (
           <div
-            style={{ position: 'absolute', left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: 'none', padding: '3px 7px', borderRadius: 3, background: T.card, border: `1px solid ${T.border}`, fontSize: 11.5, color: T.text, ...S.ellipsis }}
+            style={{ position: 'absolute', left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: 'none', padding: '3px 7px', borderRadius: 4, background: T.raised, border: `1px solid ${T.border}`, boxShadow: '0 6px 16px -8px rgba(0,0,0,.6)', fontSize: 11.5, color: T.text, ...S.ellipsis }}
           >
             {clean(hoveredSound.name, 48)} <span style={{ color: T.muted }}>· {clean(hoveredSound.class ?? '', 16)}</span>
           </div>

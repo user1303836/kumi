@@ -291,6 +291,13 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     known.current = { id: current?.id ?? null, keys }
     return new Map(fresh.map((key, order) => [key, order]))
   }, [current])
+  // New chips go at the end of the strip: it scrolls to them, so a gather or a kept sound lands in view.
+  const strip = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = strip.current
+    if (!element || arrived.size === 0) return
+    element.scrollTo({ top: element.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [arrived])
   // The last sentence fades after a while: it says what just happened, not what is.
   const [now, setNow] = useState(() => Date.now())
   const shownFor = said?.failed ? 8000 : 4000
@@ -426,7 +433,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </div>
       )}
       {open && current && items.length > 0 && (
-        <div aria-label={t('dock.sounds')} role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
+        <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip
               audio={audio}
