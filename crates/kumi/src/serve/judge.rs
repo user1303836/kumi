@@ -24,7 +24,8 @@ use std::collections::HashMap;
 
 /// How the integration's words map here, said with every round.
 const IN_HERMES: &str = "In Kumi for Hermes: make_changes is kumi_change, judge is kumi_judge, tune is kumi_tune, \
-                         sound is kumi_sound, audition is kumi_audition, groove is kumi_groove, render is kumi_render, listen \
+                         sound is kumi_sound, audition is kumi_audition, groove is kumi_groove, render is kumi_render, form is \
+                         kumi_form, listen \
                          (file) is kumi_listen with an artifact_id as its source, discovery is kumi_observe and kumi_read. A change a round took back is undone already (taken_back): \
                          don't undo it again. Each call goes on the project_key and epoch this answer gives.";
 
@@ -165,7 +166,7 @@ pub(super) fn tools_input(args: &JsonObject) -> Map<String, Value> {
     args.iter().filter(|(key, _)| !key.starts_with("expected_")).map(|(key, value)| (key.clone(), value.clone())).collect()
 }
 
-/// One call of Live's listening tool `name` (judge, tune, sound, audition, groove, render), through the integration's
+/// One call of Live's listening tool `name` (judge, tune, sound, audition, groove, render, form), through the integration's
 /// tool of that name.
 pub(super) async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Result<Value, OpError> {
     let args = &call.args;
@@ -238,6 +239,7 @@ pub(super) async fn listened(ctx: &Ctx, call: Call, name: &'static str) -> Resul
             "judge" => "Judged round",
             "tune" => "Tune",
             "sound" => "Sound measured",
+            "form" => "Form read",
             "audition" => "Audition",
             "groove" => "Groove round",
             _ => "Render",

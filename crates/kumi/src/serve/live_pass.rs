@@ -41,15 +41,38 @@ pub(super) fn beats_per_bar(ctx: &Ctx) -> f64 {
 /// Why a pass over `beats` from `from_beat` won't play here, at the tempo and meter Live last said: over a minute with
 /// its lead-in and what follows. None when it fits, or Live hasn't said its tempo (its integration says it then).
 pub(super) fn window_refusal(ctx: &Ctx, from_beat: f64, beats: f64) -> Option<OpError> {
+    longer_than(ctx, from_beat, beats, MOST_SECONDS, "60 seconds at a time here, so hear a shorter stretch (from_beat and beats)")
+}
+
+/// The most a form call plays here, seconds: the whole Arrangement once, up to a quarter of an hour (the owner's call;
+/// every other listen keeps to [`MOST_SECONDS`]). Live's integration counts each part's lead-in and holds it too.
+pub(super) const WHOLE_SONG_SECONDS: f64 = 900.;
+
+/// Why form's stretch of `beats` from `from_beat` won't play here: over `budget` seconds (at most
+/// [`WHOLE_SONG_SECONDS`]) with its lead-in.
+pub(super) fn whole_song_refusal(ctx: &Ctx, from_beat: f64, beats: f64, budget: f64) -> Option<OpError> {
+    let instead = format!("{budget:.0} seconds in one call here, so read the form in parts, each from_beat and beats short enough");
+    longer_than(ctx, from_beat, beats, budget, &instead)
+}
+
+/// The most a form call may play, seconds: the host's `max_seconds` (its own deadline, less its margin), never over
+/// [`WHOLE_SONG_SECONDS`]; that when the host gives none. None when what it gave isn't a positive number of seconds.
+pub(super) fn whole_song_budget(max_seconds: Option<&serde_json::Value>) -> Option<f64> {
+    match max_seconds {
+        None => Some(WHOLE_SONG_SECONDS),
+        Some(value) => value.as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.).map(|seconds| seconds.min(WHOLE_SONG_SECONDS)),
+    }
+}
+
+fn longer_than(ctx: &Ctx, from_beat: f64, beats: f64, most: f64, instead: &str) -> Option<OpError> {
     let transport = ctx.link().connection().and_then(|connection| connection.transport())?;
     let tempo = transport.tempo.filter(|tempo| *tempo > 0.)?;
     let meter = beats_per_bar(ctx);
     let seconds = played_seconds(from_beat, beats, tempo, meter);
-    (seconds > MOST_SECONDS).then(|| OpError::Refused {
+    (seconds > most).then(|| OpError::Refused {
         code: "window_too_long",
         reason: format!(
-            "{beats} beats at {tempo} BPM plays {seconds:.1} seconds with the bar before it and half a bar after: Kumi plays at most \
-             60 seconds at a time here, so hear a shorter stretch (from_beat and beats)."
+            "{beats} beats at {tempo} BPM plays {seconds:.1} seconds with the bar before it and half a bar after: Kumi plays at most {instead}."
         ),
         owner: None,
     })
@@ -78,11 +101,17 @@ impl Capturing {
     pub(super) fn scratch(&self) -> &Scratch {
         &self.scratch
     }
+
+    /// The host's budget for this call's playing, seconds, given to the integration while this lives.
+    pub(super) fn budget(&self, seconds: f64) {
+        self.integration.listen_budget(Some(seconds));
+    }
 }
 
 impl Drop for Capturing {
     fn drop(&mut self) {
         self.integration.listen_scratch(None);
+        self.integration.listen_budget(None);
     }
 }
 

@@ -814,6 +814,10 @@ pub trait Integration {
     /// for what they capture: its private per-call scratch, under the policy's root. None once the call ends. A pass
     /// under that policy captures nowhere else, and is refused without one. Ignored by default.
     fn listen_scratch(&self, _folder: Option<std::path::PathBuf>) {}
+    /// The most a host whose listening is restricted lets the tool call that follows play in all, seconds, when its own
+    /// deadline is shorter than the policy's limit (a form that hears the whole Arrangement): what can't play within it
+    /// is refused before anything plays. None once the call ends. Ignored by default.
+    fn listen_budget(&self, _seconds: Option<f64>) {}
     fn has_hear(&self) -> bool {
         self.profile().caps.hear
     }

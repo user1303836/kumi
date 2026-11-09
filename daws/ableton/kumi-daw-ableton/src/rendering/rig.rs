@@ -50,6 +50,43 @@ pub(super) const EARS_MISSING: &str =
 /// The longest pass the plugin host's listening plays, seconds: from Live starting to play to stopping, its lead-in and
 /// what follows the stretch included.
 pub(super) const RESTRICTED_SECONDS: f64 = 60.;
+/// The most a form call plays in all under the plugin host's listening, seconds (its passes, lead-ins and what follows
+/// included): the whole Arrangement once, for a song up to about a quarter of an hour, and nothing runs away.
+pub(super) const WHOLE_SONG_SECONDS: f64 = 900.;
+/// How long the plugin host's listening lets a call play: a minute a pass, or, for form alone, the whole Arrangement in
+/// all within its seconds: [`WHOLE_SONG_SECONDS`], or less when the host's own deadline is shorter (its budget).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum PlayLimit {
+    Minute,
+    WholeSong(f64),
+}
+impl PlayLimit {
+    /// form's limit under the host's budget for the call (none: the policy's own), never over [`WHOLE_SONG_SECONDS`].
+    pub(super) fn whole_song(budget: Option<f64>) -> Self {
+        Self::WholeSong(budget.filter(|seconds| *seconds > 0.).map_or(WHOLE_SONG_SECONDS, |seconds| seconds.min(WHOLE_SONG_SECONDS)))
+    }
+    pub(super) fn seconds(self) -> f64 {
+        match self {
+            Self::Minute => RESTRICTED_SECONDS,
+            Self::WholeSong(seconds) => seconds,
+        }
+    }
+    fn too_long(self, seconds: f64) -> String {
+        match self {
+            Self::Minute => "Kumi plays at most 60 seconds at a time here, a bar before the stretch and half a bar after it included: hear a shorter stretch (from_beat and beats).".into(),
+            Self::WholeSong(most) => format!(
+                "That plays {} with its lead-ins, longer than Kumi can listen in one call here ({} at most): read the form in parts, each from_beat and beats short enough.",
+                clock(seconds),
+                clock(most)
+            ),
+        }
+    }
+}
+/// Seconds as minutes and seconds ("6:30").
+fn clock(seconds: f64) -> String {
+    let whole = if seconds.is_finite() { seconds.round().max(0.) as u64 } else { 0 };
+    format!("{}:{:02}", whole / 60, whole % 60)
+}
 /// Why the plugin host's listening captures nowhere: it was given no private per-call scratch under its root.
 pub(super) const SCRATCH_MISSING: &str = "Restricted listening requires a private per-call scratch directory inside its configured root.";
 /// How long Live plays a Kumi Ears pass over `window`, seconds: its lead-in (a bar, or two when it plays again because
@@ -57,20 +94,18 @@ pub(super) const SCRATCH_MISSING: &str = "Restricted listening requires a privat
 pub(super) fn played_seconds(window: Window, beats_per_bar: f64, tempo: f64, again: bool) -> f64 {
     super::super::audition::render_span(window.from, window.beats, beats_per_bar, tempo, again, Some(0.)).wait * 60. / tempo
 }
-/// Why the plugin host's listening won't play a pass of `seconds` (as [`played_seconds`] counts it) with Live's
-/// transport and song as read (Live playing or recording, not following the Arrangement, or a pass over
-/// [`RESTRICTED_SECONDS`]); None when it may.
-pub(super) fn restricted_refusal(seconds: f64, transport: &Value, song: &Value) -> Option<&'static str> {
-    if !seconds.is_finite() || seconds <= 0. || seconds > RESTRICTED_SECONDS {
-        return Some(
-            "Kumi plays at most 60 seconds at a time here, a bar before the stretch and half a bar after it included: hear a shorter stretch (from_beat and beats).",
-        );
+/// Why the plugin host's listening won't play passes of `seconds` in all (as [`played_seconds`] counts each) under
+/// `limit`, with Live's transport and song as read (Live playing or recording, not following the Arrangement, or more
+/// than the limit); None when it may.
+pub(super) fn restricted_refusal(seconds: f64, limit: PlayLimit, transport: &Value, song: &Value) -> Option<String> {
+    if !seconds.is_finite() || seconds <= 0. || seconds > limit.seconds() {
+        return Some(limit.too_long(seconds));
     }
     if ["playing", "arrangementRecord", "sessionRecord"].iter().any(|key| transport.get(*key) != Some(&Value::Bool(false))) {
-        return Some("Stop playback and recording before listening to an Arrangement window.");
+        return Some("Stop playback and recording before listening to an Arrangement window.".into());
     }
     if song.get("backToArranger") != Some(&Value::Bool(false)) {
-        return Some("Live is not following the Arrangement. Resolve Back to Arrangement yourself, then observe again.");
+        return Some("Live is not following the Arrangement. Resolve Back to Arrangement yourself, then observe again.".into());
     }
     None
 }
@@ -117,15 +152,29 @@ impl LiveRenderer {
     pub(super) fn restricted(&self) -> bool {
         matches!(self.listening_policy, ListeningPolicy::Restricted { .. })
     }
+    /// How long the plugin host's listening lets the call under way play: the whole Arrangement for form, else a minute
+    /// a pass.
+    pub(super) fn play_limit(&self) -> PlayLimit {
+        if self.whole_song.get() {
+            PlayLimit::whole_song(self.call_budget.get())
+        } else {
+            PlayLimit::Minute
+        }
+    }
     /// The plugin host's limits on a pass about to play, read from Live now: Kumi Ears there, a per-call scratch to
-    /// capture into, and the first pass (a bar's lead-in, the stretch, half a bar after) a minute at most.
+    /// capture into, and what it plays (each part's lead-in, the part, half a bar after) within the call's limit.
     pub(super) async fn restricted_pass(&self, rig: &Rig, signal: Signal) -> Result<(), RuntimeError> {
         if rig.ears.is_none() {
             return Err(observation(EARS_MISSING));
         }
         let call = self.call_scratch.borrow().clone();
         capture_folder(&self.listening_policy, call).await.map_err(observation)?;
-        let seconds = played_seconds(rig.window(), self.observer.beats_per_bar.get(), self.pass_tempo(rig)?, false);
+        let (meter, tempo) = (self.observer.beats_per_bar.get(), self.pass_tempo(rig)?);
+        let taps = rig.ears.as_ref().map_or(1, |ears| ears.taps.len());
+        let seconds: f64 = super::ears_pass::pieces(rig.window(), tempo, meter, taps)
+            .into_iter()
+            .map(|piece| played_seconds(piece, meter, tempo, false))
+            .sum();
         let unreadable =
             || observation("This Live bridge can't say whether Live is playing or recording; update its bridge and restart Live.");
         let playback = self.rows("session-playback", json!({}), signal.clone()).await?;
@@ -134,7 +183,7 @@ impl LiveRenderer {
             return Err(unreadable());
         }
         let song = super::super::context::payload(&self.connection().call("live_song_state", JsonObject::new(), signal).await?)?;
-        match restricted_refusal(seconds, &transport, &Value::Object(song)) {
+        match restricted_refusal(seconds, self.play_limit(), &transport, &Value::Object(song)) {
             Some(why) => Err(observation(why)),
             None => Ok(()),
         }
@@ -506,8 +555,9 @@ mod tests {
     fn the_plugin_hosts_minute_counts_the_lead_in_and_what_follows_the_stretch() {
         let stopped = json!({"playing": false, "arrangementRecord": false, "sessionRecord": false});
         let following = json!({"backToArranger": false});
-        let fits =
-            |window: Window, again: bool| restricted_refusal(played_seconds(window, 4., 120., again), &stopped, &following).is_none();
+        let fits = |window: Window, again: bool| {
+            restricted_refusal(played_seconds(window, 4., 120., again), PlayLimit::Minute, &stopped, &following).is_none()
+        };
         // At 120 BPM in 4/4 a beat is half a second: 4 beats before, 2 after.
         assert_eq!(played_seconds(Window { from: 16., beats: 114. }, 4., 120., false), 60.);
         assert!(fits(Window { from: 16., beats: 114. }, false));
@@ -519,6 +569,46 @@ mod tests {
         assert!(fits(Window { from: 16., beats: 110. }, true));
         // A stretch from the Arrangement's start has no lead-in to play.
         assert_eq!(played_seconds(Window { from: 0., beats: 118. }, 4., 120., true), 60.);
+    }
+
+    /// form alone hears the whole Arrangement: up to 15 minutes in all, its parts' lead-ins and what follows included;
+    /// every other tool stays at a minute a pass.
+    #[test]
+    fn only_form_plays_the_whole_song_and_for_15_minutes_at_most() {
+        let stopped = json!({"playing": false, "arrangementRecord": false, "sessionRecord": false});
+        let following = json!({"backToArranger": false});
+        // A song at 120 BPM in 4/4 (half a second a beat), heard whole from its start, with one tap: in parts each
+        // Kumi Ears can hold, each with its own lead-in and half a bar after.
+        let song = |beats: f64| -> f64 {
+            super::super::ears_pass::pieces(Window { from: 0., beats }, 120., 4., 1)
+                .into_iter()
+                .map(|piece| played_seconds(piece, 4., 120., false))
+                .sum()
+        };
+        // Four minutes of song (480 beats): form plays it; anything else is held to a minute.
+        assert_eq!(song(480.), 241.);
+        assert_eq!(restricted_refusal(song(480.), PlayLimit::whole_song(None), &stopped, &following), None);
+        assert!(restricted_refusal(song(480.), PlayLimit::Minute, &stopped, &following).unwrap().contains("at most 60 seconds"));
+        // Fourteen minutes and a half fits; fifteen whole minutes doesn't, once the parts' lead-in and tail are counted.
+        assert!(song(1740.) <= WHOLE_SONG_SECONDS, "{}", song(1740.));
+        assert_eq!(restricted_refusal(song(1740.), PlayLimit::whole_song(None), &stopped, &following), None);
+        let refused = restricted_refusal(song(1800.), PlayLimit::whole_song(None), &stopped, &following).unwrap();
+        assert!(refused.contains("15:00 at most") && refused.contains("read the form in parts"), "{refused}");
+        // The host's own deadline, shorter, is the budget: 6½ minutes (Hermes's default 420 s less 30) takes a 6-minute
+        // song (361 s played) and refuses a 7-minute one (421 s), before anything plays.
+        let budget = PlayLimit::whole_song(Some(390.));
+        assert_eq!(budget, PlayLimit::WholeSong(390.));
+        assert_eq!(restricted_refusal(song(720.), budget, &stopped, &following), None);
+        let over = restricted_refusal(song(840.), budget, &stopped, &following).unwrap();
+        assert!(over.contains("7:01") && over.contains("6:30 at most") && over.contains("read the form in parts"), "{over}");
+        // A budget never lifts the limit past 15 minutes, and none (or nonsense) is the policy's own.
+        assert_eq!(PlayLimit::whole_song(Some(5000.)), PlayLimit::WholeSong(WHOLE_SONG_SECONDS));
+        assert_eq!(PlayLimit::whole_song(Some(-1.)), PlayLimit::WholeSong(WHOLE_SONG_SECONDS));
+        assert_eq!(PlayLimit::whole_song(Some(f64::NAN)).seconds(), WHOLE_SONG_SECONDS);
+        // The whole song keeps every other condition: Live stopped, not recording, following the Arrangement.
+        let playing = json!({"playing": true, "arrangementRecord": false, "sessionRecord": false});
+        assert!(restricted_refusal(song(480.), PlayLimit::whole_song(None), &playing, &following).is_some());
+        assert!(restricted_refusal(song(480.), PlayLimit::whole_song(None), &stopped, &json!({"backToArranger": true})).is_some());
     }
 
     /// The plugin host's captures go only into the private per-call folder its host gave, directly under the policy's
@@ -549,18 +639,23 @@ mod tests {
     fn the_plugin_hosts_pass_plays_only_a_stopped_unrecording_arrangement_for_a_minute_at_most() {
         let stopped = json!({"playing": false, "arrangementRecord": false, "sessionRecord": false});
         let following = json!({"backToArranger": false});
-        assert_eq!(restricted_refusal(60., &stopped, &following), None);
-        assert!(restricted_refusal(60.5, &stopped, &following).unwrap().contains("at most 60 seconds"));
-        assert!(restricted_refusal(f64::NAN, &stopped, &following).is_some());
+        assert_eq!(restricted_refusal(60., PlayLimit::Minute, &stopped, &following), None);
+        assert!(restricted_refusal(60.5, PlayLimit::Minute, &stopped, &following).unwrap().contains("at most 60 seconds"));
+        assert!(restricted_refusal(f64::NAN, PlayLimit::Minute, &stopped, &following).is_some());
         for key in ["playing", "arrangementRecord", "sessionRecord"] {
             let mut moving = stopped.clone();
             moving[key] = json!(true);
-            assert!(restricted_refusal(8., &moving, &following).unwrap().starts_with("Stop playback and recording"), "{key}");
+            assert!(
+                restricted_refusal(8., PlayLimit::Minute, &moving, &following).unwrap().starts_with("Stop playback and recording"),
+                "{key}"
+            );
             // A transport Live doesn't say is stopped isn't taken as stopped.
             moving.as_object_mut().unwrap().remove(key);
-            assert!(restricted_refusal(8., &moving, &following).is_some(), "{key} unread");
+            assert!(restricted_refusal(8., PlayLimit::Minute, &moving, &following).is_some(), "{key} unread");
         }
-        assert!(restricted_refusal(8., &stopped, &json!({"backToArranger": true})).unwrap().contains("Back to Arrangement"));
-        assert!(restricted_refusal(8., &stopped, &json!({})).is_some());
+        assert!(restricted_refusal(8., PlayLimit::Minute, &stopped, &json!({"backToArranger": true}))
+            .unwrap()
+            .contains("Back to Arrangement"));
+        assert!(restricted_refusal(8., PlayLimit::Minute, &stopped, &json!({})).is_some());
     }
 }

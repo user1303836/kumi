@@ -33,7 +33,7 @@ struct Part {
 
 /// The parts one listen plays, each short enough for Kumi Ears to hold: the whole stretch in one pass when it
 /// fits, else whole bars back to back.
-fn pieces(window: Window, tempo: f64, meter: f64, taps: usize) -> Vec<Window> {
+pub(super) fn pieces(window: Window, tempo: f64, meter: f64, taps: usize) -> Vec<Window> {
     let by_memory = PASS_SECONDS.min(PASS_BUDGET / taps.max(1) as f64) * tempo / 60.;
     let by_device = (ARMED_MOST - 6.) * tempo / 60. - (2. + 0.5 + 4.) * meter;
     let longest = by_memory.min(by_device);
@@ -64,6 +64,8 @@ impl LiveRenderer {
         // A listen in parts keeps them in a folder of its own until they're joined, out of the folder's pruning.
         let folder = if pieces.len() > 1 { ears_folder.join(format!("parts-{}", uuid::Uuid::new_v4())) } else { ears_folder.clone() };
         let mut started = false;
+        // How long Live has played for this listen so far, seconds: the plugin host's limit counts it.
+        let mut played = 0.;
         // Each tap's parts so far, in order; a tap that missed a part keeps what came before, and says so.
         let mut parts: IndexMap<String, (Vec<Part>, bool)> = IndexMap::new();
         let mut ended: Vec<String> = vec![];
@@ -80,7 +82,17 @@ impl LiveRenderer {
                         break;
                     }
                     let heard = self
-                        .ears_piece(rig, &link, &listening, &folder, *piece, tempo, index == 0, last, &mut started, signal.clone())
+                        .ears_piece(
+                            rig,
+                            &link,
+                            &listening,
+                            &folder,
+                            *piece,
+                            tempo,
+                            (index == 0, last),
+                            (&mut started, &mut played),
+                            signal.clone(),
+                        )
                         .await?;
                     for (name, outcome) in heard {
                         let named = if taps.len() > 1 { format!("{name}: ") } else { String::new() };
@@ -158,22 +170,27 @@ impl LiveRenderer {
         folder: &Path,
         piece: Window,
         tempo: f64,
-        first: bool,
-        last: bool,
-        started: &mut bool,
+        (first, last): (bool, bool),
+        (started, played): (&mut bool, &mut f64),
         signal: Signal,
     ) -> Result<IndexMap<String, Result<Part, Missed>>, RuntimeError> {
+        // What the plugin host's listening lets this play still: a minute a pass, or what's left of form's whole song.
+        let limit = self.play_limit();
+        let left = |played: f64| match limit {
+            super::rig::PlayLimit::Minute => limit.seconds(),
+            super::rig::PlayLimit::WholeSong(_) => limit.seconds() - played,
+        };
         let meter = self.observer.beats_per_bar.get();
         let beat_ms = 60. / tempo * 1000.;
         let mut heard: IndexMap<String, Result<Part, Missed>> = IndexMap::new();
         for longer in [false, true] {
-            // The plugin host's listening plays each pass for a minute at most, its lead-in and half a bar after
-            // included: Live reaching the stretch late plays it once more only when that fits too.
-            if longer && self.restricted() && super::rig::played_seconds(piece, meter, tempo, true) > super::rig::RESTRICTED_SECONDS {
-                rig.notes.push(
-                    "Live reached the stretch late, and playing it again from two bars ahead would take over 60 seconds, so Kumi didn't."
-                        .into(),
-                );
+            // The plugin host's listening plays within its limit, lead-ins and half a bar after included: Live reaching
+            // the stretch late plays it once more only when that fits too.
+            if longer && self.restricted() && super::rig::played_seconds(piece, meter, tempo, true) > left(*played) {
+                rig.notes.push(match limit {
+                    super::rig::PlayLimit::Minute => "Live reached the stretch late, and playing it again from two bars ahead would take over 60 seconds, so Kumi didn't.".into(),
+                    super::rig::PlayLimit::WholeSong(_) => "Live reached the stretch late, and playing it again would take Kumi past what it may listen to in this call, so it didn't.".into(),
+                });
                 break;
             }
             let span = render_span(piece.from, piece.beats, meter, tempo, longer, Some(0.));
@@ -218,9 +235,9 @@ impl LiveRenderer {
                 self.step("set_transport", json!({"position":span.position}), signal.clone()).await?;
             }
             let end = piece.from + piece.beats + meter / 2.;
-            // The plugin host's listening stops Live a minute after it started playing, whatever it reached.
+            // The plugin host's listening stops Live once its limit is played, whatever it reached.
             let deadline = if self.restricted() {
-                (now_ms() as f64 + seconds * 1000.).min(began + super::rig::RESTRICTED_SECONDS * 1000.)
+                (now_ms() as f64 + seconds * 1000.).min(began + left(*played) * 1000.)
             } else {
                 now_ms() as f64 + seconds * 1000.
             };
@@ -243,6 +260,7 @@ impl LiveRenderer {
             }
             self.step("play", json!({"action":"stop"}), signal.clone()).await?;
             *started = false;
+            *played += (now_ms() as f64 - began) / 1000.;
             let read = |name: String, tap: Tap| {
                 let link = link.clone();
                 let signal = signal.clone();

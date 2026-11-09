@@ -12,8 +12,16 @@ use std::rc::{Rc, Weak};
 
 struct Daw;
 
+thread_local! {
+    /// Each budget the runtime gave this test's DAW for a call, and each None it took it back with.
+    static BUDGETS: RefCell<Vec<Option<f64>>> = const { RefCell::new(vec![]) };
+}
+
 #[async_trait(?Send)]
 impl Integration for Daw {
+    fn listen_budget(&self, seconds: Option<f64>) {
+        BUDGETS.with(|budgets| budgets.borrow_mut().push(seconds));
+    }
     async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -49,6 +57,7 @@ impl KernelTool for Tool {
             "sound" => sound_tool(profile).schema,
             "audition" => audition_tool(profile).schema,
             "groove" => groove_tool(profile).schema,
+            "form" => form_tool(profile).schema,
             _ => render_tool(profile).schema,
         }
     }
@@ -114,7 +123,7 @@ impl Lab {
             tools: BTreeMap::new(),
         };
         let ctx = Ctx::new(args, kumi_types::system::Env::new(), kumi_daw::io::Answers::default()).unwrap();
-        let tools: Vec<Rc<Tool>> = ["sound", "audition", "groove", "render"]
+        let tools: Vec<Rc<Tool>> = ["sound", "audition", "groove", "render", "form"]
             .into_iter()
             .map(|name| {
                 Rc::new(Tool {
@@ -310,6 +319,59 @@ case!(a_render_is_kept_as_an_artifact_lives_copy_deleted_and_no_path_said, async
     let refused = lab.call(&RENDER, json!({"track": "1:track:2", "from_beat": 0, "beats": 8})).await;
     assert_eq!(refused["state"], "refused", "{refused}");
     assert!(elsewhere.exists());
+});
+
+case!(form_hears_the_whole_arrangement_up_to_15_minutes_while_other_listens_keep_a_minute, async {
+    let lab = Lab::new();
+    assert_eq!((FORM.effect)(&object(json!({}))), Effect::Playback);
+    // The whole Arrangement by default: no stretch asked, none added.
+    let whole = lab.call(&FORM, json!({})).await;
+    assert_eq!(whole["state"], "done", "{whole}");
+    assert!(whole["in_hermes"].as_str().unwrap().contains("form is kumi_form"));
+    let input = lab.tool("form").inputs.borrow()[0].clone();
+    assert!(!input.contains_key("from_beat") && !input.contains_key("beats"), "{input:?}");
+    // At 120 BPM, 14 minutes of song plays; 15 whole minutes with the half bar after doesn't.
+    let long = lab.call(&FORM, json!({"from_beat": 0, "beats": 1680})).await;
+    assert_eq!(long["state"], "done", "{long}");
+    let over = lab.call(&FORM, json!({"from_beat": 0, "beats": 1800})).await;
+    assert_eq!((over["state"].as_str(), over["code"].as_str()), (Some("refused"), Some("window_too_long")), "{over}");
+    assert!(over["reason"].as_str().unwrap().contains("900 seconds in one call here"), "{over}");
+    assert_eq!(lab.tool("form").inputs.borrow().len(), 2, "Live never asked for over 15 minutes");
+    // Every other listen is still held to a minute: 2 minutes of sound is refused.
+    let sound = lab.call(&SOUND, json!({"tracks": ["1:track:0"], "from_beat": 0, "beats": 240})).await;
+    assert_eq!(sound["code"], "window_too_long", "{sound}");
+    // A reference is staged as an audition's, never a path.
+    let reference = lab.media("song.wav", &a_wav());
+    let compared = lab.call(&FORM, json!({"reference": {"file": reference}})).await;
+    assert_eq!(compared["state"], "done", "{compared}");
+    let staged = lab.tool("form").inputs.borrow()[2]["reference"].as_str().unwrap().to_string();
+    assert!(staged != reference.to_string_lossy() && !Path::new(&staged).exists(), "{staged}");
+    let raw = lab.call(&FORM, json!({"reference": reference})).await;
+    assert_eq!(raw["state"], "refused", "{raw}");
+});
+
+case!(form_plays_within_the_hosts_budget_and_refuses_a_song_that_doesnt_fit, async {
+    let lab = Lab::new();
+    BUDGETS.with(|budgets| budgets.borrow_mut().clear());
+    // The host's deadline, 390 s: 6 minutes of song plays, the budget goes to Live for the call and is taken back after.
+    let fits = lab.call(&FORM, json!({"from_beat": 0, "beats": 720, "max_seconds": 390})).await;
+    assert_eq!(fits["state"], "done", "{fits}");
+    assert!(!lab.tool("form").inputs.borrow()[0].contains_key("max_seconds"), "the runtime's own field, not Live's");
+    assert_eq!(BUDGETS.with(|budgets| budgets.borrow().clone()), [Some(390.), None]);
+    // 7 minutes doesn't fit: refused before Live is asked, saying to read it in parts.
+    let over = lab.call(&FORM, json!({"from_beat": 0, "beats": 840, "max_seconds": 390})).await;
+    assert_eq!((over["state"].as_str(), over["code"].as_str()), (Some("refused"), Some("window_too_long")), "{over}");
+    assert!(over["reason"].as_str().unwrap().contains("read the form in parts"), "{over}");
+    assert_eq!(lab.tool("form").inputs.borrow().len(), 1);
+    // The whole song: the budget goes to Live, which refuses what can't fit; more than 15 minutes is taken as 15.
+    BUDGETS.with(|budgets| budgets.borrow_mut().clear());
+    let whole = lab.call(&FORM, json!({"max_seconds": 5000})).await;
+    assert_eq!(whole["state"], "done", "{whole}");
+    assert_eq!(BUDGETS.with(|budgets| budgets.borrow().clone()), [Some(900.), None]);
+    for bad in [json!(0), json!(-5), json!("390")] {
+        let refused = lab.call(&FORM, json!({"max_seconds": bad})).await;
+        assert_eq!(refused["state"], "refused", "{bad}: {refused}");
+    }
 });
 
 #[test]
