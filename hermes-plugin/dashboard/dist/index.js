@@ -7662,7 +7662,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               empty: state.map === null ? t("map.reading") : ["needs_runtime", "outdated_runtime", "damaged_runtime"].includes(state.setup?.state ?? "") ? (
                 // No runtime yet: setup comes first (the dashboard's header says how).
                 t("map.setupFirst")
-              ) : Object.values(state.jobs).some((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0)) ? t("map.scanningNow") : /* @__PURE__ */ jsxs(Fragment2, { children: [
+              ) : /* @__PURE__ */ jsxs(Fragment2, { children: [
                 t("dashboard.mapEmpty"),
                 /* @__PURE__ */ jsx("div", { style: { marginTop: 10 }, children: /* @__PURE__ */ jsx(CopyButton, { label: t("map.scanCopy"), text: SCAN_REQUEST }) })
               ] }),

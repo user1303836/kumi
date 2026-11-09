@@ -198,8 +198,6 @@ function Dashboard() {
               ) : ['needs_runtime', 'outdated_runtime', 'damaged_runtime'].includes(state.setup?.state ?? '') ? (
                 // No runtime yet: setup comes first (the dashboard's header says how).
                 t('map.setupFirst')
-              ) : Object.values(state.jobs).some(job => job.kind === 'scan' && (job.state === 'running' || job.state === undefined)) ? (
-                t('map.scanningNow')
               ) : (
                 <>
                   {t('dashboard.mapEmpty')}

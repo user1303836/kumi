@@ -206,9 +206,10 @@ made before). Nothing in your project changes: the result is Kumi's own copy unt
 - **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
 - **Use…** puts only the result's reference in the chat, its name and id (“Smear of 8 at 9.8×…, seed …” (artifact
   …)), so you say what to do with it; putting it on a pad or a track is a change of its own, asked as your changes are.
-- **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…** (on a
-  wide map the panel opens beside it, and the map moves over to stay in view), choose **Cross**, **Fuse**, **Loop** or
-  **Stack** and then a way to do it. Set its choices or leave any on **Auto** (the seed draws it, so **Reroll** varies
+- **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…** (in
+  Desktop, on a wide map the panel opens beside it, and the map moves over when it fits there; the dashboard shows the
+  panel under the map), choose **Cross**, **Fuse**, **Loop** or **Stack** and then a way to do it. Set its choices or
+  leave any on **Auto** (the seed draws it, so **Reroll** varies
   it): Resonate's pairing, what rings and the ring time; Modulate's played sound, the stages it may use, how many and
   how often they retrigger; the **Loop** tab's **Beat** or **Melody**, its tempo (your project's until you move it),
   bars, and its **Rhythm**, **Voices**, **Feel**, **Harmony** and **Line**. **Steer** shapes any of them (**Surprise**
