@@ -551,7 +551,7 @@ pub const ACTIONS: &[Action] = &[
     act("map.again", &[Map], &["p"], "Play the sound made again"),
     act("map.pick", &[Map], &["x"], "Pick the point chosen, or let it go"),
     act("map.pick-all", &[Map], &["a"], "Pick every point the filter keeps"),
-    act("map.grow", &[Map], &["g"], "Pick each picked point's nearest"),
+    act("map.pick-near", &[Map], &["g"], "Pick each picked point's nearest on the map"),
     act("map.hover", &[Map], &["h"], "Turn playing the point the mouse is on off and on"),
     act("map.made-one", &[Map], &["1"], "Pick the 1st sound made on the map to make the next from (or let it go)"),
     act("map.made-two", &[Map], &["2"], "Pick the 2nd sound made"),

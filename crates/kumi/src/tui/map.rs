@@ -1500,7 +1500,7 @@ impl MapView {
 
     /// Each point picked brings its NEIGHBOURS nearest on the map that the filter keeps (of its NEAREST_KEPT nearest,
     /// worked out once a map, so a big pick grows in a moment).
-    fn grow(&mut self) {
+    fn pick_near(&mut self) {
         let Some(data) = self.data.clone() else { return };
         let layer = if self.tab == 0 { &data.sounds } else { &data.songs };
         let nearest = self.nearest[self.tab].get_or_insert_with(|| Rc::new(nearest_lists(&layer.points))).clone();
@@ -2014,8 +2014,8 @@ impl MapView {
                     self.pick_all();
                     return Asked::Nothing;
                 }
-                "map.grow" if picks => {
-                    self.grow();
+                "map.pick-near" if picks => {
+                    self.pick_near();
                     return Asked::Nothing;
                 }
                 "map.hover" if self.data.is_some() => {
@@ -2773,7 +2773,7 @@ impl MapView {
             parts.push((&[], "", "drag picks (shift adds)"));
             parts.push((&["map.pick"], "", "picks"));
             parts.push((&["map.pick-all"], "", "all"));
-            parts.push((&["map.grow"], "", "grows"));
+            parts.push((&["map.pick-near"], "", "adds nearest"));
             parts.push((&["map.let-go"], "", &clears));
         } else {
             hover = format!("hover {}", if self.hover { "plays" } else { "quiet" });

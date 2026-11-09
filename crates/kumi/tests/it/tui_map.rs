@@ -87,6 +87,13 @@ fn fixture(per_class: usize, per_style: usize) -> MapData {
                 class: Some(class),
                 kind: Some(SoundKind::OneShot),
                 seconds: Some(0.3 + n as f64 % 7. * 0.1),
+                // What the arrangements read: brighter up the classes, punchier for drums.
+                brightness: Some(numbers.near(x, 0.2) * 9000.),
+                flatness: Some(numbers.near(y, 0.2).clamp(0., 1.)),
+                attack: Some(numbers.near(y, 0.3).abs() * 80.),
+                onsets: Some(numbers.near(0.5, 0.4).abs() * 6.),
+                low: Some(numbers.near(1. - x, 0.2).clamp(0., 1.)),
+                high: Some(numbers.near(x, 0.2).clamp(0., 1.)),
                 ..Default::default()
             });
         }
@@ -601,6 +608,16 @@ fn the_map_drawn_for_a_look() {
         assert!(braille(&lines));
         shots.push((format!("{name}-kitty.png"), png.expect("an image")));
         shots.push((format!("{name}-braille.txt"), (lines.join("\n") + "\n").into_bytes()));
+        shots.push((format!("{name}-braille.png"), braille_png(&screen)));
+    }
+    // Laid out by character and by keys, and the Make options open over the map, in braille.
+    let mut cells = MapView::new(Graphics::Cells, true).designing(true);
+    cells.loaded(ready(data.clone()));
+    for (name, keys) in [("map-character", "l"), ("map-texture", "l"), ("map-options", "e")] {
+        cells.on_text(keys);
+        let mut screen = Screen::new(160, 45);
+        cells.draw(&mut screen, &mut |_, _, _, _| unreachable!("cells draw no image"));
+        shots.push((format!("{name}-braille.txt"), (screen.lines().join("\n") + "\n").into_bytes()));
         shots.push((format!("{name}-braille.png"), braille_png(&screen)));
     }
     if let Some(folder) = std::env::var_os("KUMI_MAP_SHOTS") {
