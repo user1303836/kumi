@@ -138,7 +138,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **Max for Live 设备**是 Kumi 写入 Live 用户库（`User Library/Kumi/Audio Effects`）的新文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。
 - **插件预设**是你放进用户库后 Kumi 写入 Live 用户库（`User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects`）的新 `.vstpreset` 文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。为了知道你安装的 Serum 2、Pro-Q 4 或 Ozone 12 是哪个版本，Kumi 会读取标准插件文件夹中的 VST3 元数据；它从不加载插件。
 - **波表**是 Kumi 写入 Vital 波表文件夹（`~/Music/Vital/User/Wavetables`；Windows 上为 `~/Documents/Vital/User/Wavetables`）或 Live 用户库（`User Library/Kumi/Wavetables`，用于 Serum 2 等）的新 `.wav` 文件（从不覆盖已有文件），位于 Kumi 自己的数据之外。撤销后它们仍会保留。
-- **评判回合和调校**会在 Live 中播放那一段（每次最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次），听到的声音在调用结束前留在 Kumi 自己的数据里：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
+- **评判回合和调校**会在 Live 中播放那一段：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。每一遍最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次。听到的声音在调用结束前留在 Kumi 自己的数据里。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
 - **项目的副本：** 在某些修改之前，Kumi 会把最后保存的项目复制一份放在它旁边，每个保存的版本只复制一次。未保存的项目不会被复制，Kumi 也从不保存项目本身。
   - Live：当一次修改进行到第三步时（`<Set>.backup-<日期>.als`）。副本会一直保留，直到你删除它。
   - Renoise：在加载采样的修改之前，例如把资料库里的声音放进一个乐器时（`<Song> (Kumi copy <日期>).xrns`）。Kumi 为每首曲子保留最新的 5 份副本，并删除更早的副本。超过 512 MB 的曲子不会被复制。
