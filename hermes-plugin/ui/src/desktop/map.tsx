@@ -1,6 +1,8 @@
-// The sound-map workspace: Kumi's map of the approved sample folders. A click auditions a sound here, in the window
-// (a read, nothing reaches the DAW); "Use" puts a request naming that sound into the chat for the producer to finish,
-// and "Use on pad…" one naming a drum pad too. A sound that can't play here leaves the map quietly (never a notice per
+// The sound-map workspace: Kumi's map of the approved sample folders, with the palette under it. A sound plays here,
+// in the window, as the pointer rests on it or on a click (a read, nothing reaches the DAW); a box (Shift held, or
+// Select on) picks sounds, and Add to palette gathers them into the palette the agent shares. "Use" puts a request
+// naming a sound into the chat for the producer to finish, "Use on pad…" one naming a drum pad too, and the palette's
+// "Use as kit…" one to load it as a kit. A sound that can't play here leaves the map quietly (never a notice per
 // sound), and one line under the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
@@ -8,12 +10,18 @@ import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { liveNote, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
-import { type Audition, playFailure, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
+import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import type { KumiStore } from '../shared/store.ts'
+import { kitRequest } from '../shared/palette.ts'
+import { PaletteDock } from '../shared/PaletteDock.tsx'
+import { usePaletteMap } from '../shared/paletteMap.ts'
+import { errorText, type KumiStore } from '../shared/store.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
+
+/** Desktop's own storage key for hover-to-play (on unless the producer turned it off, as native Kumi's `h`). */
+export const HOVER_PLAY = 'mapHover'
 
 // The first sixteen pads as Live's Drum Rack shows them: C1 (note 36) bottom left, D#2 (51) top right.
 const PAD_ROWS = [48, 44, 40, 36].map(start => [start, start + 1, start + 2, start + 3])
@@ -57,109 +65,135 @@ export function PadPicker({ daw, onPick, onClose }: { daw: unknown; onPick: (not
   )
 }
 
-export function errorText(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error ?? '')
-  // Desktop's ctx.rest rejects with "<status>: <body>"; FastAPI's body says why in `detail`.
-  const json = text.indexOf('{')
-  if (json >= 0) {
-    try {
-      const body: unknown = JSON.parse(text.slice(json))
-      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
-    } catch {
-      // not JSON: the text as it came
-    }
-  }
-  return text || 'no answer'
-}
-
 export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; store: KumiStore; audition: Audition }) {
   const t = useT()
   useWant(store, 'map')
+  useWant(store, 'palette')
   const state = useKumi(store)
   const playing = usePlaying(audition)
   const [selected, setSelected] = useState<null | string>(null)
   // The sound whose pad picker is open: one at a time, and it closes when another sound is picked.
   const [padsFor, setPadsFor] = useState<null | string>(null)
-  const play = (id: string) => {
-    audition.play(id).catch(error => {
-      const why = playFailure(error)
-      if (why === 'gone' || why === 'unplayable') {
-        store.hide(id, why)
-        setSelected(current => (current === id ? null : current))
-      } else if (why === 'other') {
-        host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) })
-      }
-    })
-  }
+  const [hover, setHover] = useState(() => ctx.storage.get<boolean>(HOVER_PLAY, true) !== false)
+  const palette = usePaletteMap(store, state, audition, t, {
+    hover,
+    other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
+    left: id => setSelected(current => (current === id ? null : current))
+  })
+  const session = ownerSession(state)
   const map = state.map
   const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
   return (
-    <MapCanvas
-      actions={(id, sound) => {
-        const request = soundRequest(id, sound.name, map?.revision)
-        const near = nearRequest(id, sound.name, map?.revision)
-        return (
-          <>
-            <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title={t('map.playTitle')}>
-              {playing === id ? t('map.stop') : t('map.play')}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <MapCanvas
+          actions={(id, sound) => {
+            const request = soundRequest(id, sound.name, map?.revision)
+            const near = nearRequest(id, sound.name, map?.revision)
+            return (
+              <>
+                <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))} title={t('map.playTitle')}>
+                  {playing === id ? t('map.stop') : t('map.play')}
+                </TextButton>
+                <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
+                  {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
+                </TextButton>
+                {near && (
+                  <TextButton onClick={() => void ask(ctx, near, { send: false, session })} title={t('map.moreLikeTitle')}>
+                    {t('map.moreLike')}
+                  </TextButton>
+                )}
+                {request && (
+                  <TextButton onClick={() => setPadsFor(padsFor === id ? null : id)} pressed={padsFor === id} title={t('map.useOnPadTitle')}>
+                    {t('map.useOnPad')}
+                  </TextButton>
+                )}
+                {request && (
+                  <TextButton onClick={() => void ask(ctx, request, { send: false, session })} strong title={t('map.useTitle')}>
+                    {t('map.use')}
+                  </TextButton>
+                )}
+                {request && padsFor === id && (
+                  <PadPicker
+                    daw={state.status?.daw}
+                    onClose={() => setPadsFor(null)}
+                    onPick={note => {
+                      setPadsFor(null)
+                      const onPad = padRequest(id, note, state.status?.daw, sound.name, map?.revision)
+                      if (onPad) void ask(ctx, onPad, { send: false, session })
+                    }}
+                  />
+                )}
+              </>
+            )
+          }}
+          empty={empty}
+          found={state.found}
+          hiddenActions={
+            <>
+              <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
+                {t('map.showHidden')}
+              </TextButton>
+              <TextButton onClick={() => void ask(ctx, RESCAN_REQUEST, { send: false, session })} title={t('map.rescanTitle')}>
+                {t('map.rescan')}
+              </TextButton>
+            </>
+          }
+          leaving={state.leaving}
+          map={map}
+          marked={palette.marked}
+          onHover={palette.onHover}
+          onPick={id => {
+            setSelected(id)
+            palette.play(id)
+          }}
+          onPicked={palette.onPicked}
+          onSelect={id => {
+            setSelected(id)
+            if (id !== padsFor) setPadsFor(null)
+          }}
+          picked={palette.picked}
+          pickedActions={ids => (
+            <>
+              <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
+                {t('dock.addPicked', ids.length)}
+              </TextButton>
+              <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
+                {t('dock.clearPicks')}
+              </TextButton>
+            </>
+          )}
+          playing={playing}
+          selected={selected}
+          tools={
+            <TextButton
+              onClick={() => {
+                ctx.storage.set(HOVER_PLAY, !hover)
+                setHover(!hover)
+              }}
+              pressed={hover}
+              title={t('dock.hoverTitle')}
+            >
+              {t('dock.hover')}
             </TextButton>
-            {near && (
-              <TextButton onClick={() => void ask(ctx, near, { send: false, session: ownerSession(state) })} title={t('map.moreLikeTitle')}>
-                {t('map.moreLike')}
-              </TextButton>
-            )}
-            {request && (
-              <TextButton onClick={() => setPadsFor(padsFor === id ? null : id)} pressed={padsFor === id} title={t('map.useOnPadTitle')}>
-                {t('map.useOnPad')}
-              </TextButton>
-            )}
-            {request && (
-              <TextButton
-                onClick={() => void ask(ctx, request, { send: false, session: ownerSession(state) })}
-                strong
-                title={t('map.useTitle')}
-              >
-                {t('map.use')}
-              </TextButton>
-            )}
-            {request && padsFor === id && (
-              <PadPicker
-                daw={state.status?.daw}
-                onClose={() => setPadsFor(null)}
-                onPick={note => {
-                  setPadsFor(null)
-                  const onPad = padRequest(id, note, state.status?.daw, sound.name, map?.revision)
-                  if (onPad) void ask(ctx, onPad, { send: false, session: ownerSession(state) })
-                }}
-              />
-            )}
-          </>
-        )
-      }}
-      empty={empty}
-      found={state.found}
-      hiddenActions={
-        <>
-          <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
-            {t('map.showHidden')}
+          }
+        />
+      </div>
+      <PaletteDock
+        audio={id => audition.url(id)}
+        groups={map?.groups}
+        kit={current => (
+          <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
+            {t('dock.kit')}
           </TextButton>
-          <TextButton onClick={() => void ask(ctx, RESCAN_REQUEST, { send: false, session: ownerSession(state) })} title={t('map.rescanTitle')}>
-            {t('map.rescan')}
-          </TextButton>
-        </>
-      }
-      leaving={state.leaving}
-      map={map}
-      onPick={id => {
-        setSelected(id)
-        play(id)
-      }}
-      onSelect={id => {
-        setSelected(id)
-        if (id !== padsFor) setPadsFor(null)
-      }}
-      playing={playing}
-      selected={selected}
-    />
+        )}
+        onDo={action => store.paletteDo(action)}
+        onPlay={id => palette.play(id)}
+        onStop={() => audition.stop()}
+        palette={state.palette}
+        playing={playing}
+        said={state.paletteSaid}
+      />
+    </div>
   )
 }

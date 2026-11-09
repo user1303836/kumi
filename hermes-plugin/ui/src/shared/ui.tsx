@@ -83,12 +83,14 @@ export function TextButton({
         lineHeight: '18px',
         padding: '0 7px',
         borderRadius: 3,
-        border: `1px solid ${strong ? T.accent : T.border}`,
-        background: 'transparent',
-        color: disabled ? T.faint : strong ? T.accent : T.secondary,
+        // A toggle that's on reads as on, not only to a screen reader (hover to play, Select, Strict or Loose).
+        border: `1px solid ${strong || pressed ? T.accent : T.border}`,
+        background: pressed ? `color-mix(in srgb, ${T.accent} 14%, transparent)` : 'transparent',
+        color: disabled ? T.faint : strong || pressed ? T.accent : T.secondary,
         cursor: disabled ? 'default' : 'pointer',
         whiteSpace: 'nowrap',
-        flex: 'none'
+        flex: 'none',
+        transition: 'background-color 120ms, border-color 120ms, color 120ms'
       }}
     >
       {children}

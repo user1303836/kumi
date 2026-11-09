@@ -1,5 +1,5 @@
 // React glue over the store, and the local audition player both halves share.
-import { useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 import type { AudioReply } from './types.ts'
 import { statusOf, type KumiState, type KumiStore, type Part } from './store.ts'
@@ -16,6 +16,11 @@ export function useWant(store: KumiStore, part: Part): void {
 
 /** How much audio the window keeps for replays, counted in data-URL characters (about bytes). */
 export const AUDITION_CACHE_CHARS = 48 * 1024 * 1024
+/** A hover's preview, as native Kumi's map plays one: the first two seconds, cut with a 0.2 s fade. */
+export const PREVIEW_SECONDS = 2
+export const PREVIEW_FADE_SECONDS = 0.2
+/** How long the pointer rests on a sound before its preview loads: a sweep across the map loads nothing. */
+export const HOVER_REST_MS = 70
 
 /**
  * Plays a sound or artifact Kumi published, in the window only: an audition is a read (the bytes come from the
@@ -30,6 +35,8 @@ export class Audition {
   private generation = 0
   /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
   private turn = 0
+  /** Whether what plays is a hover's preview: leaving the map stops that, never a sound the producer clicked. */
+  private previewing = false
   private listeners = new Set<() => void>()
   playing: string | null = null
 
@@ -92,8 +99,9 @@ export class Audition {
 
   /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
    *  there's never more than one sound playing, and never one that can't be stopped. A play taken over that way ends
-   *  quietly, whatever happened to it: only the sound still wanted can fail. */
-  async play(id: string): Promise<void> {
+   *  quietly, whatever happened to it: only the sound still wanted can fail. `preview` plays a hover's preview: the
+   *  first `preview` seconds, faded out. */
+  async play(id: string, options: { preview?: number } = {}): Promise<void> {
     this.stop()
     const turn = this.turn
     this.changed(id)
@@ -102,9 +110,11 @@ export class Audition {
       if (turn !== this.turn) return
       const audio = new Audio(url)
       this.audio = audio
+      this.previewing = options.preview !== undefined
       audio.onended = () => {
         if (this.audio === audio) this.stop()
       }
+      if (options.preview !== undefined) this.cut(audio, turn, options.preview)
       await audio.play()
     } catch (error) {
       if (turn !== this.turn) return
@@ -113,14 +123,36 @@ export class Audition {
     }
   }
 
+  /** A preview's end: past `seconds` less the fade, the volume falls to nothing over the fade, then it stops. */
+  private cut(audio: HTMLAudioElement, turn: number, seconds: number): void {
+    const fade = PREVIEW_FADE_SECONDS * 1000
+    setTimeout(() => {
+      const start = performance.now()
+      const step = () => {
+        if (turn !== this.turn || this.audio !== audio) return
+        const left = 1 - (performance.now() - start) / fade
+        if (left <= 0) return this.stop()
+        audio.volume = left
+        setTimeout(step, 16)
+      }
+      step()
+    }, Math.max(0, seconds * 1000 - fade))
+  }
+
   stop(): void {
     this.turn += 1
+    this.previewing = false
     if (this.audio) {
       this.audio.pause()
       this.audio.onended = null
       this.audio = null
     }
     if (this.playing !== null) this.changed(null)
+  }
+
+  /** The pointer left the map: a hover's preview stops; a sound the producer clicked plays on. */
+  stopPreview(): void {
+    if (this.previewing) this.stop()
   }
 
   dispose(): void {
@@ -131,6 +163,31 @@ export class Audition {
 
 export function usePlaying(audition: Audition): string | null {
   return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing)
+}
+
+/** Sounds play as the pointer rests on them (native Kumi's map, `h`): `onHover` from the map plays each one's preview
+ *  through `play` once the pointer has rested `HOVER_REST_MS` on it, and stops the preview when it leaves the map.
+ *  Nothing happens while `enabled` is off. */
+export function useHoverPlay(audition: Audition, enabled: boolean, play: (id: string) => void): (id: string | null) => void {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const played = useRef(play)
+  played.current = play
+  useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(() => {
+    if (!enabled) audition.stopPreview()
+  }, [audition, enabled])
+  return useCallback(
+    (id: string | null) => {
+      clearTimeout(timer.current)
+      if (!enabled) return
+      if (id === null) {
+        audition.stopPreview()
+        return
+      }
+      timer.current = setTimeout(() => played.current(id), HOVER_REST_MS)
+    },
+    [audition, enabled]
+  )
 }
 
 /** Why a play failed, for what to do about it: `gone`, the backend has no audio for the id (the file went, or left the

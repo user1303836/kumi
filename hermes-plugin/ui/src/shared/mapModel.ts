@@ -283,3 +283,34 @@ export function frame(model: MapModel, ids: Set<string>, width: number, height: 
   const cy = (y0 + y1) / 2
   return { scale, dx: width / 2 - cx * size * scale, dy: height / 2 - cy * size * scale }
 }
+
+/** The points inside a screen box (a drag's corners, any order), among those `visible` allows, in the map's own order:
+ *  what a box selection picks. Read through the grid, so a box over a corner of a 25,000-sound map tests only the
+ *  points near it. */
+export function pointsInBox(
+  model: MapModel,
+  view: MapViewport,
+  size: number,
+  box: [number, number, number, number],
+  visible?: (index: number) => boolean
+): number[] {
+  const unit = size * view.scale
+  if (unit <= 0) return []
+  const [ax, ay, bx, by] = box
+  const x0 = (Math.min(ax, bx) - view.dx) / unit
+  const x1 = (Math.max(ax, bx) - view.dx) / unit
+  const y0 = (Math.min(ay, by) - view.dy) / unit
+  const y1 = (Math.max(ay, by) - view.dy) / unit
+  if (x1 < 0 || y1 < 0 || x0 > 1 || y0 > 1) return []
+  const cell = (value: number) => Math.min(GRID - 1, Math.max(0, Math.floor(value * GRID)))
+  const out: number[] = []
+  for (let cy = cell(y0); cy <= cell(y1); cy++) {
+    for (let cx = cell(x0); cx <= cell(x1); cx++) {
+      for (const index of model.cells.get(cy * GRID + cx) ?? []) {
+        const point = model.points[index]
+        if (point.x >= x0 && point.x <= x1 && point.y >= y0 && point.y <= y1 && (!visible || visible(index))) out.push(index)
+      }
+    }
+  }
+  return out.sort((a, b) => a - b)
+}
