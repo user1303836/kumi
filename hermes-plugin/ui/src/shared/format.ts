@@ -246,6 +246,15 @@ export function soundRequest(soundId: string, name?: string, revision?: string |
   return said ? `“${said}” (${which})` : which
 }
 
+/** What Use… puts in the input for a file Kumi made (a made sound, a kept one in the palette): its name, quoted, then
+ *  its artifact id, so the model can hand `{artifact_id}` to a file step. Null for an id the runtime doesn't write. */
+export function artifactReference(artifactId: string, name?: string): string | null {
+  const id = plainId(artifactId)
+  if (!id) return null
+  const said = quotable(name)
+  return said ? `“${said}” (artifact ${id})` : `artifact ${id}`
+}
+
 /** The most sounds one "More like these" names: Kumi's `near` takes up to sixteen. */
 export const MOST_NEAR = 16
 /** How many of them the request names, before "and N more". */

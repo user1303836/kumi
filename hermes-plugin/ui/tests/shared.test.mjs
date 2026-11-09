@@ -391,6 +391,52 @@ test('zoom keeps the point under the pointer still, search needs every word, and
     assert.ok(px >= 0 && px <= 400 && py >= 0 && py <= 300, `${id} framed at ${px},${py}`)
   }
   assert.ok(framed.scale > 1)
+  // Under a floating bar 80 px tall, the whole map and what a find frames sit below it, never under it.
+  const side = map.mapSide(400, 300, 80)
+  const fitted = map.fitView(400, 300, 80)
+  assert.ok(map.toScreen(fitted, side, 0, 0)[1] >= 80 && map.toScreen(fitted, side, 1, 1)[1] <= 300)
+  const framedBelow = map.frame(model, new Set(['s-1', 's-2']), 400, 300, 80)
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px, py] = map.toScreen(framedBelow, side, point.x, point.y)
+    assert.ok(px >= 0 && px <= 400 && py >= 80 && py <= 300, `${id} framed below the bar at ${px},${py}`)
+  }
+  // Beside a sheet covering the right 180 px of a 640-wide canvas, the whole map and a find's frame sit left of it.
+  const wide = map.mapSide(640, 300)
+  const besideFit = map.fitView(640, 300, 0, 180)
+  assert.ok(map.toScreen(besideFit, wide, 0, 0)[0] >= 0 && map.toScreen(besideFit, wide, 1, 1)[0] <= 460, JSON.stringify(besideFit))
+  const framedBeside = map.frame(model, new Set(['s-1', 's-2']), 640, 300, 0, 180)
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px] = map.toScreen(framedBeside, wide, point.x, point.y)
+    assert.ok(px >= 0 && px <= 460, `${id} framed left of the sheet at ${px}`)
+  }
+})
+
+test("the picks' actions float beside the picks and never over them; with no room, or no picks in view, at the map's foot", () => {
+  const covers = (at, w, h, box) => at.left < box[2] && at.left + w > box[0] && at.top < box[3] && at.top + h > box[1]
+  const card = [200, 40]
+  // A 600 × 500 map, 60 px of bar on top, 10 px kept at the foot. Picks on the left: the card goes to their right.
+  const left = [40, 200, 120, 260]
+  const right = map.floatBeside(left, ...card, 600, 500, 60, 10)
+  assert.ok(right.left > left[2] && !covers(right, ...card, left), JSON.stringify(right))
+  // Picks on the right: to their left.
+  const onRight = [460, 200, 560, 260]
+  const leftOf = map.floatBeside(onRight, ...card, 600, 500, 60, 10)
+  assert.ok(leftOf.left + card[0] < onRight[0] && !covers(leftOf, ...card, onRight), JSON.stringify(leftOf))
+  // Picks across the whole width (a narrow map): above them, or below when the bar leaves no room above.
+  for (const box of [
+    [20, 300, 580, 360],
+    [20, 70, 580, 200]
+  ]) {
+    const at = map.floatBeside(box, ...card, 600, 500, 60, 10)
+    assert.ok(!covers(at, ...card, box) && at.top >= 60 && at.top + card[1] <= 490 && at.left >= 8 && at.left + card[0] <= 592, `${JSON.stringify(at)} for ${box}`)
+  }
+  // Picks filling the map, or none in view: docked at the foot, inside the map, below the bar.
+  for (const box of [[0, 60, 600, 500], null]) {
+    const at = map.floatBeside(box, ...card, 600, 500, 60, 10)
+    assert.deepEqual(at, { left: 200, top: 450 })
+  }
 })
 
 test('the store reads what moved: FOCUS and HISTORY again only when their revision changes', async () => {

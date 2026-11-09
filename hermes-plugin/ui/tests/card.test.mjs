@@ -436,8 +436,9 @@ test('what the agent found, or a search, is also listed by name above the map, f
   }
   const draw = (found, selected = null) =>
     renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
-  // The listed rows: after the list's label, before the canvas (the legend's toggles are pressed buttons too).
-  const rows = html => html.slice(html.indexOf('role="group"'), html.indexOf('<canvas'))
+  // The listed rows: the list's own card, the last group before the canvas (the tools and the legend's toggles, before
+  // it, are pressed buttons too).
+  const rows = html => html.slice(html.lastIndexOf('<div', html.lastIndexOf('role="group"', html.indexOf('<canvas'))), html.indexOf('<canvas'))
   const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
   assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
   assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
@@ -456,7 +457,8 @@ test('what the agent found, or a search, is also listed by name above the map, f
   for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), `${english('map.closeness', '87')} · measured: darker than most`]) {
     assert.ok(near.includes(text), `${text} in ${near}`)
   }
-  assert.ok(!rows(near).includes('%'), rows(near))
+  const words = rows(near).replace(/<[^>]*>/g, ' ')
+  assert.ok(!words.includes('%'), words)
   // "More like these": several seeds, the first named and the rest counted.
   assert.ok(draw({ ...nearFind, near: ['s-r7-0099', ids[7]] }).includes(english('map.nearMany', 'Kick 1.wav', 1)))
   // The same hits found without a near search say their reasons alone; a seed the map doesn't list heads nothing.

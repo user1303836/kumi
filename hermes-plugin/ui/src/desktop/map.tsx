@@ -13,9 +13,10 @@ import { useEffect, useRef, useState } from 'react'
 import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useRequest } from '../shared/design.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
-import { MakePanel } from '../shared/MakePanel.tsx'
+import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { kitRequest } from '../shared/palette.ts'
+import { ToolButton } from '../shared/mapUi.tsx'
+import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
 import { errorText, type KumiStore } from '../shared/store.ts'
@@ -27,6 +28,10 @@ import { ownerSession } from './pane.tsx'
 export const HOVER_PLAY = 'mapHover'
 /** Desktop's own storage key for the square-tile view (off until the producer turns it on). */
 export const TILES = 'mapTiles'
+/** Desktop's own storage key for whether the palette drawer is open (open until the producer folds it). */
+export const PALETTE_OPEN = 'paletteOpen'
+/** How wide the map must be for the Make panel to float beside it rather than over its lower part. */
+const SIDE_SHEET = 820
 
 // The first sixteen pads as Live's Drum Rack shows them: C1 (note 36) bottom left, D#2 (51) top right.
 const PAD_ROWS = [48, 44, 40, 36].map(start => [start, start + 1, start + 2, start + 3])
@@ -88,22 +93,34 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   })
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(() => ctx.storage.get<boolean>(PALETTE_OPEN, true) !== false)
+  // How wide the map is: wide enough, and the Make panel floats beside it, the map moving into the room it leaves.
+  const area = useRef<HTMLDivElement | null>(null)
+  const [areaWidth, setAreaWidth] = useState(0)
+  useEffect(() => {
+    const element = area.current
+    if (!element) return
+    const observer = new ResizeObserver(entries => setAreaWidth(entries[0]?.contentRect.width ?? 0))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const beside = areaWidth >= SIDE_SHEET
   const session = ownerSession(state)
   const map = state.map
   const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {/* The Make panel floats over the map, not the dock: a kept sound lands in the dock in view. */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      {/* The Make panel floats over the map, not the palette: a kept sound lands in the palette in view. */}
+      <div ref={area} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <MapCanvas
+          audio={id => audition.url(id)}
+          coverRight={palette.making && beside ? sideSheetWidth(areaWidth) + 16 : 0}
+          onStop={() => audition.stop()}
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)
             const near = nearRequest([{ id, name: sound.name }], map?.revision)
             return (
               <>
-                <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))} title={t('map.playTitle')}>
-                  {playing === id ? t('map.stop') : t('map.play')}
-                </TextButton>
                 <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
                   {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                 </TextButton>
@@ -197,16 +214,16 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           }}
           tiles={tiles}
           tools={
-            <TextButton
+            <ToolButton
+              icon="hover"
+              label={t('dock.hover')}
               onClick={() => {
                 ctx.storage.set(HOVER_PLAY, !hover)
                 setHover(!hover)
               }}
               pressed={hover}
               title={t('dock.hoverTitle')}
-            >
-              {t('dock.hover')}
-            </TextButton>
+            />
           }
         />
         {palette.making && (
@@ -220,6 +237,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             onSources={palette.makeFrom}
             onPlay={id => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))}
             onStop={() => audition.stop()}
+            placement={beside ? 'side' : 'bottom'}
             playing={playing}
             results={state.designs}
             sources={palette.making}
@@ -246,11 +264,24 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         landing={dock}
         make={palette.makeFromPalette}
         onDo={action => store.paletteDo(action)}
+        onOpen={open => {
+          ctx.storage.set(PALETTE_OPEN, open)
+          setPaletteOpen(open)
+        }}
         onPlay={id => palette.play(id)}
         onStop={() => audition.stop()}
+        open={paletteOpen}
         palette={state.palette}
         playing={playing}
         said={state.paletteSaid}
+        use={item => {
+          const request = itemReference(item, state.palette?.map_revision ?? null)
+          return request ? (
+            <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
+              {t('map.use')}
+            </TextButton>
+          ) : null
+        }}
       />
     </div>
   )

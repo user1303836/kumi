@@ -1,7 +1,7 @@
 // Kumi's palette as the map and its dock use it: the sounds the producer gathered to work with, kept by the backend
 // (`/palette`) and shared with the agent's `kumi_palette`, with native Kumi's semantics. Plain data here, no DOM:
 // tested in ui/tests.
-import { plainId, quotable } from './format.ts'
+import { artifactReference, plainId, quotable, soundRequest } from './format.ts'
 
 export interface PaletteItem {
   /** The item's own id in the palette: what remove and move name. */
@@ -95,6 +95,14 @@ export function paletteName(text: string): string | null {
 export function kitRequest(name: string): string {
   const said = quotable(name)
   return said ? `Load the sounds in my palette “${said}” as a kit` : 'Load the sounds in my palette as a kit'
+}
+
+/** What a palette card's Use… puts in the input: the item's reference and nothing else, a sound by its id on the map the
+ *  palette names (`revision`), a file Kumi made by its artifact id. Null for an item off this map with no file of its
+ *  own. */
+export function itemReference(item: PaletteItem, revision: string | null): string | null {
+  if (item.sound_id) return soundRequest(item.sound_id, item.name, revision)
+  return item.artifact_id ? artifactReference(item.artifact_id, item.name) : null
 }
 
 /** The sound ids a gather sends: plain ids only, each once, at most `MOST_GATHERED` (the first ones, in map order). */
