@@ -15,7 +15,8 @@ provides_tools: [kumi_status, kumi_setup, kumi_connect, kumi_observe, kumi_read,
                  kumi_transport,
                  kumi_script, kumi_variations, kumi_device,
                  kumi_plugin_knowledge, kumi_preset_build,
-                 kumi_preset, kumi_judge, kumi_tune, kumi_wavetable, kumi_design]
+                 kumi_preset, kumi_judge, kumi_tune, kumi_wavetable, kumi_design,
+                 kumi_sound, kumi_audition, kumi_groove, kumi_render]
 provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
                  on_session_finalize, agent_loop_stopped, subagent_start]
 config_schema:

@@ -63,14 +63,15 @@ PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_histor
 # What the producer approves first: always for setup, and for the rest while "Ask before each change" is on.
 # What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
-         "kumi_tune", "kumi_wavetable"}
+         "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_groove", "kumi_render"}
 # The owner's decision: by default Kumi makes the changes the producer asks for in the DAW without asking, each in
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
 # refusal still refuses, unattended and forked turns still don't write, and setup, sample folders and Mirelo's uploads
 # and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
 UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
-                      "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable"}
+                      "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound",
+                      "kumi_audition", "kumi_groove", "kumi_render"}
 _ALWAYS_ASKED = "_always_asked"
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build", "kumi_design"}
@@ -275,6 +276,8 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _wavetable(host, args), {}
     if tool == "kumi_design":  # a new sound kept as Kumi's private copy: nothing in the DAW changes
         return None, {}
+    if tool in ("kumi_sound", "kumi_audition", "kumi_groove", "kumi_render"):
+        return _live_listening(host, tool[len("kumi_"):], args), {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
 
 
@@ -435,6 +438,67 @@ def _wavetable(host: Any, args: dict) -> dict:
     frames = f", {table['count']} frames" if isinstance(table.get("count"), int) else ""
     lines = [f"Kumi: make {name} for plug-in {quoted(args['device_ref'], 60)}", f"{drawn}{frames}", WAVETABLE_WARNING]
     return approve(lines, f"kumi:wavetable:{calls.digest(args)}")
+
+
+# Live's other listening tools (serve's sound, audition, groove and render): listens (sound, audition, a render) under
+# the playback class kumi_listen's captures use, and a groove round that changes notes as a change; a groove start or
+# done only reads the notes, so it's never asked. No runtime preview exists for them: they're asked in words built from
+# their arguments, after the plugin's own checks.
+LISTENING_ONLY_LIVE = f"{JUDGED}. Kumi measures, auditions, grooves and renders tracks only in Ableton Live."
+LISTENING_PLAYS = ("Live plays it through Kumi Ears with Live stopped and not recording (at most 60 s, a bar before and "
+                   "half a bar after included), and puts it back after.")
+AUDITION_COPIES = "Their Session clips play from temporary copies in the Arrangement, removed after."
+RENDER_KEPT = ("Offline, with no playback: the file is kept in Kumi's own data, and Live's temporary render file is "
+               "deleted.")
+GROOVE_KEEPS = "Kumi keeps the change only if the feel moved toward the reference; otherwise it takes it back itself."
+GROOVE_APPLY = "A change in HISTORY: kumi_undo takes it back."
+
+
+def _beats(args: dict, default: str) -> str:
+    start = args.get("from_beat")
+    if "beats" in args:
+        return f"beats {start:g}–{start + args['beats']:g}"
+    return f"{default} from beat {start:g}"
+
+
+def _live_listening(host: Any, tool: str, args: dict) -> dict | None:
+    refusal = tools.LISTENING_REFUSALS[tool](args)
+    if refusal is not None:
+        return block(refused(JUDGED, refusal))
+    if host.daw() != "ableton":
+        return block(LISTENING_ONLY_LIVE)
+    if tool == "groove":
+        if not tools.groove_changes(args):
+            return None
+        if "change" in args:
+            lines = [f"Kumi: judge this groove change, {quoted(args['change'], 80)}", GROOVE_KEEPS]
+        else:
+            amount = args.get("amount", 1)
+            lines = [f"Kumi: move the part's notes toward the reference's feel ({amount:g} of the way)", GROOVE_APPLY]
+        return approve(lines, "kumi:write:groove")
+    if tool == "sound":
+        heard = ", ".join(quoted(track, 40) for track in args["tracks"])
+        against = f" against {quoted(args['against'], 40)}" if "against" in args else ""
+        lines = [f"Kumi: measure {heard}{against}, {_beats(args, '8 bars')}", LISTENING_PLAYS]
+    elif tool == "audition":
+        named = [quoted(candidate.get("label") or ("the mix" if candidate.get("mix") else candidate["track"]), 40)
+                 for candidate in args["candidates"]]
+        clips = all("clip" in candidate for candidate in args["candidates"])
+        where = "their Session clips" if clips else _beats(args, "8 beats")
+        lines = [f"Kumi: audition {', '.join(named)}, {where}"]
+        if "reference" in args:
+            reference = args["reference"]
+            name = reference.get("clip_ref") or reference.get("sound_id") or reference.get("artifact_id") or (
+                Path(str(reference.get("file", ""))).name)
+            lines.append(f"Against {quoted(name, 60)}, {args.get('reference_seconds', tools.REFERENCE_SECONDS):g} s of it")
+        lines.append(LISTENING_PLAYS)
+        if any("clip" in candidate for candidate in args["candidates"]):
+            lines.append(AUDITION_COPIES)
+    else:
+        start = args["from_beat"]
+        lines = [f"Kumi: render track {quoted(args['track'], 60)}'s own clips, beats {start:g}–{start + args['beats']:g}",
+                 RENDER_KEPT]
+    return approve(lines, f"kumi:playback:{tool}")
 
 
 def preview_timeout(hook_timeout: float | None) -> float:

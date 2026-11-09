@@ -1324,12 +1324,53 @@ def wavetable(fixture: Fixture, args: dict, host: dict) -> dict:
             "in_hermes": "The file stays where it is: an undo doesn't remove it, and it's not in HISTORY."}
 
 
+def listening(name: str):
+    """Serve's sound, audition, groove and render as they answer (the listening-parity contract): refused off the
+    project or with a path for a reference, else `done` with Live's answer. An audition makes a heard row; a groove
+    change or apply is a HISTORY change of its own, and a change whose words say "worse" takes the newest change back
+    instead; a render answers an artifact, never a path."""
+    def run(fixture: Fixture, args: dict, host: dict) -> dict:
+        same = {"history_ids": [], "taken_back": [], "project_key": fixture.set["key"], "epoch": fixture.epoch}
+        if not fixture.connected:
+            return {"state": "refused", "code": "not_connected", "reason": "Kumi isn't connected.", **same}
+        if (args.get("expected_project_key"), args.get("expected_epoch")) != (fixture.set["key"], fixture.epoch):
+            return {"state": "refused", "code": "stale", "reason": "The project changed: observe again.", **same}
+        if isinstance(args.get("reference"), str) and name == "audition":
+            return {"state": "refused", "code": "invalid", "reason": "A reference is a clip_ref or a source.", **same}
+        if name == "groove" and ({"audio", "reference_tempo"} & set(args) or "/" in str(args.get("reference", ""))):
+            return {"state": "refused", "code": "unsupported", "reason": "A groove's reference is a MIDI clip.", **same}
+        ids, taken, round_ = [], [], {"kind": name}
+        if name == "groove" and "worse" in str(args.get("change", "")):
+            newest = next(row for row in reversed(fixture.history) if row["state"] == "applied")
+            newest["state"], taken = "undone", [newest["id"]]
+        elif name == "audition" or (name == "groove" and ("change" in args or args.get("apply") is True)):
+            heard = name == "audition"
+            ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+            fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}",
+                                    "project_key": fixture.set["key"], "runtime_generation": fixture.generation,
+                                    "title": "Auditioned" if heard else "Groove applied", "family": "clip",
+                                    "at": now(), "state": "heard" if heard else "applied", "undo_available": not heard,
+                                    "track": "Drums", "tool_call_id": host.get("tool_call_id"),
+                                    "call_outcome": "heard" if heard else "applied",
+                                    "change_id": f"ch-{len(fixture.history) + 1}", "before": copy.deepcopy(fixture.set)})
+            ids = [ident]
+        if name == "render":
+            round_ = {"seconds": 4, "channels": 2, "sampleRate": 48000, "artifact_id": "a-render-1",
+                      "verdict_text": "Quiet, dark.", "note": "Hear it with listen (file)."}
+        fixture.publish("history", "focus")
+        return {**same, "state": "done", "round": round_, "history_ids": ids, "taken_back": taken,
+                "undo_available": bool(ids) and name == "groove",
+                "in_hermes": "In Kumi for Hermes: sound is kumi_sound, audition is kumi_audition."}
+    return run
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
          "variations": variations, "device": device, "preset_build": preset_build,
          "preset": preset, "judge": judged("judge"), "tune": judged("tune"), "wavetable": wavetable,
-         "design": design}
+         "design": design, "sound": listening("sound"), "audition": listening("audition"),
+         "groove": listening("groove"), "render": listening("render")}
 
 
 def main() -> None:

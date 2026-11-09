@@ -129,6 +129,10 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 
 “把它做到 −14 LUFS，峰值上限 −1 dB。”Kumi 按回合（`kumi_judge`）朝响度、真峰值或参考曲的平衡靠近：它聆听那一段，列出差距，每次你做出修改后，只有变好了才保留，否则自己撤回。`kumi_tune` 让 Kumi 在这样的回合中为设备挑选数值。每个回合都是 HISTORY 中可以撤销的一次修改；Live 停止时，Live 经由 Kumi Ears 播放那一段，之后恢复原样（打开 Ask before each change 时会先征求同意）。对于 Serum 2 或 Vital，`kumi_wavetable` 会写入一个新的波表文件，然后由你在插件窗口中选择；撤销后它仍会保留。
 
+### 声音、试听、律动和渲染（Live）
+
+“底鼓和贝斯配合得怎么样？”`kumi_sound` 在一遍中把最多 8 条音轨并排聆听并测量：每个声音的包络、音色、效果（混响时间、回声、泵感）、问题、作为鼓组的判断，以及谁在谁下面闪避。“这三个 pad 里哪个最接近参考？”`kumi_audition` 把那一段播放一次，把最多 8 条候选音轨与参考（Set 中的片段、声音、Kumi 生成的文件或已批准的文件，最多 60 秒）比较并打分。两者都在 Live 停止时经由 Kumi Ears 播放（每一遍最多 60 秒，包括之前的一小节和之后的半小节），之后全部恢复原样（打开 Ask before each change 时会先征求同意）。“让我的踩镲像这个 loop 一样摇摆。”`kumi_groove` 不聆听，而是在音符上让 MIDI 段落的律动靠近参考 MIDI 片段；`apply` 移动音符，是可以撤销的修改。`kumi_render` 离线渲染音频音轨自身片段最多 60 秒，并保留文件供 `kumi_listen` 使用。一次聆听整首歌的结构仍只在独立的 Kumi 中提供。
+
 **哪些会先征求同意。** 默认情况下，Kumi 会不经询问直接做出修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设，以及在没有读取过外部内容的对话中运行脚本和构建设备：每一项都记入 HISTORY，大部分可以撤销。设置步骤、采样文件夹的添加与扫描、Mirelo 的上传和付费生成，以及在读取过外部内容的对话中的脚本和设备，始终会征求同意。在 Hermes 中 Kumi 的设置里打开 **Ask before each change**（插件配置中的 `ask_before_changes`），Hermes 就会在每一项之前按修改类别、按对话征求同意。Kumi 从不在 Hermes 中自动批准任何东西。`/kumi`、`hermes kumi status` 和 `hermes kumi doctor` 会说明当前是哪种情况，例如“Approvals: Kumi makes your changes and runs your scripts without asking (Ask before each change: off); setup steps, sample folders and Mirelo jobs still ask”。
 
 在本次会话中或始终允许某个 Kumi 调用，只对这个对话中的同类调用有效，也包括恢复该对话的一次性运行（`hermes chat -q --resume`）；另一个对话、新的一次性运行或定时任务，会重新询问或被拒绝。定时任务和 Webhook 从不修改任何东西。新的一次性 `hermes chat -q` 运行则可以修改：Hermes 在它的网关中运行它的工具，Kumi 无法把它与对话区分开，所以默认情况下它会像对话一样做出所要求的修改、运行所要求的脚本。打开 Ask before each change 时，由于没有人能回答，Hermes 会在那里拒绝这些修改；设置步骤、采样文件夹和 Mirelo 任务在那里无论开关都会被拒绝。Kumi 只在你自己的回合中行动：Hermes 在后台处理对话（每轮之后的回顾）或回答旁支问题（`/btw`）时，无论你允许了什么，Kumi 都只读取。打开 Ask before each change 时，只能用 DAW 自己的撤销来恢复的修改，会作为单独的一类征求同意，所以允许其他修改并不包括它。设置步骤的批准只针对它自己的计划。选择**始终允许**会在 Hermes 的 `command_allowlist`（你的配置中的 config.yaml）里留下一条记录，Kumi 从不编辑它：要取消，请删除其中以 `plugin_rule:kumi:` 开头的条目。
@@ -168,7 +172,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **Max for Live 设备**是 Kumi 写入 Live 用户库（`User Library/Kumi/Audio Effects`）的新文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。
 - **插件预设**是你放进用户库后 Kumi 写入 Live 用户库（`User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects`）的新 `.vstpreset` 文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。为了知道你安装的 Serum 2、Pro-Q 4 或 Ozone 12 是哪个版本，Kumi 会读取标准插件文件夹中的 VST3 元数据；它从不加载插件。
 - **波表**是 Kumi 写入 Vital 波表文件夹（`~/Music/Vital/User/Wavetables`；Windows 上为 `~/Documents/Vital/User/Wavetables`）或 Live 用户库（`User Library/Kumi/Wavetables`，用于 Serum 2 等）的新 `.wav` 文件（从不覆盖已有文件），位于 Kumi 自己的数据之外。撤销后它们仍会保留。
-- **评判回合和调校**会在 Live 中播放那一段：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。每一遍最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次。听到的声音在调用结束前留在 Kumi 自己的数据里。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
+- **评判回合和调校**会在 Live 中播放那一段：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。每一遍最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次。听到的声音在调用结束前留在 Kumi 自己的数据里。测量声音和试听也以同样方式播放；试听 Session 片段时，会在 Arrangement 中制作临时副本来播放，之后删除。律动的 `apply` 以及被撤回的律动回合，会以 HISTORY 中的修改改变 MIDI 片段的音符。渲染会把音轨自身片段最多 60 秒保留在 Kumi 自己的数据里，并删除 Live 的临时渲染文件。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
 - **项目的副本：** 在某些修改之前，Kumi 会把最后保存的项目复制一份放在它旁边，每个保存的版本只复制一次。未保存的项目不会被复制，Kumi 也从不保存项目本身。
   - Live：当一次修改进行到第三步时（`<Set>.backup-<日期>.als`）。副本会一直保留，直到你删除它。
   - Renoise：在加载采样的修改之前，例如把资料库里的声音放进一个乐器时（`<Song> (Kumi copy <日期>).xrns`）。Kumi 为每首曲子保留最新的 5 份副本，并删除更早的副本。超过 512 MB 的曲子不会被复制。

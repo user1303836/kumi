@@ -783,7 +783,8 @@ def kumi_plugin_knowledge(host: Host, args: dict, **kwargs: Any) -> dict:
     return live.call("plugin_knowledge", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
 
 
-def _write(host: Host, tool: str, args: dict, kwargs: dict, timeout: float | None = None) -> dict:
+def _write(host: Host, tool: str, args: dict, kwargs: dict, timeout: float | None = None,
+           remember: bool = True) -> dict:
     """A write (C2): sent once. An answer that never came, or can't be read, means the outcome is unknown: reported as
     unsure, never resent, and never called unchanged. The producer's Stop cancels it while it waits (`notifications/
     cancelled`), so its remaining steps don't go on applying after Hermes has given the call up (research-1's review,
@@ -796,7 +797,7 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict, timeout: float | Non
         if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
-    if tool != "undo":  # every other write that made rows is the chat's newest change (CC-3 A2)
+    if tool != "undo" and remember:  # every other write that made rows is the chat's newest change (CC-3 A2)
         host.remember_change(kwargs, answer)
     return answer
 
@@ -1139,6 +1140,164 @@ def kumi_wavetable(host: Host, args: dict, **kwargs: Any) -> dict:
         where = f" into {_words(folder, 80)}" if isinstance(folder, str) and folder.strip() else ""
         host.remember_library_write(kwargs, f"{_words(file, 120)}{where}")
     return made
+
+
+# Live's other listening tools (serve's sound, audition, groove and render), Live only, checked here as judge is: each
+# pass plays at most 60 s (a bar before the stretch and half a bar after included) through Kumi Ears with Live stopped,
+# and a render is a minute of a track's own clips at most. sound, audition and render are listens; a groove round that
+# changes notes (change, apply) is a change.
+SOUND_FIELDS = frozenset({"tracks", "against", "key", "from_beat", "beats", "expected_project_key", "expected_epoch"})
+AUDITION_FIELDS = frozenset({"candidates", "from_beat", "beats", "reference", "reference_from_seconds",
+                             "reference_seconds", "focus", "expected_project_key", "expected_epoch"})
+GROOVE_FIELDS = frozenset({"clip", "reference", "change", "apply", "amount", "done", "expected_project_key",
+                           "expected_epoch"})
+RENDER_FIELDS = frozenset({"track", "from_beat", "beats", "expected_project_key", "expected_epoch"})
+REFERENCE_SECONDS = 60
+_GROOVE_FILE = re.compile(r"[/\\]|^~|\.(mid|midi|wav|wave|aif|aiff|aifc|mp3|m4a|aac|mp4|flac|ogg|oga|opus|caf)$",
+                          re.IGNORECASE)
+
+
+def _text(value: Any, limit: int = 256) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= limit
+
+
+def _stretch_refusal(args: dict, required: bool) -> str | None:
+    start, beats = args.get("from_beat"), args.get("beats")
+    if (required or start is not None) and (not _number(start) or start < 0):
+        return "from_beat is where it starts, in beats (0 or more)."
+    if beats is not None and (not _number(beats) or not 0 < beats <= MAX_BEATS):
+        return f"beats is above 0 and at most {MAX_BEATS} (at most 60 s at the tempo, lead-in included)."
+    return None
+
+
+def sound_refusal(args: dict) -> str | None:
+    """Why serve's sound wouldn't take these arguments, or None: 1-8 tracks, from_beat (beats optional), and the
+    project key and epoch."""
+    if not set(args) <= SOUND_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(SOUND_FIELDS))}."
+    tracks = args.get("tracks")
+    if not isinstance(tracks, list) or not 1 <= len(tracks) <= 8 or not all(_text(track) for track in tracks):
+        return "tracks is 1 to 8 tracks, by ref or name."
+    if "against" in args and not _text(args["against"]):
+        return "against is a track, by ref or name."
+    if "key" in args and not _text(args["key"], 40):
+        return 'key is the song\'s key, like "F# minor".'
+    return _stretch_refusal(args, True) or _expected_refusal(args)
+
+
+def audition_refusal(args: dict) -> str | None:
+    """Why serve's audition wouldn't take these arguments, or None: 1-8 candidates (a track, maybe a Session clip, or
+    the mix alone), from_beat unless every candidate has its clip, a reference as {clip_ref} or a source (never a
+    path), at most 60 s of it, and the project key and epoch."""
+    if not set(args) <= AUDITION_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(AUDITION_FIELDS))}."
+    candidates = args.get("candidates")
+    if not isinstance(candidates, list) or not 1 <= len(candidates) <= 8:
+        return "candidates is 1 to 8 tracks to hear, or the whole mix alone."
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or not set(candidate) <= {"track", "mix", "clip", "label"}:
+            return "each candidate is {track, clip?, label?} or {mix: true}."
+        if candidate.get("mix") is True:
+            if len(candidates) > 1 or "track" in candidate or "clip" in candidate:
+                return "the whole mix is auditioned alone, with no track or clip."
+        elif not _text(candidate.get("track")) or ("clip" in candidate and not _text(candidate["clip"])):
+            return "each candidate names its track by ref (and a Session clip by its clip ref)."
+        if "label" in candidate and not _text(candidate["label"], 60):
+            return "a label is a few words."
+    clips = all("clip" in candidate for candidate in candidates)
+    refusal = _stretch_refusal(args, not clips)
+    if refusal is not None:
+        return refusal
+    if "reference" in args and not _judge_reference(args["reference"]):
+        return ("a reference is {\"clip_ref\"} for an audio clip in the Set, or a source: {\"sound_id\", "
+                "\"map_revision\"}, {\"artifact_id\"} or {\"file\"} in an approved folder, never a path.")
+    if "reference" not in args and ({"reference_seconds", "reference_from_seconds"} & set(args)):
+        return "reference_seconds and reference_from_seconds go with a reference."
+    seconds, start = args.get("reference_seconds"), args.get("reference_from_seconds")
+    if seconds is not None and (not _number(seconds) or not 0 < seconds <= REFERENCE_SECONDS):
+        return f"reference_seconds is above 0 and at most {REFERENCE_SECONDS}."
+    if start is not None and (not _number(start) or start < 0):
+        return "reference_from_seconds is 0 or more."
+    if "focus" in args and args["focus"] not in ("sound", "section"):
+        return "focus is sound or section."
+    return _expected_refusal(args)
+
+
+def groove_refusal(args: dict) -> str | None:
+    """Why serve's groove wouldn't take these arguments, or None: a start (clip and a MIDI clip reference, never a
+    file), change, apply (with amount 0-1) or done: true, and the project key and epoch."""
+    if not set(args) <= GROOVE_FIELDS | {"preview"}:
+        return (f"it takes only {', '.join(sorted(GROOVE_FIELDS))}: a reference is a MIDI clip's clip ref, so there's "
+                "no audio stem or tempo to give.")
+    start = "clip" in args or "reference" in args
+    given = [start, "change" in args, "apply" in args, "done" in args]
+    if sum(given) != 1:
+        return "give one of clip with reference (a start), change, apply: true, or done: true."
+    if start and not (_text(args.get("clip")) and _text(args.get("reference"))):
+        return "a start gives clip (the part's clip ref) and reference (a MIDI clip's clip ref)."
+    if start and _GROOVE_FILE.search(args["reference"]):
+        return "the reference is a MIDI clip's clip ref, never a file."
+    if "change" in args and not _text(args["change"], 400):
+        return "change is what you changed in the part, in one line."
+    for key in ("apply", "done"):
+        if key in args and args[key] is not True:
+            return f"{key} is true."
+    if "amount" in args and ("apply" not in args or not _number(args["amount"]) or not 0 <= args["amount"] <= 1):
+        return "amount goes with apply: how far, 0 to 1."
+    return _expected_refusal(args)
+
+
+def groove_changes(args: dict) -> bool:
+    """Whether a groove call may change the part's notes: a change judged (and maybe taken back), or apply."""
+    return "change" in args or args.get("apply") is True
+
+
+def render_refusal(args: dict) -> str | None:
+    """Why serve's render wouldn't take these arguments, or None: an audio track, from_beat and beats, and the
+    project key and epoch."""
+    if not set(args) <= RENDER_FIELDS | {"preview"}:
+        return f"it takes only {', '.join(sorted(RENDER_FIELDS))}."
+    if not _text(args.get("track")):
+        return "track is an audio track's ref from the current look."
+    if args.get("beats") is None:
+        return "give from_beat and beats: at most 60 s of the track."
+    return _stretch_refusal(args, True) or _expected_refusal(args)
+
+
+LISTENING_REFUSALS = {"sound": sound_refusal, "audition": audition_refusal, "groove": groove_refusal,
+                      "render": render_refusal}
+
+
+def _listening(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
+    """A sound, audition, groove or render call, sent once as cleared (the epoch as a string). A groove round's rows
+    are the chat's newest change, and a change it took back is undone now; a listen's (an audition's heard row) never
+    are, so "undo that" never means a listen."""
+    refusal = LISTENING_REFUSALS[tool](args)
+    if refusal is not None:
+        return {"state": "refused", "code": "invalid", "reason": f"Kumi didn't run this: {refusal}"}
+    asked = {key: value for key, value in args.items() if key != "preview"}
+    asked["expected_epoch"] = str(asked["expected_epoch"])
+    answer = _write(host, tool, asked, kwargs, timeout=JUDGED_TIMEOUT, remember=tool == "groove")
+    taken = answer.get("taken_back") if isinstance(answer, dict) else None
+    if isinstance(taken, list) and taken:
+        host.remember_undo({}, {"rows": [{"history_id": each, "state": "undone"} for each in taken]})
+    return answer
+
+
+def kumi_sound(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "sound", args, kwargs)
+
+
+def kumi_audition(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "audition", args, kwargs)
+
+
+def kumi_groove(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "groove", args, kwargs)
+
+
+def kumi_render(host: Host, args: dict, **kwargs: Any) -> dict:
+    return _listening(host, "render", args, kwargs)
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
@@ -1828,6 +1987,10 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_tune", schemas.KUMI_TUNE, kumi_tune, "🎯"),
     ("kumi_wavetable", schemas.KUMI_WAVETABLE, kumi_wavetable, "🌊"),
     ("kumi_design", schemas.KUMI_DESIGN, kumi_design, "🧪"),
+    ("kumi_sound", schemas.KUMI_SOUND, kumi_sound, "🔬"),
+    ("kumi_audition", schemas.KUMI_AUDITION, kumi_audition, "🎧"),
+    ("kumi_groove", schemas.KUMI_GROOVE, kumi_groove, "🥁"),
+    ("kumi_render", schemas.KUMI_RENDER, kumi_render, "💿"),
 )
 # What a tool needs before it's shown to the model: kumi_status, kumi_setup and kumi_connect always are (RESEARCH.md
 # §5.4).
@@ -1838,7 +2001,8 @@ def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py clears, asking the producer or (for a change, by default) not: they run only as cleared,
     with what the hook's preview bound (CC-5)."""
     return (name in ("kumi_change", "kumi_undo", "kumi_script", "kumi_device", "kumi_preset", "kumi_judge",
-                     "kumi_tune", "kumi_wavetable")
+                     "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_render")
+            or (name == "kumi_groove" and groove_changes(args))
             or (name == "kumi_variations" and args.get("action") in ("make", "change", "keep"))
             or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
             or (name == "kumi_listen" and is_track_listen(args))

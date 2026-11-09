@@ -242,6 +242,11 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Let Kumi pick the numbers with `kumi_tune`** instead of guessing them: put the device in place first, then `{device, how}` (`fit` for an EQ Eight's bands, `home` or `probe` with one knob, `search` with 2–5). It's a round too.
 - **Chain each call with the `project_key` and `epoch` its answer returns.** Each round is a change in HISTORY that `kumi_undo` can take back.
 
+## Groove (Live)
+- **To make a MIDI part feel like another,** use `kumi_groove`, not hand-moved notes: start with `{clip, reference}` (the part's clip ref, and a reference MIDI clip's clip ref, never a file) and the project key and epoch from `kumi_observe`. It judges timing per lane, swing, accents, syncopation and fills on the notes; nothing plays.
+- **Then rounds, as judged runs have them:** one change of yours (`kumi_change`), then `{change: "what you did"}`, kept or taken back by Kumi; or `{apply: true, amount}` to let Kumi move the notes itself. `apply` and a take-back are changes in HISTORY that `kumi_undo` takes back. End with `{done: true}`.
+- **An audio reference (a drum stem or a file) isn't offered here:** convert it to a MIDI clip in Live first, or work from the notes.
+
 ## Scripts
 - **Typed steps first.** A `kumi_change` step is previewed with the project's own names and values, and Kumi can undo it. Use a script (`kumi_script`) only for what no step can do: a Renoise tool's logic, a batch no step covers, reading something no reader gives.
 - **Its language is the DAW's:** Python in Live (its Live API, as a Remote Script sees it), Lua in REAPER (ReaScript) and Renoise (its scripting API).
