@@ -1,6 +1,6 @@
 //! `design`: cross, fuse or stack two to sixteen approved sounds into a new one, kept as a private artifact. Sources are
-//! map sounds (by revision) or artifacts, never paths; each is staged as an immutable copy before it's decoded, and
-//! nothing changes in the DAW.
+//! map sounds (by revision), artifacts, or files the host resolved inside an approved root (its own results, kept in a
+//! media root); each is authorized, then staged as an immutable copy before it's decoded, and nothing changes in the DAW.
 
 use super::artifacts::StagedArtifact;
 use super::ctx::{Call, Ctx, Effect, OpError, OpFuture, Operation};
@@ -12,7 +12,7 @@ use std::{io::Write, path::Path};
 
 pub static DESIGN: Operation = Operation {
     name: "design",
-    description: "Make a new sound from 2-16 approved sounds (map sounds or artifacts): cross them (blend: one morphed body; attack: one's transient on the blend of the rest; resonate: half ring through the other half; modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other), fuse them (texture: a loopable bed that moves between them; loop: their hits sequenced on a tempo grid, 1-4 bars; smear: a 4-16x granular stretch with a diffuse tail), or stack 2-8 as one hit. A seed picks every choice: the same request and seed make the same sound, another seed a variation (reroll). Returns a private 48 kHz 24-bit WAV artifact, its peaks and a one-line recipe; changes nothing in the DAW.",
+    description: "Make a new sound from 2-16 approved sounds (map sounds, artifacts, or files in an approved folder): cross them (blend: one morphed body; attack: one's transient on the blend of the rest; resonate: half ring through the other half; modulate: they phase-, ring-, FM-, filter- and spectrum-modulate each other), fuse them (texture: a loopable bed that moves between them; loop: their hits sequenced on a tempo grid, 1-4 bars; smear: a 4-16x granular stretch with a diffuse tail), or stack 2-8 as one hit. A seed picks every choice: the same request and seed make the same sound, another seed a variation (reroll). Returns a private 48 kHz 24-bit WAV artifact, its peaks and a one-line recipe; changes nothing in the DAW.",
     schema,
     effect: |_| Effect::Read,
     run,
@@ -33,10 +33,11 @@ fn schema() -> Value {
             "mode": {"type": "string", "enum": modes, "description": "cross: blend, attack, resonate, modulate; fuse: texture, loop, smear; stack: none."},
             "sources": {"type": "array", "minItems": MIN_SOURCES, "maxItems": MAX_SOURCES, "items": {
                 "type": "object", "additionalProperties": false,
-                "properties": {"sound_id": id, "map_revision": id, "artifact_id": id, "name": name},
+                "properties": {"sound_id": id, "map_revision": id, "artifact_id": id, "file": {"type": "string", "minLength": 1}, "name": name},
                 "oneOf": [
-                    {"required": ["sound_id", "map_revision"], "not": {"required": ["artifact_id"]}},
-                    {"required": ["artifact_id"], "not": {"anyOf": [{"required": ["sound_id"]}, {"required": ["map_revision"]}]}}
+                    {"required": ["sound_id", "map_revision"], "not": {"anyOf": [{"required": ["artifact_id"]}, {"required": ["file"]}]}},
+                    {"required": ["artifact_id"], "not": {"anyOf": [{"required": ["sound_id"]}, {"required": ["map_revision"]}, {"required": ["file"]}]}},
+                    {"required": ["file"], "not": {"anyOf": [{"required": ["sound_id"]}, {"required": ["map_revision"]}, {"required": ["artifact_id"]}]}}
                 ]
             }},
             "seed": {"type": "integer", "minimum": 0, "maximum": MAX_SEED, "description": "The variation; omitted: a fresh one, answered."},
@@ -63,7 +64,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         let mut request: Request =
             serde_json::from_value(Value::Object(call.args.clone())).map_err(|e| invalid(format!("That isn't a design request: {e}")))?;
         request.check().map_err(|e| invalid(e.0))?;
-        // Sources by id only: each authorized before anything is copied or decoded.
+        // Each source authorized before anything is copied or decoded: a file only inside an approved root.
         let raw = call.args.get("sources").and_then(Value::as_array).ok_or_else(|| invalid("design needs sources."))?;
         let parsed: Vec<Value> = raw
             .iter()
@@ -76,16 +77,13 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             })
             .collect();
         let sources: Vec<Source> = parsed.iter().map(Source::parse).collect::<Result<_, _>>()?;
-        if sources.iter().any(|s| matches!(s, Source::File(_))) {
-            return Err(invalid("design takes sounds by sound_id and map_revision, or by artifact_id; never a file."));
-        }
         let mut names = Vec::with_capacity(sources.len());
         for (source, given) in sources.iter().zip(&request.sources) {
             let path = super::listen::resolve_source(ctx, source, &call.signal).await?;
             let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
             names.push(given.name.clone().or(match source {
-                Source::Sound { .. } => stem,
-                _ => None,
+                Source::Sound { .. } | Source::File(_) => stem,
+                Source::Artifact(_) => None,
             }));
         }
         call.progress.report(0.1, Some(1.0), Some("reading the sounds"));
@@ -223,12 +221,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_design_takes_no_file_and_says_what_it_cant_make() {
+    async fn a_design_reads_only_approved_files_and_says_what_it_cant_make() {
         let fixture = Fixture::new();
         let low = fixture.artifact("low.wav", 110.0).await;
         let path = fixture.root.join("low.wav").to_string_lossy().into_owned();
-        let file = fixture.design(json!({"op": "stack", "sources": [{"artifact_id": low}, {"file": path}]})).await.unwrap_err();
-        assert_eq!(file.code(), "invalid");
+        let approved = fixture.design(json!({"op": "stack", "sources": [{"artifact_id": low}, {"file": path}]})).await.unwrap();
+        assert!(approved["recipe"].as_str().unwrap().contains("low"), "{}", approved["recipe"]);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join("outside.wav");
+        std::fs::write(&outside, hit(220.0)).unwrap();
+        let file = fixture.design(json!({"op": "stack", "sources": [{"artifact_id": low}, {"file": outside}]})).await;
+        assert!(file.is_err(), "a file outside the approved roots isn't read");
         let modeless = fixture.design(json!({"op": "cross", "sources": [{"artifact_id": low}, {"artifact_id": low}]})).await.unwrap_err();
         assert!(modeless.reason().contains("needs a mode"), "{}", modeless.reason());
         let unknown = fixture.design(json!({"op": "stack", "sources": [{"artifact_id": low}, {"artifact_id": "a-nothing-here"}]})).await;
