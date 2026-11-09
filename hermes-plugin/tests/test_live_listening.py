@@ -35,8 +35,15 @@ READS = (("kumi_groove", START), ("kumi_groove", DONE))
 
 
 class LiveListening(unittest.TestCase):
-    def use(self, ask: bool | None = None, daw: str = "ableton") -> None:
-        self.host, self.ctx, self.data = support.host(self, {"daw": daw}, ask_before_changes=ask)
+    def setUp(self) -> None:
+        # Never this machine's Hermes deadline: each test says its own.
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        os.environ.pop(tools.HERMES_DEADLINE_ENV, None)
+
+    def use(self, ask: bool | None = None, daw: str = "ableton", hermes: dict | None = None) -> None:
+        self.host, self.ctx, self.data = support.host(self, {"daw": daw}, ask_before_changes=ask, hermes_config=hermes)
         self.ctx.surface = "desktop"
         support.call(self.host, "kumi_connect", {}, session_id="s1")
 
@@ -96,11 +103,10 @@ class LiveListening(unittest.TestCase):
         render = self.hook("kumi_render", RENDER, "c4")["message"].split("\n")
         self.assertEqual(render[:2], ['Kumi: render track "t3"\'s own clips, beats 0–16', policy.RENDER_KEPT])
         whole = self.hook("kumi_form", FORM, "c7")["message"].split("\n")
-        self.assertEqual(whole[:2], ["Kumi: read the form of the whole Arrangement", policy.FORM_PLAYS])
-        self.assertIn("15 minutes at most", policy.FORM_PLAYS)
+        self.assertEqual(whole[:2], ["Kumi: read the form of the whole Arrangement", policy.FORM_PLAYS.format(most="6:30")])
         self.assertIn("Stop ends it", policy.FORM_PLAYS)
         part = self.hook("kumi_form", FORM_PART, "c8")["message"].split("\n")
-        self.assertEqual(part[:3], ["Kumi: read the form of beats 64–192", policy.FORM_PLAYS_PART,
+        self.assertEqual(part[:3], ["Kumi: read the form of beats 64–192", policy.FORM_PLAYS_PART.format(most="6:30"),
                                     'Beside the form of "1:clip:9"'])
         change = self.hook("kumi_groove", CHANGE, "c5")["message"].split("\n")
         self.assertEqual(change[:2], ['Kumi: judge this groove change, "Pushed the hats later"', policy.GROOVE_KEEPS])
@@ -162,7 +168,8 @@ class LiveListening(unittest.TestCase):
                 answer = support.handle(self.host, tool, asked, session_id="s1", task_id="t1")
                 self.assertNotIn("error", answer)
                 [write] = self.sent(op)
-                self.assertEqual(write, dict(args), "exactly what was cleared")
+                budget = {"max_seconds": 390.0} if op == "form" else {}
+                self.assertEqual(write, {**args, **budget}, "exactly what was cleared (form: within Hermes's deadline)")
                 again = support.handle(self.host, tool, args, session_id="s1", task_id="t1")
                 self.assertEqual(again["error"]["code"], "not_approved", "the clearance is used once")
                 self.assertEqual(len(self.sent(op)), 1)
@@ -194,11 +201,40 @@ class LiveListening(unittest.TestCase):
         self.use()
         read = support.call(self.host, "kumi_form", FORM, session_id="s1")
         self.assertEqual((read["state"], read["round"]["firstHook"]), ("done", 9))
-        self.assertEqual(self.sent("form")[-1], FORM, "the whole Arrangement: no stretch added")
+        self.assertEqual(self.sent("form")[-1], {**FORM, "max_seconds": 390.0},
+                         "the whole Arrangement, no stretch added, within Hermes's default deadline less Kumi's margin")
         with mock.patch.object(tools, "_write", wraps=tools._write) as write:
             support.call(self.host, "kumi_form", FORM, session_id="s1")
         self.assertEqual(write.call_args.kwargs["timeout"], tools.FORM_TIMEOUT)
         self.assertGreater(tools.FORM_TIMEOUT, 15 * 60, "it waits out a 15-minute song and what follows")
+
+    def test_form_plays_within_hermess_own_tool_deadline(self):
+        """Hermes v0.23.0's sequential tool deadline, resolved as Hermes resolves it, less 30 s, at most 15 minutes."""
+        cases = (
+            ({}, None, 390.0),  # the default 420 s
+            ({"timeouts": {"tools": {"sequential_call": 900}}}, None, 870.0),
+            ({"timeouts": {"tools": {"sequential_call": 3600}}}, None, 900.0),
+            ({"timeouts": {"tools": {"sequential_call": 0}}}, None, 900.0),  # none: the whole 15 minutes
+            ({"timeouts": {"tools": {"sequential_call": -1}}}, "200", 900.0),
+            ({"timeouts": {"tools": {"concurrent_batch": 600}}}, "200", 570.0),
+            ({"timeouts": {"tools": {"sequential_call": 300, "concurrent_batch": 600}}}, None, 270.0),
+            ({}, "500", 470.0),  # the environment's, under the concurrent batch's
+            ({"timeouts": {"tools": {"sequential_call": True}}}, "500", 470.0),  # a bool is passed over, as Hermes does
+            ({"timeouts": {"tools": {"sequential_call": "soon"}}}, None, 390.0),
+            ({}, "nonsense", 390.0),
+            ({"timeouts": {"tools": {"sequential_call": 20}}}, None, 1.0),
+        )
+        for hermes, env, budget in cases:
+            with self.subTest(hermes=hermes, env=env):
+                self.use(hermes=hermes)
+                if env is None:
+                    os.environ.pop(tools.HERMES_DEADLINE_ENV, None)
+                else:
+                    os.environ[tools.HERMES_DEADLINE_ENV] = env
+                self.assertEqual(tools.form_budget(self.host), budget)
+        os.environ.pop(tools.HERMES_DEADLINE_ENV, None)
+        self.use(True, hermes={"timeouts": {"tools": {"sequential_call": 900}}})
+        self.assertIn("up to 14:30 here", self.hook("kumi_form", FORM)["message"])
 
     def test_a_lost_answer_is_unsure_and_never_sent_again(self):
         self.host, self.ctx, self.data = support.host(self, None, "--slow", "sound=2")

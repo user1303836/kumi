@@ -451,11 +451,16 @@ LISTENING_PLAYS = ("Live plays it through Kumi Ears with Live stopped and not re
 AUDITION_COPIES = "Their Session clips play from temporary copies in the Arrangement, removed after."
 RENDER_KEPT = ("Offline, with no playback: the file is kept in Kumi's own data, and Live's temporary render file is "
                "deleted.")
-FORM_PLAYS = ("Live plays it once through Kumi Ears with Live stopped and not recording, as long as the song (15 "
-              "minutes at most) while you wait; Stop ends it. Everything is put back after.")
-FORM_PLAYS_PART = FORM_PLAYS.replace("as long as the song (15 minutes at most)", "that stretch (15 minutes at most)")
+FORM_PLAYS = ("Live plays it once through Kumi Ears with Live stopped and not recording, as long as the song (up to "
+              "{most} here) while you wait; Stop ends it. Everything is put back after.")
+FORM_PLAYS_PART = FORM_PLAYS.replace("as long as the song", "that stretch")
 GROOVE_KEEPS = "Kumi keeps the change only if the feel moved toward the reference; otherwise it takes it back itself."
 GROOVE_APPLY = "A change in HISTORY: kumi_undo takes it back."
+
+
+def _clock(seconds: float) -> str:
+    whole = int(round(seconds))
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 def _reference_name(reference: dict) -> str:
@@ -502,13 +507,14 @@ def _live_listening(host: Any, tool: str, args: dict) -> dict | None:
         if any("clip" in candidate for candidate in args["candidates"]):
             lines.append(AUDITION_COPIES)
     elif tool == "form":
+        most = _clock(tools.form_budget(host))
         if "beats" in args:
             start = args.get("from_beat", 0)
-            lines = [f"Kumi: read the form of beats {start:g}–{start + args['beats']:g}", FORM_PLAYS_PART]
+            lines = [f"Kumi: read the form of beats {start:g}–{start + args['beats']:g}", FORM_PLAYS_PART.format(most=most)]
         else:
             start = args.get("from_beat", 0)
             what = "the whole Arrangement" if not start else f"the Arrangement from beat {start:g} to its end"
-            lines = [f"Kumi: read the form of {what}", FORM_PLAYS]
+            lines = [f"Kumi: read the form of {what}", FORM_PLAYS.format(most=most)]
         if "reference" in args:
             lines.append(f"Beside the form of {quoted(_reference_name(args['reference']), 60)}")
     else:

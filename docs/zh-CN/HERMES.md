@@ -141,7 +141,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 
 ### 声音、试听、律动、渲染和歌曲结构（Live）
 
-“底鼓和贝斯配合得怎么样？”`kumi_sound` 在一遍中把最多 8 条音轨并排聆听并测量：每个声音的包络、音色、效果（混响时间、回声、泵感）、问题、作为鼓组的判断，以及谁在谁下面闪避。“这三个 pad 里哪个最接近参考？”`kumi_audition` 把那一段播放一次，把最多 8 条候选音轨与参考（Set 中的片段、声音、Kumi 生成的文件或已批准的文件，最多 60 秒）比较并打分。两者都在 Live 停止时经由 Kumi Ears 播放（每一遍最多 60 秒，包括之前的一小节和之后的半小节），之后全部恢复原样（打开 Ask before each change 时会先征求同意）。“让我的踩镲像这个 loop 一样摇摆。”`kumi_groove` 不聆听，而是在音符上让 MIDI 段落的律动靠近参考 MIDI 片段；`apply` 移动音符，是可以撤销的修改。`kumi_render` 离线渲染音频音轨自身片段最多 60 秒，并保留文件供 `kumi_listen` 使用。“副歌第一次在哪里出现？第二段主歌是不是拖沓？”`kumi_form` 在你等待时把整个 Arrangement 播放一次（最多 15 分钟；按 Stop 即结束），逐小节读出：整首歌的能量、段落、转折、第一个 hook，以及哪些音轨在哪里出现；如果你给出参考，还会把参考的结构并排列出。
+“底鼓和贝斯配合得怎么样？”`kumi_sound` 在一遍中把最多 8 条音轨并排聆听并测量：每个声音的包络、音色、效果（混响时间、回声、泵感）、问题、作为鼓组的判断，以及谁在谁下面闪避。“这三个 pad 里哪个最接近参考？”`kumi_audition` 把那一段播放一次，把最多 8 条候选音轨与参考（Set 中的片段、声音、Kumi 生成的文件或已批准的文件，最多 60 秒）比较并打分。两者都在 Live 停止时经由 Kumi Ears 播放（每一遍最多 60 秒，包括之前的一小节和之后的半小节），之后全部恢复原样（打开 Ask before each change 时会先征求同意）。“让我的踩镲像这个 loop 一样摇摆。”`kumi_groove` 不聆听，而是在音符上让 MIDI 段落的律动靠近参考 MIDI 片段；`apply` 移动音符，是可以撤销的修改。`kumi_render` 离线渲染音频音轨自身片段最多 60 秒，并保留文件供 `kumi_listen` 使用。“副歌第一次在哪里出现？第二段主歌是不是拖沓？”`kumi_form` 在你等待时把整个 Arrangement 播放一次（按 Hermes 默认的工具时限最多约 6 分半，调高 `timeouts.tools.sequential_call` 后最多 15 分钟；更长的歌曲分段读取；按 Stop 即结束），逐小节读出：整首歌的能量、段落、转折、第一个 hook，以及哪些音轨在哪里出现；如果你给出参考，还会把参考的结构并排列出。
 
 **哪些会先征求同意。** 默认情况下，Kumi 会不经询问直接做出修改、撤销、对音轨或混音的聆听、播放、变奏版本、预设，以及在没有读取过外部内容的对话中运行脚本和构建设备：每一项都记入 HISTORY，大部分可以撤销。设置步骤、采样文件夹的添加与扫描、Mirelo 的上传和付费生成，以及在读取过外部内容的对话中的脚本和设备，始终会征求同意。在 Hermes 中 Kumi 的设置里打开 **Ask before each change**（插件配置中的 `ask_before_changes`），Hermes 就会在每一项之前按修改类别、按对话征求同意。Kumi 从不在 Hermes 中自动批准任何东西。`/kumi`、`hermes kumi status` 和 `hermes kumi doctor` 会说明当前是哪种情况，例如“Approvals: Kumi makes your changes and runs your scripts without asking (Ask before each change: off); setup steps, sample folders and Mirelo jobs still ask”。
 
@@ -179,7 +179,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **用模型解读测量结果**（只有打开后才会）：把测量数值和一张小的频段能量图发给你在 Hermes 中为 Kumi 聆听任务设置的模型，或 Hermes 为该任务配置的后备服务商，绝不发送音频本身或文件路径。重试和后备可能增加时间和 token 费用。
 - **音频留在本地：** Kumi 在你的电脑上测量音频，不会把音频发给任何模型。在聊天应用（Telegram、Discord 等）中，如果你让 Hermes 把声音发给你，它会作为附件通过该应用送达。
 - **聆听音轨或混音：**
-  - **时间范围：** 只聆听你指定的时间范围，最长 60 秒（在 Live 中最多为 Arrangement 中的 256 拍），并且 DAW 必须处于停止状态；打开 Ask before each change 时会先征求同意。Kumi 不会替你停止播放。唯一的例外是读取歌曲结构（`kumi_form`）：它会在你等待时把整个 Arrangement 播放一次，最多 15 分钟，按 Stop 即结束。
+  - **时间范围：** 只聆听你指定的时间范围，最长 60 秒（在 Live 中最多为 Arrangement 中的 256 拍），并且 DAW 必须处于停止状态；打开 Ask before each change 时会先征求同意。Kumi 不会替你停止播放。唯一的例外是读取歌曲结构（`kumi_form`）：它会在你等待时把整个 Arrangement 播放一次（按 Hermes 默认的工具时限最多约 6 分半，调高 `timeouts.tools.sequential_call` 后最多 15 分钟；更长的歌曲分段读取），按 Stop 即结束。
   - **你的工程：** 渲染临时使用的走带、路由和设备设置之后都会恢复。聆听后 REAPER 可能显示工程已修改，因为只有保存才能清除这个标记；Kumi 从不保存。
   - **Renoise 的速度：** 渲染可能改变它的 BPM 和每拍行数。只有它们仍是渲染留下的值时，Kumi 才会改回去；如果已经不同，它会两者都保持原样，并说明无法恢复速度。
   - **音频：** DAW 渲染到 Kumi 在该 DAW 中的组件的聆听文件夹；Kumi 把这一个文件复制到自己的数据中，在那里测量。
@@ -188,7 +188,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **Max for Live 设备**是 Kumi 写入 Live 用户库（`User Library/Kumi/Audio Effects`）的新文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。
 - **插件预设**是你放进用户库后 Kumi 写入 Live 用户库（`User Library/Kumi/Instruments` 或 `User Library/Kumi/Audio Effects`）的新 `.vstpreset` 文件，位于 Kumi 自己的数据之外。在你删除之前，它们会一直留在那里。为了知道你安装的 Serum 2、Pro-Q 4 或 Ozone 12 是哪个版本，Kumi 会读取标准插件文件夹中的 VST3 元数据；它从不加载插件。
 - **波表**是 Kumi 写入 Vital 波表文件夹（`~/Music/Vital/User/Wavetables`；Windows 上为 `~/Documents/Vital/User/Wavetables`）或 Live 用户库（`User Library/Kumi/Wavetables`，用于 Serum 2 等）的新 `.wav` 文件（从不覆盖已有文件），位于 Kumi 自己的数据之外。撤销后它们仍会保留。
-- **评判回合和调校**会在 Live 中播放那一段：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。每一遍最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次。听到的声音在调用结束前留在 Kumi 自己的数据里。测量声音和试听也以同样方式播放；试听 Session 片段时，会在 Arrangement 中制作临时副本来播放，之后删除。律动的 `apply` 以及被撤回的律动回合，会以 HISTORY 中的修改改变 MIDI 片段的音符。渲染会把音轨自身片段最多 60 秒保留在 Kumi 自己的数据里，并删除 Live 的临时渲染文件。读取歌曲结构时，同样会在你等待时把整个 Arrangement 播放一次（总共最多 15 分钟，而不是每遍 1 分钟），按 Stop 立即结束。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
+- **评判回合和调校**会在 Live 中播放那一段：Live 停止且不在录音时，经由设置时安装的 Kumi Ears 设备（放在音轨上或 Main 之前）播放，之后再移除它（这些临时的设备步骤会留在 Live 自己的撤销历史里）。每一遍最多 60 秒，包括 Live 在这一段之前播放的一小节和之后的半小节；如果 Live 开始播放晚了，评判或调校的这一遍可能会在同样的上限内再播放一次。听到的声音在调用结束前留在 Kumi 自己的数据里。测量声音和试听也以同样方式播放；试听 Session 片段时，会在 Arrangement 中制作临时副本来播放，之后删除。律动的 `apply` 以及被撤回的律动回合，会以 HISTORY 中的修改改变 MIDI 片段的音符。渲染会把音轨自身片段最多 60 秒保留在 Kumi 自己的数据里，并删除 Live 的临时渲染文件。读取歌曲结构时，同样会在你等待时把整个 Arrangement 播放一次（不是每遍 1 分钟，而是 Hermes 工具时限允许的长度：默认约 6 分半，调高 `timeouts.tools.sequential_call` 后最多 15 分钟），按 Stop 立即结束。调校的 search 和 probe 会在 Set 中为本轮的音轨制作临时副本，之后删除；如果 Kumi 中途停止，它下次查看（`kumi_observe`）时会删除残留的副本。没有录音过程，也不会下载任何模型：回合依据仪表来判断。
 - **项目的副本：** 在某些修改之前，Kumi 会把最后保存的项目复制一份放在它旁边，每个保存的版本只复制一次。未保存的项目不会被复制，Kumi 也从不保存项目本身。
   - Live：当一次修改进行到第三步时（`<Set>.backup-<日期>.als`）。副本会一直保留，直到你删除它。
   - Renoise：在加载采样的修改之前，例如把资料库里的声音放进一个乐器时（`<Song> (Kumi copy <日期>).xrns`）。Kumi 为每首曲子保留最新的 5 份副本，并删除更早的副本。超过 512 MB 的曲子不会被复制。
@@ -201,7 +201,7 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 
 - 你的 DAW 必须运行在运行 Hermes 的那台电脑上。连接到远程 Hermes 的 Hermes Desktop 控制的是那台电脑上的 DAW，而不是你本机的。
 - Live 支持 macOS 和 Windows；REAPER 和 Renoise 支持 macOS、Windows 和 Linux。
-- Kumi 会聆听你指定的时间范围，最长 60 秒（在 Live 中最多为 Arrangement 中的 256 拍）；在 Live 中读取歌曲结构时，会把整个 Arrangement 播放一次，最多 15 分钟。在所有 DAW 中，它都能测量音频文件、音色库中的声音和 Kumi 自己的结果。
+- Kumi 会聆听你指定的时间范围，最长 60 秒（在 Live 中最多为 Arrangement 中的 256 拍）；在 Live 中读取歌曲结构时，会把整个 Arrangement 播放一次（按 Hermes 默认的工具时限最多约 6 分半，调高 `timeouts.tools.sequential_call` 后最多 15 分钟）。在所有 DAW 中，它都能测量音频文件、音色库中的声音和 Kumi 自己的结果。
 - Kumi 只读取打开的工程、你列出的采样文件夹中的音频文件、它对你指定的时间范围的渲染和采集，以及其他 Hermes 插件保存在 Hermes 生成音频文件夹（`<HERMES_HOME>/cache/generated/audio`，Kumi 从不创建这个文件夹）中的已完成音频，用于放置或测量。
 - Kumi 能直接读取 WAV 和 AIFF。对于 MP3、FLAC 等压缩音频，如果你在设置时允许，它会使用电脑上已有的 ffmpeg（绝不下载）。每次启动前，Kumi 都会确认它仍是你允许的那个 ffmpeg 文件（不检查它加载的库，这些库可能随升级而变化）。ffmpeg 只会拿到 Kumi 正在读取的那一个文件：绝不是 URL 或播放列表，也不从网络读取任何内容。Kumi 可读取的文件最大 50 MiB，最多测量其中 12 分钟。
 - Kumi 的 REAPER 扩展只在连接该 DAW 的单独 Kumi 请求时，才会在已保存的工程中保存一个 ID（Renoise 工具则保存在歌曲中）；Kumi for Hermes 从不请求。一旦保存，这个 ID 会随工程一起保存。

@@ -99,7 +99,7 @@ generated test data, and the made sounds come from Kumi's sound-design engine.
 | `kumi_sound` | Measures 1–8 tracks heard side by side in one pass through Kumi Ears: each sound's envelope, tone, effects (reverb time, echoes, pumping), problems, a kit verdict and ducking; nothing in the Set changes (Live only) | only with Ask before each change on |
 | `kumi_audition` | Plays a part once and scores up to 8 candidate tracks (or the mix) 0–100 against a reference, with their gaps; Session-clip candidates play from temporary Arrangement copies removed after (Live only) | only with Ask before each change on |
 | `kumi_groove` | Shapes a MIDI part's feel toward a reference MIDI clip's, judged on the notes with no listening; `apply` moves the notes as a change you can undo, and a round that didn't help is taken back (Live only) | change and apply: only with Ask before each change on |
-| `kumi_form` | Reads a song's form: plays the whole Arrangement once through Kumi Ears while you wait (up to 15 minutes; Stop ends it), then answers energy over the song, sections, turns, the first hook and which tracks play where, beside a reference's form if you give one (Live only) | only with Ask before each change on |
+| `kumi_form` | Reads a song's form: plays the whole Arrangement once through Kumi Ears while you wait (up to about 6½ minutes with Hermes's default tool deadline, up to 15 if you raise `timeouts.tools.sequential_call`; a longer song is read in parts; Stop ends it), then answers energy over the song, sections, turns, the first hook and which tracks play where, beside a reference's form if you give one (Live only) | only with Ask before each change on |
 | `kumi_render` | Renders up to 60 s of an audio track's own clips offline (no playback) and keeps the file in Kumi's own data as an `artifact_id` for `kumi_listen` (Live only) | only with Ask before each change on |
 | `kumi_sounds` | Searches your sound library by how sounds measure, by name, and by tempo, key, length and kind, saying why each result matches and on what | no |
 | `kumi_palette` | Your palette, shared with the sound map in Desktop: lists and searches it, finds what a loose palette brings in, adds, removes and excludes sounds, manages palettes, and says how to load it as a kit in your DAW; changes no project | no (its edits never run from a webhook, a one-shot query or Hermes's background work) |
@@ -252,7 +252,8 @@ project as…** with **Copy all media into project directory**), or they'll miss
   round (`kumi_groove`) never plays: its `apply`, and a round it takes back, change a MIDI clip's notes as changes in
   HISTORY. A render (`kumi_render`) is offline: Kumi keeps the file (at most 60 s of the track's own clips) in its own
   data and deletes Live's temporary render file. Reading a song's form (`kumi_form`) plays the whole Arrangement
-  once the same way while you wait, up to 15 minutes in all (not a minute a pass), and Stop ends it at once.
+  once the same way while you wait, for as long as Hermes's tool deadline allows (about 6½ minutes by default, up to
+  15 if you raise `timeouts.tools.sequential_call`; a longer song is read in parts), and Stop ends it at once.
   Before some changes, Kumi copies the project as last saved beside it, once for each saved version (an unsaved project
   gets none): in Live when a change reaches its third step (`<Set>.backup-<date>.als`, which stays until you delete it),
   and in Renoise before a change that loads a sample (`<Song> (Kumi copy <date>).xrns`; Kumi keeps a song's five newest
@@ -303,7 +304,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Listening:** Kumi measures audio files on this computer, and can listen to a track or the mix (asked first with
   `ask_before_changes` on):
   only that window (60 seconds at most, with the DAW stopped) is heard. The one exception is reading a song's form
-  (`kumi_form`): it plays the whole Arrangement once while you wait, up to 15 minutes, and Stop ends it. REAPER and Renoise render it into the
+  (`kumi_form`): it plays the whole Arrangement once while you wait, up to about 6½ minutes with Hermes's default
+  tool deadline (up to 15 if you raise `timeouts.tools.sequential_call`; a longer song is read in parts), and Stop
+  ends it. REAPER and Renoise render it into the
   listening folder of Kumi's part in that DAW, and Kumi copies that one file into its data. The render's temporary
   transport, routing and device settings are put back after; REAPER may show the project as modified, and Renoise's
   BPM and lines per beat are put back only if they're still what the render left. In Live (256 beats at most, in the

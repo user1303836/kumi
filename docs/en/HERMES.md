@@ -265,8 +265,10 @@ and put everything back (asked first with Ask before each change on). "Make my h
 `kumi_groove` shapes a MIDI part's feel toward a reference MIDI clip's on the notes, without listening; `apply` moves
 the notes as a change you can undo. `kumi_render` renders up to 60 s of an audio track's own clips offline and keeps the
 file for `kumi_listen`. "Where does the chorus first hit, and does the second verse drag?" `kumi_form` plays the whole
-Arrangement once while you wait (up to 15 minutes; Stop ends it) and reads it bar by bar: energy over the song,
-sections, turns, the first hook and which tracks play where, beside a reference's form if you give one.
+Arrangement once while you wait and reads it bar by bar: energy over the song,
+sections, turns, the first hook and which tracks play where, beside a reference's form if you give one. It plays up to
+about 6½ minutes with Hermes's default tool deadline, or up to 15 if you raise `timeouts.tools.sequential_call` in
+Hermes's config.yaml; a longer song is read in parts. Stop ends it.
 
 **What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes, presets, and
 scripts and devices in a chat that hasn't read outside content without asking: each goes into HISTORY, and most can be
@@ -340,7 +342,8 @@ words are illustrative; Kumi's side is real.
   - **Window:** it listens only to the window you ask for, 60 seconds at most (in Live, 256 beats at most, in the
     Arrangement), with the DAW stopped; it asks first with Ask before each change on. Kumi won't stop playback for you.
     The one exception is reading a song's form (`kumi_form`): it plays the whole Arrangement once while you wait, up
-    to 15 minutes, and Stop ends it.
+    to about 6½ minutes with Hermes's default tool deadline (up to 15 if you raise `timeouts.tools.sequential_call`; a
+    longer song is read in parts), and Stop ends it.
   - **Your project:** the render's temporary transport, routing and device settings are put back after. REAPER may
     show the project as modified after a listen, since only saving clears that flag; Kumi never saves.
   - **Renoise's tempo:** rendering can change its BPM and lines per beat. Kumi puts them back only if they're still
@@ -366,7 +369,8 @@ words are illustrative; Kumi's side is real.
   plays them from temporary copies in the Arrangement, removed after. A groove's `apply` and a groove round taken back
   change a MIDI clip's notes as changes in HISTORY. A render keeps up to 60 s of a track's own clips in Kumi's own data
   and deletes Live's temporary render file. Reading a song's form plays the whole Arrangement once the same way while
-  you wait, up to 15 minutes in all (not a minute a pass), and Stop ends it at once. A tune's search or probe makes scratch copies of the run's track in
+  you wait, for as long as Hermes's tool deadline allows (about 6½ minutes by default, up to 15 if you raise
+  `timeouts.tools.sequential_call`; a longer song is read in parts), and Stop ends it at once. A tune's search or probe makes scratch copies of the run's track in
   the Set and removes them after; if Kumi stops partway, its next look (`kumi_observe`) removes leftovers. There's no
   record pass, and no model is downloaded: a run goes by its meters.
 - **Plug-in presets** you put in your User Library are new `.vstpreset` files Kumi writes into Live's User Library
@@ -393,7 +397,8 @@ words are illustrative; Kumi's side is real.
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
 - Kumi listens to the window you ask for, up to 60 seconds (in Live, 256 beats at most, in the Arrangement); reading
-  a song's form in Live plays the whole Arrangement once, up to 15 minutes. In every
+  a song's form in Live plays the whole Arrangement once, up to about 6½ minutes with Hermes's default tool deadline
+  (up to 15 if you raise `timeouts.tools.sequential_call`). In every
   DAW it measures audio files, library sounds and Kumi's own results.
 - Kumi reads only the open project, the audio files in the sample folders you list, its renders and captures of the
   windows you ask for, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
