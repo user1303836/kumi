@@ -7704,7 +7704,7 @@ function HoverPill({
 }
 
 // src/shared/atlas/names.ts
-var NAMES_ON_SCREEN = 600;
+var NAMES_ON_SCREEN = 800;
 var NAMES_MOST = 50;
 var kept2 = /* @__PURE__ */ new WeakMap();
 function regionsOf(points) {

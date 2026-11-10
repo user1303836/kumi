@@ -8,9 +8,9 @@ export interface Region {
   y: number
 }
 
-/** Sounds on screen at most for any to carry its own name (a few hundred: more, and the names are noise), and how many
- *  names at most. */
-export const NAMES_ON_SCREEN = 600
+/** Sounds on screen at most for any to carry its own name (several hundred: a name is only written over empty map, so
+ *  a crowded view names few; past this the names are noise), and how many names at most. */
+export const NAMES_ON_SCREEN = 800
 export const NAMES_MOST = 50
 
 // Each layout's regions are worked out once and kept with its points: a sort per family is too much for every frame.
