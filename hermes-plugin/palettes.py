@@ -305,9 +305,9 @@ class Map:
 
 
 _MAPS: dict[tuple, Map] = {}
-# Each built map holds its revision's parsed sounds (a few hundred MB for 160,000): the current one, and the one before
-# a refresh while a request still holds it.
-_MAPS_KEPT = 2
+# One built map: it holds its revision's parsed sounds (a few hundred MB for 160,000). A request still using the one
+# before a refresh keeps that one alive by its own reference; a revision has one key, since its file is never rewritten.
+_MAPS_KEPT = 1
 _MAPS_LOCK = threading.Lock()
 
 

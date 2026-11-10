@@ -8,6 +8,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -166,11 +168,31 @@ class MapReads(StateTest):
     def test_a_map_revision_read_again_is_not_parsed_again(self) -> None:
         with mock.patch.object(snapshots, "_load", wraps=snapshots._load) as load:
             first = snapshots.map_revision(self.state)
+            # Other snapshots are read every time, and don't take the map's place.
+            snapshots.read(self.state, "status")
+            snapshots.read(self.state, "status")
             again = snapshots.map_revision(self.state)
             sound = snapshots.sound(self.state, "s-r7-0091")
         self.assertIs(again, first)
         self.assertEqual(sound["class"], "snare")
-        self.assertEqual(load.call_count, 1, "a big library's map takes seconds to parse")
+        parsed = [call.args[0].name for call in load.call_args_list]
+        self.assertEqual(parsed.count("r7.json"), 1, "a big library's map takes seconds to parse")
+        self.assertEqual(parsed.count("status.json"), 2)
+
+    def test_requests_that_arrive_together_share_one_parse(self) -> None:
+        load = snapshots._load
+
+        def slow(path: Path):
+            time.sleep(0.05)  # long enough for every thread to be waiting while the first one parses
+            return load(path)
+
+        with mock.patch.object(snapshots, "_load", side_effect=slow) as parse:
+            threads = [threading.Thread(target=snapshots.map_revision, args=(self.state,)) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(parse.call_count, 1, "a page's first requests would each hold a map of their own")
 
     def test_a_replaced_map_file_is_read_anew_and_one_cut_short_or_too_big_is_never_kept(self) -> None:
         self.assertEqual(self._class(), "snare")

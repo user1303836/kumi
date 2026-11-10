@@ -134,11 +134,12 @@ def read(state: Path, name: str) -> dict | None:
     return data
 
 
-# The map revision last read, as parsed, by its file's identity: one at most. A revision is written once, whole (by
-# atomic replace), and never changed, while every map route, sound lookup, palette and doctor check reads it: a
-# 160,000-sound map takes seconds and a few hundred MB to parse. Only a schema-1 map whose file kept its identity through
-# the parse is kept, so a half-written, oversized or replaced file is never served from here; callers share the result
-# and never change it.
+# The map revision last read, as parsed, by its file's identity: one per loaded copy of this file. The dashboard
+# (dashboard/plugin_api.py) loads its own copy and the tools use the package's, so one Hermes process can hold two.
+# A revision is written once, whole (by atomic replace), and never changed, while every map route, sound lookup, palette
+# and doctor check reads it: a 160,000-sound map takes seconds and a few hundred MB to parse. Only a schema-1 map whose
+# file kept its identity through the parse is kept, so a half-written, oversized or replaced file is never served from
+# here; callers share the result and never change it.
 _MAP_PARSED: tuple[tuple, dict] | None = None
 _MAP_LOCK = threading.Lock()
 
