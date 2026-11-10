@@ -196,7 +196,8 @@ settings:
   reorder, rename, strict or loose, Use as kit…) and is the one `kumi_palette` reads and edits. A sound that can't play
   there leaves the map quietly, counted in one line. While a script or device waits for your approval, the pane shows
   its whole code (and a device's controls); a script's HISTORY row has **Show code**. Buttons never change your
-  project directly: they write a request into the chat, which goes through the same path as a typed request.
+  project directly: a project change goes into the chat as a request, through the same path as a typed one, while
+  Make, the palette and hiding sounds that can't play write only Kumi's own data.
 - **Web dashboard:** a Kumi tab with the same HISTORY, status, map and palette.
 
 ## Files
