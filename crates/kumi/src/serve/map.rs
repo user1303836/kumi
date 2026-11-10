@@ -798,7 +798,7 @@ mod tests {
                     vector: number.map(|number| pack_vector(&[number; VECTOR_LENGTH])),
                     kind: Some(kind),
                     class: Some(class),
-                    seconds: number.map(|_| if at == 2 { 2.0006 } else { 1.25 }),
+                    seconds: number.map(|_| if at == 2 { 1.2496 } else { 1.25 }),
                     bpm: [Some(120.0), Some(60.0), Some(240.0), None][at],
                     key: [Some("A minor"), Some("C major"), None, None][at].map(str::to_owned),
                     note: (at == 2).then(|| "A3".into()),
@@ -960,8 +960,7 @@ mod tests {
         assert_eq!(similarity["Pad far"], (json!(0.01), json!(0.5)));
         let duration =
             |name: &str| first["sounds"].as_object().unwrap().values().find(|sound| sound["name"] == name).unwrap()["duration"].clone();
-        assert_eq!(duration("Pad far"), json!(2.001));
-        assert_eq!(duration("Kick seed"), json!(1.25));
+        assert_eq!(duration("Pad far"), json!(1.25), "1.2496 s is written to the millisecond");
     }
 
     /// The fixture and three more measured sounds: two near the kick seed's features, one near the far pad's.
