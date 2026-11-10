@@ -207,7 +207,8 @@ map, HISTORY, measurements, copies of the audio it measured or made (`state/arti
 changed), the code of each script it ran (`state/scripts`), your palettes (`state/palettes.json`), the sounds made on
 the map (`state/designs`, listed in `state/designs.json`: the 200 newest, and any older one a palette keeps), the sounds hidden
 from the map (`state/map-hidden.json`) and job records. Outside it, setup writes only Kumi's
-part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
+part in your DAW, at the location you approved (with another Kumi's installation in use, what it writes in that
+installation's folder is listed under Disclosure); each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
 (`User Library/Kumi/Instruments` or `Audio Effects`), and each wavetable a new `.wav` file in Vital's wavetable folder
 or `User Library/Kumi/Wavetables`. A script runs with your DAW's access, so what it writes
