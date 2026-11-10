@@ -3,6 +3,56 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.80 — 2026-11-10
+
+Ships with bridge 1.0.107, as 1.24.79 did.
+
+- On `/map` in the terminal, drag with the middle button to move around, and hold Shift (or Ctrl)
+  while dragging a box to add more sounds to your picks; Esc or a click on empty space clears them.
+- Drag a sound on `/map` to put it where you like; Kumi remembers, and Shift+R puts it back.
+- `l` on `/map` lays your sounds out by character, texture, key, tempo, family, length or folder, and
+  back to similarity.
+- Sounds you make on `/map` are listed under it; press their numbers to make the next sound from them.
+- `e` on `/map` opens every option for making a sound: steer it darker, punchier, repitched or
+  reversed, and choose how Resonate pairs, how Modulate modulates and how a Loop plays (in your DAW's
+  tempo).
+- `v` on `/map` grows one sound toward another: seven sounds along the way, drawn as a path you can
+  play, keep and make from.
+- The browser's map (`/map open`) pans with the middle button, adds Shift-lasso picks together, lays
+  sounds out other ways, and asks for more like the sounds you picked.
+- `n` on `/map` picks more sounds like the ones you picked.
+- In Kumi for Hermes, adding a sample folder and building the sound map work with no DAW open.
+- The Hermes sound map fills its pane, with its tools, groups (each in its own shape), a player for
+  the sound you click and your picks' actions floating over it.
+- The Hermes map lays its sounds out by similarity, character, texture, keys, tempo, families, length
+  or folders, and they move to their new places.
+- Grow on the Hermes map: a vine from one sound toward another whose buds you hear, keep and make
+  from, and a handle that grows any point between.
+- The Hermes palette is a drawer of waveform cards, each with Use…, that folds to one row and resizes.
+- On a wide Hermes map, the Make panel opens beside it.
+- An empty Hermes sound map offers its next step, setting Kumi up or scanning your samples, and shows
+  a scan's progress.
+- When Hermes finds sounds, the map frames them once, then keeps the view you set as the palette or
+  Make opens.
+- The Hermes sound map glows: each family lights the map in its own colour, with its name and count
+  over its sounds, and every sound has a soft halo under its shape.
+- Zoomed in, sounds on the Hermes map carry their names where there is room.
+- What plays on the Hermes map pulses as loud as it is, the label beside a sound shows its waveform,
+  and with hover-to-play on the pointer leaves a trail in the colours of what it played.
+- A sound keeps its colour and shape off the Hermes map: on palette cards, and a sound Kumi made wears
+  the colours of the sounds it came from; point at it and the map rings them.
+- The Hermes map's corner shows how many sounds it holds, the layout as a button, the zoom, and what
+  the pointer and keys do right now; at first it also lists three first steps.
+- On the Hermes map, a box counts the sounds it holds as you draw it, the sound under the pointer is
+  joined to the five nearest it, and a new layout's sounds fly to their places as a swarm.
+- Kumi's connection dot in Hermes pulses at your DAW's tempo while it plays.
+- When nothing has changed yet, Kumi's pane in Hermes Desktop offers three requests to try.
+- Kumi for Hermes can use the REAPER extension or Renoise tool that a standalone Kumi already put in,
+  without replacing it, so both can be used on the same computer.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.79 — 2026-11-09
 
 Ships with bridge 1.0.107, as 1.24.78 did.
