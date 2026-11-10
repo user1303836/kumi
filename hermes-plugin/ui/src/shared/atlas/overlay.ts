@@ -58,6 +58,8 @@ export class Overlay {
     this.canvas.width = Math.round(width * ratio)
     this.canvas.height = Math.round(height * ratio)
     this.draw(performance.now())
+    // A map that has a size again (its tab is back) picks up what still moves.
+    if (!this.still && this.live()) this.wake()
   }
 
   /** A sound starts playing (its pulse begins), or the sound stops (null: its pulse fades). */
@@ -68,8 +70,9 @@ export class Overlay {
     if (pulse) this.core = getComputedStyle(this.canvas).color || this.core
     if (pulse) this.fading = null
     // The trail's colour: the playing sound's, a little lighter, so the trail reads across its own family's cluster.
+    // A colour this can't read (a CSS variable's name: never a canvas's style) gives way to the canvas's own.
     const channels = pulse ? rgbOf(pulse.color) : null
-    if (pulse) this.tone = channels ? lighten(channels, 0.3) : pulse.color
+    if (pulse) this.tone = channels ? lighten(channels, 0.3) : this.core
     this.wake()
   }
 
@@ -111,26 +114,36 @@ export class Overlay {
     this.path = []
   }
 
+  /** Whether anything here still moves: a sound playing, a pulse fading, a trail running out. */
+  private live(): boolean {
+    return Boolean(this.pulse || this.fading || this.path.length > 0)
+  }
+
   private wake(): void {
     if (this.still) {
       this.draw(performance.now())
       return
     }
-    if (this.frame === 0) this.frame = requestAnimationFrame(this.tick)
+    // No frames for a map with no size (its tab is hidden): there is nothing to draw on, and `resize` wakes it.
+    if (this.frame === 0 && this.width > 0) this.frame = requestAnimationFrame(this.tick)
   }
 
-  private tick = (now: number): void => {
+  private tick = (): void => {
     this.frame = 0
-    this.draw(now)
-    if (this.pulse || this.fading || this.path.length > 0) this.frame = requestAnimationFrame(this.tick)
+    // The clock `play` and `trail` read, not the frame's own time, which can be a little before theirs.
+    this.draw(performance.now())
+    if (this.live() && this.width > 0) this.frame = requestAnimationFrame(this.tick)
   }
 
   private draw(now: number): void {
+    // What has run out goes first, wherever this is called from and whether or not there is anything to draw on: a
+    // fade or a trail on a map with no size must still end.
+    this.path = this.path.filter(step => strengthOf(step, now) > 0)
+    if (this.fading && now - this.fading.since >= FADE_MS) this.fading = null
     const context = this.context
     if (!context || this.width === 0) return
     context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0)
     context.clearRect(0, 0, this.width, this.height)
-    this.path = this.path.filter(step => strengthOf(step, now) > 0)
     if (this.path.length > 1) {
       // Each step a short stroke from the one before, thinner and fainter as it ages: a comet's tail, widest and
       // brightest at the pointer.
@@ -173,18 +186,14 @@ export class Overlay {
         }
         context.globalCompositeOperation = 'source-over'
         context.globalAlpha = 0.95
-        context.strokeStyle = channels ? lighten(channels, 0.3) : ringed.color
+        context.strokeStyle = channels ? lighten(channels, 0.3) : this.core
         context.beginPath()
         context.arc(place[0], place[1], 7.5, 0, Math.PI * 2)
         context.stroke()
       }
       context.restore()
     }
-    if (this.fading) {
-      const left = 1 - (now - this.fading.since) / FADE_MS
-      if (left <= 0) this.fading = null
-      else this.ring(context, this.fading.pulse, this.fading.shown, left, null)
-    }
+    if (this.fading) this.ring(context, this.fading.pulse, this.fading.shown, 1 - (now - this.fading.since) / FADE_MS, null)
     const pulse = this.pulse
     if (!pulse) return
     const progress = progressOf(now - pulse.since, pulse.duration)
@@ -220,7 +229,7 @@ export class Overlay {
       context.fillRect(x - reach, y - reach, reach * 2, reach * 2)
     }
     // Rings a little lighter than the family's colour: a pulse in the middle of its own crowded cluster still reads.
-    context.strokeStyle = channels ? lighten(channels, 0.3) : pulse.color
+    context.strokeStyle = channels ? lighten(channels, 0.3) : this.core
     if (ripple === null) {
       context.lineWidth = 1.75
       for (let ring = 0; ring < 3; ring++) {

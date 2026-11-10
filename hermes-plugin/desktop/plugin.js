@@ -6926,6 +6926,7 @@ var Overlay2 = class {
     this.canvas.width = Math.round(width * ratio);
     this.canvas.height = Math.round(height * ratio);
     this.draw(performance.now());
+    if (!this.still && this.live()) this.wake();
   }
   /** A sound starts playing (its pulse begins), or the sound stops (null: its pulse fades). */
   play(pulse) {
@@ -6935,7 +6936,7 @@ var Overlay2 = class {
     if (pulse) this.core = getComputedStyle(this.canvas).color || this.core;
     if (pulse) this.fading = null;
     const channels = pulse ? rgbOf(pulse.color) : null;
-    if (pulse) this.tone = channels ? lighten(channels, 0.3) : pulse.color;
+    if (pulse) this.tone = channels ? lighten(channels, 0.3) : this.core;
     this.wake();
   }
   /** The playing sound's waveform arrived. */
@@ -6970,24 +6971,29 @@ var Overlay2 = class {
     this.fading = null;
     this.path = [];
   }
+  /** Whether anything here still moves: a sound playing, a pulse fading, a trail running out. */
+  live() {
+    return Boolean(this.pulse || this.fading || this.path.length > 0);
+  }
   wake() {
     if (this.still) {
       this.draw(performance.now());
       return;
     }
-    if (this.frame === 0) this.frame = requestAnimationFrame(this.tick);
+    if (this.frame === 0 && this.width > 0) this.frame = requestAnimationFrame(this.tick);
   }
-  tick = (now) => {
+  tick = () => {
     this.frame = 0;
-    this.draw(now);
-    if (this.pulse || this.fading || this.path.length > 0) this.frame = requestAnimationFrame(this.tick);
+    this.draw(performance.now());
+    if (this.live() && this.width > 0) this.frame = requestAnimationFrame(this.tick);
   };
   draw(now) {
+    this.path = this.path.filter((step2) => strengthOf(step2, now) > 0);
+    if (this.fading && now - this.fading.since >= FADE_MS) this.fading = null;
     const context = this.context;
     if (!context || this.width === 0) return;
     context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
     context.clearRect(0, 0, this.width, this.height);
-    this.path = this.path.filter((step2) => strengthOf(step2, now) > 0);
     if (this.path.length > 1) {
       context.save();
       context.globalCompositeOperation = "lighter";
@@ -7025,18 +7031,14 @@ var Overlay2 = class {
         }
         context.globalCompositeOperation = "source-over";
         context.globalAlpha = 0.95;
-        context.strokeStyle = channels ? lighten(channels, 0.3) : ringed.color;
+        context.strokeStyle = channels ? lighten(channels, 0.3) : this.core;
         context.beginPath();
         context.arc(place[0], place[1], 7.5, 0, Math.PI * 2);
         context.stroke();
       }
       context.restore();
     }
-    if (this.fading) {
-      const left = 1 - (now - this.fading.since) / FADE_MS;
-      if (left <= 0) this.fading = null;
-      else this.ring(context, this.fading.pulse, this.fading.shown, left, null);
-    }
+    if (this.fading) this.ring(context, this.fading.pulse, this.fading.shown, 1 - (now - this.fading.since) / FADE_MS, null);
     const pulse = this.pulse;
     if (!pulse) return;
     const progress = progressOf(now - pulse.since, pulse.duration);
@@ -7068,7 +7070,7 @@ var Overlay2 = class {
       context.fillStyle = glow;
       context.fillRect(x - reach, y - reach, reach * 2, reach * 2);
     }
-    context.strokeStyle = channels ? lighten(channels, 0.3) : pulse.color;
+    context.strokeStyle = channels ? lighten(channels, 0.3) : this.core;
     if (ripple === null) {
       context.lineWidth = 1.75;
       for (let ring2 = 0; ring2 < 3; ring2++) {
