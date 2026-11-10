@@ -364,8 +364,9 @@ run without asking there, and Kumi can't tell it from a chat.
   palette under it, cards for measured audio, and commands in Hermes's command palette. While a script or device waits
   for your approval, the pane shows its whole code (and a device's controls); a script's HISTORY row has **Show
   code**. With nothing in HISTORY yet, the pane offers three requests to try (**What am I looking at?**, a small
-  change and a find), each put in the chat for you to send. Buttons put a request into the chat; they never change
-  your project by themselves.
+  change and a find), each put in the chat for you to send. Buttons never change your project directly: a project
+  change goes into the chat as a request, through the same path as a typed one, while Make, the palette and hiding
+  sounds that can't play write only Kumi's own data.
 - **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
 - **The dot** beside Kumi's status (in the chip, the pane and the dashboard) pulses at your DAW's tempo while it plays,
   and sits still when it's stopped.
