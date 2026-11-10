@@ -203,7 +203,7 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 Kumi makes a new sound out of two or more of yours, as many as you pick (map sounds, palette sounds, or sounds Kumi
 made before). Nothing in your project changes: the result is Kumi's own copy until you use it.
 
-![The Make panel, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, already kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
+![The Make panel, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, already kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
 
 *Kumi 1.24.79 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
 
@@ -389,13 +389,17 @@ run without asking there, and Kumi can't tell it from a chat.
 - **The dot** beside Kumi's status (in the chip, the pane and the dashboard) pulses at your DAW's tempo while it plays,
   and sits still when it's stopped.
 
-![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
+![Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.](../assets/hermes/screenshots/catalog-1-pane.png)
 
 ![The web dashboard's Kumi page: status, FOCUS and HISTORY (each change with Copy undo) beside the sound map, each family named, and a hat's name and waveform on hover.](../assets/hermes/screenshots/hermes-dashboard.png)
 
-Screenshots: the pane is Kumi 1.24.73 on real Ableton Live 12. The map, palette, Make and dashboard shots are Kumi
-1.24.79 on a generated 3,840-sound test map, with the made sounds from Kumi's sound-design engine. Hermes's side of the
-chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
+Screenshots:
+- The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
+  1.24.79 runtime, and real Renoise, in a project that started empty.
+- The map, palette, Make and dashboard shots are Kumi 1.24.79 on a generated 3,840-sound test map, with the made
+  sounds from Kumi's sound-design engine.
+- In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
+  Kumi's side is real.
 
 ## Settings
 

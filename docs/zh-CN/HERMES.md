@@ -98,7 +98,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 Kumi 能用你选中的任意数量（两个或更多）的声音（地图上的声音、调色板里的声音，或 Kumi 之前做的声音）做出一个新声音。你的工程不会有任何改变：在你使用之前，结果只是 Kumi 自己的副本。
 
-![在地图旁打开的制作面板：一个叠加，和一个按工程 124 BPM 生成的循环（正在播放，已保留到调色板），都以它们来源军鼓的颜色绘制，每个结果都有重掷、保留和使用…。](../assets/hermes/screenshots/catalog-8-make.png)
+![在地图旁打开的制作面板：一个叠加，和一个按工程 175 BPM 生成的循环（正在播放，已保留到调色板），都以它们来源军鼓的颜色绘制，每个结果都有重掷、保留和使用…。](../assets/hermes/screenshots/catalog-8-make.png)
 
 *Hermes Desktop 中的 Kumi 1.24.79；采样是生成的测试数据，做出的声音来自 Kumi 的引擎。*
 
@@ -172,11 +172,14 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 - **网页仪表盘：** 一个包含 HISTORY、状态、地图和调色板的 Kumi 标签页。
 - **Kumi 状态旁的圆点**（状态标签、侧边栏和仪表盘里）在 DAW 播放时按工程的速度跳动，停止时保持不动。
 
-![Hermes Desktop 中 Kumi 的侧边栏：FOCUS 显示 Drums 音轨，HISTORY 中每次修改都有 Undo。](../assets/hermes/screenshots/catalog-1-pane.png)
+![真实 Renoise 会话中的 Hermes Desktop 与 Kumi 的侧边栏：对话（“now do that with literally every effect”、Hermes 的步骤和 Kumi 的修改）旁边，侧边栏显示 109 BPM 的工程、FOCUS 显示正在播放的 pattern、正在进行的采样扫描（160,889 个中的 95,633 个），以及到第 207 次修改的 HISTORY（最新一条带有 Undo）。](../assets/hermes/screenshots/catalog-1-pane.png)
 
 ![网页仪表盘中的 Kumi 页面：状态、FOCUS、HISTORY（每次修改都有「复制撤销」）和声音地图；地图上每个类别都标着名字，悬停的踩镲显示名字和波形。](../assets/hermes/screenshots/hermes-dashboard.png)
 
-截图：面板是真实 Ableton Live 12 上的 Kumi 1.24.73。地图、调色板、制作和仪表盘的截图是 Kumi 1.24.79，运行在生成的 3,840 个声音的测试地图上，做出的声音来自 Kumi 的声音设计引擎。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
+截图：
+- 面板是没有脚本的真实会话：Windows 上的 Hermes Desktop v0.23.1 和真实的模型、运行在 1.24.79 运行时上的 Kumi for Hermes，以及真实的 Renoise，工程从空白开始。
+- 地图、调色板、制作和仪表盘的截图是 Kumi 1.24.79，运行在生成的 3,840 个声音的测试地图上，做出的声音来自 Kumi 的声音设计引擎。
+- 在其他截图中，对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
 
 ## 设置项
 
