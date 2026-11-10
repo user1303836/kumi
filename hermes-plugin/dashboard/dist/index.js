@@ -5813,6 +5813,19 @@
     }
   };
 
+  // src/shared/atlas/restWave.ts
+  var REST_MS = 150;
+  function restWave(id, audio, got) {
+    if (peaksKept(id, WAVE_BARS)) return () => {
+    };
+    let live = true;
+    const timer = setTimeout(() => void peaksFor(id, WAVE_BARS, audio, () => live).then((levels) => live && got(levels)), REST_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }
+
   // src/shared/atlas/AtlasOverlay.tsx
   function AtlasOverlay({
     width,
@@ -5871,12 +5884,8 @@
         drawn.play(null);
         return;
       }
-      let live = true;
       drawn.play({ place: () => placed.current(id), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) });
-      if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((levels) => live && drawn.levels(levels));
-      return () => {
-        live = false;
-      };
+      if (fetched.current) return restWave(id, fetched.current, (levels) => drawn.levels(levels));
     }, [id, color, glyph, duration]);
     return /* @__PURE__ */ jsx("canvas", { "aria-hidden": true, ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", color: T.text } });
   }
@@ -6468,6 +6477,16 @@
     return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "-1.5 -1.5 3 3", width: size, children: shape ? /* @__PURE__ */ jsx("polygon", { fill: color, points: shape.map(([x, y]) => `${x},${y}`).join(" ") }) : /* @__PURE__ */ jsx("circle", { cx: "0", cy: "0", fill: color, r: "1" }) });
   }
 
+  // src/shared/atlas/labelPlace.ts
+  var LABEL_WIDEST = 300;
+  var LABEL_TALLEST = 44;
+  var LABEL_AWAY = 24;
+  function labelPlace(at, room) {
+    const [right, left] = [room[0] - at[0] - LABEL_AWAY, at[0] - LABEL_AWAY];
+    const top = Math.min(Math.max(0, at[1] - LABEL_TALLEST / 2), Math.max(0, room[1] - LABEL_TALLEST));
+    return right >= LABEL_WIDEST || right >= left ? { side: "right", x: at[0] + LABEL_AWAY, top, most: Math.min(LABEL_WIDEST, Math.max(0, right)) } : { side: "left", x: Math.max(0, left), top, most: Math.min(LABEL_WIDEST, Math.max(0, left)) };
+  }
+
   // src/shared/atlas/Wave.tsx
   function usePlayhead(playing, duration) {
     const [startedAt, setStartedAt] = useState(null);
@@ -6476,7 +6495,7 @@
       setStartedAt(playing ? performance.now() : null);
       setNow(performance.now());
     }, [playing]);
-    const progress = startedAt === null ? null : progressOf(now - startedAt, duration);
+    const progress = startedAt === null ? null : progressOf(Math.max(0, now - startedAt), duration);
     const running = progress !== null;
     useEffect(() => {
       if (!running) return;
@@ -6524,9 +6543,6 @@
   }
 
   // src/shared/atlas/HoverPill.tsx
-  var WIDEST = 300;
-  var TALLEST = 44;
-  var AWAY = 24;
   function HoverPill({
     id,
     sound,
@@ -6543,18 +6559,14 @@
     useEffect(() => {
       setPeaks(peaksKept(id, WAVE_BARS));
       if (!playing || !fetched.current) return;
-      let live = true;
-      void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((found) => live && found && setPeaks(found));
-      return () => {
-        live = false;
-      };
+      return restWave(id, fetched.current, (found) => found && setPeaks(found));
     }, [id, playing]);
     const duration = typeof sound.duration === "number" ? sound.duration : 0;
     const progress = usePlayhead(playing, duration);
     const under = [seconds(sound.duration), clean(sound.folder ?? "", 40)].filter(Boolean).join(" · ");
-    const side = at[0] + AWAY + WIDEST > within[0] ? { right: Math.max(0, within[0] - at[0] + AWAY) } : { left: at[0] + AWAY };
-    const top = Math.min(Math.max(0, at[1] - TALLEST / 2), Math.max(0, within[1] - TALLEST));
-    return /* @__PURE__ */ jsxs("div", { style: { ...glass, borderRadius: 10, position: "absolute", ...side, top, maxWidth: WIDEST, pointerEvents: "none", padding: "5px 10px", ...S.row, gap: 10 }, children: [
+    const place = labelPlace(at, within);
+    const side = place.side === "right" ? { left: place.x } : { right: `calc(100% - ${place.x}px)` };
+    return /* @__PURE__ */ jsxs("div", { style: { ...glass, borderRadius: 10, position: "absolute", ...side, top: place.top, maxWidth: Math.max(140, place.most), pointerEvents: "none", padding: "5px 10px", ...S.row, gap: 10 }, children: [
       /* @__PURE__ */ jsxs("div", { style: { minWidth: 0, flex: "0 1 auto" }, children: [
         /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, fontSize: 11.5, color: T.text }, children: [
           /* @__PURE__ */ jsx(Glyph2, { color, glyph }),
@@ -6949,7 +6961,7 @@
                 /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
                 /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
               ] }),
-              /* @__PURE__ */ jsx(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }),
+              /* @__PURE__ */ jsx(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }, picked.result.artifact_id),
               /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
                 actions?.(picked.result),

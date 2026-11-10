@@ -1,13 +1,14 @@
 // The canvas over the sound map's own, for what moves (`overlay.ts`): mounted over the map's box, the same size, and
-// never in the pointer's way. It hears which sound plays, asks for its waveform (decoded once; the audio is already
-// here, it is playing) and hands both to the overlay; with hover-to-play on, it also listens to the pointer over the
-// map's canvas for its trail. Everything stops when it unmounts.
+// never in the pointer's way. It hears which sound plays, asks for its waveform once the sound has played a moment
+// (`restWave`: only the sound the pointer rests on is decoded) and hands both to the overlay; with hover-to-play on,
+// it also listens to the pointer over the map's canvas for its trail. Everything stops when it unmounts.
 import { T } from '@kumi/theme'
 import { type RefObject, useEffect, useRef } from 'react'
 
-import { peaksFor, peaksKept } from '../peaks.ts'
+import { peaksKept } from '../peaks.ts'
 import { Overlay } from './overlay.ts'
 import { WAVE_BARS } from './pulse.ts'
+import { restWave } from './restWave.ts'
 
 /** The sound that plays, when it is on this map: its id, colour, glyph and length in seconds. */
 export interface PlayingSound {
@@ -92,13 +93,8 @@ export function AtlasOverlay({
       drawn.play(null)
       return
     }
-    let live = true
     drawn.play({ place: () => placed.current(id), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) })
-    // Wanted only while this sound still plays: a sweep across the map decodes only the sound it rests on.
-    if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then(levels => live && drawn.levels(levels))
-    return () => {
-      live = false
-    }
+    if (fetched.current) return restWave(id, fetched.current, levels => drawn.levels(levels))
   }, [id, color, glyph, duration])
   return <canvas aria-hidden ref={canvas} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', color: T.text }} />
 }

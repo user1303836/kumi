@@ -16,7 +16,9 @@ export function usePlayhead(playing: boolean, duration: number): number | null {
     setStartedAt(playing ? performance.now() : null)
     setNow(performance.now())
   }, [playing])
-  const progress = startedAt === null ? null : progressOf(now - startedAt, duration)
+  // A frame's own time can be a little before the start read above (the first frame after an idle page): never less
+  // than no time at all, or the play would count as over before it began.
+  const progress = startedAt === null ? null : progressOf(Math.max(0, now - startedAt), duration)
   const running = progress !== null
   useEffect(() => {
     if (!running) return

@@ -236,7 +236,8 @@ export function GrowLayer({
               <span style={{ ...S.ellipsis, display: 'block' }}>{clean(picked.result.recipe, 160)}</span>
               <span style={{ color: T.faint }}>{seconds(picked.result.duration)}</span>
             </span>
-            <GrownWave colors={[fromColor, toColor]} playing={playing === picked.result.artifact_id} result={picked.result} />
+            {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
+            <GrownWave colors={[fromColor, toColor]} key={picked.result.artifact_id} playing={playing === picked.result.artifact_id} result={picked.result} />
             <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
               <TextButton onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>{playing === picked.result.artifact_id ? t('map.stop') : t('map.play')}</TextButton>
               {actions?.(picked.result)}

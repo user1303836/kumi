@@ -1,7 +1,7 @@
 // node --test: the atlas look's own logic (the glow under the sound map, the names on it, what moves over it), as
 // numbers: the one canvas here is a stand-in that takes any call.
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { mock, test } from 'node:test'
 
 import { load } from './load.mjs'
 
@@ -288,5 +288,59 @@ test('the overlay asks for a frame only while something on it moves, and never f
   } finally {
     performance.now = kept.clock
     Object.assign(globalThis, { requestAnimationFrame: kept.frame, cancelAnimationFrame: kept.cancel, getComputedStyle: kept.style, Path2D: kept.path })
+  }
+})
+
+test('the hover label sits beside its sound, clear of a side sheet over the map', async () => {
+  const { labelPlace, LABEL_AWAY } = await load('src/shared/atlas/labelPlace.ts')
+  // A map 946 wide whose right 430 a sheet covers: 516 clear.
+  const [open, covered] = [
+    [946, 900],
+    [516, 900]
+  ]
+  // Room to its right: the label starts a little right of the sound.
+  assert.deepEqual([labelPlace([100, 300], covered).side, labelPlace([100, 300], covered).x], ['right', 100 + LABEL_AWAY])
+  // Near the sheet it sits to the sound's left, and ends before the sound: nothing of it is under the sheet.
+  const near = labelPlace([450, 300], covered)
+  assert.equal(near.side, 'left')
+  assert.equal(near.x, 450 - LABEL_AWAY)
+  assert.ok(near.most <= near.x, 'no wider than the room to its left')
+  // The same sound with the sheet closed has room to its right again.
+  assert.equal(labelPlace([450, 300], open).side, 'right')
+  // A sliver of a map: the side with more room, and never past the map's edge.
+  const sliver = labelPlace([60, 300], [200, 900])
+  assert.equal(sliver.side, 'right')
+  assert.ok(sliver.x + sliver.most <= 200)
+  // Level with the sound, and inside the map's height at its top and its foot.
+  assert.equal(labelPlace([100, 4], covered).top, 0)
+  assert.ok(labelPlace([100, 898], covered).top < 898 - 22)
+})
+
+test('a waveform is fetched only for a sound that has played a moment: a sweep across the map fetches none', async () => {
+  const { restWave, REST_MS } = await load('src/shared/atlas/restWave.ts')
+  const fetched = []
+  const audio = async id => {
+    fetched.push(id)
+    return 'data:audio/wav;base64,'
+  }
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    // Crossed in a sweep: the sound stops before the pointer has rested on it.
+    const stop = restWave('s-crossed', audio, () => {})
+    mock.timers.tick(REST_MS - 1)
+    stop()
+    mock.timers.tick(REST_MS * 10)
+    await settle()
+    assert.deepEqual(fetched, [])
+    // Rested on: its audio is fetched, and whoever asked hears the answer.
+    let heard = 0
+    restWave('s-rested', audio, () => heard++)
+    mock.timers.tick(REST_MS)
+    await settle()
+    assert.deepEqual(fetched, ['s-rested'])
+    assert.equal(heard, 1)
+  } finally {
+    mock.timers.reset()
   }
 })
