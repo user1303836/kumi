@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, undoRowOf } from '../shared/format.ts'
+import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, undoRequest, undoRowOf } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
@@ -13,6 +13,9 @@ import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
 import { JobsView } from './jobs.tsx'
 import { PendingScriptView, SavedScript } from './script.tsx'
+
+// The starters' labels, in the producer's language (their requests stay English, as every request does).
+const STARTER_LABELS = { look: 'pane.starterLook', change: 'pane.starterChange', find: 'pane.starterFind' } as const
 
 /** The time, re-read every `every` ms while mounted, for "4 min ago" labels. */
 export function useNow(every = 30_000): number {
@@ -134,6 +137,17 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         />
         {/* Rows are kept while Kumi is away, but undoing one needs it back: said under them, and only when there are some. */}
         {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
+        {/* Nothing in HISTORY yet, with Kumi connected: three requests to try, each only put in the chat to send. */}
+        {connected && (state.history?.items?.length ?? 0) === 0 && (
+          <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            <span style={S.faint}>{t('pane.starters')}</span>
+            {STARTER_REQUESTS.map(starter => (
+              <TextButton key={starter.key} onClick={() => void ask(ctx, starter.request, { send: false, session })} title={t('pane.starterTitle')}>
+                {t(STARTER_LABELS[starter.key])}
+              </TextButton>
+            ))}
+          </div>
+        )}
       </Section>
       <div style={{ ...S.row, padding: '10px 12px', gap: 8 }}>
         <TextButton onClick={onOpenMap}>{t('pane.openMap')}</TextButton>

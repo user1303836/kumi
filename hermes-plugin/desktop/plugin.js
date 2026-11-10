@@ -47,7 +47,12 @@ var en = {
     undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change) => `Undo ${change}`,
     openMap: "Open the sound map",
-    undoNeedsConnection: "Undo needs a connected Kumi."
+    undoNeedsConnection: "Undo needs a connected Kumi.",
+    starters: "Try one:",
+    starterLook: "What am I looking at?",
+    starterChange: "Make this track 2 dB quieter",
+    starterFind: "Find a darker snare",
+    starterTitle: "Puts this request in the chat, for you to send"
   },
   hint: {
     sees: "Kumi sees",
@@ -806,7 +811,12 @@ var ja = {
     undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: (change) => `${change} を取り消す`,
     openMap: "サンプルマップを開く",
-    undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
+    undoNeedsConnection: "取り消すには Kumi の接続が必要です。",
+    starters: "試してみる:",
+    starterLook: "いま何を見てる？",
+    starterChange: "このトラックを 2 dB 下げて",
+    starterFind: "暗めのスネアを探して",
+    starterTitle: "この依頼をチャットに入れます。送るのはあなたです"
   },
   hint: {
     sees: "Kumi が見ているもの:",
@@ -1557,7 +1567,12 @@ var zh = {
     undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: (change) => `撤销 ${change}`,
     openMap: "打开采样地图",
-    undoNeedsConnection: "撤销需要 Kumi 已连接。"
+    undoNeedsConnection: "撤销需要 Kumi 已连接。",
+    starters: "试试：",
+    starterLook: "我现在在看什么？",
+    starterChange: "把这条音轨调低 2 dB",
+    starterFind: "找一个更暗的军鼓",
+    starterTitle: "把这条请求放进对话，由你来发送"
   },
   hint: {
     sees: "Kumi 看到：",
@@ -2496,6 +2511,11 @@ function connectRequest(daw) {
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
 var RESCAN_REQUEST = "Kumi, rescan my sample folders";
 var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
+var STARTER_REQUESTS = [
+  { key: "look", request: "What am I looking at?" },
+  { key: "change", request: "Make the selected track 2 dB quieter" },
+  { key: "find", request: "Find me a darker snare in my samples" }
+];
 function cleanupWords(cleanup, t = english) {
   if (cleanup === "restored") return t("history.restored");
   if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -4669,6 +4689,7 @@ function SavedScript({ item, store }) {
 
 // src/desktop/pane.tsx
 import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+var STARTER_LABELS = { look: "pane.starterLook", change: "pane.starterChange", find: "pane.starterFind" };
 function useNow(every = 3e4) {
   const [now, setNow] = useState3(() => Date.now());
   useEffect4(() => {
@@ -4762,7 +4783,11 @@ function KumiPane({ ctx, store, onOpenMap }) {
               }
             }
           ),
-          !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
+          !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("pane.undoNeedsConnection") }),
+          connected && (state.history?.items?.length ?? 0) === 0 && /* @__PURE__ */ jsxs7("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", marginTop: 8 }, children: [
+            /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("pane.starters") }),
+            STARTER_REQUESTS.map((starter) => /* @__PURE__ */ jsx7(TextButton, { onClick: () => void ask(ctx, starter.request, { send: false, session }), title: t("pane.starterTitle"), children: t(STARTER_LABELS[starter.key]) }, starter.key))
+          ] })
         ]
       }
     ),

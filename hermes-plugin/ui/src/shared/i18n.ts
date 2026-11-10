@@ -54,7 +54,12 @@ const en = {
     undoChangeTitle: (n: number) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change: string) => `Undo ${change}`,
     openMap: 'Open the sound map',
-    undoNeedsConnection: 'Undo needs a connected Kumi.'
+    undoNeedsConnection: 'Undo needs a connected Kumi.',
+    starters: 'Try one:',
+    starterLook: 'What am I looking at?',
+    starterChange: 'Make this track 2 dB quieter',
+    starterFind: 'Find a darker snare',
+    starterTitle: 'Puts this request in the chat, for you to send'
   },
   hint: {
     sees: 'Kumi sees',
@@ -821,7 +826,12 @@ const ja: Shape<typeof en> = {
     undoChangeTitle: n => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: change => `${change} を取り消す`,
     openMap: 'サンプルマップを開く',
-    undoNeedsConnection: '取り消すには Kumi の接続が必要です。'
+    undoNeedsConnection: '取り消すには Kumi の接続が必要です。',
+    starters: '試してみる:',
+    starterLook: 'いま何を見てる？',
+    starterChange: 'このトラックを 2 dB 下げて',
+    starterFind: '暗めのスネアを探して',
+    starterTitle: 'この依頼をチャットに入れます。送るのはあなたです'
   },
   hint: {
     sees: 'Kumi が見ているもの:',
@@ -1576,7 +1586,12 @@ const zh: Shape<typeof en> = {
     undoChangeTitle: n => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: change => `撤销 ${change}`,
     openMap: '打开采样地图',
-    undoNeedsConnection: '撤销需要 Kumi 已连接。'
+    undoNeedsConnection: '撤销需要 Kumi 已连接。',
+    starters: '试试：',
+    starterLook: '我现在在看什么？',
+    starterChange: '把这条音轨调低 2 dB',
+    starterFind: '找一个更暗的军鼓',
+    starterTitle: '把这条请求放进对话，由你来发送'
   },
   hint: {
     sees: 'Kumi 看到：',
