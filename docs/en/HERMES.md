@@ -61,7 +61,9 @@ says so and where to set the DAW instead.
 If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its part
 in Live, REAPER or Renoise, setup says so and offers to use that installation instead of replacing it, so you can go on
 using both, even at the same time. Kumi for Hermes then reads that installation's connection files and writes its own
-connection state there, never its sign-in or settings; what it learns of your projects stays in its own data.
+connection state there, never its sign-in or settings. In REAPER and Renoise it also uses that installation's listening
+folder for the renders it asks for (and, in Renoise, its work folder for an instrument whose macro mappings it changes),
+and keeps the DAW's write lease there; what it learns of your projects stays in its own data.
 
 Setup never starts or quits your DAW, chooses a Control Surface, or saves your project.
 

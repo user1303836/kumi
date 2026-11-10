@@ -36,7 +36,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 
-如果这台电脑上的另一套 Kumi（单独的 Kumi，或另一个 Hermes 配置中的 Kumi for Hermes）已经在 Live、REAPER 或 Renoise 中安装了 Kumi 的组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样两者都能继续使用，甚至可以同时使用。Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置；它对你的工程了解到的内容留在它自己的数据中。
+如果这台电脑上的另一套 Kumi（单独的 Kumi，或另一个 Hermes 配置中的 Kumi for Hermes）已经在 Live、REAPER 或 Renoise 中安装了 Kumi 的组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样两者都能继续使用，甚至可以同时使用。Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。在 REAPER 和 Renoise 中，它还会用那套安装的聆听文件夹存放它请求的渲染（在 Renoise 中，还会用它的工作文件夹临时保存要修改宏映射的乐器），并把 DAW 的写入锁放在那里；它对你的工程了解到的内容留在它自己的数据中。
 
 设置不会启动或退出你的 DAW、替你选择控制界面，也不会保存你的工程。
 
