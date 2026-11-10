@@ -64,10 +64,6 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.*
 
-![With Ask before each change on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
-
-*With **Ask before each change** on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.*
-
 ![The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
 *The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.*
@@ -79,7 +75,6 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 Screenshots:
 - The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
   1.24.79 runtime, and real Renoise, in a project that started empty.
-- The approval is Kumi 1.24.73 on real Ableton Live 12.
 - The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
   samples are generated test data, and the made sounds come from Kumi's sound-design engine.
 - In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
