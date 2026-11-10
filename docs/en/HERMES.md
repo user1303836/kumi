@@ -363,7 +363,9 @@ run without asking there, and Kumi can't tell it from a chat.
 - **Hermes Desktop:** a status chip, a side pane with FOCUS and HISTORY, the sound map in its own tab with your
   palette under it, cards for measured audio, and commands in Hermes's command palette. While a script or device waits
   for your approval, the pane shows its whole code (and a device's controls); a script's HISTORY row has **Show
-  code**. Buttons put a request into the chat; they never change your project by themselves.
+  code**. With nothing in HISTORY yet, the pane offers three requests to try (**What am I looking at?**, a small
+  change and a find), each put in the chat for you to send. Buttons put a request into the chat; they never change
+  your project by themselves.
 - **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
 - **The dot** beside Kumi's status (in the chip, the pane and the dashboard) pulses at your DAW's tempo while it plays,
   and sits still when it's stopped.
