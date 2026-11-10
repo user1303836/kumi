@@ -53,7 +53,9 @@ export function Corner({
   prompt,
   bottom,
   box,
-  first
+  first,
+  cover = 0,
+  still = false
 }: {
   /** The count in words ("8,960 sounds"), and how many families have sounds. */
   sounds: string
@@ -74,6 +76,10 @@ export function Corner({
   box?: RefObject<HTMLDivElement | null>
   /** The first-open steps still to do, while there are some: they stand over the corner's own lines. */
   first?: ReactNode
+  /** How much of the map's right a side sheet covers: the corner keeps to the room left of it. */
+  cover?: number
+  /** The system asks for less motion: the corner doesn't slide when the player opens under it. */
+  still?: boolean
 }) {
   const t = useT()
   return (
@@ -81,7 +87,19 @@ export function Corner({
       aria-label={t('corner.label')}
       ref={box}
       role="group"
-      style={{ ...glass, position: 'absolute', zIndex: 1, left: 10, bottom, maxWidth: 'calc(100% - 20px)', padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 6, transition: 'bottom 220ms cubic-bezier(.2,.8,.2,1)' }}
+      style={{
+        ...glass,
+        position: 'absolute',
+        zIndex: 1,
+        left: 10,
+        bottom,
+        maxWidth: `calc(100% - ${20 + cover}px)`,
+        padding: '7px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        transition: still ? 'none' : 'bottom 220ms cubic-bezier(.2,.8,.2,1)'
+      }}
     >
       {first}
       <div style={{ ...S.row, gap: 10, flexWrap: 'wrap' }}>

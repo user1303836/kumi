@@ -26,7 +26,7 @@ export function AtlasOverlay({
   place,
   audio,
   still,
-  moved,
+  follow,
   target,
   trail
 }: {
@@ -40,8 +40,9 @@ export function AtlasOverlay({
   audio?: (id: string) => Promise<string>
   /** The system asks for less motion: the pulse is drawn once, still. */
   still: boolean
-  /** Changes whenever the map under the overlay moves or is redrawn: a still pulse follows it. */
-  moved: unknown
+  /** Set here to what the map calls once it has painted: a still pulse and the ringed parents are drawn again where
+   *  their sounds now are (after a pan, a zoom, a layout's move, or a layout changed with no move at all). */
+  follow: RefObject<(() => void) | null>
   /** The map's own canvas, and whether the pointer leaves a trail over it (hover-to-play is on). */
   target: RefObject<HTMLCanvasElement | null>
   trail: boolean
@@ -57,16 +58,17 @@ export function AtlasOverlay({
     if (!canvas.current) return
     const made = new Overlay(canvas.current)
     overlay.current = made
+    follow.current = () => made.moved()
     return () => {
       made.dispose()
       overlay.current = null
+      follow.current = null
     }
-  }, [])
+  }, [follow])
   useEffect(() => {
     if (overlay.current) overlay.current.still = still
   }, [still])
   useEffect(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height])
-  useEffect(() => overlay.current?.moved(), [moved])
   useEffect(() => overlay.current?.kin(kin.map(sound => ({ place: () => placed.current(sound.id), color: sound.color }))), [kin])
   const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? '', playing?.glyph ?? 0, playing?.duration ?? 0]
   useEffect(() => {

@@ -5835,7 +5835,7 @@
     place,
     audio,
     still,
-    moved: moved2,
+    follow: follow2,
     target,
     trail
   }) {
@@ -5849,16 +5849,17 @@
       if (!canvas.current) return;
       const made = new Overlay(canvas.current);
       overlay.current = made;
+      follow2.current = () => made.moved();
       return () => {
         made.dispose();
         overlay.current = null;
+        follow2.current = null;
       };
-    }, []);
+    }, [follow2]);
     useEffect(() => {
       if (overlay.current) overlay.current.still = still;
     }, [still]);
     useEffect(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height]);
-    useEffect(() => overlay.current?.moved(), [moved2]);
     useEffect(() => overlay.current?.kin(kin.map((sound) => ({ place: () => placed.current(sound.id), color: sound.color }))), [kin]);
     const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? "", playing?.glyph ?? 0, playing?.duration ?? 0];
     useEffect(() => {
@@ -6147,7 +6148,9 @@
     prompt,
     bottom,
     box,
-    first
+    first,
+    cover = 0,
+    still = false
   }) {
     const t = useT();
     return /* @__PURE__ */ jsxs(
@@ -6156,7 +6159,19 @@
         "aria-label": t("corner.label"),
         ref: box,
         role: "group",
-        style: { ...glass, position: "absolute", zIndex: 1, left: 10, bottom, maxWidth: "calc(100% - 20px)", padding: "7px 10px", display: "flex", flexDirection: "column", gap: 6, transition: "bottom 220ms cubic-bezier(.2,.8,.2,1)" },
+        style: {
+          ...glass,
+          position: "absolute",
+          zIndex: 1,
+          left: 10,
+          bottom,
+          maxWidth: `calc(100% - ${20 + cover}px)`,
+          padding: "7px 10px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          transition: still ? "none" : "bottom 220ms cubic-bezier(.2,.8,.2,1)"
+        },
         children: [
           first,
           /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
@@ -6810,7 +6825,8 @@
     playing,
     onPlay,
     onStop,
-    actions
+    actions,
+    card: cardBox
   }) {
     const t = useT();
     const press = useRef(null);
@@ -6943,6 +6959,7 @@
           className: "kumi-pop",
           role: "group",
           "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)),
+          ref: cardBox,
           style: { ...glass, position: "absolute", zIndex: 1, left: card.left, top: card.top, width: 300, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 },
           children: [
             /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6 }, children: [
@@ -7251,6 +7268,10 @@
     const legendRef = useRef(null);
     const cornerRef = useRef(null);
     const playerRef = useRef(null);
+    const growCardRef = useRef(null);
+    const clusterBox = useRef(null);
+    const [cornerHeight, setCornerHeight] = useState(0);
+    const overlayFollow = useRef(null);
     const [topInset, setTopInset] = useState(0);
     const mapSize = mapSide(size.width, size.height, topInset);
     const fit = () => fitView(size.width, size.height, topInset, coverRight);
@@ -7616,7 +7637,7 @@
         for (const label of layoutShown.labels) {
           const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy];
           if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue;
-          const family = families.get(label.text);
+          const family = layoutShown.id === "families" ? families.get(label.text) : void 0;
           words.push(family ? { text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y } : { text: label.text, color: colors.strong, x, y });
         }
       } else if (regionAlpha(view.scale) > 0) {
@@ -7632,12 +7653,14 @@
       if (words.length > 0 || onScreen <= NAMES_ON_SCREEN) {
         const origin = canvas.getBoundingClientRect();
         const [bar, ...under] = [...topRef.current?.children ?? []];
-        for (const piece of [...bar?.children ?? [], ...under, playerRef.current, cluster.current]) {
+        for (const piece of [...bar?.children ?? [], ...under, playerRef.current]) {
           const box2 = piece?.getBoundingClientRect();
           if (box2 && box2.width > 2 && box2.height > 2) floating.push([box2.left - origin.left, box2.top - origin.top, box2.width, box2.height]);
         }
-        const corner = cornerRef.current;
+        const [corner, card] = [cornerRef.current, growCardRef.current];
         if (corner) floating.push([corner.offsetLeft, size.height - (selected && model.sounds[selected] ? 120 : 10) - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight]);
+        if (card) floating.push([card.offsetLeft, card.offsetTop, card.offsetWidth, card.offsetHeight]);
+        if (clusterBox.current) floating.push(clusterBox.current);
       }
       const regional = !layoutShown || layoutShown.labels.length === 0;
       const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional, floating);
@@ -7786,7 +7809,8 @@
         });
         context.globalAlpha = 1;
       }
-    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+      overlayFollow.current?.();
+    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -7918,6 +7942,13 @@
       observer.observe(element);
       return () => observer.disconnect();
     }, [hasPicks]);
+    useEffect(() => {
+      const element = cornerRef.current;
+      if (!element) return;
+      const observer = new ResizeObserver(() => setCornerHeight(element.offsetHeight));
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [hasPoints]);
     if (!model.points.length) {
       return /* @__PURE__ */ jsx("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs("div", { style: { maxWidth: 380 }, children: [
         empty,
@@ -7944,7 +7975,9 @@
     };
     const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
     const hiddenCount = (map?.hidden ?? 0) + leavingCount;
-    const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, chosen ? 120 : 10);
+    const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0);
+    const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot);
+    clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
     return /* @__PURE__ */ jsxs("div", { style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text }, children: [
       /* @__PURE__ */ jsxs("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
         /* @__PURE__ */ jsxs("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
@@ -8119,7 +8152,7 @@
             }
           }
         ),
-        /* @__PURE__ */ jsx(AtlasOverlay, { audio, height: size.height, kin: kinRings, moved: `${view?.scale},${view?.dx},${view?.dy},${clock}`, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
+        /* @__PURE__ */ jsx(AtlasOverlay, { audio, follow: overlayFollow, height: size.height, kin: kinRings, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
         box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
         /* @__PURE__ */ jsx(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
         /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
@@ -8142,7 +8175,8 @@
           GrowLayer,
           {
             actions: growActions,
-            bottom: chosen ? 120 : 10,
+            bottom: foot,
+            card: growCardRef,
             from: screenOf(placeOfEnd(grow.from)),
             fromColor: colorOfEnd(grow.from),
             fromMap: placeOfEnd(grow.from),
@@ -8159,25 +8193,6 @@
           }
         )
       ] }),
-      /* @__PURE__ */ jsx(
-        Corner,
-        {
-          bottom: chosen ? 120 : 10,
-          box: cornerRef,
-          first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
-          families: model.groups.filter((group) => group.count > 0).length,
-          hint: hintOf(mapState(spaceHeld)),
-          layout: layoutChoices.length > 0 ? /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 150), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) }) : void 0,
-          picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
-          prompt: grow?.choosing ? /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-            /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
-            /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
-            /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
-          ] }) : void 0,
-          sounds: countWords,
-          zoom: view?.scale ?? 1
-        }
-      ),
       hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
       /* @__PURE__ */ jsxs(
         "div",
@@ -8226,7 +8241,31 @@
           sound: chosen
         },
         selected
-      ) }) })
+      ) }) }),
+      /* @__PURE__ */ jsx(
+        Corner,
+        {
+          bottom: chosen ? 120 : 10,
+          box: cornerRef,
+          cover: coverRight,
+          still,
+          first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
+          families: model.groups.filter((group) => group.count > 0).length,
+          hint: hintOf(mapState(spaceHeld)),
+          layout: layoutChoices.length > 0 ? (
+            // The menu opens upward from the corner, which sits higher while the player is under it.
+            /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
+          ) : void 0,
+          picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
+          prompt: grow?.choosing ? /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+            /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
+            /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+            /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+          ] }) : void 0,
+          sounds: countWords,
+          zoom: view?.scale ?? 1
+        }
+      )
     ] });
   }
   function GlyphShape({ glyph, color }) {

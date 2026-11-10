@@ -254,10 +254,16 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // quiet line, float over the map's corner and leave its scale alone).
   const topRef = useRef<HTMLDivElement | null>(null)
   const legendRef = useRef<HTMLDivElement | null>(null)
-  // The corner's box and the player's: with what floats over the map's top and the picks' actions, the pieces no word
-  // on the map is written under.
+  // The corner's box, the player's and Grow's card's: with what floats over the map's top and the picks' actions (where
+  // they are going: `clusterBox`), the pieces no word on the map is written under. The corner's height also lifts
+  // what docks at the map's foot (the picks' actions, Grow's card) clear of it.
   const cornerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<HTMLDivElement | null>(null)
+  const growCardRef = useRef<HTMLDivElement | null>(null)
+  const clusterBox = useRef<[number, number, number, number] | null>(null)
+  const [cornerHeight, setCornerHeight] = useState(0)
+  // What the overlay hands back to be called after each paint: what stands still on it follows the map.
+  const overlayFollow = useRef<(() => void) | null>(null)
   const [topInset, setTopInset] = useState(0)
   const mapSize = mapSide(size.width, size.height, topInset)
   const fit = () => fitView(size.width, size.height, topInset, coverRight)
@@ -704,7 +710,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       for (const label of layoutShown.labels) {
         const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy]
         if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue
-        const family = families.get(label.text)
+        // A family's own label only where the layout is the families': elsewhere a folder named like a family is a
+        // folder.
+        const family = layoutShown.id === 'families' ? families.get(label.text) : undefined
         words.push(family ? { text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y } : { text: label.text, color: colors.strong, x, y })
       }
     } else if (regionAlpha(view.scale) > 0) {
@@ -720,19 +728,21 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         .sort((a, b) => b.size - a.size)
     }
     // What floats over the map, as boxes in the canvas's pixels: the search, the tools, the legend and the cards
-    // under it; the corner (where it is going: it slides when the player opens), the player and the picks' actions
-    // (where they are now); a side sheet. No word or name is written under any of them. Read only when there are
+    // under it; the player and Grow's card (where they are laid out); the corner and the picks' actions (where they
+    // are going: both slide); a side sheet. No word or name is written under any of them. Read only when there are
     // words or names to write.
     const floating: [number, number, number, number][] = coverRight > 0 ? [[size.width - coverRight, 0, coverRight, size.height]] : []
     if (words.length > 0 || onScreen <= NAMES_ON_SCREEN) {
       const origin = canvas.getBoundingClientRect()
       const [bar, ...under] = [...(topRef.current?.children ?? [])]
-      for (const piece of [...(bar?.children ?? []), ...under, playerRef.current, cluster.current]) {
+      for (const piece of [...(bar?.children ?? []), ...under, playerRef.current]) {
         const box = piece?.getBoundingClientRect()
         if (box && box.width > 2 && box.height > 2) floating.push([box.left - origin.left, box.top - origin.top, box.width, box.height])
       }
-      const corner = cornerRef.current
+      const [corner, card] = [cornerRef.current, growCardRef.current]
       if (corner) floating.push([corner.offsetLeft, size.height - (selected && model.sounds[selected] ? 120 : 10) - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight])
+      if (card) floating.push([card.offsetLeft, card.offsetTop, card.offsetWidth, card.offsetHeight])
+      if (clusterBox.current) floating.push(clusterBox.current)
     }
     const regional = !layoutShown || layoutShown.labels.length === 0
     const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional, floating)
@@ -902,7 +912,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       })
       context.globalAlpha = 1
     }
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
+    overlayFollow.current?.()
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -1054,6 +1065,13 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     observer.observe(element)
     return () => observer.disconnect()
   }, [hasPicks])
+  useEffect(() => {
+    const element = cornerRef.current
+    if (!element) return
+    const observer = new ResizeObserver(() => setCornerHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [hasPoints])
 
   // No sounds yet: what builds the map, in the middle of the pane it will fill.
   if (!model.points.length) {
@@ -1095,9 +1113,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const countWords =
     shown === model.points.length - leavingCount ? t('map.count', num(shown, 0)) : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))
   const hiddenCount = (map?.hidden ?? 0) + leavingCount
-  // The picks' actions float beside the picks, never over them; with the picks out of view, at the map's foot (above
-  // the player, when there is one).
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, chosen ? 120 : 10)
+  // The picks' actions float beside the picks, never over them; with the picks out of view, at the map's foot: above
+  // the corner, and above the player when there is one. Grow's card docks there too.
+  const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0)
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot)
+  clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
 
   return (
     <div style={{ position: 'relative', height: '100%', minHeight: 240, overflow: 'hidden', color: T.text }}>
@@ -1291,7 +1311,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             touchAction: 'none'
           }}
         />
-        <AtlasOverlay audio={audio} height={size.height} kin={kinRings} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={placeOnScreen} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
+        <AtlasOverlay audio={audio} follow={overlayFollow} height={size.height} kin={kinRings} place={placeOnScreen} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
           // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
           <PickBox box={box} count={t('dock.picked', boxed)} height={size.height} width={size.width} />
@@ -1318,7 +1338,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         {grow && (grow.from || grow.to) && (
           <GrowLayer
             actions={growActions}
-            bottom={chosen ? 120 : 10}
+            bottom={foot}
+            card={growCardRef}
             from={screenOf(placeOfEnd(grow.from))}
             fromColor={colorOfEnd(grow.from)}
             fromMap={placeOfEnd(grow.from)}
@@ -1335,32 +1356,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           />
         )}
       </div>
-      {/* The corner: what the map holds, its layout as a button, the zoom, and what can be done now. Grow's prompt
-          stands on its hint line while Grow names its sounds: which one this click names, and a way out. */}
-      <Corner
-        bottom={chosen ? 120 : 10}
-        box={cornerRef}
-        first={first && firstSteps.length > 0 ? <FirstOpen onSkip={() => first.onDone(FIRST_STEPS)} steps={firstSteps} /> : undefined}
-        families={model.groups.filter(group => group.count > 0).length}
-        hint={hintOf(mapState(spaceHeld))}
-        layout={
-          layoutChoices.length > 0 ? (
-            <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - 150)} onChoose={chooseArrangement} words={name => t('corner.layout', name)} />
-          ) : undefined
-        }
-        picked={hasPicks ? t('dock.picked', pickedIds.length) : undefined}
-        prompt={
-          grow?.choosing ? (
-            <div className="kumi-pop" role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
-              <Icon name="grow" size={13} />
-              <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
-              <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
-            </div>
-          ) : undefined
-        }
-        sounds={countWords}
-        zoom={view?.scale ?? 1}
-      />
       {hasPicks && (
         // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
         <div
@@ -1412,6 +1407,36 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           </div>
         </div>
       )}
+      {/* The corner: what the map holds, its layout as a button, the zoom, and what can be done now. Grow's prompt
+          stands on its hint line while Grow names its sounds: which one this click names, and a way out. Last here,
+          so Tab from the map still goes to the picks' actions and the player first, as the keys' hint says. */}
+      <Corner
+        bottom={chosen ? 120 : 10}
+        box={cornerRef}
+        cover={coverRight}
+        still={still}
+        first={first && firstSteps.length > 0 ? <FirstOpen onSkip={() => first.onDone(FIRST_STEPS)} steps={firstSteps} /> : undefined}
+        families={model.groups.filter(group => group.count > 0).length}
+        hint={hintOf(mapState(spaceHeld))}
+        layout={
+          layoutChoices.length > 0 ? (
+            // The menu opens upward from the corner, which sits higher while the player is under it.
+            <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - (chosen ? 260 : 150))} onChoose={chooseArrangement} words={name => t('corner.layout', name)} />
+          ) : undefined
+        }
+        picked={hasPicks ? t('dock.picked', pickedIds.length) : undefined}
+        prompt={
+          grow?.choosing ? (
+            <div className="kumi-pop" role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
+              <Icon name="grow" size={13} />
+              <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
+              <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
+            </div>
+          ) : undefined
+        }
+        sounds={countWords}
+        zoom={view?.scale ?? 1}
+      />
     </div>
   )
 }

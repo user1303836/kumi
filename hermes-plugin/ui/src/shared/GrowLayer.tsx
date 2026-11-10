@@ -3,7 +3,7 @@
 // dragged along the vine to grow and hear any point; and a card for the point picked, with what can be done with it
 // (the parent's Keep, Use… and Make from; Grow from here, another path, close).
 import { T } from '@kumi/theme'
-import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
+import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useRef } from 'react'
 
 import { usePlayhead, Wave } from './atlas/Wave.tsx'
@@ -41,7 +41,8 @@ export function GrowLayer({
   playing,
   onPlay,
   onStop,
-  actions
+  actions,
+  card: cardBox
 }: {
   grow: Grow
   /** The ends on screen (px), and in map units (a bud grown again keeps its place); null for one not on the map. */
@@ -61,6 +62,8 @@ export function GrowLayer({
   onStop: () => void
   /** What the parent offers for a grown point (Keep, Use…, Make from). */
   actions?: (result: DesignResult) => ReactNode
+  /** The card's own box, for the map to keep its words from under it. */
+  card?: RefObject<HTMLDivElement | null>
 }) {
   const t = useT()
   // A press on the handle: where it began, and whether it has moved enough to be a drag. One that never moves is a
@@ -211,6 +214,7 @@ export function GrowLayer({
         className="kumi-pop"
         role="group"
         aria-label={t('grow.title', clean(grow.from?.name ?? '', 60), clean(grow.to.name, 60))}
+        ref={cardBox}
         style={{ ...glass, position: 'absolute', zIndex: 1, left: card.left, top: card.top, width: 300, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
       >
         <div style={{ ...S.row, gap: 6 }}>
