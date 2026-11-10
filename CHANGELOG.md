@@ -3,6 +3,24 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.81 — 2026-11-10
+
+Ships with bridge 1.0.107, as 1.24.80 did.
+
+- In Hermes, add a sample folder by its path: in the sound map's Sample folders (type, paste or choose
+  it, then Add and scan), with `hermes kumi samples add <folder>` in a terminal, or with `/kumi
+  samples add <folder>` in a chat.
+- In Hermes, adding a sample folder and its first scan take one approval.
+- In Hermes, a scan reads a sample folder you added from the terminal even when Kumi was already
+  running, and says which folder it had to leave out (an unplugged drive, say).
+- In Hermes, allowing scans for the session or for always covers the folders that approval named:
+  after you add a folder, the next scan asks again.
+- A sound library of up to about 290,000 sounds gets its map in Kumi for Hermes; before, one over
+  about 134,000 sounds got no map or sound search.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.80 — 2026-11-10
 
 Ships with bridge 1.0.107, as 1.24.79 did.
