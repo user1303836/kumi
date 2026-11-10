@@ -44,8 +44,10 @@ export function gesturesOf(state: MapState): Partial<Record<Gesture, Deed>> {
 export function hintOf(state: MapState): [Gesture, Deed][] {
   const does = gesturesOf(state)
   // The pointer first (what it plays, then what a drag does), then the wheel. A trackpad scrolls to move and pinches
-  // to zoom, and has no middle button; a mouse has one.
-  const pointer: Gesture[] = [state.hover ? 'hover' : 'click', 'drag', 'shiftDrag', 'scroll', ...(state.scrollPans ? (['pinch'] as const) : state.hand ? [] : (['middleDrag'] as const))]
+  // to zoom, and has no middle button; a mouse's wheel zooms, and it has one. Until the map has seen a scroll it
+  // doesn't know which it is under, so it says neither: the line only says what is true.
+  const wheel: Gesture[] = state.scrollPans === null ? [] : state.scrollPans ? ['scroll', 'pinch'] : state.hand ? ['scroll'] : ['scroll', 'middleDrag']
+  const pointer: Gesture[] = [state.hover ? 'hover' : 'click', 'drag', 'shiftDrag', ...wheel]
   const said: Gesture[] = state.naming ? [] : state.hand ? [...pointer, 'escape'] : state.picked > 0 && does.escape ? ['shiftDrag', 'escape'] : pointer
   return said.flatMap((gesture): [Gesture, Deed][] => (does[gesture] ? [[gesture, does[gesture]]] : []))
 }

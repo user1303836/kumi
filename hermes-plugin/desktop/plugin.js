@@ -7536,7 +7536,8 @@ function gesturesOf(state) {
 }
 function hintOf(state) {
   const does = gesturesOf(state);
-  const pointer = [state.hover ? "hover" : "click", "drag", "shiftDrag", "scroll", ...state.scrollPans ? ["pinch"] : state.hand ? [] : ["middleDrag"]];
+  const wheel = state.scrollPans === null ? [] : state.scrollPans ? ["scroll", "pinch"] : state.hand ? ["scroll"] : ["scroll", "middleDrag"];
+  const pointer = [state.hover ? "hover" : "click", "drag", "shiftDrag", ...wheel];
   const said = state.naming ? [] : state.hand ? [...pointer, "escape"] : state.picked > 0 && does.escape ? ["shiftDrag", "escape"] : pointer;
   return said.flatMap((gesture) => does[gesture] ? [[gesture, does[gesture]]] : []);
 }

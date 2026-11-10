@@ -165,17 +165,21 @@ test("a made sound's lineage names the families it came from, in the sources' or
 test('the hint line says what each gesture does in the state the map is in, and nothing the map does not do', () => {
   const idle = { picks: true, hand: false, naming: false, picked: 0, hover: true, scrollPans: null }
   const line = state => gestures.hintOf(state).map(([gesture, deed]) => `${gesture} ${deed}`)
-  assert.deepEqual(line(idle), ['hover hear', 'drag pick', 'shiftDrag add', 'scroll zoom', 'middleDrag pan'])
+  // Before the map has seen a scroll it can't tell a mouse from a trackpad: it says nothing of either's wheel.
+  assert.deepEqual(line(idle), ['hover hear', 'drag pick', 'shiftDrag add'])
+  // A mouse's wheel was seen zooming: it says so, and the middle button moves the map.
+  const mouse = { ...idle, scrollPans: false }
+  assert.deepEqual(line(mouse), ['hover hear', 'drag pick', 'shiftDrag add', 'scroll zoom', 'middleDrag pan'])
   // Hover-to-play off: a click is what plays. A trackpad's scroll was seen moving the map: it says so, and a pinch zooms.
   assert.deepEqual(line({ ...idle, hover: false, scrollPans: true }), ['click hear', 'drag pick', 'shiftDrag add', 'scroll pan', 'pinch zoom'])
   // With sounds picked, what the picks take.
   assert.deepEqual(line({ ...idle, picked: 60 }), ['shiftDrag addMore', 'escape clear'])
   // The hand tool has its own line: a drag moves the map and picks nothing, so Shift has nothing to add to; picks made
   // before it can still be let go.
-  assert.deepEqual(line({ ...idle, hand: true }), ['hover hear', 'drag pan', 'scroll zoom'])
-  assert.deepEqual(line({ ...idle, hand: true, picked: 3 }), ['hover hear', 'drag pan', 'scroll zoom', 'escape clear'])
+  assert.deepEqual(line({ ...mouse, hand: true }), ['hover hear', 'drag pan', 'scroll zoom'])
+  assert.deepEqual(line({ ...mouse, hand: true, picked: 3 }), ['hover hear', 'drag pan', 'scroll zoom', 'escape clear'])
   // A map that picks nothing (no palette to pick for): a drag moves it.
-  assert.deepEqual(line({ ...idle, picks: false }), ['hover hear', 'drag pan', 'scroll zoom', 'middleDrag pan'])
+  assert.deepEqual(line({ ...mouse, picks: false }), ['hover hear', 'drag pan', 'scroll zoom', 'middleDrag pan'])
   // While Grow names its sounds, its own prompt stands on the line; a click names a sound and Escape cancels.
   const naming = { ...idle, naming: true, picked: 4 }
   assert.deepEqual(line(naming), [])
