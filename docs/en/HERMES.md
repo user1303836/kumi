@@ -138,6 +138,17 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   that sound alike together), **Character** (dark to bright, punchy to soft), **Texture** (tonal to noisy, high to low),
   **Keys** (round the circle of fifths), **Tempo** (by BPM), **Families** (an island for each kind), **Length** (a
   spiral from the shortest out) or **Folders** (an island for each top folder). Each writes its own labels on the map.
+- **Reading the map:** each family glows in its colour under its sounds, with its name and count over it; zoom in,
+  and sounds carry their own names where there's room. A sound that plays pulses as loud as it is, and the sound under
+  the pointer shows a label with its length, folder and waveform, and thin lines to the five sounds nearest it. With
+  **Hover to play** on, the pointer leaves a trail in the colours of what it played. A box counts the sounds it holds
+  as you draw it, and when the layout changes, the sounds fly to their places like a swarm. A sound Kumi made wears
+  the colours of the families it came from, on its card and its waveform; point at one in the Make panel or your
+  palette, and the map rings the sounds it came from. The corner at the bottom left says how many sounds and families
+  the map holds, its layout (a button that opens the layouts), the zoom, and what the pointer and the keys do right
+  now; at first it also lists three steps (hear a sound, drag a box, press **Make…**), each gone once you've done it,
+  or all with **Skip**. With your system set to reduce motion, the map keeps still: no trail, no swarm, and a playing
+  sound is ringed without pulsing.
 - **Picking and moving on the map:** a drag draws a box that picks the sounds in it, and Shift with a drag adds
   another box; Command or Ctrl with a click picks or unpicks one sound, and Shift with a click adds one. What the picks
   can do floats beside them. The middle button moves the map, as does a drag with **Move map** on (or with Space held,
@@ -353,6 +364,8 @@ run without asking there, and Kumi can't tell it from a chat.
   for your approval, the pane shows its whole code (and a device's controls); a script's HISTORY row has **Show
   code**. Buttons put a request into the chat; they never change your project by themselves.
 - **Web dashboard:** a Kumi tab with HISTORY, status, the map and your palette.
+- **The dot** beside Kumi's status (in the chip, the pane and the dashboard) keeps your DAW's beat while it plays, and
+  sits still when it's stopped.
 
 ![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
 
