@@ -46,7 +46,11 @@ export function FocusStyle() {
         '@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}' +
         '@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}' +
         '@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
+        // The connection dot on the DAW's beat (its period set where it's drawn): it swells on the beat with a ring of
+        // its own colour, and settles before the next.
+        '@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}' +
+        '.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }
@@ -60,8 +64,15 @@ export function Chip({ children, title, tone }: { children: ReactNode; title?: s
   )
 }
 
-export function Dot({ color, size = 7, title }: { color: string; size?: number; title?: string }) {
-  return <span aria-hidden={!title} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none' }} />
+/** How a dot beats: the class, and the beat's length (`seconds`; null: it sits steady). The ring takes `color`. */
+export const beating = (seconds: number | null | undefined, color: string): { className?: string; style: CSSProperties } =>
+  seconds ? { className: 'kumi-beat', style: { color, animationDuration: `${seconds.toFixed(3)}s` } } : { style: {} }
+
+/** A dot of `color`. With `beat` (a beat's length in seconds) it pulses in time: the connection's dot, while the DAW
+ *  plays. */
+export function Dot({ color, size = 7, title, beat }: { color: string; size?: number; title?: string; beat?: number | null }) {
+  const pulse = beating(beat, color)
+  return <span aria-hidden={!title} className={pulse.className} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none', ...pulse.style }} />
 }
 
 /** A plain text button in the theme's colours: the shared views' only control. `label` names it for a screen reader

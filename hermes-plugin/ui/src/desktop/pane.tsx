@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, undoRowOf } from '../shared/format.ts'
+import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, undoRowOf } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
@@ -62,7 +62,8 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
       {state.script && <PendingScriptView daw={state.status?.daw} script={state.script} />}
       <div style={{ ...S.section, gap: 8 }}>
         <div style={{ ...S.row, gap: 8 }}>
-          <Dot color={TONE[words.tone]} size={8} />
+          {/* On the DAW's beat while it plays; steady when it's stopped, or not connected. */}
+          <Dot beat={connected ? beatSeconds(state.focus?.transport) : null} color={TONE[words.tone]} size={8} />
           <span style={{ ...S.text, ...S.ellipsis, fontWeight: 600, flex: 1 }}>{words.text}</span>
           {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         </div>

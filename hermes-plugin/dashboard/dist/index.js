@@ -2360,6 +2360,13 @@
   function bpm(tempo) {
     return typeof tempo === "number" && tempo > 0 ? `${num(tempo, 1)} BPM` : void 0;
   }
+  function beatSeconds(transport) {
+    const tempo = transport?.tempo;
+    if (transport?.playing !== true || typeof tempo !== "number" || !Number.isFinite(tempo) || tempo <= 0) return null;
+    let beat = 60 / tempo;
+    while (beat < 1 / 3) beat *= 2;
+    return beat;
+  }
   function ago(at, now = Date.now(), t = english) {
     if (typeof at !== "number") return "";
     const seconds2 = Math.max(0, (now - at) / 1e3);
@@ -3631,14 +3638,16 @@
   };
   var FOCUSABLE = "kumi-focusable";
   function FocusStyle() {
-    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
+    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
   }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
     return /* @__PURE__ */ jsx("span", { title, style: { fontSize: 11, lineHeight: "16px", padding: "0 6px", borderRadius: 3, background: T.chip, color, whiteSpace: "nowrap" }, children });
   }
-  function Dot({ color, size = 7, title }) {
-    return /* @__PURE__ */ jsx("span", { "aria-hidden": !title, title, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none" } });
+  var beating = (seconds2, color) => seconds2 ? { className: "kumi-beat", style: { color, animationDuration: `${seconds2.toFixed(3)}s` } } : { style: {} };
+  function Dot({ color, size = 7, title, beat }) {
+    const pulse = beating(beat, color);
+    return /* @__PURE__ */ jsx("span", { "aria-hidden": !title, className: pulse.className, title, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none", ...pulse.style } });
   }
   function TextButton({
     children,
@@ -8855,7 +8864,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const steps = nextSteps(state, t);
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 12, color: T.text, minHeight: "calc(100vh - 160px)" }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "4px 2px" }, children: [
-        /* @__PURE__ */ jsx(Dot, { color: tone, size: 9 }),
+        /* @__PURE__ */ jsx(Dot, { beat: connected ? beatSeconds(state.focus?.transport) : null, color: tone, size: 9 }),
         /* @__PURE__ */ jsx("span", { style: { fontSize: 15, fontWeight: 600 }, children: words.text }),
         state.status?.runtime?.version && /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
           "Kumi ",

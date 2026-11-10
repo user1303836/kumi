@@ -5,7 +5,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -132,7 +132,7 @@ function Dashboard() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: T.text, minHeight: 'calc(100vh - 160px)' }}>
       <div style={{ ...S.row, gap: 10, padding: '4px 2px' }}>
-        <Dot color={tone} size={9} />
+        <Dot beat={connected ? beatSeconds(state.focus?.transport) : null} color={tone} size={9} />
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         {setupMessage && <span style={S.muted}>{setupMessage}</span>}

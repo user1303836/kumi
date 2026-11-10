@@ -104,6 +104,19 @@ test('numbers carry a true minus and the chip says what is connected, stale or m
   assert.equal(format.ago(Date.now() - 4 * 60_000), '4 min ago')
 })
 
+test('the connection dot keeps the beat only while the DAW plays, and never flickers', () => {
+  assert.equal(format.beatSeconds({ playing: true, tempo: 120 }), 0.5)
+  // Stopped, or no tempo to keep: it sits steady.
+  assert.equal(format.beatSeconds({ playing: false, tempo: 120 }), null)
+  assert.equal(format.beatSeconds({ tempo: 120 }), null)
+  assert.equal(format.beatSeconds({ playing: true, tempo: null }), null)
+  assert.equal(format.beatSeconds({ playing: true, tempo: 0 }), null)
+  assert.equal(format.beatSeconds(null), null)
+  // A tempo past three beats a second: every other beat, or every fourth.
+  assert.equal(format.beatSeconds({ playing: true, tempo: 240 }), 0.5)
+  assert.equal(format.beatSeconds({ playing: true, tempo: 960 }), 0.5)
+})
+
 const analysis = (lufs, peak, centroid, file) => ({
   file,
   seconds: 0.6,
