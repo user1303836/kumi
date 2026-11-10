@@ -238,6 +238,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // quiet line, float over the map's corner and leave its scale alone).
   const topRef = useRef<HTMLDivElement | null>(null)
   const legendRef = useRef<HTMLDivElement | null>(null)
+  // The corner's box and the player's: with what floats over the map's top and the picks' actions, the pieces no word
+  // on the map is written under.
+  const cornerRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<HTMLDivElement | null>(null)
   const [topInset, setTopInset] = useState(0)
   const mapSize = mapSide(size.width, size.height, topInset)
   const fit = () => fitView(size.width, size.height, topInset, coverRight)
@@ -640,8 +644,23 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         })
         .sort((a, b) => b.size - a.size)
     }
+    // What floats over the map, as boxes in the canvas's pixels: the search, the tools, the legend and the cards
+    // under it; the corner (where it is going: it slides when the player opens), the player and the picks' actions
+    // (where they are now); a side sheet. No word or name is written under any of them. Read only when there are
+    // words or names to write.
+    const floating: [number, number, number, number][] = coverRight > 0 ? [[size.width - coverRight, 0, coverRight, size.height]] : []
+    if (words.length > 0 || onScreen <= NAMES_ON_SCREEN) {
+      const origin = canvas.getBoundingClientRect()
+      const [bar, ...under] = [...(topRef.current?.children ?? [])]
+      for (const piece of [...(bar?.children ?? []), ...under, playerRef.current, cluster.current]) {
+        const box = piece?.getBoundingClientRect()
+        if (box && box.width > 2 && box.height > 2) floating.push([box.left - origin.left, box.top - origin.top, box.width, box.height])
+      }
+      const corner = cornerRef.current
+      if (corner) floating.push([corner.offsetLeft, size.height - (selected && model.sounds[selected] ? 120 : 10) - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight])
+    }
     const regional = !layoutShown || layoutShown.labels.length === 0
-    const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional)
+    const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional, floating)
     // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each sound's name beside it in its
     // family's colour, the sound file's own name drawn as canvas text, never markup. Only names with room are written,
     // so a tight cluster stays legible (its sounds are named on hover and in the list above).
@@ -650,7 +669,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         const text = mapLabel(model.sounds[points[index].id]?.name ?? '')
         return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index) }] : []
       })
-      drawNames(context, names, reach(morphed) + 4, lettering, written)
+      drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating])
     }
     // Then the layout's axis words inside the map's edges, kept in view.
     if (layoutShown && wordsIn > 0) {
@@ -1208,6 +1227,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           stands on its hint line while Grow names its sounds: which one this click names, and a way out. */}
       <Corner
         bottom={chosen ? 120 : 10}
+        box={cornerRef}
         families={model.groups.filter(group => group.count > 0).length}
         hint={hintOf(mapState(spaceHeld))}
         layout={
@@ -1259,7 +1279,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       {selected && chosen && (
         // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
         <div style={{ position: 'absolute', left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: 'flex', justifyContent: 'center', pointerEvents: 'none', transition: still ? 'none' : 'right 260ms cubic-bezier(.2,.8,.2,1)' }}>
-          <div style={{ width: 'min(640px, 100%)' }}>
+          <div ref={playerRef} style={{ width: 'min(640px, 100%)' }}>
             <Player
               actions={actions?.(selected, chosen)}
               audio={audio ?? (() => Promise.reject(new Error('no audio')))}

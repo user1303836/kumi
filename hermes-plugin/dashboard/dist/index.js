@@ -6006,13 +6006,15 @@
     picked,
     hint,
     prompt,
-    bottom
+    bottom,
+    box
   }) {
     const t = useT();
     return /* @__PURE__ */ jsxs(
       "div",
       {
         "aria-label": t("corner.label"),
+        ref: box,
         role: "group",
         style: { ...glass, position: "absolute", zIndex: 1, left: 10, bottom, maxWidth: "calc(100% - 20px)", padding: "7px 10px", display: "flex", flexDirection: "column", gap: 6, transition: "bottom 220ms cubic-bezier(.2,.8,.2,1)" },
         children: [
@@ -6473,7 +6475,7 @@
   function track(context, spacing) {
     if ("letterSpacing" in context) context.letterSpacing = spacing;
   }
-  function drawWords(context, words, alpha, look, room) {
+  function drawWords(context, words, alpha, look, room, avoid = []) {
     if (alpha <= 0 || words.length === 0) return [];
     context.save();
     context.textAlign = "center";
@@ -6487,7 +6489,7 @@
       const width = context.measureText(word.text).width;
       return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
     });
-    const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
+    const written = room ? fitting(boxes, words.length, 10, 2, avoid) : boxes.flatMap((box, index) => fitting([box], 1, 4, 2, avoid).length > 0 ? [index] : []);
     for (const index of written) {
       const word = words[index];
       context.font = name;
@@ -7005,6 +7007,8 @@
     const [hintId] = useState(() => `kumi-map-keys-${maps += 1}`);
     const topRef = useRef(null);
     const legendRef = useRef(null);
+    const cornerRef = useRef(null);
+    const playerRef = useRef(null);
     const [topInset, setTopInset] = useState(0);
     const mapSize = mapSide(size.width, size.height, topInset);
     const fit = () => fitView(size.width, size.height, topInset, coverRight);
@@ -7332,14 +7336,25 @@
           return [{ text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y, size: family.count }];
         }).sort((a, b) => b.size - a.size);
       }
+      const floating = coverRight > 0 ? [[size.width - coverRight, 0, coverRight, size.height]] : [];
+      if (words.length > 0 || onScreen <= NAMES_ON_SCREEN) {
+        const origin = canvas.getBoundingClientRect();
+        const [bar, ...under] = [...topRef.current?.children ?? []];
+        for (const piece of [...bar?.children ?? [], ...under, playerRef.current, cluster.current]) {
+          const box2 = piece?.getBoundingClientRect();
+          if (box2 && box2.width > 2 && box2.height > 2) floating.push([box2.left - origin.left, box2.top - origin.top, box2.width, box2.height]);
+        }
+        const corner = cornerRef.current;
+        if (corner) floating.push([corner.offsetLeft, size.height - (selected && model.sounds[selected] ? 120 : 10) - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight]);
+      }
       const regional = !layoutShown || layoutShown.labels.length === 0;
-      const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional);
+      const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional, floating);
       if (onScreen <= NAMES_ON_SCREEN) {
         const names = labelled.flatMap(([x, y, index, color]) => {
           const text = mapLabel(model.sounds[points[index].id]?.name ?? "");
           return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index) }] : [];
         });
-        drawNames(context, names, reach(morphed) + 4, lettering, written);
+        drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating]);
       }
       if (layoutShown && wordsIn > 0) {
         context.textBaseline = "middle";
@@ -7830,6 +7845,7 @@
         Corner,
         {
           bottom: chosen ? 120 : 10,
+          box: cornerRef,
           families: model.groups.filter((group) => group.count > 0).length,
           hint: hintOf(mapState(spaceHeld)),
           layout: layoutChoices.length > 0 ? /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 150), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) }) : void 0,
@@ -7874,7 +7890,7 @@
         }
       ),
       selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-      /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
+      /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
         Player,
         {
           actions: actions?.(selected, chosen),

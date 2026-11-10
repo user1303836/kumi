@@ -27,9 +27,10 @@ function track(context: Context, spacing: string): void {
   if ('letterSpacing' in context) context.letterSpacing = spacing
 }
 
-/** Write `words` in the atlas's hand at `alpha`, in order; with `room`, a word that would touch one already written is
- *  left out. The boxes of the ones written, for what's drawn after to keep clear of. */
-export function drawWords(context: Context, words: readonly Word[], alpha: number, look: Lettering, room: boolean): Box[] {
+/** Write `words` in the atlas's hand at `alpha`, in order, none of them under what floats over the map (`avoid`); with
+ *  `room`, a word that would touch one already written is left out too. The boxes of the ones written, for what's
+ *  drawn after to keep clear of. */
+export function drawWords(context: Context, words: readonly Word[], alpha: number, look: Lettering, room: boolean, avoid: readonly Box[] = []): Box[] {
   if (alpha <= 0 || words.length === 0) return []
   context.save()
   context.textAlign = 'center'
@@ -43,7 +44,7 @@ export function drawWords(context: Context, words: readonly Word[], alpha: numbe
     const width = context.measureText(word.text).width
     return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16]
   })
-  const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index)
+  const written = room ? fitting(boxes, words.length, 10, 2, avoid) : boxes.flatMap((box, index) => (fitting([box], 1, 4, 2, avoid).length > 0 ? [index] : []))
   for (const index of written) {
     const word = words[index]
     context.font = name

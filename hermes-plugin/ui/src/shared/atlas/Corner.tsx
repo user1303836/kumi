@@ -3,7 +3,7 @@
 // the hint line: the gestures that do something now, each a keycap and a word, written from the same table the map's
 // handlers read (`gestures.ts`); the count of the picks while there are some; Grow's prompt while it names its sounds.
 import { T } from '@kumi/theme'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
 import { glass } from '../mapUi.tsx'
 import { S, useT } from '../ui.tsx'
@@ -50,7 +50,8 @@ export function Corner({
   picked,
   hint,
   prompt,
-  bottom
+  bottom,
+  box
 }: {
   /** The count in words ("8,960 sounds"), and how many families have sounds. */
   sounds: string
@@ -67,11 +68,14 @@ export function Corner({
   prompt?: ReactNode
   /** How far above the map's foot it sits (the player takes the foot when a sound is picked). */
   bottom: number
+  /** Its own box, for the map to keep its words from under it. */
+  box?: RefObject<HTMLDivElement | null>
 }) {
   const t = useT()
   return (
     <div
       aria-label={t('corner.label')}
+      ref={box}
       role="group"
       style={{ ...glass, position: 'absolute', zIndex: 1, left: 10, bottom, maxWidth: 'calc(100% - 20px)', padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 6, transition: 'bottom 220ms cubic-bezier(.2,.8,.2,1)' }}
     >
