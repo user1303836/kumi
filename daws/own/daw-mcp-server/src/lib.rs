@@ -21,8 +21,9 @@ pub mod tools;
 use daw_bridge::Daw;
 use std::path::PathBuf;
 
-/// The command line: `--daw reaper|renoise|soundcraft` (or KUMI_DAW), `--kumi-home <folder>` (or KUMI_HOME), and
-/// `--restricted-listening` to disable shared listening-cache and Renoise work-folder sweeps before startup.
+/// The command line: `--daw reaper|renoise|soundcraft` (or KUMI_DAW), `--kumi-home <folder>` (or KUMI_HOME),
+/// `--restricted-listening` to disable shared listening-cache and Renoise work-folder sweeps before startup, and
+/// `--snapshots <folder>` to keep the catch-up snapshots there instead of in the Kumi home's `bridges/<daw>/snapshots`.
 /// `KUMI_KEEP_IDENTITY=1` in the environment, which standalone Kumi sets, asks the bridge to keep the project's id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
@@ -31,14 +32,18 @@ pub struct Options {
     pub listening: host::ListeningMode,
     /// See [`host::Host::with_keep_identity`].
     pub keep_identity: bool,
+    /// See [`host::Host::with_snapshots`].
+    pub snapshots: Option<PathBuf>,
 }
 
 pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: Option<PathBuf>) -> Result<Options, String> {
     let ids = Daw::ALL.map(Daw::id);
-    let usage = format!("usage: daw-mcp-server --daw {} [--kumi-home <folder>] [--restricted-listening]", ids.join("|"));
+    let usage =
+        format!("usage: daw-mcp-server --daw {} [--kumi-home <folder>] [--restricted-listening] [--snapshots <folder>]", ids.join("|"));
     let mut daw = env("KUMI_DAW").filter(|value| !value.is_empty());
     let mut kumi_home = None;
     let mut listening = host::ListeningMode::Standalone;
+    let mut snapshots = None;
     let keep_identity = env(daw_bridge::wire::KEEP_IDENTITY_VARIABLE).as_deref() == Some("1");
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -46,6 +51,7 @@ pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: O
             "--daw" => daw = Some(rest.next().ok_or_else(|| format!("--daw needs one of {}", ids.join(", ")))?.clone()),
             "--kumi-home" => kumi_home = Some(PathBuf::from(rest.next().ok_or("--kumi-home needs a folder")?)),
             "--restricted-listening" => listening = host::ListeningMode::Restricted,
+            "--snapshots" => snapshots = Some(PathBuf::from(rest.next().ok_or("--snapshots needs a folder")?)),
             "--version" => return Err(format!("daw-mcp-server {}", env!("CARGO_PKG_VERSION"))),
             other => return Err(format!("unknown argument {other}; {usage}")),
         }
@@ -54,7 +60,7 @@ pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: O
     let daw = Daw::from_id(&daw).ok_or_else(|| format!("unknown DAW {daw}: one of {}", ids.join(", ")))?;
     let kumi_home =
         kumi_home.or_else(|| daw_bridge::paths::kumi_home_from(env, home)).ok_or("no home folder: set KUMI_HOME or pass --kumi-home")?;
-    Ok(Options { daw, kumi_home, listening, keep_identity })
+    Ok(Options { daw, kumi_home, listening, keep_identity, snapshots })
 }
 
 #[cfg(test)]
@@ -76,6 +82,7 @@ mod tests {
                 kumi_home: PathBuf::from("/h/.kumi"),
                 listening: host::ListeningMode::Standalone,
                 keep_identity: false,
+                snapshots: None,
             }
         );
         let env = |name: &str| (name == "KUMI_DAW").then(|| "reaper".to_string());
@@ -84,6 +91,13 @@ mod tests {
             parse_args(&strings(&["--daw", "renoise", "--kumi-home", "/k"]), &env, home.clone()).unwrap().kumi_home,
             PathBuf::from("/k")
         );
+        assert_eq!(
+            parse_args(&strings(&["--daw", "reaper", "--snapshots", "/state/bridges/reaper/snapshots"]), &none, home.clone())
+                .unwrap()
+                .snapshots,
+            Some(PathBuf::from("/state/bridges/reaper/snapshots"))
+        );
+        assert!(parse_args(&strings(&["--daw", "reaper", "--snapshots"]), &none, home.clone()).is_err());
         assert!(parse_args(&[], &none, home.clone()).is_err());
         assert!(parse_args(&strings(&["--daw", "live"]), &none, home.clone()).is_err());
         assert!(parse_args(&strings(&["--daw"]), &none, home).is_err());

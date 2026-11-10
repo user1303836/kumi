@@ -924,8 +924,7 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     daw = args.get("daw") or host.daw()
     asked = setup.approval(daw, action=action, data_dir=host.data_dir())
     if asked is None:
-        why = setup.dead_end(daw, data_dir=host.data_dir()) or "run kumi_setup plan first."
-        return block(refused("Kumi didn't set anything up", why)), {}
+        return block(refused("Kumi didn't set anything up", "run kumi_setup plan first.")), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     message = "\n".join(lines)
     surface = host.session_surface()
