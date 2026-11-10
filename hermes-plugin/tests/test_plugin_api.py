@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -61,9 +62,28 @@ class Routes(unittest.TestCase):
     def test_every_route_is_a_get_but_the_contracts_post_routes(self) -> None:
         methods = {(route.path, method) for route in self.api.router.routes for method in route.methods}
         reads = {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job", "/script", "/palette",
-                 "/designs"}
-        posts = {"/map/hidden", "/palette", "/design"}
+                 "/designs", "/library/folders"}
+        posts = {"/map/hidden", "/palette", "/design", "/library/folder"}
         self.assertEqual(methods, {(path, "GET") for path in reads} | {(path, "POST") for path in posts})
+
+    def test_a_typed_folder_is_answered_by_the_guard_and_nothing_is_added(self) -> None:
+        from fastapi import HTTPException
+
+        check = self.api._library_folder
+        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)]})
+        self.assertEqual(check({"folder": f' "{self.library}{os.sep}" '}), {"folder": str(self.library), "known": True})
+        more = Path(self.tmp.name) / "More Samples"
+        more.mkdir()
+        self.assertEqual(check({"folder": str(more)}), {"folder": str(more), "known": False})
+        for typed, why in (("samples", "isn't a full path"), (str(more / "Kicks"), "there's no folder at"),
+                           ("~", "home folder"), (os.path.abspath(os.sep), "whole drive or volume")):
+            with self.subTest(typed=typed):
+                self.assertIn(why, check({"folder": typed})["refusal"])
+        for body in (None, {}, {"folder": 7}, {"folder": "/" + "x" * 5000}):
+            with self.subTest(body=body), self.assertRaises(HTTPException) as bad:
+                check(body)
+            self.assertEqual(bad.exception.status_code, 400)
+        self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)]}, "a check adds nothing")
 
     def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
         self.assertTrue(self.api.status()["connected"])

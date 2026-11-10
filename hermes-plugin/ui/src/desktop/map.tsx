@@ -10,17 +10,18 @@ import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { addFolderRequest, folderExample, jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { ToolButton } from '../shared/mapUi.tsx'
+import { glass, ToolButton } from '../shared/mapUi.tsx'
 import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
+import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { errorText, type KumiStore } from '../shared/store.ts'
 import { nextSteps } from '../shared/steps.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
@@ -129,6 +130,33 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const beside = areaWidth >= SIDE_SHEET
   const session = ownerSession(state)
   const map = state.map
+  // Sample folders: the folders now, and adding one by its path. The request goes to Kumi's chat, whose approval names
+  // the folder. Desktop's folder dialog also grants the plugin's Desktop half file access there, which Kumi never
+  // uses, so the grant is given straight back: only the path is kept.
+  const folders = useSampleFolders(store, map?.revision)
+  const [foldersOpen, setFoldersOpen] = useState(false)
+  const files = ctx.files
+  const folderControl = (onClose?: () => void) => (
+    <SampleFolders
+      ask={async (folder, known) => (await ask(ctx, known ? RESCAN_REQUEST : addFolderRequest(folder), { send: true, session })).outcome}
+      check={typed => store.checkFolder(typed)}
+      example={folderExample(state.setup?.target)}
+      folders={folders}
+      onClose={onClose}
+      pick={
+        typeof files?.requestFolder === 'function'
+          ? async () => {
+              const answer = await files.requestFolder()
+              // Hermes in a browser has no folder dialog (Desktop says why itself when it refuses a folder of its own).
+              if (!answer.ok && answer.error === 'unavailable') host.notify({ kind: 'info', message: t('folders.noDialog') })
+              if (!answer.ok || !answer.folder) return null
+              void files.release?.(answer.folder.id)
+              return answer.folder.path
+            }
+          : undefined
+      }
+    />
+  )
   // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own steps,
   // one per DAW until one is chosen, sent as the pane sends them), the scan's progress while one runs, else a request
   // to scan (Kumi asks which folder when none is set up).
@@ -147,6 +175,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     ) : (
       <>
         {setupSteps.length > 0 ? t('map.setupFirst') : t('map.empty')}
+        {setupSteps.length === 0 && <div style={{ ...glass, marginTop: 12, padding: 12 }}>{folderControl()}</div>}
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
           {setupSteps.length > 0 ? (
             setupSteps.map(step => (
@@ -155,7 +184,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
               </TextButton>
             ))
           ) : (
-            <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} strong title={t('map.scanTitle')}>
+            <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} title={t('map.scanTitle')}>
               {t('map.scan')}
             </TextButton>
           )}
@@ -314,18 +343,34 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             setLayout(id)
           }}
           tools={
-            <ToolButton
-              icon="hover"
-              label={t('dock.hover')}
-              onClick={() => {
-                ctx.storage.set(HOVER_PLAY, !hover)
-                setHover(!hover)
-              }}
-              pressed={hover}
-              title={t('dock.hoverTitle')}
-            />
+            <>
+              <ToolButton
+                icon="hover"
+                label={t('dock.hover')}
+                onClick={() => {
+                  ctx.storage.set(HOVER_PLAY, !hover)
+                  setHover(!hover)
+                }}
+                pressed={hover}
+                title={t('dock.hoverTitle')}
+              />
+              <ToolButton icon="folder" label={t('folders.title')} onClick={() => setFoldersOpen(!foldersOpen)} pressed={foldersOpen} title={t('folders.openTitle')} />
+            </>
           }
         />
+        {/* Sample folders, over the map's top right corner once there's a map (an empty map shows it in place). */}
+        {foldersOpen && (map?.points?.length ?? 0) > 0 && (
+          <div
+            onKeyDown={event => {
+              if (event.key !== 'Escape') return
+              event.stopPropagation()
+              setFoldersOpen(false)
+            }}
+            style={{ ...glass, position: 'absolute', top: 56, right: 12, width: 'min(380px, calc(100% - 24px))', padding: 12, zIndex: 6 }}
+          >
+            {folderControl(() => setFoldersOpen(false))}
+          </div>
+        )}
         {palette.making && (
           <MakePanel
             colorOf={palette.colorOf}

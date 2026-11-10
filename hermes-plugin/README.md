@@ -15,9 +15,10 @@ recorded in HISTORY, most undoable), and turns your own samples into new sounds.
 3. **Ask:** "connect Kumi", then "what am I looking at?", "turn the drums down 2 dB" and "undo that".
 
 **No DAW?** The sound map, the palette and Make don't need one: once setup has installed Kumi's runtime (its first
-step), ask Hermes to "add ~/Samples to Kumi's library and scan it" (any folder of WAV or AIFF files), then open the
-sound map in its tab in Hermes Desktop. For the DAW side too, REAPER's free evaluation takes about two minutes: install
-it from [reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
+step), open the sound map in its tab in Hermes Desktop, type or choose your sample folder under **Sample folders**
+(any folder of WAV or AIFF files) and press **Add and scan**; or run `hermes kumi samples add <folder>` in a terminal
+and ask Hermes to scan it. For the DAW side too, REAPER's free evaluation takes about two minutes: install it from
+[reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to "set up Kumi for REAPER".
 
 ## What it does
 
@@ -173,6 +174,7 @@ Setup never starts or quits your DAW, picks a Control Surface for you, or saves 
 | `/kumi` in a chat, `hermes kumi status` in a terminal | Where Kumi stands in this profile: what setup still needs, the DAW connection, whether Kumi can read compressed audio, whether Hermes asks before each Kumi change, and whether Hermes's approvals are off |
 | `/kumi doctor`, `hermes kumi doctor` | Checks what Kumi needs in this profile and says what to do about each problem. It changes nothing |
 | `hermes kumi setup --daw <daw>` | Sets Kumi up for `ableton`, `reaper` or `renoise`, asking before each step; `--use` also makes that DAW Kumi's |
+| `/kumi samples`, `hermes kumi samples` | The sample folders Kumi may read. `… samples add <folder>` adds one by its full path (`C:\Users\you\Samples`, `~/Samples`): the terminal shows what Kumi will read and asks first; `/kumi samples add` works in Hermes's own apps, never from a chat app |
 
 ## Settings
 
@@ -182,7 +184,7 @@ settings:
 | Setting | Default | What it does |
 |---|---|---|
 | `daw` | Live (`ableton`) | Which DAW Kumi connects to: `ableton`, `reaper` or `renoise`. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
-| `library_folders` | none | The folders Kumi may read to build your sound map: a scan reads only the audio files in them, and nothing else is scanned |
+| `library_folders` | none | The folders Kumi may read to build your sound map: a scan reads only the audio files in them, and nothing else is scanned. Add one from the sound map's **Sample folders**, with `hermes kumi samples add <folder>` or `/kumi samples add <folder>`, by asking Hermes, or here |
 | `inject_focus` | on | When what you're looking at changes, adds a short note to the chat connected to Kumi: what you're on (FOCUS), and what changed in the project while Kumi was away |
 | `ask_before_changes` | off | Ask before each change: Hermes asks before each Kumi change, undo, track or mix listen, play, take, preset, script and device, per kind of change and per chat. Off, Kumi makes them without asking and records each in HISTORY; setup steps, sample folders and Mirelo jobs ask either way, and so does a script or device in a chat that has read outside content |
 | `scripts_in_messaging` | off | Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, whatever Ask before each change says, and none runs while Hermes's approvals are off |
@@ -282,6 +284,11 @@ project as…** with **Copy all media into project directory**), or they'll miss
   you ask for (REAPER and Renoise); and finished audio other Hermes plugins saved in
   `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it. To tell which version of
   Serum 2, Pro-Q 4 or Ozone 12 you have, the VST3 metadata in your standard plug-in folders (it never loads a plug-in).
+- **Who can add a sample folder:** you, by its full path, and every way goes through the same check. In the sound
+  map's **Sample folders**, Desktop sends the request to Kumi's chat (the dashboard copies it), and Hermes asks once
+  for the folder and its first scan. `hermes kumi samples add <folder>` shows the folder and asks y/N in the terminal.
+  `/kumi samples add <folder>` adds it on your typed command, in Hermes's own apps only: a chat app is refused. Or
+  ask Hermes, which asks you. Nothing in a folder is read until a scan, whose approval names every folder.
 - **Approvals:** by default (`ask_before_changes` off) Kumi makes changes, undos, track and mix listens, play, takes,
   presets, and scripts and devices in a chat that hasn't read outside content without asking; each change still goes
   into HISTORY, and most can be undone. Setup steps, sample-folder adds and scans, Mirelo uploads and paid

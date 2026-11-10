@@ -163,7 +163,7 @@
       keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
-      empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
+      empty: "No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.",
       search: "Search sounds",
       searchHint: "Search the map: name, kind or folder",
       count: (n) => `${n} sounds`,
@@ -791,6 +791,31 @@
         }
       }
     },
+    // The Sample folders control on the map: the folders Kumi may read, and adding one by its path.
+    folders: {
+      title: "Sample folders",
+      openTitle: "The folders Kumi reads for this map, and adding one by its path",
+      none: "None yet.",
+      reading: "Reading your sample folders…",
+      path: "A folder's full path",
+      pathHint: (example) => `The folder's full path, like ${example}`,
+      choose: "Choose…",
+      chooseTitle: "Pick the folder in a file dialog",
+      noDialog: "This Hermes has no folder dialog: type or paste the folder's path.",
+      add: "Add and scan",
+      addTitle: "Ask Kumi in the chat to add this folder and scan it; you approve it there",
+      copy: "Copy the request",
+      copyTitle: "Copy a request to add this folder and scan it, to paste into a Hermes chat",
+      checking: "Checking…",
+      refused: (why) => `Kumi didn't add the folder: ${why}`,
+      failed: (why) => `Kumi couldn't check that folder: ${why}`,
+      sent: "Asked in Kumi's chat. Approve it there, and the map fills in as the scan runs.",
+      drafted: "The request is in the chat's input. Send it, then approve it there.",
+      copied: "Copied. Paste it into a Hermes chat to add the folder and scan it.",
+      known: "Kumi already has that folder, so this asks for a scan of your folders.",
+      note: "Kumi reads only the audio files in it, and never changes or moves your files.",
+      close: "Close"
+    },
     notify: {
       nothingToUndo: "Kumi has no change it can undo right now.",
       undoUnsure: "Kumi isn't sure of its last change: ask Hermes to have it look at your project again first.",
@@ -807,7 +832,7 @@
       copyRequest: "Copy request",
       copyReference: "Copy its reference",
       copyUndo: "Copy undo",
-      mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
+      mapEmpty: "No sound map yet. Add a sample folder here: the request to add and scan it goes into a Hermes chat.",
       askLook: "Ask Hermes in your chat to look again before another change."
     }
   };
@@ -927,7 +952,7 @@
       keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
-      empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+      empty: "まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。",
       search: "サウンドを検索",
       searchHint: "マップを検索: 名前・種類・フォルダ",
       count: (n) => `${n} 個のサウンド`,
@@ -1547,6 +1572,30 @@
         }
       }
     },
+    folders: {
+      title: "サンプルフォルダ",
+      openTitle: "このマップのために Kumi が読むフォルダと、パスを指定しての追加",
+      none: "まだありません。",
+      reading: "サンプルフォルダを読み込み中…",
+      path: "フォルダのフルパス",
+      pathHint: (example) => `フォルダのフルパス（例: ${example}）`,
+      choose: "選択…",
+      chooseTitle: "ファイルダイアログでフォルダを選びます",
+      noDialog: "この Hermes にはフォルダのダイアログがありません。フォルダのパスを入力するか貼り付けてください。",
+      add: "追加してスキャン",
+      addTitle: "このフォルダの追加とスキャンをチャットで Kumi に頼みます。承認はチャットで行います",
+      copy: "依頼をコピー",
+      copyTitle: "このフォルダの追加とスキャンの依頼をコピーします。Hermes のチャットに貼り付けてください",
+      checking: "確認中…",
+      refused: (why) => `フォルダは追加されませんでした: ${why}`,
+      failed: (why) => `そのフォルダを確認できませんでした: ${why}`,
+      sent: "Kumi のチャットで頼みました。チャットで承認すると、スキャンの進行に合わせてマップが埋まっていきます。",
+      drafted: "依頼はチャットの入力欄にあります。送信してから、チャットで承認してください。",
+      copied: "コピーしました。Hermes のチャットに貼り付けると、フォルダを追加してスキャンします。",
+      known: "そのフォルダはすでに追加されているため、フォルダのスキャンを頼みます。",
+      note: "Kumi が読むのはその中のオーディオファイルだけです。ファイルを変更したり移動したりすることはありません。",
+      close: "閉じる"
+    },
     notify: {
       nothingToUndo: "今すぐ取り消せる変更はありません。",
       undoUnsure: "Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう Hermes に頼んでください。",
@@ -1563,7 +1612,7 @@
       copyRequest: "依頼をコピー",
       copyReference: "参照をコピー",
       copyUndo: "取り消しをコピー",
-      mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
+      mapEmpty: "まだサンプルマップがありません。ここでサンプルフォルダを追加してください。追加とスキャンの依頼は Hermes のチャットに貼り付けて送ります。",
       askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
     }
   };
@@ -1683,7 +1732,7 @@
       keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
-      empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
+      empty: "还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。",
       search: "搜索声音",
       searchHint: "搜索地图：名称、种类或文件夹",
       count: (n) => `${n} 个声音`,
@@ -2303,6 +2352,30 @@
         }
       }
     },
+    folders: {
+      title: "采样文件夹",
+      openTitle: "Kumi 为这张地图读取的文件夹，以及按路径添加文件夹",
+      none: "还没有。",
+      reading: "正在读取你的采样文件夹…",
+      path: "文件夹的完整路径",
+      pathHint: (example) => `文件夹的完整路径，例如 ${example}`,
+      choose: "选择…",
+      chooseTitle: "在文件对话框中选择文件夹",
+      noDialog: "这个 Hermes 没有文件夹对话框：请输入或粘贴文件夹的路径。",
+      add: "添加并扫描",
+      addTitle: "在对话中请 Kumi 添加并扫描这个文件夹；你在对话中批准",
+      copy: "复制请求",
+      copyTitle: "复制添加并扫描这个文件夹的请求，粘贴到 Hermes 对话中",
+      checking: "正在检查…",
+      refused: (why) => `Kumi 没有添加这个文件夹：${why}`,
+      failed: (why) => `Kumi 无法检查这个文件夹：${why}`,
+      sent: "已在 Kumi 的对话中提出请求。在那里批准后，地图会随着扫描逐渐填满。",
+      drafted: "请求已放进对话的输入框。发送后，在对话中批准。",
+      copied: "已复制。粘贴到 Hermes 对话中，即可添加并扫描这个文件夹。",
+      known: "Kumi 已经有这个文件夹了，所以这会请求扫描你的文件夹。",
+      note: "Kumi 只读取其中的音频文件，绝不会更改或移动你的文件。",
+      close: "关闭"
+    },
     notify: {
       nothingToUndo: "Kumi 现在没有可以撤销的改动。",
       undoUnsure: "Kumi 不确定它的上一次改动：请先让 Hermes 让它重新查看你的项目。",
@@ -2319,7 +2392,7 @@
       copyRequest: "复制请求",
       copyReference: "复制引用",
       copyUndo: "复制撤销",
-      mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
+      mapEmpty: "还没有采样地图。在这里添加一个采样文件夹：添加并扫描的请求要粘贴到 Hermes 对话中发送。",
       askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
     }
   };
@@ -2472,6 +2545,13 @@
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   var RESCAN_REQUEST = "Kumi, rescan my sample folders";
   var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
+  function addFolderRequest(folder) {
+    return `Kumi, add this sample folder and scan it: ${folder.includes("`") ? folder : `\`${folder}\``}`;
+  }
+  function folderExample(target) {
+    const system = typeof target === "string" ? target : "";
+    return system.includes("windows") ? "C:\\Users\\you\\Samples" : system.includes("linux") ? "/home/you/Samples" : "/Users/you/Samples";
+  }
   function cleanupWords(cleanup, t = english) {
     if (cleanup === "restored") return t("history.restored");
     if (cleanup === "unsure") return t("history.restoreUnsure");
@@ -3299,6 +3379,26 @@
       if (generation !== this.generation) return;
       this.set({ leaving: /* @__PURE__ */ new Set() });
       await this.refresh("map");
+    }
+    /** The sample folders Kumi may read (`GET /library/folders`), for the Sample folders control; null when the read
+     *  fails (an older backend half, or the agent plugin off). */
+    async libraryFolders() {
+      try {
+        const answer = await this.fetch("/library/folders");
+        return Array.isArray(answer?.folders) ? answer.folders.filter((folder) => typeof folder === "string") : null;
+      } catch {
+        return null;
+      }
+    }
+    /** What the plugin's folder guard says of a typed folder. Nothing is added: the request to add it goes to the chat. */
+    async checkFolder(folder) {
+      try {
+        const answer = await this.fetch("/library/folder", { method: "POST", body: { folder } });
+        if (typeof answer?.folder === "string") return { folder: answer.folder, known: answer.known === true };
+        return { refusal: clean(typeof answer?.refusal === "string" ? answer.refusal : "", 400) };
+      } catch (error) {
+        return { error: clean(errorText(error), 300) };
+      }
     }
     /** One palette edit (`POST /palette`): the palette as the backend now has it, at once, and its sentence (with `also`
      *  after it) as `paletteSaid`; a refusal's reason there instead. True when the edit was made. */
@@ -5939,6 +6039,16 @@
   };
   var PATHS = {
     pick: /* @__PURE__ */ jsx("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
+    folder: /* @__PURE__ */ jsx(
+      "path",
+      {
+        d: "M2 4.3 a1.2 1.2 0 0 1 1.2 -1.2 H6.1 l1.6 1.7 H12.8 a1.2 1.2 0 0 1 1.2 1.2 V11.7 a1.2 1.2 0 0 1 -1.2 1.2 H3.2 a1.2 1.2 0 0 1 -1.2 -1.2 Z",
+        fill: "none",
+        stroke: "currentColor",
+        strokeLinejoin: "round",
+        strokeWidth: "1.3"
+      }
+    ),
     hand: /* @__PURE__ */ jsx(
       "path",
       {
@@ -8925,6 +9035,102 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     };
   }
 
+  // src/shared/SampleFolders.tsx
+  function useSampleFolders(store, revision) {
+    const [folders, setFolders] = useState(void 0);
+    const read = useCallback(() => void store.libraryFolders().then(setFolders), [store]);
+    useEffect(read, [read, revision]);
+    return folders;
+  }
+  async function addTyped(typed, check, ask, t) {
+    const answer = await check(typed);
+    if (answer.folder === void 0) return { refused: true, text: answer.refusal ? t("folders.refused", answer.refusal) : t("folders.failed", answer.error ?? "") };
+    const asked = await ask(answer.folder, answer.known === true);
+    if (asked === "none") return null;
+    const where = t(asked === "sent" ? "folders.sent" : asked === "drafted" ? "folders.drafted" : "folders.copied");
+    return { refused: false, text: answer.known ? `${t("folders.known")} ${where}` : where };
+  }
+  function SampleFolders({
+    folders,
+    example,
+    check,
+    ask,
+    pick: pick3,
+    copies,
+    onClose
+  }) {
+    const t = useT();
+    const [typed, setTyped] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [said, setSaid] = useState(null);
+    const submit = async () => {
+      const folder = typed.trim();
+      if (!folder || busy) return;
+      setBusy(true);
+      setSaid(null);
+      try {
+        const answer = await addTyped(folder, check, ask, t);
+        setSaid(answer);
+        if (answer && !answer.refused) setTyped("");
+      } finally {
+        setBusy(false);
+      }
+    };
+    return /* @__PURE__ */ jsxs("div", { "aria-label": t("folders.title"), role: "group", style: { display: "grid", gap: 7, textAlign: "left", fontSize: 12, color: T.text }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { ...S.row, justifyContent: "space-between", gap: 8 }, children: [
+        /* @__PURE__ */ jsx("span", { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: ".09em", textTransform: "uppercase", color: T.secondary }, children: t("folders.title") }),
+        onClose && /* @__PURE__ */ jsx(TextButton, { label: t("folders.close"), onClick: onClose, children: "×" })
+      ] }),
+      folders === void 0 ? /* @__PURE__ */ jsx("span", { style: S.faint, children: t("folders.reading") }) : folders === null ? null : folders.length === 0 ? /* @__PURE__ */ jsx("span", { style: S.faint, children: t("folders.none") }) : /* @__PURE__ */ jsx("ul", { style: { margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 2, maxHeight: 120, overflowY: "auto" }, children: folders.map((folder) => /* @__PURE__ */ jsx("li", { style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 11.5, overflowWrap: "anywhere" }, children: folder }, folder)) }),
+      /* @__PURE__ */ jsxs(
+        "form",
+        {
+          onSubmit: (event) => {
+            event.preventDefault();
+            void submit();
+          },
+          style: { ...S.row, flexWrap: "wrap", gap: 6 },
+          children: [
+            /* @__PURE__ */ jsx(
+              "input",
+              {
+                "aria-label": t("folders.path"),
+                autoComplete: "off",
+                className: FOCUSABLE,
+                disabled: busy,
+                maxLength: 4096,
+                onChange: (event) => {
+                  setTyped(event.target.value);
+                  setSaid(null);
+                },
+                placeholder: t("folders.pathHint", example),
+                spellCheck: false,
+                style: { flex: "1 1 13rem", minWidth: 0, font: "inherit", fontSize: 12, lineHeight: "18px", padding: "2px 7px", borderRadius: 4, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
+                value: typed
+              }
+            ),
+            pick3 && /* @__PURE__ */ jsx(
+              TextButton,
+              {
+                disabled: busy,
+                onClick: () => void pick3().then((path) => {
+                  if (!path) return;
+                  setTyped(path);
+                  setSaid(null);
+                }),
+                title: t("folders.chooseTitle"),
+                children: t("folders.choose")
+              }
+            ),
+            /* @__PURE__ */ jsx(TextButton, { disabled: busy || !typed.trim(), onClick: () => void submit(), strong: true, title: t(copies ? "folders.copyTitle" : "folders.addTitle"), children: busy ? t("folders.checking") : t(copies ? "folders.copy" : "folders.add") })
+          ]
+        }
+      ),
+      said && /* @__PURE__ */ jsx("div", { role: said.refused ? "alert" : "status", style: { color: said.refused ? T.warn : T.secondary, overflowWrap: "anywhere" }, children: said.text }),
+      /* @__PURE__ */ jsx("div", { style: S.faint, children: t("folders.note") })
+    ] });
+  }
+
   // src/shared/steps.ts
   var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true };
   var SETUP_DAWS = ["ableton", "reaper", "renoise"];
@@ -9022,6 +9228,22 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const grow = useGrow((request) => store.design(request), (result) => void audition.play(result.artifact_id).catch(() => {
     }), state.map?.revision ?? null);
     const dock = useRef(null);
+    const folders = useSampleFolders(store, state.map?.revision);
+    const [foldersOpen, setFoldersOpen] = useState(false);
+    const folderControl = (onClose) => /* @__PURE__ */ jsx(
+      SampleFolders,
+      {
+        ask: (folder, known) => navigator.clipboard?.writeText(known ? RESCAN_REQUEST : addFolderRequest(folder)).then(
+          () => "copied",
+          () => "none"
+        ) ?? Promise.resolve("none"),
+        check: (typed) => store.checkFolder(typed),
+        copies: true,
+        example: folderExample(state.setup?.target),
+        folders,
+        onClose
+      }
+    );
     useEffect(() => {
       void store.refreshStatus();
       const timer = setInterval(() => {
@@ -9080,7 +9302,19 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             }
           ) })
         ] }),
-        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 780, display: "flex", flexDirection: "column" }, children: [
+        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 780, display: "flex", flexDirection: "column", position: "relative" }, children: [
+          foldersOpen && (state.map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx(
+            "div",
+            {
+              onKeyDown: (event) => {
+                if (event.key !== "Escape") return;
+                event.stopPropagation();
+                setFoldersOpen(false);
+              },
+              style: { ...glass, position: "absolute", top: 56, right: 12, width: "min(380px, calc(100% - 24px))", padding: 12, zIndex: 6 },
+              children: folderControl(() => setFoldersOpen(false))
+            }
+          ),
           /* @__PURE__ */ jsx(
             MapCanvas,
             {
@@ -9098,6 +9332,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 t("map.setupFirst")
               ) : /* @__PURE__ */ jsxs(Fragment2, { children: [
                 t("dashboard.mapEmpty"),
+                /* @__PURE__ */ jsx("div", { style: { ...glass, marginTop: 12, padding: 12 }, children: folderControl() }),
                 /* @__PURE__ */ jsx("div", { style: { marginTop: 10 }, children: /* @__PURE__ */ jsx(CopyButton, { label: t("map.scanCopy"), text: SCAN_REQUEST }) })
               ] }),
               found: state.found,
@@ -9166,19 +9401,22 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 globalThis.localStorage?.setItem(LAYOUT, id);
                 setLayout(id);
               },
-              tools: /* @__PURE__ */ jsx(
-                ToolButton,
-                {
-                  icon: "hover",
-                  label: t("dock.hover"),
-                  onClick: () => {
-                    globalThis.localStorage?.setItem(HOVER_PLAY, hover ? "off" : "on");
-                    setHover(!hover);
-                  },
-                  pressed: hover,
-                  title: t("dock.hoverTitle")
-                }
-              )
+              tools: /* @__PURE__ */ jsxs(Fragment2, { children: [
+                /* @__PURE__ */ jsx(
+                  ToolButton,
+                  {
+                    icon: "hover",
+                    label: t("dock.hover"),
+                    onClick: () => {
+                      globalThis.localStorage?.setItem(HOVER_PLAY, hover ? "off" : "on");
+                      setHover(!hover);
+                    },
+                    pressed: hover,
+                    title: t("dock.hoverTitle")
+                  }
+                ),
+                /* @__PURE__ */ jsx(ToolButton, { icon: "folder", label: t("folders.title"), onClick: () => setFoldersOpen(!foldersOpen), pressed: foldersOpen, title: t("folders.openTitle") })
+              ] })
             }
           ),
           (state.map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx(

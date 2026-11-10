@@ -1944,10 +1944,12 @@ LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")
 def library_refusal(args: dict) -> str | None:
     """What's wrong with a kumi_library call's arguments, or None; the hook checks this, and the handler again, before
     anything reaches the runtime (CC-14): the action, a cancel's job id in the runtime's job-id form, a folder never
-    with cancel and a job id only with it."""
+    with cancel and a job id only with it, and `scan` (add a folder and scan at once) only with add_folder."""
     action = args.get("action")
     if action not in LIBRARY_ACTIONS:
         return "kumi_library's action is status, add_folder, scan or cancel."
+    if args.get("scan") is not None and (action != "add_folder" or not isinstance(args["scan"], bool)):
+        return "scan goes only with add_folder, as true or false."
     if action != "cancel":
         return "job_id goes only with cancel." if args.get("job_id") is not None else None
     if args.get("folder") is not None:
@@ -1957,27 +1959,63 @@ def library_refusal(args: dict) -> str | None:
     return None
 
 
+def keep_library_folder(host: Host, folder: str) -> bool:
+    """Keep a folder the producer added themself, outside a tool call (`hermes kumi samples add`, `/kumi samples add`;
+    `folder` is the guard's answer for it), in the library_folders setting: the next runtime starts with it, and one
+    already running is handed it before its next scan (`hand_over_folders`). False when it was there already."""
+    folders = host.library_folders()
+    if folder in folders:
+        return False
+    host.set_library_folders([*folders, folder])
+    return True
+
+
+def hand_over_folders(host: Host, live: runtime.Runtime, kwargs: dict) -> None:
+    """Before a scan: give a running runtime the settings' sample folders it doesn't have. A runtime reads its folders
+    when it starts, so one added since outside a tool call (the terminal, `/kumi samples add`, Hermes's settings) is
+    only in the setting, and the scan would pass it by. The scan's approval names them all (`policy._library`). One
+    the runtime refuses stays out of this scan."""
+    wanted = host.library_folders()
+    if not wanted:
+        return
+    status = live.call("library", {"action": "status"}, host.identity(kwargs), timeout=READ_TIMEOUT)
+    known = [folder for folder in status.get("folders") or [] if isinstance(folder, str)]
+    for folder in wanted:
+        if folder in known:
+            continue
+        answer = live.call("library", {"action": "add_folder", "folder": folder}, host.identity(kwargs),
+                           timeout=READ_TIMEOUT)
+        if "error" in answer:
+            log.warning("Kumi's runtime didn't take a sample folder from the settings: %s", answer["error"])
+
+
 def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     """The library tool; a folder the producer approved adding is also kept in the plugin's library_folders setting, so
-    the next runtime starts with it (`--library-root`). A cancel asks the runtime to stop the scan it names (CC-14): the
-    reply acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
+    the next runtime starts with it (`--library-root`). With `scan`, an added folder is scanned at once, under the one
+    approval that said so: the scan's job comes back with the folders. A cancel asks the runtime to stop the scan it
+    names (CC-14): the reply acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
     refusal = library_refusal(args)
     if refusal is not None:
         return {"error": {"code": "invalid", "reason": refusal}}
     action = args["action"]
+    sent = {key: value for key, value in args.items() if key != "scan"}  # `scan` is the plugin's, never the runtime's
     if action == "cancel":
-        args = {"action": "cancel", "job_id": args["job_id"]}
+        sent = {"action": "cancel", "job_id": args["job_id"]}
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return {"error": {"code": "invalid", "reason": refusal}}
-        args = {**args, "folder": folder}
+        sent = {**sent, "folder": folder}
     live = host.started(kwargs.get("session_id")) if action in ("add_folder", "scan") else host.live()
-    result = live.call("library", args, host.identity(kwargs), timeout=READ_TIMEOUT)
+    if action == "scan":
+        hand_over_folders(host, live, kwargs)
+    result = live.call("library", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
     if action == "add_folder" and "error" not in result:
-        folders = host.library_folders()
-        if args["folder"] not in folders:
-            host.set_library_folders([*folders, args["folder"]])
+        keep_library_folder(host, sent["folder"])
+        if args.get("scan") is True:
+            hand_over_folders(host, live, kwargs)
+            scanned = live.call("library", {"action": "scan"}, host.identity(kwargs), timeout=READ_TIMEOUT)
+            result = {**scanned, "added": sent["folder"], "folders": result.get("folders")}
     return result
 
 

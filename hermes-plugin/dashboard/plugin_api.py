@@ -6,6 +6,12 @@ take small, bounded JSON bodies, never a file path, answer without one, change n
 `<state>`. Nothing here starts, stops or talks to the runtime the chat holds, the DAW or the network: `/design` runs the
 pinned runtime's one-shot `kumi design` on files the media guard approved, which needs no DAW or session. A change in
 the DAW only ever comes from a tool call the user approves, which the UI asks for by putting a request into the chat.
+
+The Sample folders control has two routes of its own, which write nothing: `GET /library/folders` (the producer's
+`library_folders` setting, shown back to them) and `POST /library/folder`, the one route that takes a path, a folder
+the producer typed or picked, only to answer what the folder guard says of it. Adding it and scanning stay a tool call
+in the chat, with its approval: this process can't start a scan, and a running runtime wouldn't know a folder saved
+from here.
 """
 
 from __future__ import annotations
@@ -58,6 +64,8 @@ _BODY_MAX = 256 * 1024
 _DESIGN_BODY_MAX = 8 * 1024 * 1024
 # The largest body `POST /palette` reads: a gather of 10,000 current-revision ids (about 45 bytes each) fits in it.
 _PALETTE_BODY_MAX = 1024 * 1024
+# The largest body `POST /library/folder` reads: one folder path.
+_FOLDER_BODY_MAX = 16 * 1024
 
 router = APIRouter()
 
@@ -235,6 +243,33 @@ async def design(request: Request) -> dict:
 def designs_made() -> dict:
     """The sounds made here, newest first (at most 50): the Make panel's variations survive a reload."""
     return {"designs": designs.history(snapshots.state_dir())}
+
+
+@router.get("/library/folders")
+def library_folders() -> dict:
+    """The sample folders Kumi may read (the `library_folders` setting as the guard keeps it), for the Sample folders
+    control: the producer's own setting, as `hermes kumi samples` shows it."""
+    return {"folders": _library_folders()}
+
+
+def _library_folder(body: object) -> dict:
+    """`POST /library/folder`'s work, off the event loop: the folder guard's answer for a folder the producer typed or
+    picked (`snapshots.typed_library_folder`): the folder as Kumi would keep it and whether it's already one of them,
+    or the guard's refusal in its own words. It writes nothing and adds nothing."""
+    folder = body.get("folder") if isinstance(body, dict) else None
+    if not isinstance(folder, str) or len(folder) > 4096:
+        raise HTTPException(status_code=400, detail="The body must be {\"folder\": \"<a folder's full path>\"}.")
+    normal, refusal = snapshots.typed_library_folder(folder, hermes_home=snapshots.hermes_home())
+    if normal is None:
+        return {"refusal": refusal}
+    return {"folder": normal, "known": normal in _library_folders()}
+
+
+@router.post("/library/folder")
+async def library_folder(request: Request) -> dict:
+    """Check a folder the producer wants Kumi to read, before the request to add it goes to the chat: the folder as
+    the guard keeps it, or why it can't be one. Nothing is added or read here."""
+    return await run_in_threadpool(_library_folder, await _json(request, _FOLDER_BODY_MAX))
 
 
 @router.get("/sound")

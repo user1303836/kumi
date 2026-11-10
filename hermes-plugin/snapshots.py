@@ -418,6 +418,26 @@ def library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str 
     return normal, None
 
 
+def typed_library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str | None, str | None]:
+    """A folder the producer named themself (the terminal, `/kumi samples add`, the map's Sample folders control):
+    `library_folder`'s answer for it, its rules unchanged, after taking off what a shell or a paste leaves around a
+    path (a pair of quotes; the closing quote cmd leaves from `"D:\\Samples\\"`), and only when a folder is there: a
+    mistyped path is said here, not found out by an empty scan. Returns (folder, None), or (None, why not)."""
+    if isinstance(folder, str):
+        folder = folder.strip()
+        if len(folder) >= 2 and folder[0] == folder[-1] and folder[0] in "\"'":
+            folder = folder[1:-1].strip()
+        elif folder.endswith('"') and '"' not in folder[:-1]:
+            folder = folder[:-1]
+    normal, refusal = library_folder(folder, hermes_home=hermes_home)
+    if normal is None:
+        return None, refusal
+    real = resolved(normal)  # the guard passed, so every step of it is on this computer
+    if real is None or not os.path.isdir(real):
+        return None, f"there's no folder at {normal}."
+    return normal, None
+
+
 def library_folders(folders: Any, *, hermes_home: str | None = None) -> list[str]:
     """The `library_folders` setting as the guard keeps it: each folder normalized, once. One the guard refuses
     (relative, a disk, the home folder, Hermes's own, a network path), however it got into the setting, is left out

@@ -57,6 +57,20 @@ declare module '@hermes/plugin-sdk' {
     writeClipboard?: (text: string) => Promise<boolean>
   }
 
+  /** A folder the user picked in Desktop's own folder dialog (`ctx.files.requestFolder`). */
+  export interface PluginFolder {
+    id: string
+    name: string
+    path: string
+  }
+
+  /** Desktop's folder door (`ctx.files`), as far as Kumi uses it: the app's folder dialog, and giving back the file
+   *  grant the dialog makes. Older Desktops have none. */
+  export interface PluginFiles {
+    requestFolder: () => Promise<{ ok: true; folder: PluginFolder | null } | { ok: false; error: string; message: string }>
+    release: (folderId: string) => Promise<boolean>
+  }
+
   /** Desktop's plugin i18n (`ctx.i18n`): bundles per locale, resolved in the app's language with English, then the key,
    *  as fallbacks. Older Desktops have none. */
   export interface PluginI18n {
@@ -78,6 +92,7 @@ declare module '@hermes/plugin-sdk' {
     rest: <T>(path: string, options?: PluginRestOptions) => Promise<T>
     storage: PluginStorage
     os?: PluginOs
+    files?: PluginFiles
     i18n?: PluginI18n
     /** A line in the core pet's speech bubble, labelled with the plugin's name. Older Desktops have none. */
     pet?: PluginPet

@@ -333,6 +333,19 @@ class Media(StateTest):
             snapshots.os.path.realpath = real_realpath
         self.assertFalse([path for path in resolved if "attacker" in path], resolved)
 
+    @unittest.skipUnless(os.name == "nt", "Windows path forms")
+    def test_on_windows_a_typed_folder_keeps_its_drive_and_loses_a_trailing_backslash_or_cmds_stray_quote(self) -> None:
+        folder = str(self.library)  # C:\…\samples
+        for typed in (folder + "\\", folder.replace("\\", "/"), f'"{folder}\\"', folder + '\\"', folder.lower()):
+            with self.subTest(typed=typed):
+                kept, refusal = snapshots.typed_library_folder(typed)
+                self.assertIsNone(refusal)
+                self.assertEqual(kept.lower(), folder.lower())
+                self.assertFalse(kept.endswith("\\"))
+        for typed in (folder[:3], "\\Samples", folder[:2] + "Samples"):  # a drive; a root with no drive; drive-relative
+            with self.subTest(typed=typed):
+                self.assertIsNone(snapshots.typed_library_folder(typed)[0])
+
 
 class PublicViews(StateTest):
     def test_the_map_and_a_sound_as_clients_see_them_carry_no_file_path(self) -> None:

@@ -525,6 +525,23 @@ class Approvals(unittest.TestCase):
         self.assertEqual(decision["rule_key"], "kumi:folder_read:scan:s1")
         self.assertIn(f"• {support.DRUMS}\n{policy.AUDIO_ONLY}\n{policy.CHAT_ONLY}", decision["message"])
 
+    def test_a_folder_and_its_first_scan_are_one_approval_that_names_everything_the_scan_reads(self):
+        breaks = str(support.SAMPLES / "Breaks")
+        both = {"action": "add_folder", "folder": breaks, "scan": True}
+        alone = self.hook("kumi_library", both)
+        self.assertEqual(alone["rule_key"], f"kumi:folder_read:scan:{breaks}:s1", "never the rule for a folder alone")
+        lines = alone["message"].splitlines()
+        self.assertIn("scan it now", lines[0])
+        self.assertEqual(lines[1:3], [f"• {breaks}", policy.AUDIO_ONLY])
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
+        lines = self.hook("kumi_library", both)["message"].splitlines()
+        self.assertEqual(lines[1:5], [f"• {breaks}", "The scan reads your other sample folders again too:",
+                                      f"• {support.DRUMS}", policy.AUDIO_ONLY])
+        self.assertEqual(self.hook("kumi_library", {**both, "folder": "Breaks"})["action"], "block", "the guard first")
+        for wrong in ({"action": "scan", "scan": True}, {**both, "scan": 1}):
+            with self.subTest(args=wrong):
+                self.assertEqual(self.hook("kumi_library", wrong)["action"], "block")
+
 
 class Blocked(unittest.TestCase):
     def hook(self, host, tool: str, args: dict) -> dict | None:

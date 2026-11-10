@@ -52,6 +52,20 @@ the sound map in its tab in Hermes Desktop, or in the web dashboard's Kumi tab. 
 evaluation takes about two minutes: install it from [reaper.fm](https://www.reaper.fm/download.php), then ask Hermes to
 "set up Kumi for REAPER".
 
+**Your sample folders.** If you know where your samples are, add the folder yourself, by its full path
+(`C:\Users\you\Samples`, `D:\Samples`, `~/Samples`):
+- **Hermes Desktop:** on the sound map, **Sample folders** (in an empty map, or the folder button in the map's
+  toolbar) lists the folders Kumi reads. Type or paste a path, or press **Choose…** for the folder dialog, then **Add
+  and scan**: the request goes to Kumi's chat, and Hermes asks once for the folder and its first scan.
+- **Web dashboard:** the same control copies the request, to paste into a Hermes chat.
+- **Terminal:** `hermes kumi samples` lists them. `hermes kumi samples add <folder>` shows what Kumi will read and asks
+  before it adds the folder; a path with spaces needs no quotes.
+- **A chat:** `/kumi samples` lists them, and `/kumi samples add <folder>` adds one in Hermes's own apps (its terminal,
+  Desktop). From a chat app (Discord, Slack, Telegram…) Kumi refuses.
+- Every way goes through the same check as asking Hermes (the Sample folders setting below says what a folder can't
+  be), and a mistyped path is refused where you typed it. Nothing is read until a scan, whose approval names every
+  folder. To remove a folder, edit Sample folders in Kumi's settings.
+
 The first DAW you set up becomes Kumi's DAW (the DAW setting), in the same approval. Setting up another DAW later
 leaves Kumi with the one it has; setup then names the step that switches: `hermes kumi setup --daw <daw> --use` in a
 terminal, which asks before it changes the setting. You can also change the DAW in Kumi's plugin settings
@@ -556,6 +570,8 @@ those samples.
 - `/kumi` (or `hermes kumi status` in a terminal) says what setup still needs, and whether Kumi can read compressed
   audio. With `plugins.isolation: host`, Hermes leaves plugin commands such as `hermes kumi` out: set Kumi up from a
   chat in Hermes Desktop instead.
+- No sound map, or a folder's sounds aren't on it: `hermes kumi samples` (or `/kumi samples`) lists the folders Kumi
+  reads. Add one with `hermes kumi samples add <folder>` or the map's **Sample folders**, then ask Hermes to scan.
 - Nothing from Kumi in Hermes Desktop: check Kumi's **Agent** and **Desktop** switches under Capabilities → Plugins,
   and that it's enabled in Hermes (`hermes plugins enable kumi`).
 - No Kumi tab in the web dashboard: if the dashboard was already running when you installed Kumi, restart it

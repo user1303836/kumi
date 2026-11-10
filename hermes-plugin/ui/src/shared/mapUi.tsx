@@ -18,10 +18,19 @@ export const glass: CSSProperties = {
   borderRadius: 12
 }
 
-export type IconName = 'arrange' | 'close' | 'fit' | 'grow' | 'hand' | 'hover' | 'layers' | 'make' | 'near' | 'pick' | 'play' | 'plus' | 'reset' | 'stop' | 'tiles'
+export type IconName = 'arrange' | 'close' | 'fit' | 'folder' | 'grow' | 'hand' | 'hover' | 'layers' | 'make' | 'near' | 'pick' | 'play' | 'plus' | 'reset' | 'stop' | 'tiles'
 
 const PATHS: Record<IconName, ReactNode> = {
   pick: <path d="M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z" fill="currentColor" strokeLinejoin="round" />,
+  folder: (
+    <path
+      d="M2 4.3 a1.2 1.2 0 0 1 1.2 -1.2 H6.1 l1.6 1.7 H12.8 a1.2 1.2 0 0 1 1.2 1.2 V11.7 a1.2 1.2 0 0 1 -1.2 1.2 H3.2 a1.2 1.2 0 0 1 -1.2 -1.2 Z"
+      fill="none"
+      stroke="currentColor"
+      strokeLinejoin="round"
+      strokeWidth="1.3"
+    />
+  ),
   hand: (
     <path
       d="M5.2 8.5 V3.8 a1 1 0 0 1 2 0 V7.6 V2.9 a1 1 0 0 1 2 0 V7.6 V3.6 a1 1 0 0 1 2 0 V8 V5.4 a1 1 0 0 1 2 0 V9.6 c0 2.6 -1.8 4.6 -4.4 4.6 c-1.7 0 -2.7 -.7 -3.6 -1.9 L2.6 9.6 a1 1 0 0 1 1.5 -1.3 Z"

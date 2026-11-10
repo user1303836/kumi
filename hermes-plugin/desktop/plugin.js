@@ -121,7 +121,7 @@ var en = {
     keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
-    empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
+    empty: "No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.",
     search: "Search sounds",
     searchHint: "Search the map: name, kind or folder",
     count: (n) => `${n} sounds`,
@@ -749,6 +749,31 @@ var en = {
       }
     }
   },
+  // The Sample folders control on the map: the folders Kumi may read, and adding one by its path.
+  folders: {
+    title: "Sample folders",
+    openTitle: "The folders Kumi reads for this map, and adding one by its path",
+    none: "None yet.",
+    reading: "Reading your sample folders…",
+    path: "A folder's full path",
+    pathHint: (example) => `The folder's full path, like ${example}`,
+    choose: "Choose…",
+    chooseTitle: "Pick the folder in a file dialog",
+    noDialog: "This Hermes has no folder dialog: type or paste the folder's path.",
+    add: "Add and scan",
+    addTitle: "Ask Kumi in the chat to add this folder and scan it; you approve it there",
+    copy: "Copy the request",
+    copyTitle: "Copy a request to add this folder and scan it, to paste into a Hermes chat",
+    checking: "Checking…",
+    refused: (why) => `Kumi didn't add the folder: ${why}`,
+    failed: (why) => `Kumi couldn't check that folder: ${why}`,
+    sent: "Asked in Kumi's chat. Approve it there, and the map fills in as the scan runs.",
+    drafted: "The request is in the chat's input. Send it, then approve it there.",
+    copied: "Copied. Paste it into a Hermes chat to add the folder and scan it.",
+    known: "Kumi already has that folder, so this asks for a scan of your folders.",
+    note: "Kumi reads only the audio files in it, and never changes or moves your files.",
+    close: "Close"
+  },
   notify: {
     nothingToUndo: "Kumi has no change it can undo right now.",
     undoUnsure: "Kumi isn't sure of its last change: ask Hermes to have it look at your project again first.",
@@ -765,7 +790,7 @@ var en = {
     copyRequest: "Copy request",
     copyReference: "Copy its reference",
     copyUndo: "Copy undo",
-    mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
+    mapEmpty: "No sound map yet. Add a sample folder here: the request to add and scan it goes into a Hermes chat.",
     askLook: "Ask Hermes in your chat to look again before another change."
   }
 };
@@ -885,7 +910,7 @@ var ja = {
     keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
-    empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+    empty: "まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。",
     search: "サウンドを検索",
     searchHint: "マップを検索: 名前・種類・フォルダ",
     count: (n) => `${n} 個のサウンド`,
@@ -1505,6 +1530,30 @@ var ja = {
       }
     }
   },
+  folders: {
+    title: "サンプルフォルダ",
+    openTitle: "このマップのために Kumi が読むフォルダと、パスを指定しての追加",
+    none: "まだありません。",
+    reading: "サンプルフォルダを読み込み中…",
+    path: "フォルダのフルパス",
+    pathHint: (example) => `フォルダのフルパス（例: ${example}）`,
+    choose: "選択…",
+    chooseTitle: "ファイルダイアログでフォルダを選びます",
+    noDialog: "この Hermes にはフォルダのダイアログがありません。フォルダのパスを入力するか貼り付けてください。",
+    add: "追加してスキャン",
+    addTitle: "このフォルダの追加とスキャンをチャットで Kumi に頼みます。承認はチャットで行います",
+    copy: "依頼をコピー",
+    copyTitle: "このフォルダの追加とスキャンの依頼をコピーします。Hermes のチャットに貼り付けてください",
+    checking: "確認中…",
+    refused: (why) => `フォルダは追加されませんでした: ${why}`,
+    failed: (why) => `そのフォルダを確認できませんでした: ${why}`,
+    sent: "Kumi のチャットで頼みました。チャットで承認すると、スキャンの進行に合わせてマップが埋まっていきます。",
+    drafted: "依頼はチャットの入力欄にあります。送信してから、チャットで承認してください。",
+    copied: "コピーしました。Hermes のチャットに貼り付けると、フォルダを追加してスキャンします。",
+    known: "そのフォルダはすでに追加されているため、フォルダのスキャンを頼みます。",
+    note: "Kumi が読むのはその中のオーディオファイルだけです。ファイルを変更したり移動したりすることはありません。",
+    close: "閉じる"
+  },
   notify: {
     nothingToUndo: "今すぐ取り消せる変更はありません。",
     undoUnsure: "Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう Hermes に頼んでください。",
@@ -1521,7 +1570,7 @@ var ja = {
     copyRequest: "依頼をコピー",
     copyReference: "参照をコピー",
     copyUndo: "取り消しをコピー",
-    mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
+    mapEmpty: "まだサンプルマップがありません。ここでサンプルフォルダを追加してください。追加とスキャンの依頼は Hermes のチャットに貼り付けて送ります。",
     askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
   }
 };
@@ -1641,7 +1690,7 @@ var zh = {
     keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
-    empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
+    empty: "还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。",
     search: "搜索声音",
     searchHint: "搜索地图：名称、种类或文件夹",
     count: (n) => `${n} 个声音`,
@@ -2261,6 +2310,30 @@ var zh = {
       }
     }
   },
+  folders: {
+    title: "采样文件夹",
+    openTitle: "Kumi 为这张地图读取的文件夹，以及按路径添加文件夹",
+    none: "还没有。",
+    reading: "正在读取你的采样文件夹…",
+    path: "文件夹的完整路径",
+    pathHint: (example) => `文件夹的完整路径，例如 ${example}`,
+    choose: "选择…",
+    chooseTitle: "在文件对话框中选择文件夹",
+    noDialog: "这个 Hermes 没有文件夹对话框：请输入或粘贴文件夹的路径。",
+    add: "添加并扫描",
+    addTitle: "在对话中请 Kumi 添加并扫描这个文件夹；你在对话中批准",
+    copy: "复制请求",
+    copyTitle: "复制添加并扫描这个文件夹的请求，粘贴到 Hermes 对话中",
+    checking: "正在检查…",
+    refused: (why) => `Kumi 没有添加这个文件夹：${why}`,
+    failed: (why) => `Kumi 无法检查这个文件夹：${why}`,
+    sent: "已在 Kumi 的对话中提出请求。在那里批准后，地图会随着扫描逐渐填满。",
+    drafted: "请求已放进对话的输入框。发送后，在对话中批准。",
+    copied: "已复制。粘贴到 Hermes 对话中，即可添加并扫描这个文件夹。",
+    known: "Kumi 已经有这个文件夹了，所以这会请求扫描你的文件夹。",
+    note: "Kumi 只读取其中的音频文件，绝不会更改或移动你的文件。",
+    close: "关闭"
+  },
   notify: {
     nothingToUndo: "Kumi 现在没有可以撤销的改动。",
     undoUnsure: "Kumi 不确定它的上一次改动：请先让 Hermes 让它重新查看你的项目。",
@@ -2277,7 +2350,7 @@ var zh = {
     copyRequest: "复制请求",
     copyReference: "复制引用",
     copyUndo: "复制撤销",
-    mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
+    mapEmpty: "还没有采样地图。在这里添加一个采样文件夹：添加并扫描的请求要粘贴到 Hermes 对话中发送。",
     askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
   }
 };
@@ -2511,6 +2584,13 @@ function connectRequest(daw) {
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
 var RESCAN_REQUEST = "Kumi, rescan my sample folders";
 var SCAN_REQUEST = "Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none";
+function addFolderRequest(folder) {
+  return `Kumi, add this sample folder and scan it: ${folder.includes("`") ? folder : `\`${folder}\``}`;
+}
+function folderExample(target) {
+  const system = typeof target === "string" ? target : "";
+  return system.includes("windows") ? "C:\\Users\\you\\Samples" : system.includes("linux") ? "/home/you/Samples" : "/Users/you/Samples";
+}
 var STARTER_REQUESTS = [
   { key: "look", request: "What am I looking at?" },
   { key: "change", request: "Make the selected track 2 dB quieter" },
@@ -3306,6 +3386,26 @@ var KumiStore = class {
     if (generation !== this.generation) return;
     this.set({ leaving: /* @__PURE__ */ new Set() });
     await this.refresh("map");
+  }
+  /** The sample folders Kumi may read (`GET /library/folders`), for the Sample folders control; null when the read
+   *  fails (an older backend half, or the agent plugin off). */
+  async libraryFolders() {
+    try {
+      const answer = await this.fetch("/library/folders");
+      return Array.isArray(answer?.folders) ? answer.folders.filter((folder) => typeof folder === "string") : null;
+    } catch {
+      return null;
+    }
+  }
+  /** What the plugin's folder guard says of a typed folder. Nothing is added: the request to add it goes to the chat. */
+  async checkFolder(folder) {
+    try {
+      const answer = await this.fetch("/library/folder", { method: "POST", body: { folder } });
+      if (typeof answer?.folder === "string") return { folder: answer.folder, known: answer.known === true };
+      return { refusal: clean(typeof answer?.refusal === "string" ? answer.refusal : "", 400) };
+    } catch (error) {
+      return { error: clean(errorText(error), 300) };
+    }
   }
   /** One palette edit (`POST /palette`): the palette as the backend now has it, at once, and its sentence (with `also`
    *  after it) as `paletteSaid`; a refusal's reason there instead. True when the edit was made. */
@@ -4986,7 +5086,7 @@ function payloadOf(event) {
 
 // src/desktop/map.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
-import { useEffect as useEffect15, useRef as useRef14, useState as useState16 } from "react";
+import { useEffect as useEffect16, useRef as useRef14, useState as useState17 } from "react";
 
 // src/shared/atlas/first.ts
 import { useRef as useRef2, useState as useState4 } from "react";
@@ -7238,6 +7338,16 @@ var glass = {
 };
 var PATHS = {
   pick: /* @__PURE__ */ jsx16("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
+  folder: /* @__PURE__ */ jsx16(
+    "path",
+    {
+      d: "M2 4.3 a1.2 1.2 0 0 1 1.2 -1.2 H6.1 l1.6 1.7 H12.8 a1.2 1.2 0 0 1 1.2 1.2 V11.7 a1.2 1.2 0 0 1 -1.2 1.2 H3.2 a1.2 1.2 0 0 1 -1.2 -1.2 Z",
+      fill: "none",
+      stroke: "currentColor",
+      strokeLinejoin: "round",
+      strokeWidth: "1.3"
+    }
+  ),
   hand: /* @__PURE__ */ jsx16(
     "path",
     {
@@ -10244,8 +10354,106 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   };
 }
 
+// src/shared/SampleFolders.tsx
+import { useCallback as useCallback3, useEffect as useEffect15, useState as useState16 } from "react";
+import { jsx as jsx27, jsxs as jsxs24 } from "react/jsx-runtime";
+function useSampleFolders(store, revision) {
+  const [folders, setFolders] = useState16(void 0);
+  const read = useCallback3(() => void store.libraryFolders().then(setFolders), [store]);
+  useEffect15(read, [read, revision]);
+  return folders;
+}
+async function addTyped(typed, check, ask2, t) {
+  const answer = await check(typed);
+  if (answer.folder === void 0) return { refused: true, text: answer.refusal ? t("folders.refused", answer.refusal) : t("folders.failed", answer.error ?? "") };
+  const asked = await ask2(answer.folder, answer.known === true);
+  if (asked === "none") return null;
+  const where = t(asked === "sent" ? "folders.sent" : asked === "drafted" ? "folders.drafted" : "folders.copied");
+  return { refused: false, text: answer.known ? `${t("folders.known")} ${where}` : where };
+}
+function SampleFolders({
+  folders,
+  example,
+  check,
+  ask: ask2,
+  pick: pick3,
+  copies,
+  onClose
+}) {
+  const t = useT();
+  const [typed, setTyped] = useState16("");
+  const [busy, setBusy] = useState16(false);
+  const [said, setSaid] = useState16(null);
+  const submit = async () => {
+    const folder = typed.trim();
+    if (!folder || busy) return;
+    setBusy(true);
+    setSaid(null);
+    try {
+      const answer = await addTyped(folder, check, ask2, t);
+      setSaid(answer);
+      if (answer && !answer.refused) setTyped("");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ jsxs24("div", { "aria-label": t("folders.title"), role: "group", style: { display: "grid", gap: 7, textAlign: "left", fontSize: 12, color: T.text }, children: [
+    /* @__PURE__ */ jsxs24("div", { style: { ...S.row, justifyContent: "space-between", gap: 8 }, children: [
+      /* @__PURE__ */ jsx27("span", { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: ".09em", textTransform: "uppercase", color: T.secondary }, children: t("folders.title") }),
+      onClose && /* @__PURE__ */ jsx27(TextButton, { label: t("folders.close"), onClick: onClose, children: "×" })
+    ] }),
+    folders === void 0 ? /* @__PURE__ */ jsx27("span", { style: S.faint, children: t("folders.reading") }) : folders === null ? null : folders.length === 0 ? /* @__PURE__ */ jsx27("span", { style: S.faint, children: t("folders.none") }) : /* @__PURE__ */ jsx27("ul", { style: { margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 2, maxHeight: 120, overflowY: "auto" }, children: folders.map((folder) => /* @__PURE__ */ jsx27("li", { style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 11.5, overflowWrap: "anywhere" }, children: folder }, folder)) }),
+    /* @__PURE__ */ jsxs24(
+      "form",
+      {
+        onSubmit: (event) => {
+          event.preventDefault();
+          void submit();
+        },
+        style: { ...S.row, flexWrap: "wrap", gap: 6 },
+        children: [
+          /* @__PURE__ */ jsx27(
+            "input",
+            {
+              "aria-label": t("folders.path"),
+              autoComplete: "off",
+              className: FOCUSABLE,
+              disabled: busy,
+              maxLength: 4096,
+              onChange: (event) => {
+                setTyped(event.target.value);
+                setSaid(null);
+              },
+              placeholder: t("folders.pathHint", example),
+              spellCheck: false,
+              style: { flex: "1 1 13rem", minWidth: 0, font: "inherit", fontSize: 12, lineHeight: "18px", padding: "2px 7px", borderRadius: 4, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
+              value: typed
+            }
+          ),
+          pick3 && /* @__PURE__ */ jsx27(
+            TextButton,
+            {
+              disabled: busy,
+              onClick: () => void pick3().then((path) => {
+                if (!path) return;
+                setTyped(path);
+                setSaid(null);
+              }),
+              title: t("folders.chooseTitle"),
+              children: t("folders.choose")
+            }
+          ),
+          /* @__PURE__ */ jsx27(TextButton, { disabled: busy || !typed.trim(), onClick: () => void submit(), strong: true, title: t(copies ? "folders.copyTitle" : "folders.addTitle"), children: busy ? t("folders.checking") : t(copies ? "folders.copy" : "folders.add") })
+        ]
+      }
+    ),
+    said && /* @__PURE__ */ jsx27("div", { role: said.refused ? "alert" : "status", style: { color: said.refused ? T.warn : T.secondary, overflowWrap: "anywhere" }, children: said.text }),
+    /* @__PURE__ */ jsx27("div", { style: S.faint, children: t("folders.note") })
+  ] });
+}
+
 // src/desktop/map.tsx
-import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs24 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx28, jsxs as jsxs25 } from "react/jsx-runtime";
 var HOVER_PLAY = "mapHover";
 var TILES = "mapTiles";
 var PALETTE_OPEN = "paletteOpen";
@@ -10257,8 +10465,8 @@ var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, sta
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
   const first = useRef14(null);
-  useEffect15(() => first.current?.focus(), []);
-  return /* @__PURE__ */ jsx27(
+  useEffect16(() => first.current?.focus(), []);
+  return /* @__PURE__ */ jsx28(
     "div",
     {
       "aria-label": t("map.pads"),
@@ -10271,7 +10479,7 @@ function PadPicker({ daw, onPick, onClose }) {
       style: { flexBasis: "100%", display: "grid", gridTemplateColumns: "repeat(4, 2.8rem)", justifyContent: "end", gap: 4, paddingTop: 6 },
       children: PAD_ROWS.flat().map((note) => {
         const name = daw === "ableton" ? liveNote(note) : String(note);
-        return /* @__PURE__ */ jsx27(
+        return /* @__PURE__ */ jsx28(
           "button",
           {
             "aria-label": t("map.pad", name, note),
@@ -10295,11 +10503,11 @@ function MapWorkspace({ ctx, store, audition }) {
   useWant(store, "palette");
   const state = useKumi(store);
   const playing = usePlaying(audition);
-  const [selected, setSelected] = useState16(null);
-  const [padsFor, setPadsFor] = useState16(null);
-  const [hover, setHover] = useState16(() => ctx.storage.get(HOVER_PLAY, true) !== false);
-  const [tiles, setTiles] = useState16(() => ctx.storage.get(TILES, false) === true);
-  const [layout, setLayout] = useState16(() => ctx.storage.get(LAYOUT, "") ?? "");
+  const [selected, setSelected] = useState17(null);
+  const [padsFor, setPadsFor] = useState17(null);
+  const [hover, setHover] = useState17(() => ctx.storage.get(HOVER_PLAY, true) !== false);
+  const [tiles, setTiles] = useState17(() => ctx.storage.get(TILES, false) === true);
+  const [layout, setLayout] = useState17(() => ctx.storage.get(LAYOUT, "") ?? "");
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
@@ -10308,18 +10516,18 @@ function MapWorkspace({ ctx, store, audition }) {
   const playMade = (id) => void audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   const grow = useGrow((request) => store.design(request), (result) => playMade(result.artifact_id), state.map?.revision ?? null);
   const dock = useRef14(null);
-  const [paletteOpen, setPaletteOpen] = useState16(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
+  const [paletteOpen, setPaletteOpen] = useState17(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
   const first = useFirstOpen(
     () => ctx.storage.get(FIRST_OPEN, ""),
     (kept3) => ctx.storage.set(FIRST_OPEN, kept3)
   );
   const makeOpen = palette.making !== null;
-  useEffect15(() => {
+  useEffect16(() => {
     if (makeOpen) first.done(["make"]);
   }, [makeOpen]);
   const area = useRef14(null);
-  const [areaWidth, setAreaWidth] = useState16(0);
-  useEffect15(() => {
+  const [areaWidth, setAreaWidth] = useState17(0);
+  useEffect16(() => {
     const element = area.current;
     if (!element) return;
     const observer = new ResizeObserver((entries) => setAreaWidth(entries[0]?.contentRect.width ?? 0));
@@ -10329,18 +10537,39 @@ function MapWorkspace({ ctx, store, audition }) {
   const beside = areaWidth >= SIDE_SHEET;
   const session = ownerSession(state);
   const map = state.map;
+  const folders = useSampleFolders(store, map?.revision);
+  const [foldersOpen, setFoldersOpen] = useState17(false);
+  const files = ctx.files;
+  const folderControl = (onClose) => /* @__PURE__ */ jsx28(
+    SampleFolders,
+    {
+      ask: async (folder, known) => (await ask(ctx, known ? RESCAN_REQUEST : addFolderRequest(folder), { send: true, session })).outcome,
+      check: (typed) => store.checkFolder(typed),
+      example: folderExample(state.setup?.target),
+      folders,
+      onClose,
+      pick: typeof files?.requestFolder === "function" ? async () => {
+        const answer = await files.requestFolder();
+        if (!answer.ok && answer.error === "unavailable") host4.notify({ kind: "info", message: t("folders.noDialog") });
+        if (!answer.ok || !answer.folder) return null;
+        void files.release?.(answer.folder.id);
+        return answer.folder.path;
+      } : void 0
+    }
+  );
   const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ""] ? nextSteps(state, t) : [];
   const scanning = Object.values(state.jobs).find((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0));
-  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : scanning ? /* @__PURE__ */ jsxs24(Fragment10, { children: [
+  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : scanning ? /* @__PURE__ */ jsxs25(Fragment10, { children: [
     t("map.scanningNow"),
-    jobWords(scanning, t).detail && /* @__PURE__ */ jsx27("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
-  ] }) : /* @__PURE__ */ jsxs24(Fragment10, { children: [
+    jobWords(scanning, t).detail && /* @__PURE__ */ jsx28("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
+  ] }) : /* @__PURE__ */ jsxs25(Fragment10, { children: [
     setupSteps.length > 0 ? t("map.setupFirst") : t("map.empty"),
-    /* @__PURE__ */ jsx27("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), strong: true, title: t("map.scanTitle"), children: t("map.scan") }) })
+    setupSteps.length === 0 && /* @__PURE__ */ jsx28("div", { style: { ...glass, marginTop: 12, padding: 12 }, children: folderControl() }),
+    /* @__PURE__ */ jsx28("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), title: t("map.scanTitle"), children: t("map.scan") }) })
   ] });
-  return /* @__PURE__ */ jsxs24("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
-    /* @__PURE__ */ jsxs24("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
-      /* @__PURE__ */ jsx27(
+  return /* @__PURE__ */ jsxs25("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
+    /* @__PURE__ */ jsxs25("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
+      /* @__PURE__ */ jsx28(
         MapCanvas,
         {
           audio: (id) => audition.url(id),
@@ -10349,12 +10578,12 @@ function MapWorkspace({ ctx, store, audition }) {
           actions: (id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision);
             const near = nearRequest([{ id, name: sound.name }], map?.revision);
-            return /* @__PURE__ */ jsxs24(Fragment10, { children: [
-              /* @__PURE__ */ jsx27(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
-              near && /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
-              request && /* @__PURE__ */ jsx27(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
-              request && /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
-              request && padsFor === id && /* @__PURE__ */ jsx27(
+            return /* @__PURE__ */ jsxs25(Fragment10, { children: [
+              /* @__PURE__ */ jsx28(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
+              near && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
+              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
+              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
+              request && padsFor === id && /* @__PURE__ */ jsx28(
                 PadPicker,
                 {
                   daw: state.status?.daw,
@@ -10370,9 +10599,9 @@ function MapWorkspace({ ctx, store, audition }) {
           },
           empty,
           found: state.found,
-          hiddenActions: /* @__PURE__ */ jsxs24(Fragment10, { children: [
-            /* @__PURE__ */ jsx27(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
-            /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
+          hiddenActions: /* @__PURE__ */ jsxs25(Fragment10, { children: [
+            /* @__PURE__ */ jsx28(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+            /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
           ] }),
           leaving: state.leaving,
           map,
@@ -10388,10 +10617,10 @@ function MapWorkspace({ ctx, store, audition }) {
           growActions: (result) => {
             const request = useRequest(result);
             const kept3 = palette.kept.has(result.artifact_id);
-            return /* @__PURE__ */ jsxs24(Fragment10, { children: [
-              /* @__PURE__ */ jsx27(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
-              request && /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
-              /* @__PURE__ */ jsx27(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
+            return /* @__PURE__ */ jsxs25(Fragment10, { children: [
+              /* @__PURE__ */ jsx28(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
+              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
+              /* @__PURE__ */ jsx28(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
             ] });
           },
           onSelect: (id) => {
@@ -10401,14 +10630,14 @@ function MapWorkspace({ ctx, store, audition }) {
           picked: palette.picked,
           pickedActions: (ids) => {
             const near = ids.length > 1 ? nearRequest(ids.map((id) => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null;
-            return /* @__PURE__ */ jsxs24(Fragment10, { children: [
-              /* @__PURE__ */ jsx27(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
-              ids.length > 1 && /* @__PURE__ */ jsx27(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
+            return /* @__PURE__ */ jsxs25(Fragment10, { children: [
+              /* @__PURE__ */ jsx28(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
+              ids.length > 1 && /* @__PURE__ */ jsx28(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
               ids.length === 2 && (() => {
                 const [from, to] = ids.map((id) => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null));
                 return from && to ? (
                   // The vine takes over from the picks: their actions would float over its card.
-                  /* @__PURE__ */ jsx27(
+                  /* @__PURE__ */ jsx28(
                     TextButton,
                     {
                       onClick: () => {
@@ -10421,7 +10650,7 @@ function MapWorkspace({ ctx, store, audition }) {
                   )
                 ) : null;
               })(),
-              near && /* @__PURE__ */ jsx27(
+              near && /* @__PURE__ */ jsx28(
                 TextButton,
                 {
                   onClick: () => void ask(ctx, near, { send: false, session }),
@@ -10429,7 +10658,7 @@ function MapWorkspace({ ctx, store, audition }) {
                   children: t("map.moreLikeThese", Math.min(ids.length, MOST_NEAR))
                 }
               ),
-              /* @__PURE__ */ jsx27(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
+              /* @__PURE__ */ jsx28(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
             ] });
           },
           playing,
@@ -10448,22 +10677,37 @@ function MapWorkspace({ ctx, store, audition }) {
             ctx.storage.set(LAYOUT, id);
             setLayout(id);
           },
-          tools: /* @__PURE__ */ jsx27(
-            ToolButton,
-            {
-              icon: "hover",
-              label: t("dock.hover"),
-              onClick: () => {
-                ctx.storage.set(HOVER_PLAY, !hover);
-                setHover(!hover);
-              },
-              pressed: hover,
-              title: t("dock.hoverTitle")
-            }
-          )
+          tools: /* @__PURE__ */ jsxs25(Fragment10, { children: [
+            /* @__PURE__ */ jsx28(
+              ToolButton,
+              {
+                icon: "hover",
+                label: t("dock.hover"),
+                onClick: () => {
+                  ctx.storage.set(HOVER_PLAY, !hover);
+                  setHover(!hover);
+                },
+                pressed: hover,
+                title: t("dock.hoverTitle")
+              }
+            ),
+            /* @__PURE__ */ jsx28(ToolButton, { icon: "folder", label: t("folders.title"), onClick: () => setFoldersOpen(!foldersOpen), pressed: foldersOpen, title: t("folders.openTitle") })
+          ] })
         }
       ),
-      palette.making && /* @__PURE__ */ jsx27(
+      foldersOpen && (map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx28(
+        "div",
+        {
+          onKeyDown: (event) => {
+            if (event.key !== "Escape") return;
+            event.stopPropagation();
+            setFoldersOpen(false);
+          },
+          style: { ...glass, position: "absolute", top: 56, right: 12, width: "min(380px, calc(100% - 24px))", padding: 12, zIndex: 6 },
+          children: folderControl(() => setFoldersOpen(false))
+        }
+      ),
+      palette.making && /* @__PURE__ */ jsx28(
         MakePanel,
         {
           colorOf: palette.colorOf,
@@ -10484,17 +10728,17 @@ function MapWorkspace({ ctx, store, audition }) {
           tempo: state.focus?.transport?.tempo,
           use: (result) => {
             const request = useRequest(result);
-            return request ? /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
+            return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
           }
         }
       )
     ] }),
-    (map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx27(
+    (map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx28(
       PaletteDock,
       {
         audio: (id) => audition.url(id),
         groups: map?.groups,
-        kit: (current) => /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
+        kit: (current) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
         landing: dock,
         lineage: palette.madeLineage,
         onKin: palette.showKinOf,
@@ -10512,7 +10756,7 @@ function MapWorkspace({ ctx, store, audition }) {
         said: state.paletteSaid,
         use: (item) => {
           const request = itemReference(item, state.palette?.map_revision ?? null);
-          return request ? /* @__PURE__ */ jsx27(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
+          return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
         }
       }
     )
@@ -10520,14 +10764,14 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment11, jsx as jsx28, jsxs as jsxs25 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
-  const note = (text) => /* @__PURE__ */ jsx28("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx28("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs25(Fragment11, { children: [
-    /* @__PURE__ */ jsx28("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
-    /* @__PURE__ */ jsx28(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
+  const note = (text) => /* @__PURE__ */ jsx29("span", { style: S.muted, children: text });
+  return /* @__PURE__ */ jsx29("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs26(Fragment11, { children: [
+    /* @__PURE__ */ jsx29("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
+    /* @__PURE__ */ jsx29(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
 }
 
@@ -10553,16 +10797,16 @@ function petLine(before, after, t) {
 
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
-import { useState as useState17 } from "react";
-import { Fragment as Fragment12, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
+import { useState as useState18 } from "react";
+import { Fragment as Fragment12, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
 var HEADING = { ...S.heading, display: "block", margin: "0 0 4px", fontWeight: "inherit" };
 function Line({ label, children }) {
-  return /* @__PURE__ */ jsxs26("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
-    /* @__PURE__ */ jsx29("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx29("span", { style: { ...S.text, minWidth: 0 }, children })
+  return /* @__PURE__ */ jsxs27("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
+    /* @__PURE__ */ jsx30("span", { style: S.muted, children: label }),
+    /* @__PURE__ */ jsx30("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -10580,8 +10824,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const t = useT();
   useWant(store, "setup");
   const state = useKumi(store);
-  const [openOnFind, setOpenOnFind] = useState17(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
-  const [petLines, setPetLines] = useState17(() => ctx.storage.get(PET_LINES, false));
+  const [openOnFind, setOpenOnFind] = useState18(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
+  const [petLines, setPetLines] = useState18(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
   const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
@@ -10592,60 +10836,60 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const named = dawChosen(state) || partWorks || componentState === "installed" || Boolean(state.status?.connected);
   const daw = named ? state.status?.daw ?? setup?.daw : null;
   const next = setup?.message && !partWorks && (named || setupState !== "needs_daw_component") ? setup.message : null;
-  return /* @__PURE__ */ jsxs26("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
-    /* @__PURE__ */ jsxs26("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-      /* @__PURE__ */ jsx29("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsx29("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
+  return /* @__PURE__ */ jsxs27("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
+    /* @__PURE__ */ jsxs27("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+      /* @__PURE__ */ jsx30("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
+      /* @__PURE__ */ jsx30("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx29("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs26(Fragment12, { children: [
-      /* @__PURE__ */ jsxs26("div", { children: [
-        /* @__PURE__ */ jsx29("h3", { style: HEADING, children: t("settings.setup") }),
-        /* @__PURE__ */ jsx29(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        next && /* @__PURE__ */ jsx29(Line, { label: t("settings.next"), children: clean(next, 300) }),
-        runtime && /* @__PURE__ */ jsxs26(Line, { label: t("settings.runtime"), children: [
+    state.available === false ? /* @__PURE__ */ jsx30("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs27(Fragment12, { children: [
+      /* @__PURE__ */ jsxs27("div", { children: [
+        /* @__PURE__ */ jsx30("h3", { style: HEADING, children: t("settings.setup") }),
+        /* @__PURE__ */ jsx30(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        next && /* @__PURE__ */ jsx30(Line, { label: t("settings.next"), children: clean(next, 300) }),
+        runtime && /* @__PURE__ */ jsxs27(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
-          setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs26("span", { style: S.faint, children: [
+          setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs27("span", { style: S.faint, children: [
             " · ",
             t("settings.needs", clean(setup.pinned_version, 20))
           ] }),
-          setup?.target && /* @__PURE__ */ jsxs26("span", { style: S.faint, children: [
+          setup?.target && /* @__PURE__ */ jsxs27("span", { style: S.faint, children: [
             " · ",
             PLATFORMS.has(setup.target) ? t(`settings.platforms.${setup.target}`) : clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs26(Line, { label: t("settings.download"), children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs27(Line, { label: t("settings.download"), children: [
           megabytes(setup?.download_bytes),
-          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs26("span", { style: S.faint, children: [
+          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs27("span", { style: S.faint, children: [
             " ",
             t("settings.unpacked", megabytes(setup?.unpacked_bytes))
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs26(Line, { label: t("settings.part", dawName(daw, t)), children: [
+        component && /* @__PURE__ */ jsxs27(Line, { label: t("settings.part", dawName(daw, t)), children: [
           (() => {
             const word = partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ");
             return component.name ? t("settings.componentLine", clean(component.name, 40), word) : word;
           })(),
-          component.path && /* @__PURE__ */ jsx29("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          component.path && /* @__PURE__ */ jsx30("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs26(Line, { label: t("settings.standalone"), children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs27(Line, { label: t("settings.standalone"), children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsxs26("span", { style: S.faint, children: [
+          /* @__PURE__ */ jsxs27("span", { style: S.faint, children: [
             " · ",
             setup.existing_kumi.adopted ? t("settings.adopted") : t("settings.leftAsIs")
           ] })
         ] }),
-        setup?.compressed_audio?.message && /* @__PURE__ */ jsx29(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx29("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx30(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx30("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
-      /* @__PURE__ */ jsxs26("div", { children: [
-        /* @__PURE__ */ jsx29("h3", { style: HEADING, children: t("settings.connection") }),
-        /* @__PURE__ */ jsx29(Line, { label: t("settings.now"), children: (() => {
+      /* @__PURE__ */ jsxs27("div", { children: [
+        /* @__PURE__ */ jsx30("h3", { style: HEADING, children: t("settings.connection") }),
+        /* @__PURE__ */ jsx30(Line, { label: t("settings.now"), children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-          return /* @__PURE__ */ jsx29(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+          return /* @__PURE__ */ jsx30(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx29(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx30(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
       ] }),
-      /* @__PURE__ */ jsxs26("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        steps.map((step2) => /* @__PURE__ */ jsx29(
+      /* @__PURE__ */ jsxs27("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+        steps.map((step2) => /* @__PURE__ */ jsx30(
           TextButton,
           {
             onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
@@ -10654,14 +10898,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           },
           step2.request
         )),
-        /* @__PURE__ */ jsx29(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
-        /* @__PURE__ */ jsx29(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
+        /* @__PURE__ */ jsx30(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
+        /* @__PURE__ */ jsx30(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs26("div", { children: [
-      /* @__PURE__ */ jsx29("h3", { style: HEADING, children: t("settings.thisWindow") }),
-      /* @__PURE__ */ jsxs26("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx29(
+    /* @__PURE__ */ jsxs27("div", { children: [
+      /* @__PURE__ */ jsx30("h3", { style: HEADING, children: t("settings.thisWindow") }),
+      /* @__PURE__ */ jsxs27("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx30(
           "input",
           {
             checked: openOnFind,
@@ -10673,10 +10917,10 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx29("span", { style: S.text, children: t("settings.openOnFind") })
+        /* @__PURE__ */ jsx30("span", { style: S.text, children: t("settings.openOnFind") })
       ] }),
-      ctx.pet && /* @__PURE__ */ jsxs26("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx29(
+      ctx.pet && /* @__PURE__ */ jsxs27("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx30(
           "input",
           {
             checked: petLines,
@@ -10688,14 +10932,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx29("span", { style: S.text, children: t("settings.petLines") })
+        /* @__PURE__ */ jsx30("span", { style: S.text, children: t("settings.petLines") })
       ] })
     ] })
   ] });
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+import { jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
 var MEASUREMENTS_WORKSPACE = "kumi-measurements";
@@ -10705,8 +10949,8 @@ var JOB_POLL_MS = 2e3;
 var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
-  return /* @__PURE__ */ jsxs27(I18n.Provider, { value: t, children: [
-    /* @__PURE__ */ jsx30(FocusStyle, {}),
+  return /* @__PURE__ */ jsxs28(I18n.Provider, { value: t, children: [
+    /* @__PURE__ */ jsx31(FocusStyle, {}),
     children
   ] });
 }
@@ -10723,7 +10967,7 @@ var plugin = {
     let mapPane = null;
     let closeMeasurements = null;
     let measurementsPane = null;
-    const mapView = () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(MapWorkspace, { audition, ctx, store }) });
+    const mapView = () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
@@ -10746,7 +10990,7 @@ var plugin = {
       });
     };
     const openMeasurements = () => {
-      const render = () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(MeasurementsWorkspace, { audition, store }) });
+      const render = () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(MeasurementsWorkspace, { audition, store }) });
       const title = wordsOf(ctx)("measurements.tab");
       if (typeof host6.openWorkspace === "function") {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
@@ -10891,13 +11135,13 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(KumiPane, { ctx, onOpenMap: openMap, store }) })
+        render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(KumiPane, { ctx, onOpenMap: openMap, store }) })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
+        render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
       }
     ];
     if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
@@ -10906,7 +11150,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(ListenCard, { audition, media: props, store }) })
+          render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(ListenCard, { audition, media: props, store }) })
         }
       });
       contributions.push({
@@ -10914,7 +11158,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_job"],
-          render: (props) => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(GenerateCard, { audition, ctx, media: props, store }) })
+          render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });
     }
@@ -10922,7 +11166,7 @@ var plugin = {
       contributions.push({
         id: "focus-hint",
         area: sdk.COMPOSER_AREAS.underside,
-        render: () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(FocusHint, { store }) })
+        render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(FocusHint, { store }) })
       });
     }
     ctx.registerMany(contributions);
@@ -10967,7 +11211,7 @@ var plugin = {
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx30(WithT, { children: /* @__PURE__ */ jsx30(SettingsPage, { ctx, onOpenMap: openMap, store }) })
+      render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(SettingsPage, { ctx, onOpenMap: openMap, store }) })
     });
   }
 };
