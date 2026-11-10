@@ -149,8 +149,8 @@ Kumi needs two things on the machine that runs Hermes, can use a third, and asks
 2. **Its part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's extension or Renoise's tool,
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
    If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
-   part in Live, setup offers to use that installation instead of replacing it; for REAPER and Renoise, Kumi for Hermes
-   can't use another Kumi's part yet. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up
+   part in your DAW, setup offers to use that installation instead of replacing it, so you can go on using both, even at
+   the same time. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up
    another one keeps the current DAW and ends with the step that switches: `hermes kumi setup --daw <daw> --use`,
    approved like the rest.
 3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
@@ -207,7 +207,8 @@ map, HISTORY, measurements, copies of the audio it measured or made (`state/arti
 changed), the code of each script it ran (`state/scripts`), your palettes (`state/palettes.json`), the sounds made on
 the map (`state/designs`, listed in `state/designs.json`: the 200 newest, and any older one a palette keeps), the sounds hidden
 from the map (`state/map-hidden.json`) and job records. Outside it, setup writes only Kumi's
-part in your DAW, at the location you approved; each Max for Live device Kumi builds is a new file in Live's User
+part in your DAW, at the location you approved (with another Kumi's installation in use, what it writes in that
+installation's folder is listed under Disclosure); each Max for Live device Kumi builds is a new file in Live's User
 Library (`User Library/Kumi/Audio Effects`), and each preset you place a new `.vstpreset` file there
 (`User Library/Kumi/Instruments` or `Audio Effects`), and each wavetable a new `.wav` file in Vital's wavetable folder
 or `User Library/Kumi/Wavetables`. A script runs with your DAW's access, so what it writes
@@ -349,9 +350,16 @@ project as…** with **Copy all media into project directory**), or they'll miss
   the audio or file paths) through Hermes's own model access: to the model set for Kumi's listening task in Hermes (it
   must accept images), or to the fallback providers Hermes is configured to try for that task. Hermes retries a failed
   attempt and may fall back, which can add time and token cost.
-- **Another Kumi's installation:** if you let Kumi for Hermes use another Kumi's installation (Live only), its runtime
-  reads that installation's DAW connection files and writes its own connection state there, never its sign-in or
-  settings. A standalone Kumi's sign-in, model providers, account files and updater are never used.
+- **Another Kumi's installation:** if you let Kumi for Hermes use another Kumi's installation (in Live, REAPER or
+  Renoise), its runtime reads that installation's bridge files (the secret, discovery files and install receipt) and
+  writes only what a connection needs there, never what it learns of your projects, which stays in its own data:
+  - its connection state (Live), and the DAW's write-lease lock (`serve/<daw>.lease`);
+  - in REAPER and Renoise, it removes discovery files a closed DAW left, and uses the bridge's listening folder
+    (created if it's missing, owner-only on Windows): the renders it asks for land there, and Kumi moves or removes its
+    own, and cuts there the part of a project clip it hears as a reference;
+  - in Renoise, while Kumi changes an instrument's macro mappings, the tool saves that instrument to the bridge's work
+    folder, and the file is removed once read.
+  A standalone Kumi's sign-in, model providers, account files and updater are never used.
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published; a job's answer (change
   titles, track names) leaves this computer only through where that job delivers, and Kumi's job blueprints deliver
   locally by default.

@@ -449,7 +449,7 @@ fn files_below(folder: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 /// Setup's adoption: the runtime reaches the DAW through another Kumi's installation (its home's secret and discovery
 /// files) and keeps what it learns of the project in the plugin's own state, never in that Kumi's home.
-async fn connects_through_an_adopted_home_and_keeps_its_own_snapshots(lab: Lab, daw: &str) {
+async fn connects_through_an_adopted_home_and_keeps_its_own_snapshots(lab: &Lab, daw: &str) {
     let connected = lab.call("connect", json!({"daw": daw})).await.unwrap();
     assert_eq!(connected["connected"], true, "{connected}");
     lab.call("observe", json!({"scope": "project"})).await.unwrap();
@@ -463,20 +463,34 @@ async fn connects_through_an_adopted_home_and_keeps_its_own_snapshots(lab: Lab, 
     }
     assert!(!files_below(&own).is_empty(), "the project's snapshot is kept in the plugin's state");
     assert!(files_below(&theirs).is_empty(), "nothing in the other Kumi's snapshots: {:?}", files_below(&theirs));
-    lab.ctx.link().close().await;
 }
 
 case!(serve_uses_reaper_through_an_adopted_home_and_keeps_its_own_snapshots, async {
     let script = ReaperScript::new(3, 0);
-    script.set_project_id(Some("0123456789abcdef0123456789abcdef"));
+    let tab = script.clone();
     let lab = Lab::with(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))), true).await;
-    connects_through_an_adopted_home_and_keeps_its_own_snapshots(lab, "reaper").await;
+    // A saved project whose file is on disk, carrying its id: where it was last seen is kept in the places file.
+    let song = lab.home.path().join("Song.rpp");
+    std::fs::write(&song, b"").unwrap();
+    tab.set_project(Some("0123456789abcdef0123456789abcdef"), &song.display().to_string(), "song", "Song.rpp");
+    connects_through_an_adopted_home_and_keeps_its_own_snapshots(&lab, "reaper").await;
+    let places = |home: &std::path::Path| home.join("bridges").join("reaper").join("snapshots").join("places.json");
+    for _ in 0..1000 {
+        if places(&lab.ctx.paths().state_dir).exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(places(&lab.ctx.paths().state_dir).exists(), "the places file is the plugin's");
+    assert!(!places(&lab.ctx.paths().kumi_home).exists(), "never the other Kumi's");
+    lab.ctx.link().close().await;
 });
 
 case!(serve_uses_renoise_through_an_adopted_home_and_keeps_its_own_snapshots, async {
     let script = RenoiseScript::new();
     let lab = Lab::with(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise"))), true).await;
-    connects_through_an_adopted_home_and_keeps_its_own_snapshots(lab, "renoise").await;
+    connects_through_an_adopted_home_and_keeps_its_own_snapshots(&lab, "renoise").await;
+    lab.ctx.link().close().await;
 });
 
 /// Live with nothing in it but what a Kumi start reads.

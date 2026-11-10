@@ -210,54 +210,27 @@ class SetupTool(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "not_approved")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
-    def test_adopting_the_owner_of_lives_component_installs_nothing_and_restarts_the_runtime(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        owner = Path(folder.name)
-        host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
-                                     daw_component=False)
-        plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
-        self.assertEqual((plan["step"], plan["next"]), ("owned_elsewhere", "kumi_setup adopt"))
-        self.assertIn("blocked", support.call(host, "kumi_setup", {"action": "install"}, session_id="s1"),
-                      "a component another Kumi owns is never offered as an install")
-        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
-        adopted = support.call(host, "kumi_setup", {"action": "adopt"}, session_id="s1")
-        self.assertTrue(adopted["ok"], adopted)
-        self.assertEqual(json.loads((data / "runtime" / "current.json").read_text())["kumi_home"], str(owner))
-        self.assertIsNone(host.runtimes.get(data), "the next start uses the adopted Kumi home")
-        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
-
-    def test_a_standalone_kumis_part_in_reaper_or_renoise_stops_setup_and_says_how_to_take_it_out(self):
+    def test_adopting_the_owner_of_a_daws_component_installs_nothing_and_restarts_the_runtime(self):
+        """A standalone Kumi's part in Live, REAPER or Renoise is used as it is: setup offers to adopt that installation,
+        never to install over it, and the next runtime starts with that Kumi's home."""
         owner = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory()))) / "Kumi home"
         owner.mkdir()
-        host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner", str(owner),
-                                     daw_component=False)
-        for daw, name in (("reaper", "REAPER"), ("renoise", "Renoise")):
+        for daw in ("ableton", "reaper", "renoise"):
             with self.subTest(daw):
-                host.runtimes.stop_all()  # each DAW's dry run takes a runtime of its own
+                host, _, data = desktop_host(self, None, "--component-state", "other_owner", "--component-owner",
+                                             str(owner), daw_component=False)
                 plan = support.call(host, "kumi_setup", {"action": "plan", "daw": daw}, session_id="s1")
-                self.assertEqual((plan["step"], plan["next"]), ("other_kumi", None), "never adopt (kumi-adv's D1)")
-                self.assertIn("can't share it", plan["summary"])
+                self.assertEqual((plan["step"], plan["next"]), ("owned_elsewhere", "kumi_setup adopt"))
                 self.assertNotIn(str(owner), json.dumps(plan), "no path reaches the model")
-                for action in ("install", "adopt"):
-                    self.assertIsNone(setup.approval(daw, action=action, data_dir=data), "nothing to approve")
-                    blocked = policy.pre_tool_call(host, "kumi_setup", {"action": action, "daw": daw},
-                                                   session_id="s1", tool_call_id=f"c-{action}")
-                    self.assertEqual(blocked["action"], "block")
-                    self.assertIn("uninstalls that Kumi", blocked["message"], "and the model can say why")
-                    self.assertNotIn(str(owner), blocked["message"])
-                host.runtimes.stop_all()
-                out = Tty()
-                self.assertEqual(commands.cli_setup(host, daw, stdin=Tty("y\n"), stdout=out), 1)
-                self.assertIn(f"belongs to the standalone Kumi at {owner}", out.getvalue())
-                launcher = owner / "bin" / ("kumi.cmd" if os.name == "nt" else "kumi")  # install.ps1's, on Windows
-                self.assertIn(f'quit {name}, then run "{launcher}" uninstall in a terminal', out.getvalue(),
-                              "the exact way out, quoted for the space in its folder")
-                self.assertNotIn("Go ahead?", out.getvalue(), "nothing is asked")
+                self.assertIn("blocked", support.call(host, "kumi_setup", {"action": "install", "daw": daw},
+                                                      session_id="s1"),
+                              "a component another Kumi owns is never offered as an install")
+                support.call(host, "kumi_setup", {"action": "plan", "daw": daw}, session_id="s1")
+                adopted = support.call(host, "kumi_setup", {"action": "adopt", "daw": daw}, session_id="s1")
+                self.assertTrue(adopted["ok"], adopted)
+                self.assertEqual(json.loads((data / "runtime" / "current.json").read_text())["kumi_home"], str(owner))
+                self.assertIsNone(host.runtimes.get(data), "the next start uses the adopted Kumi home")
                 self.assertNotIn({"daw": daw, "dry_run": False}, setup_daw_calls(data), "nothing was installed")
-        current = data / "runtime" / "current.json"
-        self.assertNotEqual(json.loads(current.read_text()).get("kumi_home") if current.exists() else None, str(owner),
-                            "nor that Kumi adopted")
 
     def test_the_first_daw_set_up_becomes_kumis_daw_in_the_same_approval(self):
         host, ctx, data = desktop_host(self, daw_component=False)  # the DAW setting says Live; nothing is set up
