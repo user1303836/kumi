@@ -13,6 +13,8 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { glowOf } from './atlas/glow.ts'
+import { drawNames, drawWords, type Word } from './atlas/labels.ts'
+import { nameRank, NAMES_ON_SCREEN, regionAlpha, regionsOf } from './atlas/names.ts'
 import { haloOf, nebulaAlpha } from './atlas/nebula.ts'
 import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
@@ -539,8 +541,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const glyphAt = (index: number): number => glyphs.get(points[index].group) ?? 0
     // How far beyond a point its rings sit: past a tile's corner once tiles show.
     const reach = (blend: number): number => radius + (Math.max(radius, tileSide * 0.62) - radius) * blend
-    // The labels need at most 41 on-screen points: past 40 there are none.
-    const labelled: [number, number, string][] = []
+    // The sounds on screen, counted, and the first of them with their names and colours: past `NAMES_ON_SCREEN` there
+    // are too many for any to carry its name.
+    const labelled: [number, number, number, string][] = []
     let onScreen = 0
     // The glow under the sounds. First the layout's nebula: calmer as the map zooms in, absent under tiles, arriving
     // with a new map's sounds, and around a layout's move the old layout's fading out, then the new one's coming in
@@ -573,7 +576,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         const grown = introFor(index)
         halos?.at(color, x, y, grown * (1 - blend))
         shape(path, x, y, blend, grown, glyphAt(index))
-        if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ''])
+        if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color])
       }
       halos?.done()
       context.globalAlpha = pass ? 0.92 : 0.16
@@ -597,45 +600,53 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.fillStyle = groupColor.get(points[index].group) ?? colors.faint
       context.fill(path)
     }
-    // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
-    // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
-    // a tight cluster stays legible (its sounds are named on hover and in the list above).
-    if (onScreen <= 40) {
-      context.globalAlpha = 0.85
-      context.fillStyle = colors.text
-      context.font = `11px ${getComputedStyle(canvas).fontFamily || 'sans-serif'}`
-      context.textBaseline = 'middle'
-      const placed: [number, number, number, number][] = []
-      const gap = reach(morphed) + 4
-      for (const [x, y, name] of labelled) {
-        const text = mapLabel(name)
-        if (!text) continue
-        const box: [number, number, number, number] = [x + gap, y - 7, context.measureText(text).width, 14]
-        if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue
-        placed.push(box)
-        context.fillText(text, box[0], y)
-      }
-    }
-    // The layout's words: its data words where they belong (keys, BPM, folder names…), then its axis words inside the
-    // map's edges, kept in view. They fade in as the sounds arrive, haloed in the ground colour to read over points.
+    // The map's words, in the atlas's hand (`atlas/labels.ts`). A layout that writes its own data words (keys, BPM,
+    // folder names; the families' names, each with its colour and count) has those, where they belong. Any other has
+    // each family's name over its sounds, with its count: whole while the map is in view, gone by twice that, and
+    // not for a family the legend hides. They fade in as the sounds arrive, haloed in the ground colour.
+    const lettering = { family: getComputedStyle(canvas).fontFamily || 'sans-serif', ground: colors.ground, muted: colors.text }
     const layoutShown = arrangementIndex >= 0 ? model.arrangements[arrangementIndex] : null
     const wordsIn = clamp01((shifting - 0.55) / 0.45)
+    let words: Word[] = []
+    if (layoutShown && layoutShown.labels.length > 0) {
+      const families = new Map(model.groups.map(group => [group.name, group]))
+      for (const label of layoutShown.labels) {
+        const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy]
+        if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue
+        const family = families.get(label.text)
+        words.push(family ? { text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y } : { text: label.text, color: colors.strong, x, y })
+      }
+    } else if (regionAlpha(view.scale) > 0) {
+      // Over the tiles once the dots are more tiles than dots; between the two the names stand down.
+      const families = new Map(model.groups.map(group => [group.key, group]))
+      words = regionsOf(tilePoints && morphed > 0.5 ? tilePoints : dots)
+        .flatMap(region => {
+          const family = families.get(region.group)
+          const [x, y] = [region.x * unit + view.dx, region.y * unit + view.dy - 20]
+          if (!family || hidden.has(family.key) || x < left || y < top || x > right || y > bottom) return []
+          return [{ text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y, size: family.count }]
+        })
+        .sort((a, b) => b.size - a.size)
+    }
+    const regional = !layoutShown || layoutShown.labels.length === 0
+    const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional)
+    // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each sound's name beside it in its
+    // family's colour, the sound file's own name drawn as canvas text, never markup. Only names with room are written,
+    // so a tight cluster stays legible (its sounds are named on hover and in the list above).
+    if (onScreen <= NAMES_ON_SCREEN) {
+      const names = labelled.flatMap(([x, y, index, color]) => {
+        const text = mapLabel(model.sounds[points[index].id]?.name ?? '')
+        return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index) }] : []
+      })
+      drawNames(context, names, reach(morphed) + 4, lettering, written)
+    }
+    // Then the layout's axis words inside the map's edges, kept in view.
     if (layoutShown && wordsIn > 0) {
-      const family = getComputedStyle(canvas).fontFamily || 'sans-serif'
       context.textBaseline = 'middle'
       context.lineJoin = 'round'
       context.strokeStyle = colors.ground
       context.lineWidth = 3
-      context.textAlign = 'center'
-      context.font = `600 11px ${family}`
-      context.fillStyle = colors.strong
-      context.globalAlpha = 0.9 * wordsIn
-      for (const label of layoutShown.labels) {
-        const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy]
-        if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue
-        context.strokeText(label.text, x, y)
-        context.fillText(label.text, x, y)
-      }
+      const family = lettering.family
       context.font = `11px ${family}`
       context.fillStyle = colors.text
       context.globalAlpha = 0.85 * wordsIn

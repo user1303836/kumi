@@ -2643,36 +2643,36 @@
     return out;
   }
   function requestFor(card, sources, options = {}, seed) {
-    const kept2 = {};
+    const kept3 = {};
     for (const key of card.options) {
       const value = options[key];
       if (key === "attack_from") {
-        if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value < sources.length) kept2.attack_from = value;
+        if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value < sources.length) kept3.attack_from = value;
       } else {
         const span = spanned(RANGES[key], value);
-        if (span !== void 0) kept2[key] = RANGES[key].step === 1 ? Math.round(span) : span;
+        if (span !== void 0) kept3[key] = RANGES[key].step === 1 ? Math.round(span) : span;
       }
     }
     const resonate = card.key === "resonate" ? resonateOf(options.resonate) : void 0;
     const modulate = card.key === "modulate" ? modulateOf(options.modulate) : void 0;
-    if (resonate) kept2.resonate = resonate;
-    if (modulate) kept2.modulate = modulate;
-    if (card.key === "loop") kept2.loop = loopOf(options.loop);
+    if (resonate) kept3.resonate = resonate;
+    if (modulate) kept3.modulate = modulate;
+    if (card.key === "loop") kept3.loop = loopOf(options.loop);
     const steer = steerOf(options.steer);
-    if (steer) kept2.steer = steer;
+    if (steer) kept3.steer = steer;
     return {
       op: card.op,
       ...card.mode ? { mode: card.mode } : {},
       sources,
       ...seed === void 0 ? {} : { seed },
-      ...Object.keys(kept2).length ? { options: kept2 } : {}
+      ...Object.keys(kept3).length ? { options: kept3 } : {}
     };
   }
   function growRequest(from, to, at, seed, steer) {
-    const kept2 = { at: spanned(RANGES.at, at) ?? 0.5 };
+    const kept3 = { at: spanned(RANGES.at, at) ?? 0.5 };
     const steered = steerOf(steer);
-    if (steered) kept2.steer = steered;
-    return { op: "grow", sources: [from, to], ...seed === void 0 ? {} : { seed }, options: kept2 };
+    if (steered) kept3.steer = steered;
+    return { op: "grow", sources: [from, to], ...seed === void 0 ? {} : { seed }, options: kept3 };
   }
   function reroll(request) {
     const { seed: _seed, ...rest } = request;
@@ -2924,10 +2924,10 @@
     return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
   }
   function keptBy(result, rounds) {
-    const kept2 = result.compare?.artifact_id;
-    if (typeof kept2 !== "string" || !kept2) return null;
+    const kept3 = result.compare?.artifact_id;
+    if (typeof kept3 !== "string" || !kept3) return null;
     for (const [key, each] of Object.entries(rounds)) {
-      const round = each.find((other) => other.kept === kept2);
+      const round = each.find((other) => other.kept === kept3);
       if (round) return [key, round];
     }
     return null;
@@ -2939,8 +2939,8 @@
     return keptBy(result, rounds)?.[1].name || void 0;
   }
   function roundOf(result, id, rounds) {
-    const kept2 = result.compare?.artifact_id;
-    return { id, gaps: gapsOf(result), kept: typeof kept2 === "string" && kept2 ? kept2 : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
+    const kept3 = result.compare?.artifact_id;
+    return { id, gaps: gapsOf(result), kept: typeof kept3 === "string" && kept3 ? kept3 : null, name: result.compare?.name ? displayReferenceName(result.compare) : referenceName(result, rounds) ?? fileName(result.compare?.metrics, "") };
   }
   function gapsOf(result) {
     const mine = result.metrics ?? {};
@@ -3256,10 +3256,10 @@
     /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision, with what it said of each
      *  (CC-23: an event's `matches` or a result's `items`) and a near search's seeds (one id, or a list of them). */
     found(revision, ids, said = {}) {
-      const kept2 = ids.slice(0, 200);
+      const kept3 = ids.slice(0, 200);
       const seeds = Array.isArray(said.near) ? said.near : [said.near];
       const near = seeds.filter((seed) => typeof seed === "string" && seed !== "").slice(0, 16);
-      this.set({ found: { revision, ids: kept2, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept2)) } });
+      this.set({ found: { revision, ids: kept3, at: Date.now(), near, matches: foundMatches(said.matches, new Set(kept3)) } });
     }
     /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
     measure(toolCallId, result) {
@@ -3339,11 +3339,11 @@
      *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
      *  with it. */
     refreshJobs(now = Date.now()) {
-      const kept2 = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
-      if (kept2.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept2) });
+      const kept3 = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
+      if (kept3.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept3) });
       const stopped = this.state.status?.stale === true && this.state.status.running === false;
       if (this.state.status?.stale && !stopped) return Promise.resolve();
-      return Promise.all(kept2.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id, stopped))).then(() => void 0);
+      return Promise.all(kept3.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id, stopped))).then(() => void 0);
     }
     refreshJob(id, stopped = false) {
       return this.once(`job:${id}`, async () => {
@@ -3454,10 +3454,10 @@
       if (url.length > this.limit) return;
       this.cache.set(id, url);
       this.cached += url.length;
-      for (const [oldest, kept2] of this.cache) {
+      for (const [oldest, kept3] of this.cache) {
         if (this.cached <= this.limit) break;
         this.cache.delete(oldest);
-        this.cached -= kept2.length;
+        this.cached -= kept3.length;
       }
     }
     /** Another profile or connection: stop, and forget every sound of the last one. */
@@ -3745,15 +3745,15 @@
     }
     return /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
       const state = stateOf(item, t, live);
-      const track = nameOf(item.track);
+      const track2 = nameOf(item.track);
       const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
       return /* @__PURE__ */ jsxs("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
         /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
         /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
           /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, textDecoration: item.state === "undone" ? "line-through" : void 0 }, title: clean(item.title ?? "", 300), children: clean(item.title ?? item.label ?? item.id, 120) }),
           /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5 }, children: [
-            track && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
-            /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
+            track2 && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
+            /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track2 && clean(track2, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
           ] }),
           item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
             // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
@@ -3789,14 +3789,14 @@
     range = false,
     title
   }) {
-    const track = useRef(null);
+    const track2 = useRef(null);
     const [dragging, setDragging] = useState(null);
     const middle = span.neutral ?? (range ? span.min : (span.min + span.max) / 2);
     const resting = restAt ?? middle;
     const values = value === void 0 ? range ? [resting, resting] : [resting] : Array.isArray(value) ? value : [value];
     const set = value !== void 0;
     const from = (clientX) => {
-      const box = track.current?.getBoundingClientRect();
+      const box = track2.current?.getBoundingClientRect();
       if (!box || box.width === 0) return values[0];
       return snap(span, span.min + (clientX - box.left) / box.width * (span.max - span.min));
     };
@@ -3876,7 +3876,7 @@
             if (dragging !== null) commit(dragging, from(event.clientX));
           },
           onPointerUp: () => setDragging(null),
-          ref: track,
+          ref: track2,
           style: { position: "relative", height: 16, cursor: "pointer", touchAction: "none" },
           children: [
             /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { position: "absolute", left: 0, right: 0, top: 6, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 } }),
@@ -4531,7 +4531,7 @@
       /* @__PURE__ */ jsx("span", { style: { fontSize: 11, padding: "1px 7px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }, children: clean(stage, 80) })
     ] }, index)) });
   }
-  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept2, use, placement = "bottom", dock, onSources }) {
+  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources }) {
     const inline = placement === "inline";
     const t = useT();
     const [cardKey, setCardKey] = useState("blend");
@@ -4784,7 +4784,7 @@
               const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1);
               const result = take.results[at];
               const isPlaying = playing === result.artifact_id;
-              const inPalette = kept2.has(result.artifact_id);
+              const inPalette = kept3.has(result.artifact_id);
               const isChosen = chosen.includes(result.artifact_id);
               const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
               return /* @__PURE__ */ jsxs(
@@ -5088,11 +5088,11 @@
     onDark(context, ground) {
       if (ground === this.ground) return this.dark;
       this.ground = ground;
-      const kept2 = context.fillStyle;
+      const kept3 = context.fillStyle;
       context.fillStyle = "#000";
       context.fillStyle = ground;
       const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
-      context.fillStyle = kept2;
+      context.fillStyle = kept3;
       this.dark = read ? isDark(read) : true;
       this.shapes.clear();
       return this.dark;
@@ -5130,11 +5130,11 @@
     /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
     draw(context, nebula, view, unit, alpha) {
       if (alpha <= 0) return;
-      const kept2 = context.globalAlpha;
+      const kept3 = context.globalAlpha;
       context.globalAlpha = alpha;
       context.imageSmoothingEnabled = true;
       context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
-      context.globalAlpha = kept2;
+      context.globalAlpha = kept3;
     }
     /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
     crowd(layout) {
@@ -5181,8 +5181,8 @@
     /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
     sprite(color, side) {
       const key = `${color}|${side}`;
-      const kept2 = this.sprites.get(key);
-      if (kept2) return kept2;
+      const kept3 = this.sprites.get(key);
+      if (kept3) return kept3;
       const channels = rgbOf(color);
       const made = channels ? picture(side, side) : null;
       if (!made || !channels) return null;
@@ -5206,6 +5206,146 @@
       glows.set(canvas, glow);
     }
     return glow;
+  }
+
+  // src/shared/atlas/names.ts
+  var NAMES_ON_SCREEN = 600;
+  var NAMES_MOST = 50;
+  var kept = /* @__PURE__ */ new WeakMap();
+  function regionsOf(points) {
+    const known = kept.get(points);
+    if (known) return known;
+    const families = /* @__PURE__ */ new Map();
+    for (const point of points) {
+      const family = families.get(point.group);
+      if (family) family.push(point);
+      else families.set(point.group, [point]);
+    }
+    const regions = [];
+    for (const [group, family] of families) {
+      const across = family.map((point) => point.x).sort((a, b) => a - b);
+      const [from, middle, to] = [across[Math.floor(across.length * 0.25)], across[Math.floor(across.length * 0.5)], across[Math.min(across.length - 1, Math.ceil(across.length * 0.75))]];
+      const tops = family.filter((point) => point.x >= from && point.x <= to).map((point) => point.y);
+      tops.sort((a, b) => a - b);
+      regions.push({ group, x: middle, y: tops[Math.floor(tops.length * 0.015)] });
+    }
+    kept.set(points, regions);
+    return regions;
+  }
+  function regionAlpha(zoom) {
+    return Math.min(1, Math.max(0, (2.3 - zoom) / 0.9));
+  }
+  function fitting(boxes, most, padX = 0, padY = 0, taken = []) {
+    const kept3 = [...taken];
+    const fits = [];
+    for (let index = 0; index < boxes.length && fits.length < most; index++) {
+      const [left, top, width, height] = boxes[index];
+      if (kept3.some(([l, t, w, h]) => left < l + w + padX && l < left + width + padX && top < t + h + padY && t < top + height + padY)) continue;
+      kept3.push(boxes[index]);
+      fits.push(index);
+    }
+    return fits;
+  }
+  function nameRank(index) {
+    return Math.imul(index + 1, 2654435761) >>> 0;
+  }
+  function clearOf(boxes, places, margin = 3) {
+    const ROW = 16;
+    const rows = /* @__PURE__ */ new Map();
+    for (const place of places) {
+      const row = Math.floor(place[1] / ROW);
+      const list = rows.get(row);
+      if (list) list.push(place);
+      else rows.set(row, [place]);
+    }
+    return boxes.map(([left, top, width, height]) => {
+      for (let row = Math.floor((top - margin) / ROW); row <= Math.floor((top + height + margin) / ROW); row++) {
+        for (const [x, y] of rows.get(row) ?? []) {
+          if (x >= left - margin && x <= left + width + margin && y >= top - margin && y <= top + height + margin) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  // src/shared/atlas/labels.ts
+  function track(context, spacing) {
+    if ("letterSpacing" in context) context.letterSpacing = spacing;
+  }
+  function drawWords(context, words, alpha, look, room) {
+    if (alpha <= 0 || words.length === 0) return [];
+    context.save();
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.strokeStyle = look.ground;
+    const name = `700 12px ${look.family}`;
+    context.font = name;
+    track(context, "0.2em");
+    const boxes = words.map((word) => {
+      const width = context.measureText(word.text).width;
+      return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
+    });
+    const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
+    for (const index of written) {
+      const word = words[index];
+      context.font = name;
+      track(context, "0.2em");
+      context.lineWidth = 5;
+      context.globalAlpha = 0.85 * alpha;
+      context.strokeText(word.text, word.x, word.y);
+      context.globalAlpha = alpha;
+      context.fillStyle = word.color;
+      context.fillText(word.text, word.x, word.y);
+      if (!word.count) continue;
+      context.font = `500 10px ${look.family}`;
+      track(context, "0.06em");
+      context.lineWidth = 3;
+      context.globalAlpha = 0.8 * alpha;
+      context.strokeText(word.count, word.x, word.y + 14);
+      context.globalAlpha = 0.85 * alpha;
+      context.fillStyle = look.muted;
+      context.fillText(word.count, word.x, word.y + 14);
+    }
+    context.restore();
+    return written.map((index) => boxes[index]);
+  }
+  var widths = /* @__PURE__ */ new Map();
+  function drawNames(context, names, gap, look, taken) {
+    if (names.length === 0) return;
+    context.save();
+    const font = `500 10.5px ${look.family}`;
+    context.font = font;
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = look.ground;
+    if (widths.size > 6e3) widths.clear();
+    const offered = [...names].sort((a, b) => a.rank - b.rank);
+    const boxes = offered.map((word) => {
+      const key = `${font}|${word.text}`;
+      let width = widths.get(key);
+      if (width === void 0) {
+        width = context.measureText(word.text).width;
+        widths.set(key, width);
+      }
+      return [word.x + gap, word.y - 7, width, 14];
+    });
+    const clear = clearOf(
+      boxes,
+      offered.map((word) => [word.x, word.y])
+    );
+    const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
+    for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
+      const index = open[pick3];
+      const word = offered[index];
+      context.globalAlpha = 0.75;
+      context.strokeText(word.text, boxes[index][0], word.y);
+      context.globalAlpha = 0.95;
+      context.fillStyle = word.color;
+      context.fillText(word.text, boxes[index][0], word.y);
+    }
+    context.restore();
   }
 
   // src/shared/mapModel.ts
@@ -6038,14 +6178,14 @@
 
   // src/shared/peaks.ts
   var DECODE_MOST = 12 * 1024 * 1024;
-  var kept = /* @__PURE__ */ new Map();
+  var kept2 = /* @__PURE__ */ new Map();
   var loading = /* @__PURE__ */ new Map();
   var askers = /* @__PURE__ */ new Map();
   var queue = Promise.resolve();
   var SKIPPED = /* @__PURE__ */ Symbol("skipped");
   function peaksFor(id, bars, audio, wanted = () => true) {
     const key = `${bars}:${id}`;
-    const done = kept.get(key);
+    const done = kept2.get(key);
     if (done !== void 0) return Promise.resolve(done);
     const running = loading.get(key);
     if (running) {
@@ -6073,7 +6213,7 @@
       loading.delete(key);
       askers.delete(key);
       if (peaks === SKIPPED) return null;
-      kept.set(key, peaks);
+      kept2.set(key, peaks);
       return peaks;
     });
     queue = promise;
@@ -6081,7 +6221,7 @@
     return promise;
   }
   function peaksKept(id, bars) {
-    return kept.get(`${bars}:${id}`) ?? null;
+    return kept2.get(`${bars}:${id}`) ?? null;
   }
 
   // src/shared/Player.tsx
@@ -6622,7 +6762,7 @@
           const grown = introFor(index);
           halos?.at(color, x, y, grown * (1 - blend));
           shape(path, x, y, blend, grown, glyphAt(index));
-          if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ""]);
+          if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color]);
         }
         halos?.done();
         context.globalAlpha = pass ? 0.92 : 0.16;
@@ -6645,40 +6785,42 @@
         context.fillStyle = groupColor2.get(points[index].group) ?? colors.faint;
         context.fill(path);
       }
-      if (onScreen <= 40) {
-        context.globalAlpha = 0.85;
-        context.fillStyle = colors.text;
-        context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
-        context.textBaseline = "middle";
-        const placed = [];
-        const gap = reach(morphed) + 4;
-        for (const [x, y, name] of labelled) {
-          const text = mapLabel(name);
-          if (!text) continue;
-          const box2 = [x + gap, y - 7, context.measureText(text).width, 14];
-          if (placed.some(([left2, top2, width, height]) => box2[0] < left2 + width && left2 < box2[0] + box2[2] && box2[1] < top2 + height && top2 < box2[1] + box2[3])) continue;
-          placed.push(box2);
-          context.fillText(text, box2[0], y);
-        }
-      }
+      const lettering = { family: getComputedStyle(canvas).fontFamily || "sans-serif", ground: colors.ground, muted: colors.text };
       const layoutShown = arrangementIndex >= 0 ? model.arrangements[arrangementIndex] : null;
       const wordsIn = clamp01((shifting - 0.55) / 0.45);
+      let words = [];
+      if (layoutShown && layoutShown.labels.length > 0) {
+        const families = new Map(model.groups.map((group) => [group.name, group]));
+        for (const label of layoutShown.labels) {
+          const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy];
+          if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue;
+          const family = families.get(label.text);
+          words.push(family ? { text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y } : { text: label.text, color: colors.strong, x, y });
+        }
+      } else if (regionAlpha(view.scale) > 0) {
+        const families = new Map(model.groups.map((group) => [group.key, group]));
+        words = regionsOf(tilePoints && morphed > 0.5 ? tilePoints : dots).flatMap((region) => {
+          const family = families.get(region.group);
+          const [x, y] = [region.x * unit + view.dx, region.y * unit + view.dy - 20];
+          if (!family || hidden.has(family.key) || x < left || y < top || x > right || y > bottom) return [];
+          return [{ text: family.name.toLocaleUpperCase(), count: num(family.count, 0), color: glow.shape(family.color), x, y, size: family.count }];
+        }).sort((a, b) => b.size - a.size);
+      }
+      const regional = !layoutShown || layoutShown.labels.length === 0;
+      const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional);
+      if (onScreen <= NAMES_ON_SCREEN) {
+        const names = labelled.flatMap(([x, y, index, color]) => {
+          const text = mapLabel(model.sounds[points[index].id]?.name ?? "");
+          return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index) }] : [];
+        });
+        drawNames(context, names, reach(morphed) + 4, lettering, written);
+      }
       if (layoutShown && wordsIn > 0) {
-        const family = getComputedStyle(canvas).fontFamily || "sans-serif";
         context.textBaseline = "middle";
         context.lineJoin = "round";
         context.strokeStyle = colors.ground;
         context.lineWidth = 3;
-        context.textAlign = "center";
-        context.font = `600 11px ${family}`;
-        context.fillStyle = colors.strong;
-        context.globalAlpha = 0.9 * wordsIn;
-        for (const label of layoutShown.labels) {
-          const [x, y] = [label.x * unit + view.dx, label.y * unit + view.dy];
-          if (x < left - 80 || y < top || x > right + 80 || y > bottom) continue;
-          context.strokeText(label.text, x, y);
-          context.fillText(label.text, x, y);
-        }
+        const family = lettering.family;
         context.font = `11px ${family}`;
         context.fillStyle = colors.text;
         context.globalAlpha = 0.85 * wordsIn;
@@ -7719,7 +7861,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const marked = useMemo(() => marksOf(state.palette, revision), [state.palette, revision]);
     const [flying, setFlying] = useState(null);
     const [making, setMaking] = useState(null);
-    const kept2 = useMemo(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
+    const kept3 = useMemo(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
     const groupOf = useMemo(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
     useEffect(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
     const open = (sources) => {
@@ -7745,7 +7887,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       onHover,
       flying,
       making,
-      kept: kept2,
+      kept: kept3,
       makeFromPicks: (ids) => open(sourcesOf(ids.map((id) => ({ sound_id: id, name: state.map?.sounds[id]?.name ?? null })), revision)),
       makeFromPalette: (view) => open(sourcesOf(view.items, state.palette?.map_revision ?? null)),
       closeMake: () => setMaking(null),
@@ -7960,9 +8102,9 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               }),
               growActions: (result) => {
                 const request = useRequest(result);
-                const kept2 = palette.kept.has(result.artifact_id);
+                const kept3 = palette.kept.has(result.artifact_id);
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
-                  /* @__PURE__ */ jsx(TextButton, { disabled: kept2, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept2 ? t("make.kept") : t("make.keep") }),
+                  /* @__PURE__ */ jsx(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("make.copyUse"), text: request }),
                   /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
                 ] });
