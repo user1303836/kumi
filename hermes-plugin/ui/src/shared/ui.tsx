@@ -46,11 +46,13 @@ export function FocusStyle() {
         '@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}' +
         '@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}' +
         '@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}' +
-        // The connection dot on the DAW's beat (its period set where it's drawn): it swells on the beat with a ring of
-        // its own colour, and settles before the next.
+        // The connection dot at the DAW's tempo (the beat's length is set where the dot is drawn): it swells once a
+        // beat and settles before the next. Kumi's own dots also throw a ring of their colour (`kumi-beat`); a dot
+        // that isn't Kumi's only swells (`kumi-swell`), and nothing of its own style is touched.
         '@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}' +
-        '.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
+        '@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}' +
+        '.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }
@@ -64,9 +66,13 @@ export function Chip({ children, title, tone }: { children: ReactNode; title?: s
   )
 }
 
-/** How a dot beats: the class, and the beat's length (`seconds`; null: it sits steady). The ring takes `color`. */
-export const beating = (seconds: number | null | undefined, color: string): { className?: string; style: CSSProperties } =>
-  seconds ? { className: 'kumi-beat', style: { color, animationDuration: `${seconds.toFixed(3)}s` } } : { style: {} }
+/** How a dot beats: the class, and the beat's length (`seconds`; null: it sits steady). With `color` (the dot's own)
+ *  it throws a ring of it; without, it only swells, and its colours are left as they are. */
+export const beating = (seconds: number | null | undefined, color?: string): { className?: string; style: CSSProperties } => {
+  if (!seconds) return { style: {} }
+  const animationDuration = `${seconds.toFixed(3)}s`
+  return color ? { className: 'kumi-beat', style: { color, animationDuration } } : { className: 'kumi-swell', style: { animationDuration } }
+}
 
 /** A dot of `color`. With `beat` (a beat's length in seconds) it pulses in time: the connection's dot, while the DAW
  *  plays. */

@@ -29,9 +29,9 @@ export function StatusChip({
   const words = chipWords(state.status, state.focus?.transport?.tempo, t)
   const steps = nextSteps(state, t)
   const connected = Boolean(state.status?.connected)
-  // The dot keeps the DAW's beat while it plays (steady when it's stopped, or not connected). It's Desktop's own dot,
-  // in a colour of Desktop's choosing: it swells on the beat, without the ring Kumi's own dots have.
-  const pulse = beating(connected ? beatSeconds(state.focus?.transport) : null, 'transparent')
+  // The dot swells at the DAW's tempo while it plays (steady when it's stopped, or not connected). It's Desktop's own
+  // dot, in a colour of Desktop's choosing: only its size moves, and no style of its own is set from here.
+  const pulse = beating(connected ? beatSeconds(state.focus?.transport) : null)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
