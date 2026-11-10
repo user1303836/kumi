@@ -7,7 +7,7 @@ use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const CLIENT_NAME: &str = concat!("daw-mcp-server/", env!("CARGO_PKG_VERSION"));
@@ -212,6 +212,16 @@ impl Host {
     /// then the bridge writes nothing into the project for it. Reads name a saved project by its path's id either way.
     pub fn with_keep_identity(mut self, keep_identity: bool) -> Self {
         self.keep_identity = keep_identity;
+        self
+    }
+
+    /// The host keeping its catch-up snapshots in `folder` instead of in the Kumi home's `bridges/<daw>/snapshots`: the
+    /// plugin's runtime gives its own state's, so a Kumi home it was let use (another Kumi's installation) is read for
+    /// the bridge's secret and discovery files only and never gets its snapshots read or rewritten. None: the Kumi home's.
+    pub fn with_snapshots(mut self, folder: Option<PathBuf>) -> Self {
+        if let Some(folder) = folder {
+            self.catchup = crate::catchup::Catchup::new(folder);
+        }
         self
     }
 
