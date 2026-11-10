@@ -18,7 +18,7 @@ import { Corner, ToolName } from './atlas/Corner.tsx'
 import { FIRST_STEPS, firstLeft, type FirstStep } from './atlas/first.ts'
 import { FirstOpen } from './atlas/FirstOpen.tsx'
 import { gesturesOf, hintOf, type MapState } from './atlas/gestures.ts'
-import { glowOf } from './atlas/glow.ts'
+import { glowOf, HALOS_ON_SCREEN } from './atlas/glow.ts'
 import { HoverPill } from './atlas/HoverPill.tsx'
 import { drawNames, drawWords, type Word } from './atlas/labels.ts'
 import { nameRank, NAMES_ON_SCREEN, regionAlpha, regionsOf } from './atlas/names.ts'
@@ -600,11 +600,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     // A dot is its group's glyph (a kind reads by shape as well as colour); a tile a rounded square; between the two
     // while the morph runs.
     const glyphs = new Map(model.groups.map(group => [group.key, glyphOf(group.key)]))
-    const shape = (path: Path2D, x: number, y: number, blend: number, grow = 1, glyph = 0) => {
+    // `closed` is for the one path that is stroked: the filled ones leave each shape open (`traceGlyph` says why).
+    const shape = (path: Path2D, x: number, y: number, blend: number, grow = 1, glyph = 0, closed = false) => {
       if (blend <= 0) {
         const r = radius * grow
         if (r <= 0.05) return
-        traceGlyph(path, glyph, x, y, r)
+        traceGlyph(path, glyph, x, y, r, closed)
         return
       }
       const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow
@@ -622,7 +623,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     let onScreen = 0
     // The glow under the sounds. First the layout's nebula: calmer as the map zooms in, absent under tiles, arriving
     // with a new map's sounds, and around a layout's move the old layout's fading out, then the new one's coming in
-    // as the sounds arrive. Then, in the pass below, a halo under each sound the search and the legend keep.
+    // as the sounds arrive. Then, in the pass below, a halo under each sound the search and the legend keep, while
+    // no more than `HALOS_ON_SCREEN` of them are on screen.
     const glow = glowOf(canvas)
     const dark = glow.onDark(context, colors.ground)
     const calm = nebulaAlpha(view.scale) * (1 - morphed) * clamp01((now - introAt.current) / INTRO_MS) * (dark ? 0.85 : 0.4)
@@ -637,6 +639,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
       const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null
+      // The halos wait for the count of sounds on screen: one more than `HALOS_ON_SCREEN` kept means none is drawn.
+      const lit: [string, number, number, number][] = []
       const tails = pass === 1 && before ? new Map<string, Path2D>() : null
       for (let index = 0; index < count; index++) {
         if (mask[index] !== pass) continue
@@ -650,7 +654,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           paths.set(color, path)
         }
         const grown = introFor(index)
-        halos?.at(color, x, y, grown * (1 - blend))
+        if (halos && lit.length <= HALOS_ON_SCREEN) lit.push([color, x, y, grown * (1 - blend)])
         shape(path, x, y, blend, grown, glyphAt(index))
         if (tails && before) {
           const [dx, dy] = [x - (before[2 * index] * unit + view.dx), y - (before[2 * index + 1] * unit + view.dy)]
@@ -666,7 +670,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         }
         if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color])
       }
-      halos?.done()
+      if (halos) {
+        if (lit.length <= HALOS_ON_SCREEN) for (const [color, x, y, strength] of lit) halos.at(color, x, y, strength)
+        halos.done()
+      }
       if (tails) {
         context.globalAlpha = 0.5
         context.lineWidth = Math.max(1, radius * 0.7)
@@ -881,7 +888,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.restore()
       // And a fine ring in the text colour, so one sound stands out of a dense cluster of its own colour.
       const ring = new Path2D()
-      shape(ring, x, y, blend, 2.3, glyphAt(hovered))
+      shape(ring, x, y, blend, 2.3, glyphAt(hovered), true)
       context.strokeStyle = colors.strong
       context.lineWidth = 1.25
       context.stroke(ring)

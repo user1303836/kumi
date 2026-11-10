@@ -11,6 +11,9 @@ type Picture = OffscreenCanvas
 const GREY: Rgb = [128, 128, 128]
 /** How many halo sprites one map keeps (a colour at a size each): a zoom passes through a few dozen sizes. */
 const MOST_SPRITES = 240
+/** How many sounds on screen each still have a halo of their own. Past this the halos have long run into one glow,
+ *  which the nebula gives as well, and a sprite per sound is a large part of a frame. */
+export const HALOS_ON_SCREEN = 30_000
 
 interface Sheet {
   canvas: Picture

@@ -6650,7 +6650,7 @@ var GLYPH_SHAPES = [
 function glyphOf(group) {
   return (group % GLYPH_SHAPES.length + GLYPH_SHAPES.length) % GLYPH_SHAPES.length;
 }
-function traceGlyph(path, glyph, x, y, r) {
+function traceGlyph(path, glyph, x, y, r, closed = false) {
   const shape = GLYPH_SHAPES[glyph];
   if (!shape) {
     path.moveTo(x + r, y);
@@ -6658,7 +6658,7 @@ function traceGlyph(path, glyph, x, y, r) {
     return;
   }
   shape.forEach(([px, py], index) => index === 0 ? path.moveTo(x + px * r, y + py * r) : path.lineTo(x + px * r, y + py * r));
-  path.closePath();
+  if (closed) path.closePath();
 }
 var cellOf = (x, y) => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID));
 var MOST_ARRANGEMENTS = 16;
@@ -7778,6 +7778,7 @@ function haloOf(radius, zoom, crowd, unit) {
 // src/shared/atlas/glow.ts
 var GREY = [128, 128, 128];
 var MOST_SPRITES = 240;
+var HALOS_ON_SCREEN = 3e4;
 function picture(width, height) {
   if (typeof OffscreenCanvas !== "function") return null;
   const canvas = new OffscreenCanvas(width, height);
@@ -8993,11 +8994,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       return since >= INTRO_MS * 0.55 ? 1 : since <= 0 ? 0 : easeOutBack(since / (INTRO_MS * 0.55));
     };
     const glyphs = new Map(model.groups.map((group) => [group.key, glyphOf(group.key)]));
-    const shape = (path, x, y, blend, grow2 = 1, glyph = 0) => {
+    const shape = (path, x, y, blend, grow2 = 1, glyph = 0, closed = false) => {
       if (blend <= 0) {
         const r = radius * grow2;
         if (r <= 0.05) return;
-        traceGlyph(path, glyph, x, y, r);
+        traceGlyph(path, glyph, x, y, r, closed);
         return;
       }
       const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow2;
@@ -9023,6 +9024,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
       const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null;
+      const lit = [];
       const tails = pass === 1 && before ? /* @__PURE__ */ new Map() : null;
       for (let index = 0; index < count2; index++) {
         if (mask[index] !== pass) continue;
@@ -9036,7 +9038,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           paths.set(color, path);
         }
         const grown = introFor(index);
-        halos?.at(color, x, y, grown * (1 - blend));
+        if (halos && lit.length <= HALOS_ON_SCREEN) lit.push([color, x, y, grown * (1 - blend)]);
         shape(path, x, y, blend, grown, glyphAt(index));
         if (tails && before) {
           const [dx, dy] = [x - (before[2 * index] * unit + view.dx), y - (before[2 * index + 1] * unit + view.dy)];
@@ -9052,7 +9054,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
         if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color]);
       }
-      halos?.done();
+      if (halos) {
+        if (lit.length <= HALOS_ON_SCREEN) for (const [color, x, y, strength] of lit) halos.at(color, x, y, strength);
+        halos.done();
+      }
       if (tails) {
         context.globalAlpha = 0.5;
         context.lineWidth = Math.max(1, radius * 0.7);
@@ -9235,7 +9240,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.fill(path);
       context.restore();
       const ring3 = new Path2D();
-      shape(ring3, x, y, blend, 2.3, glyphAt(hovered2));
+      shape(ring3, x, y, blend, 2.3, glyphAt(hovered2), true);
       context.strokeStyle = colors.strong;
       context.lineWidth = 1.25;
       context.stroke(ring3);
