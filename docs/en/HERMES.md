@@ -371,15 +371,17 @@ run without asking there, and Kumi can't tell it from a chat.
 - **The dot** beside Kumi's status (in the chip, the pane and the dashboard) pulses at your DAW's tempo while it plays,
   and sits still when it's stopped.
 
-![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
+![Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.](../assets/hermes/screenshots/catalog-1-pane.png)
 
 ![The web dashboard's Kumi page: status, FOCUS and HISTORY (each change with Copy undo) beside the sound map, each family named, and a hat's name and waveform on hover.](../assets/hermes/screenshots/hermes-dashboard.png)
 
 Screenshots:
-- The pane is Kumi 1.24.73 on real Ableton Live 12.
+- The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
+  1.24.79 runtime, and real Renoise, in a project that started empty.
 - The map, palette, Make and dashboard shots are Kumi 1.24.79 on a generated 3,840-sound test map, with the made
   sounds from Kumi's sound-design engine.
-- Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
+- In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
+  Kumi's side is real.
 
 ## Settings
 

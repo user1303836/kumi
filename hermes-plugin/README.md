@@ -60,9 +60,9 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 ## What it looks like
 
-![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../docs/assets/hermes/screenshots/catalog-1-pane.png)
+![Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.](../docs/assets/hermes/screenshots/catalog-1-pane.png)
 
-*Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.*
+*Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.*
 
 ![With Ask before each change on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.](../docs/assets/hermes/screenshots/catalog-3-approval.png)
 
@@ -81,13 +81,15 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 *Make, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.*
 
 Screenshots:
-- The pane is Kumi 1.24.73 on real Ableton Live 12.
+- The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
+  1.24.79 runtime, and real Renoise, in a project that started empty.
 - The approval is Kumi 1.24.73 on real Ableton Live 12.
 - The listening shot is Kumi 1.24.71 on real REAPER 7. It measures a synthetic test tone against a reference made 3 dB
   louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step.
 - The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
   samples are generated test data, and the made sounds come from Kumi's sound-design engine.
-- Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
+- In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
+  Kumi's side is real.
 
 ## Tools
 
