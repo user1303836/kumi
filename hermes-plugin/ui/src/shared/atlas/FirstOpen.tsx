@@ -2,7 +2,7 @@
 import { T } from '@kumi/theme'
 
 import { S, TextButton, useT } from '../ui.tsx'
-import { FIRST_STEPS, type FirstStep } from './first.ts'
+import type { FirstStep } from './first.ts'
 
 export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSkip: () => void }) {
   const t = useT()
@@ -27,7 +27,7 @@ export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSk
               fontVariantNumeric: 'tabular-nums'
             }}
           >
-            {FIRST_STEPS.indexOf(step) + 1}
+            {index + 1}
           </span>
           <span style={{ flex: 1 }}>{t(`first.${step}`)}</span>
           {index === 0 && (

@@ -7512,7 +7512,7 @@ function FirstOpen({ steps, onSkip }) {
           fontWeight: 700,
           fontVariantNumeric: "tabular-nums"
         },
-        children: FIRST_STEPS.indexOf(step2) + 1
+        children: index + 1
       }
     ),
     /* @__PURE__ */ jsx18("span", { style: { flex: 1 }, children: t(`first.${step2}`) }),
