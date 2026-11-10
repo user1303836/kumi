@@ -1974,14 +1974,15 @@ def hand_over_folders(host: Host, live: runtime.Runtime, kwargs: dict) -> None:
     """Before a scan: give a running runtime the settings' sample folders it doesn't have. A runtime reads its folders
     when it starts, so one added since outside a tool call (the terminal, `/kumi samples add`, Hermes's settings) is
     only in the setting, and the scan would pass it by. The scan's approval names them all (`policy._library`). One
-    the runtime refuses stays out of this scan."""
+    the runtime has under another spelling (it keeps the disk's) is left alone, and one it refuses stays out of this
+    scan."""
     wanted = host.library_folders()
     if not wanted:
         return
     status = live.call("library", {"action": "status"}, host.identity(kwargs), timeout=READ_TIMEOUT)
-    known = [folder for folder in status.get("folders") or [] if isinstance(folder, str)]
+    known = {snapshots.same_place(folder) for folder in status.get("folders") or [] if isinstance(folder, str)}
     for folder in wanted:
-        if folder in known:
+        if snapshots.same_place(folder) in known:
             continue
         answer = live.call("library", {"action": "add_folder", "folder": folder}, host.identity(kwargs),
                            timeout=READ_TIMEOUT)

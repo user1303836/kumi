@@ -438,6 +438,16 @@ def typed_library_folder(folder: Any, *, hermes_home: str | None = None) -> tupl
     return normal, None
 
 
+def same_place(folder: str) -> str:
+    """A folder's real place, in a form every spelling of it shares: links followed, Windows's verbatim prefix and
+    letter case aside. `kumi serve` keeps its folders as the disk spells them (`/private/tmp/…` for `/tmp/…`,
+    `\\\\?\\C:\\…` on Windows), so this is how one of the settings' folders is told from one the runtime already has.
+    A path that can't be resolved here stands for itself."""
+    plain = local(folder)
+    real = resolved(plain) if plain else None
+    return os.path.normcase(real or folder)
+
+
 def library_folders(folders: Any, *, hermes_home: str | None = None) -> list[str]:
     """The `library_folders` setting as the guard keeps it: each folder normalized, once. One the guard refuses
     (relative, a disk, the home folder, Hermes's own, a network path), however it got into the setting, is left out

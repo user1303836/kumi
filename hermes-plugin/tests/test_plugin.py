@@ -279,6 +279,25 @@ class Tools(unittest.TestCase):
         status = support.call(self.host, "kumi_library", {"action": "status"}, session_id="s1")
         self.assertEqual(status["folders"], [support.DRUMS], "the running runtime was handed it, once")
 
+    def test_a_folder_the_runtime_has_as_the_disk_spells_it_is_neither_handed_over_nor_asked_twice(self):
+        place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        real, alias = place / "Samples", place / "Alias"
+        real.mkdir()
+        try:
+            alias.symlink_to(real, target_is_directory=True)
+        except OSError:
+            self.skipTest("this system can't make links here")
+        # `kumi serve` keeps a folder as the disk spells it; the setting, as the producer wrote it.
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": str(real)}, session_id="s1")
+        self.ctx.settings["library_folders"] = [str(alias)]
+        asked = policy.pre_tool_call(self.host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
+                                     tool_call_id="c-scan")
+        lines = asked["message"].splitlines()
+        self.assertEqual("".join(lines[1:lines.index(policy.AUDIO_ONLY)]), f"• {alias}", "once, as the setting has it")
+        self.assertIn("job_id", support.call(self.host, "kumi_library", {"action": "scan"}, session_id="s1"))
+        status = support.call(self.host, "kumi_library", {"action": "status"}, session_id="s1")
+        self.assertEqual(status["folders"], [str(real)], "the runtime had it already")
+
     def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio_and_kumis_own_designs(self):
         generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
         host, _, data = support.host(self, media_roots=[generated])
