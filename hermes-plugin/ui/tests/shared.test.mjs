@@ -1000,7 +1000,7 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   const sources = walk(fileURLToPath(new URL('../src', import.meta.url))).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
   const keys = new Set()
   // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
-  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard|arrange|grow|corner)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
+  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard|arrange|grow|corner|first)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
   for (const file of sources) for (const match of readFileSync(file, 'utf8').matchAll(pattern)) keys.add(match[1])
   // The keys built from a state's name.
   for (const state of ['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown']) keys.add(`settings.states.${state}`)
@@ -1016,6 +1016,8 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   // The map's hint line, built from each gesture it can name and what that does: every state the map can be in.
   const gestures = await load('src/shared/atlas/gestures.ts')
   for (const state of mapStates()) for (const [gesture, deed] of gestures.hintOf(state)) keys.add(`corner.keys.${gesture}`).add(`corner.does.${deed}`)
+  // The first-open steps, each named from its step.
+  for (const step of (await load('src/shared/atlas/first.ts')).FIRST_STEPS) keys.add(`first.${step}`)
   for (const option of ['seconds', 'bpm', 'bars', 'depth', 'stretch', 'attack_from']) keys.add(`make.options.${option}`)
   for (const pairing of design.PAIRINGS) keys.add(`make.resonate.pairings.${pairing}`).add(`make.resonate.pairingHints.${pairing}`)
   for (const ring of design.RINGS) keys.add(`make.resonate.rings.${ring}`)
