@@ -110,6 +110,8 @@ const ARRANGE_MS = 1000
 const POP_MS = 180
 const POP_EACH = 80
 const POP_STEPS = 8
+/** A layout's move draws each sound a tail as long as its way over this many milliseconds, whatever the frame rate. */
+const STREAK_MS = 36
 /** The layouts this plug-in can name, in the order the menu lists them (serve's `arrangements` ids). */
 export const LAYOUTS = ['character', 'texture', 'keys', 'tempo', 'families', 'length', 'folders'] as const
 /** The axis words each layout has (`arrange.<id>.<side>`): its x axis's ends, then its y axis's. */
@@ -354,6 +356,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // move is noted as the layout changes, before the frame that first draws it, so no frame jumps ahead.
   const drawn = useRef<{ model: MapModel; places: Float32Array } | null>(null)
   const shift = useRef<{ from: Float32Array; at: number } | null>(null)
+  // When the map was last painted: a moving sound's tail is as long as its way over a set time (STREAK_MS).
+  const lastPaint = useRef(0)
   const shiftedTo = useRef(arranged)
   if (shiftedTo.current !== arranged) {
     shiftedTo.current = arranged
@@ -554,6 +558,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     // Where each sound is drawn this frame (map units), for the next layout's move to start from.
     const places = drawn.current?.model === model && drawn.current.places.length === count * 2 ? drawn.current.places : new Float32Array(count * 2)
     drawn.current = { model, places }
+    // Where each was drawn a frame ago, while a layout's move runs: each sound trails a short line from there, so the
+    // move reads as a swarm in flight, not a slide. `tailed`: how much of the last frame's way a tail is.
+    const before = from ? places.slice() : null
+    const tailed = STREAK_MS / Math.max(8, now - lastPaint.current)
+    lastPaint.current = now
     const placeOf = (index: number): [number, number, number] => {
       const dot = dots[index]
       const blend = blendOf(index)
@@ -613,6 +622,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
       const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null
+      const tails = pass === 1 && before ? new Map<string, Path2D>() : null
       for (let index = 0; index < count; index++) {
         if (mask[index] !== pass) continue
         const [x, y, blend] = placeOf(index)
@@ -627,9 +637,30 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         const grown = introFor(index)
         halos?.at(color, x, y, grown * (1 - blend))
         shape(path, x, y, blend, grown, glyphAt(index))
+        if (tails && before) {
+          const [dx, dy] = [x - (before[2 * index] * unit + view.dx), y - (before[2 * index + 1] * unit + view.dy)]
+          if (dx * dx + dy * dy > 0.5) {
+            let tail = tails.get(color)
+            if (!tail) {
+              tail = new Path2D()
+              tails.set(color, tail)
+            }
+            tail.moveTo(x - dx * tailed, y - dy * tailed)
+            tail.lineTo(x, y)
+          }
+        }
         if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color])
       }
       halos?.done()
+      if (tails) {
+        context.globalAlpha = 0.5
+        context.lineWidth = Math.max(1, radius * 0.7)
+        context.lineCap = 'round'
+        for (const [color, tail] of tails) {
+          context.strokeStyle = glow.shape(color)
+          context.stroke(tail)
+        }
+      }
       context.globalAlpha = pass ? 0.92 : 0.16
       for (const paths of rounds) {
         for (const [color, path] of paths) {

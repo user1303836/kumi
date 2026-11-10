@@ -8327,6 +8327,7 @@ var ARRANGE_MS = 1e3;
 var POP_MS = 180;
 var POP_EACH = 80;
 var POP_STEPS = 8;
+var STREAK_MS = 36;
 var LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
 var AXES = {
   character: ["left", "right", "top", "bottom"],
@@ -8516,6 +8517,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   }, [model, t]);
   const drawn = useRef11(null);
   const shift = useRef11(null);
+  const lastPaint = useRef11(0);
   const shiftedTo = useRef11(arranged);
   if (shiftedTo.current !== arranged) {
     shiftedTo.current = arranged;
@@ -8670,6 +8672,9 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const from = moving && shifting < 1 && moving.from.length === count2 * 2 ? moving.from : null;
     const places = drawn.current?.model === model && drawn.current.places.length === count2 * 2 ? drawn.current.places : new Float32Array(count2 * 2);
     drawn.current = { model, places };
+    const before = from ? places.slice() : null;
+    const tailed = STREAK_MS / Math.max(8, now - lastPaint.current);
+    lastPaint.current = now;
     const placeOf = (index) => {
       const dot = dots[index];
       const blend = blendOf(index);
@@ -8719,6 +8724,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
       const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null;
+      const tails = pass === 1 && before ? /* @__PURE__ */ new Map() : null;
       for (let index = 0; index < count2; index++) {
         if (mask[index] !== pass) continue;
         const [x, y, blend] = placeOf(index);
@@ -8733,9 +8739,30 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         const grown = introFor(index);
         halos?.at(color, x, y, grown * (1 - blend));
         shape(path, x, y, blend, grown, glyphAt(index));
+        if (tails && before) {
+          const [dx, dy] = [x - (before[2 * index] * unit + view.dx), y - (before[2 * index + 1] * unit + view.dy)];
+          if (dx * dx + dy * dy > 0.5) {
+            let tail = tails.get(color);
+            if (!tail) {
+              tail = new Path2D();
+              tails.set(color, tail);
+            }
+            tail.moveTo(x - dx * tailed, y - dy * tailed);
+            tail.lineTo(x, y);
+          }
+        }
         if (pass === 1 && ++onScreen <= NAMES_ON_SCREEN) labelled.push([x, y, index, color]);
       }
       halos?.done();
+      if (tails) {
+        context.globalAlpha = 0.5;
+        context.lineWidth = Math.max(1, radius * 0.7);
+        context.lineCap = "round";
+        for (const [color, tail] of tails) {
+          context.strokeStyle = glow.shape(color);
+          context.stroke(tail);
+        }
+      }
       context.globalAlpha = pass ? 0.92 : 0.16;
       for (const paths of rounds) {
         for (const [color, path] of paths) {
