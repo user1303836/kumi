@@ -183,7 +183,7 @@ def cli_parser(parser: argparse.ArgumentParser) -> None:
                                                         "`add <folder>` adds one, asking you first")
     samples_choices = samples_parser.add_subparsers(dest="samples_action")
     add = samples_choices.add_parser("add", help="add a sample folder, after showing what Kumi will read")
-    add.add_argument("folder", nargs="+", help="the folder's full path; one with spaces needs no quotes")
+    add.add_argument("folder", nargs="+", help="the folder's full path, in quotes when it has spaces or & in it")
 
 
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
@@ -290,7 +290,7 @@ def cli_samples(host: tools.Host, action: str | None, words: list[str] | None = 
     if refusal is not None:
         print(policy.refused("Kumi didn't add the folder", refusal), file=stdout)
         return 1
-    if folder in host.library_folders():
+    if snapshots.has_folder(host.library_folders(), folder):
         print(f"Kumi already has {_said(folder, 4096)}. {SCAN_NEXT}", file=stdout)
         return 0
     if not (stdin.isatty() and stdout.isatty()):

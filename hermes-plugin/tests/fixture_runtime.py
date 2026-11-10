@@ -76,6 +76,10 @@ class Fixture:
         self.device_files: dict[str, str] = {}  # a preview's file, by its spec's SHA-256 (W1-B)
         self.preset_files: set[str] = set()  # the .vstpreset labels Kumi wrote in its User Library folders (CC-26)
         self.wavetables: set[str] = set()  # the wavetable names Kumi wrote (the plugin-parity contract)
+        self.library_calls: dict[tuple, tuple[str, dict]] = {}  # what each host call asked the library, and its answer
+        if options.real_folders:  # as serve's `granted`: a root that isn't a folder now grants nothing; kept canonical
+            roots = [os.path.realpath(root) for root in options.library_root if os.path.isdir(root)]
+            options.library_root = list(dict.fromkeys(roots))
         self.seq = 0
         self.connected = False
         self.playing = False  # whether transport's play started it (CC-17)
@@ -837,14 +841,42 @@ SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", 
 
 
 def library(fixture: Fixture, args: dict, host: dict) -> dict:
-    """The library tool. One scan runs at a time (the busy guard, held until it settles); cancel answers only for the
-    scan running or still settling from a cancel, again on a repeat (CC-14's 14a), and `not_running` for any other."""
+    """The library tool. As kumi serve's outer dedup (mcp.rs): add_folder and scan aren't reads, so one runs per host
+    call id; the same id asking for the same again gets the first answer, and asking for anything else is refused
+    `duplicate`. status and cancel are reads."""
+    if args.get("action") not in ("add_folder", "scan") or not host.get("tool_call_id"):
+        return library_action(fixture, args)
+    call = (host.get("profile_id"), host.get("session_id"), host["tool_call_id"])
+    asked = json.dumps(args, sort_keys=True)
+    earlier = fixture.library_calls.get(call)
+    if earlier is None:
+        earlier = fixture.library_calls[call] = (asked, library_action(fixture, args))
+    elif earlier[0] != asked:
+        return error("duplicate", "This host call already ran with other arguments: a call is run once, as first asked.")
+    return earlier[1]
+
+
+def library_action(fixture: Fixture, args: dict) -> dict:
+    """One scan runs at a time (the busy guard, held until it settles); cancel answers only for the scan running or
+    still settling from a cancel, again on a repeat (CC-14's 14a), and `not_running` for any other. With
+    `--real-folders`, a folder is taken as serve takes one (`canonical_local_path`): a folder there now with no link
+    on the way, kept as the disk spells it."""
     action = args.get("action")
     if action == "add_folder":
-        fixture.options.library_root.append(args["folder"])
+        folder = args["folder"]
+        if fixture.options.real_folders:
+            steps = [Path(*Path(folder).parts[:at]) for at in range(2, len(Path(folder).parts) + 1)]
+            if any(step.is_symlink() for step in steps) or not os.path.isdir(folder):
+                return error("invalid", "Choose an existing folder on this computer by its full path: not a link, a "
+                                        "network share or a device.")
+            folder = os.path.realpath(folder)
+        if folder not in fixture.options.library_root:
+            fixture.options.library_root.append(folder)
     if action == "scan":  # a scan job, its file written as kumi serve writes jobs/<id>.json
         if any(state in ("running", "cancelling") for state in fixture.scans.values()):
             return error("busy", "a scan is already running")
+        if fixture.options.real_folders and not fixture.options.library_root:
+            return error("no_folders", "Approve a local sample folder with add_folder before scanning.")
         job_id = f"j-scan-{len(fixture.scans) + 1}"
         fixture.scans[job_id] = "running"
         fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.seq + 1, "at": now(), "job_id": job_id,
@@ -1430,6 +1462,8 @@ def main() -> None:
     parser.add_argument("--quiet", action="append", default=[], help="never tell a subscriber this URI changed")
     parser.add_argument("--publish-at-start", action="store_true", help="write HISTORY and FOCUS as it starts")
     parser.add_argument("--library-root", action="append", default=[])
+    parser.add_argument("--real-folders", action="store_true",
+                        help="take a sample folder as kumi serve does: there now, no link on the way, kept canonical")
     parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
     parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")
     parser.add_argument("--media-root", action="append", default=[])

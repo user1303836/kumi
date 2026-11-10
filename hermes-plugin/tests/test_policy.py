@@ -522,8 +522,12 @@ class Approvals(unittest.TestCase):
         self.assertIn("no approved sample folders", self.hook("kumi_library", {"action": "scan"})["message"])
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
         decision = self.hook("kumi_library", {"action": "scan"})
-        self.assertEqual(decision["rule_key"], "kumi:folder_read:scan:s1")
+        self.assertRegex(decision["rule_key"], r"^kumi:folder_read:scan\+[0-9a-f]{16}:s1$")
         self.assertIn(f"• {support.DRUMS}\n{policy.AUDIO_ONLY}\n{policy.CHAT_ONLY}", decision["message"])
+        # The key is these folders': allowing scans for the session or always never covers one added later.
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": str(support.SAMPLES / "Breaks")},
+                     session_id="s1")
+        self.assertNotEqual(self.hook("kumi_library", {"action": "scan"})["rule_key"], decision["rule_key"])
 
     def test_a_folder_and_its_first_scan_are_one_approval_that_names_everything_the_scan_reads(self):
         breaks = str(support.SAMPLES / "Breaks")
@@ -534,9 +538,11 @@ class Approvals(unittest.TestCase):
         self.assertIn("scan it now", lines[0])
         self.assertEqual(lines[1:3], [f"• {breaks}", policy.AUDIO_ONLY])
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
-        lines = self.hook("kumi_library", both)["message"].splitlines()
+        beside = self.hook("kumi_library", both)
+        lines = beside["message"].splitlines()
         self.assertEqual(lines[1:5], [f"• {breaks}", "The scan reads your other sample folders again too:",
                                       f"• {support.DRUMS}", policy.AUDIO_ONLY])
+        self.assertTrue(beside["rule_key"].startswith(f"kumi:folder_read:scan:{breaks}+"), "and the others it reads")
         self.assertEqual(self.hook("kumi_library", {**both, "folder": "Breaks"})["action"], "block", "the guard first")
         for wrong in ({"action": "scan", "scan": True}, {**both, "scan": 1}):
             with self.subTest(args=wrong):

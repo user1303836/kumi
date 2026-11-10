@@ -254,15 +254,16 @@ def library_folders() -> dict:
 
 def _library_folder(body: object) -> dict:
     """`POST /library/folder`'s work, off the event loop: the folder guard's answer for a folder the producer typed or
-    picked (`snapshots.typed_library_folder`): the folder as Kumi would keep it and whether it's already one of them,
-    or the guard's refusal in its own words. It writes nothing and adds nothing."""
+    picked (`snapshots.typed_library_folder`): the folder's real place, as Kumi would keep it, and whether it's
+    already one of them under any spelling; or the guard's refusal in its own words. It writes nothing and adds
+    nothing."""
     folder = body.get("folder") if isinstance(body, dict) else None
     if not isinstance(folder, str) or len(folder) > 4096:
         raise HTTPException(status_code=400, detail="The body must be {\"folder\": \"<a folder's full path>\"}.")
     normal, refusal = snapshots.typed_library_folder(folder, hermes_home=snapshots.hermes_home())
     if normal is None:
         return {"refusal": refusal}
-    return {"folder": normal, "known": normal in _library_folders()}
+    return {"folder": normal, "known": snapshots.has_folder(_library_folders(), normal)}
 
 
 @router.post("/library/folder")

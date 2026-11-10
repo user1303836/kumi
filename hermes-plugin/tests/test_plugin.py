@@ -256,28 +256,69 @@ class Tools(unittest.TestCase):
         self.assertEqual(started["argv"][at:at + 2], ["--library-root", support.DRUMS])
         self.assertEqual(self.received("connect"), [], "no DAW was asked for")
 
+    @staticmethod
+    def library_calls(data: Path) -> list[tuple[str, str]]:
+        """Each add_folder and scan the runtime got, with the host call id it went under."""
+        sent = [m["params"]["arguments"] for m in support.requests(data / "state")
+                if m.get("params", {}).get("name") == "library"]
+        return [(args["action"], args["_host"]["tool_call_id"]) for args in sent if args["action"] in ("add_folder", "scan")]
+
     def test_a_folder_and_its_first_scan_run_as_one_call(self):
         made = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS, "scan": True},
                             session_id="s1")
         self.assertIn("job_id", made, "the scan's job, to follow with kumi_job")
         self.assertEqual((made["added"], made["folders"]), (support.DRUMS, [support.DRUMS]))
         self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS])
-        sent = self.received("library")
-        self.assertEqual([args["action"] for args in sent if args["action"] != "status"], ["add_folder", "scan"])
-        self.assertFalse([args for args in sent if "scan" in args], "`scan` is the plugin's word, never the runtime's")
+        (add, call), (scan, step) = self.library_calls(self.data)
+        self.assertEqual((add, scan, step), ("add_folder", "scan", f"{call}:scan"),
+                         "each under a host call of its own: the runtime runs one per id, and refuses another")
+        self.assertFalse([args for args in self.received("library") if "scan" in args], "`scan` never reaches the runtime")
+        # A scan that can't start (the first is still running) still says the folder was kept.
+        breaks = str(support.SAMPLES / "Breaks")
+        again = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": breaks, "scan": True},
+                             session_id="s1")
+        self.assertEqual((again["added"], again["error"]["code"]), (breaks, "busy"), again)
+        self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS, breaks])
         for wrong in ({"action": "scan", "scan": True}, {"action": "add_folder", "folder": support.DRUMS, "scan": "yes"}):
             with self.subTest(args=wrong):
                 self.assertIn("scan goes only with add_folder", support.call(self.host, "kumi_library", wrong)["blocked"])
 
-    def test_a_scan_takes_in_a_folder_added_from_the_terminal_while_the_runtime_was_running(self):
-        support.call(self.host, "kumi_connect", {}, session_id="s1")  # the chat's runtime, started with no folders
-        self.ctx.settings["library_folders"] = [support.DRUMS]  # as `hermes kumi samples add` leaves the setting
-        asked = policy.pre_tool_call(self.host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
-                                     tool_call_id="c-scan")
-        self.assertEqual(asked["message"].splitlines()[1], f"• {support.DRUMS}", "the approval names it")
-        self.assertIn("job_id", support.call(self.host, "kumi_library", {"action": "scan"}, session_id="s1"))
-        status = support.call(self.host, "kumi_library", {"action": "status"}, session_id="s1")
-        self.assertEqual(status["folders"], [support.DRUMS], "the running runtime was handed it, once")
+    def test_a_scan_reads_a_folder_added_from_the_terminal_and_names_one_it_had_to_leave_out(self):
+        host, ctx, data = support.host(self, None, "--real-folders")  # folders taken as `kumi serve` takes them
+        ctx.surface = "desktop"  # where an approval shows whole: the terminal's panel is too short for these paths
+        place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        drums, breaks, gone, alias = place / "Drums", place / "Breaks", place / "Unplugged", place / "Alias"
+        drums.mkdir()
+        breaks.mkdir()
+        try:
+            alias.symlink_to(breaks, target_is_directory=True)
+        except OSError:
+            alias = breaks  # no links here: the folder under its own name
+        support.call(host, "kumi_connect", {}, session_id="s1")  # the chat's runtime, started with no folders
+        ctx.settings["library_folders"] = [str(drums), str(gone), str(alias)]  # added since, outside the chat
+
+        def asked() -> dict:
+            return policy.pre_tool_call(host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
+                                        tool_call_id="c-scan")
+
+        first = asked()
+        lines = first["message"].splitlines()
+        self.assertEqual("".join(lines[1:lines.index(policy.AUDIO_ONLY)]), f"• {drums}• {breaks}",
+                         "what the scan will read, by its real place, and not the folder that's gone")
+        self.assertRegex(first["rule_key"], r"^kumi:folder_read:scan\+[0-9a-f]{16}:s1$")
+        made = support.call(host, "kumi_library", {"action": "scan"}, session_id="s1")
+        self.assertIn("job_id", made, made)
+        self.assertEqual(made["left_out"], [{"folder": str(gone), "reason": tools.NOT_THERE}])
+        status = support.call(host, "kumi_library", {"action": "status"}, session_id="s1")
+        self.assertEqual(status["folders"], [str(drums), str(breaks)], "the running runtime was handed them, once")
+        ids = [ident for _, ident in self.library_calls(data)]
+        self.assertEqual((len(ids), len(set(ids))), (3, 3), "two adds and the scan, each a host call of its own")
+        # An approval given for the session or for always covers these folders, and never one added since.
+        self.assertEqual(asked()["rule_key"], first["rule_key"], "the same folders, now all the runtime's")
+        loops = place / "Loops"
+        loops.mkdir()
+        ctx.settings["library_folders"] = [*ctx.settings["library_folders"], str(loops)]
+        self.assertNotEqual(asked()["rule_key"], first["rule_key"], "a folder added since: the scan asks again")
 
     def test_a_folder_the_runtime_has_as_the_disk_spells_it_is_neither_handed_over_nor_asked_twice(self):
         place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
@@ -458,6 +499,23 @@ class Command(unittest.TestCase):
         self.assertIn("only in Hermes on your computer", commands.kumi(host, f"samples add {folder}"), "nobody says")
         self.assertEqual(ctx.settings["library_folders"], [])
         self.assertEqual(commands.kumi(host, f"samples add {folder}", platform="desktop").splitlines()[1], f"• {folder}")
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+
+    def test_a_typed_folder_is_kept_by_its_real_place_and_never_twice(self):
+        commands = support.module("commands")
+        host, ctx, _ = support.host(self)
+        folder = self.folder()
+        alias = folder.parent / "Alias"
+        try:
+            alias.symlink_to(folder, target_is_directory=True)
+        except OSError:
+            self.skipTest("this system can't make links here")
+        said = commands.kumi(host, f"samples add {alias}").splitlines()
+        self.assertEqual(said[1], f"• {folder}", "where it leads: what Kumi reads, and the path its runtime takes")
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+        out = io.StringIO()
+        self.assertEqual(commands.cli_samples(host, "add", [str(alias)], stdout=out), 0)
+        self.assertIn("already has", out.getvalue(), "the same place under another name")
         self.assertEqual(ctx.settings["library_folders"], [str(folder)])
 
     def test_the_terminal_shows_the_folder_and_adds_it_only_after_a_yes(self):

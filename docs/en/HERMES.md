@@ -59,12 +59,14 @@ evaluation takes about two minutes: install it from [reaper.fm](https://www.reap
   and scan**: the request goes to Kumi's chat, and Hermes asks once for the folder and its first scan.
 - **Web dashboard:** the same control copies the request, to paste into a Hermes chat.
 - **Terminal:** `hermes kumi samples` lists them. `hermes kumi samples add <folder>` shows what Kumi will read and asks
-  before it adds the folder; a path with spaces needs no quotes.
+  before it adds the folder. Put a path that has spaces or `&` in quotes.
 - **A chat:** `/kumi samples` lists them, and `/kumi samples add <folder>` adds one in Hermes's own apps (its terminal,
   Desktop). From a chat app (Discord, Slack, Telegram…) Kumi refuses.
-- Every way goes through the same check as asking Hermes (the Sample folders setting below says what a folder can't
-  be), and a mistyped path is refused where you typed it. Nothing is read until a scan, whose approval names every
-  folder. To remove a folder, edit Sample folders in Kumi's settings.
+- Every way goes through the same guard (the Sample folders setting below says what a folder can't be). A mistyped
+  path is refused where you typed it, and a folder reached through a link is kept by where it really is.
+- Nothing is read until a scan, whose approval names every folder it reads. Allowing scans for the session or for
+  always covers those folders only: add one, and the next scan asks again. A folder that's gone (an unplugged drive)
+  is left out of a scan, and Kumi says which. To remove a folder, edit Sample folders in Kumi's settings.
 
 The first DAW you set up becomes Kumi's DAW (the DAW setting), in the same approval. Setting up another DAW later
 leaves Kumi with the one it has; setup then names the step that switches: `hermes kumi setup --daw <daw> --use` in a

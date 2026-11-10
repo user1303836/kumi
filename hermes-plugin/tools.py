@@ -1962,39 +1962,75 @@ def library_refusal(args: dict) -> str | None:
 def keep_library_folder(host: Host, folder: str) -> bool:
     """Keep a folder the producer added themself, outside a tool call (`hermes kumi samples add`, `/kumi samples add`;
     `folder` is the guard's answer for it), in the library_folders setting: the next runtime starts with it, and one
-    already running is handed it before its next scan (`hand_over_folders`). False when it was there already."""
+    already running is handed it before its next scan (`hand_over_folders`). False when it was there already, under
+    any spelling."""
     folders = host.library_folders()
-    if folder in folders:
+    if snapshots.has_folder(folders, folder):
         return False
     host.set_library_folders([*folders, folder])
     return True
 
 
-def hand_over_folders(host: Host, live: runtime.Runtime, kwargs: dict) -> None:
-    """Before a scan: give a running runtime the settings' sample folders it doesn't have. A runtime reads its folders
-    when it starts, so one added since outside a tool call (the terminal, `/kumi samples add`, Hermes's settings) is
-    only in the setting, and the scan would pass it by. The scan's approval names them all (`policy._library`). One
-    the runtime has under another spelling (it keeps the disk's) is left alone, and one it refuses stays out of this
-    scan."""
-    wanted = host.library_folders()
-    if not wanted:
-        return
-    status = live.call("library", {"action": "status"}, host.identity(kwargs), timeout=READ_TIMEOUT)
-    known = {snapshots.same_place(folder) for folder in status.get("folders") or [] if isinstance(folder, str)}
-    for folder in wanted:
-        if snapshots.same_place(folder) in known:
+def step_identity(host: Host, kwargs: dict, step: str) -> dict:
+    """Hermes's identity for a call a tool makes besides its own (a scan's hand-over, the scan after an add). The
+    runtime runs one call that isn't a read per host call id, and refuses another with other arguments (`duplicate`,
+    kumi serve's outer dedup), so each such call goes under the tool call's id with its step after it. With no id
+    (never made up) it has none, and the runtime dedups nothing."""
+    identity = host.identity(kwargs)
+    ident = identity["tool_call_id"]
+    return {**identity, "tool_call_id": f"{ident}:{step}" if ident else None}
+
+
+NOT_THERE = "it isn't a folder on this computer now."
+
+
+def folders_to_hand_over(host: Host, running: list[str]) -> tuple[list[str], list[dict]]:
+    """What a scan gives a running runtime first, and what it leaves out. A runtime reads its folders when it starts,
+    so one added since outside a tool call (the terminal, `/kumi samples add`, Hermes's settings) is only in the
+    setting. `running` is the runtime's own list, as the disk spells it, so folders are told apart by their real place
+    (`snapshots.same_place`). Each folder to hand over goes by its real place, the only path the runtime takes for one
+    (it refuses a link on the way). One that isn't a folder now (an unplugged drive, a renamed folder) is left out,
+    with why. The scan's approval names the first list (`policy._library`); the scan's answer, the second."""
+    known = {snapshots.same_place(folder) for folder in running}
+    hand: list[str] = []
+    left: list[dict] = []
+    for folder in host.library_folders():
+        place = snapshots.same_place(folder)
+        if place in known:
             continue
-        answer = live.call("library", {"action": "add_folder", "folder": folder}, host.identity(kwargs),
-                           timeout=READ_TIMEOUT)
-        if "error" in answer:
-            log.warning("Kumi's runtime didn't take a sample folder from the settings: %s", answer["error"])
+        known.add(place)
+        real = snapshots.real_folder(folder)
+        if real is None:
+            left.append({"folder": folder, "reason": NOT_THERE})
+        else:
+            hand.append(real)
+    return hand, left
+
+
+def hand_over_folders(host: Host, live: runtime.Runtime, kwargs: dict) -> list[dict]:
+    """Before a scan: give the running runtime the settings' folders it lacks (`folders_to_hand_over`), each as a call
+    of its own. One the runtime refuses is left out of this scan too, in the runtime's words, and the rest are still
+    read. Returns the folders left out, for the scan's answer."""
+    status = live.call("library", {"action": "status"}, host.identity(kwargs), timeout=READ_TIMEOUT)
+    running = [folder for folder in status.get("folders") or [] if isinstance(folder, str)]
+    hand, left = folders_to_hand_over(host, running)
+    for at, folder in enumerate(hand, 1):
+        try:
+            live.call("library", {"action": "add_folder", "folder": folder}, step_identity(host, kwargs, f"add:{at}"),
+                      timeout=READ_TIMEOUT)
+        except runtime.Refused as refused:
+            log.warning("Kumi's runtime didn't take a sample folder from the settings: %s", refused.reason)
+            left.append({"folder": folder, "reason": refused.reason})
+    return left
 
 
 def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     """The library tool; a folder the producer approved adding is also kept in the plugin's library_folders setting, so
     the next runtime starts with it (`--library-root`). With `scan`, an added folder is scanned at once, under the one
-    approval that said so: the scan's job comes back with the folders. A cancel asks the runtime to stop the scan it
-    names (CC-14): the reply acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
+    approval that said so: the scan's job comes back with the folder (`added`), and if the scan didn't start, its
+    error does, still saying the folder was kept. A scan first hands the runtime the settings' folders it lacks, and
+    names any it left out (`left_out`). A cancel asks the runtime to stop the scan it names (CC-14): the reply
+    acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
     refusal = library_refusal(args)
     if refusal is not None:
         return {"error": {"code": "invalid", "reason": refusal}}
@@ -2009,15 +2045,31 @@ def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
         sent = {**sent, "folder": folder}
     live = host.started(kwargs.get("session_id")) if action in ("add_folder", "scan") else host.live()
     if action == "scan":
-        hand_over_folders(host, live, kwargs)
+        left_out = hand_over_folders(host, live, kwargs)
+        try:
+            result = live.call("library", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
+        except runtime.Refused as refused:
+            if not left_out:
+                raise
+            return {**refused.as_json(), "left_out": left_out}
+        return {**result, "left_out": left_out} if left_out else result
     result = live.call("library", sent, host.identity(kwargs), timeout=READ_TIMEOUT)
-    if action == "add_folder" and "error" not in result:
-        keep_library_folder(host, sent["folder"])
-        if args.get("scan") is True:
-            hand_over_folders(host, live, kwargs)
-            scanned = live.call("library", {"action": "scan"}, host.identity(kwargs), timeout=READ_TIMEOUT)
-            result = {**scanned, "added": sent["folder"], "folders": result.get("folders")}
-    return result
+    if action != "add_folder":
+        return result
+    keep_library_folder(host, sent["folder"])
+    if args.get("scan") is not True:
+        return result
+    kept: dict = {"added": sent["folder"], "folders": result.get("folders")}
+    try:  # the folder is kept whatever the scan does: its answer says so either way
+        left_out = hand_over_folders(host, live, kwargs)
+        if left_out:
+            kept["left_out"] = left_out
+        scanned = live.call("library", {"action": "scan"}, step_identity(host, kwargs, "scan"), timeout=READ_TIMEOUT)
+    except runtime.Refused as refused:
+        return {**kept, **refused.as_json()}
+    except runtime.Unavailable as failure:
+        return {**kept, "error": {"code": failure.code, "reason": failure.reason}}
+    return {**scanned, **kept}
 
 
 def kumi_generate(host: Host, args: dict, **kwargs: Any) -> dict:

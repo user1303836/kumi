@@ -9,11 +9,12 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 ## Folders
 - **Kumi reads only the folders the producer added.**
   - `kumi_library` with `action: add_folder` and an absolute path adds one; the producer approves it.
-  - **When the producer names a folder and asks to add and scan it** (the map's Sample folders sends "add this sample folder and scan it: <path>"): one call, `action: add_folder` with that path exactly as given and `scan: true`. One approval covers the folder and its scan, and the scan's `job_id` comes back: follow it with `kumi_job`.
+  - **When the producer names a folder and asks to add and scan it** (the map's Sample folders sends "add this sample folder and scan it: <path>"): one call, `action: add_folder` with that path exactly as given and `scan: true`. One approval covers the folder and its scan, and the scan's `job_id` comes back with `added`: follow it with `kumi_job`. If the answer has `added` and an `error`, the folder was kept and only the scan didn't start: say so, and scan again when the producer asks.
   - The producer can also add one themself (`hermes kumi samples add <folder>`, `/kumi samples add <folder>`, the map's Sample folders): the next scan reads it, and its approval names it.
   - With no path given, ask which folder to add. Never guess one, and never suggest scanning a whole disk or home folder.
 - **`action: scan` builds or refreshes the map.**
   - The producer approves it, and it runs as a job: follow it with `kumi_job`.
+  - `left_out` in its answer lists folders the scan couldn't read (one that isn't there now, such as an unplugged drive): tell the producer which, and why.
   - To stop it, when the producer asks: `action: cancel` with the scan's `job_id`. That only asks: the scan has stopped once `kumi_job` says `cancelled`, and only then can another scan start. The map stays as it was.
   - `action: status` says what's there.
 

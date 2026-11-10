@@ -284,11 +284,14 @@ project as…** with **Copy all media into project directory**), or they'll miss
   you ask for (REAPER and Renoise); and finished audio other Hermes plugins saved in
   `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it. To tell which version of
   Serum 2, Pro-Q 4 or Ozone 12 you have, the VST3 metadata in your standard plug-in folders (it never loads a plug-in).
-- **Who can add a sample folder:** you, by its full path, and every way goes through the same check. In the sound
+- **Who can add a sample folder:** you, by its full path, and every way goes through the same guard. In the sound
   map's **Sample folders**, Desktop sends the request to Kumi's chat (the dashboard copies it), and Hermes asks once
   for the folder and its first scan. `hermes kumi samples add <folder>` shows the folder and asks y/N in the terminal.
   `/kumi samples add <folder>` adds it on your typed command, in Hermes's own apps only: a chat app is refused. Or
-  ask Hermes, which asks you. Nothing in a folder is read until a scan, whose approval names every folder.
+  ask Hermes, which asks you. A folder you type is kept by where it really is (a link is followed first, and shown).
+  Nothing in a folder is read until a scan, whose approval names every folder it reads. Allowing scans for the session
+  or for always covers those folders only: add one, and the next scan asks again. A folder that's gone (an unplugged
+  drive) is left out of a scan, and Kumi says which.
 - **Approvals:** by default (`ask_before_changes` off) Kumi makes changes, undos, track and mix listens, play, takes,
   presets, and scripts and devices in a chat that hasn't read outside content without asking; each change still goes
   into HISTORY, and most can be undone. Setup steps, sample-folder adds and scans, Mirelo uploads and paid

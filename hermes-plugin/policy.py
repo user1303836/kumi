@@ -21,6 +21,7 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 from __future__ import annotations
 
 import collections
+import hashlib
 import itertools
 import json
 import logging
@@ -841,10 +842,11 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
         live = None
 
     def scanned() -> list[str] | dict:
-        """The folders a scan reads, or the block when the runtime can't say: a running runtime's own, then the
-        settings' it lacks, which the tool hands it before the scan (`tools.hand_over_folders`); with none running,
-        the settings', which the runtime the tool starts is given (its --library-root). A folder the runtime has is
-        shown as the settings spell it, when they have it too: the runtime's own spelling is the disk's."""
+        """The folders a scan reads, or the block when the runtime can't say. A running runtime's own come first,
+        shown as the settings spell them when they have them too (the runtime's spelling is the disk's), then the
+        settings' it lacks, by their real place, which the tool hands it before the scan
+        (`tools.folders_to_hand_over`; one that isn't a folder now is left out there, and the scan's answer names
+        it). With no runtime running, the settings', which the one the tool starts is given (its --library-root)."""
         kept = host.library_folders()
         if live is None:
             return kept
@@ -852,10 +854,17 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
             status = _ask(host, "library", {"action": "status"}, kwargs)
         except (runtime.Unavailable, runtime.Refused) as failure:
             return block(refused("Kumi didn't scan anything", _reason(failure)))
+        running = [folder for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
         spelled = {snapshots.same_place(folder): folder for folder in kept}
-        running = [spelled.get(snapshots.same_place(folder), folder)
-                   for folder in status.get("folders") or [] if isinstance(folder, str) and folder]
-        return [*running, *(folder for folder in kept if folder not in running)]
+        handed, _ = tools.folders_to_hand_over(host, running)
+        return [*(spelled.get(snapshots.same_place(folder), folder) for folder in running), *handed]
+
+    def keyed(key: str, folders: list[str]) -> str:
+        """A scan's rule key: `key`, then a digest of the folders it reads (their real places, so a spelling changes
+        nothing). An approval given for the session or for always covers scans of those folders, and never one that
+        reads a folder it didn't name: after a folder is added, by any door, the next scan asks again."""
+        places = sorted({snapshots.same_place(folder) for folder in folders})
+        return f"{key}+{hashlib.sha256(chr(10).join(places).encode('utf-8')).hexdigest()[:16]}" if places else key
 
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
@@ -868,18 +877,20 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
         if isinstance(folders, dict):
             return folders
         place = snapshots.same_place(folder)
-        others = [line for other in folders if snapshots.same_place(other) != place for line in _path_lines(other)]
+        others = [other for other in folders if snapshots.same_place(other) != place]
         return approve(["Kumi: read the audio files in this folder and its subfolders, and scan it now for your sound "
                         "map:", *_path_lines(folder),
-                        *(["The scan reads your other sample folders again too:", *others] if others else []),
-                        AUDIO_ONLY], f"kumi:folder_read:scan:{folder}")
+                        *(["The scan reads your other sample folders again too:",
+                           *(line for other in others for line in _path_lines(other))] if others else []),
+                        AUDIO_ONLY], keyed(f"kumi:folder_read:scan:{folder}", others))
     folders = scanned()
     if isinstance(folders, dict):
         return folders
     if not folders:
         return block("Kumi didn't scan anything: it has no approved sample folders yet. Add one first.")
     return approve(["Kumi: scan these sample folders and update your sound map, in the background:",
-                    *(line for folder in folders for line in _path_lines(folder)), AUDIO_ONLY], "kumi:folder_read:scan")
+                    *(line for folder in folders for line in _path_lines(folder)), AUDIO_ONLY],
+                   keyed("kumi:folder_read:scan", folders))
 
 
 def _path_lines(path: str) -> list[str]:

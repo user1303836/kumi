@@ -71,10 +71,13 @@ class Routes(unittest.TestCase):
 
         check = self.api._library_folder
         self.assertEqual(self.api.library_folders(), {"folders": [str(self.library)]})
-        self.assertEqual(check({"folder": f' "{self.library}{os.sep}" '}), {"folder": str(self.library), "known": True})
+        # The answer is the folder's real place (macOS's temporary folder is reached through a link), and it's known
+        # under whatever spelling the setting has.
+        self.assertEqual(check({"folder": f' "{self.library}{os.sep}" '}),
+                         {"folder": os.path.realpath(self.library), "known": True})
         more = Path(self.tmp.name) / "More Samples"
         more.mkdir()
-        self.assertEqual(check({"folder": str(more)}), {"folder": str(more), "known": False})
+        self.assertEqual(check({"folder": str(more)}), {"folder": os.path.realpath(more), "known": False})
         for typed, why in (("samples", "isn't a full path"), (str(more / "Kicks"), "there's no folder at"),
                            ("~", "home folder"), (os.path.abspath(os.sep), "whole drive or volume")):
             with self.subTest(typed=typed):
