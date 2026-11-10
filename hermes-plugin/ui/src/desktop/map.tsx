@@ -10,15 +10,18 @@ import { host } from '@hermes/plugin-sdk'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, soundRequest } from '../shared/format.ts'
-import { useRequest } from '../shared/design.ts'
+import { jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { sourceOfResult, useRequest } from '../shared/design.ts'
+import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
-import { MakePanel } from '../shared/MakePanel.tsx'
+import { MakePanel, sideSheetWidth } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { kitRequest } from '../shared/palette.ts'
+import { ToolButton } from '../shared/mapUi.tsx'
+import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
 import { errorText, type KumiStore } from '../shared/store.ts'
+import { nextSteps } from '../shared/steps.ts'
 import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
@@ -27,6 +30,14 @@ import { ownerSession } from './pane.tsx'
 export const HOVER_PLAY = 'mapHover'
 /** Desktop's own storage key for the square-tile view (off until the producer turns it on). */
 export const TILES = 'mapTiles'
+/** Desktop's own storage key for whether the palette drawer is open (open until the producer folds it). */
+export const PALETTE_OPEN = 'paletteOpen'
+/** Desktop's own storage key for the map's layout (similarity, '', until the producer picks another). */
+export const LAYOUT = 'mapLayout'
+/** How wide the map must be for the Make panel to float beside it rather than over its lower part. */
+const SIDE_SHEET = 820
+/** Setup's states with no usable runtime: nothing builds the map until setup runs. */
+const RUNTIME_MISSING: Record<string, true> = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true }
 
 // The first sixteen pads as Live's Drum Rack shows them: C1 (note 36) bottom left, D#2 (51) top right.
 const PAD_ROWS = [48, 44, 40, 36].map(start => [start, start + 1, start + 2, start + 3])
@@ -81,29 +92,77 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   const [padsFor, setPadsFor] = useState<null | string>(null)
   const [hover, setHover] = useState(() => ctx.storage.get<boolean>(HOVER_PLAY, true) !== false)
   const [tiles, setTiles] = useState(() => ctx.storage.get<boolean>(TILES, false) === true)
+  const [layout, setLayout] = useState(() => ctx.storage.get<string>(LAYOUT, '') ?? '')
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }),
     left: id => setSelected(current => (current === id ? null : current))
   })
+  // Grow: its renders go through the store; the handle's point plays as soon as it's grown.
+  const playMade = (id: string) => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))
+  const grow = useGrow(request => store.design(request), result => playMade(result.artifact_id), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(() => ctx.storage.get<boolean>(PALETTE_OPEN, true) !== false)
+  // How wide the map is: wide enough, and the Make panel floats beside it, the map moving into the room it leaves.
+  const area = useRef<HTMLDivElement | null>(null)
+  const [areaWidth, setAreaWidth] = useState(0)
+  useEffect(() => {
+    const element = area.current
+    if (!element) return
+    const observer = new ResizeObserver(entries => setAreaWidth(entries[0]?.contentRect.width ?? 0))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const beside = areaWidth >= SIDE_SHEET
   const session = ownerSession(state)
   const map = state.map
-  const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
+  // An empty map says what builds it and offers that step: setup when Kumi's runtime is missing (the pane's own steps,
+  // one per DAW until one is chosen, sent as the pane sends them), the scan's progress while one runs, else a request
+  // to scan (Kumi asks which folder when none is set up).
+  const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ''] ? nextSteps(state, t) : []
+  const scanning = Object.values(state.jobs).find(job => job.kind === 'scan' && (job.state === 'running' || job.state === undefined))
+  const empty =
+    state.available === false ? (
+      t('map.agentOff')
+    ) : map === null ? (
+      t('map.reading')
+    ) : scanning ? (
+      <>
+        {t('map.scanningNow')}
+        {jobWords(scanning, t).detail && <div style={{ marginTop: 6, color: T.faint }}>{jobWords(scanning, t).detail}</div>}
+      </>
+    ) : (
+      <>
+        {setupSteps.length > 0 ? t('map.setupFirst') : t('map.empty')}
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
+          {setupSteps.length > 0 ? (
+            setupSteps.map(step => (
+              <TextButton key={step.request} onClick={() => void ask(ctx, step.request, { send: true, session: null })} strong={setupSteps.length === 1}>
+                {step.label}
+              </TextButton>
+            ))
+          ) : (
+            <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} strong title={t('map.scanTitle')}>
+              {t('map.scan')}
+            </TextButton>
+          )}
+        </div>
+      </>
+    )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {/* The Make panel floats over the map, not the dock: a kept sound lands in the dock in view. */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      {/* The Make panel floats over the map, not the palette: a kept sound lands in the palette in view. */}
+      <div ref={area} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <MapCanvas
+          audio={id => audition.url(id)}
+          coverRight={palette.making && beside ? sideSheetWidth(areaWidth) + 16 : 0}
+          onStop={() => audition.stop()}
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)
             const near = nearRequest([{ id, name: sound.name }], map?.revision)
             return (
               <>
-                <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))} title={t('map.playTitle')}>
-                  {playing === id ? t('map.stop') : t('map.play')}
-                </TextButton>
                 <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
                   {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                 </TextButton>
@@ -157,6 +216,28 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             palette.play(id)
           }}
           onPicked={palette.onPicked}
+          grow={grow}
+          onPlayMade={result => playMade(result.artifact_id)}
+          growActions={result => {
+            const request = useRequest(result)
+            const kept = palette.kept.has(result.artifact_id)
+            return (
+              <>
+                <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                  {kept ? t('make.kept') : t('make.keep')}
+                </TextButton>
+                {request && (
+                  <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('make.useTitle')}>
+                    {t('make.use')}
+                  </TextButton>
+                )}
+                {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
+                <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
+                  {t('make.open')}
+                </TextButton>
+              </>
+            )
+          }}
           onSelect={id => {
             setSelected(id)
             if (id !== padsFor) setPadsFor(null)
@@ -174,6 +255,22 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                     {t('make.open')}
                   </TextButton>
                 )}
+                {ids.length === 2 &&
+                  (() => {
+                    const [from, to] = ids.map(id => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null))
+                    return from && to ? (
+                      // The vine takes over from the picks: their actions would float over its card.
+                      <TextButton
+                        onClick={() => {
+                          grow.between(from, to)
+                          palette.clearPicks()
+                        }}
+                        title={t('grow.betweenTitle')}
+                      >
+                        {t('grow.between')}
+                      </TextButton>
+                    ) : null
+                  })()}
                 {near && (
                   <TextButton
                     onClick={() => void ask(ctx, near, { send: false, session })}
@@ -196,17 +293,22 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             setTiles(on)
           }}
           tiles={tiles}
+          arrangement={layout}
+          onArrangement={id => {
+            ctx.storage.set(LAYOUT, id)
+            setLayout(id)
+          }}
           tools={
-            <TextButton
+            <ToolButton
+              icon="hover"
+              label={t('dock.hover')}
               onClick={() => {
                 ctx.storage.set(HOVER_PLAY, !hover)
                 setHover(!hover)
               }}
               pressed={hover}
               title={t('dock.hoverTitle')}
-            >
-              {t('dock.hover')}
-            </TextButton>
+            />
           }
         />
         {palette.making && (
@@ -220,6 +322,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             onSources={palette.makeFrom}
             onPlay={id => void audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))}
             onStop={() => audition.stop()}
+            placement={beside ? 'side' : 'bottom'}
             playing={playing}
             results={state.designs}
             sources={palette.making}
@@ -235,23 +338,39 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           />
         )}
       </div>
-      <PaletteDock
-        audio={id => audition.url(id)}
-        groups={map?.groups}
-        kit={current => (
-          <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
-            {t('dock.kit')}
-          </TextButton>
-        )}
-        landing={dock}
-        make={palette.makeFromPalette}
-        onDo={action => store.paletteDo(action)}
-        onPlay={id => palette.play(id)}
-        onStop={() => audition.stop()}
-        palette={state.palette}
-        playing={playing}
-        said={state.paletteSaid}
-      />
+      {/* The palette's strip waits for a map: with no sounds yet, the empty map's next step has the pane to itself. */}
+      {(map?.points?.length ?? 0) > 0 && (
+        <PaletteDock
+          audio={id => audition.url(id)}
+          groups={map?.groups}
+          kit={current => (
+            <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
+              {t('dock.kit')}
+            </TextButton>
+          )}
+          landing={dock}
+          make={palette.makeFromPalette}
+          onDo={action => store.paletteDo(action)}
+          onOpen={open => {
+            ctx.storage.set(PALETTE_OPEN, open)
+            setPaletteOpen(open)
+          }}
+          onPlay={id => palette.play(id)}
+          onStop={() => audition.stop()}
+          open={paletteOpen}
+          palette={state.palette}
+          playing={playing}
+          said={state.paletteSaid}
+          use={item => {
+            const request = itemReference(item, state.palette?.map_revision ?? null)
+            return request ? (
+              <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
+                {t('map.use')}
+              </TextButton>
+            ) : null
+          }}
+        />
+      )}
     </div>
   )
 }

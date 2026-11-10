@@ -6,9 +6,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { chipWords } from '../shared/format.ts'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
+import { nextSteps } from '../shared/steps.ts'
 import { FOCUSABLE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
-import { nextSteps, ownerSession } from './pane.tsx'
+import { ownerSession } from './pane.tsx'
 
 export function StatusChip({
   ctx,

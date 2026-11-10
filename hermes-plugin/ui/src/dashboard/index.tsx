@@ -5,17 +5,20 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
-import { useRequest } from '../shared/design.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { sourceOfResult, useRequest } from '../shared/design.ts'
+import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
 import { MakePanel } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { kitRequest } from '../shared/palette.ts'
+import { ToolButton } from '../shared/mapUi.tsx'
+import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
-import { dawPartWorks, KumiStore } from '../shared/store.ts'
+import { KumiStore } from '../shared/store.ts'
+import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
 import { Dot, FocusStyle, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
@@ -26,6 +29,10 @@ const POLL_MS = 5000
 const HOVER_PLAY = 'kumi.mapHover'
 /** The browser's own key for the square-tile view: off until the producer turns it on. */
 const TILES = 'kumi.mapTiles'
+/** The browser's own key for whether the palette drawer is open: open until the producer folds it. */
+const PALETTE_OPEN = 'kumi.paletteOpen'
+/** The browser's own key for the map's layout: similarity ('') until the producer picks another. */
+const LAYOUT = 'kumi.mapLayout'
 
 function useNow(every = 30_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -85,8 +92,12 @@ function Dashboard() {
   const [selected, setSelected] = useState<null | string>(null)
   const [hover, setHover] = useState(() => globalThis.localStorage?.getItem(HOVER_PLAY) !== 'off')
   const [tiles, setTiles] = useState(() => globalThis.localStorage?.getItem(TILES) === 'on')
+  const [paletteOpen, setPaletteOpen] = useState(() => globalThis.localStorage?.getItem(PALETTE_OPEN) !== 'off')
+  const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? '')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
+  // Grow: its renders go through the store; the handle's point plays as soon as it's grown.
+  const grow = useGrow(request => store.design(request), result => void audition.play(result.artifact_id).catch(() => {}), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
 
@@ -114,15 +125,21 @@ function Dashboard() {
     )
   }
 
+  // Setup's words and next steps, as the pane has them: one step per DAW until one is chosen, none that setup can't
+  // take (no pin, an unsupported system), and no words that name a DAW nobody chose.
+  const setupMessage = setupWords(state)
+  const steps = nextSteps(state, t)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: T.text, minHeight: 'calc(100vh - 160px)' }}>
       <div style={{ ...S.row, gap: 10, padding: '4px 2px' }}>
         <Dot color={tone} size={9} />
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
-        {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && !dawPartWorks(state) && (
-          <span style={S.muted}>{state.setup.message}</span>
-        )}
+        {setupMessage && <span style={S.muted}>{setupMessage}</span>}
+        {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}
+        {steps.map(step => (
+          <CopyButton key={step.request} label={step.label} text={step.request} />
+        ))}
       </div>
       {state.status?.unsure && (
         <div style={{ ...S.row, gap: 10, padding: '0 2px', alignItems: 'flex-start' }}>
@@ -158,15 +175,16 @@ function Dashboard() {
             />
           </Section>
         </div>
-        {/* Tall enough that a search's list (six rows) and a picked sound's row still leave the map most of the card:
-            at 420 the canvas shrank to its 160 px floor. The page scrolls, so the height costs nothing. */}
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 640, display: 'flex', flexDirection: 'column' }}>
+        {/* Tall enough that the palette drawer, open, still leaves the map most of the card. The page scrolls, so the
+            height costs nothing. */}
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 780, display: 'flex', flexDirection: 'column' }}>
           <MapCanvas
+            audio={id => audition.url(id)}
+            onStop={() => audition.stop()}
             actions={(id, sound) => {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton onClick={() => (playing === id ? audition.stop() : palette.play(id))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
                   <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
                     {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                   </TextButton>
@@ -174,7 +192,21 @@ function Dashboard() {
                 </>
               )
             }}
-            empty={state.map === null ? t('map.reading') : t('dashboard.mapEmpty')}
+            empty={
+              state.map === null ? (
+                t('map.reading')
+              ) : ['needs_runtime', 'outdated_runtime', 'damaged_runtime'].includes(state.setup?.state ?? '') ? (
+                // No runtime yet: setup comes first (the dashboard's header says how).
+                t('map.setupFirst')
+              ) : (
+                <>
+                  {t('dashboard.mapEmpty')}
+                  <div style={{ marginTop: 10 }}>
+                    <CopyButton label={t('map.scanCopy')} text={SCAN_REQUEST} />
+                  </div>
+                </>
+              )
+            }
             found={state.found}
             hiddenActions={
               <>
@@ -193,6 +225,24 @@ function Dashboard() {
               palette.play(id)
             }}
             onPicked={palette.onPicked}
+            grow={grow}
+            onPlayMade={result => void audition.play(result.artifact_id).catch(() => {})}
+            growActions={result => {
+              const request = useRequest(result)
+              const kept = palette.kept.has(result.artifact_id)
+              return (
+                <>
+                  <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                    {kept ? t('make.kept') : t('make.keep')}
+                  </TextButton>
+                  {request && <CopyButton label={t('make.copyUse')} text={request} />}
+                  {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
+                  <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
+                    {t('make.open')}
+                  </TextButton>
+                </>
+              )
+            }}
             onSelect={setSelected}
             picked={palette.picked}
             pickedActions={ids => (
@@ -205,6 +255,22 @@ function Dashboard() {
                     {t('make.open')}
                   </TextButton>
                 )}
+                {ids.length === 2 &&
+                  (() => {
+                    const [from, to] = ids.map(id => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null))
+                    return from && to ? (
+                      // The vine takes over from the picks: their actions would float over its card.
+                      <TextButton
+                        onClick={() => {
+                          grow.between(from, to)
+                          palette.clearPicks()
+                        }}
+                        title={t('grow.betweenTitle')}
+                      >
+                        {t('grow.between')}
+                      </TextButton>
+                    ) : null
+                  })()}
                 <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
                   {t('dock.clearPicks', ids.length)}
                 </TextButton>
@@ -218,32 +284,49 @@ function Dashboard() {
               setTiles(on)
             }}
             tiles={tiles}
+            arrangement={layout}
+            onArrangement={id => {
+              globalThis.localStorage?.setItem(LAYOUT, id)
+              setLayout(id)
+            }}
             tools={
-              <TextButton
+              <ToolButton
+                icon="hover"
+                label={t('dock.hover')}
                 onClick={() => {
                   globalThis.localStorage?.setItem(HOVER_PLAY, hover ? 'off' : 'on')
                   setHover(!hover)
                 }}
                 pressed={hover}
                 title={t('dock.hoverTitle')}
-              >
-                {t('dock.hover')}
-              </TextButton>
+              />
             }
           />
-          <PaletteDock
-            audio={id => audition.url(id)}
-            groups={state.map?.groups}
-            kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
-            landing={dock}
-            make={palette.makeFromPalette}
-            onDo={action => store.paletteDo(action)}
-            onPlay={id => palette.play(id)}
-            onStop={() => audition.stop()}
-            palette={state.palette}
-            playing={playing}
-            said={state.paletteSaid}
-          />
+          {/* The palette's strip waits for a map, as in Desktop. */}
+          {(state.map?.points?.length ?? 0) > 0 && (
+            <PaletteDock
+              audio={id => audition.url(id)}
+              groups={state.map?.groups}
+              kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+              landing={dock}
+              make={palette.makeFromPalette}
+              onDo={action => store.paletteDo(action)}
+              onOpen={open => {
+                globalThis.localStorage?.setItem(PALETTE_OPEN, open ? 'on' : 'off')
+                setPaletteOpen(open)
+              }}
+              onPlay={id => palette.play(id)}
+              onStop={() => audition.stop()}
+              open={paletteOpen}
+              palette={state.palette}
+              playing={playing}
+              said={state.paletteSaid}
+              use={item => {
+                const request = itemReference(item, state.palette?.map_revision ?? null)
+                return request ? <CopyButton label={t('dashboard.copyReference')} text={request} /> : null
+              }}
+            />
+          )}
         </div>
         {/* Under the map card, in the grid's own column (the page scrolls): the map keeps its whole height, and the
             dock sits between them, so a kept sound lands in view. */}
@@ -252,7 +335,7 @@ function Dashboard() {
             <MakePanel
               colorOf={palette.colorOf}
               dock={dock}
-              inline
+              placement="inline"
               kept={palette.kept}
               onClose={palette.closeMake}
               onKeep={palette.keep}

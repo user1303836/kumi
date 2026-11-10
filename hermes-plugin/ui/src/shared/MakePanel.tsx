@@ -35,9 +35,10 @@ export interface MakePanelProps {
   kept: ReadonlySet<string>
   /** "Use…": Desktop drafts a chat request for the result, the dashboard copies it. */
   use?: (result: DesignResult) => ReactNode
-  /** A card in the page's flow (the dashboard's, under the map's card; its page scrolls), rather than floating over the
-   *  map's lower part (Desktop's pane, where the dock under the map stays in view). */
-  inline?: boolean
+  /** Where it sits: `inline`, a card in the page's flow (the dashboard's, under the map's card; its page scrolls);
+   *  `side`, a sheet floating at the map's right, below its top bar (a wide pane: the map stays in view beside it);
+   *  `bottom`, floating over the map's lower part (a narrow pane, where the palette under the map stays in view). */
+  placement?: 'bottom' | 'inline' | 'side'
   /** The palette dock (its `landing`), where a kept sound's waveform flies to. */
   dock?: RefObject<HTMLElement | null>
   /** Make from other sounds (chosen results, or back to the last ones): the panel's `sources` become these. */
@@ -257,7 +258,11 @@ interface Take {
   request: DesignRequest
 }
 
-export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, inline = false, dock, onSources }: MakePanelProps) {
+/** The side sheet's width in a map `area` pixels wide, as its style's `min(430px, 46%)` sets it. */
+export const sideSheetWidth = (area: number): number => Math.min(430, area * 0.46)
+
+export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, placement = 'bottom', dock, onSources }: MakePanelProps) {
+  const inline = placement === 'inline'
   const t = useT()
   const [cardKey, setCardKey] = useState('blend')
   // The mode each tab had last, so going back to Cross finds Attack where it was left.
@@ -456,7 +461,11 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     <section
       aria-label={t('make.title')}
       style={{
-        ...(inline ? {} : { position: 'absolute', left: 8, right: 8, bottom: 8, maxHeight: '82%' }),
+        ...(placement === 'side'
+          ? { position: 'absolute', right: 8, top: 52, bottom: 8, width: 'min(430px, 46%)' }
+          : placement === 'bottom'
+            ? { position: 'absolute', left: 8, right: 8, bottom: 8, maxHeight: '82%' }
+            : {}),
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 12,
@@ -464,7 +473,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         background: T.raised,
         boxShadow: '0 18px 48px -18px rgba(0,0,0,.55)',
         color: T.text,
-        transform: open ? 'none' : 'translateY(24px)',
+        transform: open ? 'none' : placement === 'side' ? 'translateX(24px)' : 'translateY(24px)',
         opacity: open ? 1 : 0,
         transition: 'transform 260ms cubic-bezier(.2,.8,.2,1), opacity 200ms',
         zIndex: inline ? undefined : 2

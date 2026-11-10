@@ -19,6 +19,13 @@ export interface MapGroupView {
   count: number
 }
 
+/** Another way the map lays its sounds out than similarity (the snapshot's `arrangements`): its id, and the data
+ *  words it writes where they belong (class ids, keys, BPM, seconds, folder names), cleaned; x, y in [0, 1]. */
+export interface MapArrangement {
+  id: string
+  labels: { text: string; x: number; y: number }[]
+}
+
 export interface MapModel {
   revision: string | null
   points: MapPointView[]
@@ -26,6 +33,10 @@ export interface MapModel {
   sounds: Record<string, MapSound>
   /** Point indexes by grid cell (`GRID` × `GRID` over [0, 1]²). */
   cells: Map<number, number[]>
+  /** The map's other arrangements, in the snapshot's order; `places[k]` holds each point's place in the k-th (x, y
+   *  pairs in the points' order; NaN where the snapshot gave a point none, which then keeps its similarity place). */
+  arrangements: MapArrangement[]
+  places: Float32Array[]
 }
 
 /** Where the map sits in its canvas: map x in [0, 1] → `x * size * scale + dx` pixels. */
@@ -46,9 +57,91 @@ export function groupColor(color: unknown, key: number): string {
   return FALLBACK[Math.abs(key) % FALLBACK.length]
 }
 
+// Each group's glyph, so a kind reads by its shape as well as its colour: a circle, a diamond, a triangle, a square, a
+// hexagon, a four-point star, a triangle pointing down and a plus, repeating past eight groups. Polygons on the unit
+// circle (y down; null is a circle), a little larger where a shape covers less than a circle would, so the canvas and
+// the legend draw the same shapes at the same weight.
+const ring = (count: number, radius: number, turn = -Math.PI / 2): [number, number][] =>
+  Array.from({ length: count }, (_, index) => [Math.cos(turn + (index * 2 * Math.PI) / count) * radius, Math.sin(turn + (index * 2 * Math.PI) / count) * radius])
+export const GLYPH_SHAPES: (readonly [number, number][] | null)[] = [
+  null,
+  [
+    [0, -1.3],
+    [1.1, 0],
+    [0, 1.3],
+    [-1.1, 0]
+  ],
+  [
+    [0, -1.35],
+    [1.2, 0.75],
+    [-1.2, 0.75]
+  ],
+  [
+    [-0.92, -0.92],
+    [0.92, -0.92],
+    [0.92, 0.92],
+    [-0.92, 0.92]
+  ],
+  ring(6, 1.08),
+  ring(8, 1, -Math.PI / 2).map(([x, y], index) => (index % 2 ? [x * 0.5, y * 0.5] : [x * 1.4, y * 1.4]) as [number, number]),
+  [
+    [0, 1.35],
+    [1.2, -0.75],
+    [-1.2, -0.75]
+  ],
+  [
+    [-0.4, -1.15],
+    [0.4, -1.15],
+    [0.4, -0.4],
+    [1.15, -0.4],
+    [1.15, 0.4],
+    [0.4, 0.4],
+    [0.4, 1.15],
+    [-0.4, 1.15],
+    [-0.4, 0.4],
+    [-1.15, 0.4],
+    [-1.15, -0.4],
+    [-0.4, -0.4]
+  ]
+]
+
+/** A group's glyph, by its key. */
+export function glyphOf(group: number): number {
+  return ((group % GLYPH_SHAPES.length) + GLYPH_SHAPES.length) % GLYPH_SHAPES.length
+}
+
+/** Add glyph `glyph` of radius `r` at (`x`, `y`) to a path (the canvas's Path2D). */
+export function traceGlyph(path: Pick<Path2D, 'arc' | 'closePath' | 'lineTo' | 'moveTo'>, glyph: number, x: number, y: number, r: number): void {
+  const shape = GLYPH_SHAPES[glyph]
+  if (!shape) {
+    path.moveTo(x + r, y)
+    path.arc(x, y, r, 0, Math.PI * 2)
+    return
+  }
+  shape.forEach(([px, py], index) => (index === 0 ? path.moveTo(x + px * r, y + py * r) : path.lineTo(x + px * r, y + py * r)))
+  path.closePath()
+}
+
 const cellOf = (x: number, y: number): number => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID))
 
+/** How many arrangements, and labels in each, a snapshot may bring: Kumi sends seven, with at most tens of labels. */
+const MOST_ARRANGEMENTS = 16
+const MOST_LABELS = 400
+
+/** A place on the map's unit square, or NaN for none. */
+const unitOf = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : NaN)
+
 export function buildModel(map: SoundMap | null): MapModel {
+  // The arrangements keep the snapshot's order (the k-th's places are each point's fields 4+2k and 5+2k), even one
+  // this plug-in can't name.
+  const arrangements: MapArrangement[] = (Array.isArray(map?.arrangements) ? map.arrangements : []).slice(0, MOST_ARRANGEMENTS).map(raw => ({
+    id: typeof raw?.id === 'string' ? clean(raw.id, 24) : '',
+    labels: (Array.isArray(raw?.labels) ? raw.labels : [])
+      .slice(0, MOST_LABELS)
+      .filter(label => Array.isArray(label) && typeof label[0] === 'string' && Number.isFinite(label[1]) && Number.isFinite(label[2]))
+      .map(([text, x, y]) => ({ text: clean(text, 40), x: unitOf(x), y: unitOf(y) }))
+  }))
+  const placed: number[][] = arrangements.map(() => [])
   const points: MapPointView[] = []
   const cells = new Map<number, number[]>()
   for (const raw of Array.isArray(map?.points) ? map.points : []) {
@@ -61,6 +154,7 @@ export function buildModel(map: SoundMap | null): MapModel {
     if (list) list.push(points.length)
     else cells.set(cell, [points.length])
     points.push(point)
+    placed.forEach((values, k) => values.push(unitOf(raw[4 + 2 * k]), unitOf(raw[5 + 2 * k])))
   }
   const groups = Object.entries(map?.groups ?? {})
     .map(([key, group]) => ({
@@ -71,7 +165,25 @@ export function buildModel(map: SoundMap | null): MapModel {
     }))
     .filter(group => Number.isInteger(group.key))
     .sort((a, b) => a.key - b.key)
-  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells }
+  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells, arrangements, places: placed.map(values => Float32Array.from(values)) }
+}
+
+/** The map laid out by its `k`-th arrangement: each point at its place there (its similarity place where it has none),
+ *  the grid rebuilt for the pointer and the box. Any other `k` is the map as it is. */
+export function arrangedModel(model: MapModel, k: number): MapModel {
+  const place = model.places[k]
+  if (!place) return model
+  const cells = new Map<number, number[]>()
+  const points = model.points.map((point, index) => {
+    const [x, y] = [place[2 * index], place[2 * index + 1]]
+    const at = Number.isNaN(x) || Number.isNaN(y) ? point : { ...point, x, y }
+    const cell = cellOf(at.x, at.y)
+    const list = cells.get(cell)
+    if (list) list.push(index)
+    else cells.set(cell, [index])
+    return at
+  })
+  return { ...model, points, cells }
 }
 
 /** The square-tile view's grid: `side` × `side` tiles over the map's square, each sound on its own tile near where the
@@ -180,10 +292,42 @@ export function tileModel(model: MapModel, layout: TileLayout): MapModel {
   return { ...model, points, cells }
 }
 
-/** The view that shows the whole map in a `width` × `height` canvas, with a margin. */
-export function fitView(width: number, height: number, margin = 16): MapViewport {
-  const size = Math.max(1, Math.min(width, height) - 2 * margin)
-  return { scale: 1, dx: (width - size) / 2, dy: (height - size) / 2 }
+/** The map's square side in a `width` × `height` canvas whose top `top` pixels are covered (the floating bar): what
+ *  every view of that canvas draws the map at, times its scale. */
+export function mapSide(width: number, height: number, top = 0): number {
+  return Math.max(1, Math.min(width, height - top) - 32)
+}
+
+/** The room left for the map across a `width` canvas whose right `right` pixels a side sheet covers: all of it when
+ *  the sheet would leave too little to be worth centring in. */
+const roomBeside = (width: number, right: number): number => (width - right >= 240 ? width - right : width)
+
+/** The view that shows the whole map in a `width` × `height` canvas, below its top `top` pixels, with a margin: in the
+ *  room left of a side sheet covering its right `right` pixels when the map fits there (the map's size stays the
+ *  canvas's, so a sheet opening moves the map and never rescales it). */
+export function fitView(width: number, height: number, top = 0, right = 0): MapViewport {
+  const size = mapSide(width, height, top)
+  const room = roomBeside(width, right)
+  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - size) / 2 }
+}
+
+/** Where a `w` × `h` card goes beside the screen box `box` ([x0, y0, x1, y1]: the picks) in a `width` × `height` map
+ *  whose top `top` and bottom `bottom` pixels are taken: to the box's right, else its left, else above it, else below
+ *  it, never over it; with no room anywhere, or no box (no picks in view), centred at the map's foot. */
+export function floatBeside(box: readonly [number, number, number, number] | null, w: number, h: number, width: number, height: number, top: number, bottom: number): { left: number; top: number } {
+  const GAP = 12
+  const EDGE = 8
+  const floor = height - bottom - h
+  const docked = { left: Math.max(EDGE, (width - w) / 2), top: Math.max(top, floor) }
+  if (!box) return docked
+  const [x0, y0, x1, y1] = box
+  const beside = Math.min(Math.max(top, y0 - 6), Math.max(top, floor))
+  const across = Math.min(Math.max(EDGE, (x0 + x1) / 2 - w / 2), Math.max(EDGE, width - w - EDGE))
+  if (x1 + GAP + w <= width - EDGE) return { left: x1 + GAP, top: beside }
+  if (x0 - GAP - w >= EDGE) return { left: x0 - GAP - w, top: beside }
+  if (y0 - GAP - h >= top) return { left: across, top: y0 - GAP - h }
+  if (y1 + GAP <= floor) return { left: across, top: y1 + GAP }
+  return docked
 }
 
 export function toScreen(view: MapViewport, size: number, x: number, y: number): [number, number] {
@@ -413,20 +557,22 @@ export function searchSounds(model: MapModel, query: string): Set<string> | null
   return found
 }
 
-/** The view that centres the given points, zoomed in as far as they allow (for "show what the agent found"). */
-export function frame(model: MapModel, ids: Set<string>, width: number, height: number, margin = 48): MapViewport | null {
+/** The view that centres the given points, zoomed in as far as they allow (for "show what the agent found"), below the
+ *  canvas's top `top` pixels and left of a side sheet covering its right `right` pixels. */
+export function frame(model: MapModel, ids: Set<string>, width: number, height: number, top = 0, right = 0, margin = 48): MapViewport | null {
   const chosen = model.points.filter(point => ids.has(point.id))
   if (!chosen.length) return null
   const xs = chosen.map(point => point.x)
   const ys = chosen.map(point => point.y)
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
-  // The same map size `fitView` gives, zoomed so the found points fill the canvas less a margin.
-  const size = Math.max(1, Math.min(width, height) - 32)
+  // The same map side `fitView` gives, zoomed so the found points fill the room left less a margin.
+  const size = mapSide(width, height, top)
+  const room = roomBeside(width, right)
   const span = Math.max(x1 - x0, y1 - y0, 0.04)
-  const scale = Math.min(40, Math.max(1, (Math.min(width, height) - 2 * margin) / (span * size)))
+  const scale = Math.min(40, Math.max(1, (Math.min(room, height - top) - 2 * margin) / (span * size)))
   const cx = (x0 + x1) / 2
   const cy = (y0 + y1) / 2
-  return { scale, dx: width / 2 - cx * size * scale, dy: height / 2 - cy * size * scale }
+  return { scale, dx: room / 2 - cx * size * scale, dy: top + (height - top) / 2 - cy * size * scale }
 }
 
 /** The points inside a screen box (a drag's corners, any order), among those `visible` allows, in the map's own order:

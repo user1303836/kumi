@@ -182,6 +182,9 @@ export class KumiStore {
   private reads = new Map<string, { promise: Promise<void>; again: boolean }>()
   private wanted = new Map<Part, number>()
   private generation = 0
+  /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
+   *  window made before (a grow renders before the Make panel ever opens). */
+  private designsRead = false
   /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
   private cards = new Map<string, unknown>()
   /** Jobs a call started, or an event reported running, not read yet: news even when the first read finds them
@@ -217,6 +220,7 @@ export class KumiStore {
   /** Forget everything (another profile or connection): what's shown must be that profile's. */
   reset(): void {
     this.generation += 1
+    this.designsRead = false
     this.reads.clear()
     this.cards.clear()
     this.started.clear()
@@ -373,18 +377,28 @@ export class KumiStore {
     }
   }
 
-  /** The engine's recent results, newest first (`GET /designs`), for the Make panel's history. None when the backend
-   *  has no sound design (an older plugin) or can't read them. */
+  /** The engine's recent results, newest first (`GET /designs`), for the Make panel's history, after the ones this
+   *  window made already (a grow's buds, a make before the read answered), each once. None when the backend has no
+   *  sound design (an older plugin) or can't read them. */
   async readDesigns(): Promise<void> {
     const generation = this.generation
     try {
       const answer = await this.fetch<{ designs?: unknown }>('/designs')
       if (generation !== this.generation) return
-      const designs = (Array.isArray(answer?.designs) ? answer.designs : []).map(resultOf).filter((result): result is DesignResult => result !== null)
-      this.set({ designs })
+      const history = (Array.isArray(answer?.designs) ? answer.designs : []).map(resultOf).filter((result): result is DesignResult => result !== null)
+      const made = this.state.designs ?? []
+      const have = new Set(made.map(result => result.artifact_id))
+      this.set({ designs: [...made, ...history.filter(result => !have.has(result.artifact_id))] })
     } catch {
       if (generation === this.generation && this.state.designs === null) this.set({ designs: [] })
     }
+  }
+
+  /** `readDesigns`, the first time this window asks (the Make panel opening); later opens read nothing more. */
+  readDesignsOnce(): Promise<void> {
+    if (this.designsRead) return Promise.resolve()
+    this.designsRead = true
+    return this.readDesigns()
   }
 
   /** Make a sound (`POST /design`): the result goes first in `designs`. Renders are quick (well under a second for

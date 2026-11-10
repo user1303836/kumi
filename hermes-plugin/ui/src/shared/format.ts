@@ -246,6 +246,15 @@ export function soundRequest(soundId: string, name?: string, revision?: string |
   return said ? `“${said}” (${which})` : which
 }
 
+/** What Use… puts in the input for a file Kumi made (a made sound, a kept one in the palette): its name, quoted, then
+ *  its artifact id, so the model can hand `{artifact_id}` to a file step. Null for an id the runtime doesn't write. */
+export function artifactReference(artifactId: string, name?: string): string | null {
+  const id = plainId(artifactId)
+  if (!id) return null
+  const said = quotable(name)
+  return said ? `“${said}” (artifact ${id})` : `artifact ${id}`
+}
+
 /** The most sounds one "More like these" names: Kumi's `near` takes up to sixteen. */
 export const MOST_NEAR = 16
 /** How many of them the request names, before "and N more". */
@@ -302,6 +311,9 @@ export const LOOK_AGAIN_REQUEST = 'Kumi, look at my project again before changin
 
 /** From the map's line about hidden sounds: a scan finds what moved, and drops what's gone, for good. */
 export const RESCAN_REQUEST = 'Kumi, rescan my sample folders'
+
+/** From an empty map: build it. A folder already approved is scanned; with none, the agent asks which one to add. */
+export const SCAN_REQUEST = 'Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none'
 
 /** What an unsure or partial outcome's `cleanup` says Kumi did about it (CC-2), as a sentence or nothing. */
 export function cleanupWords(cleanup: unknown, t: Translate = english): string {

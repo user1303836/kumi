@@ -374,6 +374,43 @@ test('the map keeps valid points, colours each group, and picks the nearest poin
   assert.equal(model.points[map.pick(model, view, size, x, y, 8, index => model.points[index].id !== 's-2')].id, 's-1')
 })
 
+test("each of a snapshot's layouts places every sound: one a sound lacks leaves it where similarity put it, and the pointer finds sounds where the layout shown put them", () => {
+  const snapshot = {
+    revision: 'r1',
+    points: [
+      ['s-1', 0.1, 0.1, 0, 0.9, 0.9, 0.5, 0.5],
+      ['s-2', 0.2, 0.2, 0, 0.3, null, 0.6, 0.6],
+      ['s-3', 0.3, 0.3, 1]
+    ],
+    groups: { 0: { name: 'snare' }, 1: { name: 'kick' } },
+    sounds: { 's-1': { name: 'A' }, 's-2': { name: 'B' }, 's-3': { name: 'C' } },
+    arrangements: [
+      { id: 'character', labels: [] },
+      { id: 'keys', labels: [['C', 0.5, 0.05], ['broken'], ['Am', 0.5, 0.2]] }
+    ]
+  }
+  const model = map.buildModel(snapshot)
+  const at = arranged => arranged.points.map(point => [point.id, Math.round(point.x * 1e4) / 1e4, Math.round(point.y * 1e4) / 1e4])
+  // Similarity stays the map's own places; character moves s-1 only (s-2's place there is broken, s-3 has none).
+  assert.deepEqual(at(model), [['s-1', 0.1, 0.1], ['s-2', 0.2, 0.2], ['s-3', 0.3, 0.3]])
+  assert.deepEqual(at(map.arrangedModel(model, 0)), [['s-1', 0.9, 0.9], ['s-2', 0.2, 0.2], ['s-3', 0.3, 0.3]])
+  const keys = map.arrangedModel(model, 1)
+  assert.deepEqual(at(keys), [['s-1', 0.5, 0.5], ['s-2', 0.6, 0.6], ['s-3', 0.3, 0.3]])
+  assert.deepEqual(model.arrangements[1].labels.map(label => label.text), ['C', 'Am'])
+  assert.equal(map.arrangedModel(model, 7), model)
+  // The pointer and a box work on the layout shown: s-1 is found at its keys place, not at its similarity place.
+  const view = map.fitView(400, 400)
+  const size = map.mapSide(400, 400)
+  const [kx, ky] = map.toScreen(view, size, 0.5, 0.5)
+  assert.equal(keys.points[map.pick(keys, view, size, kx, ky, 8)].id, 's-1')
+  const [sx, sy] = map.toScreen(view, size, 0.1, 0.1)
+  assert.equal(map.pick(keys, view, size, sx, sy, 8), -1)
+  assert.deepEqual(
+    map.pointsInBox(keys, view, size, [kx - 4, ky - 4, kx + 44, ky + 44]).map(index => keys.points[index].id),
+    ['s-1', 's-2']
+  )
+})
+
 test('zoom keeps the point under the pointer still, search needs every word, and framing shows what was found', () => {
   const model = map.buildModel(sample)
   const view = map.fitView(400, 300)
@@ -391,6 +428,52 @@ test('zoom keeps the point under the pointer still, search needs every word, and
     assert.ok(px >= 0 && px <= 400 && py >= 0 && py <= 300, `${id} framed at ${px},${py}`)
   }
   assert.ok(framed.scale > 1)
+  // Under a floating bar 80 px tall, the whole map and what a find frames sit below it, never under it.
+  const side = map.mapSide(400, 300, 80)
+  const fitted = map.fitView(400, 300, 80)
+  assert.ok(map.toScreen(fitted, side, 0, 0)[1] >= 80 && map.toScreen(fitted, side, 1, 1)[1] <= 300)
+  const framedBelow = map.frame(model, new Set(['s-1', 's-2']), 400, 300, 80)
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px, py] = map.toScreen(framedBelow, side, point.x, point.y)
+    assert.ok(px >= 0 && px <= 400 && py >= 80 && py <= 300, `${id} framed below the bar at ${px},${py}`)
+  }
+  // Beside a sheet covering the right 180 px of a 640-wide canvas, the whole map and a find's frame sit left of it.
+  const wide = map.mapSide(640, 300)
+  const besideFit = map.fitView(640, 300, 0, 180)
+  assert.ok(map.toScreen(besideFit, wide, 0, 0)[0] >= 0 && map.toScreen(besideFit, wide, 1, 1)[0] <= 460, JSON.stringify(besideFit))
+  const framedBeside = map.frame(model, new Set(['s-1', 's-2']), 640, 300, 0, 180)
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px] = map.toScreen(framedBeside, wide, point.x, point.y)
+    assert.ok(px >= 0 && px <= 460, `${id} framed left of the sheet at ${px}`)
+  }
+})
+
+test("the picks' actions float beside the picks and never over them; with no room, or no picks in view, at the map's foot", () => {
+  const covers = (at, w, h, box) => at.left < box[2] && at.left + w > box[0] && at.top < box[3] && at.top + h > box[1]
+  const card = [200, 40]
+  // A 600 × 500 map, 60 px of bar on top, 10 px kept at the foot. Picks on the left: the card goes to their right.
+  const left = [40, 200, 120, 260]
+  const right = map.floatBeside(left, ...card, 600, 500, 60, 10)
+  assert.ok(right.left > left[2] && !covers(right, ...card, left), JSON.stringify(right))
+  // Picks on the right: to their left.
+  const onRight = [460, 200, 560, 260]
+  const leftOf = map.floatBeside(onRight, ...card, 600, 500, 60, 10)
+  assert.ok(leftOf.left + card[0] < onRight[0] && !covers(leftOf, ...card, onRight), JSON.stringify(leftOf))
+  // Picks across the whole width (a narrow map): above them, or below when the bar leaves no room above.
+  for (const box of [
+    [20, 300, 580, 360],
+    [20, 70, 580, 200]
+  ]) {
+    const at = map.floatBeside(box, ...card, 600, 500, 60, 10)
+    assert.ok(!covers(at, ...card, box) && at.top >= 60 && at.top + card[1] <= 490 && at.left >= 8 && at.left + card[0] <= 592, `${JSON.stringify(at)} for ${box}`)
+  }
+  // Picks filling the map, or none in view: docked at the foot, inside the map, below the bar.
+  for (const box of [[0, 60, 600, 500], null]) {
+    const at = map.floatBeside(box, ...card, 600, 500, 60, 10)
+    assert.deepEqual(at, { left: 200, top: 450 })
+  }
 })
 
 test('the store reads what moved: FOCUS and HISTORY again only when their revision changes', async () => {
@@ -898,11 +981,15 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   const sources = walk(fileURLToPath(new URL('../src', import.meta.url))).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
   const keys = new Set()
   // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
-  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
+  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard|arrange|grow)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
   for (const file of sources) for (const match of readFileSync(file, 'utf8').matchAll(pattern)) keys.add(match[1])
   // The keys built from a state's name.
   for (const state of ['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown']) keys.add(`settings.states.${state}`)
   for (const state of ['not_installed', 'installed', 'outdated', 'unknown']) keys.add(`settings.componentStates.${state}`)
+  // The map's layouts, built from each layout's id: its menu name and title, and its axis words.
+  const canvas = await load('src/shared/MapCanvas.tsx')
+  for (const id of canvas.LAYOUTS) keys.add(`arrange.${id}.name`).add(`arrange.${id}.title`)
+  for (const [id, sides] of Object.entries(canvas.AXES)) for (const side of sides) keys.add(`arrange.${id}.${side}`)
   // The Make panel's, built from each card, tab and option, and from the catalogs of its choices and controls.
   for (const card of design.CARDS) keys.add(`make.cards.${card.key}.title`).add(`make.cards.${card.key}.hint`)
   for (const tab of design.TABS) keys.add(`make.ops.${tab}`).add(`make.opHints.${tab}`)

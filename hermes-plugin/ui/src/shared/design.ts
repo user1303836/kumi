@@ -3,7 +3,7 @@
 // way from one sound toward another, by Kumi's engine (`POST /design`, the contract's "engine's interface"). Every
 // option is optional: one left unset is drawn from the seed, so Reroll varies it. Plain data here, no DOM: tested in
 // ui/tests.
-import { plainId, quotable } from './format.ts'
+import { artifactReference, plainId, quotable } from './format.ts'
 
 export type DesignOp = 'cross' | 'fuse' | 'grow' | 'stack'
 export type DesignMode = 'attack' | 'blend' | 'loop' | 'modulate' | 'resonate' | 'smear' | 'texture'
@@ -483,10 +483,7 @@ export function stagesOf(recipe: string): string[] {
  *  its artifact id), so the producer says what to do with it; the model can hand `{artifact_id}` to a file step. Null
  *  for an id the runtime doesn't write. */
 export function useRequest(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'seed'>): string | null {
-  const id = plainId(result.artifact_id)
-  if (!id) return null
-  const said = resultName(result)
-  return said ? `“${said}” (artifact ${id})` : `artifact ${id}`
+  return artifactReference(result.artifact_id, resultName(result))
 }
 
 /** The sounds the panel makes from: picks in map order, or the palette's playable items, as the engine names them. */

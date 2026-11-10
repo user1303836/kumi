@@ -172,29 +172,29 @@ test('with no input in front (Settings, a profile with no chat yet), the request
 })
 
 test('until a DAW is chosen, setup is offered for each DAW and nothing names the default one', async () => {
-  const pane = await load('src/desktop/pane.tsx')
+  const steps = await load('src/shared/steps.ts')
   const needsPart = { state: 'needs_daw_component', next_step: 'install_daw_component', message: "next, setup installs Kumi's part in Live." }
   const fresh = { status: { connected: false }, setup: { ...needsPart, daw: 'ableton', daw_chosen: false } }
-  assert.deepEqual(pane.nextSteps(fresh).map(step => step.request), ['Set up Kumi for Live', 'Set up Kumi for REAPER', 'Set up Kumi for Renoise'])
-  assert.equal(pane.setupWords(fresh), null)
+  assert.deepEqual(steps.nextSteps(fresh).map(step => step.request), ['Set up Kumi for Live', 'Set up Kumi for REAPER', 'Set up Kumi for Renoise'])
+  assert.equal(steps.setupWords(fresh), null)
   // Chosen in Kumi's settings (or a backend from before the flag): that DAW alone, and setup's words.
   for (const setup of [{ ...needsPart, daw: 'reaper', daw_chosen: true }, { ...needsPart, daw: 'reaper' }]) {
     const state = { status: { connected: false, daw: 'reaper' }, setup }
-    assert.deepEqual(pane.nextSteps(state).map(step => step.request), ['Set up Kumi for REAPER'])
-    assert.equal(pane.setupWords(state), needsPart.message)
+    assert.deepEqual(steps.nextSteps(state).map(step => step.request), ['Set up Kumi for REAPER'])
+    assert.equal(steps.setupWords(state), needsPart.message)
   }
 })
 
 test("once the DAW's part is in, its own step (a restart) shows with a connect until Kumi connects", async () => {
-  const pane = await load('src/desktop/pane.tsx')
+  const steps = await load('src/shared/steps.ts')
   const setup = { state: 'ready', next_step: 'restart_daw', daw: 'reaper', daw_chosen: true, message: 'restart REAPER if it’s open' }
   const away = { status: { connected: false, daw: 'reaper' }, setup }
-  assert.deepEqual(pane.nextSteps(away).map(step => step.request), ['Connect Kumi to REAPER'])
-  assert.equal(pane.setupWords(away), setup.message)
+  assert.deepEqual(steps.nextSteps(away).map(step => step.request), ['Connect Kumi to REAPER'])
+  assert.equal(steps.setupWords(away), setup.message)
   const connected = { status: { connected: true, daw: 'reaper' }, setup }
-  assert.deepEqual([pane.nextSteps(connected), pane.setupWords(connected)], [[], null])
+  assert.deepEqual([steps.nextSteps(connected), steps.setupWords(connected)], [[], null])
   // Plain "open REAPER and connect" is the button's to say.
-  assert.equal(pane.setupWords({ status: { connected: false }, setup: { ...setup, next_step: 'connect' } }), null)
+  assert.equal(steps.setupWords({ status: { connected: false }, setup: { ...setup, next_step: 'connect' } }), null)
 })
 
 test('nothing is undone when Kumi is not connected', async () => {

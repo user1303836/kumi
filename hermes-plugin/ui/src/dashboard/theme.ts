@@ -20,5 +20,6 @@ export const CANVAS = {
   faint: '--color-muted-foreground',
   border: '--color-border',
   accent: '--color-primary',
-  strong: '--color-foreground'
+  strong: '--color-foreground',
+  ground: '--color-card'
 } as const

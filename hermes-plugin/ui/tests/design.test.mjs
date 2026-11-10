@@ -158,3 +158,53 @@ test('the store makes a sound: it goes first in the history once; a refusal says
   assert.deepEqual(await kumi.design(request), { error: "Kumi's runtime isn't installed in this profile.", status: 503 })
   assert.equal(kumi.get().designs.length, 2, 'a refusal adds nothing')
 })
+
+test("a sound made before the Make panel's first open keeps the earlier results: the history follows it, each once, read once", async () => {
+  let reads = 0
+  const kumi = new store.KumiStore(async path => {
+    if (path !== '/designs') return answer()
+    reads += 1
+    // The backend's history already holds the sound this window made.
+    return { designs: [answer(), answer({ artifact_id: 'a-dOLDOLDOLDOLDOLDOLDOLDO' })] }
+  })
+  // A grow's bud renders before Make… was ever opened.
+  await kumi.design(design.requestFor(card('blend'), sounds(2)))
+  await kumi.readDesignsOnce()
+  await kumi.readDesignsOnce()
+  assert.deepEqual(
+    kumi.get().designs.map(made => made.artifact_id),
+    ['a-dAAAAAAAAAAAAAAAAAAAAAA', 'a-dOLDOLDOLDOLDOLDOLDOLDO']
+  )
+  assert.equal(reads, 1, 'a second open reads nothing more')
+})
+
+test("grow's vine runs from one sound to the other, a drag finds its point, and renders go handle first, then buds in order, two at a time", async () => {
+  const grow = await load('src/shared/grow.ts')
+  const [a, b] = [
+    [0.1, 0.5],
+    [0.9, 0.5]
+  ]
+  assert.deepEqual(grow.vinePoint(a, b, 0), a)
+  assert.deepEqual(grow.vinePoint(a, b, 1), b)
+  // It bows off the straight line between them, and is the same curve on screen as on the map (the view only scales
+  // and shifts), so the buds drawn on screen sit where their map places are.
+  assert.ok(Math.abs(grow.vinePoint(a, b, 0.5)[1] - 0.5) > 0.05)
+  const onScreen = ([x, y]) => [x * 400 + 30, y * 400 + 12]
+  for (const t of [0.2, 0.5, 0.8]) {
+    const drawn = grow.vinePoint(onScreen(a), onScreen(b), t)
+    const placed = onScreen(grow.vinePoint(a, b, t))
+    assert.ok(Math.hypot(drawn[0] - placed[0], drawn[1] - placed[1]) < 1e-9, `t ${t}`)
+    // A drag at a point of the vine puts the handle there.
+    assert.ok(Math.abs(grow.nearestOnVine(a, b, grow.vinePoint(a, b, t)) - t) < 0.01, `t ${t}`)
+  }
+  // The backend renders two at once (a third is refused): the handle's point goes first, then the buds from the start.
+  const buds = grow.BUDS.map(at => ({ at, state: 'waiting' }))
+  assert.equal(grow.nextToGrow(buds, { at: 0.4, state: 'waiting' }, 0).at, 0.4)
+  assert.equal(grow.nextToGrow(buds, { at: 0.4, state: 'growing' }, 1).at, 0.125)
+  assert.equal(grow.nextToGrow([{ at: 0.125, state: 'ready', result: answer() }, ...buds.slice(1)], null, 1).at, 0.25)
+  assert.equal(grow.nextToGrow(buds, { at: 0.4, state: 'waiting' }, grow.RENDERS), null)
+  assert.equal(grow.nextToGrow(buds.map(bud => ({ ...bud, state: 'failed', error: 'no' })), null, 0), null)
+  // A map sound is an end by its id on the map it's from; without a map, there's none.
+  assert.deepEqual(grow.soundEnd('s-r7-0009', 'Dusty Snare 09.wav', 'r7')?.source, { sound_id: 's-r7-0009', map_revision: 'r7', name: 'Dusty Snare 09.wav' })
+  assert.equal(grow.soundEnd('s-r7-0009', 'Dusty Snare 09.wav', null), null)
+})

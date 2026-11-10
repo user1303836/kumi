@@ -126,17 +126,23 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   Hermes Desktop, the map's **Use on pad…** puts that request in the chat.
 - **Use…** on a map sound puts only its reference in the chat, its name and ids (“Rim Brixton” (sound … from map …)),
   so you say what to do with it; the dashboard copies the same words.
-- On the map, a sound plays in the window as soon as the pointer reaches it (its first two seconds; **Hover to play**
-  turns that off) or on a click, AIFF included; nothing changes in your DAW. A sound whose file is gone, or that the
-  window can't play, fades off the map quietly, and one line under the map counts them: **Show them** puts them back,
-  and **Rescan…** puts a request to rescan your sample folders in the chat (in the dashboard, it copies the request).
-  **Tiles** turns the map into square tiles in each group's colour, every sound on its own tile near its place; the
-  dots morph into them and back.
+- **The map** fills its pane; the search, the tools and the groups float over it, each group in its own colour and
+  shape. A sound plays as soon as the pointer reaches it (its first two seconds; **Hover to play** turns that off) or on
+  a click, AIFF included; nothing changes in your DAW. The sound you click opens in the player at the map's foot: its
+  waveform, kind, length and folder, and what you can do with it. A sound whose file is gone, or that the window can't
+  play, fades off the map quietly, and one line counts them: **Show them** puts them back, and **Rescan…** puts a request
+  to rescan your sample folders in the chat (in the dashboard, it copies the request). **Tiles** turns the map into
+  square tiles in each group's colour, every sound on its own tile near its place; the dots morph into them and back.
+  **Fit**, or a double-click, shows the whole map.
+- **Layouts:** **Layout** lays the map out another way, and the sounds move to their new places: **Similarity** (sounds
+  that sound alike together), **Character** (dark to bright, punchy to soft), **Texture** (tonal to noisy, high to low),
+  **Keys** (round the circle of fifths), **Tempo** (by BPM), **Families** (an island for each kind), **Length** (a
+  spiral from the shortest out) or **Folders** (an island for each top folder). Each writes its own labels on the map.
 - **Picking and moving on the map:** a drag draws a box that picks the sounds in it, and Shift with a drag adds
-  another box; Command or Ctrl with a click picks or unpicks one sound, and Shift with a click adds one. The middle
-  button moves the map, as does a drag with **Move map** on (or with Space held, in the web dashboard). A mouse's wheel
-  zooms; a trackpad's two-finger scroll moves the map and a pinch zooms. **Esc**, a click on empty map, or **Clear
-  (N)** lets go of the picks.
+  another box; Command or Ctrl with a click picks or unpicks one sound, and Shift with a click adds one. What the picks
+  can do floats beside them. The middle button moves the map, as does a drag with **Move map** on (or with Space held,
+  in the web dashboard). A mouse's wheel zooms; a trackpad's two-finger scroll moves the map and a pinch zooms. **Esc**,
+  a click on empty map, or **Clear (N)** lets go of the picks.
 
 ### Your palette
 
@@ -149,8 +155,10 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 - **Gather:** on the map, drag a box (Shift adds another), Command or Ctrl-click a sound to pick or unpick it, or
   **Pick all** for what a search or Kumi's find keeps; then **Add to palette**. A picked sound's own **Add to palette**
   takes just it. The palette's sounds are ringed on the map.
-- **Under the map:** each sound is a chip with its waveform, in its group's colour. A click plays it, × takes it out,
-  and a drag (or Alt with ← or →) moves it. Rename the palette, make another, switch between them, or forget one; its
+- **Under the map**, the palette is a drawer of cards: each sound's waveform in its group's colour, its name and kind,
+  **Use…** (its reference in the chat; the dashboard copies it) and × to take it out. A click plays a sound, and a drag
+  (or Alt with ← or →) moves it. **Fold** leaves one row of small chips (**Show all** opens it again), and dragging the
+  drawer's edge makes it taller or shorter. Rename the palette, make another, switch between them, or forget one; its
   sounds stay in your library.
 - **Strict or loose:** strict, Kumi uses only these sounds when you ask for your palette; loose, it may also offer
   each one's 5 nearest, and asks before adding any.
@@ -186,7 +194,10 @@ made before). Nothing in your project changes: the result is Kumi's own copy unt
   - **smear:** stretched 4 to 16 times longer, with a long, soft tail.
 - **Stack** them into one layered hit, lined up on their attacks and balanced.
 - **Grow** one sound toward another: the sounds in between, from just like the first to just like the second. One seed
-  is one path; another seed takes another.
+  is one path; another seed takes another. On the map, **Grow** draws it as a vine: click a sound, then the one to grow
+  toward (or pick two and press **Grow between**), and buds open along the vine as Kumi makes them. Click a bud to hear
+  it, or drag the handle to grow any point between; **Keep**, **Use…**, **Make…** or **Grow from here** what you like,
+  and **Another path** grows the vine again with a new seed.
 - **Steer** any of them before it's made: darker or brighter, thinner or fuller, a filter, more tonal or noisier, softer
   or punchier, shorter or longer, drive, lo-fi, width and space; and for each sound, a pitch range, a chance to play
   backwards, a start point, a delay, pan and level, each sound drawing its own.
@@ -195,17 +206,19 @@ made before). Nothing in your project changes: the result is Kumi's own copy unt
 - **Keep:** put a result in your palette, where it stays (Kumi otherwise keeps your 200 newest results).
 - **Use…** puts only the result's reference in the chat, its name and id (“Smear of 8 at 9.8×…, seed …” (artifact
   …)), so you say what to do with it; putting it on a pad or a track is a change of its own, asked as your changes are.
-- **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…**,
-  choose **Cross**, **Fuse**, **Loop** or **Stack** and then a way to do it. Set its choices or leave any on **Auto**
-  (the seed draws it, so **Reroll** varies it): Resonate's pairing, what rings and the ring time; Modulate's played
-  sound, the stages it may use, how many and how often they retrigger; the **Loop** tab's **Beat** or **Melody**, its
-  tempo (your project's until you move it), bars, and its **Rhythm**, **Voices**, **Feel**, **Harmony** and **Line**.
-  **Steer** shapes any of them (**Surprise** moves a few controls at random, **Reset** puts them back; each way keeps
-  its own steer). Press **Make**: the new sound plays as it arrives (press ▶ or its waveform to hear it again), and a
-  modulate result shows its stages in a row. **Reroll**, **Keep** and **Use…** are on each result (the dashboard copies
-  Use's words instead), ‹ › steps through a result's variations, and the results stay after a reload. A kept sound
-  flies into your palette. Choose results (✓) and **Make from these**, or **Add to the sounds**, to make from what you
-  made, generation after generation; **Back** returns to the sounds before.
+- **On the sound map, in Desktop or the web dashboard:** pick sounds (or open your palette) and press **Make…** (in
+  Desktop, on a wide map the panel opens beside it, and the map moves over when it fits there; the dashboard shows the
+  panel under the map), choose **Cross**, **Fuse**, **Loop** or **Stack** and then a way to do it. Set its choices or
+  leave any on **Auto** (the seed draws it, so **Reroll** varies
+  it): Resonate's pairing, what rings and the ring time; Modulate's played sound, the stages it may use, how many and
+  how often they retrigger; the **Loop** tab's **Beat** or **Melody**, its tempo (your project's until you move it),
+  bars, and its **Rhythm**, **Voices**, **Feel**, **Harmony** and **Line**. **Steer** shapes any of them (**Surprise**
+  moves a few controls at random, **Reset** puts them back; each way keeps its own steer). Press **Make**: the new sound
+  plays as it arrives (press ▶ or its waveform to hear it again), and a modulate result shows its stages in a row.
+  **Reroll**, **Keep** and **Use…** are on each result (the dashboard copies Use's words instead), ‹ › steps through a
+  result's variations, and the results stay after a reload. A kept sound flies into your palette. Choose results (✓)
+  and **Make from these**, or **Add to the sounds**, to make from what you made, generation after generation; **Back**
+  returns to the sounds before.
 - **Ask Hermes:** "blend these three kicks", "make a texture from my palette", "stack this snare with that clap",
   "reroll it", "put the second one in my palette", "load it on pad C2".
 

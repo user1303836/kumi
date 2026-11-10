@@ -1,28 +1,32 @@
-// The palette dock under the sound map: the sounds the producer gathered to work with, as chips with a waveform in
-// their group's colour. A chip plays on a click; × takes it out; a drag (or Alt with ← or →) moves it. The header
-// names the palette, switches, renames, makes or forgets one, sets it strict or loose, and offers it as a kit or as
-// the sounds to make a new one from. Every edit changes no project, so it runs at once (`POST /palette`); the agent's
-// `kumi_palette` reads and edits the same palette. Both UI halves use it: what "Use as kit" does comes from `kit`, and
-// "Make…" from `make`.
+// The palette, a drawer under the sound map: the sounds the producer gathered to work with. Folded, it's one row of
+// chips with their waveforms and a "Show all" pill; open, a roomy grid of cards, each with its waveform in its group's
+// colour, its name and kind, Use…, and ×. A card or chip plays on a click; a drag (or Alt with ← or →) moves it; the
+// grip on top folds the drawer, or resizes it with a drag. The header names the palette, switches, renames, makes or
+// forgets one, sets it strict or loose, and offers it as a kit or as the sounds to make a new one from. Every edit
+// changes no project, so it runs at once (`POST /palette`); the agent's `kumi_palette` reads and edits the same
+// palette. Both UI halves use it: what "Use as kit", a card's "Use…" and "Make…" do comes from the parent.
 import { T } from '@kumi/theme'
-import type { DragEvent, KeyboardEvent, ReactNode, RefObject } from 'react'
+import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num } from './format.ts'
 import { groupColor } from './mapModel.ts'
-import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, peaksOf, playableId } from './palette.ts'
+import { Icon } from './mapUi.tsx'
+import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
+import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapGroup } from './types.ts'
 import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
 
-/** Chips drawn at once: a palette can hold thousands (a gather takes 10,000), and the dock is a strip, not a list. */
+/** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
-/** Thumbnail bars per chip, and the largest audio (in data-URL characters) a thumbnail decodes. */
-const BARS = 28
-const THUMB_MOST = 12 * 1024 * 1024
+/** The open drawer's height: where it starts, and how far a drag on its grip takes it. */
+const OPEN_HEIGHT = 260
+const LOWEST = 150
+const HIGHEST = 620
 
 export interface PaletteDockProps {
   palette: PaletteReply | null
-  /** The map's groups, for each chip's colour. */
+  /** The map's groups, for each sound's colour. */
   groups: Record<string, MapGroup> | undefined
   /** What plays now (a sound id or an artifact id). */
   playing: string | null
@@ -32,59 +36,27 @@ export interface PaletteDockProps {
   onDo: (action: PaletteAction) => Promise<boolean>
   /** What the last edit said, or why it was refused (the store's `paletteSaid`): shown a few seconds. */
   said: { text: string; failed: boolean; at: number } | null
-  /** The audio behind an id, as a data URL (the audition's cache), for the thumbnails. */
+  /** The audio behind an id, as a data URL (the audition's cache), for the waveforms. */
   audio: (id: string) => Promise<string>
   /** "Use as kit": Desktop drafts a chat request, the dashboard copies it. */
   kit?: (palette: PaletteView) => ReactNode
+  /** A card's "Use…": Desktop drafts the sound's reference in the chat, the dashboard copies it. */
+  use?: (item: PaletteItem) => ReactNode
   /** "Make…": opens the Make panel on the palette's sounds. */
   make?: (palette: PaletteView) => void
-  /** The dock's own box, for the Make panel to fly a kept sound into. */
+  /** The drawer's own box, for the Make panel to fly a kept sound into. */
   landing?: RefObject<HTMLElement | null>
+  /** Whether the drawer is open, kept by the parent (each UI half remembers it), and how to change it. */
+  open: boolean
+  onOpen: (open: boolean) => void
 }
 
-// Thumbnails by id, shared by every dock in the window: decoded once, one at a time, kept for the session.
-const peaksKept = new Map<string, number[] | null>()
-const peaksLoading = new Map<string, Promise<number[] | null>>()
-let decodeQueue: Promise<unknown> = Promise.resolve()
-
-function decodePeaks(id: string, audio: (id: string) => Promise<string>): Promise<number[] | null> {
-  const kept = peaksKept.get(id)
-  if (kept !== undefined) return Promise.resolve(kept)
-  const loading = peaksLoading.get(id)
-  if (loading) return loading
-  const run = async (): Promise<number[] | null> => {
-    const url = await audio(id)
-    const comma = url.indexOf(',')
-    if (comma < 0 || url.length > THUMB_MOST || typeof OfflineAudioContext !== 'function') return null
-    const binary = atob(url.slice(comma + 1))
-    const bytes = new Uint8Array(binary.length)
-    for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at)
-    const buffer = await new OfflineAudioContext(1, 1, 44_100).decodeAudioData(bytes.buffer)
-    const mixed = new Float32Array(buffer.length)
-    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-      const data = buffer.getChannelData(channel)
-      for (let at = 0; at < data.length; at++) mixed[at] += data[at]
-    }
-    return peaksOf(mixed, BARS)
-  }
-  // One decode at a time: a palette of hundreds mustn't decode them all at once.
-  const promise = decodeQueue
-    .then(run, run)
-    .catch(() => null)
-    .then(peaks => {
-      peaksKept.set(id, peaks)
-      peaksLoading.delete(id)
-      return peaks
-    })
-  decodeQueue = promise
-  peaksLoading.set(id, promise)
-  return promise
-}
-
-function Waveform({ id, color, audio }: { id: string | null; color: string; audio: (id: string) => Promise<string> }) {
+/** A waveform drawn from the sound's own audio, decoded once it's on screen (a card scrolled out of view costs
+ *  nothing), in `color`. */
+function Waveform({ id, color, audio, width, height, bars }: { id: string | null; color: string; audio: (id: string) => Promise<string>; width: number | '100%'; height: number; bars: number }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
-  const [peaks, setPeaks] = useState<number[] | null>(() => (id ? (peaksKept.get(id) ?? null) : null))
-  // Decoded once it's on screen: a chip scrolled out of view costs nothing.
+  const [peaks, setPeaks] = useState<number[] | null>(() => (id ? peaksKept(id, bars) : null))
+  const [drawnWidth, setDrawnWidth] = useState(typeof width === 'number' ? width : 0)
   useEffect(() => {
     const element = canvas.current
     if (!id || !element || peaks) return
@@ -92,53 +64,59 @@ function Waveform({ id, color, audio }: { id: string | null; color: string; audi
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return
       observer.disconnect()
-      void decodePeaks(id, audio).then(found => live && setPeaks(found))
+      void peaksFor(id, bars, audio).then(found => live && setPeaks(found))
     })
     observer.observe(element)
     return () => {
       live = false
       observer.disconnect()
     }
-  }, [id, audio, peaks])
+  }, [id, audio, peaks, bars])
+  useEffect(() => {
+    if (typeof width === 'number') return
+    const element = canvas.current
+    if (!element) return
+    const observer = new ResizeObserver(entries => setDrawnWidth(Math.floor(entries[0]?.contentRect.width ?? 0)))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [width])
   useEffect(() => {
     const element = canvas.current
     const context = element?.getContext('2d')
-    if (!element || !context) return
+    if (!element || !context || drawnWidth === 0) return
     const ratio = window.devicePixelRatio || 1
-    const [width, height] = [44, 16]
-    element.width = width * ratio
+    element.width = drawnWidth * ratio
     element.height = height * ratio
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    context.clearRect(0, 0, width, height)
+    context.clearRect(0, 0, drawnWidth, height)
     // A canvas takes no CSS variables, and a theme colour is one (`var(--ui-accent)`): the canvas wears the colour as
     // its own CSS colour, and the computed value is what it draws with.
     context.fillStyle = getComputedStyle(element).color
-    const bars = peaks ?? new Array<number>(BARS).fill(0.08)
-    const step = width / bars.length
-    bars.forEach((peak, bar) => {
+    const shown = peaks ?? new Array<number>(bars).fill(0.08)
+    const step = drawnWidth / shown.length
+    context.globalAlpha = peaks ? 0.95 : 0.35
+    shown.forEach((peak, bar) => {
       const tall = Math.max(1, peak * (height - 2))
-      context.globalAlpha = peaks ? 0.95 : 0.35
       context.fillRect(bar * step, (height - tall) / 2, Math.max(1, step - 0.6), tall)
     })
-  }, [peaks, color])
-  return <canvas aria-hidden ref={canvas} style={{ width: 44, height: 16, flex: 'none', color }} />
+  }, [peaks, color, drawnWidth, height, bars])
+  return <canvas aria-hidden ref={canvas} style={{ width, height, flex: 'none', display: 'block', color }} />
 }
 
-function Chip({
-  item,
-  index,
-  color,
-  playing,
-  audio,
-  onPlay,
-  onStop,
-  onRemove,
-  onMove,
-  onDropHere,
-  dragging,
-  onDrag,
-  arriving
-}: {
+/** What a chip and a card share: dragged to move, Alt with ← or → to move by keys, Delete to take it out. */
+function useItemKeys(index: number, onMove: (to: number) => void, onRemove: () => void) {
+  return (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault()
+      onMove(index + (event.key === 'ArrowLeft' ? -1 : 1))
+    } else if (event.key === 'Delete') {
+      event.preventDefault()
+      onRemove()
+    }
+  }
+}
+
+interface ItemProps {
   item: PaletteItem
   index: number
   color: string
@@ -148,55 +126,64 @@ function Chip({
   onStop: () => void
   onRemove: () => void
   onMove: (to: number) => void
-  /** Another chip was dropped on this one: it takes this one's place. */
+  /** Another sound was dropped on this one: it takes this one's place. */
   onDropHere: () => void
   dragging: string | null
   onDrag: (key: string | null) => void
   /** Just gathered: it pops in, after the flight from the map lands (its place in the batch sets the delay). */
   arriving: number | null
-}) {
-  const t = useT()
-  const id = playableId(item)
-  const name = clean(item.name, 60) || item.key
+  use?: ReactNode
+}
+
+/** The drag-and-drop a chip and a card share, and how one looks while it's dragged or something hovers over it. */
+function useDrop({ item, dragging, onDrag, onDropHere }: Pick<ItemProps, 'item' | 'dragging' | 'onDrag' | 'onDropHere'>, name: string) {
   const [over, setOver] = useState(false)
-  const keys = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      event.preventDefault()
-      onMove(index + (event.key === 'ArrowLeft' ? -1 : 1))
-    } else if (event.key === 'Delete') {
-      event.preventDefault()
-      onRemove()
-    }
-  }
-  return (
-    <div
-      draggable
-      onDragEnd={() => onDrag(null)}
-      onDragLeave={() => setOver(false)}
-      onDragOver={(event: DragEvent) => {
+  return {
+    over,
+    handlers: {
+      draggable: true,
+      onDragEnd: () => onDrag(null),
+      onDragLeave: () => setOver(false),
+      onDragOver: (event: DragEvent) => {
         if (!dragging || dragging === item.key) return
         event.preventDefault()
         setOver(true)
-      }}
-      onDragStart={(event: DragEvent) => {
+      },
+      onDragStart: (event: DragEvent) => {
         event.dataTransfer.effectAllowed = 'move'
         event.dataTransfer.setData('text/plain', name)
         onDrag(item.key)
-      }}
-      onDrop={(event: DragEvent) => {
+      },
+      onDrop: (event: DragEvent) => {
         event.preventDefault()
         setOver(false)
         if (dragging && dragging !== item.key) onDropHere()
-      }}
+      }
+    }
+  }
+}
+
+/** One sound in the folded drawer's row: its waveform and name. */
+function Chip(props: ItemProps) {
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving } = props
+  const t = useT()
+  const id = playableId(item)
+  const name = clean(item.name, 60) || item.key
+  const { over, handlers } = useDrop(props, name)
+  const keys = useItemKeys(index, onMove, onRemove)
+  return (
+    <div
+      {...handlers}
       className={arriving === null ? undefined : 'kumi-pop'}
       role="listitem"
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 2,
+        flex: 'none',
         maxWidth: 220,
         padding: '2px 2px 2px 4px',
-        borderRadius: 6,
+        borderRadius: 7,
         border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
         boxShadow: playing ? `0 0 0 1px ${color}, 0 0 10px -2px ${color}` : 'none',
         background: playing ? T.chip : 'transparent',
@@ -217,7 +204,7 @@ function Chip({
         type="button"
         style={{ ...S.row, gap: 5, minWidth: 0, font: 'inherit', fontSize: 11.5, padding: '1px 3px', border: 'none', background: 'transparent', color: T.text, cursor: id ? 'pointer' : 'default' }}
       >
-        <Waveform audio={audio} color={color} id={id} />
+        <Waveform audio={audio} bars={28} color={color} height={16} id={id} width={44} />
         <span style={S.ellipsis}>{name}</span>
       </button>
       <button
@@ -230,6 +217,72 @@ function Chip({
       >
         ×
       </button>
+    </div>
+  )
+}
+
+/** One sound in the open drawer: a card with its waveform across the top, its name, kind, Use… and ×. */
+function Card(props: ItemProps) {
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use } = props
+  const t = useT()
+  const id = playableId(item)
+  const name = clean(item.name, 80) || item.key
+  const { over, handlers } = useDrop(props, name)
+  const keys = useItemKeys(index, onMove, onRemove)
+  return (
+    <div
+      {...handlers}
+      className={arriving === null ? undefined : 'kumi-pop'}
+      role="listitem"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        minWidth: 0,
+        padding: 7,
+        borderRadius: 10,
+        border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
+        background: playing ? `color-mix(in srgb, ${color} 12%, transparent)` : `color-mix(in srgb, ${T.card} 55%, transparent)`,
+        boxShadow: playing ? `0 0 0 1px ${color}, 0 6px 18px -8px ${color}` : 'none',
+        opacity: dragging === item.key ? 0.4 : id ? 1 : 0.55,
+        transition: 'border-color 120ms, box-shadow 180ms, background-color 160ms, opacity 120ms, transform 160ms',
+        cursor: 'grab',
+        animationDelay: arriving === null ? undefined : `${380 + Math.min(arriving, 24) * 22}ms`
+      }}
+    >
+      <button
+        aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
+        aria-pressed={playing}
+        className={FOCUSABLE}
+        disabled={!id}
+        onClick={() => (playing ? onStop() : onPlay())}
+        onKeyDown={keys}
+        title={id ? t('dock.reorderHint') : t('dock.offMap')}
+        type="button"
+        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: id ? 'pointer' : 'default' }}
+      >
+        <Waveform audio={audio} bars={64} color={color} height={30} id={id} width="100%" />
+      </button>
+      <div style={{ ...S.row, gap: 5 }}>
+        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: color, flex: 'none' }} />
+        <span style={{ ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }} title={name}>
+          {name}
+        </span>
+        <button
+          aria-label={t('dock.remove', name)}
+          className={FOCUSABLE}
+          onClick={onRemove}
+          title={t('dock.remove', name)}
+          type="button"
+          style={{ font: 'inherit', fontSize: 12, lineHeight: '14px', width: 16, height: 16, padding: 0, borderRadius: 3, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ ...S.row, gap: 5, minHeight: 18 }}>
+        <span style={{ ...S.faint, ...S.ellipsis, flex: 1, fontSize: 10.5 }}>{item.source === 'artifact' ? t('dock.made') : clean(item.class ?? '', 16)}</span>
+        {use}
+      </div>
     </div>
   )
 }
@@ -273,17 +326,17 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, make, landing }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
   const [forgetting, setForgetting] = useState(false)
-  const [open, setOpen] = useState(true)
   const [dragging, setDragging] = useState<string | null>(null)
+  const [height, setHeight] = useState(OPEN_HEIGHT)
   // A move shows at once; the backend's answer then replaces it.
   const [order, setOrder] = useState<PaletteItem[] | null>(null)
   useEffect(() => setOrder(null), [palette])
-  // Which chips were there before the last answer: one that wasn't is new (a gather), and pops in. The first answer
+  // Which sounds were there before the last answer: one that wasn't is new (a gather), and pops in. The first answer
   // shows the palette as it is, with nothing popping.
   const known = useRef<{ id: string | null; keys: Set<string> } | null>(null)
   const arrived = useMemo(() => {
@@ -293,13 +346,14 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     known.current = { id: current?.id ?? null, keys }
     return new Map(fresh.map((key, order) => [key, order]))
   }, [current])
-  // New chips go at the end of the strip: it scrolls to them, so a gather or a kept sound lands in view.
+  // New sounds go at the end: the row or grid scrolls to them, so a gather or a kept sound lands in view.
   const strip = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const element = strip.current
     if (!element || arrived.size === 0) return
-    element.scrollTo({ top: element.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-  }, [arrived])
+    const smooth = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth })
+  }, [arrived, open])
   // The last sentence fades after a while: it says what just happened, not what is.
   const [now, setNow] = useState(() => Date.now())
   const shownFor = said?.failed ? 8000 : 4000
@@ -311,33 +365,58 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   }, [said, shownFor])
   const saying = said && now - said.at < shownFor ? said : null
 
+  // The grip: a click folds or opens the drawer; a drag on an open one resizes it.
+  const grip = useRef<{ y: number; height: number; moved: boolean } | null>(null)
+  const gripDown = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!open || event.button !== 0) return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    grip.current = { y: event.clientY, height, moved: false }
+  }
+  const gripMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const held = grip.current
+    if (!held) return
+    const delta = held.y - event.clientY
+    if (Math.abs(delta) > 3) held.moved = true
+    if (held.moved) setHeight(Math.min(HIGHEST, Math.max(LOWEST, held.height + delta)))
+  }
+
   const run = (action: PaletteAction) =>
     onDo(action).then(done => {
       if (!done) setOrder(null)
     })
   const items = order ?? current?.items ?? []
-  const colorOf = (group: number | null) => (group === null ? T.faint : groupColor(groups?.[String(group)]?.color, group))
+  const colorOf = (item: PaletteItem) => (item.source === 'artifact' ? T.accent : item.group === null ? T.faint : groupColor(groups?.[String(item.group)]?.color, item.group))
   const move = (key: string, to: number) => {
     if (to < 0 || to >= items.length) return
     setOrder(moved(items, key, to))
     void run({ action: 'move', key, to })
   }
+  const itemProps = (item: PaletteItem, index: number): ItemProps => ({
+    audio,
+    color: colorOf(item),
+    dragging,
+    index,
+    item,
+    arriving: arrived.get(item.key) ?? null,
+    onDrag: setDragging,
+    onDropHere: () => dragging && move(dragging, index),
+    onMove: to => move(item.key, to),
+    onPlay: () => {
+      const id = playableId(item)
+      if (id) onPlay(id)
+    },
+    onRemove: () => {
+      setOrder(items.filter(other => other.key !== item.key))
+      void run({ action: 'remove', keys: [item.key] })
+    },
+    onStop,
+    playing: playing !== null && playing === playableId(item),
+    use: use?.(item)
+  })
 
   const header = (
     <div style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
-      <button
-        aria-expanded={open}
-        className={FOCUSABLE}
-        onClick={() => setOpen(!open)}
-        title={open ? t('dock.collapse') : t('dock.expand')}
-        type="button"
-        style={{ ...S.heading, font: 'inherit', fontSize: 11, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
-      >
-        <span aria-hidden style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }}>
-          ▸
-        </span>
-        {t('dock.title')}
-      </button>
+      <span style={{ ...S.heading, fontSize: 11, color: T.secondary }}>{t('dock.title')}</span>
       {editing ? (
         <NameField
           initial={editing === 'rename' ? (current?.name ?? '') : ''}
@@ -360,7 +439,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
                 if (value === '\u0000new') setEditing('new')
                 else if (value !== current?.id) void run({ action: 'use', id: value })
               }}
-              style={{ font: 'inherit', fontSize: 12, fontWeight: 600, maxWidth: '14rem', padding: '0 4px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
+              style={{ font: 'inherit', fontSize: 12, fontWeight: 600, maxWidth: '14rem', padding: '0 4px', borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
               value={current?.id ?? ''}
             >
               {!current && <option value="">{t('dock.choose')}</option>}
@@ -395,12 +474,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           </TextButton>
         </span>
       )}
-      {current && (
-        <span style={S.faint}>
-          {t('dock.count', current.items.length)}
-          {current.excluded > 0 ? ` · ${t('dock.excluded', current.excluded)}` : ''}
-        </span>
-      )}
+      {current && current.excluded > 0 && <span style={S.faint}>{t('dock.excluded', current.excluded)}</span>}
       <span style={{ flex: 1 }} />
       {current && current.items.length > 1 && make && (
         <TextButton onClick={() => make(current)} title={t('make.openTitle')}>
@@ -413,11 +487,74 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           {t('dock.forget')}
         </TextButton>
       )}
+      {current && items.length > 0 && (
+        <button
+          aria-expanded={open}
+          className={FOCUSABLE}
+          onClick={() => onOpen(!open)}
+          title={open ? t('dock.collapse') : t('dock.expand')}
+          type="button"
+          style={{
+            ...S.row,
+            gap: 4,
+            font: 'inherit',
+            fontSize: 11.5,
+            fontWeight: 600,
+            padding: '2px 10px',
+            borderRadius: 12,
+            border: `1px solid ${T.accent}`,
+            background: `color-mix(in srgb, ${T.accent} ${open ? 10 : 18}%, transparent)`,
+            color: T.accent,
+            cursor: 'pointer',
+            flex: 'none'
+          }}
+        >
+          {open ? t('dock.fold') : t('dock.showAll', items.length)}
+          <span aria-hidden style={{ display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
+            ▴
+          </span>
+        </button>
+      )}
     </div>
   )
 
   return (
-    <section aria-label={t('dock.title')} ref={landing} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderTop: `1px solid ${T.border}`, color: T.text }}>
+    <section
+      aria-label={t('dock.title')}
+      ref={landing}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '0 10px 8px',
+        borderTop: `1px solid ${T.border}`,
+        background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
+        color: T.text,
+        flex: 'none',
+        height: open && items.length > 0 ? height : undefined,
+        transition: grip.current ? 'none' : 'height 260ms cubic-bezier(.2,.8,.2,1)'
+      }}
+    >
+      {/* The grip: a handle across the top, so the drawer reads as one that opens. */}
+      <button
+        aria-expanded={open}
+        aria-label={open ? t('dock.collapse') : t('dock.expand')}
+        className={FOCUSABLE}
+        onClick={() => {
+          if (grip.current?.moved) return
+          onOpen(!open)
+        }}
+        onPointerCancel={() => (grip.current = null)}
+        onPointerDown={gripDown}
+        onPointerMove={gripMove}
+        onPointerUp={() => setTimeout(() => (grip.current = null), 0)}
+        title={open ? t('dock.gripTitle') : t('dock.expand')}
+        type="button"
+        style={{ alignSelf: 'stretch', height: 12, padding: 0, border: 'none', background: 'transparent', cursor: open ? 'ns-resize' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}
+      >
+        <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
+      </button>
       {header}
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
@@ -434,37 +571,28 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           <TextButton onClick={() => setForgetting(false)}>{t('dock.keep')}</TextButton>
         </div>
       )}
-      {open && current && items.length > 0 && (
-        <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 116, overflowY: 'auto', paddingBottom: 1 }}>
+      {current && items.length > 0 && open && (
+        <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, alignContent: 'start', padding: '2px 1px' }}>
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
-            <Chip
-              audio={audio}
-              // A sound Kumi made has no group on the map: it wears the accent, so its waveform shows.
-              color={item.source === 'artifact' ? T.accent : colorOf(item.group)}
-              dragging={dragging}
-              index={index}
-              item={item}
-              key={item.key}
-              arriving={arrived.get(item.key) ?? null}
-              onDrag={setDragging}
-              onDropHere={() => dragging && move(dragging, index)}
-              onMove={to => move(item.key, to)}
-              onPlay={() => {
-                const id = playableId(item)
-                if (id) onPlay(id)
-              }}
-              onRemove={() => {
-                setOrder(items.filter(other => other.key !== item.key))
-                void run({ action: 'remove', keys: [item.key] })
-              }}
-              onStop={onStop}
-              playing={playing !== null && playing === playableId(item)}
-            />
+            <Card key={item.key} {...itemProps(item, index)} />
           ))}
           {items.length > CHIPS_SHOWN && <span style={{ ...S.faint, alignSelf: 'center' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
         </div>
       )}
-      {open && (!current || items.length === 0) && <span style={S.faint}>{t('dock.empty')}</span>}
+      {current && items.length > 0 && !open && (
+        <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ display: 'flex', flexWrap: 'nowrap', gap: 5, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
+          {items.slice(0, CHIPS_SHOWN).map((item, index) => (
+            <Chip key={item.key} {...itemProps(item, index)} />
+          ))}
+          {items.length > CHIPS_SHOWN && <span style={{ ...S.faint, alignSelf: 'center', flex: 'none' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
+        </div>
+      )}
+      {(!current || items.length === 0) && (
+        <span style={{ ...S.row, gap: 6, ...S.faint }}>
+          <Icon name="plus" size={12} />
+          {t('dock.empty')}
+        </span>
+      )}
       <span aria-live="polite" style={saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden}>
         {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
       </span>

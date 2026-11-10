@@ -3,11 +3,11 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { canUndoChange, changesOf, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, undoRowOf } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
-import { english, type Translate } from '../shared/i18n.ts'
-import { dawPartWorks, type KumiState, type KumiStore } from '../shared/store.ts'
+import type { KumiState, KumiStore } from '../shared/store.ts'
+import { nextSteps, setupWords } from '../shared/steps.ts'
 import { Dot, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
@@ -27,43 +27,6 @@ export function useNow(every = 30_000): number {
 export function ownerSession(state: KumiState): null | string {
   const session = state.status?.owner?.session_id
   return typeof session === 'string' && session ? session : null
-}
-
-// Setup states (W5's `setup.status()`) that a setup request fixes. `no_pin` and `unsupported_platform` it can't.
-const NEEDS_SETUP: Record<string, true> = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true }
-// Setup's last steps, taken in the DAW (choose Kumi's control surface, restart the DAW so it loads Kumi's part, turn on
-// its tool): setup's message says what to do there until Kumi connects.
-const IN_DAW: Record<string, true> = { choose_control_surface: true, restart_daw: true, enable_tool: true }
-// The DAWs setup is offered for before one is chosen in Kumi's settings, as setup names them.
-const SETUP_DAWS = ['ableton', 'reaper', 'renoise']
-
-/** Whether a DAW is chosen in Kumi's settings. A backend from before `daw_chosen` reads as chosen, as it always did. */
-export function dawChosen(state: KumiState): boolean {
-  return state.setup?.daw_chosen !== false
-}
-
-/** Setup's next step, as the buttons that ask for it (labels in `t`'s words; the requests stay English, C5). Until a
- *  DAW is chosen in Kumi's settings, setup is offered for each DAW: setting one up makes it Kumi's DAW in the same
- *  approval (setup's `use_daw`). */
-export function nextSteps(state: KumiState, t: Translate = english): { label: string; request: string }[] {
-  const setup = state.setup
-  const daw = state.status?.daw ?? setup?.daw
-  if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
-    return (dawChosen(state) ? [daw] : SETUP_DAWS).map(each => ({ label: t('step.setup', dawName(each, t)), request: setupRequest(each) }))
-  }
-  if (setup?.state === 'ready' && !state.status?.connected) return [{ label: t('step.connect', dawName(daw, t)), request: connectRequest(daw) }]
-  return []
-}
-
-/** Setup's own words for the pane: only while there's something to do, and not ones that name a DAW nobody chose. */
-export function setupWords(state: KumiState): string | null {
-  const setup = state.setup
-  const said = setup?.state
-  if (typeof setup?.message !== 'string' || !setup.message || !said || said === 'unknown' || dawPartWorks(state)) return null
-  if (said === 'ready') return !state.status?.connected && IN_DAW[setup.next_step ?? ''] ? setup.message : null
-  // "next, setup installs Kumi's part in Live" for a producer who hasn't said Live: the buttons name each DAW instead.
-  if (said === 'needs_daw_component' && !dawChosen(state)) return null
-  return setup.message
 }
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
