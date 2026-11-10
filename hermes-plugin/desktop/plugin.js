@@ -4896,7 +4896,7 @@ function payloadOf(event) {
 
 // src/desktop/map.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
-import { useEffect as useEffect12, useRef as useRef10, useState as useState13 } from "react";
+import { useEffect as useEffect15, useRef as useRef13, useState as useState15 } from "react";
 
 // src/shared/grow.ts
 import { useEffect as useEffect5, useRef as useRef2, useState as useState4 } from "react";
@@ -6225,411 +6225,114 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
 }
 
 // src/shared/MapCanvas.tsx
-import { useEffect as useEffect9, useMemo as useMemo2, useRef as useRef8, useState as useState10 } from "react";
+import { useEffect as useEffect12, useMemo as useMemo2, useRef as useRef11, useState as useState12 } from "react";
 
-// src/shared/atlas/color.ts
-function rgbOf(color) {
-  const text = color.trim();
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-  if (hex) {
-    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
-    const value = parseInt(digits, 16);
-    return [value >> 16, value >> 8 & 255, value & 255];
-  }
-  const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
-  if (!rgb) return null;
-  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-  return channels.every((channel) => channel <= 255) ? channels : null;
-}
-function rgba(color, alpha) {
-  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-}
-function lighten(color, amount) {
-  const toward = (channel) => Math.round(channel + (255 - channel) * amount);
-  return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
-}
-function isDark(color) {
-  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
-}
+// src/shared/atlas/AtlasOverlay.tsx
+import { useEffect as useEffect7, useRef as useRef5 } from "react";
 
-// src/shared/atlas/nebula.ts
-var NEBULA_SIDE = 128;
-var NEBULA_PAD = 0.12;
-var SPREAD = 2;
-var SKIRT = 5;
-var CORE = 0.55;
-var ALONE = CORE / (2 * SPREAD + 1) ** 2;
-var CROWD = 8;
-var BRIGHTEST = 0.85;
-function blur(from, into, side, radius, step2) {
-  const across = step2 === 1 ? side : 1;
-  const scale = 1 / (2 * radius + 1);
-  for (let line = 0; line < side; line++) {
-    const start = line * across;
-    let sum = 0;
-    for (let k = 0; k <= radius && k < side; k++) sum += from[start + k * step2];
-    for (let k = 0; k < side; k++) {
-      into[start + k * step2] = sum * scale;
-      const enters = k + radius + 1;
-      const leaves = k - radius;
-      if (enters < side) sum += from[start + enters * step2];
-      if (leaves >= 0) sum -= from[start + leaves * step2];
-    }
-  }
+// src/shared/palette.ts
+var MOST_GATHERED = 1e4;
+var LOOSE = 5;
+var NAME_MOST = 80;
+function marksOf(palette, revision) {
+  const out = /* @__PURE__ */ new Set();
+  if (!palette?.current || !revision || palette.map_revision !== revision) return out;
+  for (const item of palette.current.items) if (item.sound_id) out.add(item.sound_id);
+  return out;
 }
-function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
-  const cells = side * side;
-  const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
-  const [red, green, blue, weight] = sums;
-  const span2 = side / (1 + 2 * NEBULA_PAD);
-  const colors = /* @__PURE__ */ new Map();
-  for (let index = 0; index < points.length; index++) {
-    if (!keep(index)) continue;
-    const point = points[index];
-    let color = colors.get(point.group);
-    if (!color) {
-      color = colorOf2(point.group);
-      colors.set(point.group, color);
-    }
-    const fx = (point.x + NEBULA_PAD) * span2 - 0.5;
-    const fy = (point.y + NEBULA_PAD) * span2 - 0.5;
-    const x0 = Math.floor(fx);
-    const y0 = Math.floor(fy);
-    if (x0 < 0 || y0 < 0 || x0 + 1 >= side || y0 + 1 >= side) continue;
-    const right = fx - x0;
-    const down = fy - y0;
-    for (let corner = 0; corner < 4; corner++) {
-      const share = (corner & 1 ? right : 1 - right) * (corner & 2 ? down : 1 - down);
-      const cell = (y0 + (corner >> 1)) * side + x0 + (corner & 1);
-      red[cell] += color[0] * share;
-      green[cell] += color[1] * share;
-      blue[cell] += color[2] * share;
-      weight[cell] += share;
-    }
-  }
-  const spare = new Float32Array(cells);
-  const core = new Float32Array(cells);
-  for (const sum of sums) {
-    for (let pass = 0; pass < 2; pass++) {
-      blur(sum, spare, side, SPREAD, 1);
-      blur(spare, sum, side, SPREAD, side);
-    }
-    core.set(sum);
-    for (let pass = 0; pass < 2; pass++) {
-      blur(sum, spare, side, SKIRT, 1);
-      blur(spare, sum, side, SKIRT, side);
-    }
-    for (let cell = 0; cell < cells; cell++) sum[cell] = CORE * core[cell] + (1 - CORE) * sum[cell];
-  }
-  let peak = 0;
-  for (let cell = 0; cell < cells; cell++) if (weight[cell] > peak) peak = weight[cell];
-  const pixels = new Uint8ClampedArray(cells * 4);
-  if (peak <= 0) return pixels;
-  const gain = -Math.log(1 - BRIGHTEST) / Math.max(peak, ALONE * CROWD);
-  for (let cell = 0; cell < cells; cell++) {
-    const here = weight[cell];
-    if (here <= 1e-9) continue;
-    pixels[4 * cell] = red[cell] / here;
-    pixels[4 * cell + 1] = green[cell] / here;
-    pixels[4 * cell + 2] = blue[cell] / here;
-    pixels[4 * cell + 3] = 255 * (1 - Math.exp(-here * gain));
-  }
-  return pixels;
+function playableId(item) {
+  return item.sound_id ?? item.artifact_id;
 }
-function nebulaAlpha(zoom) {
-  const alpha = 1 / Math.max(1, zoom) ** 1.35;
-  return alpha < 0.03 ? 0 : alpha;
+function moved(items, key, to) {
+  const from = items.findIndex((item) => item.key === key);
+  if (from < 0) return [...items];
+  const out = items.filter((item) => item.key !== key);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, items[from]);
+  return out;
 }
-function haloOf(radius, zoom, crowd, unit) {
-  const reach = radius * 3.3;
-  const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
-  return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
+function paletteName(text) {
+  const name = text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, NAME_MOST).trim();
+  return name || null;
+}
+function kitRequest(name) {
+  const said = quotable(name);
+  return said ? `Load the sounds in my palette “${said}” as a kit` : "Load the sounds in my palette as a kit";
+}
+function itemReference(item, revision) {
+  if (item.sound_id) return soundRequest(item.sound_id, item.name, revision);
+  return item.artifact_id ? artifactReference(item.artifact_id, item.name) : null;
+}
+function gatherIds(ids) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const id of ids) if (plainId(id)) seen.add(id);
+  const all = [...seen];
+  return { ids: all.slice(0, MOST_GATHERED), dropped: Math.max(0, all.length - MOST_GATHERED) };
+}
+function peaksOf2(samples, bins) {
+  const out = new Array(bins).fill(0);
+  if (samples.length === 0 || bins <= 0) return out;
+  let loudest = 0;
+  for (let bin = 0; bin < bins; bin++) {
+    const start = Math.floor(bin * samples.length / bins);
+    const end = Math.max(start + 1, Math.floor((bin + 1) * samples.length / bins));
+    let peak = 0;
+    for (let at = start; at < end && at < samples.length; at++) {
+      const value = Math.abs(samples[at]);
+      if (value > peak) peak = value;
+    }
+    out[bin] = peak;
+    if (peak > loudest) loudest = peak;
+  }
+  return loudest > 0 ? out.map((peak) => peak / loudest) : out;
 }
 
-// src/shared/atlas/glow.ts
-var GREY = [128, 128, 128];
-var MOST_SPRITES = 240;
-function picture(width, height) {
-  if (typeof OffscreenCanvas !== "function") return null;
-  const canvas = new OffscreenCanvas(width, height);
-  const context = canvas.getContext("2d");
-  return context ? { canvas, context } : null;
-}
-var Glow = class {
-  current = null;
-  last = null;
-  sprites = /* @__PURE__ */ new Map();
-  crowds = /* @__PURE__ */ new WeakMap();
-  shapes = /* @__PURE__ */ new Map();
-  ground = "";
-  dark = true;
-  /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
-   *  counts as dark, as both hosts' first themes are). */
-  onDark(context, ground) {
-    if (ground === this.ground) return this.dark;
-    this.ground = ground;
-    const kept3 = context.fillStyle;
-    context.fillStyle = "#000";
-    context.fillStyle = ground;
-    const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
-    context.fillStyle = kept3;
-    this.dark = read ? isDark(read) : true;
-    this.shapes.clear();
-    return this.dark;
+// src/shared/peaks.ts
+var DECODE_MOST = 12 * 1024 * 1024;
+var kept = /* @__PURE__ */ new Map();
+var loading = /* @__PURE__ */ new Map();
+var askers = /* @__PURE__ */ new Map();
+var queue = Promise.resolve();
+var SKIPPED = /* @__PURE__ */ Symbol("skipped");
+function peaksFor(id, bars, audio, wanted = () => true) {
+  const key = `${bars}:${id}`;
+  const done = kept.get(key);
+  if (done !== void 0) return Promise.resolve(done);
+  const running = loading.get(key);
+  if (running) {
+    askers.get(key)?.push(wanted);
+    return running;
   }
-  /** The colour a sound's shape is filled in: its family's, a little brighter on a dark ground so it stays crisp over
-   *  its own glow. */
-  shape(color) {
-    let shape = this.shapes.get(color);
-    if (shape === void 0) {
-      const channels = this.dark ? rgbOf(color) : null;
-      shape = channels ? lighten(channels, 0.2) : color;
-      this.shapes.set(color, shape);
+  askers.set(key, [wanted]);
+  const run = async () => {
+    if (!(askers.get(key) ?? []).some((ask2) => ask2())) return SKIPPED;
+    const url = await audio(id);
+    const comma = url.indexOf(",");
+    if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
+    const binary = atob(url.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
+    const buffer = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
+    const mixed2 = new Float32Array(buffer.length);
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const data = buffer.getChannelData(channel);
+      for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
     }
-    return shape;
-  }
-  /** The nebula of `layout` for the sounds `mask` keeps, made the first time it's asked for and kept until either
-   *  changes; with it, the one the map showed before a new layout (for the move between them to fade out). Two
-   *  pictures in all, drawn over in turn. */
-  nebula(layout, mask, colorOf2) {
-    if (this.current?.layout !== layout || this.current.mask !== mask) {
-      const same = this.current?.layout === layout;
-      const sheet = (same ? this.current?.sheet : this.last?.sheet) ?? picture(NEBULA_SIDE, NEBULA_SIDE);
-      if (!sheet) return { now: null, before: null };
-      if (!same) this.last = this.current;
-      const pixels = nebulaField(
-        layout.points,
-        (index) => mask[index] === 1,
-        (group) => rgbOf(colorOf2(group)) ?? GREY
-      );
-      sheet.context.putImageData(new ImageData(pixels, NEBULA_SIDE, NEBULA_SIDE), 0, 0);
-      this.current = { layout, mask, sheet };
-    }
-    return { now: this.current.sheet.canvas, before: this.last && this.last.layout !== layout ? this.last.sheet.canvas : null };
-  }
-  /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
-  draw(context, nebula, view, unit, alpha) {
-    if (alpha <= 0) return;
-    const kept3 = context.globalAlpha;
-    context.globalAlpha = alpha;
-    context.imageSmoothingEnabled = true;
-    context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
-    context.globalAlpha = kept3;
-  }
-  /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
-  crowd(layout) {
-    let crowd = this.crowds.get(layout);
-    if (crowd === void 0) {
-      crowd = 0;
-      for (const cell of layout.cells.values()) crowd = Math.max(crowd, cell.length);
-      this.crowds.set(layout, crowd);
-    }
-    return crowd;
-  }
-  /** Halos of `radius` pixels at `alpha`, on a canvas drawn at `ratio` device pixels to one: each `at` adds one, `done`
-   *  hands the canvas back as it was. Null when there's nothing to draw them with, or nothing to see. */
-  halos(context, radius, alpha, ratio) {
-    if (alpha < 0.02 || radius < 1 || typeof OffscreenCanvas !== "function") return null;
-    const size = Math.round(radius * 2) / 2;
-    const side = Math.max(2, Math.ceil(size * 2 * ratio));
-    const [keptAlpha, keptBlend] = [context.globalAlpha, context.globalCompositeOperation];
-    context.globalCompositeOperation = "lighter";
-    let strong = -1;
-    let color = "";
-    let sprite = null;
-    return {
-      at: (next, x, y, strength) => {
-        if (strength <= 0.02) return;
-        if (next !== color) {
-          color = next;
-          sprite = this.sprite(next, side);
-        }
-        if (!sprite) return;
-        const stepped = Math.round(Math.min(1, strength) * 10) / 10;
-        if (stepped !== strong) {
-          strong = stepped;
-          context.globalAlpha = alpha * stepped;
-        }
-        context.drawImage(sprite, x - size, y - size, size * 2, size * 2);
-      },
-      done: () => {
-        context.globalAlpha = keptAlpha;
-        context.globalCompositeOperation = keptBlend;
-      }
-    };
-  }
-  /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
-  sprite(color, side) {
-    const key = `${color}|${side}`;
-    const kept3 = this.sprites.get(key);
-    if (kept3) return kept3;
-    const channels = rgbOf(color);
-    const made = channels ? picture(side, side) : null;
-    if (!made || !channels) return null;
-    const middle = side / 2;
-    const fade = made.context.createRadialGradient(middle, middle, 0, middle, middle, middle);
-    fade.addColorStop(0, rgba(channels, 1));
-    fade.addColorStop(0.35, rgba(channels, 0.45));
-    fade.addColorStop(1, rgba(channels, 0));
-    made.context.fillStyle = fade;
-    made.context.fillRect(0, 0, side, side);
-    if (this.sprites.size >= MOST_SPRITES) this.sprites.clear();
-    this.sprites.set(key, made.canvas);
-    return made.canvas;
-  }
-};
-var glows = /* @__PURE__ */ new WeakMap();
-function glowOf(canvas) {
-  let glow = glows.get(canvas);
-  if (!glow) {
-    glow = new Glow();
-    glows.set(canvas, glow);
-  }
-  return glow;
-}
-
-// src/shared/atlas/names.ts
-var NAMES_ON_SCREEN = 600;
-var NAMES_MOST = 50;
-var kept = /* @__PURE__ */ new WeakMap();
-function regionsOf(points) {
-  const known = kept.get(points);
-  if (known) return known;
-  const families = /* @__PURE__ */ new Map();
-  for (const point of points) {
-    const family = families.get(point.group);
-    if (family) family.push(point);
-    else families.set(point.group, [point]);
-  }
-  const regions = [];
-  for (const [group, family] of families) {
-    const across = family.map((point) => point.x).sort((a, b) => a - b);
-    const [from, middle, to] = [across[Math.floor(across.length * 0.25)], across[Math.floor(across.length * 0.5)], across[Math.min(across.length - 1, Math.ceil(across.length * 0.75))]];
-    const tops = family.filter((point) => point.x >= from && point.x <= to).map((point) => point.y);
-    tops.sort((a, b) => a - b);
-    regions.push({ group, x: middle, y: tops[Math.floor(tops.length * 0.015)] });
-  }
-  kept.set(points, regions);
-  return regions;
-}
-function regionAlpha(zoom) {
-  return Math.min(1, Math.max(0, (2.3 - zoom) / 0.9));
-}
-function fitting(boxes, most, padX = 0, padY = 0, taken = []) {
-  const kept3 = [...taken];
-  const fits = [];
-  for (let index = 0; index < boxes.length && fits.length < most; index++) {
-    const [left, top, width, height] = boxes[index];
-    if (kept3.some(([l, t, w, h]) => left < l + w + padX && l < left + width + padX && top < t + h + padY && t < top + height + padY)) continue;
-    kept3.push(boxes[index]);
-    fits.push(index);
-  }
-  return fits;
-}
-function nameRank(index) {
-  return Math.imul(index + 1, 2654435761) >>> 0;
-}
-function clearOf(boxes, places, margin = 3) {
-  const ROW = 16;
-  const rows = /* @__PURE__ */ new Map();
-  for (const place of places) {
-    const row2 = Math.floor(place[1] / ROW);
-    const list = rows.get(row2);
-    if (list) list.push(place);
-    else rows.set(row2, [place]);
-  }
-  return boxes.map(([left, top, width, height]) => {
-    for (let row2 = Math.floor((top - margin) / ROW); row2 <= Math.floor((top + height + margin) / ROW); row2++) {
-      for (const [x, y] of rows.get(row2) ?? []) {
-        if (x >= left - margin && x <= left + width + margin && y >= top - margin && y <= top + height + margin) return false;
-      }
-    }
-    return true;
+    return peaksOf2(mixed2, bars);
+  };
+  const promise = queue.then(run, run).catch(() => null).then((peaks) => {
+    loading.delete(key);
+    askers.delete(key);
+    if (peaks === SKIPPED) return null;
+    kept.set(key, peaks);
+    return peaks;
   });
+  queue = promise;
+  loading.set(key, promise);
+  return promise;
 }
-
-// src/shared/atlas/labels.ts
-function track(context, spacing) {
-  if ("letterSpacing" in context) context.letterSpacing = spacing;
+function peaksKept(id, bars) {
+  return kept.get(`${bars}:${id}`) ?? null;
 }
-function drawWords(context, words, alpha, look, room) {
-  if (alpha <= 0 || words.length === 0) return [];
-  context.save();
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.lineJoin = "round";
-  context.strokeStyle = look.ground;
-  const name = `700 12px ${look.family}`;
-  context.font = name;
-  track(context, "0.2em");
-  const boxes = words.map((word) => {
-    const width = context.measureText(word.text).width;
-    return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
-  });
-  const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
-  for (const index of written) {
-    const word = words[index];
-    context.font = name;
-    track(context, "0.2em");
-    context.lineWidth = 5;
-    context.globalAlpha = 0.85 * alpha;
-    context.strokeText(word.text, word.x, word.y);
-    context.globalAlpha = alpha;
-    context.fillStyle = word.color;
-    context.fillText(word.text, word.x, word.y);
-    if (!word.count) continue;
-    context.font = `500 10px ${look.family}`;
-    track(context, "0.06em");
-    context.lineWidth = 3;
-    context.globalAlpha = 0.8 * alpha;
-    context.strokeText(word.count, word.x, word.y + 14);
-    context.globalAlpha = 0.85 * alpha;
-    context.fillStyle = look.muted;
-    context.fillText(word.count, word.x, word.y + 14);
-  }
-  context.restore();
-  return written.map((index) => boxes[index]);
-}
-var widths = /* @__PURE__ */ new Map();
-function drawNames(context, names, gap, look, taken) {
-  if (names.length === 0) return;
-  context.save();
-  const font = `500 10.5px ${look.family}`;
-  context.font = font;
-  context.textBaseline = "middle";
-  context.lineJoin = "round";
-  context.lineWidth = 3;
-  context.strokeStyle = look.ground;
-  if (widths.size > 6e3) widths.clear();
-  const offered = [...names].sort((a, b) => a.rank - b.rank);
-  const boxes = offered.map((word) => {
-    const key = `${font}|${word.text}`;
-    let width = widths.get(key);
-    if (width === void 0) {
-      width = context.measureText(word.text).width;
-      widths.set(key, width);
-    }
-    return [word.x + gap, word.y - 7, width, 14];
-  });
-  const clear = clearOf(
-    boxes,
-    offered.map((word) => [word.x, word.y])
-  );
-  const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
-  for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
-    const index = open[pick3];
-    const word = offered[index];
-    context.globalAlpha = 0.75;
-    context.strokeText(word.text, boxes[index][0], word.y);
-    context.globalAlpha = 0.95;
-    context.fillStyle = word.color;
-    context.fillText(word.text, boxes[index][0], word.y);
-  }
-  context.restore();
-}
-
-// src/shared/GrowLayer.tsx
-import { useRef as useRef6 } from "react";
 
 // src/shared/mapModel.ts
 var GRID = 64;
@@ -7027,9 +6730,472 @@ function pointsInBox(model, view, size, box, visible) {
   return out.sort((a, b) => a - b);
 }
 
+// src/shared/atlas/color.ts
+function rgbOf(color) {
+  const text = color.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+  if (hex) {
+    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+    const value = parseInt(digits, 16);
+    return [value >> 16, value >> 8 & 255, value & 255];
+  }
+  const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
+  if (!rgb) return null;
+  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  return channels.every((channel) => channel <= 255) ? channels : null;
+}
+function rgba(color, alpha) {
+  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+}
+function lighten(color, amount) {
+  const toward = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
+}
+function isDark(color) {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+}
+
+// src/shared/atlas/pulse.ts
+var WAVE_BARS = 160;
+function levelAt(levels, progress) {
+  if (!levels || levels.length === 0 || !(progress >= 0) || progress > 1) return 0;
+  const at = Math.min(levels.length - 1, progress * levels.length);
+  const before = Math.floor(at);
+  const after = Math.min(levels.length - 1, before + 1);
+  return levels[before] + (levels[after] - levels[before]) * (at - before);
+}
+function follow(shown, level, elapsed) {
+  return level >= shown ? level : Math.max(level, shown - elapsed / 220);
+}
+function progressOf(elapsed, duration) {
+  if (!(duration > 0) || elapsed < 0) return null;
+  const progress = elapsed / 1e3 / duration;
+  return progress <= 1 ? progress : null;
+}
+
+// src/shared/atlas/overlay.ts
+var FADE_MS = 180;
+var RIPPLE_MS = 1100;
+var Overlay2 = class {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.context = canvas.getContext("2d");
+  }
+  canvas;
+  context;
+  width = 0;
+  height = 0;
+  ratio = 1;
+  frame = 0;
+  pulse = null;
+  /** The pulse that just stopped, fading where it was, and when it stopped. */
+  fading = null;
+  /** The core's colour: the canvas's own CSS colour (the theme's text colour), read when a sound starts. */
+  core = "#fff";
+  still = false;
+  resize(width, height, ratio) {
+    if (width === this.width && height === this.height && ratio === this.ratio) return;
+    [this.width, this.height, this.ratio] = [width, height, ratio];
+    this.canvas.width = Math.round(width * ratio);
+    this.canvas.height = Math.round(height * ratio);
+    this.draw(performance.now());
+  }
+  /** A sound starts playing (its pulse begins), or the sound stops (null: its pulse fades). */
+  play(pulse) {
+    const now = performance.now();
+    if (this.pulse && !pulse && !this.still) this.fading = { pulse: this.pulse, shown: this.pulse.shown, since: now };
+    this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null;
+    if (pulse) this.core = getComputedStyle(this.canvas).color || this.core;
+    if (pulse) this.fading = null;
+    this.wake();
+  }
+  /** The playing sound's waveform arrived. */
+  levels(levels) {
+    if (this.pulse) this.pulse.levels = levels;
+  }
+  /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
+  moved() {
+    if (this.frame === 0 && (this.pulse || this.fading)) this.draw(performance.now());
+  }
+  dispose() {
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
+    this.pulse = null;
+    this.fading = null;
+  }
+  wake() {
+    if (this.still) {
+      this.draw(performance.now());
+      return;
+    }
+    if (this.frame === 0) this.frame = requestAnimationFrame(this.tick);
+  }
+  tick = (now) => {
+    this.frame = 0;
+    this.draw(now);
+    if (this.pulse || this.fading) this.frame = requestAnimationFrame(this.tick);
+  };
+  draw(now) {
+    const context = this.context;
+    if (!context || this.width === 0) return;
+    context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
+    context.clearRect(0, 0, this.width, this.height);
+    if (this.fading) {
+      const left = 1 - (now - this.fading.since) / FADE_MS;
+      if (left <= 0) this.fading = null;
+      else this.ring(context, this.fading.pulse, this.fading.shown, left, null);
+    }
+    const pulse = this.pulse;
+    if (!pulse) return;
+    const progress = progressOf(now - pulse.since, pulse.duration);
+    if (pulse.levels && progress !== null && !this.still) {
+      pulse.shown = follow(pulse.shown, levelAt(pulse.levels, progress), now - pulse.at);
+      pulse.at = now;
+      this.ring(context, pulse, pulse.shown, 1, null);
+    } else {
+      this.ring(context, pulse, 0.35, 1, this.still ? -1 : (now - pulse.since) / RIPPLE_MS);
+    }
+  }
+  /** One pulse: a glow and three rings reaching as far as `level`, and the sound's own shape bright at the middle.
+   *  With `ripple` (a phase), two rings spread from it instead (the plain pulse); a negative one holds them still. */
+  ring(context, pulse, level, strength, ripple) {
+    const place = pulse.place();
+    if (!place) return;
+    const [x, y] = place;
+    if (x < -60 || y < -60 || x > this.width + 60 || y > this.height + 60) return;
+    const channels = rgbOf(pulse.color);
+    context.save();
+    context.globalCompositeOperation = "lighter";
+    if (channels) {
+      const reach = 26 + 30 * level;
+      const glow = context.createRadialGradient(x, y, 0, x, y, reach);
+      glow.addColorStop(0, rgba(channels, 1));
+      glow.addColorStop(0.35, rgba(channels, 0.45));
+      glow.addColorStop(1, rgba(channels, 0));
+      context.globalAlpha = (0.5 + 0.4 * level) * strength;
+      context.fillStyle = glow;
+      context.fillRect(x - reach, y - reach, reach * 2, reach * 2);
+    }
+    context.strokeStyle = channels ? lighten(channels, 0.3) : pulse.color;
+    if (ripple === null) {
+      context.lineWidth = 1.75;
+      for (let ring2 = 0; ring2 < 3; ring2++) {
+        context.globalAlpha = (0.9 - ring2 * 0.25) * strength;
+        context.beginPath();
+        context.arc(x, y, 9 + ring2 * (7 + 9 * level), 0, Math.PI * 2);
+        context.stroke();
+      }
+    } else {
+      for (const offset of ripple < 0 ? [0.25] : [0, 0.5]) {
+        const phase = ripple < 0 ? offset : ((ripple + offset) % 1 + 1) % 1;
+        context.globalAlpha = 0.7 * (1 - phase) ** 1.5 * strength;
+        context.lineWidth = 2 - phase;
+        context.beginPath();
+        context.arc(x, y, 8 + phase * 26, 0, Math.PI * 2);
+        context.stroke();
+      }
+    }
+    context.restore();
+    const core = new Path2D();
+    traceGlyph(core, pulse.glyph, x, y, 4);
+    context.globalAlpha = strength;
+    context.fillStyle = this.core;
+    context.fill(core);
+    context.globalAlpha = 1;
+  }
+};
+
+// src/shared/atlas/AtlasOverlay.tsx
+import { jsx as jsx14 } from "react/jsx-runtime";
+function AtlasOverlay({
+  width,
+  height,
+  playing,
+  place,
+  audio,
+  still,
+  moved: moved2
+}) {
+  const canvas = useRef5(null);
+  const overlay = useRef5(null);
+  const placed = useRef5(place);
+  placed.current = place;
+  const fetched = useRef5(audio);
+  fetched.current = audio;
+  useEffect7(() => {
+    if (!canvas.current) return;
+    const made = new Overlay2(canvas.current);
+    overlay.current = made;
+    return () => {
+      made.dispose();
+      overlay.current = null;
+    };
+  }, []);
+  useEffect7(() => {
+    if (overlay.current) overlay.current.still = still;
+  }, [still]);
+  useEffect7(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height]);
+  useEffect7(() => overlay.current?.moved(), [moved2]);
+  const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? "", playing?.glyph ?? 0, playing?.duration ?? 0];
+  useEffect7(() => {
+    const drawn = overlay.current;
+    if (!drawn) return;
+    if (id === null) {
+      drawn.play(null);
+      return;
+    }
+    let live = true;
+    drawn.play({ place: () => placed.current(), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) });
+    if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((levels) => live && drawn.levels(levels));
+    return () => {
+      live = false;
+    };
+  }, [id, color, glyph, duration]);
+  return /* @__PURE__ */ jsx14("canvas", { "aria-hidden": true, ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", color: T.text } });
+}
+
+// src/shared/atlas/nebula.ts
+var NEBULA_SIDE = 128;
+var NEBULA_PAD = 0.12;
+var SPREAD = 2;
+var SKIRT = 5;
+var CORE = 0.55;
+var ALONE = CORE / (2 * SPREAD + 1) ** 2;
+var CROWD = 8;
+var BRIGHTEST = 0.85;
+function blur(from, into, side, radius, step2) {
+  const across = step2 === 1 ? side : 1;
+  const scale = 1 / (2 * radius + 1);
+  for (let line = 0; line < side; line++) {
+    const start = line * across;
+    let sum = 0;
+    for (let k = 0; k <= radius && k < side; k++) sum += from[start + k * step2];
+    for (let k = 0; k < side; k++) {
+      into[start + k * step2] = sum * scale;
+      const enters = k + radius + 1;
+      const leaves = k - radius;
+      if (enters < side) sum += from[start + enters * step2];
+      if (leaves >= 0) sum -= from[start + leaves * step2];
+    }
+  }
+}
+function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+  const cells = side * side;
+  const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
+  const [red, green, blue, weight] = sums;
+  const span2 = side / (1 + 2 * NEBULA_PAD);
+  const colors = /* @__PURE__ */ new Map();
+  for (let index = 0; index < points.length; index++) {
+    if (!keep(index)) continue;
+    const point = points[index];
+    let color = colors.get(point.group);
+    if (!color) {
+      color = colorOf2(point.group);
+      colors.set(point.group, color);
+    }
+    const fx = (point.x + NEBULA_PAD) * span2 - 0.5;
+    const fy = (point.y + NEBULA_PAD) * span2 - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= side || y0 + 1 >= side) continue;
+    const right = fx - x0;
+    const down = fy - y0;
+    for (let corner = 0; corner < 4; corner++) {
+      const share = (corner & 1 ? right : 1 - right) * (corner & 2 ? down : 1 - down);
+      const cell = (y0 + (corner >> 1)) * side + x0 + (corner & 1);
+      red[cell] += color[0] * share;
+      green[cell] += color[1] * share;
+      blue[cell] += color[2] * share;
+      weight[cell] += share;
+    }
+  }
+  const spare = new Float32Array(cells);
+  const core = new Float32Array(cells);
+  for (const sum of sums) {
+    for (let pass = 0; pass < 2; pass++) {
+      blur(sum, spare, side, SPREAD, 1);
+      blur(spare, sum, side, SPREAD, side);
+    }
+    core.set(sum);
+    for (let pass = 0; pass < 2; pass++) {
+      blur(sum, spare, side, SKIRT, 1);
+      blur(spare, sum, side, SKIRT, side);
+    }
+    for (let cell = 0; cell < cells; cell++) sum[cell] = CORE * core[cell] + (1 - CORE) * sum[cell];
+  }
+  let peak = 0;
+  for (let cell = 0; cell < cells; cell++) if (weight[cell] > peak) peak = weight[cell];
+  const pixels = new Uint8ClampedArray(cells * 4);
+  if (peak <= 0) return pixels;
+  const gain = -Math.log(1 - BRIGHTEST) / Math.max(peak, ALONE * CROWD);
+  for (let cell = 0; cell < cells; cell++) {
+    const here = weight[cell];
+    if (here <= 1e-9) continue;
+    pixels[4 * cell] = red[cell] / here;
+    pixels[4 * cell + 1] = green[cell] / here;
+    pixels[4 * cell + 2] = blue[cell] / here;
+    pixels[4 * cell + 3] = 255 * (1 - Math.exp(-here * gain));
+  }
+  return pixels;
+}
+function nebulaAlpha(zoom) {
+  const alpha = 1 / Math.max(1, zoom) ** 1.35;
+  return alpha < 0.03 ? 0 : alpha;
+}
+function haloOf(radius, zoom, crowd, unit) {
+  const reach = radius * 3.3;
+  const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
+  return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
+}
+
+// src/shared/atlas/glow.ts
+var GREY = [128, 128, 128];
+var MOST_SPRITES = 240;
+function picture(width, height) {
+  if (typeof OffscreenCanvas !== "function") return null;
+  const canvas = new OffscreenCanvas(width, height);
+  const context = canvas.getContext("2d");
+  return context ? { canvas, context } : null;
+}
+var Glow = class {
+  current = null;
+  last = null;
+  sprites = /* @__PURE__ */ new Map();
+  crowds = /* @__PURE__ */ new WeakMap();
+  shapes = /* @__PURE__ */ new Map();
+  ground = "";
+  dark = true;
+  /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
+   *  counts as dark, as both hosts' first themes are). */
+  onDark(context, ground) {
+    if (ground === this.ground) return this.dark;
+    this.ground = ground;
+    const kept3 = context.fillStyle;
+    context.fillStyle = "#000";
+    context.fillStyle = ground;
+    const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
+    context.fillStyle = kept3;
+    this.dark = read ? isDark(read) : true;
+    this.shapes.clear();
+    return this.dark;
+  }
+  /** The colour a sound's shape is filled in: its family's, a little brighter on a dark ground so it stays crisp over
+   *  its own glow. */
+  shape(color) {
+    let shape = this.shapes.get(color);
+    if (shape === void 0) {
+      const channels = this.dark ? rgbOf(color) : null;
+      shape = channels ? lighten(channels, 0.2) : color;
+      this.shapes.set(color, shape);
+    }
+    return shape;
+  }
+  /** The nebula of `layout` for the sounds `mask` keeps, made the first time it's asked for and kept until either
+   *  changes; with it, the one the map showed before a new layout (for the move between them to fade out). Two
+   *  pictures in all, drawn over in turn. */
+  nebula(layout, mask, colorOf2) {
+    if (this.current?.layout !== layout || this.current.mask !== mask) {
+      const same = this.current?.layout === layout;
+      const sheet = (same ? this.current?.sheet : this.last?.sheet) ?? picture(NEBULA_SIDE, NEBULA_SIDE);
+      if (!sheet) return { now: null, before: null };
+      if (!same) this.last = this.current;
+      const pixels = nebulaField(
+        layout.points,
+        (index) => mask[index] === 1,
+        (group) => rgbOf(colorOf2(group)) ?? GREY
+      );
+      sheet.context.putImageData(new ImageData(pixels, NEBULA_SIDE, NEBULA_SIDE), 0, 0);
+      this.current = { layout, mask, sheet };
+    }
+    return { now: this.current.sheet.canvas, before: this.last && this.last.layout !== layout ? this.last.sheet.canvas : null };
+  }
+  /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
+  draw(context, nebula, view, unit, alpha) {
+    if (alpha <= 0) return;
+    const kept3 = context.globalAlpha;
+    context.globalAlpha = alpha;
+    context.imageSmoothingEnabled = true;
+    context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
+    context.globalAlpha = kept3;
+  }
+  /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
+  crowd(layout) {
+    let crowd = this.crowds.get(layout);
+    if (crowd === void 0) {
+      crowd = 0;
+      for (const cell of layout.cells.values()) crowd = Math.max(crowd, cell.length);
+      this.crowds.set(layout, crowd);
+    }
+    return crowd;
+  }
+  /** Halos of `radius` pixels at `alpha`, on a canvas drawn at `ratio` device pixels to one: each `at` adds one, `done`
+   *  hands the canvas back as it was. Null when there's nothing to draw them with, or nothing to see. */
+  halos(context, radius, alpha, ratio) {
+    if (alpha < 0.02 || radius < 1 || typeof OffscreenCanvas !== "function") return null;
+    const size = Math.round(radius * 2) / 2;
+    const side = Math.max(2, Math.ceil(size * 2 * ratio));
+    const [keptAlpha, keptBlend] = [context.globalAlpha, context.globalCompositeOperation];
+    context.globalCompositeOperation = "lighter";
+    let strong = -1;
+    let color = "";
+    let sprite = null;
+    return {
+      at: (next, x, y, strength) => {
+        if (strength <= 0.02) return;
+        if (next !== color) {
+          color = next;
+          sprite = this.sprite(next, side);
+        }
+        if (!sprite) return;
+        const stepped = Math.round(Math.min(1, strength) * 10) / 10;
+        if (stepped !== strong) {
+          strong = stepped;
+          context.globalAlpha = alpha * stepped;
+        }
+        context.drawImage(sprite, x - size, y - size, size * 2, size * 2);
+      },
+      done: () => {
+        context.globalAlpha = keptAlpha;
+        context.globalCompositeOperation = keptBlend;
+      }
+    };
+  }
+  /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
+  sprite(color, side) {
+    const key = `${color}|${side}`;
+    const kept3 = this.sprites.get(key);
+    if (kept3) return kept3;
+    const channels = rgbOf(color);
+    const made = channels ? picture(side, side) : null;
+    if (!made || !channels) return null;
+    const middle = side / 2;
+    const fade = made.context.createRadialGradient(middle, middle, 0, middle, middle, middle);
+    fade.addColorStop(0, rgba(channels, 1));
+    fade.addColorStop(0.35, rgba(channels, 0.45));
+    fade.addColorStop(1, rgba(channels, 0));
+    made.context.fillStyle = fade;
+    made.context.fillRect(0, 0, side, side);
+    if (this.sprites.size >= MOST_SPRITES) this.sprites.clear();
+    this.sprites.set(key, made.canvas);
+    return made.canvas;
+  }
+};
+var glows = /* @__PURE__ */ new WeakMap();
+function glowOf(canvas) {
+  let glow = glows.get(canvas);
+  if (!glow) {
+    glow = new Glow();
+    glows.set(canvas, glow);
+  }
+  return glow;
+}
+
+// src/shared/atlas/HoverPill.tsx
+import { useEffect as useEffect10, useRef as useRef8, useState as useState10 } from "react";
+
 // src/shared/mapUi.tsx
-import { useEffect as useEffect7, useRef as useRef5, useState as useState8 } from "react";
-import { Fragment as Fragment6, jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
+import { useEffect as useEffect8, useRef as useRef6, useState as useState8 } from "react";
+import { Fragment as Fragment6, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var glass = {
   background: `color-mix(in srgb, ${T.raised} 90%, transparent)`,
   backdropFilter: "blur(12px) saturate(1.15)",
@@ -7039,8 +7205,8 @@ var glass = {
   borderRadius: 12
 };
 var PATHS = {
-  pick: /* @__PURE__ */ jsx14("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
-  hand: /* @__PURE__ */ jsx14(
+  pick: /* @__PURE__ */ jsx15("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
+  hand: /* @__PURE__ */ jsx15(
     "path",
     {
       d: "M5.2 8.5 V3.8 a1 1 0 0 1 2 0 V7.6 V2.9 a1 1 0 0 1 2 0 V7.6 V3.6 a1 1 0 0 1 2 0 V8 V5.4 a1 1 0 0 1 2 0 V9.6 c0 2.6 -1.8 4.6 -4.4 4.6 c-1.7 0 -2.7 -.7 -3.6 -1.9 L2.6 9.6 a1 1 0 0 1 1.5 -1.3 Z",
@@ -7051,49 +7217,49 @@ var PATHS = {
     }
   ),
   tiles: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "2" }),
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "2" }),
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "9.4" }),
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", fillOpacity: ".45", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "9.4" })
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "2" }),
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "2" }),
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "9.4" }),
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", fillOpacity: ".45", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "9.4" })
   ] }),
   hover: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("path", { d: "M3 9.5 V8 a5 5 0 0 1 10 0 V9.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "2.2", y: "9" }),
-    /* @__PURE__ */ jsx14("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "11", y: "9" })
+    /* @__PURE__ */ jsx15("path", { d: "M3 9.5 V8 a5 5 0 0 1 10 0 V9.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "2.2", y: "9" }),
+    /* @__PURE__ */ jsx15("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "11", y: "9" })
   ] }),
-  fit: /* @__PURE__ */ jsx14("path", { d: "M2.5 6 V2.5 H6 M10 2.5 H13.5 V6 M13.5 10 V13.5 H10 M6 13.5 H2.5 V10", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" }),
+  fit: /* @__PURE__ */ jsx15("path", { d: "M2.5 6 V2.5 H6 M10 2.5 H13.5 V6 M13.5 10 V13.5 H10 M6 13.5 H2.5 V10", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" }),
   grow: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("path", { d: "M2.5 13.5 C5 13 6 10.5 7.5 8.5 S11 4 13.5 2.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "2.6", cy: "13.4", fill: "currentColor", r: "1.6" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "13.4", cy: "2.6", fill: "currentColor", r: "1.6" }),
-    /* @__PURE__ */ jsx14("path", { d: "M6.6 9.6 c-1.6 .2 -2.4 -.6 -2.6 -2 c1.4 -.1 2.4 .5 2.6 2 Z M9.4 5.8 c.3 -1.6 1.3 -2.2 2.6 -2 c-.1 1.4 -1 2.2 -2.6 2 Z", fill: "currentColor", fillOpacity: ".8" })
+    /* @__PURE__ */ jsx15("path", { d: "M2.5 13.5 C5 13 6 10.5 7.5 8.5 S11 4 13.5 2.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "2.6", cy: "13.4", fill: "currentColor", r: "1.6" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "13.4", cy: "2.6", fill: "currentColor", r: "1.6" }),
+    /* @__PURE__ */ jsx15("path", { d: "M6.6 9.6 c-1.6 .2 -2.4 -.6 -2.6 -2 c1.4 -.1 2.4 .5 2.6 2 Z M9.4 5.8 c.3 -1.6 1.3 -2.2 2.6 -2 c-.1 1.4 -1 2.2 -2.6 2 Z", fill: "currentColor", fillOpacity: ".8" })
   ] }),
   arrange: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("circle", { cx: "5", cy: "5", fill: "currentColor", r: "2" }),
-    /* @__PURE__ */ jsx14("path", { d: "M8.5 8.5 L13.5 13.5 M13.5 9.6 V13.5 H9.6", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
+    /* @__PURE__ */ jsx15("circle", { cx: "5", cy: "5", fill: "currentColor", r: "2" }),
+    /* @__PURE__ */ jsx15("path", { d: "M8.5 8.5 L13.5 13.5 M13.5 9.6 V13.5 H9.6", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
   ] }),
   layers: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("path", { d: "M8 2 L14 5.2 L8 8.4 L2 5.2 Z", fill: "currentColor", fillOpacity: ".9" }),
-    /* @__PURE__ */ jsx14("path", { d: "M2.4 8 L8 11 L13.6 8 M2.4 10.8 L8 13.8 L13.6 10.8", fill: "none", stroke: "currentColor", strokeLinejoin: "round", strokeWidth: "1.2" })
+    /* @__PURE__ */ jsx15("path", { d: "M8 2 L14 5.2 L8 8.4 L2 5.2 Z", fill: "currentColor", fillOpacity: ".9" }),
+    /* @__PURE__ */ jsx15("path", { d: "M2.4 8 L8 11 L13.6 8 M2.4 10.8 L8 13.8 L13.6 10.8", fill: "none", stroke: "currentColor", strokeLinejoin: "round", strokeWidth: "1.2" })
   ] }),
-  close: /* @__PURE__ */ jsx14("path", { d: "M4 4 L12 12 M12 4 L4 12", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
-  play: /* @__PURE__ */ jsx14("path", { d: "M5 3 L13 8 L5 13 Z", fill: "currentColor", strokeLinejoin: "round" }),
-  stop: /* @__PURE__ */ jsx14("rect", { fill: "currentColor", height: "9", rx: "1.5", width: "9", x: "3.5", y: "3.5" }),
-  plus: /* @__PURE__ */ jsx14("path", { d: "M8 3 V13 M3 8 H13", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
+  close: /* @__PURE__ */ jsx15("path", { d: "M4 4 L12 12 M12 4 L4 12", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
+  play: /* @__PURE__ */ jsx15("path", { d: "M5 3 L13 8 L5 13 Z", fill: "currentColor", strokeLinejoin: "round" }),
+  stop: /* @__PURE__ */ jsx15("rect", { fill: "currentColor", height: "9", rx: "1.5", width: "9", x: "3.5", y: "3.5" }),
+  plus: /* @__PURE__ */ jsx15("path", { d: "M8 3 V13 M3 8 H13", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
   make: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("circle", { cx: "6", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "10", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" })
+    /* @__PURE__ */ jsx15("circle", { cx: "6", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "10", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" })
   ] }),
   near: /* @__PURE__ */ jsxs14(Fragment6, { children: [
-    /* @__PURE__ */ jsx14("circle", { cx: "8", cy: "8", fill: "currentColor", r: "1.8" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "8", cy: "8", fill: "none", r: "4.4", stroke: "currentColor", strokeDasharray: "2 1.6", strokeWidth: "1.2" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "13.2", cy: "4", fill: "currentColor", r: "1.1" }),
-    /* @__PURE__ */ jsx14("circle", { cx: "3.2", cy: "12.4", fill: "currentColor", r: "1.1" })
+    /* @__PURE__ */ jsx15("circle", { cx: "8", cy: "8", fill: "currentColor", r: "1.8" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "8", cy: "8", fill: "none", r: "4.4", stroke: "currentColor", strokeDasharray: "2 1.6", strokeWidth: "1.2" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "13.2", cy: "4", fill: "currentColor", r: "1.1" }),
+    /* @__PURE__ */ jsx15("circle", { cx: "3.2", cy: "12.4", fill: "currentColor", r: "1.1" })
   ] }),
-  reset: /* @__PURE__ */ jsx14("path", { d: "M3.5 8 a4.5 4.5 0 1 0 1.4 -3.3 M3.5 2.8 V5.6 H6.3", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
+  reset: /* @__PURE__ */ jsx15("path", { d: "M3.5 8 a4.5 4.5 0 1 0 1.4 -3.3 M3.5 2.8 V5.6 H6.3", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
 };
 function Icon({ name, size = 16 }) {
-  return /* @__PURE__ */ jsx14("svg", { "aria-hidden": true, height: size, style: { flex: "none", display: "block" }, viewBox: "0 0 16 16", width: size, children: PATHS[name] });
+  return /* @__PURE__ */ jsx15("svg", { "aria-hidden": true, height: size, style: { flex: "none", display: "block" }, viewBox: "0 0 16 16", width: size, children: PATHS[name] });
 }
 function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }) {
   return /* @__PURE__ */ jsxs14(
@@ -7128,23 +7294,23 @@ function ToolButton({ icon, label, title, pressed, onClick, children, disabled, 
         flex: "none"
       },
       children: [
-        /* @__PURE__ */ jsx14(Icon, { name: icon }),
+        /* @__PURE__ */ jsx15(Icon, { name: icon }),
         children
       ]
     }
   );
 }
 function ToolGroup({ children, label }) {
-  return /* @__PURE__ */ jsx14("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, position: "relative", zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
+  return /* @__PURE__ */ jsx15("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, position: "relative", zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
 }
 function Rule() {
-  return /* @__PURE__ */ jsx14("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
+  return /* @__PURE__ */ jsx15("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
 }
 function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
   const [open, setOpen] = useState8(false);
-  const box = useRef5(null);
-  const items = useRef5([]);
-  useEffect7(() => {
+  const box = useRef6(null);
+  const items = useRef6([]);
+  useEffect8(() => {
     if (!open) return;
     const away = (event) => {
       if (!box.current?.contains(event.target)) setOpen(false);
@@ -7153,7 +7319,7 @@ function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
     return () => window.removeEventListener("pointerdown", away, true);
   }, [open]);
   const shown = choices.find((choice) => choice.id === current) ?? choices[0];
-  useEffect7(() => {
+  useEffect8(() => {
     if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus();
   }, [open]);
   const keys = (event) => {
@@ -7170,8 +7336,8 @@ function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
     items.current[(at + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length]?.focus();
   };
   return /* @__PURE__ */ jsxs14("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
-    /* @__PURE__ */ jsx14(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
-    open && /* @__PURE__ */ jsx14("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, maxHeight, overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice, index) => /* @__PURE__ */ jsxs14(
+    /* @__PURE__ */ jsx15(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
+    open && /* @__PURE__ */ jsx15("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, maxHeight, overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice, index) => /* @__PURE__ */ jsxs14(
       "button",
       {
         "aria-checked": choice.id === shown?.id,
@@ -7200,8 +7366,8 @@ function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
           background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent"
         },
         children: [
-          /* @__PURE__ */ jsx14("span", { style: { fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }, children: choice.name }),
-          /* @__PURE__ */ jsx14("span", { style: { fontSize: 11, color: T.muted }, children: choice.title })
+          /* @__PURE__ */ jsx15("span", { style: { fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }, children: choice.name }),
+          /* @__PURE__ */ jsx15("span", { style: { fontSize: 11, color: T.muted }, children: choice.title })
         ]
       },
       choice.id
@@ -7209,8 +7375,263 @@ function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
   ] });
 }
 
+// src/shared/atlas/Glyph.tsx
+import { jsx as jsx16 } from "react/jsx-runtime";
+function Glyph2({ glyph, color, size = 9 }) {
+  const shape = GLYPH_SHAPES[glyph];
+  return /* @__PURE__ */ jsx16("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "-1.5 -1.5 3 3", width: size, children: shape ? /* @__PURE__ */ jsx16("polygon", { fill: color, points: shape.map(([x, y]) => `${x},${y}`).join(" ") }) : /* @__PURE__ */ jsx16("circle", { cx: "0", cy: "0", fill: color, r: "1" }) });
+}
+
+// src/shared/atlas/Wave.tsx
+import { useEffect as useEffect9, useRef as useRef7, useState as useState9 } from "react";
+import { jsx as jsx17, jsxs as jsxs15 } from "react/jsx-runtime";
+function usePlayhead(playing, duration) {
+  const [startedAt, setStartedAt] = useState9(null);
+  const [now, setNow] = useState9(0);
+  useEffect9(() => {
+    setStartedAt(playing ? performance.now() : null);
+    setNow(performance.now());
+  }, [playing]);
+  const progress = startedAt === null ? null : progressOf(now - startedAt, duration);
+  const running = progress !== null;
+  useEffect9(() => {
+    if (!running) return;
+    const frame2 = requestAnimationFrame(setNow);
+    return () => cancelAnimationFrame(frame2);
+  }, [running, now]);
+  return progress;
+}
+function Wave3({ peaks, colors, width, height, progress = null }) {
+  const canvas = useRef7(null);
+  const tint = colors.join();
+  useEffect9(() => {
+    const element = canvas.current;
+    const context = element?.getContext("2d");
+    if (!element || !context || width <= 0) return;
+    const ratio = window.devicePixelRatio || 1;
+    element.width = Math.round(width * ratio);
+    element.height = Math.round(height * ratio);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    const own = getComputedStyle(element).color;
+    if (colors.length > 1) {
+      const across = context.createLinearGradient(0, 0, width, 0);
+      colors.forEach((color, index) => across.addColorStop(index / (colors.length - 1), color));
+      context.fillStyle = across;
+    } else context.fillStyle = colors[0] ?? own;
+    const bars = Math.max(1, Math.floor(width / 3));
+    for (let bar = 0; bar < bars; bar++) {
+      let peak = 0.06;
+      if (peaks && peaks.length > 0) {
+        const [from, to] = [Math.floor(bar * peaks.length / bars), Math.max(Math.floor(bar * peaks.length / bars) + 1, Math.floor((bar + 1) * peaks.length / bars))];
+        for (let at = from; at < to && at < peaks.length; at++) peak = Math.max(peak, peaks[at]);
+      }
+      const tall = Math.max(1, peak * (height - 2));
+      context.globalAlpha = !peaks ? 0.3 : progress !== null && bar / bars <= progress ? 1 : progress !== null ? 0.5 : 0.9;
+      context.fillRect(bar * 3, (height - tall) / 2, 2, tall);
+    }
+    context.globalAlpha = 1;
+  }, [peaks, tint, width, height, progress]);
+  return /* @__PURE__ */ jsxs15("span", { "aria-hidden": true, style: { position: "relative", display: "block", flex: "none", width, height }, children: [
+    /* @__PURE__ */ jsx17("canvas", { ref: canvas, style: { display: "block", width, height, color: T.accent } }),
+    progress !== null && progress > 0 && progress < 1 && /* @__PURE__ */ jsx17("span", { style: { position: "absolute", top: -1, bottom: -1, left: progress * width, width: 1.5, borderRadius: 1, background: T.text } })
+  ] });
+}
+
+// src/shared/atlas/HoverPill.tsx
+import { jsx as jsx18, jsxs as jsxs16 } from "react/jsx-runtime";
+var WIDEST = 300;
+var TALLEST = 44;
+var AWAY = 24;
+function HoverPill({
+  id,
+  sound,
+  color,
+  glyph,
+  playing,
+  audio,
+  at,
+  within
+}) {
+  const [peaks, setPeaks] = useState10(() => peaksKept(id, WAVE_BARS));
+  const fetched = useRef8(audio);
+  fetched.current = audio;
+  useEffect10(() => {
+    setPeaks(peaksKept(id, WAVE_BARS));
+    if (!playing || !fetched.current) return;
+    let live = true;
+    void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((found) => live && found && setPeaks(found));
+    return () => {
+      live = false;
+    };
+  }, [id, playing]);
+  const duration = typeof sound.duration === "number" ? sound.duration : 0;
+  const progress = usePlayhead(playing, duration);
+  const under = [seconds(sound.duration), clean(sound.folder ?? "", 40)].filter(Boolean).join(" · ");
+  const side = at[0] + AWAY + WIDEST > within[0] ? { right: Math.max(0, within[0] - at[0] + AWAY) } : { left: at[0] + AWAY };
+  const top = Math.min(Math.max(0, at[1] - TALLEST / 2), Math.max(0, within[1] - TALLEST));
+  return /* @__PURE__ */ jsxs16("div", { style: { ...glass, borderRadius: 10, position: "absolute", ...side, top, maxWidth: WIDEST, pointerEvents: "none", padding: "5px 10px", ...S.row, gap: 10 }, children: [
+    /* @__PURE__ */ jsxs16("div", { style: { minWidth: 0, flex: "0 1 auto" }, children: [
+      /* @__PURE__ */ jsxs16("div", { style: { ...S.row, gap: 6, fontSize: 11.5, color: T.text }, children: [
+        /* @__PURE__ */ jsx18(Glyph2, { color, glyph }),
+        /* @__PURE__ */ jsxs16("span", { style: { ...S.ellipsis, fontWeight: 600 }, children: [
+          clean(sound.name, 48),
+          " ",
+          /* @__PURE__ */ jsxs16("span", { style: { color: T.muted, fontWeight: 400 }, children: [
+            "· ",
+            clean(sound.class ?? "", 16)
+          ] })
+        ] })
+      ] }),
+      under && /* @__PURE__ */ jsx18("div", { style: { ...S.ellipsis, fontSize: 10.5, color: T.faint, paddingLeft: 15, fontVariantNumeric: "tabular-nums" }, children: under })
+    ] }),
+    peaks && /* @__PURE__ */ jsx18(Wave3, { colors: [color], height: 24, peaks, progress, width: 96 })
+  ] });
+}
+
+// src/shared/atlas/names.ts
+var NAMES_ON_SCREEN = 600;
+var NAMES_MOST = 50;
+var kept2 = /* @__PURE__ */ new WeakMap();
+function regionsOf(points) {
+  const known = kept2.get(points);
+  if (known) return known;
+  const families = /* @__PURE__ */ new Map();
+  for (const point of points) {
+    const family = families.get(point.group);
+    if (family) family.push(point);
+    else families.set(point.group, [point]);
+  }
+  const regions = [];
+  for (const [group, family] of families) {
+    const across = family.map((point) => point.x).sort((a, b) => a - b);
+    const [from, middle, to] = [across[Math.floor(across.length * 0.25)], across[Math.floor(across.length * 0.5)], across[Math.min(across.length - 1, Math.ceil(across.length * 0.75))]];
+    const tops = family.filter((point) => point.x >= from && point.x <= to).map((point) => point.y);
+    tops.sort((a, b) => a - b);
+    regions.push({ group, x: middle, y: tops[Math.floor(tops.length * 0.015)] });
+  }
+  kept2.set(points, regions);
+  return regions;
+}
+function regionAlpha(zoom) {
+  return Math.min(1, Math.max(0, (2.3 - zoom) / 0.9));
+}
+function fitting(boxes, most, padX = 0, padY = 0, taken = []) {
+  const kept3 = [...taken];
+  const fits = [];
+  for (let index = 0; index < boxes.length && fits.length < most; index++) {
+    const [left, top, width, height] = boxes[index];
+    if (kept3.some(([l, t, w, h]) => left < l + w + padX && l < left + width + padX && top < t + h + padY && t < top + height + padY)) continue;
+    kept3.push(boxes[index]);
+    fits.push(index);
+  }
+  return fits;
+}
+function nameRank(index) {
+  return Math.imul(index + 1, 2654435761) >>> 0;
+}
+function clearOf(boxes, places, margin = 3) {
+  const ROW = 16;
+  const rows = /* @__PURE__ */ new Map();
+  for (const place of places) {
+    const row2 = Math.floor(place[1] / ROW);
+    const list = rows.get(row2);
+    if (list) list.push(place);
+    else rows.set(row2, [place]);
+  }
+  return boxes.map(([left, top, width, height]) => {
+    for (let row2 = Math.floor((top - margin) / ROW); row2 <= Math.floor((top + height + margin) / ROW); row2++) {
+      for (const [x, y] of rows.get(row2) ?? []) {
+        if (x >= left - margin && x <= left + width + margin && y >= top - margin && y <= top + height + margin) return false;
+      }
+    }
+    return true;
+  });
+}
+
+// src/shared/atlas/labels.ts
+function track(context, spacing) {
+  if ("letterSpacing" in context) context.letterSpacing = spacing;
+}
+function drawWords(context, words, alpha, look, room) {
+  if (alpha <= 0 || words.length === 0) return [];
+  context.save();
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.lineJoin = "round";
+  context.strokeStyle = look.ground;
+  const name = `700 12px ${look.family}`;
+  context.font = name;
+  track(context, "0.2em");
+  const boxes = words.map((word) => {
+    const width = context.measureText(word.text).width;
+    return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
+  });
+  const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
+  for (const index of written) {
+    const word = words[index];
+    context.font = name;
+    track(context, "0.2em");
+    context.lineWidth = 5;
+    context.globalAlpha = 0.85 * alpha;
+    context.strokeText(word.text, word.x, word.y);
+    context.globalAlpha = alpha;
+    context.fillStyle = word.color;
+    context.fillText(word.text, word.x, word.y);
+    if (!word.count) continue;
+    context.font = `500 10px ${look.family}`;
+    track(context, "0.06em");
+    context.lineWidth = 3;
+    context.globalAlpha = 0.8 * alpha;
+    context.strokeText(word.count, word.x, word.y + 14);
+    context.globalAlpha = 0.85 * alpha;
+    context.fillStyle = look.muted;
+    context.fillText(word.count, word.x, word.y + 14);
+  }
+  context.restore();
+  return written.map((index) => boxes[index]);
+}
+var widths = /* @__PURE__ */ new Map();
+function drawNames(context, names, gap, look, taken) {
+  if (names.length === 0) return;
+  context.save();
+  const font = `500 10.5px ${look.family}`;
+  context.font = font;
+  context.textBaseline = "middle";
+  context.lineJoin = "round";
+  context.lineWidth = 3;
+  context.strokeStyle = look.ground;
+  if (widths.size > 6e3) widths.clear();
+  const offered = [...names].sort((a, b) => a.rank - b.rank);
+  const boxes = offered.map((word) => {
+    const key = `${font}|${word.text}`;
+    let width = widths.get(key);
+    if (width === void 0) {
+      width = context.measureText(word.text).width;
+      widths.set(key, width);
+    }
+    return [word.x + gap, word.y - 7, width, 14];
+  });
+  const clear = clearOf(
+    boxes,
+    offered.map((word) => [word.x, word.y])
+  );
+  const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
+  for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
+    const index = open[pick3];
+    const word = offered[index];
+    context.globalAlpha = 0.75;
+    context.strokeText(word.text, boxes[index][0], word.y);
+    context.globalAlpha = 0.95;
+    context.fillStyle = word.color;
+    context.fillText(word.text, boxes[index][0], word.y);
+  }
+  context.restore();
+}
+
 // src/shared/GrowLayer.tsx
-import { Fragment as Fragment7, jsx as jsx15, jsxs as jsxs15 } from "react/jsx-runtime";
+import { useRef as useRef9 } from "react";
+import { Fragment as Fragment7, jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
 var percent2 = (at) => Math.round(at * 100);
 var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
 function GrowLayer({
@@ -7231,10 +7652,10 @@ function GrowLayer({
   actions
 }) {
   const t = useT();
-  const press = useRef6(null);
+  const press = useRef9(null);
   if (!from) return null;
   if (!to || !grow.to) {
-    return /* @__PURE__ */ jsx15("svg", { "aria-hidden": true, height, style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: /* @__PURE__ */ jsx15("circle", { className: "kumi-breathe", cx: from[0], cy: from[1], fill: "none", r: 11, stroke: fromColor, strokeWidth: 2.5 }) });
+    return /* @__PURE__ */ jsx19("svg", { "aria-hidden": true, height, style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: /* @__PURE__ */ jsx19("circle", { className: "kumi-breathe", cx: from[0], cy: from[1], fill: "none", r: 11, stroke: fromColor, strokeWidth: 2.5 }) });
   }
   const at = (bud) => vinePoint(from, to, bud);
   const [cx, cy] = [(from[0] + to[0]) / 2 - (to[1] - from[1]) * 0.22, (from[1] + to[1]) / 2 + (to[0] - from[0]) * 0.22];
@@ -7254,7 +7675,7 @@ function GrowLayer({
   const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : grow.buds.find((bud) => bud.at === grow.picked) ?? null;
   const pickedAt = picked ? at(picked.at) : null;
   const failed = grow.buds.some((bud) => bud.state !== "failed") ? void 0 : grow.buds.find((bud) => bud.state === "failed");
-  const another = /* @__PURE__ */ jsx15(TextButton, { onClick: grow.reroll, title: t("grow.rerollTitle"), children: t("grow.reroll") });
+  const another = /* @__PURE__ */ jsx19(TextButton, { onClick: grow.reroll, title: t("grow.rerollTitle"), children: t("grow.reroll") });
   const xs = [from[0], to[0], cx];
   const ys = [from[1], to[1], cy];
   const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
@@ -7264,7 +7685,7 @@ function GrowLayer({
     const color = mixed(fromColor, toColor, bud.at);
     const sounding = bud.state === "ready" && playing === bud.result.artifact_id;
     const isPicked = grow.picked === bud.at;
-    return /* @__PURE__ */ jsxs15(
+    return /* @__PURE__ */ jsxs17(
       "g",
       {
         "aria-label": t("grow.bud", percent2(bud.at)),
@@ -7280,28 +7701,28 @@ function GrowLayer({
         style: { cursor: "pointer", pointerEvents: "auto" },
         tabIndex: 0,
         children: [
-          /* @__PURE__ */ jsx15("circle", { cx: x, cy: y, fill: "transparent", r: 12 }),
-          isPicked && /* @__PURE__ */ jsx15("circle", { cx: x, cy: y, fill: "none", r: 11, stroke: T.text, strokeWidth: 1.25 }),
-          sounding && /* @__PURE__ */ jsx15("circle", { cx: x, cy: y, fill: "none", r: 14, stroke: color, strokeOpacity: 0.5, strokeWidth: 2 }),
-          bud.state === "ready" ? /* @__PURE__ */ jsx15("circle", { className: "kumi-open", cx: x, cy: y, fill: color, r: 6.5, stroke: T.raised, strokeWidth: 1.5 }) : bud.state === "failed" ? /* @__PURE__ */ jsx15("path", { d: `M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x + 4} ${y - 4} L ${x - 4} ${y + 4}`, stroke: T.bad, strokeLinecap: "round", strokeWidth: 2 }) : /* @__PURE__ */ jsx15("circle", { className: bud.state === "growing" ? "kumi-breathe" : void 0, cx: x, cy: y, fill: T.raised, r: 5, stroke: color, strokeDasharray: bud.state === "waiting" ? "2 2" : void 0, strokeWidth: 1.75 })
+          /* @__PURE__ */ jsx19("circle", { cx: x, cy: y, fill: "transparent", r: 12 }),
+          isPicked && /* @__PURE__ */ jsx19("circle", { cx: x, cy: y, fill: "none", r: 11, stroke: T.text, strokeWidth: 1.25 }),
+          sounding && /* @__PURE__ */ jsx19("circle", { cx: x, cy: y, fill: "none", r: 14, stroke: color, strokeOpacity: 0.5, strokeWidth: 2 }),
+          bud.state === "ready" ? /* @__PURE__ */ jsx19("circle", { className: "kumi-open", cx: x, cy: y, fill: color, r: 6.5, stroke: T.raised, strokeWidth: 1.5 }) : bud.state === "failed" ? /* @__PURE__ */ jsx19("path", { d: `M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x + 4} ${y - 4} L ${x - 4} ${y + 4}`, stroke: T.bad, strokeLinecap: "round", strokeWidth: 2 }) : /* @__PURE__ */ jsx19("circle", { className: bud.state === "growing" ? "kumi-breathe" : void 0, cx: x, cy: y, fill: T.raised, r: 5, stroke: color, strokeDasharray: bud.state === "waiting" ? "2 2" : void 0, strokeWidth: 1.75 })
         ]
       },
       `${scrubbed ? "s" : "b"}${bud.at}`
     );
   };
-  return /* @__PURE__ */ jsxs15(Fragment7, { children: [
-    /* @__PURE__ */ jsxs15("svg", { "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)), height, role: "group", style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: [
-      /* @__PURE__ */ jsx15("defs", { children: /* @__PURE__ */ jsxs15("linearGradient", { gradientUnits: "userSpaceOnUse", id: gradient, x1: from[0], x2: to[0], y1: from[1], y2: to[1], children: [
-        /* @__PURE__ */ jsx15("stop", { offset: "0", stopColor: fromColor }),
-        /* @__PURE__ */ jsx15("stop", { offset: "1", stopColor: toColor })
+  return /* @__PURE__ */ jsxs17(Fragment7, { children: [
+    /* @__PURE__ */ jsxs17("svg", { "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)), height, role: "group", style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: [
+      /* @__PURE__ */ jsx19("defs", { children: /* @__PURE__ */ jsxs17("linearGradient", { gradientUnits: "userSpaceOnUse", id: gradient, x1: from[0], x2: to[0], y1: from[1], y2: to[1], children: [
+        /* @__PURE__ */ jsx19("stop", { offset: "0", stopColor: fromColor }),
+        /* @__PURE__ */ jsx19("stop", { offset: "1", stopColor: toColor })
       ] }) }),
-      /* @__PURE__ */ jsx15("path", { d: curve, fill: "none", opacity: 0.22, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 10 }),
-      /* @__PURE__ */ jsx15("path", { className: "kumi-vine", d: curve, fill: "none", pathLength: 1, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 3 }),
-      /* @__PURE__ */ jsx15("circle", { cx: from[0], cy: from[1], fill: "none", r: 9, stroke: fromColor, strokeWidth: 2 }),
-      /* @__PURE__ */ jsx15("circle", { cx: to[0], cy: to[1], fill: "none", r: 9, stroke: toColor, strokeDasharray: "3 2", strokeWidth: 2 }),
+      /* @__PURE__ */ jsx19("path", { d: curve, fill: "none", opacity: 0.22, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 10 }),
+      /* @__PURE__ */ jsx19("path", { className: "kumi-vine", d: curve, fill: "none", pathLength: 1, stroke: `url(#${gradient})`, strokeLinecap: "round", strokeWidth: 3 }),
+      /* @__PURE__ */ jsx19("circle", { cx: from[0], cy: from[1], fill: "none", r: 9, stroke: fromColor, strokeWidth: 2 }),
+      /* @__PURE__ */ jsx19("circle", { cx: to[0], cy: to[1], fill: "none", r: 9, stroke: toColor, strokeDasharray: "3 2", strokeWidth: 2 }),
       grow.buds.map((bud) => budView(bud)),
       grow.scrub && !grow.buds.some((bud) => bud.at === grow.scrub?.at) && budView(grow.scrub, true),
-      /* @__PURE__ */ jsxs15(
+      /* @__PURE__ */ jsxs17(
         "g",
         {
           "aria-label": t("grow.handle"),
@@ -7347,15 +7768,15 @@ function GrowLayer({
           style: { cursor: "grab", pointerEvents: "auto" },
           tabIndex: 0,
           children: [
-            /* @__PURE__ */ jsx15("circle", { cx: handle[0], cy: handle[1], fill: "transparent", r: 16 }),
-            /* @__PURE__ */ jsx15("circle", { cx: handle[0], cy: handle[1], fill: T.raised, r: 8.5, stroke: T.accent, strokeWidth: 2.5 }),
-            /* @__PURE__ */ jsx15("circle", { cx: handle[0], cy: handle[1], fill: T.accent, r: 3 }),
-            /* @__PURE__ */ jsx15("text", { fill: T.text, fontSize: 10.5, fontWeight: 600, paintOrder: "stroke", stroke: T.raised, strokeWidth: 3, textAnchor: "middle", x: handle[0], y: handle[1] - 15, children: `${percent2(grow.handle)}%` })
+            /* @__PURE__ */ jsx19("circle", { cx: handle[0], cy: handle[1], fill: "transparent", r: 16 }),
+            /* @__PURE__ */ jsx19("circle", { cx: handle[0], cy: handle[1], fill: T.raised, r: 8.5, stroke: T.accent, strokeWidth: 2.5 }),
+            /* @__PURE__ */ jsx19("circle", { cx: handle[0], cy: handle[1], fill: T.accent, r: 3 }),
+            /* @__PURE__ */ jsx19("text", { fill: T.text, fontSize: 10.5, fontWeight: 600, paintOrder: "stroke", stroke: T.raised, strokeWidth: 3, textAnchor: "middle", x: handle[0], y: handle[1] - 15, children: `${percent2(grow.handle)}%` })
           ]
         }
       )
     ] }),
-    /* @__PURE__ */ jsxs15(
+    /* @__PURE__ */ jsxs17(
       "div",
       {
         className: "kumi-pop",
@@ -7363,26 +7784,26 @@ function GrowLayer({
         "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)),
         style: { ...glass, position: "absolute", zIndex: 1, left: card.left, top: card.top, width: 300, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 },
         children: [
-          /* @__PURE__ */ jsxs15("div", { style: { ...S.row, gap: 6 }, children: [
-            /* @__PURE__ */ jsx15(Icon, { name: "grow", size: 14 }),
-            /* @__PURE__ */ jsx15("span", { style: { ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }, children: t("grow.title", clean(grow.from?.name ?? "", 40), clean(grow.to.name, 40)) }),
-            /* @__PURE__ */ jsx15("button", { "aria-label": t("grow.close"), className: FOCUSABLE, onClick: grow.close, title: t("grow.close"), type: "button", style: { display: "flex", padding: 3, border: "none", borderRadius: 10, background: "transparent", color: T.faint, cursor: "pointer" }, children: /* @__PURE__ */ jsx15(Icon, { name: "close", size: 11 }) })
+          /* @__PURE__ */ jsxs17("div", { style: { ...S.row, gap: 6 }, children: [
+            /* @__PURE__ */ jsx19(Icon, { name: "grow", size: 14 }),
+            /* @__PURE__ */ jsx19("span", { style: { ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }, children: t("grow.title", clean(grow.from?.name ?? "", 40), clean(grow.to.name, 40)) }),
+            /* @__PURE__ */ jsx19("button", { "aria-label": t("grow.close"), className: FOCUSABLE, onClick: grow.close, title: t("grow.close"), type: "button", style: { display: "flex", padding: 3, border: "none", borderRadius: 10, background: "transparent", color: T.faint, cursor: "pointer" }, children: /* @__PURE__ */ jsx19(Icon, { name: "close", size: 11 }) })
           ] }),
           !picked ? failed ? (
             // Nothing grew and nothing is on its way (a sound's file is gone, the map moved on): why, at once.
-            /* @__PURE__ */ jsxs15(Fragment7, { children: [
-              /* @__PURE__ */ jsx15("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(failed.error, 160)) }),
-              /* @__PURE__ */ jsx15("div", { style: S.row, children: another })
+            /* @__PURE__ */ jsxs17(Fragment7, { children: [
+              /* @__PURE__ */ jsx19("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(failed.error, 160)) }),
+              /* @__PURE__ */ jsx19("div", { style: S.row, children: another })
             ] })
-          ) : /* @__PURE__ */ jsx15("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs15(Fragment7, { children: [
-            /* @__PURE__ */ jsxs15("span", { style: { fontSize: 11, color: T.secondary }, title: picked.result.recipe, children: [
-              /* @__PURE__ */ jsx15("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
-              /* @__PURE__ */ jsx15("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
+          ) : /* @__PURE__ */ jsx19("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs17(Fragment7, { children: [
+            /* @__PURE__ */ jsxs17("span", { style: { fontSize: 11, color: T.secondary }, title: picked.result.recipe, children: [
+              /* @__PURE__ */ jsx19("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
+              /* @__PURE__ */ jsx19("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
             ] }),
-            /* @__PURE__ */ jsxs15("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-              /* @__PURE__ */ jsx15(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
+            /* @__PURE__ */ jsxs17("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+              /* @__PURE__ */ jsx19(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
               actions?.(picked.result),
-              fromMap && toMap && /* @__PURE__ */ jsx15(
+              fromMap && toMap && /* @__PURE__ */ jsx19(
                 TextButton,
                 {
                   onClick: () => {
@@ -7396,10 +7817,10 @@ function GrowLayer({
               ),
               another
             ] })
-          ] }) : picked.state === "failed" ? /* @__PURE__ */ jsxs15(Fragment7, { children: [
-            /* @__PURE__ */ jsx15("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }),
-            /* @__PURE__ */ jsx15("div", { style: S.row, children: another })
-          ] }) : /* @__PURE__ */ jsx15("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
+          ] }) : picked.state === "failed" ? /* @__PURE__ */ jsxs17(Fragment7, { children: [
+            /* @__PURE__ */ jsx19("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }),
+            /* @__PURE__ */ jsx19("div", { style: S.row, children: another })
+          ] }) : /* @__PURE__ */ jsx19("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
         ]
       }
     )
@@ -7407,122 +7828,16 @@ function GrowLayer({
 }
 
 // src/shared/Player.tsx
-import { useEffect as useEffect8, useRef as useRef7, useState as useState9 } from "react";
-
-// src/shared/palette.ts
-var MOST_GATHERED = 1e4;
-var LOOSE = 5;
-var NAME_MOST = 80;
-function marksOf(palette, revision) {
-  const out = /* @__PURE__ */ new Set();
-  if (!palette?.current || !revision || palette.map_revision !== revision) return out;
-  for (const item of palette.current.items) if (item.sound_id) out.add(item.sound_id);
-  return out;
-}
-function playableId(item) {
-  return item.sound_id ?? item.artifact_id;
-}
-function moved(items, key, to) {
-  const from = items.findIndex((item) => item.key === key);
-  if (from < 0) return [...items];
-  const out = items.filter((item) => item.key !== key);
-  out.splice(Math.max(0, Math.min(out.length, to)), 0, items[from]);
-  return out;
-}
-function paletteName(text) {
-  const name = text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, NAME_MOST).trim();
-  return name || null;
-}
-function kitRequest(name) {
-  const said = quotable(name);
-  return said ? `Load the sounds in my palette “${said}” as a kit` : "Load the sounds in my palette as a kit";
-}
-function itemReference(item, revision) {
-  if (item.sound_id) return soundRequest(item.sound_id, item.name, revision);
-  return item.artifact_id ? artifactReference(item.artifact_id, item.name) : null;
-}
-function gatherIds(ids) {
-  const seen = /* @__PURE__ */ new Set();
-  for (const id of ids) if (plainId(id)) seen.add(id);
-  const all = [...seen];
-  return { ids: all.slice(0, MOST_GATHERED), dropped: Math.max(0, all.length - MOST_GATHERED) };
-}
-function peaksOf2(samples, bins) {
-  const out = new Array(bins).fill(0);
-  if (samples.length === 0 || bins <= 0) return out;
-  let loudest = 0;
-  for (let bin = 0; bin < bins; bin++) {
-    const start = Math.floor(bin * samples.length / bins);
-    const end = Math.max(start + 1, Math.floor((bin + 1) * samples.length / bins));
-    let peak = 0;
-    for (let at = start; at < end && at < samples.length; at++) {
-      const value = Math.abs(samples[at]);
-      if (value > peak) peak = value;
-    }
-    out[bin] = peak;
-    if (peak > loudest) loudest = peak;
-  }
-  return loudest > 0 ? out.map((peak) => peak / loudest) : out;
-}
-
-// src/shared/peaks.ts
-var DECODE_MOST = 12 * 1024 * 1024;
-var kept2 = /* @__PURE__ */ new Map();
-var loading = /* @__PURE__ */ new Map();
-var askers = /* @__PURE__ */ new Map();
-var queue = Promise.resolve();
-var SKIPPED = /* @__PURE__ */ Symbol("skipped");
-function peaksFor(id, bars, audio, wanted = () => true) {
-  const key = `${bars}:${id}`;
-  const done = kept2.get(key);
-  if (done !== void 0) return Promise.resolve(done);
-  const running = loading.get(key);
-  if (running) {
-    askers.get(key)?.push(wanted);
-    return running;
-  }
-  askers.set(key, [wanted]);
-  const run = async () => {
-    if (!(askers.get(key) ?? []).some((ask2) => ask2())) return SKIPPED;
-    const url = await audio(id);
-    const comma = url.indexOf(",");
-    if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
-    const binary = atob(url.slice(comma + 1));
-    const bytes = new Uint8Array(binary.length);
-    for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
-    const buffer = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
-    const mixed2 = new Float32Array(buffer.length);
-    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-      const data = buffer.getChannelData(channel);
-      for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
-    }
-    return peaksOf2(mixed2, bars);
-  };
-  const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-    loading.delete(key);
-    askers.delete(key);
-    if (peaks === SKIPPED) return null;
-    kept2.set(key, peaks);
-    return peaks;
-  });
-  queue = promise;
-  loading.set(key, promise);
-  return promise;
-}
-function peaksKept(id, bars) {
-  return kept2.get(`${bars}:${id}`) ?? null;
-}
-
-// src/shared/Player.tsx
-import { jsx as jsx16, jsxs as jsxs16 } from "react/jsx-runtime";
+import { useEffect as useEffect11, useRef as useRef10, useState as useState11 } from "react";
+import { jsx as jsx20, jsxs as jsxs18 } from "react/jsx-runtime";
 var BARS = 160;
 function Waveform({ id, color, playing, duration, audio, onClick }) {
-  const canvas = useRef7(null);
-  const [peaks, setPeaks] = useState9(() => peaksKept(id, BARS));
-  const [width, setWidth] = useState9(0);
-  const [startedAt, setStartedAt] = useState9(null);
-  const [now, setNow] = useState9(0);
-  useEffect8(() => {
+  const canvas = useRef10(null);
+  const [peaks, setPeaks] = useState11(() => peaksKept(id, BARS));
+  const [width, setWidth] = useState11(0);
+  const [startedAt, setStartedAt] = useState11(null);
+  const [now, setNow] = useState11(0);
+  useEffect11(() => {
     let live = true;
     setPeaks(peaksKept(id, BARS));
     void peaksFor(id, BARS, audio, () => live).then((found) => live && setPeaks(found));
@@ -7530,20 +7845,20 @@ function Waveform({ id, color, playing, duration, audio, onClick }) {
       live = false;
     };
   }, [id, audio]);
-  useEffect8(() => {
+  useEffect11(() => {
     const element = canvas.current?.parentElement;
     if (!element) return;
     const observer = new ResizeObserver((entries) => setWidth(Math.floor(entries[0]?.contentRect.width ?? 0)));
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  useEffect8(() => setStartedAt(playing ? performance.now() : null), [playing, id]);
-  useEffect8(() => {
+  useEffect11(() => setStartedAt(playing ? performance.now() : null), [playing, id]);
+  useEffect11(() => {
     if (startedAt === null) return;
     const frame2 = requestAnimationFrame(setNow);
     return () => cancelAnimationFrame(frame2);
   }, [startedAt, now]);
-  useEffect8(() => {
+  useEffect11(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
     if (!element || !context || width === 0) return;
@@ -7563,9 +7878,9 @@ function Waveform({ id, color, playing, duration, audio, onClick }) {
     });
   }, [peaks, width, color]);
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1e3 / duration) : null;
-  return /* @__PURE__ */ jsxs16("div", { "aria-hidden": true, onClick, style: { position: "relative", flex: "1 1 160px", minWidth: 120, height: 34, cursor: "pointer" }, children: [
-    /* @__PURE__ */ jsx16("canvas", { ref: canvas, style: { width: "100%", height: 34, display: "block", color } }),
-    progress !== null && progress > 0 && progress < 1 && /* @__PURE__ */ jsx16("span", { style: { position: "absolute", top: -2, bottom: -2, left: `${progress * 100}%`, width: 2, borderRadius: 1, background: T.text, boxShadow: `0 0 8px ${color}` } })
+  return /* @__PURE__ */ jsxs18("div", { "aria-hidden": true, onClick, style: { position: "relative", flex: "1 1 160px", minWidth: 120, height: 34, cursor: "pointer" }, children: [
+    /* @__PURE__ */ jsx20("canvas", { ref: canvas, style: { width: "100%", height: 34, display: "block", color } }),
+    progress !== null && progress > 0 && progress < 1 && /* @__PURE__ */ jsx20("span", { style: { position: "absolute", top: -2, bottom: -2, left: `${progress * 100}%`, width: 2, borderRadius: 1, background: T.text, boxShadow: `0 0 8px ${color}` } })
   ] });
 }
 function Player({
@@ -7580,13 +7895,13 @@ function Player({
   audio
 }) {
   const t = useT();
-  const [shown, setShown] = useState9(false);
-  useEffect8(() => {
+  const [shown, setShown] = useState11(false);
+  useEffect11(() => {
     const frame2 = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(frame2);
   }, []);
   const name = clean(sound.name ?? id, 80);
-  return /* @__PURE__ */ jsxs16(
+  return /* @__PURE__ */ jsxs18(
     "section",
     {
       "aria-label": t("map.player", name),
@@ -7603,8 +7918,8 @@ function Player({
         pointerEvents: "auto"
       },
       children: [
-        /* @__PURE__ */ jsxs16("div", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
-          /* @__PURE__ */ jsx16(
+        /* @__PURE__ */ jsxs18("div", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
+          /* @__PURE__ */ jsx20(
             "button",
             {
               "aria-label": playing ? t("map.stop") : t("map.play"),
@@ -7628,20 +7943,20 @@ function Player({
                 boxShadow: playing ? `0 0 14px -2px ${color}` : "none",
                 transition: "background-color 140ms, box-shadow 200ms"
               },
-              children: /* @__PURE__ */ jsx16(Icon, { name: playing ? "stop" : "play", size: 13 })
+              children: /* @__PURE__ */ jsx20(Icon, { name: playing ? "stop" : "play", size: 13 })
             }
           ),
-          /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: "0 1 220px" }, children: [
-            /* @__PURE__ */ jsx16("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 650 }, children: name }),
-            /* @__PURE__ */ jsxs16("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
-              sound.class && /* @__PURE__ */ jsx16(Chip, { children: clean(sound.class, 16) }),
-              sound.kind && /* @__PURE__ */ jsx16(Chip, { children: clean(sound.kind, 16) }),
-              typeof sound.duration === "number" && /* @__PURE__ */ jsx16(Chip, { children: seconds(sound.duration) })
+          /* @__PURE__ */ jsxs18("div", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: "0 1 220px" }, children: [
+            /* @__PURE__ */ jsx20("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 650 }, children: name }),
+            /* @__PURE__ */ jsxs18("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
+              sound.class && /* @__PURE__ */ jsx20(Chip, { children: clean(sound.class, 16) }),
+              sound.kind && /* @__PURE__ */ jsx20(Chip, { children: clean(sound.kind, 16) }),
+              typeof sound.duration === "number" && /* @__PURE__ */ jsx20(Chip, { children: seconds(sound.duration) })
             ] })
           ] }),
-          /* @__PURE__ */ jsx16(Waveform, { audio, color, duration: typeof sound.duration === "number" ? sound.duration : 2, id, onClick: playing ? onStop : onPlay, playing })
+          /* @__PURE__ */ jsx20(Waveform, { audio, color, duration: typeof sound.duration === "number" ? sound.duration : 2, id, onClick: playing ? onStop : onPlay, playing })
         ] }),
-        /* @__PURE__ */ jsx16(
+        /* @__PURE__ */ jsx20(
           "button",
           {
             "aria-label": t("map.letGo"),
@@ -7650,12 +7965,12 @@ function Player({
             title: t("map.letGo"),
             type: "button",
             style: { position: "absolute", top: 6, right: 6, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, borderRadius: 12, border: "none", background: "transparent", color: T.faint, cursor: "pointer" },
-            children: /* @__PURE__ */ jsx16(Icon, { name: "close", size: 12 })
+            children: /* @__PURE__ */ jsx20(Icon, { name: "close", size: 12 })
           }
         ),
-        /* @__PURE__ */ jsxs16("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", marginRight: -26 }, children: [
-          sound.folder && /* @__PURE__ */ jsx16("span", { style: { ...S.faint, ...S.ellipsis, flex: "1 1 8rem", fontSize: 11 }, children: clean(sound.folder, 80) }),
-          /* @__PURE__ */ jsx16("span", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions })
+        /* @__PURE__ */ jsxs18("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", marginRight: -26 }, children: [
+          sound.folder && /* @__PURE__ */ jsx20("span", { style: { ...S.faint, ...S.ellipsis, flex: "1 1 8rem", fontSize: 11 }, children: clean(sound.folder, 80) }),
+          /* @__PURE__ */ jsx20("span", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions })
         ] })
       ]
     }
@@ -7663,15 +7978,14 @@ function Player({
 }
 
 // src/shared/MapCanvas.tsx
-import { jsx as jsx17, jsxs as jsxs17 } from "react/jsx-runtime";
+import { jsx as jsx21, jsxs as jsxs19 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
-var FADE_MS = 450;
+var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
 var FLY_MS = 620;
 var FLY_STAGGER = 14;
 var FLY_MOST = 48;
-var RIPPLE_MS = 1100;
 var STAGGER = 0.55;
 var ARRANGE_MS = 1e3;
 var LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
@@ -7703,22 +8017,22 @@ var maps = 0;
 function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade }) {
   const t = useT();
   const model = useMemo2(() => buildModel(map), [map]);
-  const canvasRef = useRef8(null);
-  const boxRef = useRef8(null);
-  const [size, setSize] = useState10({ width: 0, height: 0 });
-  const [view, setView] = useState10(null);
-  const [query, setQuery] = useState10("");
-  const [searchFor, setSearchFor] = useState10("");
-  const [hidden, setHidden] = useState10(() => /* @__PURE__ */ new Set());
-  const [hover, setHover] = useState10(null);
-  const drag = useRef8(null);
-  const [box, setBox] = useState10(null);
-  const [handTool, setHandTool] = useState10(false);
-  const [grabbing, setGrabbing] = useState10(false);
-  const over = useRef8(false);
-  const [spaceHeld, setSpaceHeld] = useState10(false);
-  const space = useRef8(false);
-  useEffect9(() => {
+  const canvasRef = useRef11(null);
+  const boxRef = useRef11(null);
+  const [size, setSize] = useState12({ width: 0, height: 0 });
+  const [view, setView] = useState12(null);
+  const [query, setQuery] = useState12("");
+  const [searchFor, setSearchFor] = useState12("");
+  const [hidden, setHidden] = useState12(() => /* @__PURE__ */ new Set());
+  const [hover, setHover] = useState12(null);
+  const drag = useRef11(null);
+  const [box, setBox] = useState12(null);
+  const [handTool, setHandTool] = useState12(false);
+  const [grabbing, setGrabbing] = useState12(false);
+  const over = useRef11(false);
+  const [spaceHeld, setSpaceHeld] = useState12(false);
+  const space = useRef11(false);
+  useEffect12(() => {
     const hold = (held) => {
       if (space.current === held) return;
       space.current = held;
@@ -7744,16 +8058,16 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       window.removeEventListener("blur", blur2);
     };
   }, []);
-  const rested = useRef8(null);
+  const rested = useRef11(null);
   const rest = (id) => {
     if (rested.current === id) return;
     rested.current = id;
     onHover?.(id);
   };
-  const viewRef = useRef8(null);
+  const viewRef = useRef11(null);
   viewRef.current = view;
-  const nextView = useRef8(null);
-  const frameRef = useRef8(0);
+  const nextView = useRef11(null);
+  const frameRef = useRef11(0);
   const queueView = (next) => {
     moved2.current = true;
     nextView.current = next;
@@ -7765,17 +8079,17 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       if (latest) setView(latest);
     });
   };
-  useEffect9(() => () => cancelAnimationFrame(frameRef.current), []);
-  const backing = useRef8("");
-  const [said, setSaid] = useState10("");
-  const [hintId] = useState10(() => `kumi-map-keys-${maps += 1}`);
-  const topRef = useRef8(null);
-  const legendRef = useRef8(null);
-  const [topInset, setTopInset] = useState10(0);
+  useEffect12(() => () => cancelAnimationFrame(frameRef.current), []);
+  const backing = useRef11("");
+  const [said, setSaid] = useState12("");
+  const [hintId] = useState12(() => `kumi-map-keys-${maps += 1}`);
+  const topRef = useRef11(null);
+  const legendRef = useRef11(null);
+  const [topInset, setTopInset] = useState12(0);
   const mapSize = mapSide(size.width, size.height, topInset);
   const fit = () => fitView(size.width, size.height, topInset, coverRight);
   const hasPoints = model.points.length > 0;
-  useEffect9(() => {
+  useEffect12(() => {
     if (query === searchFor) return;
     const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0);
     return () => clearTimeout(timer);
@@ -7797,41 +8111,40 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const shown = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 1 ? 1 : 0), 0), [mask]);
   const leavingCount = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 2 ? 1 : 0), 0), [mask]);
   const still = useMemo2(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
-  const leftAt = useRef8(/* @__PURE__ */ new Map());
-  const introAt = useRef8(-Infinity);
-  const until = useRef8(0);
-  const [clock2, setClock] = useState10(0);
+  const leftAt = useRef11(/* @__PURE__ */ new Map());
+  const introAt = useRef11(-Infinity);
+  const until = useRef11(0);
+  const [clock2, setClock] = useState12(0);
   const animate = (ms2) => {
     until.current = Math.max(until.current, performance.now() + ms2);
     setClock(performance.now());
   };
-  useEffect9(() => {
+  useEffect12(() => {
     const now = performance.now();
     for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
     for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
-    if (leaving?.size) animate(FADE_MS);
+    if (leaving?.size) animate(FADE_MS2);
   }, [leaving]);
-  useEffect9(() => {
+  useEffect12(() => {
     if (still || !model.revision) return;
     introAt.current = performance.now();
     animate(INTRO_MS);
   }, [model.revision]);
-  const [morph, setMorph] = useState10(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
-  useEffect9(() => {
+  const [morph, setMorph] = useState12(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
+  useEffect12(() => {
     const now = performance.now();
     setMorph((current) => current.to === (tiles ? 1 : 0) ? current : { from: still ? tiles ? 1 : 0 : morphAt(current, now), to: tiles ? 1 : 0, at: now });
     if (!still) animate(MORPH_MS);
   }, [tiles]);
-  useEffect9(() => {
+  useEffect12(() => {
     if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
   }, [flying]);
-  const playingHere = playing !== null && indexOf.has(playing) && !still;
-  useEffect9(() => {
-    if (performance.now() >= until.current && !playingHere) return;
+  useEffect12(() => {
+    if (performance.now() >= until.current) return;
     const frame2 = requestAnimationFrame(setClock);
     return () => cancelAnimationFrame(frame2);
-  }, [clock2, playingHere]);
-  const [ownArrangement, setOwnArrangement] = useState10("");
+  }, [clock2]);
+  const [ownArrangement, setOwnArrangement] = useState12("");
   const arrangementId = arrangement ?? ownArrangement;
   const arrangementIndex = LAYOUTS.includes(arrangementId) ? model.arrangements.findIndex((each) => each.id === arrangementId) : -1;
   const arranged = useMemo2(() => arrangedModel(model, arrangementIndex), [model, arrangementIndex]);
@@ -7843,15 +8156,15 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const named = LAYOUTS.filter((id) => model.arrangements.some((each) => each.id === id));
     return named.length === 0 ? [] : [{ id: "", name: t("arrange.similar.name"), title: t("arrange.similar.title") }, ...named.map((id) => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))];
   }, [model, t]);
-  const drawn = useRef8(null);
-  const shift = useRef8(null);
-  const shiftedTo = useRef8(arranged);
+  const drawn = useRef11(null);
+  const shift = useRef11(null);
+  const shiftedTo = useRef11(arranged);
   if (shiftedTo.current !== arranged) {
     shiftedTo.current = arranged;
     const last = drawn.current;
     shift.current = !still && last && last.model === model && last.places.length === model.points.length * 2 ? { from: last.places.slice(), at: performance.now() } : null;
   }
-  useEffect9(() => {
+  useEffect12(() => {
     if (shift.current) animate(ARRANGE_MS);
   }, [arranged]);
   const layout = useMemo2(() => tiles || morph.from > 0 ? tileLayout(arranged) : null, [arranged, tiles, morph.from > 0]);
@@ -7882,8 +8195,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const first = clean(model.sounds[seeds[0]].name ?? "", 60);
     return seeds.length === 1 ? t("map.near", first) : t("map.nearMany", first, seeds.length - 1);
   }, [searched, foundIds, found, model, t]);
-  const [painted, setPainted] = useState10("");
-  useEffect9(() => {
+  const [painted, setPainted] = useState12("");
+  useEffect12(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const timer = setInterval(() => {
@@ -7892,7 +8205,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     }, 1e3);
     return () => clearInterval(timer);
   }, [hasPoints]);
-  useEffect9(() => {
+  useEffect12(() => {
     const box2 = boxRef.current;
     if (!box2) return;
     const observer = new ResizeObserver((entries) => {
@@ -7902,7 +8215,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     observer.observe(box2);
     return () => observer.disconnect();
   }, [hasPoints]);
-  useEffect9(() => {
+  useEffect12(() => {
     const top = topRef.current;
     if (!top) return;
     const observer = new ResizeObserver(() => {
@@ -7912,19 +8225,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     observer.observe(top);
     return () => observer.disconnect();
   }, [hasPoints]);
-  const moved2 = useRef8(false);
-  useEffect9(() => {
+  const moved2 = useRef11(false);
+  useEffect12(() => {
     if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
   }, [size.width, size.height]);
-  useEffect9(() => {
+  useEffect12(() => {
     moved2.current = false;
     setView(size.width > 0 ? fit() : null);
   }, [model.revision]);
-  useEffect9(() => {
+  useEffect12(() => {
     if (!moved2.current && size.width > 0) setView(fit());
   }, [topInset, coverRight]);
-  const framedFound = useRef8(null);
-  useEffect9(() => {
+  const framedFound = useRef11(null);
+  useEffect12(() => {
     if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
     framedFound.current = foundIds;
     const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
@@ -7932,9 +8245,9 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     moved2.current = true;
     setView(framed);
   }, [foundIds, model, size.width, size.height, topInset]);
-  const wheelMode = useRef8(wheel);
+  const wheelMode = useRef11(wheel);
   wheelMode.current = wheel;
-  useEffect9(() => {
+  useEffect12(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const memory = { pans: null, at: 0 };
@@ -7957,7 +8270,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [hasPoints]);
   const hoverAt = hover ? hover.index : null;
-  useEffect9(() => {
+  useEffect12(() => {
     const canvas = canvasRef.current;
     if (!canvas || !view || size.width === 0) return;
     const ratio = window.devicePixelRatio || 1;
@@ -8065,7 +8378,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       }
     }
     for (const [id, at2] of leftAt.current) {
-      const progress = (now - at2) / FADE_MS;
+      const progress = (now - at2) / FADE_MS2;
       const index = indexOf.get(id);
       if (progress >= 1 || index === void 0) continue;
       const eased = 1 - (1 - progress) ** 2;
@@ -8185,23 +8498,6 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.strokeStyle = colors.strong;
       context.lineWidth = 1.25;
       context.stroke(ring3);
-    }
-    if (playing) {
-      ring2(playing, colors.accent, 6, 2);
-      const index = indexOf.get(playing);
-      if (index !== void 0 && !still) {
-        const [x, y, blend] = placeOf(index);
-        for (const offset of [0, 0.5]) {
-          const phase = ((now / RIPPLE_MS + offset) % 1 + 1) % 1;
-          context.globalAlpha = 0.65 * (1 - phase) ** 1.5;
-          context.strokeStyle = groupColor2.get(points[index].group) ?? colors.accent;
-          context.lineWidth = 2 - phase;
-          context.beginPath();
-          context.arc(x, y, reach(blend) + 4 + phase * 26, 0, Math.PI * 2);
-          context.stroke();
-        }
-        context.globalAlpha = 1;
-      }
     }
     if (selected) ring2(selected, colors.strong, 4, 2);
     if (flying && !still) {
@@ -8334,10 +8630,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const inView = Number.isFinite(x0) && x1 >= 0 && y1 >= 0 && x0 <= size.width && y0 <= size.height;
     return inView ? [x0, y0, x1, y1] : null;
   }, [view, pickedIds, indexOf, mask, active, mapSize, size.width, size.height]);
-  const cluster = useRef8(null);
-  const [clusterSize, setClusterSize] = useState10([320, 40]);
+  const cluster = useRef11(null);
+  const [clusterSize, setClusterSize] = useState12([320, 40]);
   const hasPicks = pickedIds.length > 0;
-  useEffect9(() => {
+  useEffect12(() => {
     const element = cluster.current;
     if (!element) return;
     const observer = new ResizeObserver((entries) => {
@@ -8348,10 +8644,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => observer.disconnect();
   }, [hasPicks]);
   if (!model.points.length) {
-    return /* @__PURE__ */ jsx17("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs17("div", { style: { maxWidth: 380 }, children: [
+    return /* @__PURE__ */ jsx21("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs19("div", { style: { maxWidth: 380 }, children: [
       empty,
-      (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs17("div", { role: "status", style: { ...S.row, flexWrap: "wrap", justifyContent: "center", gap: 6, marginTop: 8 }, children: [
-        /* @__PURE__ */ jsx17("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", map?.hidden ?? 0) }),
+      (map?.hidden ?? 0) > 0 && /* @__PURE__ */ jsxs19("div", { role: "status", style: { ...S.row, flexWrap: "wrap", justifyContent: "center", gap: 6, marginTop: 8 }, children: [
+        /* @__PURE__ */ jsx21("span", { style: { ...S.faint, flex: "1 1 14rem" }, children: t("map.hidden", map?.hidden ?? 0) }),
         hiddenActions
       ] })
     ] }) });
@@ -8361,14 +8657,23 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const chosenColor = chosenIndex === void 0 ? T.accent : model.groups.find((group) => group.key === model.points[chosenIndex].group)?.color ?? T.accent;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
+  const playingIndex = playing === null ? void 0 : indexOf.get(playing);
+  const playingGroup = playingIndex === void 0 ? void 0 : model.points[playingIndex].group;
+  const playingSound = playing === null || playingGroup === void 0 ? null : { id: playing, color: model.groups.find((group) => group.key === playingGroup)?.color ?? T.accent, glyph: glyphOf(playingGroup), duration: model.sounds[playing]?.duration ?? 0 };
+  const playingPlace = () => {
+    const [last, at2] = [drawn.current, viewRef.current];
+    if (playingIndex === void 0 || !last || !at2 || last.places.length < 2 * playingIndex + 2) return null;
+    const unit = mapSize * at2.scale;
+    return [last.places[2 * playingIndex] * unit + at2.dx, last.places[2 * playingIndex + 1] * unit + at2.dy];
+  };
   const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
   const hiddenCount = (map?.hidden ?? 0) + leavingCount;
   const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, chosen ? 120 : 10);
-  return /* @__PURE__ */ jsxs17("div", { style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text }, children: [
-    /* @__PURE__ */ jsxs17("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
-      /* @__PURE__ */ jsxs17("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
-        /* @__PURE__ */ jsxs17("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
-          /* @__PURE__ */ jsx17(
+  return /* @__PURE__ */ jsxs19("div", { style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text }, children: [
+    /* @__PURE__ */ jsxs19("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
+      /* @__PURE__ */ jsxs19("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
+        /* @__PURE__ */ jsxs19("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
+          /* @__PURE__ */ jsx21(
             "input",
             {
               "aria-label": t("map.search"),
@@ -8379,7 +8684,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               value: query
             }
           ),
-          /* @__PURE__ */ jsx17(
+          /* @__PURE__ */ jsx21(
             "span",
             {
               style: { ...S.faint, fontSize: 10.5, lineHeight: "18px", padding: "0 7px", borderRadius: 9, background: T.chip, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
@@ -8388,17 +8693,17 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             }
           )
         ] }),
-        /* @__PURE__ */ jsx17("span", { style: { flex: 1 } }),
-        /* @__PURE__ */ jsxs17(ToolGroup, { label: t("map.tools"), children: [
-          onPicked && /* @__PURE__ */ jsx17(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
-          onPicked && /* @__PURE__ */ jsx17(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
-          grow && /* @__PURE__ */ jsx17(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
-          onPicked && /* @__PURE__ */ jsx17(Rule, {}),
-          layoutChoices.length > 0 && /* @__PURE__ */ jsx17(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
-          onTiles && /* @__PURE__ */ jsx17(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
+        /* @__PURE__ */ jsx21("span", { style: { flex: 1 } }),
+        /* @__PURE__ */ jsxs19(ToolGroup, { label: t("map.tools"), children: [
+          onPicked && /* @__PURE__ */ jsx21(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
+          onPicked && /* @__PURE__ */ jsx21(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
+          grow && /* @__PURE__ */ jsx21(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
+          onPicked && /* @__PURE__ */ jsx21(Rule, {}),
+          layoutChoices.length > 0 && /* @__PURE__ */ jsx21(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
+          onTiles && /* @__PURE__ */ jsx21(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
           tools,
-          /* @__PURE__ */ jsx17(Rule, {}),
-          /* @__PURE__ */ jsx17(
+          /* @__PURE__ */ jsx21(Rule, {}),
+          /* @__PURE__ */ jsx21(
             ToolButton,
             {
               icon: "fit",
@@ -8412,9 +8717,9 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           )
         ] })
       ] }),
-      /* @__PURE__ */ jsx17("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
+      /* @__PURE__ */ jsx21("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
         const off = hidden.has(group.key);
-        return /* @__PURE__ */ jsxs17(
+        return /* @__PURE__ */ jsxs19(
           "button",
           {
             "aria-pressed": !off,
@@ -8429,32 +8734,32 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             type: "button",
             style: { ...S.row, gap: 5, font: "inherit", fontSize: 11, padding: "2px 8px 2px 6px", borderRadius: 10, border: "none", background: off ? "transparent" : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.55 : 1, transition: "background-color 140ms, opacity 140ms" },
             children: [
-              /* @__PURE__ */ jsx17("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx17(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
+              /* @__PURE__ */ jsx21("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx21(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
               group.name,
               " ",
-              /* @__PURE__ */ jsx17("span", { style: { color: T.faint }, children: group.count })
+              /* @__PURE__ */ jsx21("span", { style: { color: T.faint }, children: group.count })
             ]
           },
           group.key
         );
       }) }),
       grow?.choosing && // Grow names its sounds with clicks on the map: which one this click names, and a way out.
-      /* @__PURE__ */ jsxs17("div", { className: "kumi-pop", role: "status", style: { ...glass, borderRadius: 16, ...S.row, gap: 8, padding: "4px 6px 4px 12px", pointerEvents: "auto", maxWidth: "100%" }, children: [
-        /* @__PURE__ */ jsx17(Icon, { name: "grow", size: 13 }),
-        /* @__PURE__ */ jsx17("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
-        /* @__PURE__ */ jsx17(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+      /* @__PURE__ */ jsxs19("div", { className: "kumi-pop", role: "status", style: { ...glass, borderRadius: 16, ...S.row, gap: 8, padding: "4px 6px 4px 12px", pointerEvents: "auto", maxWidth: "100%" }, children: [
+        /* @__PURE__ */ jsx21(Icon, { name: "grow", size: 13 }),
+        /* @__PURE__ */ jsx21("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+        /* @__PURE__ */ jsx21(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
       ] }),
-      matches.length > 0 && /* @__PURE__ */ jsxs17("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
-        /* @__PURE__ */ jsxs17("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
-          /* @__PURE__ */ jsx17("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
+      matches.length > 0 && /* @__PURE__ */ jsxs19("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
+        /* @__PURE__ */ jsxs19("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
+          /* @__PURE__ */ jsx21("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
           onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
-          /* @__PURE__ */ jsx17(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
+          /* @__PURE__ */ jsx21(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
         ] }),
         matches.slice(0, MATCHES_LISTED).map((id) => {
           const sound = model.sounds[id];
           const indexed = indexedValues(sound, t);
           const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
-          return /* @__PURE__ */ jsxs17(
+          return /* @__PURE__ */ jsxs19(
             "button",
             {
               "aria-pressed": selected === id,
@@ -8463,27 +8768,27 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               type: "button",
               style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
               children: [
-                /* @__PURE__ */ jsxs17("span", { style: { ...S.row, gap: 6 }, children: [
-                  /* @__PURE__ */ jsx17("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-                  indexed && /* @__PURE__ */ jsx17("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
-                  sound?.class && /* @__PURE__ */ jsx17("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+                /* @__PURE__ */ jsxs19("span", { style: { ...S.row, gap: 6 }, children: [
+                  /* @__PURE__ */ jsx21("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                  indexed && /* @__PURE__ */ jsx21("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
+                  sound?.class && /* @__PURE__ */ jsx21("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
                 ] }),
-                reasons && /* @__PURE__ */ jsx17("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
+                reasons && /* @__PURE__ */ jsx21("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
               ]
             },
             id
           );
         }),
-        matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx17("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+        matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx21("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
       ] }),
       hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
-      /* @__PURE__ */ jsxs17("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: "100%" }, children: [
-        /* @__PURE__ */ jsx17("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
+      /* @__PURE__ */ jsxs19("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: "100%" }, children: [
+        /* @__PURE__ */ jsx21("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
         hiddenActions
       ] })
     ] }),
-    /* @__PURE__ */ jsxs17("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
-      /* @__PURE__ */ jsx17(
+    /* @__PURE__ */ jsxs19("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
+      /* @__PURE__ */ jsx21(
         "canvas",
         {
           ref: canvasRef,
@@ -8541,15 +8846,16 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           }
         }
       ),
+      /* @__PURE__ */ jsx21(AtlasOverlay, { audio, height: size.height, moved: `${view?.scale},${view?.dx},${view?.dy},${clock2}`, place: playingPlace, playing: playingSound, still, width: size.width }),
       box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
-      /* @__PURE__ */ jsx17(
+      /* @__PURE__ */ jsx21(
         "svg",
         {
           "aria-hidden": true,
           height: Math.abs(box[3] - box[1]),
           style: { position: "absolute", left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: "visible", pointerEvents: "none" },
           width: Math.abs(box[2] - box[0]),
-          children: /* @__PURE__ */ jsx17(
+          children: /* @__PURE__ */ jsx21(
             "rect",
             {
               className: "kumi-ants",
@@ -8563,23 +8869,23 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           )
         }
       ),
-      /* @__PURE__ */ jsx17("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
-      /* @__PURE__ */ jsx17("span", { "aria-live": "polite", style: S.hidden, children: said }),
-      hovered && hoveredSound && hover && /* @__PURE__ */ jsxs17(
-        "div",
+      /* @__PURE__ */ jsx21("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+      /* @__PURE__ */ jsx21("span", { "aria-live": "polite", style: S.hidden, children: said }),
+      hovered && hoveredSound && hover && /* @__PURE__ */ jsx21(
+        HoverPill,
         {
-          style: { ...glass, borderRadius: 8, position: "absolute", left: Math.min(hover.x + 14, Math.max(0, size.width - 230)), top: Math.max(0, hover.y - 38), maxWidth: 230, pointerEvents: "none", padding: "4px 9px", fontSize: 11.5, color: T.text, ...S.ellipsis },
-          children: [
-            clean(hoveredSound.name, 48),
-            " ",
-            /* @__PURE__ */ jsxs17("span", { style: { color: T.muted }, children: [
-              "· ",
-              clean(hoveredSound.class ?? "", 16)
-            ] })
-          ]
-        }
+          at: [hover.x, hover.y],
+          audio,
+          color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
+          glyph: glyphOf(hovered.group),
+          id: hovered.id,
+          playing: playing === hovered.id,
+          sound: hoveredSound,
+          within: [size.width - coverRight, size.height]
+        },
+        hovered.id
       ),
-      grow && (grow.from || grow.to) && /* @__PURE__ */ jsx17(
+      grow && (grow.from || grow.to) && /* @__PURE__ */ jsx21(
         GrowLayer,
         {
           actions: growActions,
@@ -8601,7 +8907,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       )
     ] }),
     hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
-    /* @__PURE__ */ jsxs17(
+    /* @__PURE__ */ jsxs19(
       "div",
       {
         "aria-label": t("dock.picked", pickedIds.length),
@@ -8622,8 +8928,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           transition: still ? "none" : "left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)"
         },
         children: [
-          /* @__PURE__ */ jsxs17("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
-            /* @__PURE__ */ jsx17(Icon, { name: "pick", size: 12 }),
+          /* @__PURE__ */ jsxs19("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
+            /* @__PURE__ */ jsx21(Icon, { name: "pick", size: 12 }),
             t("dock.picked", pickedIds.length)
           ] }),
           pickedActions?.(pickedIds)
@@ -8631,7 +8937,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       }
     ),
     selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-    /* @__PURE__ */ jsx17("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx17("div", { style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx17(
+    /* @__PURE__ */ jsx21("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx21("div", { style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx21(
       Player,
       {
         actions: actions?.(selected, chosen),
@@ -8653,21 +8959,21 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
 }
 function GlyphShape({ glyph, color }) {
   const shape = GLYPH_SHAPES[glyph];
-  return shape ? /* @__PURE__ */ jsx17("polygon", { fill: color, points: shape.map(([x, y]) => `${x},${y}`).join(" ") }) : /* @__PURE__ */ jsx17("circle", { cx: "0", cy: "0", fill: color, r: "1" });
+  return shape ? /* @__PURE__ */ jsx21("polygon", { fill: color, points: shape.map(([x, y]) => `${x},${y}`).join(" ") }) : /* @__PURE__ */ jsx21("circle", { cx: "0", cy: "0", fill: color, r: "1" });
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect10, useMemo as useMemo3, useRef as useRef9, useState as useState11 } from "react";
-import { Fragment as Fragment8, jsx as jsx18, jsxs as jsxs18 } from "react/jsx-runtime";
+import { useEffect as useEffect13, useMemo as useMemo3, useRef as useRef12, useState as useState13 } from "react";
+import { Fragment as Fragment8, jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
 var LOWEST = 150;
 var HIGHEST = 620;
 function Waveform2({ id, color, audio, width, height, bars }) {
-  const canvas = useRef9(null);
-  const [peaks, setPeaks] = useState11(() => id ? peaksKept(id, bars) : null);
-  const [drawnWidth, setDrawnWidth] = useState11(typeof width === "number" ? width : 0);
-  useEffect10(() => {
+  const canvas = useRef12(null);
+  const [peaks, setPeaks] = useState13(() => id ? peaksKept(id, bars) : null);
+  const [drawnWidth, setDrawnWidth] = useState13(typeof width === "number" ? width : 0);
+  useEffect13(() => {
     const element = canvas.current;
     if (!id || !element || peaks) return;
     let live = true;
@@ -8682,7 +8988,7 @@ function Waveform2({ id, color, audio, width, height, bars }) {
       observer.disconnect();
     };
   }, [id, audio, peaks, bars]);
-  useEffect10(() => {
+  useEffect13(() => {
     if (typeof width === "number") return;
     const element = canvas.current;
     if (!element) return;
@@ -8690,7 +8996,7 @@ function Waveform2({ id, color, audio, width, height, bars }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, [width]);
-  useEffect10(() => {
+  useEffect13(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
     if (!element || !context || drawnWidth === 0) return;
@@ -8708,7 +9014,7 @@ function Waveform2({ id, color, audio, width, height, bars }) {
       context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.6), tall);
     });
   }, [peaks, color, drawnWidth, height, bars]);
-  return /* @__PURE__ */ jsx18("canvas", { "aria-hidden": true, ref: canvas, style: { width, height, flex: "none", display: "block", color } });
+  return /* @__PURE__ */ jsx22("canvas", { "aria-hidden": true, ref: canvas, style: { width, height, flex: "none", display: "block", color } });
 }
 function useItemKeys(index, onMove, onRemove) {
   return (event) => {
@@ -8722,7 +9028,7 @@ function useItemKeys(index, onMove, onRemove) {
   };
 }
 function useDrop({ item, dragging, onDrag, onDropHere }, name) {
-  const [over, setOver] = useState11(false);
+  const [over, setOver] = useState13(false);
   return {
     over,
     handlers: {
@@ -8754,7 +9060,7 @@ function Chip2(props) {
   const name = clean(item.name, 60) || item.key;
   const { over, handlers } = useDrop(props, name);
   const keys = useItemKeys(index, onMove, onRemove);
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs20(
     "div",
     {
       ...handlers,
@@ -8777,7 +9083,7 @@ function Chip2(props) {
         animationDelay: arriving === null ? void 0 : `${380 + Math.min(arriving, 24) * 22}ms`
       },
       children: [
-        /* @__PURE__ */ jsxs18(
+        /* @__PURE__ */ jsxs20(
           "button",
           {
             "aria-label": playing ? t("dock.stop", name) : t("dock.play", name),
@@ -8791,12 +9097,12 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             type: "button",
             style: { ...S.row, gap: 5, minWidth: 0, font: "inherit", fontSize: 11.5, padding: "1px 3px", border: "none", background: "transparent", color: T.text, cursor: id ? "pointer" : "default" },
             children: [
-              /* @__PURE__ */ jsx18(Waveform2, { audio, bars: 28, color, height: 16, id, width: 44 }),
-              /* @__PURE__ */ jsx18("span", { style: S.ellipsis, children: name })
+              /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 28, color, height: 16, id, width: 44 }),
+              /* @__PURE__ */ jsx22("span", { style: S.ellipsis, children: name })
             ]
           }
         ),
-        /* @__PURE__ */ jsx18(
+        /* @__PURE__ */ jsx22(
           "button",
           {
             "aria-label": t("dock.remove", name),
@@ -8819,7 +9125,7 @@ function Card(props) {
   const name = clean(item.name, 80) || item.key;
   const { over, handlers } = useDrop(props, name);
   const keys = useItemKeys(index, onMove, onRemove);
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs20(
     "div",
     {
       ...handlers,
@@ -8841,7 +9147,7 @@ function Card(props) {
         animationDelay: arriving === null ? void 0 : `${380 + Math.min(arriving, 24) * 22}ms`
       },
       children: [
-        /* @__PURE__ */ jsx18(
+        /* @__PURE__ */ jsx22(
           "button",
           {
             "aria-label": playing ? t("dock.stop", name) : t("dock.play", name),
@@ -8853,13 +9159,13 @@ function Card(props) {
             title: id ? t("dock.reorderHint") : t("dock.offMap"),
             type: "button",
             style: { display: "block", width: "100%", padding: 0, border: "none", background: "transparent", cursor: id ? "pointer" : "default" },
-            children: /* @__PURE__ */ jsx18(Waveform2, { audio, bars: 64, color, height: 30, id, width: "100%" })
+            children: /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 64, color, height: 30, id, width: "100%" })
           }
         ),
-        /* @__PURE__ */ jsxs18("div", { style: { ...S.row, gap: 5 }, children: [
-          /* @__PURE__ */ jsx18("span", { "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" } }),
-          /* @__PURE__ */ jsx18("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }, title: name, children: name }),
-          /* @__PURE__ */ jsx18(
+        /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 5 }, children: [
+          /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" } }),
+          /* @__PURE__ */ jsx22("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }, title: name, children: name }),
+          /* @__PURE__ */ jsx22(
             "button",
             {
               "aria-label": t("dock.remove", name),
@@ -8872,8 +9178,8 @@ function Card(props) {
             }
           )
         ] }),
-        /* @__PURE__ */ jsxs18("div", { style: { ...S.row, gap: 5, minHeight: 18 }, children: [
-          /* @__PURE__ */ jsx18("span", { style: { ...S.faint, ...S.ellipsis, flex: 1, fontSize: 10.5 }, children: item.source === "artifact" ? t("dock.made") : clean(item.class ?? "", 16) }),
+        /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 5, minHeight: 18 }, children: [
+          /* @__PURE__ */ jsx22("span", { style: { ...S.faint, ...S.ellipsis, flex: 1, fontSize: 10.5 }, children: item.source === "artifact" ? t("dock.made") : clean(item.class ?? "", 16) }),
           use
         ] })
       ]
@@ -8881,10 +9187,10 @@ function Card(props) {
   );
 }
 function NameField({ initial, label, onDone }) {
-  const [text, setText] = useState11(initial);
-  const field = useRef9(null);
-  const done = useRef9(false);
-  useEffect10(() => {
+  const [text, setText] = useState13(initial);
+  const field = useRef12(null);
+  const done = useRef12(false);
+  useEffect13(() => {
     field.current?.focus();
     field.current?.select();
   }, []);
@@ -8893,7 +9199,7 @@ function NameField({ initial, label, onDone }) {
     done.current = true;
     onDone(name);
   };
-  return /* @__PURE__ */ jsx18(
+  return /* @__PURE__ */ jsx22(
     "input",
     {
       "aria-label": label,
@@ -8921,13 +9227,13 @@ function NameField({ initial, label, onDone }) {
 function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen }) {
   const t = useT();
   const current = palette?.current ?? null;
-  const [editing, setEditing] = useState11(null);
-  const [forgetting, setForgetting] = useState11(false);
-  const [dragging, setDragging] = useState11(null);
-  const [height, setHeight] = useState11(OPEN_HEIGHT);
-  const [order, setOrder] = useState11(null);
-  useEffect10(() => setOrder(null), [palette]);
-  const known = useRef9(null);
+  const [editing, setEditing] = useState13(null);
+  const [forgetting, setForgetting] = useState13(false);
+  const [dragging, setDragging] = useState13(null);
+  const [height, setHeight] = useState13(OPEN_HEIGHT);
+  const [order, setOrder] = useState13(null);
+  useEffect13(() => setOrder(null), [palette]);
+  const known = useRef12(null);
   const arrived = useMemo3(() => {
     const keys = new Set((current?.items ?? []).map((item) => item.key));
     const before = known.current;
@@ -8935,23 +9241,23 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     known.current = { id: current?.id ?? null, keys };
     return new Map(fresh2.map((key, order2) => [key, order2]));
   }, [current]);
-  const strip = useRef9(null);
-  useEffect10(() => {
+  const strip = useRef12(null);
+  useEffect13(() => {
     const element = strip.current;
     if (!element || arrived.size === 0) return;
     const smooth = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth });
   }, [arrived, open]);
-  const [now, setNow] = useState11(() => Date.now());
+  const [now, setNow] = useState13(() => Date.now());
   const shownFor = said?.failed ? 8e3 : 4e3;
-  useEffect10(() => {
+  useEffect13(() => {
     if (!said) return;
     setNow(Date.now());
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, said.at + shownFor - Date.now()));
     return () => clearTimeout(timer);
   }, [said, shownFor]);
   const saying = said && now - said.at < shownFor ? said : null;
-  const grip = useRef9(null);
+  const grip = useRef12(null);
   const gripDown = (event) => {
     if (!open || event.button !== 0) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -8996,9 +9302,9 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     playing: playing !== null && playing === playableId(item),
     use: use?.(item)
   });
-  const header = /* @__PURE__ */ jsxs18("div", { style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
-    /* @__PURE__ */ jsx18("span", { style: { ...S.heading, fontSize: 11, color: T.secondary }, children: t("dock.title") }),
-    editing ? /* @__PURE__ */ jsx18(
+  const header = /* @__PURE__ */ jsxs20("div", { style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
+    /* @__PURE__ */ jsx22("span", { style: { ...S.heading, fontSize: 11, color: T.secondary }, children: t("dock.title") }),
+    editing ? /* @__PURE__ */ jsx22(
       NameField,
       {
         initial: editing === "rename" ? current?.name ?? "" : "",
@@ -9010,8 +9316,8 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           if (name && action === "new") void run({ action: "new", name });
         }
       }
-    ) : /* @__PURE__ */ jsxs18(Fragment8, { children: [
-      palette && palette.palettes.length > 0 && /* @__PURE__ */ jsxs18(
+    ) : /* @__PURE__ */ jsxs20(Fragment8, { children: [
+      palette && palette.palettes.length > 0 && /* @__PURE__ */ jsxs20(
         "select",
         {
           "aria-label": t("dock.switch"),
@@ -9024,26 +9330,26 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           style: { font: "inherit", fontSize: 12, fontWeight: 600, maxWidth: "14rem", padding: "0 4px", borderRadius: 4, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
           value: current?.id ?? "",
           children: [
-            !current && /* @__PURE__ */ jsx18("option", { value: "", children: t("dock.choose") }),
-            palette.palettes.map((entry) => /* @__PURE__ */ jsx18("option", { value: entry.id, children: `${clean(entry.name, 40)} (${num(entry.items, 0)})` }, entry.id)),
-            /* @__PURE__ */ jsx18("option", { value: "\0new", children: t("dock.newPalette") })
+            !current && /* @__PURE__ */ jsx22("option", { value: "", children: t("dock.choose") }),
+            palette.palettes.map((entry) => /* @__PURE__ */ jsx22("option", { value: entry.id, children: `${clean(entry.name, 40)} (${num(entry.items, 0)})` }, entry.id)),
+            /* @__PURE__ */ jsx22("option", { value: "\0new", children: t("dock.newPalette") })
           ]
         }
       ),
-      (!palette || palette.palettes.length === 0) && /* @__PURE__ */ jsx18("span", { style: S.faint, children: t("dock.none") }),
-      current && /* @__PURE__ */ jsx18(TextButton, { onClick: () => setEditing("rename"), title: t("dock.renameTitle"), children: t("dock.rename") }),
-      palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx18(TextButton, { onClick: () => setEditing("new"), title: t("dock.newName"), children: t("dock.newPalette") })
+      (!palette || palette.palettes.length === 0) && /* @__PURE__ */ jsx22("span", { style: S.faint, children: t("dock.none") }),
+      current && /* @__PURE__ */ jsx22(TextButton, { onClick: () => setEditing("rename"), title: t("dock.renameTitle"), children: t("dock.rename") }),
+      palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx22(TextButton, { onClick: () => setEditing("new"), title: t("dock.newName"), children: t("dock.newPalette") })
     ] }),
-    current && /* @__PURE__ */ jsxs18("span", { role: "group", "aria-label": t("dock.mode"), style: { ...S.row, gap: 0 }, children: [
-      /* @__PURE__ */ jsx18(TextButton, { onClick: () => current.reach !== 0 && void run({ action: "reach", reach: 0 }), pressed: current.reach === 0, title: t("dock.strictTitle"), children: t("dock.strict") }),
-      /* @__PURE__ */ jsx18(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
+    current && /* @__PURE__ */ jsxs20("span", { role: "group", "aria-label": t("dock.mode"), style: { ...S.row, gap: 0 }, children: [
+      /* @__PURE__ */ jsx22(TextButton, { onClick: () => current.reach !== 0 && void run({ action: "reach", reach: 0 }), pressed: current.reach === 0, title: t("dock.strictTitle"), children: t("dock.strict") }),
+      /* @__PURE__ */ jsx22(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
     ] }),
-    current && current.excluded > 0 && /* @__PURE__ */ jsx18("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
-    /* @__PURE__ */ jsx18("span", { style: { flex: 1 } }),
-    current && current.items.length > 1 && make && /* @__PURE__ */ jsx18(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
+    current && current.excluded > 0 && /* @__PURE__ */ jsx22("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
+    /* @__PURE__ */ jsx22("span", { style: { flex: 1 } }),
+    current && current.items.length > 1 && make && /* @__PURE__ */ jsx22(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
     current && current.items.length > 0 && kit?.(current),
-    current && !forgetting && /* @__PURE__ */ jsx18(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
-    current && items.length > 0 && /* @__PURE__ */ jsxs18(
+    current && !forgetting && /* @__PURE__ */ jsx22(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
+    current && items.length > 0 && /* @__PURE__ */ jsxs20(
       "button",
       {
         "aria-expanded": open,
@@ -9067,12 +9373,12 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
         },
         children: [
           open ? t("dock.fold") : t("dock.showAll", items.length),
-          /* @__PURE__ */ jsx18("span", { "aria-hidden": true, style: { display: "inline-block", transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms" }, children: "▴" })
+          /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { display: "inline-block", transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms" }, children: "▴" })
         ]
       }
     )
   ] });
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs20(
     "section",
     {
       "aria-label": t("dock.title"),
@@ -9091,7 +9397,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
         transition: grip.current ? "none" : "height 260ms cubic-bezier(.2,.8,.2,1)"
       },
       children: [
-        /* @__PURE__ */ jsx18(
+        /* @__PURE__ */ jsx22(
           "button",
           {
             "aria-expanded": open,
@@ -9108,13 +9414,13 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
             title: open ? t("dock.gripTitle") : t("dock.expand"),
             type: "button",
             style: { alignSelf: "stretch", height: 12, padding: 0, border: "none", background: "transparent", cursor: open ? "ns-resize" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flex: "none" },
-            children: /* @__PURE__ */ jsx18("span", { "aria-hidden": true, style: { width: 36, height: 4, borderRadius: 2, background: T.border, transition: "background-color 140ms" } })
+            children: /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { width: 36, height: 4, borderRadius: 2, background: T.border, transition: "background-color 140ms" } })
           }
         ),
         header,
-        current && forgetting && /* @__PURE__ */ jsxs18("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
-          /* @__PURE__ */ jsx18("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
-          /* @__PURE__ */ jsx18(
+        current && forgetting && /* @__PURE__ */ jsxs20("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
+          /* @__PURE__ */ jsx22("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
+          /* @__PURE__ */ jsx22(
             TextButton,
             {
               onClick: () => {
@@ -9125,39 +9431,39 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
               children: t("dock.forgetYes")
             }
           ),
-          /* @__PURE__ */ jsx18(TextButton, { onClick: () => setForgetting(false), children: t("dock.keep") })
+          /* @__PURE__ */ jsx22(TextButton, { onClick: () => setForgetting(false), children: t("dock.keep") })
         ] }),
-        current && items.length > 0 && open && /* @__PURE__ */ jsxs18("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, alignContent: "start", padding: "2px 1px" }, children: [
-          items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx18(Card, { ...itemProps(item, index) }, item.key)),
-          items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx18("span", { style: { ...S.faint, alignSelf: "center" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
+        current && items.length > 0 && open && /* @__PURE__ */ jsxs20("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, alignContent: "start", padding: "2px 1px" }, children: [
+          items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx22(Card, { ...itemProps(item, index) }, item.key)),
+          items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx22("span", { style: { ...S.faint, alignSelf: "center" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
         ] }),
-        current && items.length > 0 && !open && /* @__PURE__ */ jsxs18("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "nowrap", gap: 5, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-          items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx18(Chip2, { ...itemProps(item, index) }, item.key)),
-          items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx18("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
+        current && items.length > 0 && !open && /* @__PURE__ */ jsxs20("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "nowrap", gap: 5, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
+          items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx22(Chip2, { ...itemProps(item, index) }, item.key)),
+          items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx22("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
         ] }),
-        (!current || items.length === 0) && /* @__PURE__ */ jsxs18("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
-          /* @__PURE__ */ jsx18(Icon, { name: "plus", size: 12 }),
+        (!current || items.length === 0) && /* @__PURE__ */ jsxs20("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
+          /* @__PURE__ */ jsx22(Icon, { name: "plus", size: 12 }),
           t("dock.empty")
         ] }),
-        /* @__PURE__ */ jsx18("span", { "aria-live": "polite", style: saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" })
+        /* @__PURE__ */ jsx22("span", { "aria-live": "polite", style: saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" })
       ]
     }
   );
 }
 
 // src/shared/paletteMap.ts
-import { useEffect as useEffect11, useMemo as useMemo4, useState as useState12 } from "react";
+import { useEffect as useEffect14, useMemo as useMemo4, useState as useState14 } from "react";
 function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const revision = state.map?.revision ?? null;
-  const [picks, setPicks] = useState12({ revision, ids: /* @__PURE__ */ new Set() });
+  const [picks, setPicks] = useState14({ revision, ids: /* @__PURE__ */ new Set() });
   const picked = picks.revision === revision ? picks.ids : /* @__PURE__ */ new Set();
-  useEffect11(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
+  useEffect14(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
   const marked = useMemo4(() => marksOf(state.palette, revision), [state.palette, revision]);
-  const [flying, setFlying] = useState12(null);
-  const [making, setMaking] = useState12(null);
+  const [flying, setFlying] = useState14(null);
+  const [making, setMaking] = useState14(null);
   const kept3 = useMemo4(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
   const groupOf = useMemo4(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
-  useEffect11(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
+  useEffect14(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
   const open = (sources) => {
     setMaking(sources);
     void store.readDesignsOnce();
@@ -9212,7 +9518,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment9, jsx as jsx19, jsxs as jsxs19 } from "react/jsx-runtime";
+import { Fragment as Fragment9, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
 var HOVER_PLAY = "mapHover";
 var TILES = "mapTiles";
 var PALETTE_OPEN = "paletteOpen";
@@ -9222,9 +9528,9 @@ var RUNTIME_MISSING = { needs_runtime: true, outdated_runtime: true, damaged_run
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
-  const first = useRef10(null);
-  useEffect12(() => first.current?.focus(), []);
-  return /* @__PURE__ */ jsx19(
+  const first = useRef13(null);
+  useEffect15(() => first.current?.focus(), []);
+  return /* @__PURE__ */ jsx23(
     "div",
     {
       "aria-label": t("map.pads"),
@@ -9237,7 +9543,7 @@ function PadPicker({ daw, onPick, onClose }) {
       style: { flexBasis: "100%", display: "grid", gridTemplateColumns: "repeat(4, 2.8rem)", justifyContent: "end", gap: 4, paddingTop: 6 },
       children: PAD_ROWS.flat().map((note) => {
         const name = daw === "ableton" ? liveNote(note) : String(note);
-        return /* @__PURE__ */ jsx19(
+        return /* @__PURE__ */ jsx23(
           "button",
           {
             "aria-label": t("map.pad", name, note),
@@ -9261,11 +9567,11 @@ function MapWorkspace({ ctx, store, audition }) {
   useWant(store, "palette");
   const state = useKumi(store);
   const playing = usePlaying(audition);
-  const [selected, setSelected] = useState13(null);
-  const [padsFor, setPadsFor] = useState13(null);
-  const [hover, setHover] = useState13(() => ctx.storage.get(HOVER_PLAY, true) !== false);
-  const [tiles, setTiles] = useState13(() => ctx.storage.get(TILES, false) === true);
-  const [layout, setLayout] = useState13(() => ctx.storage.get(LAYOUT, "") ?? "");
+  const [selected, setSelected] = useState15(null);
+  const [padsFor, setPadsFor] = useState15(null);
+  const [hover, setHover] = useState15(() => ctx.storage.get(HOVER_PLAY, true) !== false);
+  const [tiles, setTiles] = useState15(() => ctx.storage.get(TILES, false) === true);
+  const [layout, setLayout] = useState15(() => ctx.storage.get(LAYOUT, "") ?? "");
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
@@ -9273,11 +9579,11 @@ function MapWorkspace({ ctx, store, audition }) {
   });
   const playMade = (id) => void audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   const grow = useGrow((request) => store.design(request), (result) => playMade(result.artifact_id), state.map?.revision ?? null);
-  const dock = useRef10(null);
-  const [paletteOpen, setPaletteOpen] = useState13(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
-  const area = useRef10(null);
-  const [areaWidth, setAreaWidth] = useState13(0);
-  useEffect12(() => {
+  const dock = useRef13(null);
+  const [paletteOpen, setPaletteOpen] = useState15(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
+  const area = useRef13(null);
+  const [areaWidth, setAreaWidth] = useState15(0);
+  useEffect15(() => {
     const element = area.current;
     if (!element) return;
     const observer = new ResizeObserver((entries) => setAreaWidth(entries[0]?.contentRect.width ?? 0));
@@ -9289,16 +9595,16 @@ function MapWorkspace({ ctx, store, audition }) {
   const map = state.map;
   const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ""] ? nextSteps(state, t) : [];
   const scanning = Object.values(state.jobs).find((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0));
-  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : scanning ? /* @__PURE__ */ jsxs19(Fragment9, { children: [
+  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : scanning ? /* @__PURE__ */ jsxs21(Fragment9, { children: [
     t("map.scanningNow"),
-    jobWords(scanning, t).detail && /* @__PURE__ */ jsx19("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
-  ] }) : /* @__PURE__ */ jsxs19(Fragment9, { children: [
+    jobWords(scanning, t).detail && /* @__PURE__ */ jsx23("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
+  ] }) : /* @__PURE__ */ jsxs21(Fragment9, { children: [
     setupSteps.length > 0 ? t("map.setupFirst") : t("map.empty"),
-    /* @__PURE__ */ jsx19("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), strong: true, title: t("map.scanTitle"), children: t("map.scan") }) })
+    /* @__PURE__ */ jsx23("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), strong: true, title: t("map.scanTitle"), children: t("map.scan") }) })
   ] });
-  return /* @__PURE__ */ jsxs19("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
-    /* @__PURE__ */ jsxs19("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
-      /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsxs21("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
+    /* @__PURE__ */ jsxs21("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
+      /* @__PURE__ */ jsx23(
         MapCanvas,
         {
           audio: (id) => audition.url(id),
@@ -9307,12 +9613,12 @@ function MapWorkspace({ ctx, store, audition }) {
           actions: (id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision);
             const near = nearRequest([{ id, name: sound.name }], map?.revision);
-            return /* @__PURE__ */ jsxs19(Fragment9, { children: [
-              /* @__PURE__ */ jsx19(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
-              near && /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
-              request && /* @__PURE__ */ jsx19(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
-              request && /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
-              request && padsFor === id && /* @__PURE__ */ jsx19(
+            return /* @__PURE__ */ jsxs21(Fragment9, { children: [
+              /* @__PURE__ */ jsx23(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
+              near && /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
+              request && /* @__PURE__ */ jsx23(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
+              request && /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
+              request && padsFor === id && /* @__PURE__ */ jsx23(
                 PadPicker,
                 {
                   daw: state.status?.daw,
@@ -9328,9 +9634,9 @@ function MapWorkspace({ ctx, store, audition }) {
           },
           empty,
           found: state.found,
-          hiddenActions: /* @__PURE__ */ jsxs19(Fragment9, { children: [
-            /* @__PURE__ */ jsx19(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
-            /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
+          hiddenActions: /* @__PURE__ */ jsxs21(Fragment9, { children: [
+            /* @__PURE__ */ jsx23(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+            /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
           ] }),
           leaving: state.leaving,
           map,
@@ -9346,10 +9652,10 @@ function MapWorkspace({ ctx, store, audition }) {
           growActions: (result) => {
             const request = useRequest(result);
             const kept3 = palette.kept.has(result.artifact_id);
-            return /* @__PURE__ */ jsxs19(Fragment9, { children: [
-              /* @__PURE__ */ jsx19(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
-              request && /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
-              /* @__PURE__ */ jsx19(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
+            return /* @__PURE__ */ jsxs21(Fragment9, { children: [
+              /* @__PURE__ */ jsx23(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
+              request && /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
+              /* @__PURE__ */ jsx23(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
             ] });
           },
           onSelect: (id) => {
@@ -9359,14 +9665,14 @@ function MapWorkspace({ ctx, store, audition }) {
           picked: palette.picked,
           pickedActions: (ids) => {
             const near = ids.length > 1 ? nearRequest(ids.map((id) => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null;
-            return /* @__PURE__ */ jsxs19(Fragment9, { children: [
-              /* @__PURE__ */ jsx19(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
-              ids.length > 1 && /* @__PURE__ */ jsx19(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
+            return /* @__PURE__ */ jsxs21(Fragment9, { children: [
+              /* @__PURE__ */ jsx23(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
+              ids.length > 1 && /* @__PURE__ */ jsx23(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
               ids.length === 2 && (() => {
                 const [from, to] = ids.map((id) => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null));
                 return from && to ? (
                   // The vine takes over from the picks: their actions would float over its card.
-                  /* @__PURE__ */ jsx19(
+                  /* @__PURE__ */ jsx23(
                     TextButton,
                     {
                       onClick: () => {
@@ -9379,7 +9685,7 @@ function MapWorkspace({ ctx, store, audition }) {
                   )
                 ) : null;
               })(),
-              near && /* @__PURE__ */ jsx19(
+              near && /* @__PURE__ */ jsx23(
                 TextButton,
                 {
                   onClick: () => void ask(ctx, near, { send: false, session }),
@@ -9387,7 +9693,7 @@ function MapWorkspace({ ctx, store, audition }) {
                   children: t("map.moreLikeThese", Math.min(ids.length, MOST_NEAR))
                 }
               ),
-              /* @__PURE__ */ jsx19(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
+              /* @__PURE__ */ jsx23(TextButton, { onClick: palette.clearPicks, title: t("dock.clearPicksTitle"), children: t("dock.clearPicks", ids.length) })
             ] });
           },
           playing,
@@ -9403,7 +9709,7 @@ function MapWorkspace({ ctx, store, audition }) {
             ctx.storage.set(LAYOUT, id);
             setLayout(id);
           },
-          tools: /* @__PURE__ */ jsx19(
+          tools: /* @__PURE__ */ jsx23(
             ToolButton,
             {
               icon: "hover",
@@ -9418,7 +9724,7 @@ function MapWorkspace({ ctx, store, audition }) {
           )
         }
       ),
-      palette.making && /* @__PURE__ */ jsx19(
+      palette.making && /* @__PURE__ */ jsx23(
         MakePanel,
         {
           colorOf: palette.colorOf,
@@ -9437,17 +9743,17 @@ function MapWorkspace({ ctx, store, audition }) {
           tempo: state.focus?.transport?.tempo,
           use: (result) => {
             const request = useRequest(result);
-            return request ? /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
+            return request ? /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
           }
         }
       )
     ] }),
-    (map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx19(
+    (map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx23(
       PaletteDock,
       {
         audio: (id) => audition.url(id),
         groups: map?.groups,
-        kit: (current) => /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
+        kit: (current) => /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
         landing: dock,
         make: palette.makeFromPalette,
         onDo: (action) => store.paletteDo(action),
@@ -9463,7 +9769,7 @@ function MapWorkspace({ ctx, store, audition }) {
         said: state.paletteSaid,
         use: (item) => {
           const request = itemReference(item, state.palette?.map_revision ?? null);
-          return request ? /* @__PURE__ */ jsx19(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
+          return request ? /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
         }
       }
     )
@@ -9471,14 +9777,14 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment10, jsx as jsx20, jsxs as jsxs20 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx24, jsxs as jsxs22 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
-  const note = (text) => /* @__PURE__ */ jsx20("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx20("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs20(Fragment10, { children: [
-    /* @__PURE__ */ jsx20("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
-    /* @__PURE__ */ jsx20(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
+  const note = (text) => /* @__PURE__ */ jsx24("span", { style: S.muted, children: text });
+  return /* @__PURE__ */ jsx24("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs22(Fragment10, { children: [
+    /* @__PURE__ */ jsx24("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
+    /* @__PURE__ */ jsx24(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
 }
 
@@ -9504,16 +9810,16 @@ function petLine(before, after, t) {
 
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
-import { useState as useState14 } from "react";
-import { Fragment as Fragment11, jsx as jsx21, jsxs as jsxs21 } from "react/jsx-runtime";
+import { useState as useState16 } from "react";
+import { Fragment as Fragment11, jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
 var HEADING = { ...S.heading, display: "block", margin: "0 0 4px", fontWeight: "inherit" };
 function Line({ label, children }) {
-  return /* @__PURE__ */ jsxs21("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
-    /* @__PURE__ */ jsx21("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx21("span", { style: { ...S.text, minWidth: 0 }, children })
+  return /* @__PURE__ */ jsxs23("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
+    /* @__PURE__ */ jsx25("span", { style: S.muted, children: label }),
+    /* @__PURE__ */ jsx25("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -9531,8 +9837,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const t = useT();
   useWant(store, "setup");
   const state = useKumi(store);
-  const [openOnFind, setOpenOnFind] = useState14(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
-  const [petLines, setPetLines] = useState14(() => ctx.storage.get(PET_LINES, false));
+  const [openOnFind, setOpenOnFind] = useState16(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
+  const [petLines, setPetLines] = useState16(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
   const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
@@ -9543,60 +9849,60 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const named = dawChosen(state) || partWorks || componentState === "installed" || Boolean(state.status?.connected);
   const daw = named ? state.status?.daw ?? setup?.daw : null;
   const next = setup?.message && !partWorks && (named || setupState !== "needs_daw_component") ? setup.message : null;
-  return /* @__PURE__ */ jsxs21("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
-    /* @__PURE__ */ jsxs21("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-      /* @__PURE__ */ jsx21("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsx21("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
+  return /* @__PURE__ */ jsxs23("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
+    /* @__PURE__ */ jsxs23("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+      /* @__PURE__ */ jsx25("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
+      /* @__PURE__ */ jsx25("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx21("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs21(Fragment11, { children: [
-      /* @__PURE__ */ jsxs21("div", { children: [
-        /* @__PURE__ */ jsx21("h3", { style: HEADING, children: t("settings.setup") }),
-        /* @__PURE__ */ jsx21(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        next && /* @__PURE__ */ jsx21(Line, { label: t("settings.next"), children: clean(next, 300) }),
-        runtime && /* @__PURE__ */ jsxs21(Line, { label: t("settings.runtime"), children: [
+    state.available === false ? /* @__PURE__ */ jsx25("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs23(Fragment11, { children: [
+      /* @__PURE__ */ jsxs23("div", { children: [
+        /* @__PURE__ */ jsx25("h3", { style: HEADING, children: t("settings.setup") }),
+        /* @__PURE__ */ jsx25(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        next && /* @__PURE__ */ jsx25(Line, { label: t("settings.next"), children: clean(next, 300) }),
+        runtime && /* @__PURE__ */ jsxs23(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
-          setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs21("span", { style: S.faint, children: [
+          setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs23("span", { style: S.faint, children: [
             " · ",
             t("settings.needs", clean(setup.pinned_version, 20))
           ] }),
-          setup?.target && /* @__PURE__ */ jsxs21("span", { style: S.faint, children: [
+          setup?.target && /* @__PURE__ */ jsxs23("span", { style: S.faint, children: [
             " · ",
             PLATFORMS.has(setup.target) ? t(`settings.platforms.${setup.target}`) : clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs21(Line, { label: t("settings.download"), children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs23(Line, { label: t("settings.download"), children: [
           megabytes(setup?.download_bytes),
-          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs21("span", { style: S.faint, children: [
+          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs23("span", { style: S.faint, children: [
             " ",
             t("settings.unpacked", megabytes(setup?.unpacked_bytes))
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs21(Line, { label: t("settings.part", dawName(daw, t)), children: [
+        component && /* @__PURE__ */ jsxs23(Line, { label: t("settings.part", dawName(daw, t)), children: [
           (() => {
             const word = partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ");
             return component.name ? t("settings.componentLine", clean(component.name, 40), word) : word;
           })(),
-          component.path && /* @__PURE__ */ jsx21("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          component.path && /* @__PURE__ */ jsx25("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs21(Line, { label: t("settings.standalone"), children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs23(Line, { label: t("settings.standalone"), children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsxs21("span", { style: S.faint, children: [
+          /* @__PURE__ */ jsxs23("span", { style: S.faint, children: [
             " · ",
             setup.existing_kumi.adopted ? t("settings.adopted") : t("settings.leftAsIs")
           ] })
         ] }),
-        setup?.compressed_audio?.message && /* @__PURE__ */ jsx21(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx21("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx25(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx25("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
-      /* @__PURE__ */ jsxs21("div", { children: [
-        /* @__PURE__ */ jsx21("h3", { style: HEADING, children: t("settings.connection") }),
-        /* @__PURE__ */ jsx21(Line, { label: t("settings.now"), children: (() => {
+      /* @__PURE__ */ jsxs23("div", { children: [
+        /* @__PURE__ */ jsx25("h3", { style: HEADING, children: t("settings.connection") }),
+        /* @__PURE__ */ jsx25(Line, { label: t("settings.now"), children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-          return /* @__PURE__ */ jsx21(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+          return /* @__PURE__ */ jsx25(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx21(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx25(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
       ] }),
-      /* @__PURE__ */ jsxs21("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        steps.map((step2) => /* @__PURE__ */ jsx21(
+      /* @__PURE__ */ jsxs23("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+        steps.map((step2) => /* @__PURE__ */ jsx25(
           TextButton,
           {
             onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
@@ -9605,14 +9911,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           },
           step2.request
         )),
-        /* @__PURE__ */ jsx21(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
-        /* @__PURE__ */ jsx21(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
+        /* @__PURE__ */ jsx25(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
+        /* @__PURE__ */ jsx25(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs21("div", { children: [
-      /* @__PURE__ */ jsx21("h3", { style: HEADING, children: t("settings.thisWindow") }),
-      /* @__PURE__ */ jsxs21("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx21(
+    /* @__PURE__ */ jsxs23("div", { children: [
+      /* @__PURE__ */ jsx25("h3", { style: HEADING, children: t("settings.thisWindow") }),
+      /* @__PURE__ */ jsxs23("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx25(
           "input",
           {
             checked: openOnFind,
@@ -9624,10 +9930,10 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx21("span", { style: S.text, children: t("settings.openOnFind") })
+        /* @__PURE__ */ jsx25("span", { style: S.text, children: t("settings.openOnFind") })
       ] }),
-      ctx.pet && /* @__PURE__ */ jsxs21("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx21(
+      ctx.pet && /* @__PURE__ */ jsxs23("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx25(
           "input",
           {
             checked: petLines,
@@ -9639,14 +9945,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx21("span", { style: S.text, children: t("settings.petLines") })
+        /* @__PURE__ */ jsx25("span", { style: S.text, children: t("settings.petLines") })
       ] })
     ] })
   ] });
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx22, jsxs as jsxs22 } from "react/jsx-runtime";
+import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
 var MEASUREMENTS_WORKSPACE = "kumi-measurements";
@@ -9656,8 +9962,8 @@ var JOB_POLL_MS = 2e3;
 var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
-  return /* @__PURE__ */ jsxs22(I18n.Provider, { value: t, children: [
-    /* @__PURE__ */ jsx22(FocusStyle, {}),
+  return /* @__PURE__ */ jsxs24(I18n.Provider, { value: t, children: [
+    /* @__PURE__ */ jsx26(FocusStyle, {}),
     children
   ] });
 }
@@ -9674,7 +9980,7 @@ var plugin = {
     let mapPane = null;
     let closeMeasurements = null;
     let measurementsPane = null;
-    const mapView = () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(MapWorkspace, { audition, ctx, store }) });
+    const mapView = () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
@@ -9697,7 +10003,7 @@ var plugin = {
       });
     };
     const openMeasurements = () => {
-      const render = () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(MeasurementsWorkspace, { audition, store }) });
+      const render = () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(MeasurementsWorkspace, { audition, store }) });
       const title = wordsOf(ctx)("measurements.tab");
       if (typeof host6.openWorkspace === "function") {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
@@ -9842,13 +10148,13 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(KumiPane, { ctx, onOpenMap: openMap, store }) })
+        render: () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(KumiPane, { ctx, onOpenMap: openMap, store }) })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
+        render: () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
       }
     ];
     if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
@@ -9857,7 +10163,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(ListenCard, { audition, media: props, store }) })
+          render: (props) => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(ListenCard, { audition, media: props, store }) })
         }
       });
       contributions.push({
@@ -9865,7 +10171,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_job"],
-          render: (props) => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(GenerateCard, { audition, ctx, media: props, store }) })
+          render: (props) => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });
     }
@@ -9873,7 +10179,7 @@ var plugin = {
       contributions.push({
         id: "focus-hint",
         area: sdk.COMPOSER_AREAS.underside,
-        render: () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(FocusHint, { store }) })
+        render: () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(FocusHint, { store }) })
       });
     }
     ctx.registerMany(contributions);
@@ -9918,7 +10224,7 @@ var plugin = {
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx22(WithT, { children: /* @__PURE__ */ jsx22(SettingsPage, { ctx, onOpenMap: openMap, store }) })
+      render: () => /* @__PURE__ */ jsx26(WithT, { children: /* @__PURE__ */ jsx26(SettingsPage, { ctx, onOpenMap: openMap, store }) })
     });
   }
 };

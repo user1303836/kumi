@@ -6,6 +6,7 @@ import { load } from './load.mjs'
 
 const nebula = await load('src/shared/atlas/nebula.ts')
 const names = await load('src/shared/atlas/names.ts')
+const pulse = await load('src/shared/atlas/pulse.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -90,4 +91,22 @@ test('sounds carry their names only where there is room: clear of each other, ne
   // The map lists its sounds a family at a time: the first fifty offered a name come from all along that order.
   const offered = Array.from({ length: 600 }, (_, index) => index).sort((a, b) => names.nameRank(a) - names.nameRank(b)).slice(0, 50)
   for (const third of [0, 1, 2]) assert.ok(offered.filter(index => Math.floor(index / 200) === third).length >= 8, `third ${third}`)
+})
+
+test("the pulse follows the playing sound's level: up at once with a hit, settling after it, and plain before the waveform arrives", () => {
+  // A hit, then a tail: loud at the start, quiet by the middle, silent at the end.
+  const levels = [1, 0.6, 0.3, 0.1, 0.05, 0, 0, 0]
+  assert.equal(pulse.levelAt(levels, 0), 1)
+  assert.ok(Math.abs(pulse.levelAt(levels, 1 / 16) - 0.8) < 1e-9, 'between two bars, between their levels')
+  assert.equal(pulse.levelAt(levels, 1), 0)
+  assert.equal(pulse.levelAt(null, 0.5), 0, 'no waveform yet: no level (the plain pulse)')
+  assert.equal(pulse.levelAt(levels, 1.2), 0, 'past the end')
+  // The level shown jumps up to a hit and falls back over about a fifth of a second, never below the sound's own.
+  assert.equal(pulse.follow(0.2, 0.9, 16), 0.9)
+  assert.ok(pulse.follow(0.9, 0.1, 16) > 0.8)
+  assert.equal(pulse.follow(0.9, 0.1, 400), 0.1)
+  // How far through the sound a play is: null once it's over, or for a sound of no known length.
+  assert.equal(pulse.progressOf(250, 0.5), 0.5)
+  assert.equal(pulse.progressOf(600, 0.5), null)
+  assert.equal(pulse.progressOf(100, 0), null)
 })

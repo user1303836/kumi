@@ -12,7 +12,9 @@ import { CANVAS, T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { AtlasOverlay } from './atlas/AtlasOverlay.tsx'
 import { glowOf } from './atlas/glow.ts'
+import { HoverPill } from './atlas/HoverPill.tsx'
 import { drawNames, drawWords, type Word } from './atlas/labels.ts'
 import { nameRank, NAMES_ON_SCREEN, regionAlpha, regionsOf } from './atlas/names.ts'
 import { haloOf, nebulaAlpha } from './atlas/nebula.ts'
@@ -85,13 +87,13 @@ const MATCHES_LISTED = 6
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
 // The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
-// middle out, dots morph into tiles and back, gathered sounds fly into the dock, and a playing sound ripples.
+// middle out, dots morph into tiles and back, and gathered sounds fly into the dock. (A playing sound's pulse is the
+// overlay's, on a canvas of its own: `atlas/overlay.ts`.)
 const INTRO_MS = 900
 const MORPH_MS = 760
 const FLY_MS = 620
 const FLY_STAGGER = 14
 const FLY_MOST = 48
-const RIPPLE_MS = 1100
 /** How far apart, in a morph's span, the middle's points and the edge's move: the middle leads. */
 const STAGGER = 0.55
 /** How long the sounds take to move to a new layout. */
@@ -261,8 +263,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const leavingCount = useMemo(() => mask.reduce((count, keep) => count + (keep === 2 ? 1 : 0), 0), [mask])
   // Motion: when each leaving sound started fading, when the map arrived (its points pop in from the middle out), the
   // dots-to-tiles morph, and the sounds flying into the palette. One clock moves once a frame while any of them runs,
-  // or while a sound plays (its ripple), and not otherwise: a map that sits still draws nothing. A system asking for
-  // less motion gets none of it.
+  // and not otherwise: a map that sits still draws nothing, and a sound playing redraws only the overlay. A system
+  // asking for less motion gets none of it.
   const still = useMemo(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, [])
   const leftAt = useRef(new Map<string, number>())
   const introAt = useRef(-Infinity)
@@ -292,12 +294,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   useEffect(() => {
     if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST)
   }, [flying]) // eslint-disable-line react-hooks/exhaustive-deps
-  const playingHere = playing !== null && indexOf.has(playing) && !still
   useEffect(() => {
-    if (performance.now() >= until.current && !playingHere) return
+    if (performance.now() >= until.current) return
     const frame = requestAnimationFrame(setClock)
     return () => cancelAnimationFrame(frame)
-  }, [clock, playingHere])
+  }, [clock])
   // The layout: similarity (''), or one of the map's arrangements that this plug-in can name. The parent keeps the
   // choice when it listens; a choice the map lacks is similarity.
   const [ownArrangement, setOwnArrangement] = useState('')
@@ -732,24 +733,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.lineWidth = 1.25
       context.stroke(ring)
     }
-    // A playing sound ripples: two rings spread from it and fade, half a beat apart.
-    if (playing) {
-      ring(playing, colors.accent, 6, 2)
-      const index = indexOf.get(playing)
-      if (index !== undefined && !still) {
-        const [x, y, blend] = placeOf(index)
-        for (const offset of [0, 0.5]) {
-          const phase = ((now / RIPPLE_MS + offset) % 1 + 1) % 1
-          context.globalAlpha = 0.65 * (1 - phase) ** 1.5
-          context.strokeStyle = groupColor.get(points[index].group) ?? colors.accent
-          context.lineWidth = 2 - phase
-          context.beginPath()
-          context.arc(x, y, reach(blend) + 4 + phase * 26, 0, Math.PI * 2)
-          context.stroke()
-        }
-        context.globalAlpha = 1
-      }
-    }
     if (selected) ring(selected, colors.strong, 4, 2)
     // Sounds just gathered fly down into the palette under the map, shrinking, one after another.
     if (flying && !still) {
@@ -937,6 +920,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const chosenColor = chosenIndex === undefined ? T.accent : (model.groups.find(group => group.key === model.points[chosenIndex].group)?.color ?? T.accent)
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
+  // The sound that plays, when it's one of this map's: the overlay pulses on it, wherever the map last drew it (its
+  // place moves with a pan, a zoom and a layout's move).
+  const playingIndex = playing === null ? undefined : indexOf.get(playing)
+  const playingGroup = playingIndex === undefined ? undefined : model.points[playingIndex].group
+  const playingSound =
+    playing === null || playingGroup === undefined
+      ? null
+      : { id: playing, color: model.groups.find(group => group.key === playingGroup)?.color ?? T.accent, glyph: glyphOf(playingGroup), duration: model.sounds[playing]?.duration ?? 0 }
+  const playingPlace = (): [number, number] | null => {
+    const [last, at] = [drawn.current, viewRef.current]
+    if (playingIndex === undefined || !last || !at || last.places.length < 2 * playingIndex + 2) return null
+    const unit = mapSize * at.scale
+    return [last.places[2 * playingIndex] * unit + at.dx, last.places[2 * playingIndex + 1] * unit + at.dy]
+  }
   const countWords =
     shown === model.points.length - leavingCount ? t('map.count', num(shown, 0)) : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))
   const hiddenCount = (map?.hidden ?? 0) + leavingCount
@@ -1140,6 +1137,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             touchAction: 'none'
           }}
         />
+        <AtlasOverlay audio={audio} height={size.height} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={playingPlace} playing={playingSound} still={still} width={size.width} />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
           // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
           <svg
@@ -1166,11 +1164,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           {said}
         </span>
         {hovered && hoveredSound && hover && (
-          <div
-            style={{ ...glass, borderRadius: 8, position: 'absolute', left: Math.min(hover.x + 14, Math.max(0, size.width - 230)), top: Math.max(0, hover.y - 38), maxWidth: 230, pointerEvents: 'none', padding: '4px 9px', fontSize: 11.5, color: T.text, ...S.ellipsis }}
-          >
-            {clean(hoveredSound.name, 48)} <span style={{ color: T.muted }}>· {clean(hoveredSound.class ?? '', 16)}</span>
-          </div>
+          <HoverPill
+            at={[hover.x, hover.y]}
+            audio={audio}
+            color={model.groups.find(group => group.key === hovered.group)?.color ?? T.accent}
+            glyph={glyphOf(hovered.group)}
+            id={hovered.id}
+            key={hovered.id}
+            playing={playing === hovered.id}
+            sound={hoveredSound}
+            within={[size.width - coverRight, size.height]}
+          />
         )}
         {grow && (grow.from || grow.to) && (
           <GrowLayer

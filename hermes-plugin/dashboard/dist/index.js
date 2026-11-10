@@ -4947,405 +4947,108 @@
     );
   }
 
-  // src/shared/atlas/color.ts
-  function rgbOf(color) {
-    const text = color.trim();
-    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-    if (hex) {
-      const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
-      const value = parseInt(digits, 16);
-      return [value >> 16, value >> 8 & 255, value & 255];
+  // src/shared/palette.ts
+  var MOST_GATHERED = 1e4;
+  var LOOSE = 5;
+  var NAME_MOST = 80;
+  function marksOf(palette, revision) {
+    const out = /* @__PURE__ */ new Set();
+    if (!palette?.current || !revision || palette.map_revision !== revision) return out;
+    for (const item of palette.current.items) if (item.sound_id) out.add(item.sound_id);
+    return out;
+  }
+  function playableId(item) {
+    return item.sound_id ?? item.artifact_id;
+  }
+  function moved(items, key, to) {
+    const from = items.findIndex((item) => item.key === key);
+    if (from < 0) return [...items];
+    const out = items.filter((item) => item.key !== key);
+    out.splice(Math.max(0, Math.min(out.length, to)), 0, items[from]);
+    return out;
+  }
+  function paletteName(text) {
+    const name = text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, NAME_MOST).trim();
+    return name || null;
+  }
+  function kitRequest(name) {
+    const said = quotable(name);
+    return said ? `Load the sounds in my palette “${said}” as a kit` : "Load the sounds in my palette as a kit";
+  }
+  function itemReference(item, revision) {
+    if (item.sound_id) return soundRequest(item.sound_id, item.name, revision);
+    return item.artifact_id ? artifactReference(item.artifact_id, item.name) : null;
+  }
+  function gatherIds(ids) {
+    const seen = /* @__PURE__ */ new Set();
+    for (const id of ids) if (plainId(id)) seen.add(id);
+    const all = [...seen];
+    return { ids: all.slice(0, MOST_GATHERED), dropped: Math.max(0, all.length - MOST_GATHERED) };
+  }
+  function peaksOf(samples, bins) {
+    const out = new Array(bins).fill(0);
+    if (samples.length === 0 || bins <= 0) return out;
+    let loudest = 0;
+    for (let bin = 0; bin < bins; bin++) {
+      const start = Math.floor(bin * samples.length / bins);
+      const end = Math.max(start + 1, Math.floor((bin + 1) * samples.length / bins));
+      let peak = 0;
+      for (let at = start; at < end && at < samples.length; at++) {
+        const value = Math.abs(samples[at]);
+        if (value > peak) peak = value;
+      }
+      out[bin] = peak;
+      if (peak > loudest) loudest = peak;
     }
-    const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
-    if (!rgb) return null;
-    const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-    return channels.every((channel) => channel <= 255) ? channels : null;
-  }
-  function rgba(color, alpha) {
-    return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-  }
-  function lighten(color, amount) {
-    const toward = (channel) => Math.round(channel + (255 - channel) * amount);
-    return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
-  }
-  function isDark(color) {
-    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+    return loudest > 0 ? out.map((peak) => peak / loudest) : out;
   }
 
-  // src/shared/atlas/nebula.ts
-  var NEBULA_SIDE = 128;
-  var NEBULA_PAD = 0.12;
-  var SPREAD = 2;
-  var SKIRT = 5;
-  var CORE = 0.55;
-  var ALONE = CORE / (2 * SPREAD + 1) ** 2;
-  var CROWD = 8;
-  var BRIGHTEST = 0.85;
-  function blur(from, into, side, radius, step2) {
-    const across = step2 === 1 ? side : 1;
-    const scale = 1 / (2 * radius + 1);
-    for (let line = 0; line < side; line++) {
-      const start = line * across;
-      let sum = 0;
-      for (let k = 0; k <= radius && k < side; k++) sum += from[start + k * step2];
-      for (let k = 0; k < side; k++) {
-        into[start + k * step2] = sum * scale;
-        const enters = k + radius + 1;
-        const leaves = k - radius;
-        if (enters < side) sum += from[start + enters * step2];
-        if (leaves >= 0) sum -= from[start + leaves * step2];
+  // src/shared/peaks.ts
+  var DECODE_MOST = 12 * 1024 * 1024;
+  var kept = /* @__PURE__ */ new Map();
+  var loading = /* @__PURE__ */ new Map();
+  var askers = /* @__PURE__ */ new Map();
+  var queue = Promise.resolve();
+  var SKIPPED = /* @__PURE__ */ Symbol("skipped");
+  function peaksFor(id, bars, audio, wanted = () => true) {
+    const key = `${bars}:${id}`;
+    const done = kept.get(key);
+    if (done !== void 0) return Promise.resolve(done);
+    const running = loading.get(key);
+    if (running) {
+      askers.get(key)?.push(wanted);
+      return running;
+    }
+    askers.set(key, [wanted]);
+    const run = async () => {
+      if (!(askers.get(key) ?? []).some((ask) => ask())) return SKIPPED;
+      const url = await audio(id);
+      const comma = url.indexOf(",");
+      if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
+      const binary = atob(url.slice(comma + 1));
+      const bytes = new Uint8Array(binary.length);
+      for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
+      const buffer = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
+      const mixed2 = new Float32Array(buffer.length);
+      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const data = buffer.getChannelData(channel);
+        for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
       }
-    }
-  }
-  function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
-    const cells = side * side;
-    const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
-    const [red, green, blue, weight] = sums;
-    const span = side / (1 + 2 * NEBULA_PAD);
-    const colors = /* @__PURE__ */ new Map();
-    for (let index = 0; index < points.length; index++) {
-      if (!keep(index)) continue;
-      const point = points[index];
-      let color = colors.get(point.group);
-      if (!color) {
-        color = colorOf2(point.group);
-        colors.set(point.group, color);
-      }
-      const fx = (point.x + NEBULA_PAD) * span - 0.5;
-      const fy = (point.y + NEBULA_PAD) * span - 0.5;
-      const x0 = Math.floor(fx);
-      const y0 = Math.floor(fy);
-      if (x0 < 0 || y0 < 0 || x0 + 1 >= side || y0 + 1 >= side) continue;
-      const right = fx - x0;
-      const down = fy - y0;
-      for (let corner = 0; corner < 4; corner++) {
-        const share = (corner & 1 ? right : 1 - right) * (corner & 2 ? down : 1 - down);
-        const cell = (y0 + (corner >> 1)) * side + x0 + (corner & 1);
-        red[cell] += color[0] * share;
-        green[cell] += color[1] * share;
-        blue[cell] += color[2] * share;
-        weight[cell] += share;
-      }
-    }
-    const spare = new Float32Array(cells);
-    const core = new Float32Array(cells);
-    for (const sum of sums) {
-      for (let pass = 0; pass < 2; pass++) {
-        blur(sum, spare, side, SPREAD, 1);
-        blur(spare, sum, side, SPREAD, side);
-      }
-      core.set(sum);
-      for (let pass = 0; pass < 2; pass++) {
-        blur(sum, spare, side, SKIRT, 1);
-        blur(spare, sum, side, SKIRT, side);
-      }
-      for (let cell = 0; cell < cells; cell++) sum[cell] = CORE * core[cell] + (1 - CORE) * sum[cell];
-    }
-    let peak = 0;
-    for (let cell = 0; cell < cells; cell++) if (weight[cell] > peak) peak = weight[cell];
-    const pixels = new Uint8ClampedArray(cells * 4);
-    if (peak <= 0) return pixels;
-    const gain = -Math.log(1 - BRIGHTEST) / Math.max(peak, ALONE * CROWD);
-    for (let cell = 0; cell < cells; cell++) {
-      const here = weight[cell];
-      if (here <= 1e-9) continue;
-      pixels[4 * cell] = red[cell] / here;
-      pixels[4 * cell + 1] = green[cell] / here;
-      pixels[4 * cell + 2] = blue[cell] / here;
-      pixels[4 * cell + 3] = 255 * (1 - Math.exp(-here * gain));
-    }
-    return pixels;
-  }
-  function nebulaAlpha(zoom) {
-    const alpha = 1 / Math.max(1, zoom) ** 1.35;
-    return alpha < 0.03 ? 0 : alpha;
-  }
-  function haloOf(radius, zoom, crowd, unit) {
-    const reach = radius * 3.3;
-    const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
-    return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
-  }
-
-  // src/shared/atlas/glow.ts
-  var GREY = [128, 128, 128];
-  var MOST_SPRITES = 240;
-  function picture(width, height) {
-    if (typeof OffscreenCanvas !== "function") return null;
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-    return context ? { canvas, context } : null;
-  }
-  var Glow = class {
-    current = null;
-    last = null;
-    sprites = /* @__PURE__ */ new Map();
-    crowds = /* @__PURE__ */ new WeakMap();
-    shapes = /* @__PURE__ */ new Map();
-    ground = "";
-    dark = true;
-    /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
-     *  counts as dark, as both hosts' first themes are). */
-    onDark(context, ground) {
-      if (ground === this.ground) return this.dark;
-      this.ground = ground;
-      const kept3 = context.fillStyle;
-      context.fillStyle = "#000";
-      context.fillStyle = ground;
-      const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
-      context.fillStyle = kept3;
-      this.dark = read ? isDark(read) : true;
-      this.shapes.clear();
-      return this.dark;
-    }
-    /** The colour a sound's shape is filled in: its family's, a little brighter on a dark ground so it stays crisp over
-     *  its own glow. */
-    shape(color) {
-      let shape = this.shapes.get(color);
-      if (shape === void 0) {
-        const channels = this.dark ? rgbOf(color) : null;
-        shape = channels ? lighten(channels, 0.2) : color;
-        this.shapes.set(color, shape);
-      }
-      return shape;
-    }
-    /** The nebula of `layout` for the sounds `mask` keeps, made the first time it's asked for and kept until either
-     *  changes; with it, the one the map showed before a new layout (for the move between them to fade out). Two
-     *  pictures in all, drawn over in turn. */
-    nebula(layout, mask, colorOf2) {
-      if (this.current?.layout !== layout || this.current.mask !== mask) {
-        const same = this.current?.layout === layout;
-        const sheet = (same ? this.current?.sheet : this.last?.sheet) ?? picture(NEBULA_SIDE, NEBULA_SIDE);
-        if (!sheet) return { now: null, before: null };
-        if (!same) this.last = this.current;
-        const pixels = nebulaField(
-          layout.points,
-          (index) => mask[index] === 1,
-          (group) => rgbOf(colorOf2(group)) ?? GREY
-        );
-        sheet.context.putImageData(new ImageData(pixels, NEBULA_SIDE, NEBULA_SIDE), 0, 0);
-        this.current = { layout, mask, sheet };
-      }
-      return { now: this.current.sheet.canvas, before: this.last && this.last.layout !== layout ? this.last.sheet.canvas : null };
-    }
-    /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
-    draw(context, nebula, view, unit, alpha) {
-      if (alpha <= 0) return;
-      const kept3 = context.globalAlpha;
-      context.globalAlpha = alpha;
-      context.imageSmoothingEnabled = true;
-      context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
-      context.globalAlpha = kept3;
-    }
-    /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
-    crowd(layout) {
-      let crowd = this.crowds.get(layout);
-      if (crowd === void 0) {
-        crowd = 0;
-        for (const cell of layout.cells.values()) crowd = Math.max(crowd, cell.length);
-        this.crowds.set(layout, crowd);
-      }
-      return crowd;
-    }
-    /** Halos of `radius` pixels at `alpha`, on a canvas drawn at `ratio` device pixels to one: each `at` adds one, `done`
-     *  hands the canvas back as it was. Null when there's nothing to draw them with, or nothing to see. */
-    halos(context, radius, alpha, ratio) {
-      if (alpha < 0.02 || radius < 1 || typeof OffscreenCanvas !== "function") return null;
-      const size = Math.round(radius * 2) / 2;
-      const side = Math.max(2, Math.ceil(size * 2 * ratio));
-      const [keptAlpha, keptBlend] = [context.globalAlpha, context.globalCompositeOperation];
-      context.globalCompositeOperation = "lighter";
-      let strong = -1;
-      let color = "";
-      let sprite = null;
-      return {
-        at: (next, x, y, strength) => {
-          if (strength <= 0.02) return;
-          if (next !== color) {
-            color = next;
-            sprite = this.sprite(next, side);
-          }
-          if (!sprite) return;
-          const stepped = Math.round(Math.min(1, strength) * 10) / 10;
-          if (stepped !== strong) {
-            strong = stepped;
-            context.globalAlpha = alpha * stepped;
-          }
-          context.drawImage(sprite, x - size, y - size, size * 2, size * 2);
-        },
-        done: () => {
-          context.globalAlpha = keptAlpha;
-          context.globalCompositeOperation = keptBlend;
-        }
-      };
-    }
-    /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
-    sprite(color, side) {
-      const key = `${color}|${side}`;
-      const kept3 = this.sprites.get(key);
-      if (kept3) return kept3;
-      const channels = rgbOf(color);
-      const made = channels ? picture(side, side) : null;
-      if (!made || !channels) return null;
-      const middle = side / 2;
-      const fade = made.context.createRadialGradient(middle, middle, 0, middle, middle, middle);
-      fade.addColorStop(0, rgba(channels, 1));
-      fade.addColorStop(0.35, rgba(channels, 0.45));
-      fade.addColorStop(1, rgba(channels, 0));
-      made.context.fillStyle = fade;
-      made.context.fillRect(0, 0, side, side);
-      if (this.sprites.size >= MOST_SPRITES) this.sprites.clear();
-      this.sprites.set(key, made.canvas);
-      return made.canvas;
-    }
-  };
-  var glows = /* @__PURE__ */ new WeakMap();
-  function glowOf(canvas) {
-    let glow = glows.get(canvas);
-    if (!glow) {
-      glow = new Glow();
-      glows.set(canvas, glow);
-    }
-    return glow;
-  }
-
-  // src/shared/atlas/names.ts
-  var NAMES_ON_SCREEN = 600;
-  var NAMES_MOST = 50;
-  var kept = /* @__PURE__ */ new WeakMap();
-  function regionsOf(points) {
-    const known = kept.get(points);
-    if (known) return known;
-    const families = /* @__PURE__ */ new Map();
-    for (const point of points) {
-      const family = families.get(point.group);
-      if (family) family.push(point);
-      else families.set(point.group, [point]);
-    }
-    const regions = [];
-    for (const [group, family] of families) {
-      const across = family.map((point) => point.x).sort((a, b) => a - b);
-      const [from, middle, to] = [across[Math.floor(across.length * 0.25)], across[Math.floor(across.length * 0.5)], across[Math.min(across.length - 1, Math.ceil(across.length * 0.75))]];
-      const tops = family.filter((point) => point.x >= from && point.x <= to).map((point) => point.y);
-      tops.sort((a, b) => a - b);
-      regions.push({ group, x: middle, y: tops[Math.floor(tops.length * 0.015)] });
-    }
-    kept.set(points, regions);
-    return regions;
-  }
-  function regionAlpha(zoom) {
-    return Math.min(1, Math.max(0, (2.3 - zoom) / 0.9));
-  }
-  function fitting(boxes, most, padX = 0, padY = 0, taken = []) {
-    const kept3 = [...taken];
-    const fits = [];
-    for (let index = 0; index < boxes.length && fits.length < most; index++) {
-      const [left, top, width, height] = boxes[index];
-      if (kept3.some(([l, t, w, h]) => left < l + w + padX && l < left + width + padX && top < t + h + padY && t < top + height + padY)) continue;
-      kept3.push(boxes[index]);
-      fits.push(index);
-    }
-    return fits;
-  }
-  function nameRank(index) {
-    return Math.imul(index + 1, 2654435761) >>> 0;
-  }
-  function clearOf(boxes, places, margin = 3) {
-    const ROW = 16;
-    const rows = /* @__PURE__ */ new Map();
-    for (const place of places) {
-      const row = Math.floor(place[1] / ROW);
-      const list = rows.get(row);
-      if (list) list.push(place);
-      else rows.set(row, [place]);
-    }
-    return boxes.map(([left, top, width, height]) => {
-      for (let row = Math.floor((top - margin) / ROW); row <= Math.floor((top + height + margin) / ROW); row++) {
-        for (const [x, y] of rows.get(row) ?? []) {
-          if (x >= left - margin && x <= left + width + margin && y >= top - margin && y <= top + height + margin) return false;
-        }
-      }
-      return true;
+      return peaksOf(mixed2, bars);
+    };
+    const promise = queue.then(run, run).catch(() => null).then((peaks) => {
+      loading.delete(key);
+      askers.delete(key);
+      if (peaks === SKIPPED) return null;
+      kept.set(key, peaks);
+      return peaks;
     });
+    queue = promise;
+    loading.set(key, promise);
+    return promise;
   }
-
-  // src/shared/atlas/labels.ts
-  function track(context, spacing) {
-    if ("letterSpacing" in context) context.letterSpacing = spacing;
-  }
-  function drawWords(context, words, alpha, look, room) {
-    if (alpha <= 0 || words.length === 0) return [];
-    context.save();
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.lineJoin = "round";
-    context.strokeStyle = look.ground;
-    const name = `700 12px ${look.family}`;
-    context.font = name;
-    track(context, "0.2em");
-    const boxes = words.map((word) => {
-      const width = context.measureText(word.text).width;
-      return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
-    });
-    const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
-    for (const index of written) {
-      const word = words[index];
-      context.font = name;
-      track(context, "0.2em");
-      context.lineWidth = 5;
-      context.globalAlpha = 0.85 * alpha;
-      context.strokeText(word.text, word.x, word.y);
-      context.globalAlpha = alpha;
-      context.fillStyle = word.color;
-      context.fillText(word.text, word.x, word.y);
-      if (!word.count) continue;
-      context.font = `500 10px ${look.family}`;
-      track(context, "0.06em");
-      context.lineWidth = 3;
-      context.globalAlpha = 0.8 * alpha;
-      context.strokeText(word.count, word.x, word.y + 14);
-      context.globalAlpha = 0.85 * alpha;
-      context.fillStyle = look.muted;
-      context.fillText(word.count, word.x, word.y + 14);
-    }
-    context.restore();
-    return written.map((index) => boxes[index]);
-  }
-  var widths = /* @__PURE__ */ new Map();
-  function drawNames(context, names, gap, look, taken) {
-    if (names.length === 0) return;
-    context.save();
-    const font = `500 10.5px ${look.family}`;
-    context.font = font;
-    context.textBaseline = "middle";
-    context.lineJoin = "round";
-    context.lineWidth = 3;
-    context.strokeStyle = look.ground;
-    if (widths.size > 6e3) widths.clear();
-    const offered = [...names].sort((a, b) => a.rank - b.rank);
-    const boxes = offered.map((word) => {
-      const key = `${font}|${word.text}`;
-      let width = widths.get(key);
-      if (width === void 0) {
-        width = context.measureText(word.text).width;
-        widths.set(key, width);
-      }
-      return [word.x + gap, word.y - 7, width, 14];
-    });
-    const clear = clearOf(
-      boxes,
-      offered.map((word) => [word.x, word.y])
-    );
-    const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
-    for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
-      const index = open[pick3];
-      const word = offered[index];
-      context.globalAlpha = 0.75;
-      context.strokeText(word.text, boxes[index][0], word.y);
-      context.globalAlpha = 0.95;
-      context.fillStyle = word.color;
-      context.fillText(word.text, boxes[index][0], word.y);
-    }
-    context.restore();
+  function peaksKept(id, bars) {
+    return kept.get(`${bars}:${id}`) ?? null;
   }
 
   // src/shared/mapModel.ts
@@ -5744,6 +5447,465 @@
     return out.sort((a, b) => a - b);
   }
 
+  // src/shared/atlas/color.ts
+  function rgbOf(color) {
+    const text = color.trim();
+    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+    if (hex) {
+      const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+      const value = parseInt(digits, 16);
+      return [value >> 16, value >> 8 & 255, value & 255];
+    }
+    const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
+    if (!rgb) return null;
+    const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+    return channels.every((channel) => channel <= 255) ? channels : null;
+  }
+  function rgba(color, alpha) {
+    return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+  }
+  function lighten(color, amount) {
+    const toward = (channel) => Math.round(channel + (255 - channel) * amount);
+    return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
+  }
+  function isDark(color) {
+    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+  }
+
+  // src/shared/atlas/pulse.ts
+  var WAVE_BARS = 160;
+  function levelAt(levels, progress) {
+    if (!levels || levels.length === 0 || !(progress >= 0) || progress > 1) return 0;
+    const at = Math.min(levels.length - 1, progress * levels.length);
+    const before = Math.floor(at);
+    const after = Math.min(levels.length - 1, before + 1);
+    return levels[before] + (levels[after] - levels[before]) * (at - before);
+  }
+  function follow(shown, level, elapsed) {
+    return level >= shown ? level : Math.max(level, shown - elapsed / 220);
+  }
+  function progressOf(elapsed, duration) {
+    if (!(duration > 0) || elapsed < 0) return null;
+    const progress = elapsed / 1e3 / duration;
+    return progress <= 1 ? progress : null;
+  }
+
+  // src/shared/atlas/overlay.ts
+  var FADE_MS = 180;
+  var RIPPLE_MS = 1100;
+  var Overlay = class {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.context = canvas.getContext("2d");
+    }
+    canvas;
+    context;
+    width = 0;
+    height = 0;
+    ratio = 1;
+    frame = 0;
+    pulse = null;
+    /** The pulse that just stopped, fading where it was, and when it stopped. */
+    fading = null;
+    /** The core's colour: the canvas's own CSS colour (the theme's text colour), read when a sound starts. */
+    core = "#fff";
+    still = false;
+    resize(width, height, ratio) {
+      if (width === this.width && height === this.height && ratio === this.ratio) return;
+      [this.width, this.height, this.ratio] = [width, height, ratio];
+      this.canvas.width = Math.round(width * ratio);
+      this.canvas.height = Math.round(height * ratio);
+      this.draw(performance.now());
+    }
+    /** A sound starts playing (its pulse begins), or the sound stops (null: its pulse fades). */
+    play(pulse) {
+      const now = performance.now();
+      if (this.pulse && !pulse && !this.still) this.fading = { pulse: this.pulse, shown: this.pulse.shown, since: now };
+      this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null;
+      if (pulse) this.core = getComputedStyle(this.canvas).color || this.core;
+      if (pulse) this.fading = null;
+      this.wake();
+    }
+    /** The playing sound's waveform arrived. */
+    levels(levels) {
+      if (this.pulse) this.pulse.levels = levels;
+    }
+    /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
+    moved() {
+      if (this.frame === 0 && (this.pulse || this.fading)) this.draw(performance.now());
+    }
+    dispose() {
+      cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      this.pulse = null;
+      this.fading = null;
+    }
+    wake() {
+      if (this.still) {
+        this.draw(performance.now());
+        return;
+      }
+      if (this.frame === 0) this.frame = requestAnimationFrame(this.tick);
+    }
+    tick = (now) => {
+      this.frame = 0;
+      this.draw(now);
+      if (this.pulse || this.fading) this.frame = requestAnimationFrame(this.tick);
+    };
+    draw(now) {
+      const context = this.context;
+      if (!context || this.width === 0) return;
+      context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
+      context.clearRect(0, 0, this.width, this.height);
+      if (this.fading) {
+        const left = 1 - (now - this.fading.since) / FADE_MS;
+        if (left <= 0) this.fading = null;
+        else this.ring(context, this.fading.pulse, this.fading.shown, left, null);
+      }
+      const pulse = this.pulse;
+      if (!pulse) return;
+      const progress = progressOf(now - pulse.since, pulse.duration);
+      if (pulse.levels && progress !== null && !this.still) {
+        pulse.shown = follow(pulse.shown, levelAt(pulse.levels, progress), now - pulse.at);
+        pulse.at = now;
+        this.ring(context, pulse, pulse.shown, 1, null);
+      } else {
+        this.ring(context, pulse, 0.35, 1, this.still ? -1 : (now - pulse.since) / RIPPLE_MS);
+      }
+    }
+    /** One pulse: a glow and three rings reaching as far as `level`, and the sound's own shape bright at the middle.
+     *  With `ripple` (a phase), two rings spread from it instead (the plain pulse); a negative one holds them still. */
+    ring(context, pulse, level, strength, ripple) {
+      const place = pulse.place();
+      if (!place) return;
+      const [x, y] = place;
+      if (x < -60 || y < -60 || x > this.width + 60 || y > this.height + 60) return;
+      const channels = rgbOf(pulse.color);
+      context.save();
+      context.globalCompositeOperation = "lighter";
+      if (channels) {
+        const reach = 26 + 30 * level;
+        const glow = context.createRadialGradient(x, y, 0, x, y, reach);
+        glow.addColorStop(0, rgba(channels, 1));
+        glow.addColorStop(0.35, rgba(channels, 0.45));
+        glow.addColorStop(1, rgba(channels, 0));
+        context.globalAlpha = (0.5 + 0.4 * level) * strength;
+        context.fillStyle = glow;
+        context.fillRect(x - reach, y - reach, reach * 2, reach * 2);
+      }
+      context.strokeStyle = channels ? lighten(channels, 0.3) : pulse.color;
+      if (ripple === null) {
+        context.lineWidth = 1.75;
+        for (let ring2 = 0; ring2 < 3; ring2++) {
+          context.globalAlpha = (0.9 - ring2 * 0.25) * strength;
+          context.beginPath();
+          context.arc(x, y, 9 + ring2 * (7 + 9 * level), 0, Math.PI * 2);
+          context.stroke();
+        }
+      } else {
+        for (const offset of ripple < 0 ? [0.25] : [0, 0.5]) {
+          const phase = ripple < 0 ? offset : ((ripple + offset) % 1 + 1) % 1;
+          context.globalAlpha = 0.7 * (1 - phase) ** 1.5 * strength;
+          context.lineWidth = 2 - phase;
+          context.beginPath();
+          context.arc(x, y, 8 + phase * 26, 0, Math.PI * 2);
+          context.stroke();
+        }
+      }
+      context.restore();
+      const core = new Path2D();
+      traceGlyph(core, pulse.glyph, x, y, 4);
+      context.globalAlpha = strength;
+      context.fillStyle = this.core;
+      context.fill(core);
+      context.globalAlpha = 1;
+    }
+  };
+
+  // src/shared/atlas/AtlasOverlay.tsx
+  function AtlasOverlay({
+    width,
+    height,
+    playing,
+    place,
+    audio,
+    still,
+    moved: moved2
+  }) {
+    const canvas = useRef(null);
+    const overlay = useRef(null);
+    const placed = useRef(place);
+    placed.current = place;
+    const fetched = useRef(audio);
+    fetched.current = audio;
+    useEffect(() => {
+      if (!canvas.current) return;
+      const made = new Overlay(canvas.current);
+      overlay.current = made;
+      return () => {
+        made.dispose();
+        overlay.current = null;
+      };
+    }, []);
+    useEffect(() => {
+      if (overlay.current) overlay.current.still = still;
+    }, [still]);
+    useEffect(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height]);
+    useEffect(() => overlay.current?.moved(), [moved2]);
+    const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? "", playing?.glyph ?? 0, playing?.duration ?? 0];
+    useEffect(() => {
+      const drawn = overlay.current;
+      if (!drawn) return;
+      if (id === null) {
+        drawn.play(null);
+        return;
+      }
+      let live = true;
+      drawn.play({ place: () => placed.current(), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) });
+      if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((levels) => live && drawn.levels(levels));
+      return () => {
+        live = false;
+      };
+    }, [id, color, glyph, duration]);
+    return /* @__PURE__ */ jsx("canvas", { "aria-hidden": true, ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", color: T.text } });
+  }
+
+  // src/shared/atlas/nebula.ts
+  var NEBULA_SIDE = 128;
+  var NEBULA_PAD = 0.12;
+  var SPREAD = 2;
+  var SKIRT = 5;
+  var CORE = 0.55;
+  var ALONE = CORE / (2 * SPREAD + 1) ** 2;
+  var CROWD = 8;
+  var BRIGHTEST = 0.85;
+  function blur(from, into, side, radius, step2) {
+    const across = step2 === 1 ? side : 1;
+    const scale = 1 / (2 * radius + 1);
+    for (let line = 0; line < side; line++) {
+      const start = line * across;
+      let sum = 0;
+      for (let k = 0; k <= radius && k < side; k++) sum += from[start + k * step2];
+      for (let k = 0; k < side; k++) {
+        into[start + k * step2] = sum * scale;
+        const enters = k + radius + 1;
+        const leaves = k - radius;
+        if (enters < side) sum += from[start + enters * step2];
+        if (leaves >= 0) sum -= from[start + leaves * step2];
+      }
+    }
+  }
+  function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+    const cells = side * side;
+    const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
+    const [red, green, blue, weight] = sums;
+    const span = side / (1 + 2 * NEBULA_PAD);
+    const colors = /* @__PURE__ */ new Map();
+    for (let index = 0; index < points.length; index++) {
+      if (!keep(index)) continue;
+      const point = points[index];
+      let color = colors.get(point.group);
+      if (!color) {
+        color = colorOf2(point.group);
+        colors.set(point.group, color);
+      }
+      const fx = (point.x + NEBULA_PAD) * span - 0.5;
+      const fy = (point.y + NEBULA_PAD) * span - 0.5;
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      if (x0 < 0 || y0 < 0 || x0 + 1 >= side || y0 + 1 >= side) continue;
+      const right = fx - x0;
+      const down = fy - y0;
+      for (let corner = 0; corner < 4; corner++) {
+        const share = (corner & 1 ? right : 1 - right) * (corner & 2 ? down : 1 - down);
+        const cell = (y0 + (corner >> 1)) * side + x0 + (corner & 1);
+        red[cell] += color[0] * share;
+        green[cell] += color[1] * share;
+        blue[cell] += color[2] * share;
+        weight[cell] += share;
+      }
+    }
+    const spare = new Float32Array(cells);
+    const core = new Float32Array(cells);
+    for (const sum of sums) {
+      for (let pass = 0; pass < 2; pass++) {
+        blur(sum, spare, side, SPREAD, 1);
+        blur(spare, sum, side, SPREAD, side);
+      }
+      core.set(sum);
+      for (let pass = 0; pass < 2; pass++) {
+        blur(sum, spare, side, SKIRT, 1);
+        blur(spare, sum, side, SKIRT, side);
+      }
+      for (let cell = 0; cell < cells; cell++) sum[cell] = CORE * core[cell] + (1 - CORE) * sum[cell];
+    }
+    let peak = 0;
+    for (let cell = 0; cell < cells; cell++) if (weight[cell] > peak) peak = weight[cell];
+    const pixels = new Uint8ClampedArray(cells * 4);
+    if (peak <= 0) return pixels;
+    const gain = -Math.log(1 - BRIGHTEST) / Math.max(peak, ALONE * CROWD);
+    for (let cell = 0; cell < cells; cell++) {
+      const here = weight[cell];
+      if (here <= 1e-9) continue;
+      pixels[4 * cell] = red[cell] / here;
+      pixels[4 * cell + 1] = green[cell] / here;
+      pixels[4 * cell + 2] = blue[cell] / here;
+      pixels[4 * cell + 3] = 255 * (1 - Math.exp(-here * gain));
+    }
+    return pixels;
+  }
+  function nebulaAlpha(zoom) {
+    const alpha = 1 / Math.max(1, zoom) ** 1.35;
+    return alpha < 0.03 ? 0 : alpha;
+  }
+  function haloOf(radius, zoom, crowd, unit) {
+    const reach = radius * 3.3;
+    const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
+    return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
+  }
+
+  // src/shared/atlas/glow.ts
+  var GREY = [128, 128, 128];
+  var MOST_SPRITES = 240;
+  function picture(width, height) {
+    if (typeof OffscreenCanvas !== "function") return null;
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    return context ? { canvas, context } : null;
+  }
+  var Glow = class {
+    current = null;
+    last = null;
+    sprites = /* @__PURE__ */ new Map();
+    crowds = /* @__PURE__ */ new WeakMap();
+    shapes = /* @__PURE__ */ new Map();
+    ground = "";
+    dark = true;
+    /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
+     *  counts as dark, as both hosts' first themes are). */
+    onDark(context, ground) {
+      if (ground === this.ground) return this.dark;
+      this.ground = ground;
+      const kept3 = context.fillStyle;
+      context.fillStyle = "#000";
+      context.fillStyle = ground;
+      const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
+      context.fillStyle = kept3;
+      this.dark = read ? isDark(read) : true;
+      this.shapes.clear();
+      return this.dark;
+    }
+    /** The colour a sound's shape is filled in: its family's, a little brighter on a dark ground so it stays crisp over
+     *  its own glow. */
+    shape(color) {
+      let shape = this.shapes.get(color);
+      if (shape === void 0) {
+        const channels = this.dark ? rgbOf(color) : null;
+        shape = channels ? lighten(channels, 0.2) : color;
+        this.shapes.set(color, shape);
+      }
+      return shape;
+    }
+    /** The nebula of `layout` for the sounds `mask` keeps, made the first time it's asked for and kept until either
+     *  changes; with it, the one the map showed before a new layout (for the move between them to fade out). Two
+     *  pictures in all, drawn over in turn. */
+    nebula(layout, mask, colorOf2) {
+      if (this.current?.layout !== layout || this.current.mask !== mask) {
+        const same = this.current?.layout === layout;
+        const sheet = (same ? this.current?.sheet : this.last?.sheet) ?? picture(NEBULA_SIDE, NEBULA_SIDE);
+        if (!sheet) return { now: null, before: null };
+        if (!same) this.last = this.current;
+        const pixels = nebulaField(
+          layout.points,
+          (index) => mask[index] === 1,
+          (group) => rgbOf(colorOf2(group)) ?? GREY
+        );
+        sheet.context.putImageData(new ImageData(pixels, NEBULA_SIDE, NEBULA_SIDE), 0, 0);
+        this.current = { layout, mask, sheet };
+      }
+      return { now: this.current.sheet.canvas, before: this.last && this.last.layout !== layout ? this.last.sheet.canvas : null };
+    }
+    /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
+    draw(context, nebula, view, unit, alpha) {
+      if (alpha <= 0) return;
+      const kept3 = context.globalAlpha;
+      context.globalAlpha = alpha;
+      context.imageSmoothingEnabled = true;
+      context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
+      context.globalAlpha = kept3;
+    }
+    /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
+    crowd(layout) {
+      let crowd = this.crowds.get(layout);
+      if (crowd === void 0) {
+        crowd = 0;
+        for (const cell of layout.cells.values()) crowd = Math.max(crowd, cell.length);
+        this.crowds.set(layout, crowd);
+      }
+      return crowd;
+    }
+    /** Halos of `radius` pixels at `alpha`, on a canvas drawn at `ratio` device pixels to one: each `at` adds one, `done`
+     *  hands the canvas back as it was. Null when there's nothing to draw them with, or nothing to see. */
+    halos(context, radius, alpha, ratio) {
+      if (alpha < 0.02 || radius < 1 || typeof OffscreenCanvas !== "function") return null;
+      const size = Math.round(radius * 2) / 2;
+      const side = Math.max(2, Math.ceil(size * 2 * ratio));
+      const [keptAlpha, keptBlend] = [context.globalAlpha, context.globalCompositeOperation];
+      context.globalCompositeOperation = "lighter";
+      let strong = -1;
+      let color = "";
+      let sprite = null;
+      return {
+        at: (next, x, y, strength) => {
+          if (strength <= 0.02) return;
+          if (next !== color) {
+            color = next;
+            sprite = this.sprite(next, side);
+          }
+          if (!sprite) return;
+          const stepped = Math.round(Math.min(1, strength) * 10) / 10;
+          if (stepped !== strong) {
+            strong = stepped;
+            context.globalAlpha = alpha * stepped;
+          }
+          context.drawImage(sprite, x - size, y - size, size * 2, size * 2);
+        },
+        done: () => {
+          context.globalAlpha = keptAlpha;
+          context.globalCompositeOperation = keptBlend;
+        }
+      };
+    }
+    /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
+    sprite(color, side) {
+      const key = `${color}|${side}`;
+      const kept3 = this.sprites.get(key);
+      if (kept3) return kept3;
+      const channels = rgbOf(color);
+      const made = channels ? picture(side, side) : null;
+      if (!made || !channels) return null;
+      const middle = side / 2;
+      const fade = made.context.createRadialGradient(middle, middle, 0, middle, middle, middle);
+      fade.addColorStop(0, rgba(channels, 1));
+      fade.addColorStop(0.35, rgba(channels, 0.45));
+      fade.addColorStop(1, rgba(channels, 0));
+      made.context.fillStyle = fade;
+      made.context.fillRect(0, 0, side, side);
+      if (this.sprites.size >= MOST_SPRITES) this.sprites.clear();
+      this.sprites.set(key, made.canvas);
+      return made.canvas;
+    }
+  };
+  var glows = /* @__PURE__ */ new WeakMap();
+  function glowOf(canvas) {
+    let glow = glows.get(canvas);
+    if (!glow) {
+      glow = new Glow();
+      glows.set(canvas, glow);
+    }
+    return glow;
+  }
+
   // src/shared/mapUi.tsx
   var glass = {
     background: `color-mix(in srgb, ${T.raised} 90%, transparent)`,
@@ -5922,6 +6084,256 @@
         choice.id
       )) })
     ] });
+  }
+
+  // src/shared/atlas/Glyph.tsx
+  function Glyph2({ glyph, color, size = 9 }) {
+    const shape = GLYPH_SHAPES[glyph];
+    return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "-1.5 -1.5 3 3", width: size, children: shape ? /* @__PURE__ */ jsx("polygon", { fill: color, points: shape.map(([x, y]) => `${x},${y}`).join(" ") }) : /* @__PURE__ */ jsx("circle", { cx: "0", cy: "0", fill: color, r: "1" }) });
+  }
+
+  // src/shared/atlas/Wave.tsx
+  function usePlayhead(playing, duration) {
+    const [startedAt, setStartedAt] = useState(null);
+    const [now, setNow] = useState(0);
+    useEffect(() => {
+      setStartedAt(playing ? performance.now() : null);
+      setNow(performance.now());
+    }, [playing]);
+    const progress = startedAt === null ? null : progressOf(now - startedAt, duration);
+    const running = progress !== null;
+    useEffect(() => {
+      if (!running) return;
+      const frame2 = requestAnimationFrame(setNow);
+      return () => cancelAnimationFrame(frame2);
+    }, [running, now]);
+    return progress;
+  }
+  function Wave2({ peaks, colors, width, height, progress = null }) {
+    const canvas = useRef(null);
+    const tint = colors.join();
+    useEffect(() => {
+      const element = canvas.current;
+      const context = element?.getContext("2d");
+      if (!element || !context || width <= 0) return;
+      const ratio = window.devicePixelRatio || 1;
+      element.width = Math.round(width * ratio);
+      element.height = Math.round(height * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      const own = getComputedStyle(element).color;
+      if (colors.length > 1) {
+        const across = context.createLinearGradient(0, 0, width, 0);
+        colors.forEach((color, index) => across.addColorStop(index / (colors.length - 1), color));
+        context.fillStyle = across;
+      } else context.fillStyle = colors[0] ?? own;
+      const bars = Math.max(1, Math.floor(width / 3));
+      for (let bar = 0; bar < bars; bar++) {
+        let peak = 0.06;
+        if (peaks && peaks.length > 0) {
+          const [from, to] = [Math.floor(bar * peaks.length / bars), Math.max(Math.floor(bar * peaks.length / bars) + 1, Math.floor((bar + 1) * peaks.length / bars))];
+          for (let at = from; at < to && at < peaks.length; at++) peak = Math.max(peak, peaks[at]);
+        }
+        const tall = Math.max(1, peak * (height - 2));
+        context.globalAlpha = !peaks ? 0.3 : progress !== null && bar / bars <= progress ? 1 : progress !== null ? 0.5 : 0.9;
+        context.fillRect(bar * 3, (height - tall) / 2, 2, tall);
+      }
+      context.globalAlpha = 1;
+    }, [peaks, tint, width, height, progress]);
+    return /* @__PURE__ */ jsxs("span", { "aria-hidden": true, style: { position: "relative", display: "block", flex: "none", width, height }, children: [
+      /* @__PURE__ */ jsx("canvas", { ref: canvas, style: { display: "block", width, height, color: T.accent } }),
+      progress !== null && progress > 0 && progress < 1 && /* @__PURE__ */ jsx("span", { style: { position: "absolute", top: -1, bottom: -1, left: progress * width, width: 1.5, borderRadius: 1, background: T.text } })
+    ] });
+  }
+
+  // src/shared/atlas/HoverPill.tsx
+  var WIDEST = 300;
+  var TALLEST = 44;
+  var AWAY = 24;
+  function HoverPill({
+    id,
+    sound,
+    color,
+    glyph,
+    playing,
+    audio,
+    at,
+    within
+  }) {
+    const [peaks, setPeaks] = useState(() => peaksKept(id, WAVE_BARS));
+    const fetched = useRef(audio);
+    fetched.current = audio;
+    useEffect(() => {
+      setPeaks(peaksKept(id, WAVE_BARS));
+      if (!playing || !fetched.current) return;
+      let live = true;
+      void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((found) => live && found && setPeaks(found));
+      return () => {
+        live = false;
+      };
+    }, [id, playing]);
+    const duration = typeof sound.duration === "number" ? sound.duration : 0;
+    const progress = usePlayhead(playing, duration);
+    const under = [seconds(sound.duration), clean(sound.folder ?? "", 40)].filter(Boolean).join(" · ");
+    const side = at[0] + AWAY + WIDEST > within[0] ? { right: Math.max(0, within[0] - at[0] + AWAY) } : { left: at[0] + AWAY };
+    const top = Math.min(Math.max(0, at[1] - TALLEST / 2), Math.max(0, within[1] - TALLEST));
+    return /* @__PURE__ */ jsxs("div", { style: { ...glass, borderRadius: 10, position: "absolute", ...side, top, maxWidth: WIDEST, pointerEvents: "none", padding: "5px 10px", ...S.row, gap: 10 }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { minWidth: 0, flex: "0 1 auto" }, children: [
+        /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, fontSize: 11.5, color: T.text }, children: [
+          /* @__PURE__ */ jsx(Glyph2, { color, glyph }),
+          /* @__PURE__ */ jsxs("span", { style: { ...S.ellipsis, fontWeight: 600 }, children: [
+            clean(sound.name, 48),
+            " ",
+            /* @__PURE__ */ jsxs("span", { style: { color: T.muted, fontWeight: 400 }, children: [
+              "· ",
+              clean(sound.class ?? "", 16)
+            ] })
+          ] })
+        ] }),
+        under && /* @__PURE__ */ jsx("div", { style: { ...S.ellipsis, fontSize: 10.5, color: T.faint, paddingLeft: 15, fontVariantNumeric: "tabular-nums" }, children: under })
+      ] }),
+      peaks && /* @__PURE__ */ jsx(Wave2, { colors: [color], height: 24, peaks, progress, width: 96 })
+    ] });
+  }
+
+  // src/shared/atlas/names.ts
+  var NAMES_ON_SCREEN = 600;
+  var NAMES_MOST = 50;
+  var kept2 = /* @__PURE__ */ new WeakMap();
+  function regionsOf(points) {
+    const known = kept2.get(points);
+    if (known) return known;
+    const families = /* @__PURE__ */ new Map();
+    for (const point of points) {
+      const family = families.get(point.group);
+      if (family) family.push(point);
+      else families.set(point.group, [point]);
+    }
+    const regions = [];
+    for (const [group, family] of families) {
+      const across = family.map((point) => point.x).sort((a, b) => a - b);
+      const [from, middle, to] = [across[Math.floor(across.length * 0.25)], across[Math.floor(across.length * 0.5)], across[Math.min(across.length - 1, Math.ceil(across.length * 0.75))]];
+      const tops = family.filter((point) => point.x >= from && point.x <= to).map((point) => point.y);
+      tops.sort((a, b) => a - b);
+      regions.push({ group, x: middle, y: tops[Math.floor(tops.length * 0.015)] });
+    }
+    kept2.set(points, regions);
+    return regions;
+  }
+  function regionAlpha(zoom) {
+    return Math.min(1, Math.max(0, (2.3 - zoom) / 0.9));
+  }
+  function fitting(boxes, most, padX = 0, padY = 0, taken = []) {
+    const kept3 = [...taken];
+    const fits = [];
+    for (let index = 0; index < boxes.length && fits.length < most; index++) {
+      const [left, top, width, height] = boxes[index];
+      if (kept3.some(([l, t, w, h]) => left < l + w + padX && l < left + width + padX && top < t + h + padY && t < top + height + padY)) continue;
+      kept3.push(boxes[index]);
+      fits.push(index);
+    }
+    return fits;
+  }
+  function nameRank(index) {
+    return Math.imul(index + 1, 2654435761) >>> 0;
+  }
+  function clearOf(boxes, places, margin = 3) {
+    const ROW = 16;
+    const rows = /* @__PURE__ */ new Map();
+    for (const place of places) {
+      const row = Math.floor(place[1] / ROW);
+      const list = rows.get(row);
+      if (list) list.push(place);
+      else rows.set(row, [place]);
+    }
+    return boxes.map(([left, top, width, height]) => {
+      for (let row = Math.floor((top - margin) / ROW); row <= Math.floor((top + height + margin) / ROW); row++) {
+        for (const [x, y] of rows.get(row) ?? []) {
+          if (x >= left - margin && x <= left + width + margin && y >= top - margin && y <= top + height + margin) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  // src/shared/atlas/labels.ts
+  function track(context, spacing) {
+    if ("letterSpacing" in context) context.letterSpacing = spacing;
+  }
+  function drawWords(context, words, alpha, look, room) {
+    if (alpha <= 0 || words.length === 0) return [];
+    context.save();
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.strokeStyle = look.ground;
+    const name = `700 12px ${look.family}`;
+    context.font = name;
+    track(context, "0.2em");
+    const boxes = words.map((word) => {
+      const width = context.measureText(word.text).width;
+      return [word.x - width / 2, word.y - 8, width, word.count ? 30 : 16];
+    });
+    const written = room ? fitting(boxes, words.length, 10, 2) : boxes.map((_, index) => index);
+    for (const index of written) {
+      const word = words[index];
+      context.font = name;
+      track(context, "0.2em");
+      context.lineWidth = 5;
+      context.globalAlpha = 0.85 * alpha;
+      context.strokeText(word.text, word.x, word.y);
+      context.globalAlpha = alpha;
+      context.fillStyle = word.color;
+      context.fillText(word.text, word.x, word.y);
+      if (!word.count) continue;
+      context.font = `500 10px ${look.family}`;
+      track(context, "0.06em");
+      context.lineWidth = 3;
+      context.globalAlpha = 0.8 * alpha;
+      context.strokeText(word.count, word.x, word.y + 14);
+      context.globalAlpha = 0.85 * alpha;
+      context.fillStyle = look.muted;
+      context.fillText(word.count, word.x, word.y + 14);
+    }
+    context.restore();
+    return written.map((index) => boxes[index]);
+  }
+  var widths = /* @__PURE__ */ new Map();
+  function drawNames(context, names, gap, look, taken) {
+    if (names.length === 0) return;
+    context.save();
+    const font = `500 10.5px ${look.family}`;
+    context.font = font;
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = look.ground;
+    if (widths.size > 6e3) widths.clear();
+    const offered = [...names].sort((a, b) => a.rank - b.rank);
+    const boxes = offered.map((word) => {
+      const key = `${font}|${word.text}`;
+      let width = widths.get(key);
+      if (width === void 0) {
+        width = context.measureText(word.text).width;
+        widths.set(key, width);
+      }
+      return [word.x + gap, word.y - 7, width, 14];
+    });
+    const clear = clearOf(
+      boxes,
+      offered.map((word) => [word.x, word.y])
+    );
+    const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
+    for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
+      const index = open[pick3];
+      const word = offered[index];
+      context.globalAlpha = 0.75;
+      context.strokeText(word.text, boxes[index][0], word.y);
+      context.globalAlpha = 0.95;
+      context.fillStyle = word.color;
+      context.fillText(word.text, boxes[index][0], word.y);
+    }
+    context.restore();
   }
 
   // src/shared/GrowLayer.tsx
@@ -6120,110 +6532,6 @@
     ] });
   }
 
-  // src/shared/palette.ts
-  var MOST_GATHERED = 1e4;
-  var LOOSE = 5;
-  var NAME_MOST = 80;
-  function marksOf(palette, revision) {
-    const out = /* @__PURE__ */ new Set();
-    if (!palette?.current || !revision || palette.map_revision !== revision) return out;
-    for (const item of palette.current.items) if (item.sound_id) out.add(item.sound_id);
-    return out;
-  }
-  function playableId(item) {
-    return item.sound_id ?? item.artifact_id;
-  }
-  function moved(items, key, to) {
-    const from = items.findIndex((item) => item.key === key);
-    if (from < 0) return [...items];
-    const out = items.filter((item) => item.key !== key);
-    out.splice(Math.max(0, Math.min(out.length, to)), 0, items[from]);
-    return out;
-  }
-  function paletteName(text) {
-    const name = text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, NAME_MOST).trim();
-    return name || null;
-  }
-  function kitRequest(name) {
-    const said = quotable(name);
-    return said ? `Load the sounds in my palette “${said}” as a kit` : "Load the sounds in my palette as a kit";
-  }
-  function itemReference(item, revision) {
-    if (item.sound_id) return soundRequest(item.sound_id, item.name, revision);
-    return item.artifact_id ? artifactReference(item.artifact_id, item.name) : null;
-  }
-  function gatherIds(ids) {
-    const seen = /* @__PURE__ */ new Set();
-    for (const id of ids) if (plainId(id)) seen.add(id);
-    const all = [...seen];
-    return { ids: all.slice(0, MOST_GATHERED), dropped: Math.max(0, all.length - MOST_GATHERED) };
-  }
-  function peaksOf(samples, bins) {
-    const out = new Array(bins).fill(0);
-    if (samples.length === 0 || bins <= 0) return out;
-    let loudest = 0;
-    for (let bin = 0; bin < bins; bin++) {
-      const start = Math.floor(bin * samples.length / bins);
-      const end = Math.max(start + 1, Math.floor((bin + 1) * samples.length / bins));
-      let peak = 0;
-      for (let at = start; at < end && at < samples.length; at++) {
-        const value = Math.abs(samples[at]);
-        if (value > peak) peak = value;
-      }
-      out[bin] = peak;
-      if (peak > loudest) loudest = peak;
-    }
-    return loudest > 0 ? out.map((peak) => peak / loudest) : out;
-  }
-
-  // src/shared/peaks.ts
-  var DECODE_MOST = 12 * 1024 * 1024;
-  var kept2 = /* @__PURE__ */ new Map();
-  var loading = /* @__PURE__ */ new Map();
-  var askers = /* @__PURE__ */ new Map();
-  var queue = Promise.resolve();
-  var SKIPPED = /* @__PURE__ */ Symbol("skipped");
-  function peaksFor(id, bars, audio, wanted = () => true) {
-    const key = `${bars}:${id}`;
-    const done = kept2.get(key);
-    if (done !== void 0) return Promise.resolve(done);
-    const running = loading.get(key);
-    if (running) {
-      askers.get(key)?.push(wanted);
-      return running;
-    }
-    askers.set(key, [wanted]);
-    const run = async () => {
-      if (!(askers.get(key) ?? []).some((ask) => ask())) return SKIPPED;
-      const url = await audio(id);
-      const comma = url.indexOf(",");
-      if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
-      const binary = atob(url.slice(comma + 1));
-      const bytes = new Uint8Array(binary.length);
-      for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
-      const buffer = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
-      const mixed2 = new Float32Array(buffer.length);
-      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-        const data = buffer.getChannelData(channel);
-        for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
-      }
-      return peaksOf(mixed2, bars);
-    };
-    const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-      loading.delete(key);
-      askers.delete(key);
-      if (peaks === SKIPPED) return null;
-      kept2.set(key, peaks);
-      return peaks;
-    });
-    queue = promise;
-    loading.set(key, promise);
-    return promise;
-  }
-  function peaksKept(id, bars) {
-    return kept2.get(`${bars}:${id}`) ?? null;
-  }
-
   // src/shared/Player.tsx
   var BARS = 160;
   function Waveform({ id, color, playing, duration, audio, onClick }) {
@@ -6374,13 +6682,12 @@
 
   // src/shared/MapCanvas.tsx
   var MATCHES_LISTED = 6;
-  var FADE_MS = 450;
+  var FADE_MS2 = 450;
   var INTRO_MS = 900;
   var MORPH_MS = 760;
   var FLY_MS = 620;
   var FLY_STAGGER = 14;
   var FLY_MOST = 48;
-  var RIPPLE_MS = 1100;
   var STAGGER = 0.55;
   var ARRANGE_MS = 1e3;
   var LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
@@ -6518,7 +6825,7 @@
       const now = performance.now();
       for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
       for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
-      if (leaving?.size) animate(FADE_MS);
+      if (leaving?.size) animate(FADE_MS2);
     }, [leaving]);
     useEffect(() => {
       if (still || !model.revision) return;
@@ -6534,12 +6841,11 @@
     useEffect(() => {
       if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
     }, [flying]);
-    const playingHere = playing !== null && indexOf.has(playing) && !still;
     useEffect(() => {
-      if (performance.now() >= until.current && !playingHere) return;
+      if (performance.now() >= until.current) return;
       const frame2 = requestAnimationFrame(setClock);
       return () => cancelAnimationFrame(frame2);
-    }, [clock, playingHere]);
+    }, [clock]);
     const [ownArrangement, setOwnArrangement] = useState("");
     const arrangementId = arrangement ?? ownArrangement;
     const arrangementIndex = LAYOUTS.includes(arrangementId) ? model.arrangements.findIndex((each) => each.id === arrangementId) : -1;
@@ -6774,7 +7080,7 @@
         }
       }
       for (const [id, at2] of leftAt.current) {
-        const progress = (now - at2) / FADE_MS;
+        const progress = (now - at2) / FADE_MS2;
         const index = indexOf.get(id);
         if (progress >= 1 || index === void 0) continue;
         const eased = 1 - (1 - progress) ** 2;
@@ -6894,23 +7200,6 @@
         context.strokeStyle = colors.strong;
         context.lineWidth = 1.25;
         context.stroke(ring3);
-      }
-      if (playing) {
-        ring2(playing, colors.accent, 6, 2);
-        const index = indexOf.get(playing);
-        if (index !== void 0 && !still) {
-          const [x, y, blend] = placeOf(index);
-          for (const offset of [0, 0.5]) {
-            const phase = ((now / RIPPLE_MS + offset) % 1 + 1) % 1;
-            context.globalAlpha = 0.65 * (1 - phase) ** 1.5;
-            context.strokeStyle = groupColor2.get(points[index].group) ?? colors.accent;
-            context.lineWidth = 2 - phase;
-            context.beginPath();
-            context.arc(x, y, reach(blend) + 4 + phase * 26, 0, Math.PI * 2);
-            context.stroke();
-          }
-          context.globalAlpha = 1;
-        }
       }
       if (selected) ring2(selected, colors.strong, 4, 2);
       if (flying && !still) {
@@ -7070,6 +7359,15 @@
     const chosenColor = chosenIndex === void 0 ? T.accent : model.groups.find((group) => group.key === model.points[chosenIndex].group)?.color ?? T.accent;
     const hovered = hover ? model.points[hover.index] : void 0;
     const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
+    const playingIndex = playing === null ? void 0 : indexOf.get(playing);
+    const playingGroup = playingIndex === void 0 ? void 0 : model.points[playingIndex].group;
+    const playingSound = playing === null || playingGroup === void 0 ? null : { id: playing, color: model.groups.find((group) => group.key === playingGroup)?.color ?? T.accent, glyph: glyphOf(playingGroup), duration: model.sounds[playing]?.duration ?? 0 };
+    const playingPlace = () => {
+      const [last, at2] = [drawn.current, viewRef.current];
+      if (playingIndex === void 0 || !last || !at2 || last.places.length < 2 * playingIndex + 2) return null;
+      const unit = mapSize * at2.scale;
+      return [last.places[2 * playingIndex] * unit + at2.dx, last.places[2 * playingIndex + 1] * unit + at2.dy];
+    };
     const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
     const hiddenCount = (map?.hidden ?? 0) + leavingCount;
     const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, chosen ? 120 : 10);
@@ -7250,6 +7548,7 @@
             }
           }
         ),
+        /* @__PURE__ */ jsx(AtlasOverlay, { audio, height: size.height, moved: `${view?.scale},${view?.dx},${view?.dy},${clock}`, place: playingPlace, playing: playingSound, still, width: size.width }),
         box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
         /* @__PURE__ */ jsx(
           "svg",
@@ -7274,19 +7573,19 @@
         ),
         /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
         /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: S.hidden, children: said }),
-        hovered && hoveredSound && hover && /* @__PURE__ */ jsxs(
-          "div",
+        hovered && hoveredSound && hover && /* @__PURE__ */ jsx(
+          HoverPill,
           {
-            style: { ...glass, borderRadius: 8, position: "absolute", left: Math.min(hover.x + 14, Math.max(0, size.width - 230)), top: Math.max(0, hover.y - 38), maxWidth: 230, pointerEvents: "none", padding: "4px 9px", fontSize: 11.5, color: T.text, ...S.ellipsis },
-            children: [
-              clean(hoveredSound.name, 48),
-              " ",
-              /* @__PURE__ */ jsxs("span", { style: { color: T.muted }, children: [
-                "· ",
-                clean(hoveredSound.class ?? "", 16)
-              ] })
-            ]
-          }
+            at: [hover.x, hover.y],
+            audio,
+            color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
+            glyph: glyphOf(hovered.group),
+            id: hovered.id,
+            playing: playing === hovered.id,
+            sound: hoveredSound,
+            within: [size.width - coverRight, size.height]
+          },
+          hovered.id
         ),
         grow && (grow.from || grow.to) && /* @__PURE__ */ jsx(
           GrowLayer,
