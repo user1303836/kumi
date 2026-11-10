@@ -257,6 +257,15 @@
       keys: { hover: "Hover", click: "Click", drag: "Drag", shiftDrag: "⇧ Drag", scroll: "Scroll", pinch: "Pinch", middleDrag: "Middle drag", escape: "Esc" },
       does: { hear: "hear", pick: "pick", add: "add", addMore: "add more", zoom: "zoom", pan: "pan", clear: "clear" }
     },
+    // The map's first-open steps, in its corner until each has been done once (or all are skipped).
+    first: {
+      label: "Getting started with the map",
+      hover: "Move over a sound to hear it",
+      box: "Drag a box around sounds to pick them",
+      make: "Press Make… to make a new sound from your picks",
+      skip: "Skip",
+      skipTitle: "Hide these steps; they won't come back"
+    },
     measurements: {
       tab: "Measurements",
       nothing: "Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.",
@@ -1003,6 +1012,14 @@
       keys: { hover: "ホバー", click: "クリック", drag: "ドラッグ", shiftDrag: "⇧ ドラッグ", scroll: "スクロール", pinch: "ピンチ", middleDrag: "中ボタンドラッグ", escape: "Esc" },
       does: { hear: "再生", pick: "選択", add: "追加", addMore: "さらに追加", zoom: "ズーム", pan: "移動", clear: "解除" }
     },
+    first: {
+      label: "マップのはじめかた",
+      hover: "サウンドにポインタを重ねると再生されます",
+      box: "ドラッグで囲むと、サウンドをまとめて選択できます",
+      make: "「作る…」を押すと、選択したサウンドから新しいサウンドを作れます",
+      skip: "スキップ",
+      skipTitle: "この手順を閉じます。再表示されません"
+    },
     measurements: {
       tab: "測定結果",
       nothing: "まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。",
@@ -1746,6 +1763,14 @@
       keys: { hover: "悬停", click: "点击", drag: "拖动", shiftDrag: "⇧ 拖动", scroll: "滚动", pinch: "捏合", middleDrag: "中键拖动", escape: "Esc" },
       does: { hear: "播放", pick: "选择", add: "添加", addMore: "继续添加", zoom: "缩放", pan: "移动", clear: "清除" }
     },
+    first: {
+      label: "地图入门",
+      hover: "把指针移到声音上即可播放",
+      box: "拖出一个框来选择声音",
+      make: "点击“制作…”，用选中的声音制作一个新声音",
+      skip: "跳过",
+      skipTitle: "隐藏这些步骤，之后不再显示"
+    },
     measurements: {
       tab: "测量结果",
       nothing: "还没有测量。Kumi 在对话中测量音频时，数值也会显示在这里。",
@@ -2448,6 +2473,32 @@
     if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
     if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
     return { tone: "muted", text: t("chip.notConnected", daw) };
+  }
+
+  // src/shared/atlas/first.ts
+  var FIRST_STEPS = ["hover", "box", "make"];
+  var keptSteps = (kept3) => (kept3 ?? "").split(",");
+  function firstLeft(kept3, offers) {
+    const done = keptSteps(kept3);
+    return FIRST_STEPS.filter((step2) => !done.includes(step2) && (step2 === "hover" ? offers.hover : offers.picks));
+  }
+  function firstKept(kept3, steps) {
+    const done = keptSteps(kept3);
+    return FIRST_STEPS.filter((step2) => done.includes(step2) || steps.includes(step2)).join(",");
+  }
+  function useFirstOpen(read, write) {
+    const [kept3, setKept] = useState(() => read() ?? "");
+    const latest = useRef(kept3);
+    return {
+      kept: kept3,
+      done: (steps) => {
+        const next = firstKept(latest.current, steps);
+        if (next === latest.current) return;
+        latest.current = next;
+        write(next);
+        setKept(next);
+      }
+    };
   }
 
   // src/shared/design.ts
@@ -6084,7 +6135,8 @@
     hint,
     prompt,
     bottom,
-    box
+    box,
+    first
   }) {
     const t = useT();
     return /* @__PURE__ */ jsxs(
@@ -6095,6 +6147,7 @@
         role: "group",
         style: { ...glass, position: "absolute", zIndex: 1, left: 10, bottom, maxWidth: "calc(100% - 20px)", padding: "7px 10px", display: "flex", flexDirection: "column", gap: 6, transition: "bottom 220ms cubic-bezier(.2,.8,.2,1)" },
         children: [
+          first,
           /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
             /* @__PURE__ */ jsxs("span", { style: caps, children: [
               sounds,
@@ -6118,6 +6171,36 @@
         ]
       }
     );
+  }
+
+  // src/shared/atlas/FirstOpen.tsx
+  function FirstOpen({ steps, onSkip }) {
+    const t = useT();
+    if (steps.length === 0) return null;
+    return /* @__PURE__ */ jsx("div", { "aria-label": t("first.label"), role: "group", style: { display: "flex", flexDirection: "column", gap: 5, paddingBottom: 7, borderBottom: `1px solid ${T.border}` }, children: steps.map((step2, index) => /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 8, fontSize: 12, color: T.text }, children: [
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          "aria-hidden": true,
+          style: {
+            flex: "none",
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            display: "grid",
+            placeItems: "center",
+            background: `color-mix(in srgb, ${T.accent} 24%, transparent)`,
+            color: T.accent,
+            fontSize: 10.5,
+            fontWeight: 700,
+            fontVariantNumeric: "tabular-nums"
+          },
+          children: FIRST_STEPS.indexOf(step2) + 1
+        }
+      ),
+      /* @__PURE__ */ jsx("span", { style: { flex: 1 }, children: t(`first.${step2}`) }),
+      index === 0 && /* @__PURE__ */ jsx(TextButton, { onClick: onSkip, title: t("first.skipTitle"), children: t("first.skip") })
+    ] }, step2)) });
   }
 
   // src/shared/atlas/gestures.ts
@@ -7080,7 +7163,7 @@
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -7286,8 +7369,8 @@
     const nearName = useMemo(() => {
       const seeds = !searched && foundIds ? (found?.near ?? []).filter((id) => model.sounds[id]) : [];
       if (seeds.length === 0) return "";
-      const first = clean(model.sounds[seeds[0]].name ?? "", 60);
-      return seeds.length === 1 ? t("map.near", first) : t("map.nearMany", first, seeds.length - 1);
+      const first2 = clean(model.sounds[seeds[0]].name ?? "", 60);
+      return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
     }, [searched, foundIds, found, model, t]);
     const [painted, setPainted] = useState("");
     useEffect(() => {
@@ -7803,6 +7886,14 @@
     const hasPicks = pickedIds.length > 0;
     const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : [];
     const boxed = drag.current?.add && picked?.size ? (/* @__PURE__ */ new Set([...picked, ...inBox.map((index) => model.points[index].id)])).size : inBox.length;
+    const firstSteps = first && !grow?.choosing ? firstLeft(first.kept, { hover: trail, picks: Boolean(onPicked) }) : [];
+    const [heard2, drew] = [hover !== null && trail, inBox.length > 0];
+    useEffect(() => {
+      if (heard2) first?.onDone(["hover"]);
+    }, [heard2]);
+    useEffect(() => {
+      if (drew) first?.onDone(["box"]);
+    }, [drew]);
     useEffect(() => {
       const element = cluster.current;
       if (!element) return;
@@ -8059,6 +8150,7 @@
         {
           bottom: chosen ? 120 : 10,
           box: cornerRef,
+          first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
           families: model.groups.filter((group) => group.count > 0).length,
           hint: hintOf(mapState(spaceHeld)),
           layout: layoutChoices.length > 0 ? /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 150), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) }) : void 0,
@@ -8785,6 +8877,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
   var TILES = "kumi.mapTiles";
   var PALETTE_OPEN = "kumi.paletteOpen";
   var LAYOUT = "kumi.mapLayout";
+  var FIRST_OPEN = "kumi.mapFirst";
   function useNow(every = 3e4) {
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => {
@@ -8838,6 +8931,14 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [paletteOpen, setPaletteOpen] = useState(() => globalThis.localStorage?.getItem(PALETTE_OPEN) !== "off");
     const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? "");
     const palette = usePaletteMap(store, state, audition, t, { hover, left: (id) => setSelected((current) => current === id ? null : current) });
+    const first = useFirstOpen(
+      () => globalThis.localStorage?.getItem(FIRST_OPEN),
+      (kept3) => globalThis.localStorage?.setItem(FIRST_OPEN, kept3)
+    );
+    const makeOpen = palette.making !== null;
+    useEffect(() => {
+      if (makeOpen) first.done(["make"]);
+    }, [makeOpen]);
     const grow = useGrow((request) => store.design(request), (result) => void audition.play(result.artifact_id).catch(() => {
     }), state.map?.revision ?? null);
     const dock = useRef(null);
@@ -8930,6 +9031,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               onHover: palette.onHover,
               trail: hover,
               kin: palette.kin,
+              first: { kept: first.kept, onDone: first.done },
               onPick: (id) => {
                 setSelected(id);
                 palette.play(id);

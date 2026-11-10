@@ -6,6 +6,7 @@ import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -33,6 +34,8 @@ const TILES = 'kumi.mapTiles'
 const PALETTE_OPEN = 'kumi.paletteOpen'
 /** The browser's own key for the map's layout: similarity ('') until the producer picks another. */
 const LAYOUT = 'kumi.mapLayout'
+/** The browser's own key for the map's first-open steps the producer has done or skipped: none at first. */
+const FIRST_OPEN = 'kumi.mapFirst'
 
 function useNow(every = 30_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -96,6 +99,15 @@ function Dashboard() {
   const [layout, setLayout] = useState(() => globalThis.localStorage?.getItem(LAYOUT) ?? '')
   // A sound that can't play here leaves the map quietly; nothing else a play meets is shown here either.
   const palette = usePaletteMap(store, state, audition, t, { hover, left: id => setSelected(current => (current === id ? null : current)) })
+  // The map's first-open steps, kept where the drawer's fold is. Make… pressed is seen here; the map sees the others.
+  const first = useFirstOpen(
+    () => globalThis.localStorage?.getItem(FIRST_OPEN),
+    kept => globalThis.localStorage?.setItem(FIRST_OPEN, kept)
+  )
+  const makeOpen = palette.making !== null
+  useEffect(() => {
+    if (makeOpen) first.done(['make'])
+  }, [makeOpen]) // eslint-disable-line react-hooks/exhaustive-deps
   // Grow: its renders go through the store; the handle's point plays as soon as it's grown.
   const grow = useGrow(request => store.design(request), result => void audition.play(result.artifact_id).catch(() => {}), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
@@ -222,6 +234,7 @@ function Dashboard() {
             onHover={palette.onHover}
             trail={hover}
             kin={palette.kin}
+            first={{ kept: first.kept, onDone: first.done }}
             onPick={id => {
               setSelected(id)
               palette.play(id)

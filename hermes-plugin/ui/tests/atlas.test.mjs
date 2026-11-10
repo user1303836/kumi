@@ -11,6 +11,7 @@ const trail = await load('src/shared/atlas/trail.ts')
 const lineage = await load('src/shared/atlas/lineage.ts')
 const gestures = await load('src/shared/atlas/gestures.ts')
 const constellation = await load('src/shared/atlas/constellation.ts')
+const first = await load('src/shared/atlas/first.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -209,4 +210,20 @@ test("a sound's constellation is the sounds nearest it, nearest first, without t
   // A map of three sounds joins the two others; a sound the map doesn't have, none.
   assert.deepEqual(constellation.nearestTo(points.slice(0, 3), 1, 5), [0, 2])
   assert.deepEqual(constellation.nearestTo(points, 99, 5), [])
+})
+
+test('a first-open step shows until it has been done once, on a map that offers it', () => {
+  const all = { hover: true, picks: true }
+  assert.deepEqual(first.firstLeft('', all), ['hover', 'box', 'make'])
+  assert.deepEqual(first.firstLeft(null, all), ['hover', 'box', 'make'])
+  // Done in any order, each stays done; what the host keeps reads back the same.
+  const kept = first.firstKept(first.firstKept('', ['make']), ['hover'])
+  assert.equal(kept, 'hover,make')
+  assert.deepEqual(first.firstLeft(kept, all), ['box'])
+  assert.equal(first.firstKept(kept, ['hover']), kept)
+  // Skip does them all.
+  assert.deepEqual(first.firstLeft(first.firstKept('', first.FIRST_STEPS), all), [])
+  // With hover-to-play off there is nothing to hear by moving; a map that picks nothing has no box and no Make….
+  assert.deepEqual(first.firstLeft('', { hover: false, picks: true }), ['box', 'make'])
+  assert.deepEqual(first.firstLeft('', { hover: true, picks: false }), ['hover'])
 })

@@ -225,6 +225,15 @@ const en = {
     keys: { hover: 'Hover', click: 'Click', drag: 'Drag', shiftDrag: '⇧ Drag', scroll: 'Scroll', pinch: 'Pinch', middleDrag: 'Middle drag', escape: 'Esc' },
     does: { hear: 'hear', pick: 'pick', add: 'add', addMore: 'add more', zoom: 'zoom', pan: 'pan', clear: 'clear' }
   },
+  // The map's first-open steps, in its corner until each has been done once (or all are skipped).
+  first: {
+    label: 'Getting started with the map',
+    hover: 'Move over a sound to hear it',
+    box: 'Drag a box around sounds to pick them',
+    make: 'Press Make… to make a new sound from your picks',
+    skip: 'Skip',
+    skipTitle: "Hide these steps; they won't come back"
+  },
   measurements: {
     tab: 'Measurements',
     nothing: 'Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.',
@@ -977,6 +986,14 @@ const ja: Shape<typeof en> = {
     keys: { hover: 'ホバー', click: 'クリック', drag: 'ドラッグ', shiftDrag: '⇧ ドラッグ', scroll: 'スクロール', pinch: 'ピンチ', middleDrag: '中ボタンドラッグ', escape: 'Esc' },
     does: { hear: '再生', pick: '選択', add: '追加', addMore: 'さらに追加', zoom: 'ズーム', pan: '移動', clear: '解除' }
   },
+  first: {
+    label: 'マップのはじめかた',
+    hover: 'サウンドにポインタを重ねると再生されます',
+    box: 'ドラッグで囲むと、サウンドをまとめて選択できます',
+    make: '「作る…」を押すと、選択したサウンドから新しいサウンドを作れます',
+    skip: 'スキップ',
+    skipTitle: 'この手順を閉じます。再表示されません'
+  },
   measurements: {
     tab: '測定結果',
     nothing: 'まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。',
@@ -1722,6 +1739,14 @@ const zh: Shape<typeof en> = {
     zoom: '缩放（100% 为全图）',
     keys: { hover: '悬停', click: '点击', drag: '拖动', shiftDrag: '⇧ 拖动', scroll: '滚动', pinch: '捏合', middleDrag: '中键拖动', escape: 'Esc' },
     does: { hear: '播放', pick: '选择', add: '添加', addMore: '继续添加', zoom: '缩放', pan: '移动', clear: '清除' }
+  },
+  first: {
+    label: '地图入门',
+    hover: '把指针移到声音上即可播放',
+    box: '拖出一个框来选择声音',
+    make: '点击“制作…”，用选中的声音制作一个新声音',
+    skip: '跳过',
+    skipTitle: '隐藏这些步骤，之后不再显示'
   },
   measurements: {
     tab: '测量结果',

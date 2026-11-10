@@ -2,6 +2,7 @@
 // sounds in how many families, the layout as a button anyone can find (it opens the layout menu), and the zoom. Below,
 // the hint line: the gestures that do something now, each a keycap and a word, written from the same table the map's
 // handlers read (`gestures.ts`); the count of the picks while there are some; Grow's prompt while it names its sounds.
+// On a host's first maps, the first-open steps stand over both (`FirstOpen.tsx`).
 import { T } from '@kumi/theme'
 import type { ReactNode, RefObject } from 'react'
 
@@ -51,7 +52,8 @@ export function Corner({
   hint,
   prompt,
   bottom,
-  box
+  box,
+  first
 }: {
   /** The count in words ("8,960 sounds"), and how many families have sounds. */
   sounds: string
@@ -70,6 +72,8 @@ export function Corner({
   bottom: number
   /** Its own box, for the map to keep its words from under it. */
   box?: RefObject<HTMLDivElement | null>
+  /** The first-open steps still to do, while there are some: they stand over the corner's own lines. */
+  first?: ReactNode
 }) {
   const t = useT()
   return (
@@ -79,6 +83,7 @@ export function Corner({
       role="group"
       style={{ ...glass, position: 'absolute', zIndex: 1, left: 10, bottom, maxWidth: 'calc(100% - 20px)', padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 6, transition: 'bottom 220ms cubic-bezier(.2,.8,.2,1)' }}
     >
+      {first}
       <div style={{ ...S.row, gap: 10, flexWrap: 'wrap' }}>
         <span style={caps}>
           {sounds} · {t('corner.families', families)}

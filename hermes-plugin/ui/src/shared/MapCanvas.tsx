@@ -15,6 +15,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AtlasOverlay } from './atlas/AtlasOverlay.tsx'
 import { nearestTo, STARS } from './atlas/constellation.ts'
 import { Corner, ToolName } from './atlas/Corner.tsx'
+import { FIRST_STEPS, firstLeft, type FirstStep } from './atlas/first.ts'
+import { FirstOpen } from './atlas/FirstOpen.tsx'
 import { gesturesOf, hintOf, type MapState } from './atlas/gestures.ts'
 import { glowOf } from './atlas/glow.ts'
 import { HoverPill } from './atlas/HoverPill.tsx'
@@ -88,6 +90,9 @@ export interface MapCanvasProps {
   trail?: boolean
   /** Sounds to ring in their own colours: the parents of the made sound the pointer or the keyboard is on. */
   kin?: ReadonlySet<string> | null
+  /** The first-open steps (`atlas/first.ts`): which the host has kept as done, and what to call as more are (hearing
+   *  a sound and drawing a box are seen here; the host sees Make… pressed). Absent: the map shows none. */
+  first?: { kept: string; onDone: (steps: readonly FirstStep[]) => void }
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -162,7 +167,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1029,6 +1034,16 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // While a box is drawn: how many sounds letting go would leave picked (a Shift-drag's box adds to the picks).
   const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : []
   const boxed = drag.current?.add && picked?.size ? new Set([...picked, ...inBox.map(index => model.points[index].id)]).size : inBox.length
+  // The first-open steps still to do here: hearing a sound (with hover-to-play on) and drawing a box are done the
+  // moment the map sees them. Not while Grow's prompt has the corner.
+  const firstSteps = first && !grow?.choosing ? firstLeft(first.kept, { hover: trail, picks: Boolean(onPicked) }) : []
+  const [heard, drew] = [hover !== null && trail, inBox.length > 0]
+  useEffect(() => {
+    if (heard) first?.onDone(['hover'])
+  }, [heard]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (drew) first?.onDone(['box'])
+  }, [drew]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const element = cluster.current
     if (!element) return
@@ -1325,6 +1340,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       <Corner
         bottom={chosen ? 120 : 10}
         box={cornerRef}
+        first={first && firstSteps.length > 0 ? <FirstOpen onSkip={() => first.onDone(FIRST_STEPS)} steps={firstSteps} /> : undefined}
         families={model.groups.filter(group => group.count > 0).length}
         hint={hintOf(mapState(spaceHeld))}
         layout={
