@@ -8823,10 +8823,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       },
       kin,
       showKin: setKinOf,
-      showKinOf: (id) => {
-        setKinOf(id);
-        if (id && !designed.has(id)) void store.readDesignsOnce();
-      },
+      showKinOf: setKinOf,
       onPicked: (ids, how) => setPicks((current) => {
         const base = current.revision === revision ? current.ids : /* @__PURE__ */ new Set();
         const next = how === "replace" ? /* @__PURE__ */ new Set() : new Set(base);

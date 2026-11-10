@@ -45,8 +45,8 @@ export interface PaletteMap {
   lineage: (sources: readonly DesignSource[], at?: number) => Share[]
   madeLineage: (artifactId: string) => Share[] | null
   /** The sounds to ring on the map: the parents of the made sound the pointer or the keyboard is on. `showKin` sets
-   *  them from a result's sources (null: none), `showKinOf` from a made sound's id: in a window that doesn't know
-   *  what that sound was made from yet, it reads the engine's results (the read Make… does on opening, once). */
+   *  them from a result's sources (null: none), `showKinOf` from a made sound's id: none for a sound this window
+   *  doesn't know the sources of (it knows what it made, and what Make… read on opening; a hover reads nothing). */
   kin: ReadonlySet<string> | null
   showKin: (sources: readonly DesignSource[] | null) => void
   showKinOf: (artifactId: string | null) => void
@@ -132,10 +132,7 @@ export function usePaletteMap(
     },
     kin,
     showKin: setKinOf,
-    showKinOf: id => {
-      setKinOf(id)
-      if (id && !designed.has(id)) void store.readDesignsOnce()
-    },
+    showKinOf: setKinOf,
     onPicked: (ids, how) =>
       setPicks(current => {
         const base = current.revision === revision ? current.ids : new Set<string>()
