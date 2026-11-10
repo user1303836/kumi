@@ -3,7 +3,7 @@
 **Kumi puts Hermes inside Ableton Live, REAPER and Renoise: it hears your mix, makes the changes you ask for (each
 recorded in HISTORY, most undoable), and turns your own samples into new sounds.**
 
-![The sound map in Hermes Desktop: your own samples laid out by how they sound, with the found snares circled and why each matched.](../docs/assets/hermes/screenshots/catalog-2-map.png)
+![The sound map in Hermes Desktop: 3,840 sounds laid out by how they sound, each group in its own colour and shape, with a sound's name on hover.](../docs/assets/hermes/screenshots/catalog-2-map.png)
 
 ## Quick start
 
@@ -72,19 +72,19 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
 
-![The palette: a box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
+![The palette: a box of 77 snares picked in white, with what they can do beside them, the palette's 94 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
-*The palette: a box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.*
+*The palette: a box of 77 snares picked in white, with what they can do beside them, the palette's 94 hats ringed in the accent, and the palette drawer below, each sound with its waveform.*
 
-![Make: a Cross blend, a Fuse loop at the project's 124 BPM (playing, kept in the palette) and a Stack, each with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
+![Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
 
-*Make: a Cross blend, a Fuse loop at the project's 124 BPM (playing, kept in the palette) and a Stack, each with Reroll, Keep and Use.*
+*Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each with Reroll, Keep and Use.*
 
 Screenshots: Kumi 1.24.73 on real Ableton Live 12, and Kumi 1.24.71 on real REAPER 7 (the listening shot). Hermes's
-side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side (the pane, the map,
-the approval and the measurements) is real. The listening shot measures a synthetic test tone against a reference
-made 3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step. The
-palette and Make shots are Kumi 1.24.77 in Hermes v0.23.0's Desktop interface: the 8,830-sound map and its samples are
+side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side (the pane, the
+approval and the measurements) is real. The listening shot measures a synthetic test tone against a reference made
+3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step. The map,
+palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its samples are
 generated test data, and the made sounds come from Kumi's sound-design engine.
 
 ## Tools

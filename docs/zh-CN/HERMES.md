@@ -75,9 +75,9 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 调色板是你收集起来准备使用的声音，和 Kumi 自己的地图一样；Hermes 读写的也是同一个调色板。
 
-![Hermes Desktop 中的声音地图：按住 Shift 框选的 21 个声音带白色圆环，调色板里的 15 个声音带强调色圆环，下方的调色板中每个声音都带着波形。](../assets/hermes/screenshots/catalog-7-palette.png)
+![Hermes Desktop 中的声音地图：框选的 77 个军鼓带白色圆环，能对它们做的事浮在旁边；调色板里的 94 个踩镲带强调色圆环；下方的调色板抽屉中每个声音都带着波形。](../assets/hermes/screenshots/catalog-7-palette.png)
 
-*Hermes Desktop 中的 Kumi 1.24.77；这张 8,830 个声音的地图及其采样是生成的测试数据。*
+*Hermes Desktop 中的 Kumi 1.24.79；这张 3,840 个声音的地图及其采样是生成的测试数据。*
 
 - **收集：** 在地图上拖出一个框（按住 Shift 可再加一个框），按住 Command 或 Ctrl 点击一个声音可选中或取消它，或用 **选择全部** 选中搜索或 Kumi 找到的声音；然后按 **加入调色板**。选中的声音自己的 **加入调色板** 只加入它。调色板中的声音在地图上带一个圆环。
 - **在地图下方**，调色板是一个卡片抽屉：每个声音的波形（与它所在分组同色）、名称和类别、**使用…**（把它的引用放进对话；仪表盘中则复制）和用来移出的 ×。点击播放，拖动（或按 Alt 加 ← / →）移动它。**收起** 只留一行小块（**全部显示** 再次打开），拖动抽屉的边缘可以调整它的高度。可以重命名调色板、新建、切换或删除调色板；删除后声音仍留在你的音色库中。
@@ -90,9 +90,9 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 Kumi 能用你选中的任意数量（两个或更多）的声音（地图上的声音、调色板里的声音，或 Kumi 之前做的声音）做出一个新声音。你的工程不会有任何改变：在你使用之前，结果只是 Kumi 自己的副本。
 
-![制作面板：一个交叉融合、一个按工程 124 BPM 生成的熔合循环（正在播放，已保留到调色板）和一个叠加，每个结果都有重掷、保留和使用…。](../assets/hermes/screenshots/catalog-8-make.png)
+![在地图旁打开的制作面板：一个叠加，和一个按工程 124 BPM 生成的循环（正在播放，已保留到调色板），每个结果都有重掷、保留和使用…。](../assets/hermes/screenshots/catalog-8-make.png)
 
-*Hermes Desktop 中的 Kumi 1.24.77；采样是生成的测试数据，做出的声音来自 Kumi 的引擎。*
+*Hermes Desktop 中的 Kumi 1.24.79；采样是生成的测试数据，做出的声音来自 Kumi 的引擎。*
 
 - **交叉**（cross）成一个声音：
   - **融合**（blend）：把它们全部揉成一个声音主体；
@@ -166,9 +166,9 @@ Kumi 也能与 ElevenLabs 和 Mirelo 的声音配合使用：见[集成](#集成
 
 ![Hermes Desktop 中 Kumi 的侧边栏：FOCUS 显示 Drums 音轨，HISTORY 中每次修改都有 Undo。](../assets/hermes/screenshots/catalog-1-pane.png)
 
-![网页仪表盘中的 Kumi 标签页：HISTORY、状态和地图。](../assets/hermes/screenshots/hermes-dashboard.png)
+![网页仪表盘中的 Kumi 页面：状态、FOCUS、HISTORY 和声音地图。](../assets/hermes/screenshots/hermes-dashboard.png)
 
-截图：真实 Ableton Live 12 上的 Kumi 1.24.73。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
+截图：面板是真实 Ableton Live 12 上的 Kumi 1.24.73。地图、调色板、制作和仪表盘的截图是 Kumi 1.24.79，运行在生成的 3,840 个声音的测试地图上，做出的声音来自 Kumi 的声音设计引擎。对话中 Hermes 一方来自按脚本回答的替代模型，文字仅作示意；Kumi 一方是真实的。
 
 ## 设置项
 

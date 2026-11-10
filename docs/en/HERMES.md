@@ -160,9 +160,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 The palette is the sounds you gather to work with, as in Kumi's own map; Hermes reads and edits the same one.
 
-![The sound map in Hermes Desktop: a Shift-drag box of 21 picks ringed in white, the palette's 15 sounds ringed in the accent, and the palette dock below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
+![The sound map in Hermes Desktop: a box of 77 snares picked in white, with what they can do beside them, the palette's 94 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
 
-*Kumi 1.24.77 in Hermes Desktop; the 8,830-sound map and its samples are generated test data.*
+*Kumi 1.24.79 in Hermes Desktop; the 3,840-sound map and its samples are generated test data.*
 
 - **Gather:** on the map, drag a box (Shift adds another), Command or Ctrl-click a sound to pick or unpick it, or
   **Pick all** for what a search or Kumi's find keeps; then **Add to palette**. A picked sound's own **Add to palette**
@@ -185,9 +185,9 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 Kumi makes a new sound out of two or more of yours, as many as you pick (map sounds, palette sounds, or sounds Kumi
 made before). Nothing in your project changes: the result is Kumi's own copy until you use it.
 
-![The Make panel: a Cross blend, a Fuse loop at the project's 124 BPM (playing, already kept in the palette) and a Stack, each with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
+![The Make panel, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, already kept in the palette), each with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
 
-*Kumi 1.24.77 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
+*Kumi 1.24.79 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
 
 - **Cross** them into one sound:
   - **blend:** one body morphed from all of them;
@@ -370,10 +370,11 @@ run without asking there, and Kumi can't tell it from a chat.
 
 ![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
 
-![The web dashboard's Kumi tab: HISTORY, status and the map.](../assets/hermes/screenshots/hermes-dashboard.png)
+![The web dashboard's Kumi page: status, FOCUS and HISTORY beside the sound map.](../assets/hermes/screenshots/hermes-dashboard.png)
 
-Screenshots: Kumi 1.24.73 on real Ableton Live 12. Hermes's side of the chat came from a scripted stand-in model, so the
-words are illustrative; Kumi's side is real.
+Screenshots: the pane is Kumi 1.24.73 on real Ableton Live 12. The map, palette, Make and dashboard shots are Kumi
+1.24.79 on a generated 3,840-sound test map, with the made sounds from Kumi's sound-design engine. Hermes's side of the
+chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
 
 ## Settings
 
