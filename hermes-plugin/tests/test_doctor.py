@@ -253,17 +253,13 @@ class Doctor(unittest.TestCase):
                 self.assertEqual(last["state"], doctor.OK, "only setup's record to go on")
                 self.assertIn("as setup last recorded it", last["detail"])
 
-    def test_an_adopted_part_is_usable_in_live_only(self):
-        for daw, app, state in (("ableton", "Live", doctor.OK), ("reaper", "REAPER", doctor.FIX),
-                                ("renoise", "Renoise", doctor.FIX)):
+    def test_an_adopted_part_is_usable_in_every_daw(self):
+        for daw, app in (("ableton", "Live"), ("reaper", "REAPER"), ("renoise", "Renoise")):
             with self.subTest(daw=daw):
                 host, _, data = self.ready(settings={"daw": daw}, daw=daw)
                 self.recorded(data, adopted=True, daw=daw)
                 adopted = self.item(doctor.checks(host), f"Kumi's part in {app}")
-                self.assertEqual(adopted["state"], state, adopted)
-                if state == doctor.FIX:  # the runtime refuses to connect through it (serve/connection.rs)
-                    self.assertIn("can't use", adopted["detail"])
-                    self.assertEqual(adopted["fix"], f"Set {app} up for Hermes instead.")
+                self.assertEqual(adopted["state"], doctor.OK, adopted)
 
     def test_the_connection_names_the_daw_the_runtime_runs_for(self):
         host, _, _ = self.ready(daw="reaper")

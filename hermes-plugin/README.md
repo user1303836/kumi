@@ -149,8 +149,8 @@ Kumi needs two things on the machine that runs Hermes, can use a third, and asks
 2. **Its part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's extension or Renoise's tool,
    installed only at the location shown to you. Quit Live first; REAPER and Renoise can stay open and restart after.
    If another Kumi on this computer (a standalone Kumi, or Kumi for Hermes in another Hermes profile) already put its
-   part in Live, setup offers to use that installation instead of replacing it; for REAPER and Renoise, Kumi for Hermes
-   can't use another Kumi's part yet. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up
+   part in your DAW, setup offers to use that installation instead of replacing it, so you can go on using both, even at
+   the same time. The first DAW you set up becomes Kumi's `daw` in the same approval; setting up
    another one keeps the current DAW and ends with the step that switches: `hermes kumi setup --daw <daw> --use`,
    approved like the rest.
 3. **Optional, ffmpeg:** if an ffmpeg is already on this computer, setup offers to let Kumi's runtime run it to read
