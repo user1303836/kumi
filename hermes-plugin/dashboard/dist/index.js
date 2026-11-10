@@ -6151,9 +6151,9 @@
     return alpha < 0.03 ? 0 : alpha;
   }
   function haloOf(radius, zoom, crowd, unit) {
-    const reach = radius * 3.3;
+    const reach = radius * Math.min(6.5, 3.3 + 0.85 * Math.log2(Math.max(1, zoom)));
     const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
-    return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
+    return { radius: reach, alpha: Math.max(0.18, Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? 0.9 / overlap : 1)) };
   }
 
   // src/shared/atlas/glow.ts

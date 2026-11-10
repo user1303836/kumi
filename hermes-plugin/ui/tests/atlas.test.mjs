@@ -58,6 +58,9 @@ test('halos weaken as the map zooms in and on a crowded map, so a core adds up t
   assert.ok(sparse.alpha <= 0.34 && crowded.alpha < sparse.alpha && crowded.alpha >= 0.16)
   assert.ok(nebula.haloOf(3.5, 4, 2, 833 * 4).alpha < sparse.alpha)
   assert.ok(nebula.haloOf(3.5, 4, 2, 833 * 4).radius > sparse.radius)
+  // Far in, a sound alone on dark map still glows: its halo keeps a floor, and reaches further past its shape.
+  const far = nebula.haloOf(5.2, 30, 2, 833 * 30)
+  assert.ok(far.alpha >= 0.16 && far.radius / 5.2 > sparse.radius / 2.2)
   assert.equal(nebula.nebulaAlpha(1), 1)
   assert.ok(nebula.nebulaAlpha(2) < 0.5)
   assert.equal(nebula.nebulaAlpha(20), 0, 'far in, the nebula is not drawn at all')

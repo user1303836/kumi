@@ -118,11 +118,12 @@ export function nebulaAlpha(zoom: number): number {
 
 /** A halo's radius under a sound drawn `radius` pixels big, and how strong it is at a zoom, on a map whose densest
  *  64th-by-64th cell holds `crowd` sounds and whose square is `unit` pixels across: strong enough to lift a lone sound,
- *  weak enough that a crowded core adds up to a glow in its colour, never to white. */
+ *  weak enough that a crowded core adds up to a glow in its colour, never to white. Zoomed in, the sounds stand apart
+ *  on dark map: the halo reaches further past the shape, and never falls below a floor, so each still glows. */
 export function haloOf(radius: number, zoom: number, crowd: number, unit: number): { radius: number; alpha: number } {
-  const reach = radius * 3.3
+  const reach = radius * Math.min(6.5, 3.3 + 0.85 * Math.log2(Math.max(1, zoom)))
   // A halo's light, summed over its sprite, is about 0.77 of its radius squared; a core's sounds per pixel times that
   // is how many halos overlap there.
   const overlap = ((crowd * 64 * 64) / (unit * unit)) * 0.77 * reach * reach
-  return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) }
+  return { radius: reach, alpha: Math.max(0.18, Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? 0.9 / overlap : 1)) }
 }
