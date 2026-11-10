@@ -7653,16 +7653,26 @@ var Glow = class {
   shapes = /* @__PURE__ */ new Map();
   ground = "";
   dark = true;
-  /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
-   *  counts as dark, as both hosts' first themes are). */
+  /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved. The colour is painted and
+   *  the pixel read back, so any form a theme writes it in counts (`oklch(…)`, `color(srgb …)`); without an off-screen
+   *  canvas to paint on, the canvas's own reading of it; one neither can read counts as dark. */
   onDark(context, ground) {
     if (ground === this.ground) return this.dark;
     this.ground = ground;
-    const kept3 = context.fillStyle;
-    context.fillStyle = "#000";
-    context.fillStyle = ground;
-    const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
-    context.fillStyle = kept3;
+    const probe = picture(1, 1);
+    let read = null;
+    if (probe) {
+      probe.context.fillStyle = ground;
+      probe.context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = probe.context.getImageData(0, 0, 1, 1).data;
+      read = [red, green, blue];
+    } else {
+      const kept3 = context.fillStyle;
+      context.fillStyle = "#000";
+      context.fillStyle = ground;
+      read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
+      context.fillStyle = kept3;
+    }
     this.dark = read ? isDark(read) : true;
     this.shapes.clear();
     return this.dark;
