@@ -147,6 +147,10 @@ pub struct HostStart {
     /// `keepIdentity`; `KUMI_KEEP_IDENTITY=1` in `daw-mcp-server`'s environment): the context's `policy.persist_identity`,
     /// true for standalone Kumi and false for the plugin's runtime, whose host then has nothing written into the project.
     pub keep_identity: bool,
+    /// Where the host keeps its catch-up snapshots, when not in the Kumi home (`daw-mcp-server --snapshots`): the
+    /// plugin's state's `bridges/<daw>/snapshots` (`policy.state_home`), so a Kumi home the plugin was let use (another
+    /// Kumi's installation) keeps only its own. None: the Kumi home's, standalone Kumi's.
+    pub snapshots: Option<PathBuf>,
 }
 
 /// What `daw-mcp-server`'s environment gets beside the MCP client's own: `KUMI_KEEP_IDENTITY=1` when the host is to ask.
@@ -492,6 +496,10 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         made_in: RefCell::default(),
     });
     let context = &options.context;
+    // What Kumi learns of each project (where a saved one was last seen) and its kept scripts: in the plugin host's own
+    // state when it has one, so a Kumi home it was let use (another Kumi's installation) never gets them; else in the
+    // Kumi home, standalone Kumi's.
+    let own_home = context.policy.state_home.clone().unwrap_or_else(|| options.kumi_home.clone());
     // A change of Kumi's (or its undo) is kept in the project's snapshot once things settle.
     let remembered = Rc::new(Remembered::default());
     let on_change: Option<Rc<dyn Fn(ChangeRecord)>> = {
@@ -518,7 +526,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
     // (#401) kept scripts, where the DAW offers them: Kumi's copies in its folder, one a DAW
     let scripts: Option<Rc<dyn KernelTool>> = daw.profile.caps.scripts.then(|| {
         let backend = crate::scripts::OwnScripts::new(changes.clone(), daw.scripts);
-        kumi_agent::core::scripts::tool::Scripts::new(backend, options.kumi_home.join("scripts").join(daw.host_flag)).tool()
+        kumi_agent::core::scripts::tool::Scripts::new(backend, own_home.join("scripts").join(daw.host_flag)).tool()
     });
     // (#401) delivery to a spec, where the DAW offers it
     let spec: Option<Rc<dyn KernelTool>> = daw.profile.caps.delivery_spec.then(|| {
@@ -535,7 +543,6 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         let backend = crate::ears::OwnEars::new(changes.clone(), listening.renderer.clone(), ears);
         kumi_agent::core::stems::tool::Stems::new(backend).tool()
     });
-    let kumi_home = options.kumi_home.clone();
     Rc::new(OwnIntegration::<S> {
         daw,
         options,
@@ -575,7 +582,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         heard: Rc::default(),
         pins: Rc::default(),
         shifts: Rc::default(),
-        places: Places::new(&kumi_home, daw.host_flag),
+        places: Places::new(&own_home, daw.host_flag),
         variations,
         mapping,
         chop,
@@ -778,8 +785,10 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             return Ok(endpoint);
         }
         let keep_identity = self.options.context.policy.persist_identity;
+        let snapshots =
+            self.options.context.policy.state_home.as_ref().map(|state| state.join("bridges").join(self.daw.host_flag).join("snapshots"));
         let endpoint = match &self.options.connect {
-            Some(connect) => connect(HostStart { signal, keep_identity }).await?,
+            Some(connect) => connect(HostStart { signal, keep_identity, snapshots }).await?,
             None => {
                 let mut args = vec![
                     "--daw".into(),
@@ -789,6 +798,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 ];
                 if matches!(self.options.context.policy.listening, kumi_agent::core::context::ListeningPolicy::Restricted { .. }) {
                     args.push("--restricted-listening".into());
+                }
+                if let Some(snapshots) = snapshots {
+                    args.extend(["--snapshots".into(), snapshots.to_string_lossy().into_owned()]);
                 }
                 let options = Options {
                     signal,

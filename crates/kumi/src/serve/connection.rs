@@ -457,9 +457,9 @@ pub fn policy(state_dir: &Path) -> HostPolicy {
 }
 
 /// Connects to the DAW: its integration made with the plugin's host policy and started. One start at a time: a second
-/// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, when the part in
-/// the DAW is another Kumi's (its home isn't `--kumi-home`), and, for REAPER and Renoise, when `--kumi-home` is a home
-/// setup adopted (their integrations still keep the project's places and baselines under it).
+/// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, or when the part
+/// in the DAW is another Kumi's (its home isn't `--kumi-home`). A home setup adopted (another Kumi's installation) is
+/// used for its bridge's files only: what Kumi keeps of each project goes in the plugin's state (`policy.state_home`).
 pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc<Connection>, OpError> {
     let _starting = ctx.link().connecting.lock().await;
     if let Some(connection) = ctx.link().connection() {
@@ -482,11 +482,6 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
     if !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home)) {
         let reason = owned_elsewhere(ctx.daw());
         return Err(OpError::Refused { code: "owned_elsewhere", reason, owner: Some(json!({"kumi_home": owner})) });
-    }
-    let plugins = ctx.paths().state_dir.parent().map(Path::to_path_buf).unwrap_or_default();
-    if matches!(ctx.daw(), kumi_types::daw::DawId::Reaper | kumi_types::daw::DawId::Renoise) && !inside(home, &plugins) {
-        let reason = format!("Kumi for Hermes can't use {app} through an adopted installation yet: set {app} up for Hermes instead.");
-        return Err(OpError::Refused { code: "adopted_home", reason, owner: Some(json!({"kumi_home": home})) });
     }
     let reported = Rc::new(Reported::default());
     let on_connection = {

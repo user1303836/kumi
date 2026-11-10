@@ -1,5 +1,6 @@
-//! The `daw-mcp-server` command: `daw-mcp-server --daw reaper|renoise|soundcraft [--kumi-home <folder>]`, asking the
-//! bridge to keep the project's id when `KUMI_KEEP_IDENTITY=1` is in its environment.
+//! The `daw-mcp-server` command: `daw-mcp-server --daw reaper|renoise|soundcraft [--kumi-home <folder>]
+//! [--restricted-listening] [--snapshots <folder>]`, asking the bridge to keep the project's id when
+//! `KUMI_KEEP_IDENTITY=1` is in its environment.
 use std::sync::Arc;
 
 fn main() {
@@ -17,8 +18,9 @@ fn main() {
         }
     };
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio runtime");
-    let host =
-        daw_mcp_server::host::Host::new(options.daw, &options.kumi_home, options.listening).with_keep_identity(options.keep_identity);
+    let host = daw_mcp_server::host::Host::new(options.daw, &options.kumi_home, options.listening)
+        .with_keep_identity(options.keep_identity)
+        .with_snapshots(options.snapshots);
     let host = Arc::new(host);
     let served = runtime.block_on(daw_mcp_server::stdio::serve(host, tokio::io::stdin(), tokio::io::stdout()));
     if let Err(error) = served {

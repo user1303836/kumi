@@ -35,6 +35,11 @@ pub struct HostPolicy {
     /// own rules. A plugin host's is under its own state, so its takes' numbering and kept takes never mix with
     /// standalone Kumi's on the same project (W1-e).
     pub variations_home: Option<PathBuf>,
+    /// The plugin host's own state folder: where a DAW integration through Kumi's own host keeps what it learns of each
+    /// project (where a saved project was last seen, the catch-up snapshots) and its kept scripts, instead of in the
+    /// Kumi home it reaches the bridge through, which may be another Kumi's installation the producer let it use
+    /// (setup's adoption). None: in the Kumi home, standalone Kumi's.
+    pub state_home: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,16 +97,26 @@ impl ListeningPolicy {
 
 impl HostPolicy {
     pub fn standalone() -> Self {
-        Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone, menus: true, variations_home: None }
+        Self {
+            persist_identity: true,
+            guards_undo: false,
+            listening: ListeningPolicy::Standalone,
+            menus: true,
+            variations_home: None,
+            state_home: None,
+        }
     }
 
-    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf, variations_home: PathBuf) -> Self {
+    /// The plugin host's policy; `state` is its own state folder (the variations' home, and its projects' places,
+    /// catch-up snapshots and kept scripts).
+    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf, state: PathBuf) -> Self {
         Self {
             persist_identity: false,
             guards_undo: true,
             listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root },
             menus: false,
-            variations_home: Some(variations_home),
+            variations_home: Some(state.clone()),
+            state_home: Some(state),
         }
     }
 }
