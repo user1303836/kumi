@@ -5326,7 +5326,7 @@
     return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - size) / 2 };
   }
   function floatBeside(box, w, h, width, height, top, bottom) {
-    const GAP = 12;
+    const GAP2 = 12;
     const EDGE = 8;
     const floor = height - bottom - h;
     const docked = { left: Math.max(EDGE, (width - w) / 2), top: Math.max(top, floor) };
@@ -5334,10 +5334,10 @@
     const [x0, y0, x1, y1] = box;
     const beside = Math.min(Math.max(top, y0 - 6), Math.max(top, floor));
     const across = Math.min(Math.max(EDGE, (x0 + x1) / 2 - w / 2), Math.max(EDGE, width - w - EDGE));
-    if (x1 + GAP + w <= width - EDGE) return { left: x1 + GAP, top: beside };
-    if (x0 - GAP - w >= EDGE) return { left: x0 - GAP - w, top: beside };
-    if (y0 - GAP - h >= top) return { left: across, top: y0 - GAP - h };
-    if (y1 + GAP <= floor) return { left: across, top: y1 + GAP };
+    if (x1 + GAP2 + w <= width - EDGE) return { left: x1 + GAP2, top: beside };
+    if (x0 - GAP2 - w >= EDGE) return { left: x0 - GAP2 - w, top: beside };
+    if (y0 - GAP2 - h >= top) return { left: across, top: y0 - GAP2 - h };
+    if (y1 + GAP2 <= floor) return { left: across, top: y1 + GAP2 };
     return docked;
   }
   function toScreen(view, size, x, y) {
@@ -6601,6 +6601,70 @@
     context.restore();
   }
 
+  // src/shared/atlas/PickBox.tsx
+  var TICK = 12;
+  var GAP = 10;
+  function PickBox({
+    box,
+    count,
+    width,
+    height
+  }) {
+    const [w, h] = [Math.abs(box[2] - box[0]), Math.abs(box[3] - box[1])];
+    const tick = Math.min(TICK, w / 2, h / 2);
+    const [x1, y1] = [Math.max(0.5, w - 0.5), Math.max(0.5, h - 0.5)];
+    const [right, down] = [box[2] >= box[0], box[3] >= box[1]];
+    const x = right ? Math.min(box[2] + GAP, width - 96) : Math.max(box[2] - GAP, 96);
+    const y = down ? Math.min(box[3] + GAP, height - 30) : Math.max(box[3] - GAP, 30);
+    return /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsxs("svg", { "aria-hidden": true, height: h, style: { position: "absolute", left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: "visible", pointerEvents: "none" }, width: w, children: [
+        /* @__PURE__ */ jsx(
+          "rect",
+          {
+            className: "kumi-ants",
+            height: Math.max(0, h - 1),
+            rx: 2,
+            style: { fill: `color-mix(in srgb, ${T.accent} 9%, transparent)`, stroke: T.accent, strokeOpacity: 0.6, strokeWidth: 1, strokeDasharray: "5 4" },
+            width: Math.max(0, w - 1),
+            x: 0.5,
+            y: 0.5
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "path",
+          {
+            d: `M0.5 ${tick}V0.5H${tick}M${x1 - tick} 0.5H${x1}V${tick}M${x1} ${y1 - tick}V${y1}H${x1 - tick}M${tick} ${y1}H0.5V${y1 - tick}`,
+            style: { fill: "none", stroke: `color-mix(in srgb, ${T.accent} 55%, ${T.text})`, strokeWidth: 2, strokeLinecap: "square" }
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          "aria-hidden": true,
+          style: {
+            position: "absolute",
+            left: x,
+            top: y,
+            transform: `translate(${right ? "0" : "-100%"}, ${down ? "0" : "-100%"})`,
+            padding: "3px 9px",
+            border: `1px solid color-mix(in srgb, ${T.accent} 60%, transparent)`,
+            borderRadius: 999,
+            background: `color-mix(in srgb, ${T.accent} 24%, ${T.raised})`,
+            color: T.text,
+            fontSize: 11.5,
+            fontWeight: 600,
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: "16px",
+            whiteSpace: "nowrap",
+            pointerEvents: "none"
+          },
+          children: count
+        }
+      )
+    ] });
+  }
+
   // src/shared/GrowLayer.tsx
   var percent2 = (at) => Math.round(at * 100);
   var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
@@ -6959,6 +7023,9 @@
   var FLY_MOST = 48;
   var STAGGER = 0.55;
   var ARRANGE_MS = 1e3;
+  var POP_MS = 180;
+  var POP_EACH = 80;
+  var POP_STEPS = 8;
   var LAYOUTS = ["character", "texture", "keys", "tempo", "families", "length", "folders"];
   var AXES = {
     character: ["left", "right", "top", "bottom"],
@@ -7113,6 +7180,22 @@
     useEffect(() => {
       if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
     }, [flying]);
+    const popped = useRef(null);
+    const pickedBefore = useRef(void 0);
+    useEffect(() => {
+      const before = pickedBefore.current;
+      pickedBefore.current = picked;
+      const places = drawn.current?.places;
+      const fresh2 = still || !picked || !places ? [] : [...picked].filter((id) => !before?.has(id));
+      if (fresh2.length === 0 || !places) return;
+      const along = (id) => {
+        const index = indexOf.get(id);
+        return index === void 0 ? 0 : places[2 * index] + places[2 * index + 1];
+      };
+      const ordered = fresh2.map((id) => [id, along(id)]).sort((a, b) => a[1] - b[1]);
+      popped.current = { at: performance.now(), step: new Map(ordered.map(([id], rank) => [id, Math.floor(rank / ordered.length * POP_STEPS)])) };
+      animate(POP_MS);
+    }, [picked]);
     useEffect(() => {
       if (performance.now() >= until.current) return;
       const frame2 = requestAnimationFrame(setClock);
@@ -7436,12 +7519,12 @@
         context.textAlign = "start";
       }
       context.globalAlpha = 1;
-      const rings = (ids, extra) => {
+      const rings = (ids, extra, later) => {
         if (!ids || ids.size === 0) return null;
         const path = new Path2D();
         for (const id of ids) {
           const index = indexOf.get(id);
-          if (index === void 0 || mask[index] === 2) continue;
+          if (index === void 0 || mask[index] === 2 || later?.has(id)) continue;
           const [x, y, blend] = placeOf(index);
           if (x < left || y < top || x > right || y > bottom) continue;
           const r = reach(blend) + extra;
@@ -7458,11 +7541,32 @@
         context.stroke(inPalette);
         context.globalAlpha = 1;
       }
-      const inPicks = rings(picked, 1.4);
+      const pop = popped.current && now - popped.current.at < POP_MS ? popped.current : null;
+      const inPicks = rings(picked, 1.4, pop?.step);
       if (inPicks) {
         context.strokeStyle = colors.strong;
         context.lineWidth = 1.6;
         context.stroke(inPicks);
+      }
+      if (pop && picked) {
+        const settled = Array.from({ length: POP_STEPS }, (_, step2) => clamp01((now - pop.at - step2 * (POP_MS - POP_EACH) / (POP_STEPS - 1)) / POP_EACH));
+        const waves = settled.map(() => new Path2D());
+        for (const [id, step2] of pop.step) {
+          const index = indexOf.get(id);
+          if (index === void 0 || mask[index] === 2 || settled[step2] <= 0 || !picked.has(id)) continue;
+          const [x, y, blend] = placeOf(index);
+          if (x < left || y < top || x > right || y > bottom) continue;
+          const r = (reach(blend) + 1.4) * (1 + 0.9 * (1 - settled[step2]) ** 2);
+          waves[step2].moveTo(x + r, y);
+          waves[step2].arc(x, y, r, 0, Math.PI * 2);
+        }
+        context.strokeStyle = colors.strong;
+        context.lineWidth = 1.6;
+        waves.forEach((wave, step2) => {
+          context.globalAlpha = settled[step2];
+          context.stroke(wave);
+        });
+        context.globalAlpha = 1;
       }
       const ring2 = (id, color, extra, width) => {
         const index = indexOf.get(id);
@@ -7628,6 +7732,8 @@
     const cluster = useRef(null);
     const [clusterSize, setClusterSize] = useState([320, 40]);
     const hasPicks = pickedIds.length > 0;
+    const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : [];
+    const boxed = drag.current?.add && picked?.size ? (/* @__PURE__ */ new Set([...picked, ...inBox.map((index) => model.points[index].id)])).size : inBox.length;
     useEffect(() => {
       const element = cluster.current;
       if (!element) return;
@@ -7840,28 +7946,8 @@
           }
         ),
         /* @__PURE__ */ jsx(AtlasOverlay, { audio, height: size.height, kin: kinRings, moved: `${view?.scale},${view?.dx},${view?.dy},${clock}`, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
-        box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
-        /* @__PURE__ */ jsx(
-          "svg",
-          {
-            "aria-hidden": true,
-            height: Math.abs(box[3] - box[1]),
-            style: { position: "absolute", left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: "visible", pointerEvents: "none" },
-            width: Math.abs(box[2] - box[0]),
-            children: /* @__PURE__ */ jsx(
-              "rect",
-              {
-                className: "kumi-ants",
-                height: Math.max(0, Math.abs(box[3] - box[1]) - 1),
-                rx: 2,
-                style: { fill: `color-mix(in srgb, ${T.accent} 12%, transparent)`, stroke: T.accent, strokeWidth: 1, strokeDasharray: "5 4" },
-                width: Math.max(0, Math.abs(box[2] - box[0]) - 1),
-                x: 0.5,
-                y: 0.5
-              }
-            )
-          }
-        ),
+        box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
+        /* @__PURE__ */ jsx(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
         /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
         /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: S.hidden, children: said }),
         hovered && hoveredSound && hover && /* @__PURE__ */ jsx(

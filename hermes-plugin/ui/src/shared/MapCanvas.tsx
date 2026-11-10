@@ -20,6 +20,7 @@ import { HoverPill } from './atlas/HoverPill.tsx'
 import { drawNames, drawWords, type Word } from './atlas/labels.ts'
 import { nameRank, NAMES_ON_SCREEN, regionAlpha, regionsOf } from './atlas/names.ts'
 import { haloOf, nebulaAlpha } from './atlas/nebula.ts'
+import { PickBox } from './atlas/PickBox.tsx'
 import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
@@ -104,6 +105,11 @@ const FLY_MOST = 48
 const STAGGER = 0.55
 /** How long the sounds take to move to a new layout. */
 const ARRANGE_MS = 1000
+/** Sounds just picked get their rings in a wave across them: POP_STEPS steps, each ring POP_EACH ms settling, POP_MS in
+ *  all. */
+const POP_MS = 180
+const POP_EACH = 80
+const POP_STEPS = 8
 /** The layouts this plug-in can name, in the order the menu lists them (serve's `arrangements` ids). */
 export const LAYOUTS = ['character', 'texture', 'keys', 'tempo', 'families', 'length', 'folders'] as const
 /** The axis words each layout has (`arrange.<id>.<side>`): its x axis's ends, then its y axis's. */
@@ -306,6 +312,24 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   useEffect(() => {
     if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST)
   }, [flying]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Sounds just picked: their rings arrive in a wave across them (top left first), not all at once.
+  const popped = useRef<{ at: number; step: Map<string, number> } | null>(null)
+  const pickedBefore = useRef<ReadonlySet<string> | undefined>(undefined)
+  useEffect(() => {
+    const before = pickedBefore.current
+    pickedBefore.current = picked
+    const places = drawn.current?.places
+    const fresh = still || !picked || !places ? [] : [...picked].filter(id => !before?.has(id))
+    if (fresh.length === 0 || !places) return
+    // Across the map as it's drawn, top left first.
+    const along = (id: string) => {
+      const index = indexOf.get(id)
+      return index === undefined ? 0 : places[2 * index] + places[2 * index + 1]
+    }
+    const ordered = fresh.map(id => [id, along(id)] as const).sort((a, b) => a[1] - b[1])
+    popped.current = { at: performance.now(), step: new Map(ordered.map(([id], rank) => [id, Math.floor((rank / ordered.length) * POP_STEPS)])) }
+    animate(POP_MS)
+  }, [picked]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (performance.now() >= until.current) return
     const frame = requestAnimationFrame(setClock)
@@ -714,12 +738,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     }
     context.globalAlpha = 1
     // The palette's sounds, and the picks, as rings: one path each, however many there are.
-    const rings = (ids: ReadonlySet<string> | undefined, extra: number): Path2D | null => {
+    const rings = (ids: ReadonlySet<string> | undefined, extra: number, later?: ReadonlyMap<string, number>): Path2D | null => {
       if (!ids || ids.size === 0) return null
       const path = new Path2D()
       for (const id of ids) {
         const index = indexOf.get(id)
-        if (index === undefined || mask[index] === 2) continue
+        if (index === undefined || mask[index] === 2 || later?.has(id)) continue
         const [x, y, blend] = placeOf(index)
         if (x < left || y < top || x > right || y > bottom) continue
         const r = reach(blend) + extra
@@ -737,11 +761,33 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.stroke(inPalette)
       context.globalAlpha = 1
     }
-    const inPicks = rings(picked, 1.4)
+    const pop = popped.current && now - popped.current.at < POP_MS ? popped.current : null
+    const inPicks = rings(picked, 1.4, pop?.step)
     if (inPicks) {
       context.strokeStyle = colors.strong
       context.lineWidth = 1.6
       context.stroke(inPicks)
+    }
+    if (pop && picked) {
+      // The rings still arriving: each wave step one path, wide and faint at first, settling onto its sounds.
+      const settled = Array.from({ length: POP_STEPS }, (_, step) => clamp01((now - pop.at - (step * (POP_MS - POP_EACH)) / (POP_STEPS - 1)) / POP_EACH))
+      const waves = settled.map(() => new Path2D())
+      for (const [id, step] of pop.step) {
+        const index = indexOf.get(id)
+        if (index === undefined || mask[index] === 2 || settled[step] <= 0 || !picked.has(id)) continue
+        const [x, y, blend] = placeOf(index)
+        if (x < left || y < top || x > right || y > bottom) continue
+        const r = (reach(blend) + 1.4) * (1 + 0.9 * (1 - settled[step]) ** 2)
+        waves[step].moveTo(x + r, y)
+        waves[step].arc(x, y, r, 0, Math.PI * 2)
+      }
+      context.strokeStyle = colors.strong
+      context.lineWidth = 1.6
+      waves.forEach((wave, step) => {
+        context.globalAlpha = settled[step]
+        context.stroke(wave)
+      })
+      context.globalAlpha = 1
     }
     const ring = (id: string, color: string, extra: number, width: number) => {
       const index = indexOf.get(id)
@@ -929,6 +975,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const cluster = useRef<HTMLDivElement | null>(null)
   const [clusterSize, setClusterSize] = useState<[number, number]>([320, 40])
   const hasPicks = pickedIds.length > 0
+  // While a box is drawn: how many sounds letting go would leave picked (a Shift-drag's box adds to the picks).
+  const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : []
+  const boxed = drag.current?.add && picked?.size ? new Set([...picked, ...inBox.map(index => model.points[index].id)]).size : inBox.length
   useEffect(() => {
     const element = cluster.current
     if (!element) return
@@ -1178,23 +1227,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         />
         <AtlasOverlay audio={audio} height={size.height} kin={kinRings} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={placeOnScreen} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
-          // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
-          <svg
-            aria-hidden
-            height={Math.abs(box[3] - box[1])}
-            style={{ position: 'absolute', left: Math.min(box[0], box[2]), top: Math.min(box[1], box[3]), overflow: 'visible', pointerEvents: 'none' }}
-            width={Math.abs(box[2] - box[0])}
-          >
-            <rect
-              className="kumi-ants"
-              height={Math.max(0, Math.abs(box[3] - box[1]) - 1)}
-              rx={2}
-              style={{ fill: `color-mix(in srgb, ${T.accent} 12%, transparent)`, stroke: T.accent, strokeWidth: 1, strokeDasharray: '5 4' }}
-              width={Math.max(0, Math.abs(box[2] - box[0]) - 1)}
-              x={0.5}
-              y={0.5}
-            />
-          </svg>
+          // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
+          <PickBox box={box} count={t('dock.picked', boxed)} height={size.height} width={size.width} />
         )}
         <span id={hintId} style={S.hidden}>
           {t('map.keys')}
