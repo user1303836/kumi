@@ -5,7 +5,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { addFolderRequest, beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
@@ -14,10 +14,11 @@ import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
 import { MakePanel } from '../shared/MakePanel.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { ToolButton } from '../shared/mapUi.tsx'
+import { glass, ToolButton } from '../shared/mapUi.tsx'
 import { itemReference, kitRequest } from '../shared/palette.ts'
 import { PaletteDock } from '../shared/PaletteDock.tsx'
 import { usePaletteMap } from '../shared/paletteMap.ts'
+import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { KumiStore } from '../shared/store.ts'
 import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
@@ -112,6 +113,24 @@ function Dashboard() {
   const grow = useGrow(request => store.design(request), result => void audition.play(result.artifact_id).catch(() => {}), state.map?.revision ?? null)
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
+  // Sample folders: the folders now, and adding one by its path. The dashboard can't send a request, so it copies it.
+  const folders = useSampleFolders(store, state.map?.revision)
+  const [foldersOpen, setFoldersOpen] = useState(false)
+  const folderControl = (onClose?: () => void) => (
+    <SampleFolders
+      ask={(folder, known) =>
+        navigator.clipboard?.writeText(known ? RESCAN_REQUEST : addFolderRequest(folder)).then(
+          () => 'copied' as const,
+          () => 'none' as const
+        ) ?? Promise.resolve('none' as const)
+      }
+      check={typed => store.checkFolder(typed)}
+      copies
+      example={folderExample(state.setup?.target)}
+      folders={folders}
+      onClose={onClose}
+    />
+  )
 
   useEffect(() => {
     void store.refreshStatus()
@@ -189,7 +208,20 @@ function Dashboard() {
         </div>
         {/* Tall enough that the palette drawer, open, still leaves the map most of the card. The page scrolls, so the
             height costs nothing. */}
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 780, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 780, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          {/* Sample folders, over the map's top right corner once there's a map (an empty map shows it in place). */}
+          {foldersOpen && (state.map?.points?.length ?? 0) > 0 && (
+            <div
+              onKeyDown={event => {
+                if (event.key !== 'Escape') return
+                event.stopPropagation()
+                setFoldersOpen(false)
+              }}
+              style={{ ...glass, position: 'absolute', top: 56, right: 12, width: 'min(380px, calc(100% - 24px))', padding: 12, zIndex: 6 }}
+            >
+              {folderControl(() => setFoldersOpen(false))}
+            </div>
+          )}
           <MapCanvas
             audio={id => audition.url(id)}
             onStop={() => audition.stop()}
@@ -213,6 +245,7 @@ function Dashboard() {
               ) : (
                 <>
                   {t('dashboard.mapEmpty')}
+                  <div style={{ ...glass, marginTop: 12, padding: 12 }}>{folderControl()}</div>
                   <div style={{ marginTop: 10 }}>
                     <CopyButton label={t('map.scanCopy')} text={SCAN_REQUEST} />
                   </div>
@@ -305,16 +338,19 @@ function Dashboard() {
               setLayout(id)
             }}
             tools={
-              <ToolButton
-                icon="hover"
-                label={t('dock.hover')}
-                onClick={() => {
-                  globalThis.localStorage?.setItem(HOVER_PLAY, hover ? 'off' : 'on')
-                  setHover(!hover)
-                }}
-                pressed={hover}
-                title={t('dock.hoverTitle')}
-              />
+              <>
+                <ToolButton
+                  icon="hover"
+                  label={t('dock.hover')}
+                  onClick={() => {
+                    globalThis.localStorage?.setItem(HOVER_PLAY, hover ? 'off' : 'on')
+                    setHover(!hover)
+                  }}
+                  pressed={hover}
+                  title={t('dock.hoverTitle')}
+                />
+                <ToolButton icon="folder" label={t('folders.title')} onClick={() => setFoldersOpen(!foldersOpen)} pressed={foldersOpen} title={t('folders.openTitle')} />
+              </>
             }
           />
           {/* The palette's strip waits for a map, as in Desktop. */}

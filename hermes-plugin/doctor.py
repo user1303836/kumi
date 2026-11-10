@@ -263,7 +263,7 @@ def _library(host: tools.Host, state: Path, *, live: bool) -> dict:
     folders = host.library_folders()
     if not folders:
         return _item(name, CHECK, "No sample folders are approved, so the sound map is empty.",
-                     "Ask Hermes to add a sample folder, then scan it.")
+                     "Add one with `hermes kumi samples add <folder>`, or ask Hermes to, then ask Hermes to scan it.")
     scan = _last_scan(state)
     progress = scan.get("progress") if isinstance(scan.get("progress"), dict) else {}
     sounds = (snapshots.map_revision(state) or {}).get("sounds")

@@ -34,6 +34,14 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 **没有 DAW？** 声音地图、调色板和制作声音都不需要 DAW：设置装好 Kumi 的运行时（第一步）后，让 Hermes“把 ~/Samples 加入 Kumi 的音色库并扫描”（任何装有 WAV 或 AIFF 文件的文件夹都可以），然后打开 Hermes Desktop 中声音地图的标签页，或网页仪表盘中的 Kumi 标签页。如果也想试试 DAW 这一侧，REAPER 的免费评估版大约两分钟就能用上：从 [reaper.fm](https://www.reaper.fm/download.php) 安装，然后让 Hermes“为 REAPER 设置 Kumi”。
 
+**自己添加采样文件夹。** 如果你知道采样放在哪里，可以直接用完整路径（`C:\Users\you\Samples`、`D:\Samples`、`~/Samples`）自己添加文件夹：
+- **Hermes Desktop：** 声音地图上的 **采样文件夹**（地图为空时就在原处，有地图时在工具栏的文件夹按钮里）列出 Kumi 读取的文件夹。输入或粘贴路径，或按 **选择…** 在文件夹对话框中选取，然后按 **添加并扫描**：请求会发到 Kumi 的对话，Hermes 只为这个文件夹和它的第一次扫描征求一次同意。
+- **网页仪表盘：** 同一个控件会复制请求，粘贴到 Hermes 对话中即可。
+- **终端：** `hermes kumi samples` 列出文件夹；`hermes kumi samples add <文件夹>` 会显示 Kumi 将读取的位置，并在添加前征求同意。路径中有空格或 `&` 时请加引号。
+- **对话：** `/kumi samples` 列出文件夹，`/kumi samples add <文件夹>` 添加一个；只能在 Hermes 自己的应用（终端、Desktop）的对话中添加，来自聊天应用（Discord、Slack、Telegram 等）的会被拒绝。
+- 无论哪种方式，都要通过同一道检查（不能添加哪些文件夹，见下文“采样文件夹”设置）。路径输错时，会当场被拒绝；通过链接到达的文件夹，会按它的实际位置保存。
+- 扫描之前什么都不会读取，而扫描的确认会列出它要读取的每一个文件夹。允许本次会话或始终扫描，只涵盖当时的这些文件夹：添加新文件夹后，下一次扫描会重新征求同意。已经不在的文件夹（例如拔掉的硬盘）会被扫描跳过，Kumi 会告诉你是哪一个。要移除文件夹，请在 Kumi 的设置中编辑“采样文件夹”。
+
 你最先设置的 DAW 会在同一次确认中成为 Kumi 的 DAW（DAW 设置）。之后再设置另一个 DAW 时，Kumi 仍连接原来的 DAW：设置结束时会告诉你切换的步骤——在终端运行 `hermes kumi setup --daw <daw> --use`，它会在修改设置前征求你的同意。你也可以在 Kumi 的插件设置中更改 DAW（配置文件 config.yaml 中的 `plugins.entries.kumi.settings.daw`）。如果在你的环境中无法写入 Hermes 的设置，设置会说明这一点，以及应该在哪里设置 DAW。
 
 如果这台电脑上的另一套 Kumi（单独的 Kumi，或另一个 Hermes 配置中的 Kumi for Hermes）已经在 Live、REAPER 或 Renoise 中安装了 Kumi 的组件，设置会告诉你，并建议直接使用那套安装而不是替换它。这样两者都能继续使用，甚至可以同时使用。Kumi for Hermes 会读取那套安装的连接文件，并把自己的连接状态写在那里，但绝不使用它的登录信息或设置。在 REAPER 和 Renoise 中，它还会用那套安装的聆听文件夹存放它请求的渲染（在 Renoise 中，还会用它的工作文件夹临时保存要修改宏映射的乐器），并把 DAW 的写入锁放在那里；它对你的工程了解到的内容留在它自己的数据中。
@@ -249,6 +257,7 @@ Kumi 的核心功能不需要其中任何一个。
 
 - `hermes kumi doctor`（在对话中用 `/kumi doctor`）会检查 Kumi 在这个 Hermes 配置中需要的一切：Hermes 的批准设置和 Kumi 是否在每次修改前征求同意、设置、连接、打开的项目和声音地图。对每个问题，它都会告诉你该怎么做。它不会更改任何内容。
 - `/kumi`（在终端中用 `hermes kumi status`）会告诉你设置还缺什么，以及 Kumi 能否读取压缩音频。当 `plugins.isolation` 为 `host` 时，Hermes 不会加载 `hermes kumi` 这类插件命令，请改在 Hermes Desktop 的对话中设置。
+- 没有声音地图，或某个文件夹的声音不在地图上：`hermes kumi samples`（在对话中用 `/kumi samples`）会列出 Kumi 读取的文件夹。用 `hermes kumi samples add <文件夹>` 或地图上的 **采样文件夹** 添加，然后让 Hermes 扫描。
 - Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - 网页仪表盘中没有 Kumi 标签页：如果安装 Kumi 时仪表盘已经在运行，请重启它（`hermes dashboard`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。

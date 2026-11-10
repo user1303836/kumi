@@ -2,6 +2,8 @@
 their handlers against the fixture runtime: status and connect, a change with HISTORY and undo, the library, sounds."""
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import os
 from pathlib import Path
@@ -254,6 +256,89 @@ class Tools(unittest.TestCase):
         self.assertEqual(started["argv"][at:at + 2], ["--library-root", support.DRUMS])
         self.assertEqual(self.received("connect"), [], "no DAW was asked for")
 
+    @staticmethod
+    def library_calls(data: Path) -> list[tuple[str, str]]:
+        """Each add_folder and scan the runtime got, with the host call id it went under."""
+        sent = [m["params"]["arguments"] for m in support.requests(data / "state")
+                if m.get("params", {}).get("name") == "library"]
+        return [(args["action"], args["_host"]["tool_call_id"]) for args in sent if args["action"] in ("add_folder", "scan")]
+
+    def test_a_folder_and_its_first_scan_run_as_one_call(self):
+        made = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS, "scan": True},
+                            session_id="s1")
+        self.assertIn("job_id", made, "the scan's job, to follow with kumi_job")
+        self.assertEqual((made["added"], made["folders"]), (support.DRUMS, [support.DRUMS]))
+        self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS])
+        (add, call), (scan, step) = self.library_calls(self.data)
+        self.assertEqual((add, scan, step), ("add_folder", "scan", f"{call}:scan"),
+                         "each under a host call of its own: the runtime runs one per id, and refuses another")
+        self.assertFalse([args for args in self.received("library") if "scan" in args], "`scan` never reaches the runtime")
+        # A scan that can't start (the first is still running) still says the folder was kept.
+        breaks = str(support.SAMPLES / "Breaks")
+        again = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": breaks, "scan": True},
+                             session_id="s1")
+        self.assertEqual((again["added"], again["error"]["code"]), (breaks, "busy"), again)
+        self.assertEqual(self.ctx.settings["library_folders"], [support.DRUMS, breaks])
+        for wrong in ({"action": "scan", "scan": True}, {"action": "add_folder", "folder": support.DRUMS, "scan": "yes"}):
+            with self.subTest(args=wrong):
+                self.assertIn("scan goes only with add_folder", support.call(self.host, "kumi_library", wrong)["blocked"])
+
+    def test_a_scan_reads_a_folder_added_from_the_terminal_and_names_one_it_had_to_leave_out(self):
+        host, ctx, data = support.host(self, None, "--real-folders")  # folders taken as `kumi serve` takes them
+        ctx.surface = "desktop"  # where an approval shows whole: the terminal's panel is too short for these paths
+        place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        drums, breaks, gone, alias = place / "Drums", place / "Breaks", place / "Unplugged", place / "Alias"
+        drums.mkdir()
+        breaks.mkdir()
+        try:
+            alias.symlink_to(breaks, target_is_directory=True)
+        except OSError:
+            alias = breaks  # no links here: the folder under its own name
+        support.call(host, "kumi_connect", {}, session_id="s1")  # the chat's runtime, started with no folders
+        ctx.settings["library_folders"] = [str(drums), str(gone), str(alias)]  # added since, outside the chat
+
+        def asked() -> dict:
+            return policy.pre_tool_call(host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
+                                        tool_call_id="c-scan")
+
+        first = asked()
+        lines = first["message"].splitlines()
+        self.assertEqual("".join(lines[1:lines.index(policy.AUDIO_ONLY)]), f"• {drums}• {breaks}",
+                         "what the scan will read, by its real place, and not the folder that's gone")
+        self.assertRegex(first["rule_key"], r"^kumi:folder_read:scan\+[0-9a-f]{16}:s1$")
+        made = support.call(host, "kumi_library", {"action": "scan"}, session_id="s1")
+        self.assertIn("job_id", made, made)
+        self.assertEqual(made["left_out"], [{"folder": str(gone), "reason": tools.NOT_THERE}])
+        status = support.call(host, "kumi_library", {"action": "status"}, session_id="s1")
+        self.assertEqual(status["folders"], [str(drums), str(breaks)], "the running runtime was handed them, once")
+        ids = [ident for _, ident in self.library_calls(data)]
+        self.assertEqual((len(ids), len(set(ids))), (3, 3), "two adds and the scan, each a host call of its own")
+        # An approval given for the session or for always covers these folders, and never one added since.
+        self.assertEqual(asked()["rule_key"], first["rule_key"], "the same folders, now all the runtime's")
+        loops = place / "Loops"
+        loops.mkdir()
+        ctx.settings["library_folders"] = [*ctx.settings["library_folders"], str(loops)]
+        self.assertNotEqual(asked()["rule_key"], first["rule_key"], "a folder added since: the scan asks again")
+
+    def test_a_folder_the_runtime_has_as_the_disk_spells_it_is_neither_handed_over_nor_asked_twice(self):
+        place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        real, alias = place / "Samples", place / "Alias"
+        real.mkdir()
+        try:
+            alias.symlink_to(real, target_is_directory=True)
+        except OSError:
+            self.skipTest("this system can't make links here")
+        # `kumi serve` keeps a folder as the disk spells it; the setting, as the producer wrote it.
+        support.call(self.host, "kumi_library", {"action": "add_folder", "folder": str(real)}, session_id="s1")
+        self.ctx.settings["library_folders"] = [str(alias)]
+        asked = policy.pre_tool_call(self.host, tool_name="kumi_library", args={"action": "scan"}, session_id="s1",
+                                     tool_call_id="c-scan")
+        lines = asked["message"].splitlines()
+        self.assertEqual("".join(lines[1:lines.index(policy.AUDIO_ONLY)]), f"• {alias}", "once, as the setting has it")
+        self.assertIn("job_id", support.call(self.host, "kumi_library", {"action": "scan"}, session_id="s1"))
+        status = support.call(self.host, "kumi_library", {"action": "status"}, session_id="s1")
+        self.assertEqual(status["folders"], [str(real)], "the runtime had it already")
+
     def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio_and_kumis_own_designs(self):
         generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
         host, _, data = support.host(self, media_roots=[generated])
@@ -370,12 +455,101 @@ class Command(unittest.TestCase):
                         "Hermes leaves plugin commands out: no terminal command is offered")
         support.install(data)
         support.call(host, "kumi_connect", {}, session_id="s1")
+        none_yet = "Sample folders: none yet. `/kumi samples add <folder>` adds one."
         self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1:],
-                         ["Connected to Live: Night Drive. This chat is using Kumi.",
+                         ["Connected to Live: Night Drive. This chat is using Kumi.", none_yet,
                           "Approvals: Hermes asks before each Kumi change (Ask before each change: on)."])
         self.assertEqual(commands.kumi(host, "", session_id="s2").splitlines()[1:],
                          ["Connected to Live: Night Drive. Another chat is using Kumi: use that chat, or end it.",
-                          "Approvals: Hermes asks before each Kumi change (Ask before each change: on)."])
+                          none_yet, "Approvals: Hermes asks before each Kumi change (Ask before each change: on)."])
+
+    def folder(self, name: str = "Drum Hits") -> Path:
+        """A real folder with a space in its name, outside the home folder."""
+        made = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory()))) / name
+        made.mkdir()
+        return made
+
+    def test_samples_adds_a_folder_the_producer_typed_through_the_guard_and_only_in_hermess_own_clients(self):
+        commands = support.module("commands")
+        host, ctx, _ = support.host(self)
+        self.assertEqual(commands.kumi(host, "samples"), "Sample folders: none yet. `/kumi samples add <folder>` adds one.")
+        folder = self.folder()
+        said = commands.kumi(host, f'Samples add "{folder}{os.sep}"').splitlines()
+        self.assertEqual(said[:3], ["Kumi will read the audio files in this folder and its subfolders:", f"• {folder}",
+                                    policy.AUDIO_ONLY])
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)], "kept as the guard keeps it")
+        self.assertIn("already has", commands.kumi(host, f"samples add {folder}"))
+        self.assertEqual(commands.kumi(host, "samples").splitlines()[:2], ["Sample folders:", f"• {folder}"])
+        for typed, why in (("Drums", "isn't a full path"), (str(folder / "Kicks"), "there's no folder at"),
+                           ("~", "home folder"), (os.path.abspath(os.sep), "whole drive or volume")):
+            with self.subTest(typed=typed):
+                refused = commands.kumi(host, f"samples add {typed}")
+                self.assertTrue(refused.startswith("Kumi didn't add the folder: "), refused)
+                self.assertIn(why, refused)
+        self.assertIn("`/kumi samples add <folder>`", commands.kumi(host, "samples remove everything"))
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)], "nothing else was kept")
+        ctx.settings["library_folders"], ctx.surface = [], "telegram"  # a chat app: whoever types there isn't asked
+        self.assertIn("only in Hermes on your computer", commands.kumi(host, f"samples add {folder}"))
+        self.assertEqual(ctx.settings["library_folders"], [])
+        self.assertEqual(commands.kumi(host, "samples"), "Sample folders: none yet. On your computer, `hermes kumi "
+                                                         "samples add <folder>` in a terminal adds one.")
+        # Hermes tells a command its platform; the session's own surface isn't bound for one (Desktop's command).
+        ctx.surface = ""
+        self.assertIn("only in Hermes on your computer", commands.kumi(host, f"samples add {folder}", platform="discord"))
+        self.assertIn("only in Hermes on your computer", commands.kumi(host, f"samples add {folder}"), "nobody says")
+        self.assertEqual(ctx.settings["library_folders"], [])
+        self.assertEqual(commands.kumi(host, f"samples add {folder}", platform="desktop").splitlines()[1], f"• {folder}")
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+
+    def test_a_typed_folder_is_kept_by_its_real_place_and_never_twice(self):
+        commands = support.module("commands")
+        host, ctx, _ = support.host(self)
+        folder = self.folder()
+        alias = folder.parent / "Alias"
+        try:
+            alias.symlink_to(folder, target_is_directory=True)
+        except OSError:
+            self.skipTest("this system can't make links here")
+        said = commands.kumi(host, f"samples add {alias}").splitlines()
+        self.assertEqual(said[1], f"• {folder}", "where it leads: what Kumi reads, and the path its runtime takes")
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+        out = io.StringIO()
+        self.assertEqual(commands.cli_samples(host, "add", [str(alias)], stdout=out), 0)
+        self.assertIn("already has", out.getvalue(), "the same place under another name")
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+
+    def test_the_terminal_shows_the_folder_and_adds_it_only_after_a_yes(self):
+        commands = support.module("commands")
+        host, ctx, _ = support.host(self)
+        self.assertIn("Sample folders: none yet. Add one with `hermes kumi samples add <folder>`.",
+                      commands.status_text(host))
+        folder = self.folder()
+        parser = argparse.ArgumentParser()
+        commands.cli_parser(parser)
+        words = parser.parse_args(["samples", "add", *str(folder).split(" ")]).folder  # typed with no quotes
+
+        class Tty(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        self.assertEqual(commands.cli_samples(host, "add", words, stdin=io.StringIO("y\n"), stdout=io.StringIO()), 1,
+                         "no terminal: nobody was asked")
+        out = Tty()
+        self.assertEqual(commands.cli_samples(host, "add", words, stdin=Tty("n\n"), stdout=out), 1)
+        self.assertIn(f"\n  • {folder}\n  {policy.AUDIO_ONLY}\nGo ahead? [y/N] ", out.getvalue(), "what it will read")
+        self.assertNotIn("library_folders", ctx.settings)
+        stray = [f'{folder}{os.sep}"']  # what cmd passes for "D:\Samples\": the closing quote, escaped
+        self.assertEqual(commands.cli_samples(host, "add", stray, stdin=Tty("yes\n"), stdout=Tty()), 0)
+        self.assertEqual(ctx.settings["library_folders"], [str(folder)])
+        out = io.StringIO()
+        self.assertEqual(commands.cli_samples(host, "add", words, stdout=out), 0, "there already: nothing to ask")
+        self.assertIn("already has", out.getvalue())
+        out = io.StringIO()
+        self.assertEqual(commands.cli_samples(host, "add", ["Drums"], stdin=Tty("y\n"), stdout=out), 1)
+        self.assertEqual(out.getvalue(), "Kumi didn't add the folder: 'Drums' isn't a full path.\n")
+        out = io.StringIO()
+        self.assertEqual(commands.cli_samples(host, None, stdout=out), 0)
+        self.assertEqual(out.getvalue().splitlines()[:2], ["Sample folders:", f"• {folder}"])
 
 
 if __name__ == "__main__":

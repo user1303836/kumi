@@ -6,6 +6,9 @@
 - `hermes kumi setup` in a terminal: setup, asking before each step (C8).
 - `hermes kumi doctor` and `/kumi doctor`: what Kumi needs in this profile, each item with what to do (`doctor`). It
   only reads.
+- `hermes kumi samples` and `/kumi samples`: the sample folders Kumi may read. `… samples add <folder>` adds one the
+  producer names themself, through the folder guard: the terminal asks first, as setup does; in a chat the typed
+  command is the producer's yes, in Hermes's own clients only. Neither reads a file: a scan does, and it asks.
 """
 from __future__ import annotations
 
@@ -14,16 +17,20 @@ from pathlib import Path
 import sys
 from typing import Any, TextIO
 
-from . import doctor, policy, runtime, schemas, setup, snapshots, tools
+from . import doctor, policy, runtime, schemas, scripts, setup, snapshots, tools
 
-DESCRIPTION = "Kumi's state: setup, its runtime, the DAW connection and the open project (`doctor`: what Kumi needs)"
-ARGS_HINT = "[doctor]"
-CLI_HELP = "Kumi in this Hermes profile: where it stands, what it needs, and setting it up"
+DESCRIPTION = ("Kumi's state: setup, its runtime, the DAW connection and the open project (`doctor`: what Kumi needs; "
+               "`samples`: its sample folders, `samples add <folder>` adds one)")
+ARGS_HINT = "[doctor | samples [add <folder>]]"
+CLI_HELP = "Kumi in this Hermes profile: where it stands, what it needs, its sample folders, and setting it up"
 
 
 def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
-    if raw_args.strip().lower() == "doctor":
+    words = raw_args.strip()
+    if words.lower() == "doctor":
         return doctor.report(doctor.checks(host, **kwargs))
+    if words.lower().split(None, 1)[:1] == ["samples"]:
+        return samples_text(host, words[len("samples"):].strip(), kwargs.get("platform"))
     try:
         status = tools.kumi_status(host, {}, **kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
@@ -37,9 +44,11 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
         return "\n".join([f"Kumi isn't ready: {state.get('message')} {how}", *warning])
     lines = [f"Kumi {(state.get('runtime') or {}).get('version')} is set up "
              f"({setup.platform_name(state.get('target'))}); DAW: {daw}."]
+    none_yet = ([] if host.library_folders()
+                else [f"Sample folders: none yet. {_how_to_add(host, kwargs.get('platform'))}"])
     if not status.get("connected"):
         lines.append(_said(status.get("message"), 300) or f"Kumi isn't connected to {daw}: ask Hermes to connect.")
-        return "\n".join([*lines, *warning])
+        return "\n".join([*lines, *none_yet, *warning])
     project = status.get("project") or {}
     # The chat using Kumi is the one that started its runtime in this process: the runtime's own status names a holder
     # only while a change runs, and never its chat (fresh-user run 1, F13).
@@ -48,7 +57,52 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
     using = ("This chat is using Kumi." if owner and owner == kwargs.get("session_id")
              else "Another chat is using Kumi: use that chat, or end it." if owner else "")
     lines.append(f"Connected to {daw}: {_said(project.get('name', 'a project'), 80)}. {using}".rstrip())
-    return "\n".join([*lines, *warning])
+    return "\n".join([*lines, *none_yet, *warning])
+
+
+ADD_IN_TERMINAL = "`hermes kumi samples add <folder>` in a terminal"
+SCAN_NEXT = 'Kumi reads it at its next scan: in a chat, ask "Kumi, scan my sample folders".'
+
+
+def _local_chat(host: tools.Host, platform: Any) -> bool:
+    """Whether this chat is in one of Hermes's own clients (its terminal, TUI, Desktop, an editor): where the person
+    typing is the producer at their computer. Hermes tells a command its `platform` (`cli`, `tui`, `desktop`, or a
+    messaging app's name); without it, the calling session's surface. A messaging app, or a Hermes that says neither,
+    isn't one."""
+    surface = platform if isinstance(platform, str) and platform else host.session_surface()
+    return surface in scripts.LOCAL_SURFACES
+
+
+def _how_to_add(host: tools.Host, platform: Any) -> str:
+    return ("`/kumi samples add <folder>` adds one." if _local_chat(host, platform)
+            else f"On your computer, {ADD_IN_TERMINAL} adds one.")
+
+
+def samples_text(host: tools.Host, rest: str, platform: Any = None) -> str:
+    """`/kumi samples`: the sample folders Kumi may read. `/kumi samples add <folder>`: add one the producer names,
+    through the folder guard (`snapshots.typed_library_folder`), kept in the setting. The typed command is the
+    producer's yes, so it adds only in Hermes's own clients; nothing is read until a scan, whose approval names every
+    folder."""
+    if not rest:
+        folders = host.library_folders()
+        if not folders:
+            return f"Sample folders: none yet. {_how_to_add(host, platform)}"
+        return "\n".join(["Sample folders:", *(f"• {_said(folder, 4096)}" for folder in folders),
+                          f"To add one: {_how_to_add(host, platform)}"])
+    action, _, named = rest.partition(" ")
+    if action.lower() != "add" or not named.strip():
+        return "Kumi's samples command is `/kumi samples`, or `/kumi samples add <folder>` with the folder's full path."
+    if not _local_chat(host, platform):
+        return ("Kumi didn't add the folder: it takes a sample folder from a chat only in Hermes on your computer "
+                f"(its terminal or Desktop). There, type `/kumi samples add <folder>`, or run {ADD_IN_TERMINAL}. "
+                "Here, ask Hermes to add it: it asks you first.")
+    folder, refusal = snapshots.typed_library_folder(named, hermes_home=host.hermes_home())
+    if refusal is not None:
+        return policy.refused("Kumi didn't add the folder", refusal)
+    if not tools.keep_library_folder(host, folder):
+        return f"Kumi already has {_said(folder, 4096)}. {SCAN_NEXT}"
+    return "\n".join(["Kumi will read the audio files in this folder and its subfolders:", f"• {_said(folder, 4096)}",
+                      policy.AUDIO_ONLY, SCAN_NEXT])
 
 
 def _commands_left_out(host: tools.Host) -> bool:
@@ -87,7 +141,8 @@ def status_text(host: tools.Host) -> str:
         else:
             lines.append(f"Not connected to {daw}.")
     folders = host.library_folders()
-    lines.append("Sample folders: " + (", ".join(_said(folder, 300) for folder in folders) if folders else "none yet."))
+    lines.append("Sample folders: " + (", ".join(_said(folder, 300) for folder in folders) if folders
+                                       else "none yet. Add one with `hermes kumi samples add <folder>`."))
     lines.append(setup.compressed_audio(data)["message"])
     lines.append(f"Approvals: off in Hermes (approvals.mode: off or --yolo), so {tools.UNASKED} run without asking first."
                  if tools.approvals_bypassed(host, chat=False)
@@ -124,6 +179,11 @@ def cli_parser(parser: argparse.ArgumentParser) -> None:
     release = choices.add_parser("release", help="release a reservation whose charge stayed unknown, after checking "
                                                  "Mirelo's dashboard")
     release.add_argument("reservation_id")
+    samples_parser = actions.add_parser("samples", help="the sample folders Kumi may read for your sound map; "
+                                                        "`add <folder>` adds one, asking you first")
+    samples_choices = samples_parser.add_subparsers(dest="samples_action")
+    add = samples_choices.add_parser("add", help="add a sample folder, after showing what Kumi will read")
+    add.add_argument("folder", nargs="+", help="the folder's full path, in quotes when it has spaces or & in it")
 
 
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
@@ -133,6 +193,8 @@ def cli(host: tools.Host, args: argparse.Namespace) -> int:
         items = doctor.checks(host)
         print(doctor.report(items))
         return 1 if doctor.needs_fixing(items) else 0
+    if getattr(args, "kumi_action", None) == "samples":
+        return cli_samples(host, getattr(args, "samples_action", None), getattr(args, "folder", None))
     if getattr(args, "kumi_action", None) == "credits":
         return cli_credits(host, getattr(args, "credits_action", None), getattr(args, "reservation_id", None))
     print(status_text(host))  # `status`, or no action at all
@@ -208,6 +270,40 @@ def cli_credits(host: tools.Host, action: str | None, reservation_id: str | None
               file=stdout)
         return 1
     print(credits_line(totals), file=stdout)
+    return 0
+
+
+def cli_samples(host: tools.Host, action: str | None, words: list[str] | None = None, *,
+                stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
+    """`hermes kumi samples [add <folder>]`: the sample folders Kumi may read, and adding one the producer names. The
+    folder guard answers for it (`snapshots.typed_library_folder`), the folder is shown as Kumi will read it, and it's
+    kept in the setting after an interactive yes, as setup asks. Nothing is read here: a scan reads the folders."""
+    stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
+    if action != "add":
+        folders = host.library_folders()
+        print("Sample folders:" if folders else "Sample folders: none yet.", file=stdout)
+        for folder in folders:
+            print(f"• {_said(folder, 4096)}", file=stdout)
+        print("To add one: hermes kumi samples add <folder>", file=stdout)
+        return 0
+    folder, refusal = snapshots.typed_library_folder(" ".join(words or []), hermes_home=host.hermes_home())
+    if refusal is not None:
+        print(policy.refused("Kumi didn't add the folder", refusal), file=stdout)
+        return 1
+    if snapshots.has_folder(host.library_folders(), folder):
+        print(f"Kumi already has {_said(folder, 4096)}. {SCAN_NEXT}", file=stdout)
+        return 0
+    if not (stdin.isatty() and stdout.isatty()):
+        print("hermes kumi samples add asks you first, so it needs a terminal.", file=stdout)
+        return 1
+    print("Kumi: read the audio files in this folder and its subfolders, to build your sound map:",
+          f"• {_said(folder, 4096)}", policy.AUDIO_ONLY, sep="\n  ", file=stdout)
+    print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
+    if stdin.readline().strip().lower() not in ("y", "yes"):
+        print("Nothing was added.", file=stdout)
+        return 1
+    tools.keep_library_folder(host, folder)
+    print(f"Added. {SCAN_NEXT}", file=stdout)
     return 0
 
 

@@ -14,6 +14,15 @@ export type Fetch = <T>(path: string, init?: { method: 'POST'; body: unknown }) 
 
 export type Part = 'focus' | 'history' | 'map' | 'palette' | 'setup'
 
+/** The folder guard's answer for a folder the producer typed or picked (`POST /library/folder`): the folder as Kumi
+ *  would keep it and whether it's one already, or the guard's refusal in its own words; `error` when it couldn't ask. */
+export interface FolderCheck {
+  folder?: string
+  known?: boolean
+  refusal?: string
+  error?: string
+}
+
 export interface KumiState {
   /** null until the first answer; false when the backend half isn't mounted (the agent plugin is off). */
   available: boolean | null
@@ -359,6 +368,28 @@ export class KumiStore {
     if (generation !== this.generation) return
     this.set({ leaving: new Set() })
     await this.refresh('map')
+  }
+
+  /** The sample folders Kumi may read (`GET /library/folders`), for the Sample folders control; null when the read
+   *  fails (an older backend half, or the agent plugin off). */
+  async libraryFolders(): Promise<null | string[]> {
+    try {
+      const answer = await this.fetch<{ folders?: unknown }>('/library/folders')
+      return Array.isArray(answer?.folders) ? answer.folders.filter((folder): folder is string => typeof folder === 'string') : null
+    } catch {
+      return null
+    }
+  }
+
+  /** What the plugin's folder guard says of a typed folder. Nothing is added: the request to add it goes to the chat. */
+  async checkFolder(folder: string): Promise<FolderCheck> {
+    try {
+      const answer = await this.fetch<FolderCheck>('/library/folder', { method: 'POST', body: { folder } })
+      if (typeof answer?.folder === 'string') return { folder: answer.folder, known: answer.known === true }
+      return { refusal: clean(typeof answer?.refusal === 'string' ? answer.refusal : '', 400) }
+    } catch (error) {
+      return { error: clean(errorText(error), 300) }
+    }
   }
 
   /** One palette edit (`POST /palette`): the palette as the backend now has it, at once, and its sentence (with `also`

@@ -131,7 +131,7 @@ const en = {
     keys: 'Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.',
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: 'Reading the sound map…',
-    empty: 'No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.',
+    empty: 'No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.',
     search: 'Search sounds',
     searchHint: 'Search the map: name, kind or folder',
     count: (n: string) => `${n} sounds`,
@@ -762,6 +762,31 @@ const en = {
       }
     }
   },
+  // The Sample folders control on the map: the folders Kumi may read, and adding one by its path.
+  folders: {
+    title: 'Sample folders',
+    openTitle: 'The folders Kumi reads for this map, and adding one by its path',
+    none: 'None yet.',
+    reading: 'Reading your sample folders…',
+    path: "A folder's full path",
+    pathHint: (example: string) => `The folder's full path, like ${example}`,
+    choose: 'Choose…',
+    chooseTitle: 'Pick the folder in a file dialog',
+    noDialog: "This Hermes has no folder dialog: type or paste the folder's path.",
+    add: 'Add and scan',
+    addTitle: 'Ask Kumi in the chat to add this folder and scan it; you approve it there',
+    copy: 'Copy the request',
+    copyTitle: 'Copy a request to add this folder and scan it, to paste into a Hermes chat',
+    checking: 'Checking…',
+    refused: (why: string) => `Kumi didn't add the folder: ${why}`,
+    failed: (why: string) => `Kumi couldn't check that folder: ${why}`,
+    sent: "Asked in Kumi's chat. Approve it there, and the map fills in as the scan runs.",
+    drafted: "The request is in the chat's input. Send it, then approve it there.",
+    copied: 'Copied. Paste it into a Hermes chat to add the folder and scan it.',
+    known: 'Kumi already has that folder, so this asks for a scan of your folders.',
+    note: 'Kumi reads only the audio files in it, and never changes or moves your files.',
+    close: 'Close'
+  },
   notify: {
     nothingToUndo: 'Kumi has no change it can undo right now.',
     undoUnsure: "Kumi isn't sure of its last change: ask Hermes to have it look at your project again first.",
@@ -778,7 +803,7 @@ const en = {
     copyRequest: 'Copy request',
     copyReference: 'Copy its reference',
     copyUndo: 'Copy undo',
-    mapEmpty: 'No sound map yet: ask Hermes to add a sample folder and scan it.',
+    mapEmpty: 'No sound map yet. Add a sample folder here: the request to add and scan it goes into a Hermes chat.',
     askLook: 'Ask Hermes in your chat to look again before another change.'
   }
 }
@@ -901,7 +926,7 @@ const ja: Shape<typeof en> = {
     keys: '矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。',
     agentOff: 'このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。',
     reading: 'サンプルマップを読み込み中…',
-    empty: 'まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。',
+    empty: 'まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。',
     search: 'サウンドを検索',
     searchHint: 'マップを検索: 名前・種類・フォルダ',
     count: n => `${n} 個のサウンド`,
@@ -1523,6 +1548,30 @@ const ja: Shape<typeof en> = {
       }
     }
   },
+  folders: {
+    title: 'サンプルフォルダ',
+    openTitle: 'このマップのために Kumi が読むフォルダと、パスを指定しての追加',
+    none: 'まだありません。',
+    reading: 'サンプルフォルダを読み込み中…',
+    path: 'フォルダのフルパス',
+    pathHint: example => `フォルダのフルパス（例: ${example}）`,
+    choose: '選択…',
+    chooseTitle: 'ファイルダイアログでフォルダを選びます',
+    noDialog: 'この Hermes にはフォルダのダイアログがありません。フォルダのパスを入力するか貼り付けてください。',
+    add: '追加してスキャン',
+    addTitle: 'このフォルダの追加とスキャンをチャットで Kumi に頼みます。承認はチャットで行います',
+    copy: '依頼をコピー',
+    copyTitle: 'このフォルダの追加とスキャンの依頼をコピーします。Hermes のチャットに貼り付けてください',
+    checking: '確認中…',
+    refused: why => `フォルダは追加されませんでした: ${why}`,
+    failed: why => `そのフォルダを確認できませんでした: ${why}`,
+    sent: 'Kumi のチャットで頼みました。チャットで承認すると、スキャンの進行に合わせてマップが埋まっていきます。',
+    drafted: '依頼はチャットの入力欄にあります。送信してから、チャットで承認してください。',
+    copied: 'コピーしました。Hermes のチャットに貼り付けると、フォルダを追加してスキャンします。',
+    known: 'そのフォルダはすでに追加されているため、フォルダのスキャンを頼みます。',
+    note: 'Kumi が読むのはその中のオーディオファイルだけです。ファイルを変更したり移動したりすることはありません。',
+    close: '閉じる'
+  },
   notify: {
     nothingToUndo: '今すぐ取り消せる変更はありません。',
     undoUnsure: 'Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう Hermes に頼んでください。',
@@ -1539,7 +1588,7 @@ const ja: Shape<typeof en> = {
     copyRequest: '依頼をコピー',
     copyReference: '参照をコピー',
     copyUndo: '取り消しをコピー',
-    mapEmpty: 'まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。',
+    mapEmpty: 'まだサンプルマップがありません。ここでサンプルフォルダを追加してください。追加とスキャンの依頼は Hermes のチャットに貼り付けて送ります。',
     askLook: '次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。'
   }
 }
@@ -1660,7 +1709,7 @@ const zh: Shape<typeof en> = {
     keys: '方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。',
     agentOff: '此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。',
     reading: '正在读取采样地图…',
-    empty: '还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。',
+    empty: '还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。',
     search: '搜索声音',
     searchHint: '搜索地图：名称、种类或文件夹',
     count: n => `${n} 个声音`,
@@ -2280,6 +2329,30 @@ const zh: Shape<typeof en> = {
       }
     }
   },
+  folders: {
+    title: '采样文件夹',
+    openTitle: 'Kumi 为这张地图读取的文件夹，以及按路径添加文件夹',
+    none: '还没有。',
+    reading: '正在读取你的采样文件夹…',
+    path: '文件夹的完整路径',
+    pathHint: example => `文件夹的完整路径，例如 ${example}`,
+    choose: '选择…',
+    chooseTitle: '在文件对话框中选择文件夹',
+    noDialog: '这个 Hermes 没有文件夹对话框：请输入或粘贴文件夹的路径。',
+    add: '添加并扫描',
+    addTitle: '在对话中请 Kumi 添加并扫描这个文件夹；你在对话中批准',
+    copy: '复制请求',
+    copyTitle: '复制添加并扫描这个文件夹的请求，粘贴到 Hermes 对话中',
+    checking: '正在检查…',
+    refused: why => `Kumi 没有添加这个文件夹：${why}`,
+    failed: why => `Kumi 无法检查这个文件夹：${why}`,
+    sent: '已在 Kumi 的对话中提出请求。在那里批准后，地图会随着扫描逐渐填满。',
+    drafted: '请求已放进对话的输入框。发送后，在对话中批准。',
+    copied: '已复制。粘贴到 Hermes 对话中，即可添加并扫描这个文件夹。',
+    known: 'Kumi 已经有这个文件夹了，所以这会请求扫描你的文件夹。',
+    note: 'Kumi 只读取其中的音频文件，绝不会更改或移动你的文件。',
+    close: '关闭'
+  },
   notify: {
     nothingToUndo: 'Kumi 现在没有可以撤销的改动。',
     undoUnsure: 'Kumi 不确定它的上一次改动：请先让 Hermes 让它重新查看你的项目。',
@@ -2296,7 +2369,7 @@ const zh: Shape<typeof en> = {
     copyRequest: '复制请求',
     copyReference: '复制引用',
     copyUndo: '复制撤销',
-    mapEmpty: '还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。',
+    mapEmpty: '还没有采样地图。在这里添加一个采样文件夹：添加并扫描的请求要粘贴到 Hermes 对话中发送。',
     askLook: '下一次改动之前，请在对话中让 Hermes 重新查看。'
   }
 }

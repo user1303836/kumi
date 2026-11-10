@@ -418,6 +418,52 @@ def library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str 
     return normal, None
 
 
+def typed_library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str | None, str | None]:
+    """A folder the producer named themself (the terminal, `/kumi samples add`, the map's Sample folders control):
+    `library_folder`'s answer for it, its rules unchanged, after taking off what a shell or a paste leaves around a
+    path (a pair of quotes; the closing quote cmd leaves from `"D:\\Samples\\"`). The answer is the folder's real
+    place, links followed: the producer sees where it leads before saying yes, and it's the one path `kumi serve`
+    takes for a folder (it refuses a link on the way). A path with no folder at it is said here, not found out by an
+    empty scan. Returns (folder, None), or (None, why not)."""
+    if isinstance(folder, str):
+        folder = folder.strip()
+        if len(folder) >= 2 and folder[0] == folder[-1] and folder[0] in "\"'":
+            folder = folder[1:-1].strip()
+        elif folder.endswith('"') and '"' not in folder[:-1]:
+            folder = folder[:-1]
+    normal, refusal = library_folder(folder, hermes_home=hermes_home)
+    if normal is None:
+        return None, refusal
+    real = real_folder(normal)  # the guard passed, so every step of it is on this computer
+    if real is None:
+        return None, f"there's no folder at {normal}."
+    return library_folder(real, hermes_home=hermes_home)
+
+
+def real_folder(folder: str) -> str | None:
+    """A folder's real place, links followed, when a folder is there now; None otherwise (an unplugged drive, a
+    renamed folder, a network path, which is never looked up)."""
+    plain = local(folder)
+    real = resolved(plain) if plain else None
+    return real if real and os.path.isdir(real) else None
+
+
+def same_place(folder: str) -> str:
+    """A folder's real place, in a form every spelling of it shares: links followed, Windows's verbatim prefix and
+    letter case aside. `kumi serve` keeps its folders as the disk spells them (`/private/tmp/…` for `/tmp/…`,
+    `\\\\?\\C:\\…` on Windows), so this is how one of the settings' folders is told from one the runtime already has.
+    A path that can't be resolved here stands for itself."""
+    plain = local(folder)
+    real = resolved(plain) if plain else None
+    return os.path.normcase(real or folder)
+
+
+def has_folder(folders: list[str], folder: str) -> bool:
+    """Whether `folder` is one of `folders`, under any spelling (`same_place`)."""
+    place = same_place(folder)
+    return any(same_place(each) == place for each in folders)
+
+
 def library_folders(folders: Any, *, hermes_home: str | None = None) -> list[str]:
     """The `library_folders` setting as the guard keeps it: each folder normalized, once. One the guard refuses
     (relative, a disk, the home folder, Hermes's own, a network path), however it got into the setting, is left out

@@ -326,6 +326,18 @@ export const RESCAN_REQUEST = 'Kumi, rescan my sample folders'
 /** From an empty map: build it. A folder already approved is scanned; with none, the agent asks which one to add. */
 export const SCAN_REQUEST = 'Kumi, scan my sample folders for the sound map, and ask me which folder to add if there are none'
 
+/** From the Sample folders control: add the folder the producer typed or picked, as the folder guard keeps it, and
+ *  scan it. The path goes as it is, in code quotes so a chat that draws Markdown leaves its backslashes alone. */
+export function addFolderRequest(folder: string): string {
+  return `Kumi, add this sample folder and scan it: ${folder.includes('`') ? folder : `\`${folder}\``}`
+}
+
+/** A folder's path as someone would type it on the computer Kumi runs on (setup's `target`), for the path field. */
+export function folderExample(target: unknown): string {
+  const system = typeof target === 'string' ? target : ''
+  return system.includes('windows') ? 'C:\\Users\\you\\Samples' : system.includes('linux') ? '/home/you/Samples' : '/Users/you/Samples'
+}
+
 /** With nothing in HISTORY yet, three things to try: a look, a small change and a find. They only draft their words. */
 export const STARTER_REQUESTS = [
   { key: 'look', request: 'What am I looking at?' },
