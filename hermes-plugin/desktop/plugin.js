@@ -6650,7 +6650,7 @@ var GLYPH_SHAPES = [
 function glyphOf(group) {
   return (group % GLYPH_SHAPES.length + GLYPH_SHAPES.length) % GLYPH_SHAPES.length;
 }
-function traceGlyph(path, glyph, x, y, r) {
+function traceGlyph(path, glyph, x, y, r, closed = false) {
   const shape = GLYPH_SHAPES[glyph];
   if (!shape) {
     path.moveTo(x + r, y);
@@ -6658,6 +6658,7 @@ function traceGlyph(path, glyph, x, y, r) {
     return;
   }
   shape.forEach(([px, py], index) => index === 0 ? path.moveTo(x + px * r, y + py * r) : path.lineTo(x + px * r, y + py * r));
+  if (closed) path.closePath();
 }
 var cellOf = (x, y) => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID));
 var MOST_ARRANGEMENTS = 16;
@@ -8993,11 +8994,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       return since >= INTRO_MS * 0.55 ? 1 : since <= 0 ? 0 : easeOutBack(since / (INTRO_MS * 0.55));
     };
     const glyphs = new Map(model.groups.map((group) => [group.key, glyphOf(group.key)]));
-    const shape = (path, x, y, blend, grow2 = 1, glyph = 0) => {
+    const shape = (path, x, y, blend, grow2 = 1, glyph = 0, closed = false) => {
       if (blend <= 0) {
         const r = radius * grow2;
         if (r <= 0.05) return;
-        traceGlyph(path, glyph, x, y, r);
+        traceGlyph(path, glyph, x, y, r, closed);
         return;
       }
       const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow2;
@@ -9239,7 +9240,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.fill(path);
       context.restore();
       const ring3 = new Path2D();
-      shape(ring3, x, y, blend, 2.3, glyphAt(hovered2));
+      shape(ring3, x, y, blend, 2.3, glyphAt(hovered2), true);
       context.strokeStyle = colors.strong;
       context.lineWidth = 1.25;
       context.stroke(ring3);

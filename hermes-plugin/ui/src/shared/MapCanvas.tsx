@@ -600,11 +600,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     // A dot is its group's glyph (a kind reads by shape as well as colour); a tile a rounded square; between the two
     // while the morph runs.
     const glyphs = new Map(model.groups.map(group => [group.key, glyphOf(group.key)]))
-    const shape = (path: Path2D, x: number, y: number, blend: number, grow = 1, glyph = 0) => {
+    // `closed` is for the one path that is stroked: the filled ones leave each shape open (`traceGlyph` says why).
+    const shape = (path: Path2D, x: number, y: number, blend: number, grow = 1, glyph = 0, closed = false) => {
       if (blend <= 0) {
         const r = radius * grow
         if (r <= 0.05) return
-        traceGlyph(path, glyph, x, y, r)
+        traceGlyph(path, glyph, x, y, r, closed)
         return
       }
       const side = (2 * radius + (tileSide - 2 * radius) * blend) * grow
@@ -887,7 +888,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.restore()
       // And a fine ring in the text colour, so one sound stands out of a dense cluster of its own colour.
       const ring = new Path2D()
-      shape(ring, x, y, blend, 2.3, glyphAt(hovered))
+      shape(ring, x, y, blend, 2.3, glyphAt(hovered), true)
       context.strokeStyle = colors.strong
       context.lineWidth = 1.25
       context.stroke(ring)

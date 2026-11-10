@@ -110,10 +110,11 @@ export function glyphOf(group: number): number {
   return ((group % GLYPH_SHAPES.length) + GLYPH_SHAPES.length) % GLYPH_SHAPES.length
 }
 
-/** Add glyph `glyph` of radius `r` at (`x`, `y`) to a path (the canvas's Path2D) that will be filled. A polygon is left
- *  open, since a fill closes it: Chrome's `closePath` takes longer the longer the path already is, and with a large
- *  library's shapes in one path it was most of a frame. */
-export function traceGlyph(path: Pick<Path2D, 'arc' | 'lineTo' | 'moveTo'>, glyph: number, x: number, y: number, r: number): void {
+/** Add glyph `glyph` of radius `r` at (`x`, `y`) to a path (the canvas's Path2D). A polygon is left open unless
+ *  `closed`. A path that is filled needs no closing, since a fill closes each shape: Chrome's `closePath` takes longer
+ *  the longer the path already is, and with a large library's shapes in one path it was most of a frame. A path that
+ *  is stroked must ask for `closed`, or the polygon's last side is missing. */
+export function traceGlyph(path: Pick<Path2D, 'arc' | 'closePath' | 'lineTo' | 'moveTo'>, glyph: number, x: number, y: number, r: number, closed = false): void {
   const shape = GLYPH_SHAPES[glyph]
   if (!shape) {
     path.moveTo(x + r, y)
@@ -121,6 +122,7 @@ export function traceGlyph(path: Pick<Path2D, 'arc' | 'lineTo' | 'moveTo'>, glyp
     return
   }
   shape.forEach(([px, py], index) => (index === 0 ? path.moveTo(x + px * r, y + py * r) : path.lineTo(x + px * r, y + py * r)))
+  if (closed) path.closePath()
 }
 
 const cellOf = (x: number, y: number): number => Math.min(GRID - 1, Math.floor(y * GRID)) * GRID + Math.min(GRID - 1, Math.floor(x * GRID))
