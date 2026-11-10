@@ -104,6 +104,19 @@ test('numbers carry a true minus and the chip says what is connected, stale or m
   assert.equal(format.ago(Date.now() - 4 * 60_000), '4 min ago')
 })
 
+test('the connection dot keeps the beat only while the DAW plays, and never flickers', () => {
+  assert.equal(format.beatSeconds({ playing: true, tempo: 120 }), 0.5)
+  // Stopped, or no tempo to keep: it sits steady.
+  assert.equal(format.beatSeconds({ playing: false, tempo: 120 }), null)
+  assert.equal(format.beatSeconds({ tempo: 120 }), null)
+  assert.equal(format.beatSeconds({ playing: true, tempo: null }), null)
+  assert.equal(format.beatSeconds({ playing: true, tempo: 0 }), null)
+  assert.equal(format.beatSeconds(null), null)
+  // A tempo past three beats a second: every other beat, or every fourth.
+  assert.equal(format.beatSeconds({ playing: true, tempo: 240 }), 0.5)
+  assert.equal(format.beatSeconds({ playing: true, tempo: 960 }), 0.5)
+})
+
 const analysis = (lufs, peak, centroid, file) => ({
   file,
   seconds: 0.6,
@@ -973,6 +986,12 @@ test('the chip, a job and the time read in Japanese and Chinese; requests to the
   assert.deepEqual(['zh-Hant-TW', 'zh-TW', 'zh_HK', 'zh-Hans', 'zh'].map(i18n.localeOf), ['en', 'en', 'en', 'zh', 'zh'])
 })
 
+// Every state the map can be in, as its gestures' table takes it (`atlas/gestures.ts`).
+const mapStates = () =>
+  [true, false].flatMap(picks =>
+    [true, false].flatMap(hand => [true, false].flatMap(naming => [0, 3].flatMap(picked => [true, false].flatMap(hover => [null, true, false].map(scrollPans => ({ picks, hand, naming, picked, hover, scrollPans }))))))
+  )
+
 test('every catalog key the UI names has words in English, Japanese and Chinese, so no raw key ever shows', async () => {
   const { readdirSync, readFileSync } = await import('node:fs')
   const { join } = await import('node:path')
@@ -981,7 +1000,7 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   const sources = walk(fileURLToPath(new URL('../src', import.meta.url))).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
   const keys = new Set()
   // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
-  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard|arrange|grow)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
+  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|generate|palette|dock|make|notify|dashboard|arrange|grow|corner|first)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
   for (const file of sources) for (const match of readFileSync(file, 'utf8').matchAll(pattern)) keys.add(match[1])
   // The keys built from a state's name.
   for (const state of ['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown']) keys.add(`settings.states.${state}`)
@@ -994,6 +1013,11 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
   for (const card of design.CARDS) keys.add(`make.cards.${card.key}.title`).add(`make.cards.${card.key}.hint`)
   for (const tab of design.TABS) keys.add(`make.ops.${tab}`).add(`make.opHints.${tab}`)
   keys.add('make.ops.grow')
+  // The map's hint line, built from each gesture it can name and what that does: every state the map can be in.
+  const gestures = await load('src/shared/atlas/gestures.ts')
+  for (const state of mapStates()) for (const [gesture, deed] of gestures.hintOf(state)) keys.add(`corner.keys.${gesture}`).add(`corner.does.${deed}`)
+  // The first-open steps, each named from its step.
+  for (const step of (await load('src/shared/atlas/first.ts')).FIRST_STEPS) keys.add(`first.${step}`)
   for (const option of ['seconds', 'bpm', 'bars', 'depth', 'stretch', 'attack_from']) keys.add(`make.options.${option}`)
   for (const pairing of design.PAIRINGS) keys.add(`make.resonate.pairings.${pairing}`).add(`make.resonate.pairingHints.${pairing}`)
   for (const ring of design.RINGS) keys.add(`make.resonate.rings.${ring}`)

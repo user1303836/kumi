@@ -3,9 +3,10 @@
 // dragged along the vine to grow and hear any point; and a card for the point picked, with what can be done with it
 // (the parent's Keep, Use… and Make from; Grow from here, another path, close).
 import { T } from '@kumi/theme'
-import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
+import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useRef } from 'react'
 
+import { usePlayhead, Wave } from './atlas/Wave.tsx'
 import { type DesignResult, sourceOfResult } from './design.ts'
 import { clean, seconds } from './format.ts'
 import { type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
@@ -19,6 +20,11 @@ const percent = (at: number): number => Math.round(at * 100)
 
 /** A bud's colour: its ends' colours mixed by how far along it is. */
 const mixed = (from: string, to: string, at: number): string => `color-mix(in srgb, ${to} ${percent(at)}%, ${from})`
+
+/** A grown point's waveform in its two ends' colours, the first's on the left, with a playhead while it plays. */
+function GrownWave({ result, colors, playing }: { result: DesignResult; colors: readonly string[]; playing: boolean }) {
+  return <Wave colors={colors} height={26} peaks={result.peaks} progress={usePlayhead(playing, result.duration)} width={278} />
+}
 
 export function GrowLayer({
   grow,
@@ -35,7 +41,8 @@ export function GrowLayer({
   playing,
   onPlay,
   onStop,
-  actions
+  actions,
+  card: cardBox
 }: {
   grow: Grow
   /** The ends on screen (px), and in map units (a bud grown again keeps its place); null for one not on the map. */
@@ -55,6 +62,8 @@ export function GrowLayer({
   onStop: () => void
   /** What the parent offers for a grown point (Keep, Use…, Make from). */
   actions?: (result: DesignResult) => ReactNode
+  /** The card's own box, for the map to keep its words from under it. */
+  card?: RefObject<HTMLDivElement | null>
 }) {
   const t = useT()
   // A press on the handle: where it began, and whether it has moved enough to be a drag. One that never moves is a
@@ -99,7 +108,7 @@ export function GrowLayer({
   const xs = [from[0], to[0], cx]
   const ys = [from[1], to[1], cy]
   const anchor: [number, number, number, number] = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
-  const card = floatBeside(anchor, 300, picked?.state === 'ready' ? 132 : failed || picked?.state === 'failed' ? 96 : 70, width, height, top, bottom)
+  const card = floatBeside(anchor, 300, picked?.state === 'ready' ? 164 : failed || picked?.state === 'failed' ? 96 : 70, width, height, top, bottom)
   const budView = (bud: Bud, scrubbed = false) => {
     const [x, y] = at(bud.at)
     const color = mixed(fromColor, toColor, bud.at)
@@ -205,6 +214,7 @@ export function GrowLayer({
         className="kumi-pop"
         role="group"
         aria-label={t('grow.title', clean(grow.from?.name ?? '', 60), clean(grow.to.name, 60))}
+        ref={cardBox}
         style={{ ...glass, position: 'absolute', zIndex: 1, left: card.left, top: card.top, width: 300, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
       >
         <div style={{ ...S.row, gap: 6 }}>
@@ -230,6 +240,8 @@ export function GrowLayer({
               <span style={{ ...S.ellipsis, display: 'block' }}>{clean(picked.result.recipe, 160)}</span>
               <span style={{ color: T.faint }}>{seconds(picked.result.duration)}</span>
             </span>
+            {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
+            <GrownWave colors={[fromColor, toColor]} key={picked.result.artifact_id} playing={playing === picked.result.artifact_id} result={picked.result} />
             <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
               <TextButton onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>{playing === picked.result.artifact_id ? t('map.stop') : t('map.play')}</TextButton>
               {actions?.(picked.result)}

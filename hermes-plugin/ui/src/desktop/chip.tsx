@@ -3,11 +3,11 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, StatusDot } from '@hermes/plugin-sdk'
 
-import { chipWords } from '../shared/format.ts'
+import { beatSeconds, chipWords } from '../shared/format.ts'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
 import { nextSteps } from '../shared/steps.ts'
-import { FOCUSABLE, useT } from '../shared/ui.tsx'
+import { beating, FOCUSABLE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 
@@ -29,6 +29,9 @@ export function StatusChip({
   const words = chipWords(state.status, state.focus?.transport?.tempo, t)
   const steps = nextSteps(state, t)
   const connected = Boolean(state.status?.connected)
+  // The dot swells at the DAW's tempo while it plays (steady when it's stopped, or not connected). It's Desktop's own
+  // dot, in a colour of Desktop's choosing: only its size moves, and no style of its own is set from here.
+  const pulse = beating(connected ? beatSeconds(state.focus?.transport) : null)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -53,7 +56,9 @@ export function StatusChip({
             whiteSpace: 'nowrap'
           }}
         >
-          <StatusDot tone={words.tone} />
+          <span className={pulse.className} style={{ display: 'inline-flex', ...pulse.style }}>
+            <StatusDot tone={words.tone} />
+          </span>
           {words.text}
         </button>
       </DropdownMenuTrigger>

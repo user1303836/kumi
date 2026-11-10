@@ -1,7 +1,7 @@
 // Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests. The UI's
 // words come through a `Translate` (English by default); the requests stay English, as contract C5 has them.
 import { english, type Translate } from './i18n.ts'
-import type { Focus, HistoryItem, Job, Named, Status } from './types.ts'
+import type { Focus, HistoryItem, Job, Named, Status, Transport } from './types.ts'
 
 const DAWS: Record<string, string> = { ableton: 'Live', live: 'Live', reaper: 'REAPER', renoise: 'Renoise', soundcraft: 'SoundCraft' }
 
@@ -96,6 +96,17 @@ export function hz(value: number): string {
 
 export function bpm(tempo: unknown): string | undefined {
   return typeof tempo === 'number' && tempo > 0 ? `${num(tempo, 1)} BPM` : undefined
+}
+
+/** How long a beat of the DAW is while it plays, in seconds: the connection dot pulses at it. Null while the DAW is
+ *  stopped or names no tempo. Never faster than three a second (a very fast tempo beats every other beat, or every
+ *  fourth): a dot that flickers reads as trouble. */
+export function beatSeconds(transport: Transport | null | undefined): number | null {
+  const tempo = transport?.tempo
+  if (transport?.playing !== true || typeof tempo !== 'number' || !Number.isFinite(tempo) || tempo <= 0) return null
+  let beat = 60 / tempo
+  while (beat < 1 / 3) beat *= 2
+  return beat
 }
 
 /** How long ago `at` (ms since 1970) was: `now`, `4 min ago`, `2 h ago`, `3 d ago`. */

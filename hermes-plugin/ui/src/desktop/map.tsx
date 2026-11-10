@@ -11,6 +11,7 @@ import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
 import { jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
@@ -34,6 +35,8 @@ export const TILES = 'mapTiles'
 export const PALETTE_OPEN = 'paletteOpen'
 /** Desktop's own storage key for the map's layout (similarity, '', until the producer picks another). */
 export const LAYOUT = 'mapLayout'
+/** Desktop's own storage key for the map's first-open steps the producer has done or skipped (none at first). */
+export const FIRST_OPEN = 'mapFirst'
 /** How wide the map must be for the Make panel to float beside it rather than over its lower part. */
 const SIDE_SHEET = 820
 /** Setup's states with no usable runtime: nothing builds the map until setup runs. */
@@ -104,6 +107,15 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   // The dock's box: the Make panel flies a kept sound into it.
   const dock = useRef<HTMLElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(() => ctx.storage.get<boolean>(PALETTE_OPEN, true) !== false)
+  // The map's first-open steps, kept where the drawer's fold is. Make… pressed is seen here; the map sees the others.
+  const first = useFirstOpen(
+    () => ctx.storage.get<string>(FIRST_OPEN, ''),
+    kept => ctx.storage.set(FIRST_OPEN, kept)
+  )
+  const makeOpen = palette.making !== null
+  useEffect(() => {
+    if (makeOpen) first.done(['make'])
+  }, [makeOpen]) // eslint-disable-line react-hooks/exhaustive-deps
   // How wide the map is: wide enough, and the Make panel floats beside it, the map moving into the room it leaves.
   const area = useRef<HTMLDivElement | null>(null)
   const [areaWidth, setAreaWidth] = useState(0)
@@ -293,6 +305,9 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             setTiles(on)
           }}
           tiles={tiles}
+          trail={hover}
+          kin={palette.kin}
+          first={{ kept: first.kept, onDone: first.done }}
           arrangement={layout}
           onArrangement={id => {
             ctx.storage.set(LAYOUT, id)
@@ -314,6 +329,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         {palette.making && (
           <MakePanel
             colorOf={palette.colorOf}
+            lineage={result => palette.lineage(result.sources, result.at)}
+            onKin={result => palette.showKin(result ? result.sources : null)}
             dock={dock}
             kept={palette.kept}
             onClose={palette.closeMake}
@@ -349,6 +366,8 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             </TextButton>
           )}
           landing={dock}
+          lineage={palette.madeLineage}
+          onKin={palette.showKinOf}
           make={palette.makeFromPalette}
           onDo={action => store.paletteDo(action)}
           onOpen={open => {
