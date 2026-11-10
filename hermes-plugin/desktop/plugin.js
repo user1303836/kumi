@@ -6227,6 +6227,267 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
 // src/shared/MapCanvas.tsx
 import { useEffect as useEffect9, useMemo as useMemo2, useRef as useRef8, useState as useState10 } from "react";
 
+// src/shared/atlas/color.ts
+function rgbOf(color) {
+  const text = color.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+  if (hex) {
+    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+    const value = parseInt(digits, 16);
+    return [value >> 16, value >> 8 & 255, value & 255];
+  }
+  const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
+  if (!rgb) return null;
+  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  return channels.every((channel) => channel <= 255) ? channels : null;
+}
+function rgba(color, alpha) {
+  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+}
+function lighten(color, amount) {
+  const toward = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
+}
+function isDark(color) {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+}
+
+// src/shared/atlas/nebula.ts
+var NEBULA_SIDE = 128;
+var NEBULA_PAD = 0.12;
+var SPREAD = 2;
+var SKIRT = 5;
+var CORE = 0.55;
+var ALONE = CORE / (2 * SPREAD + 1) ** 2;
+var CROWD = 8;
+var BRIGHTEST = 0.85;
+function blur(from, into, side, radius, step2) {
+  const across = step2 === 1 ? side : 1;
+  const scale = 1 / (2 * radius + 1);
+  for (let line = 0; line < side; line++) {
+    const start = line * across;
+    let sum = 0;
+    for (let k = 0; k <= radius && k < side; k++) sum += from[start + k * step2];
+    for (let k = 0; k < side; k++) {
+      into[start + k * step2] = sum * scale;
+      const enters = k + radius + 1;
+      const leaves = k - radius;
+      if (enters < side) sum += from[start + enters * step2];
+      if (leaves >= 0) sum -= from[start + leaves * step2];
+    }
+  }
+}
+function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+  const cells = side * side;
+  const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
+  const [red, green, blue, weight] = sums;
+  const span2 = side / (1 + 2 * NEBULA_PAD);
+  const colors = /* @__PURE__ */ new Map();
+  for (let index = 0; index < points.length; index++) {
+    if (!keep(index)) continue;
+    const point = points[index];
+    let color = colors.get(point.group);
+    if (!color) {
+      color = colorOf2(point.group);
+      colors.set(point.group, color);
+    }
+    const fx = (point.x + NEBULA_PAD) * span2 - 0.5;
+    const fy = (point.y + NEBULA_PAD) * span2 - 0.5;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= side || y0 + 1 >= side) continue;
+    const right = fx - x0;
+    const down = fy - y0;
+    for (let corner = 0; corner < 4; corner++) {
+      const share = (corner & 1 ? right : 1 - right) * (corner & 2 ? down : 1 - down);
+      const cell = (y0 + (corner >> 1)) * side + x0 + (corner & 1);
+      red[cell] += color[0] * share;
+      green[cell] += color[1] * share;
+      blue[cell] += color[2] * share;
+      weight[cell] += share;
+    }
+  }
+  const spare = new Float32Array(cells);
+  const core = new Float32Array(cells);
+  for (const sum of sums) {
+    for (let pass = 0; pass < 2; pass++) {
+      blur(sum, spare, side, SPREAD, 1);
+      blur(spare, sum, side, SPREAD, side);
+    }
+    core.set(sum);
+    for (let pass = 0; pass < 2; pass++) {
+      blur(sum, spare, side, SKIRT, 1);
+      blur(spare, sum, side, SKIRT, side);
+    }
+    for (let cell = 0; cell < cells; cell++) sum[cell] = CORE * core[cell] + (1 - CORE) * sum[cell];
+  }
+  let peak = 0;
+  for (let cell = 0; cell < cells; cell++) if (weight[cell] > peak) peak = weight[cell];
+  const pixels = new Uint8ClampedArray(cells * 4);
+  if (peak <= 0) return pixels;
+  const gain = -Math.log(1 - BRIGHTEST) / Math.max(peak, ALONE * CROWD);
+  for (let cell = 0; cell < cells; cell++) {
+    const here = weight[cell];
+    if (here <= 1e-9) continue;
+    pixels[4 * cell] = red[cell] / here;
+    pixels[4 * cell + 1] = green[cell] / here;
+    pixels[4 * cell + 2] = blue[cell] / here;
+    pixels[4 * cell + 3] = 255 * (1 - Math.exp(-here * gain));
+  }
+  return pixels;
+}
+function nebulaAlpha(zoom) {
+  const alpha = 1 / Math.max(1, zoom) ** 1.35;
+  return alpha < 0.03 ? 0 : alpha;
+}
+function haloOf(radius, zoom, crowd, unit) {
+  const reach = radius * 3.3;
+  const overlap = crowd * 64 * 64 / (unit * unit) * 0.77 * reach * reach;
+  return { radius: reach, alpha: Math.min(0.34 / Math.sqrt(Math.max(1, zoom)), overlap > 0 ? Math.max(0.16, 0.9 / overlap) : 1) };
+}
+
+// src/shared/atlas/glow.ts
+var GREY = [128, 128, 128];
+var MOST_SPRITES = 240;
+function picture(width, height) {
+  if (typeof OffscreenCanvas !== "function") return null;
+  const canvas = new OffscreenCanvas(width, height);
+  const context = canvas.getContext("2d");
+  return context ? { canvas, context } : null;
+}
+var Glow = class {
+  current = null;
+  last = null;
+  sprites = /* @__PURE__ */ new Map();
+  crowds = /* @__PURE__ */ new WeakMap();
+  shapes = /* @__PURE__ */ new Map();
+  ground = "";
+  dark = true;
+  /** Whether the canvas's ground is a dark one, from the theme colour the canvas resolved (a colour it can't read
+   *  counts as dark, as both hosts' first themes are). */
+  onDark(context, ground) {
+    if (ground === this.ground) return this.dark;
+    this.ground = ground;
+    const kept2 = context.fillStyle;
+    context.fillStyle = "#000";
+    context.fillStyle = ground;
+    const read = typeof context.fillStyle === "string" ? rgbOf(context.fillStyle) : null;
+    context.fillStyle = kept2;
+    this.dark = read ? isDark(read) : true;
+    this.shapes.clear();
+    return this.dark;
+  }
+  /** The colour a sound's shape is filled in: its family's, a little brighter on a dark ground so it stays crisp over
+   *  its own glow. */
+  shape(color) {
+    let shape = this.shapes.get(color);
+    if (shape === void 0) {
+      const channels = this.dark ? rgbOf(color) : null;
+      shape = channels ? lighten(channels, 0.2) : color;
+      this.shapes.set(color, shape);
+    }
+    return shape;
+  }
+  /** The nebula of `layout` for the sounds `mask` keeps, made the first time it's asked for and kept until either
+   *  changes; with it, the one the map showed before a new layout (for the move between them to fade out). Two
+   *  pictures in all, drawn over in turn. */
+  nebula(layout, mask, colorOf2) {
+    if (this.current?.layout !== layout || this.current.mask !== mask) {
+      const same = this.current?.layout === layout;
+      const sheet = (same ? this.current?.sheet : this.last?.sheet) ?? picture(NEBULA_SIDE, NEBULA_SIDE);
+      if (!sheet) return { now: null, before: null };
+      if (!same) this.last = this.current;
+      const pixels = nebulaField(
+        layout.points,
+        (index) => mask[index] === 1,
+        (group) => rgbOf(colorOf2(group)) ?? GREY
+      );
+      sheet.context.putImageData(new ImageData(pixels, NEBULA_SIDE, NEBULA_SIDE), 0, 0);
+      this.current = { layout, mask, sheet };
+    }
+    return { now: this.current.sheet.canvas, before: this.last && this.last.layout !== layout ? this.last.sheet.canvas : null };
+  }
+  /** Draw a nebula under the map at `view`, `unit` pixels to the map's square, at `alpha`. */
+  draw(context, nebula, view, unit, alpha) {
+    if (alpha <= 0) return;
+    const kept2 = context.globalAlpha;
+    context.globalAlpha = alpha;
+    context.imageSmoothingEnabled = true;
+    context.drawImage(nebula, view.dx - NEBULA_PAD * unit, view.dy - NEBULA_PAD * unit, (1 + 2 * NEBULA_PAD) * unit, (1 + 2 * NEBULA_PAD) * unit);
+    context.globalAlpha = kept2;
+  }
+  /** How many sounds the layout's most crowded cell holds (of its 64 × 64 grid). */
+  crowd(layout) {
+    let crowd = this.crowds.get(layout);
+    if (crowd === void 0) {
+      crowd = 0;
+      for (const cell of layout.cells.values()) crowd = Math.max(crowd, cell.length);
+      this.crowds.set(layout, crowd);
+    }
+    return crowd;
+  }
+  /** Halos of `radius` pixels at `alpha`, on a canvas drawn at `ratio` device pixels to one: each `at` adds one, `done`
+   *  hands the canvas back as it was. Null when there's nothing to draw them with, or nothing to see. */
+  halos(context, radius, alpha, ratio) {
+    if (alpha < 0.02 || radius < 1 || typeof OffscreenCanvas !== "function") return null;
+    const size = Math.round(radius * 2) / 2;
+    const side = Math.max(2, Math.ceil(size * 2 * ratio));
+    const [keptAlpha, keptBlend] = [context.globalAlpha, context.globalCompositeOperation];
+    context.globalCompositeOperation = "lighter";
+    let strong = -1;
+    let color = "";
+    let sprite = null;
+    return {
+      at: (next, x, y, strength) => {
+        if (strength <= 0.02) return;
+        if (next !== color) {
+          color = next;
+          sprite = this.sprite(next, side);
+        }
+        if (!sprite) return;
+        const stepped = Math.round(Math.min(1, strength) * 10) / 10;
+        if (stepped !== strong) {
+          strong = stepped;
+          context.globalAlpha = alpha * stepped;
+        }
+        context.drawImage(sprite, x - size, y - size, size * 2, size * 2);
+      },
+      done: () => {
+        context.globalAlpha = keptAlpha;
+        context.globalCompositeOperation = keptBlend;
+      }
+    };
+  }
+  /** A soft round sprite in one colour, `side` device pixels across: bright in the middle, gone at its edge. */
+  sprite(color, side) {
+    const key = `${color}|${side}`;
+    const kept2 = this.sprites.get(key);
+    if (kept2) return kept2;
+    const channels = rgbOf(color);
+    const made = channels ? picture(side, side) : null;
+    if (!made || !channels) return null;
+    const middle = side / 2;
+    const fade = made.context.createRadialGradient(middle, middle, 0, middle, middle, middle);
+    fade.addColorStop(0, rgba(channels, 1));
+    fade.addColorStop(0.35, rgba(channels, 0.45));
+    fade.addColorStop(1, rgba(channels, 0));
+    made.context.fillStyle = fade;
+    made.context.fillRect(0, 0, side, side);
+    if (this.sprites.size >= MOST_SPRITES) this.sprites.clear();
+    this.sprites.set(key, made.canvas);
+    return made.canvas;
+  }
+};
+var glows = /* @__PURE__ */ new WeakMap();
+function glowOf(canvas) {
+  let glow = glows.get(canvas);
+  if (!glow) {
+    glow = new Glow();
+    glows.set(canvas, glow);
+  }
+  return glow;
+}
+
 // src/shared/GrowLayer.tsx
 import { useRef as useRef6 } from "react";
 
@@ -7333,14 +7594,14 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const up = (event) => {
       if (event.code === "Space") hold(false);
     };
-    const blur = () => hold(false);
+    const blur2 = () => hold(false);
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);
-    window.addEventListener("blur", blur);
+    window.addEventListener("blur", blur2);
     return () => {
       window.removeEventListener("keydown", down, true);
       window.removeEventListener("keyup", up, true);
-      window.removeEventListener("blur", blur);
+      window.removeEventListener("blur", blur2);
     };
   }, []);
   const rested = useRef8(null);
@@ -7625,8 +7886,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const reach = (blend) => radius + (Math.max(radius, tileSide * 0.62) - radius) * blend;
     const labelled = [];
     let onScreen = 0;
+    const glow = glowOf(canvas);
+    const dark = glow.onDark(context, colors.ground);
+    const calm = nebulaAlpha(view.scale) * (1 - morphed) * clamp01((now - introAt.current) / INTRO_MS) * (dark ? 0.85 : 0.4);
+    if (calm > 0) {
+      const nebula = glow.nebula(arranged, mask, (group) => groupColor2.get(group) ?? colors.faint);
+      if (from && shifting < 0.3) {
+        if (nebula.before) glow.draw(context, nebula.before, view, unit, calm * (1 - shifting / 0.3));
+      } else if (nebula.now) glow.draw(context, nebula.now, view, unit, calm * (from ? clamp01((shifting - 0.7) / 0.3) : 1));
+    }
+    const halo = haloOf(radius, view.scale, glow.crowd(arranged), unit);
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
+      const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null;
       for (let index = 0; index < count2; index++) {
         if (mask[index] !== pass) continue;
         const [x, y, blend] = placeOf(index);
@@ -7638,13 +7910,16 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           path = new Path2D();
           paths.set(color, path);
         }
-        shape(path, x, y, blend, introFor(index), glyphAt(index));
+        const grown = introFor(index);
+        halos?.at(color, x, y, grown * (1 - blend));
+        shape(path, x, y, blend, grown, glyphAt(index));
         if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ""]);
       }
+      halos?.done();
       context.globalAlpha = pass ? 0.92 : 0.16;
       for (const paths of rounds) {
         for (const [color, path] of paths) {
-          context.fillStyle = color;
+          context.fillStyle = glow.shape(color);
           context.fill(path);
         }
       }
@@ -7760,7 +8035,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.save();
       context.shadowColor = color;
       context.shadowBlur = 14;
-      context.fillStyle = color;
+      context.fillStyle = glow.shape(color);
       context.fill(path);
       context.restore();
       const ring3 = new Path2D();

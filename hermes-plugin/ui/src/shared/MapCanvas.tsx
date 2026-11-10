@@ -12,6 +12,8 @@ import { CANVAS, T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { glowOf } from './atlas/glow.ts'
+import { haloOf, nebulaAlpha } from './atlas/nebula.ts'
 import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
@@ -540,9 +542,23 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     // The labels need at most 41 on-screen points: past 40 there are none.
     const labelled: [number, number, string][] = []
     let onScreen = 0
+    // The glow under the sounds. First the layout's nebula: calmer as the map zooms in, absent under tiles, arriving
+    // with a new map's sounds, and around a layout's move the old layout's fading out, then the new one's coming in
+    // as the sounds arrive. Then, in the pass below, a halo under each sound the search and the legend keep.
+    const glow = glowOf(canvas)
+    const dark = glow.onDark(context, colors.ground)
+    const calm = nebulaAlpha(view.scale) * (1 - morphed) * clamp01((now - introAt.current) / INTRO_MS) * (dark ? 0.85 : 0.4)
+    if (calm > 0) {
+      const nebula = glow.nebula(arranged, mask, group => groupColor.get(group) ?? colors.faint)
+      if (from && shifting < 0.3) {
+        if (nebula.before) glow.draw(context, nebula.before, view, unit, calm * (1 - shifting / 0.3))
+      } else if (nebula.now) glow.draw(context, nebula.now, view, unit, calm * (from ? clamp01((shifting - 0.7) / 0.3) : 1))
+    }
+    const halo = haloOf(radius, view.scale, glow.crowd(arranged), unit)
     // Dimmed points first, then the ones the search and legend keep, so those sit on top.
     for (const pass of [0, 1]) {
       const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
+      const halos = pass === 1 && morphed < 1 ? glow.halos(context, halo.radius, halo.alpha, ratio) : null
       for (let index = 0; index < count; index++) {
         if (mask[index] !== pass) continue
         const [x, y, blend] = placeOf(index)
@@ -554,13 +570,16 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           path = new Path2D()
           paths.set(color, path)
         }
-        shape(path, x, y, blend, introFor(index), glyphAt(index))
+        const grown = introFor(index)
+        halos?.at(color, x, y, grown * (1 - blend))
+        shape(path, x, y, blend, grown, glyphAt(index))
         if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[points[index].id]?.name ?? ''])
       }
+      halos?.done()
       context.globalAlpha = pass ? 0.92 : 0.16
       for (const paths of rounds) {
         for (const [color, path] of paths) {
-          context.fillStyle = color
+          context.fillStyle = glow.shape(color)
           context.fill(path)
         }
       }
@@ -692,7 +711,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.save()
       context.shadowColor = color
       context.shadowBlur = 14
-      context.fillStyle = color
+      context.fillStyle = glow.shape(color)
       context.fill(path)
       context.restore()
       // And a fine ring in the text colour, so one sound stands out of a dense cluster of its own colour.
