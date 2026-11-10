@@ -6773,6 +6773,19 @@ function progressOf(elapsed, duration) {
   return progress <= 1 ? progress : null;
 }
 
+// src/shared/atlas/trail.ts
+var TRAIL_MS = 600;
+var MOST_STEPS = 72;
+function stepTo(path, x, y, now, color, lifted) {
+  const last = path[path.length - 1];
+  const live = path.filter((step2) => now - step2.at < TRAIL_MS);
+  if (last && !lifted && Math.hypot(x - last.x, y - last.y) < 2) return live;
+  return [...live, { x, y, at: now, color, joined: !lifted && live.length > 0 && live[live.length - 1] === last }].slice(-MOST_STEPS);
+}
+function strengthOf(step2, now) {
+  return Math.min(1, Math.max(0, 1 - (now - step2.at) / TRAIL_MS));
+}
+
 // src/shared/atlas/overlay.ts
 var FADE_MS = 180;
 var RIPPLE_MS = 1100;
@@ -6792,6 +6805,11 @@ var Overlay2 = class {
   fading = null;
   /** The core's colour: the canvas's own CSS colour (the theme's text colour), read when a sound starts. */
   core = "#fff";
+  /** The pointer's trail: its steps, the colour of the sound that last played (null before any has), and whether the
+   *  pointer left or pressed since its last step (the next one starts a new line). */
+  path = [];
+  tone = null;
+  lifted = true;
   still = false;
   resize(width, height, ratio) {
     if (width === this.width && height === this.height && ratio === this.ratio) return;
@@ -6807,11 +6825,24 @@ var Overlay2 = class {
     this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null;
     if (pulse) this.core = getComputedStyle(this.canvas).color || this.core;
     if (pulse) this.fading = null;
+    if (pulse) this.tone = pulse.color;
     this.wake();
   }
   /** The playing sound's waveform arrived. */
   levels(levels) {
     if (this.pulse) this.pulse.levels = levels;
+  }
+  /** The pointer moved to (`x`, `y`) over the map with hover-to-play on: its trail grows, in the colour of the sound
+   *  that last played (nothing has played yet: no trail). */
+  trail(x, y) {
+    if (this.still || !this.tone) return;
+    this.path = stepTo(this.path, x, y, performance.now(), this.tone, this.lifted);
+    this.lifted = false;
+    this.wake();
+  }
+  /** The pointer left the map, or pressed on it: what it draws next starts a new line. */
+  lift() {
+    this.lifted = true;
   }
   /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
   moved() {
@@ -6822,6 +6853,7 @@ var Overlay2 = class {
     this.frame = 0;
     this.pulse = null;
     this.fading = null;
+    this.path = [];
   }
   wake() {
     if (this.still) {
@@ -6833,13 +6865,32 @@ var Overlay2 = class {
   tick = (now) => {
     this.frame = 0;
     this.draw(now);
-    if (this.pulse || this.fading) this.frame = requestAnimationFrame(this.tick);
+    if (this.pulse || this.fading || this.path.length > 0) this.frame = requestAnimationFrame(this.tick);
   };
   draw(now) {
     const context = this.context;
     if (!context || this.width === 0) return;
     context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
     context.clearRect(0, 0, this.width, this.height);
+    this.path = this.path.filter((step2) => strengthOf(step2, now) > 0);
+    if (this.path.length > 1) {
+      context.save();
+      context.globalCompositeOperation = "lighter";
+      context.lineCap = "butt";
+      for (let index = 1; index < this.path.length; index++) {
+        const [from, to] = [this.path[index - 1], this.path[index]];
+        if (!to.joined) continue;
+        const strength = strengthOf(to, now);
+        context.strokeStyle = to.color;
+        context.globalAlpha = 0.12 + 0.6 * strength * strength;
+        context.lineWidth = 1 + 4 * strength * strength;
+        context.beginPath();
+        context.moveTo(from.x, from.y);
+        context.lineTo(to.x, to.y);
+        context.stroke();
+      }
+      context.restore();
+    }
     if (this.fading) {
       const left = 1 - (now - this.fading.since) / FADE_MS;
       if (left <= 0) this.fading = null;
@@ -6914,7 +6965,9 @@ function AtlasOverlay({
   place,
   audio,
   still,
-  moved: moved2
+  moved: moved2,
+  target,
+  trail
 }) {
   const canvas = useRef5(null);
   const overlay = useRef5(null);
@@ -6937,6 +6990,22 @@ function AtlasOverlay({
   useEffect7(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height]);
   useEffect7(() => overlay.current?.moved(), [moved2]);
   const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? "", playing?.glyph ?? 0, playing?.duration ?? 0];
+  useEffect7(() => {
+    const element = target.current;
+    if (!trail || still || !element) return;
+    const move = (event) => {
+      if (event.buttons !== 0) return overlay.current?.lift();
+      const box = element.getBoundingClientRect();
+      overlay.current?.trail(event.clientX - box.left, event.clientY - box.top);
+    };
+    const lift = () => overlay.current?.lift();
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerleave", lift);
+    return () => {
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerleave", lift);
+    };
+  }, [trail, still, target]);
   useEffect7(() => {
     const drawn = overlay.current;
     if (!drawn) return;
@@ -8014,7 +8083,7 @@ function resolve(canvas) {
 }
 var ROUNDS = 8;
 var maps = 0;
-function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade }) {
+function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false }) {
   const t = useT();
   const model = useMemo2(() => buildModel(map), [map]);
   const canvasRef = useRef11(null);
@@ -8846,7 +8915,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           }
         }
       ),
-      /* @__PURE__ */ jsx21(AtlasOverlay, { audio, height: size.height, moved: `${view?.scale},${view?.dx},${view?.dy},${clock2}`, place: playingPlace, playing: playingSound, still, width: size.width }),
+      /* @__PURE__ */ jsx21(AtlasOverlay, { audio, height: size.height, moved: `${view?.scale},${view?.dx},${view?.dy},${clock2}`, place: playingPlace, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
       box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
       /* @__PURE__ */ jsx21(
         "svg",
@@ -9704,6 +9773,7 @@ function MapWorkspace({ ctx, store, audition }) {
             setTiles(on);
           },
           tiles,
+          trail: hover,
           arrangement: layout,
           onArrangement: (id) => {
             ctx.storage.set(LAYOUT, id);

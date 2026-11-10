@@ -1,10 +1,12 @@
 // What moves over the sound map, on a canvas of its own above the map's: the pulse on the sound that is playing (rings
-// and a glow that reach as far as it is loud right now). It draws only while there is something to draw: its
-// animation frame runs while a sound plays and for a moment after, and never while the map sits still, so the map's own
-// canvas isn't redrawn for it. A system asking for less motion gets the pulse drawn once, still.
+// and a glow that reach as far as it is loud right now), and, with hover-to-play on, the pointer's trail in the colours
+// of what it played. It draws only while there is something to draw: its animation frame runs while a sound plays or
+// a trail fades, and never while the map sits still, so the map's own canvas isn't redrawn for it. A system asking for
+// less motion gets the pulse drawn once, still, and no trail.
 import { traceGlyph } from '../mapModel.ts'
 import { lighten, rgba, rgbOf } from './color.ts'
 import { follow, levelAt, progressOf } from './pulse.ts'
+import { type Step, stepTo, strengthOf } from './trail.ts'
 
 /** The sound that plays, as the overlay draws it: where it is now (the map moves under a pan), its colour and glyph,
  *  how long it is, and its waveform once decoded (null until then: a plain two-ring pulse). */
@@ -31,6 +33,11 @@ export class Overlay {
   private fading: { pulse: Pulse; shown: number; since: number } | null = null
   /** The core's colour: the canvas's own CSS colour (the theme's text colour), read when a sound starts. */
   private core = '#fff'
+  /** The pointer's trail: its steps, the colour of the sound that last played (null before any has), and whether the
+   *  pointer left or pressed since its last step (the next one starts a new line). */
+  private path: Step[] = []
+  private tone: string | null = null
+  private lifted = true
   still = false
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -52,12 +59,27 @@ export class Overlay {
     this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null
     if (pulse) this.core = getComputedStyle(this.canvas).color || this.core
     if (pulse) this.fading = null
+    if (pulse) this.tone = pulse.color
     this.wake()
   }
 
   /** The playing sound's waveform arrived. */
   levels(levels: readonly number[] | null): void {
     if (this.pulse) this.pulse.levels = levels
+  }
+
+  /** The pointer moved to (`x`, `y`) over the map with hover-to-play on: its trail grows, in the colour of the sound
+   *  that last played (nothing has played yet: no trail). */
+  trail(x: number, y: number): void {
+    if (this.still || !this.tone) return
+    this.path = stepTo(this.path, x, y, performance.now(), this.tone, this.lifted)
+    this.lifted = false
+    this.wake()
+  }
+
+  /** The pointer left the map, or pressed on it: what it draws next starts a new line. */
+  lift(): void {
+    this.lifted = true
   }
 
   /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
@@ -70,6 +92,7 @@ export class Overlay {
     this.frame = 0
     this.pulse = null
     this.fading = null
+    this.path = []
   }
 
   private wake(): void {
@@ -83,7 +106,7 @@ export class Overlay {
   private tick = (now: number): void => {
     this.frame = 0
     this.draw(now)
-    if (this.pulse || this.fading) this.frame = requestAnimationFrame(this.tick)
+    if (this.pulse || this.fading || this.path.length > 0) this.frame = requestAnimationFrame(this.tick)
   }
 
   private draw(now: number): void {
@@ -91,6 +114,27 @@ export class Overlay {
     if (!context || this.width === 0) return
     context.setTransform(this.ratio, 0, 0, this.ratio, 0, 0)
     context.clearRect(0, 0, this.width, this.height)
+    this.path = this.path.filter(step => strengthOf(step, now) > 0)
+    if (this.path.length > 1) {
+      // Each step a short stroke from the one before, thinner and fainter as it ages.
+      context.save()
+      context.globalCompositeOperation = 'lighter'
+      // Butted, not round: round ends would overlap at every joint, and added light makes each overlap a bead.
+      context.lineCap = 'butt'
+      for (let index = 1; index < this.path.length; index++) {
+        const [from, to] = [this.path[index - 1], this.path[index]]
+        if (!to.joined) continue
+        const strength = strengthOf(to, now)
+        context.strokeStyle = to.color
+        context.globalAlpha = 0.12 + 0.6 * strength * strength
+        context.lineWidth = 1 + 4 * strength * strength
+        context.beginPath()
+        context.moveTo(from.x, from.y)
+        context.lineTo(to.x, to.y)
+        context.stroke()
+      }
+      context.restore()
+    }
     if (this.fading) {
       const left = 1 - (now - this.fading.since) / FADE_MS
       if (left <= 0) this.fading = null

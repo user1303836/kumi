@@ -293,6 +293,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             setTiles(on)
           }}
           tiles={tiles}
+          trail={hover}
           arrangement={layout}
           onArrangement={id => {
             ctx.storage.set(LAYOUT, id)

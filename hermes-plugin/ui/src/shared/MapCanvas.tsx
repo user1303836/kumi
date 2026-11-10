@@ -80,6 +80,8 @@ export interface MapCanvasProps {
   grow?: Grow
   growActions?: (result: DesignResult) => ReactNode
   onPlayMade?: (result: DesignResult) => void
+  /** Hover-to-play is on: the pointer leaves a trail over the map, in the colours of what it played. */
+  trail?: boolean
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -147,7 +149,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1137,7 +1139,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             touchAction: 'none'
           }}
         />
-        <AtlasOverlay audio={audio} height={size.height} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={playingPlace} playing={playingSound} still={still} width={size.width} />
+        <AtlasOverlay audio={audio} height={size.height} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={playingPlace} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
           // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
           <svg

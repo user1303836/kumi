@@ -220,6 +220,7 @@ function Dashboard() {
             map={state.map}
             marked={palette.marked}
             onHover={palette.onHover}
+            trail={hover}
             onPick={id => {
               setSelected(id)
               palette.play(id)

@@ -7,6 +7,7 @@ import { load } from './load.mjs'
 const nebula = await load('src/shared/atlas/nebula.ts')
 const names = await load('src/shared/atlas/names.ts')
 const pulse = await load('src/shared/atlas/pulse.ts')
+const trail = await load('src/shared/atlas/trail.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -109,4 +110,20 @@ test("the pulse follows the playing sound's level: up at once with a hit, settli
   assert.equal(pulse.progressOf(250, 0.5), 0.5)
   assert.equal(pulse.progressOf(600, 0.5), null)
   assert.equal(pulse.progressOf(100, 0), null)
+})
+
+test("the pointer's trail runs out when the pointer rests, and a new line never joins the old one", () => {
+  let path = []
+  for (let step = 0; step < 10; step++) path = trail.stepTo(path, 100 + step * 10, 200, 1000 + step * 16, 'rgb(80, 200, 180)', step === 0)
+  assert.equal(path.length, 10)
+  assert.deepEqual(path.map(step => step.joined), [false, ...Array(9).fill(true)], 'the first step starts the line')
+  // Resting: a tremble of a pixel adds nothing, and the steps fade to nothing in a little over half a second.
+  const resting = trail.stepTo(path, 191, 200, 1200, 'rgb(80, 200, 180)', false)
+  assert.equal(resting.length, 10)
+  assert.ok(trail.strengthOf(path[9], 1144) === 1 && trail.strengthOf(path[9], 1444) > 0.4)
+  assert.equal(trail.strengthOf(path[9], 1144 + trail.TRAIL_MS), 0)
+  assert.equal(trail.stepTo(path, 191, 200, 3000, 'rgb(80, 200, 180)', false).length, 0, 'long after, nothing is left')
+  // The pointer left and came back elsewhere, onto another family: a new line, in that sound's colour.
+  const back = trail.stepTo(path, 600, 500, 1300, 'rgb(232, 93, 74)', true)
+  assert.deepEqual([back.at(-1).joined, back.at(-1).color], [false, 'rgb(232, 93, 74)'])
 })
