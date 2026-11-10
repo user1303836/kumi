@@ -185,7 +185,7 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 Kumi makes a new sound out of two or more of yours, as many as you pick (map sounds, palette sounds, or sounds Kumi
 made before). Nothing in your project changes: the result is Kumi's own copy until you use it.
 
-![The Make panel, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, already kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
+![The Make panel, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, already kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
 
 *Kumi 1.24.79 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
 

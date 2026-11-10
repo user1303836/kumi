@@ -76,9 +76,9 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.*
 
-![Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
+![Make, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
 
-*Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.*
+*Make, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.*
 
 Screenshots: the pane and the approval are Kumi 1.24.73 on real Ableton Live 12, and the listening shot is Kumi 1.24.71
 on real REAPER 7. Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's
