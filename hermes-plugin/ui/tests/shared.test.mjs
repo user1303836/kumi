@@ -387,6 +387,16 @@ test('the map keeps valid points, colours each group, and picks the nearest poin
   assert.equal(model.points[map.pick(model, view, size, x, y, 8, index => model.points[index].id !== 's-2')].id, 's-1')
 })
 
+test("a sound's shape is traced with one move and its lines, and never closed: the fill closes it, and each close costs more the longer the path is", () => {
+  for (let glyph = 0; glyph < map.GLYPH_SHAPES.length; glyph++) {
+    const calls = []
+    const path = new Proxy({}, { get: (_path, name) => () => calls.push(name) })
+    map.traceGlyph(path, glyph, 10, 20, 2)
+    const shape = map.GLYPH_SHAPES[glyph]
+    assert.deepEqual(calls, shape ? ['moveTo', ...shape.slice(1).map(() => 'lineTo')] : ['moveTo', 'arc'])
+  }
+})
+
 test("each of a snapshot's layouts places every sound: one a sound lacks leaves it where similarity put it, and the pointer finds sounds where the layout shown put them", () => {
   const snapshot = {
     revision: 'r1',
