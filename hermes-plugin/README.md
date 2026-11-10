@@ -80,12 +80,14 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *Make, open beside the map: a Stack and a Loop at the project's 175 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.*
 
-Screenshots: the pane and the approval are Kumi 1.24.73 on real Ableton Live 12, and the listening shot is Kumi 1.24.71
-on real REAPER 7. Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's
-side (the pane, the approval and the measurements) is real. The listening shot measures a synthetic test tone against a
-reference made 3 dB louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration
-step. The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and
-its samples are generated test data, and the made sounds come from Kumi's sound-design engine.
+Screenshots:
+- The pane is Kumi 1.24.73 on real Ableton Live 12.
+- The approval is Kumi 1.24.73 on real Ableton Live 12.
+- The listening shot is Kumi 1.24.71 on real REAPER 7. It measures a synthetic test tone against a reference made 3 dB
+  louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step.
+- The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
+  samples are generated test data, and the made sounds come from Kumi's sound-design engine.
+- Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
 
 ## Tools
 

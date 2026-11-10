@@ -375,9 +375,11 @@ run without asking there, and Kumi can't tell it from a chat.
 
 ![The web dashboard's Kumi page: status, FOCUS and HISTORY (each change with Copy undo) beside the sound map, each family named, and a hat's name and waveform on hover.](../assets/hermes/screenshots/hermes-dashboard.png)
 
-Screenshots: the pane is Kumi 1.24.73 on real Ableton Live 12. The map, palette, Make and dashboard shots are Kumi
-1.24.79 on a generated 3,840-sound test map, with the made sounds from Kumi's sound-design engine. Hermes's side of the
-chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
+Screenshots:
+- The pane is Kumi 1.24.73 on real Ableton Live 12.
+- The map, palette, Make and dashboard shots are Kumi 1.24.79 on a generated 3,840-sound test map, with the made
+  sounds from Kumi's sound-design engine.
+- Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's side is real.
 
 ## Settings
 
