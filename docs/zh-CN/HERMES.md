@@ -75,7 +75,7 @@ Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对�
 
 调色板是你收集起来准备使用的声音，和 Kumi 自己的地图一样；Hermes 读写的也是同一个调色板。
 
-![Hermes Desktop 中的声音地图：框选的 77 个军鼓带白色圆环，能对它们做的事浮在旁边；调色板里的 94 个踩镲带强调色圆环；下方的调色板抽屉中每个声音都带着波形。](../assets/hermes/screenshots/catalog-7-palette.png)
+![Hermes Desktop 中的声音地图：框选的 18 个军鼓带白色圆环，对它们的操作（加入调色板、制作…、更多类似这些的）浮在旁边；调色板里的 15 个踩镲带强调色圆环；下方的调色板抽屉中每个声音都带着波形。](../assets/hermes/screenshots/catalog-7-palette.png)
 
 *Hermes Desktop 中的 Kumi 1.24.79；这张 3,840 个声音的地图及其采样是生成的测试数据。*
 

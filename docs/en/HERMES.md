@@ -160,7 +160,7 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 The palette is the sounds you gather to work with, as in Kumi's own map; Hermes reads and edits the same one.
 
-![The sound map in Hermes Desktop: a box of 77 snares picked in white, with what they can do beside them, the palette's 94 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
+![The sound map in Hermes Desktop: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
 
 *Kumi 1.24.79 in Hermes Desktop; the 3,840-sound map and its samples are generated test data.*
 
