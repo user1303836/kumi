@@ -75,7 +75,7 @@ Hermes Desktop は各段階の確認内容をすべて表示します。ター�
 
 パレットは、Kumi 自身の地図と同じく、使うために集めたサウンドです。Hermes も同じパレットを読み書きします。
 
-![Hermes Desktop のサウンドマップ: 囲んで選んだ 18 個のスネアが白い輪で、そのすぐ横に操作（パレットに追加、作る…、これらに似たサウンド）が浮かび、パレットの 15 個のハイハットがアクセント色の輪で示され、下のパレットの引き出しには各サウンドの波形が並びます。](../assets/hermes/screenshots/catalog-7-palette.png)
+![Hermes Desktop のサウンドマップ: 囲んで選んだ 18 個のスネアが白い輪で、そのすぐ横に操作（パレットに追加、作る…、これらに似たサウンド）が浮かび、パレットの 15 個のハイハットがアクセント色の輪で示され、下のパレットの引き出しには各サウンドの波形がファミリーの色で並びます。](../assets/hermes/screenshots/catalog-7-palette.png)
 
 *Hermes Desktop の Kumi 1.24.79。3,840 個のマップとそのサンプルは生成したテストデータです。*
 
@@ -90,7 +90,7 @@ Hermes Desktop は各段階の確認内容をすべて表示します。ター�
 
 Kumi は、選んだだけの数のあなたのサウンド（2 個以上。マップのサウンド、パレットのサウンド、Kumi が前に作ったサウンド）から新しいサウンドを作ります。プロジェクトは何も変わりません。使うまでは Kumi 自身のコピーです。
 
-![マップの横に開いた作るパネル: スタックと、プロジェクトの 124 BPM でのループ（再生中、パレットにキープ済み）。それぞれにリロール、キープ、使う…があります。](../assets/hermes/screenshots/catalog-8-make.png)
+![マップの横に開いた作るパネル: スタックと、プロジェクトの 124 BPM でのループ（再生中、パレットにキープ済み）。どちらも元にしたスネアの色で描かれ、それぞれにリロール、キープ、使う…があります。](../assets/hermes/screenshots/catalog-8-make.png)
 
 *Hermes Desktop の Kumi 1.24.79。サンプルは生成したテストデータで、作られた音は Kumi のエンジンによるものです。*
 
@@ -166,7 +166,7 @@ Kumi の呼び出しをこのセッションの間または常に許可すると
 
 ![Hermes Desktop と Kumi のペイン: Drums トラックの FOCUS と、変更ごとに Undo のある HISTORY。](../assets/hermes/screenshots/catalog-1-pane.png)
 
-![Web ダッシュボードの Kumi ページ: 状態、FOCUS、HISTORY とサウンドマップ。](../assets/hermes/screenshots/hermes-dashboard.png)
+![Web ダッシュボードの Kumi ページ: 状態、FOCUS、HISTORY（変更ごとに「取り消しをコピー」）とサウンドマップ。マップには各ファミリーの名前が付き、ホバーしたハイハットの名前と波形が表示されます。](../assets/hermes/screenshots/hermes-dashboard.png)
 
 スクリーンショット: ペインは実際の Ableton Live 12 で動く Kumi 1.24.73。マップ、パレット、作る、ダッシュボードのショットは、生成した 3,840 個のテスト用マップで動く Kumi 1.24.79 で、作られた音は Kumi のサウンドデザインエンジンによるものです。チャットの Hermes 側は、台本どおりに答える代わりのモデルによるもので、言葉は例です。Kumi 側は本物です。
 

@@ -3,7 +3,7 @@
 **Kumi puts Hermes inside Ableton Live, REAPER and Renoise: it hears your mix, makes the changes you ask for (each
 recorded in HISTORY, most undoable), and turns your own samples into new sounds.**
 
-![The sound map in Hermes Desktop: 3,840 sounds laid out by how they sound, the darker, dustier snares Kumi found lit up, with a sound's name on hover.](../docs/assets/hermes/screenshots/catalog-2-map.png)
+![The sound map in Hermes Desktop: 3,840 sounds laid out by how they sound, each family in its own colour, the darker, dustier snares Kumi found lit up, and a sound's name and waveform on hover.](../docs/assets/hermes/screenshots/catalog-2-map.png)
 
 ## Quick start
 
@@ -72,13 +72,13 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
 
-![The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
+![The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
-*The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform.*
+*The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.*
 
-![Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
+![Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../docs/assets/hermes/screenshots/catalog-8-make.png)
 
-*Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each with Reroll, Keep and Use.*
+*Make, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.*
 
 Screenshots: the pane and the approval are Kumi 1.24.73 on real Ableton Live 12, and the listening shot is Kumi 1.24.71
 on real REAPER 7. Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative; Kumi's

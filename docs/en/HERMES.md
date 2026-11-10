@@ -160,7 +160,7 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 The palette is the sounds you gather to work with, as in Kumi's own map; Hermes reads and edits the same one.
 
-![The sound map in Hermes Desktop: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform.](../assets/hermes/screenshots/catalog-7-palette.png)
+![The sound map in Hermes Desktop: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.](../assets/hermes/screenshots/catalog-7-palette.png)
 
 *Kumi 1.24.79 in Hermes Desktop; the 3,840-sound map and its samples are generated test data.*
 
@@ -185,7 +185,7 @@ The palette is the sounds you gather to work with, as in Kumi's own map; Hermes 
 Kumi makes a new sound out of two or more of yours, as many as you pick (map sounds, palette sounds, or sounds Kumi
 made before). Nothing in your project changes: the result is Kumi's own copy until you use it.
 
-![The Make panel, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, already kept in the palette), each with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
+![The Make panel, open beside the map: a Stack and a Loop at the project's 124 BPM (playing, already kept in the palette), each drawn in the colours of the snares it came from, with Reroll, Keep and Use.](../assets/hermes/screenshots/catalog-8-make.png)
 
 *Kumi 1.24.79 in Hermes Desktop; the samples are generated test data, and the made sounds come from Kumi's engine.*
 
@@ -370,7 +370,7 @@ run without asking there, and Kumi can't tell it from a chat.
 
 ![Hermes Desktop with Kumi's pane: FOCUS on the Drums track, and HISTORY with an Undo on each change.](../assets/hermes/screenshots/catalog-1-pane.png)
 
-![The web dashboard's Kumi page: status, FOCUS and HISTORY beside the sound map.](../assets/hermes/screenshots/hermes-dashboard.png)
+![The web dashboard's Kumi page: status, FOCUS and HISTORY (each change with Copy undo) beside the sound map, each family named, and a hat's name and waveform on hover.](../assets/hermes/screenshots/hermes-dashboard.png)
 
 Screenshots: the pane is Kumi 1.24.73 on real Ableton Live 12. The map, palette, Make and dashboard shots are Kumi
 1.24.79 on a generated 3,840-sound test map, with the made sounds from Kumi's sound-design engine. Hermes's side of the
