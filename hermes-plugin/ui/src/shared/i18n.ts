@@ -215,6 +215,16 @@ const en = {
     between: 'Grow between',
     betweenTitle: 'Grow the first pick toward the second: the sounds between them, along a vine'
   },
+  // The map's corner: its count, layout and zoom, and the hint line (each gesture that does something now, as a
+  // keycap, then what it does).
+  corner: {
+    label: 'The map, and what you can do on it now',
+    families: (n: number) => (n === 1 ? '1 family' : `${n} families`),
+    layout: (name: string) => `Layout: ${name}`,
+    zoom: 'Zoom (100% is the whole map)',
+    keys: { hover: 'Hover', click: 'Click', drag: 'Drag', shiftDrag: '⇧ Drag', scroll: 'Scroll', pinch: 'Pinch', middleDrag: 'Middle drag', escape: 'Esc' },
+    does: { hear: 'hear', pick: 'pick', add: 'add', addMore: 'add more', zoom: 'zoom', pan: 'pan', clear: 'clear' }
+  },
   measurements: {
     tab: 'Measurements',
     nothing: 'Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.',
@@ -959,6 +969,14 @@ const ja: Shape<typeof en> = {
     between: '間を育てる',
     betweenTitle: '1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます'
   },
+  corner: {
+    label: 'マップと、いまできる操作',
+    families: n => `${n} 種類`,
+    layout: name => `レイアウト: ${name}`,
+    zoom: 'ズーム（100% でマップ全体）',
+    keys: { hover: 'ホバー', click: 'クリック', drag: 'ドラッグ', shiftDrag: '⇧ ドラッグ', scroll: 'スクロール', pinch: 'ピンチ', middleDrag: '中ボタンドラッグ', escape: 'Esc' },
+    does: { hear: '再生', pick: '選択', add: '追加', addMore: 'さらに追加', zoom: 'ズーム', pan: '移動', clear: '解除' }
+  },
   measurements: {
     tab: '測定結果',
     nothing: 'まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。',
@@ -1696,6 +1714,14 @@ const zh: Shape<typeof en> = {
     close: '关闭藤蔓',
     between: '在两者之间生长',
     betweenTitle: '让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开'
+  },
+  corner: {
+    label: '地图，以及现在可以做的操作',
+    families: n => `${n} 个类别`,
+    layout: name => `布局：${name}`,
+    zoom: '缩放（100% 为全图）',
+    keys: { hover: '悬停', click: '点击', drag: '拖动', shiftDrag: '⇧ 拖动', scroll: '滚动', pinch: '捏合', middleDrag: '中键拖动', escape: 'Esc' },
+    does: { hear: '播放', pick: '选择', add: '添加', addMore: '继续添加', zoom: '缩放', pan: '移动', clear: '清除' }
   },
   measurements: {
     tab: '测量结果',

@@ -13,6 +13,8 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AtlasOverlay } from './atlas/AtlasOverlay.tsx'
+import { Corner, ToolName } from './atlas/Corner.tsx'
+import { gesturesOf, hintOf, type MapState } from './atlas/gestures.ts'
 import { glowOf } from './atlas/glow.ts'
 import { HoverPill } from './atlas/HoverPill.tsx'
 import { drawNames, drawWords, type Word } from './atlas/labels.ts'
@@ -168,6 +170,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport; box: boolean; add: boolean; button: number } | null>(null)
   const [box, setBox] = useState<[number, number, number, number] | null>(null)
   const [handTool, setHandTool] = useState(false)
+  // What a scroll last did here (it moved the map: a trackpad; it zoomed: a mouse's wheel), for the hint line to say.
+  const [scrollPans, setScrollPans] = useState<boolean | null>(null)
   const [grabbing, setGrabbing] = useState(false)
   // Space held over the map pans with the left button, as in drawing apps. Desktop takes Space for its composer before
   // the map sees it, so this works in the dashboard; Desktop has the hand tool and the middle button.
@@ -359,6 +363,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }, [searched, foundIds, indexOf, visible])
   // The picks in the map's own order, as a gather sends them.
   const pickedIds = useMemo(() => (picked && picked.size > 0 ? model.points.filter(point => picked.has(point.id)).map(point => point.id) : []), [model, picked])
+  // The map's state as the pointer and the keys meet it (`atlas/gestures.ts`): the handlers below ask what a drag or
+  // Escape does in it, and the corner's hint line is written from the same table. `held`: whether Space is held (the
+  // handlers read it as it is now; the hint, as last drawn).
+  const mapState = (held: boolean): MapState => ({ picks: Boolean(onPicked), hand: held || handTool, naming: Boolean(grow?.choosing), picked: pickedIds.length, hover: trail, scrollPans })
   // CC-23: a near search names its seeds (the top-level `near`) from this map, the first by name and how many more;
   // seeds the map doesn't list head nothing.
   const nearName = useMemo(() => {
@@ -448,6 +456,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       if (!base) return
       const legacy = event as WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number }
       const pans = !event.ctrlKey && (wheelMode.current === 'auto' ? wheelPans(legacy, memory, performance.now()) : wheelMode.current === 'pan')
+      if (!event.ctrlKey) setScrollPans(pans)
       // Lines and pages (Firefox's mouse wheel) count as 16 and 400 pixels.
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1
       if (pans) {
@@ -779,7 +788,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (event.button === 1) event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
     const [x, y] = at(event)
-    const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool && !grow?.choosing
+    const boxing = event.button === 0 && gesturesOf(mapState(space.current)).drag === 'pick'
     drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button }
     rest(null)
     setHover(null)
@@ -836,14 +845,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
     // Escape stops Grow naming its sounds, else lets go of the picks. Only while there's one of those: otherwise it
     // stays Desktop's (it stops a running turn), which stands down for a key the map already took.
-    if (event.key === 'Escape' && grow?.choosing && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    const escape = event.key === 'Escape' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey ? gesturesOf(mapState(space.current)).escape : undefined
+    if (escape === 'cancel') {
       event.preventDefault()
-      grow.choose(false)
+      grow?.choose(false)
       return
     }
-    if (event.key === 'Escape' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
+    if (escape === 'clear') {
       event.preventDefault()
-      onPicked([], 'replace')
+      onPicked?.([], 'replace')
       setSaid(t('dock.cleared'))
       return
     }
@@ -972,8 +982,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           <span style={{ flex: 1 }} />
           <ToolGroup label={t('map.tools')}>
             {onPicked && <ToolButton icon="pick" label={t('map.pickTool')} onClick={() => setHandTool(false)} pressed={!handTool} title={t('map.pickToolTitle')} />}
+            {/* The tool in hand shows its name beside its icon. */}
+            {onPicked && !handTool && !grow?.choosing && <ToolName>{t('map.pickTool')}</ToolName>}
             {onPicked && <ToolButton icon="hand" label={t('map.hand')} onClick={() => setHandTool(true)} pressed={handTool} title={t('map.handTitle')} />}
+            {onPicked && handTool && !grow?.choosing && <ToolName>{t('map.hand')}</ToolName>}
             {grow && <ToolButton icon="grow" label={t('grow.tool')} onClick={() => grow.choose(!grow.choosing)} pressed={grow.choosing !== null} title={t('grow.toolTitle')} />}
+            {grow?.choosing && <ToolName>{t('grow.tool')}</ToolName>}
             {onPicked && <Rule />}
             {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - 60)} onChoose={chooseArrangement} />}
             {onTiles && <ToolButton icon="tiles" label={t('map.tiles')} onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')} />}
@@ -1019,14 +1033,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             )
           })}
         </div>
-        {grow?.choosing && (
-          // Grow names its sounds with clicks on the map: which one this click names, and a way out.
-          <div className="kumi-pop" role="status" style={{ ...glass, borderRadius: 16, ...S.row, gap: 8, padding: '4px 6px 4px 12px', pointerEvents: 'auto', maxWidth: '100%' }}>
-            <Icon name="grow" size={13} />
-            <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
-            <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
-          </div>
-        )}
         {matches.length > 0 && (
           <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: 'min(340px, 100%)', pointerEvents: 'auto' }}>
             <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
@@ -1198,6 +1204,30 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           />
         )}
       </div>
+      {/* The corner: what the map holds, its layout as a button, the zoom, and what can be done now. Grow's prompt
+          stands on its hint line while Grow names its sounds: which one this click names, and a way out. */}
+      <Corner
+        bottom={chosen ? 120 : 10}
+        families={model.groups.filter(group => group.count > 0).length}
+        hint={hintOf(mapState(spaceHeld))}
+        layout={
+          layoutChoices.length > 0 ? (
+            <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - 150)} onChoose={chooseArrangement} words={name => t('corner.layout', name)} />
+          ) : undefined
+        }
+        picked={hasPicks ? t('dock.picked', pickedIds.length) : undefined}
+        prompt={
+          grow?.choosing ? (
+            <div className="kumi-pop" role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
+              <Icon name="grow" size={13} />
+              <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
+              <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
+            </div>
+          ) : undefined
+        }
+        sounds={countWords}
+        zoom={view?.scale ?? 1}
+      />
       {hasPicks && (
         // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
         <div

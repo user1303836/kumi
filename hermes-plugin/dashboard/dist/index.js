@@ -247,6 +247,16 @@
       between: "Grow between",
       betweenTitle: "Grow the first pick toward the second: the sounds between them, along a vine"
     },
+    // The map's corner: its count, layout and zoom, and the hint line (each gesture that does something now, as a
+    // keycap, then what it does).
+    corner: {
+      label: "The map, and what you can do on it now",
+      families: (n) => n === 1 ? "1 family" : `${n} families`,
+      layout: (name) => `Layout: ${name}`,
+      zoom: "Zoom (100% is the whole map)",
+      keys: { hover: "Hover", click: "Click", drag: "Drag", shiftDrag: "⇧ Drag", scroll: "Scroll", pinch: "Pinch", middleDrag: "Middle drag", escape: "Esc" },
+      does: { hear: "hear", pick: "pick", add: "add", addMore: "add more", zoom: "zoom", pan: "pan", clear: "clear" }
+    },
     measurements: {
       tab: "Measurements",
       nothing: "Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.",
@@ -985,6 +995,14 @@
       between: "間を育てる",
       betweenTitle: "1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます"
     },
+    corner: {
+      label: "マップと、いまできる操作",
+      families: (n) => `${n} 種類`,
+      layout: (name) => `レイアウト: ${name}`,
+      zoom: "ズーム（100% でマップ全体）",
+      keys: { hover: "ホバー", click: "クリック", drag: "ドラッグ", shiftDrag: "⇧ ドラッグ", scroll: "スクロール", pinch: "ピンチ", middleDrag: "中ボタンドラッグ", escape: "Esc" },
+      does: { hear: "再生", pick: "選択", add: "追加", addMore: "さらに追加", zoom: "ズーム", pan: "移動", clear: "解除" }
+    },
     measurements: {
       tab: "測定結果",
       nothing: "まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。",
@@ -1719,6 +1737,14 @@
       close: "关闭藤蔓",
       between: "在两者之间生长",
       betweenTitle: "让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开"
+    },
+    corner: {
+      label: "地图，以及现在可以做的操作",
+      families: (n) => `${n} 个类别`,
+      layout: (name) => `布局：${name}`,
+      zoom: "缩放（100% 为全图）",
+      keys: { hover: "悬停", click: "点击", drag: "拖动", shiftDrag: "⇧ 拖动", scroll: "滚动", pinch: "捏合", middleDrag: "中键拖动", escape: "Esc" },
+      does: { hear: "播放", pick: "选择", add: "添加", addMore: "继续添加", zoom: "缩放", pan: "移动", clear: "清除" }
     },
     measurements: {
       tab: "测量结果",
@@ -5743,6 +5769,299 @@
     return /* @__PURE__ */ jsx("canvas", { "aria-hidden": true, ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", color: T.text } });
   }
 
+  // src/shared/mapUi.tsx
+  var glass = {
+    background: `color-mix(in srgb, ${T.raised} 90%, transparent)`,
+    backdropFilter: "blur(12px) saturate(1.15)",
+    WebkitBackdropFilter: "blur(12px) saturate(1.15)",
+    border: `1px solid color-mix(in srgb, ${T.border} 85%, transparent)`,
+    boxShadow: "0 10px 30px -12px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.03) inset",
+    borderRadius: 12
+  };
+  var PATHS = {
+    pick: /* @__PURE__ */ jsx("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
+    hand: /* @__PURE__ */ jsx(
+      "path",
+      {
+        d: "M5.2 8.5 V3.8 a1 1 0 0 1 2 0 V7.6 V2.9 a1 1 0 0 1 2 0 V7.6 V3.6 a1 1 0 0 1 2 0 V8 V5.4 a1 1 0 0 1 2 0 V9.6 c0 2.6 -1.8 4.6 -4.4 4.6 c-1.7 0 -2.7 -.7 -3.6 -1.9 L2.6 9.6 a1 1 0 0 1 1.5 -1.3 Z",
+        fill: "none",
+        stroke: "currentColor",
+        strokeLinejoin: "round",
+        strokeWidth: "1.2"
+      }
+    ),
+    tiles: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "2" }),
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "2" }),
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "9.4" }),
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".45", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "9.4" })
+    ] }),
+    hover: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("path", { d: "M3 9.5 V8 a5 5 0 0 1 10 0 V9.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "2.2", y: "9" }),
+      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "11", y: "9" })
+    ] }),
+    fit: /* @__PURE__ */ jsx("path", { d: "M2.5 6 V2.5 H6 M10 2.5 H13.5 V6 M13.5 10 V13.5 H10 M6 13.5 H2.5 V10", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" }),
+    grow: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("path", { d: "M2.5 13.5 C5 13 6 10.5 7.5 8.5 S11 4 13.5 2.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
+      /* @__PURE__ */ jsx("circle", { cx: "2.6", cy: "13.4", fill: "currentColor", r: "1.6" }),
+      /* @__PURE__ */ jsx("circle", { cx: "13.4", cy: "2.6", fill: "currentColor", r: "1.6" }),
+      /* @__PURE__ */ jsx("path", { d: "M6.6 9.6 c-1.6 .2 -2.4 -.6 -2.6 -2 c1.4 -.1 2.4 .5 2.6 2 Z M9.4 5.8 c.3 -1.6 1.3 -2.2 2.6 -2 c-.1 1.4 -1 2.2 -2.6 2 Z", fill: "currentColor", fillOpacity: ".8" })
+    ] }),
+    arrange: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("circle", { cx: "5", cy: "5", fill: "currentColor", r: "2" }),
+      /* @__PURE__ */ jsx("path", { d: "M8.5 8.5 L13.5 13.5 M13.5 9.6 V13.5 H9.6", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
+    ] }),
+    layers: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("path", { d: "M8 2 L14 5.2 L8 8.4 L2 5.2 Z", fill: "currentColor", fillOpacity: ".9" }),
+      /* @__PURE__ */ jsx("path", { d: "M2.4 8 L8 11 L13.6 8 M2.4 10.8 L8 13.8 L13.6 10.8", fill: "none", stroke: "currentColor", strokeLinejoin: "round", strokeWidth: "1.2" })
+    ] }),
+    close: /* @__PURE__ */ jsx("path", { d: "M4 4 L12 12 M12 4 L4 12", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
+    play: /* @__PURE__ */ jsx("path", { d: "M5 3 L13 8 L5 13 Z", fill: "currentColor", strokeLinejoin: "round" }),
+    stop: /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "9", rx: "1.5", width: "9", x: "3.5", y: "3.5" }),
+    plus: /* @__PURE__ */ jsx("path", { d: "M8 3 V13 M3 8 H13", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
+    make: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("circle", { cx: "6", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" }),
+      /* @__PURE__ */ jsx("circle", { cx: "10", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" })
+    ] }),
+    near: /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", fill: "currentColor", r: "1.8" }),
+      /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", fill: "none", r: "4.4", stroke: "currentColor", strokeDasharray: "2 1.6", strokeWidth: "1.2" }),
+      /* @__PURE__ */ jsx("circle", { cx: "13.2", cy: "4", fill: "currentColor", r: "1.1" }),
+      /* @__PURE__ */ jsx("circle", { cx: "3.2", cy: "12.4", fill: "currentColor", r: "1.1" })
+    ] }),
+    reset: /* @__PURE__ */ jsx("path", { d: "M3.5 8 a4.5 4.5 0 1 0 1.4 -3.3 M3.5 2.8 V5.6 H6.3", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
+  };
+  function Icon({ name, size = 16 }) {
+    return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none", display: "block" }, viewBox: "0 0 16 16", width: size, children: PATHS[name] });
+  }
+  function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }) {
+    return /* @__PURE__ */ jsxs(
+      "button",
+      {
+        "aria-expanded": expanded,
+        "aria-haspopup": expanded === void 0 ? void 0 : "menu",
+        "aria-label": children ? void 0 : label,
+        "aria-pressed": expanded === void 0 ? pressed : void 0,
+        className: FOCUSABLE,
+        disabled,
+        onClick,
+        title: title ?? label,
+        type: "button",
+        style: {
+          ...S.row,
+          justifyContent: "center",
+          gap: 5,
+          minWidth: 30,
+          height: 30,
+          padding: children ? "0 10px 0 8px" : 0,
+          font: "inherit",
+          fontSize: 12,
+          fontWeight: pressed ? 600 : 500,
+          borderRadius: 15,
+          border: "none",
+          background: pressed ? `color-mix(in srgb, ${T.accent} 22%, transparent)` : "transparent",
+          color: disabled ? T.faint : pressed ? T.accent : T.secondary,
+          cursor: disabled ? "default" : "pointer",
+          boxShadow: pressed ? `0 0 0 1px color-mix(in srgb, ${T.accent} 45%, transparent) inset` : "none",
+          transition: "background-color 140ms, color 140ms, box-shadow 160ms, transform 120ms",
+          flex: "none"
+        },
+        children: [
+          /* @__PURE__ */ jsx(Icon, { name: icon }),
+          children
+        ]
+      }
+    );
+  }
+  function ToolGroup({ children, label }) {
+    return /* @__PURE__ */ jsx("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, position: "relative", zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
+  }
+  function Rule() {
+    return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
+  }
+  function LayoutMenu({ label, choices, current, onChoose, maxHeight, words }) {
+    const [open, setOpen] = useState(false);
+    const box = useRef(null);
+    const items = useRef([]);
+    useEffect(() => {
+      if (!open) return;
+      const away = (event) => {
+        if (!box.current?.contains(event.target)) setOpen(false);
+      };
+      window.addEventListener("pointerdown", away, true);
+      return () => window.removeEventListener("pointerdown", away, true);
+    }, [open]);
+    const shown = choices.find((choice) => choice.id === current) ?? choices[0];
+    useEffect(() => {
+      if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus();
+    }, [open]);
+    const keys = (event) => {
+      if (!open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const at = items.current.findIndex((item) => item === event.target);
+      items.current[(at + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length]?.focus();
+    };
+    return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
+      words ? /* @__PURE__ */ jsxs(
+        "button",
+        {
+          "aria-expanded": open,
+          "aria-haspopup": "menu",
+          className: FOCUSABLE,
+          onClick: () => setOpen(!open),
+          title: shown?.title,
+          type: "button",
+          style: { ...S.row, gap: 5, font: "inherit", fontSize: 11.5, fontWeight: 500, padding: "2px 8px", borderRadius: 8, border: `1px solid ${open ? T.accent : T.border}`, background: `color-mix(in srgb, ${T.text} 4%, transparent)`, color: T.text, cursor: "pointer", whiteSpace: "nowrap" },
+          children: [
+            words(shown?.name ?? ""),
+            /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { fontSize: 9, color: T.muted }, children: "▾" })
+          ]
+        }
+      ) : /* @__PURE__ */ jsx(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
+      open && /* @__PURE__ */ jsx(
+        "div",
+        {
+          "aria-label": label,
+          className: "kumi-pop",
+          role: "menu",
+          style: { ...glass, position: "absolute", ...words ? { bottom: 28, left: -4, background: T.raised } : { top: 38, right: -4 }, width: "max-content", maxWidth: 300, maxHeight, overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 },
+          children: choices.map((choice, index) => /* @__PURE__ */ jsxs(
+            "button",
+            {
+              "aria-checked": choice.id === shown?.id,
+              className: FOCUSABLE,
+              onClick: () => {
+                onChoose(choice.id);
+                setOpen(false);
+              },
+              ref: (element) => {
+                items.current[index] = element;
+              },
+              role: "menuitemradio",
+              type: "button",
+              style: {
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 1,
+                font: "inherit",
+                textAlign: "left",
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "none",
+                cursor: "pointer",
+                color: T.text,
+                background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent"
+              },
+              children: [
+                /* @__PURE__ */ jsx("span", { style: { fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }, children: choice.name }),
+                /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.muted }, children: choice.title })
+              ]
+            },
+            choice.id
+          ))
+        }
+      )
+    ] });
+  }
+
+  // src/shared/atlas/Corner.tsx
+  var caps = { fontSize: 10.5, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: T.faint, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  function ToolName({ children }) {
+    return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { color: T.accent, fontSize: 11.5, fontWeight: 600, margin: "0 7px 0 1px", whiteSpace: "nowrap" }, children });
+  }
+  function Keycap({ children }) {
+    return /* @__PURE__ */ jsx(
+      "kbd",
+      {
+        style: {
+          display: "inline-block",
+          padding: "0 6px",
+          border: `1px solid color-mix(in srgb, ${T.muted} 45%, transparent)`,
+          borderBottomWidth: 2,
+          borderRadius: 5,
+          font: "600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace",
+          lineHeight: "15px",
+          color: T.text,
+          background: `color-mix(in srgb, ${T.text} 5%, transparent)`,
+          whiteSpace: "nowrap"
+        },
+        children
+      }
+    );
+  }
+  function Corner({
+    sounds,
+    families,
+    layout,
+    zoom,
+    picked,
+    hint,
+    prompt,
+    bottom
+  }) {
+    const t = useT();
+    return /* @__PURE__ */ jsxs(
+      "div",
+      {
+        "aria-label": t("corner.label"),
+        role: "group",
+        style: { ...glass, position: "absolute", zIndex: 1, left: 10, bottom, maxWidth: "calc(100% - 20px)", padding: "7px 10px", display: "flex", flexDirection: "column", gap: 6, transition: "bottom 220ms cubic-bezier(.2,.8,.2,1)" },
+        children: [
+          /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
+            /* @__PURE__ */ jsxs("span", { style: caps, children: [
+              sounds,
+              " · ",
+              t("corner.families", families)
+            ] }),
+            layout,
+            /* @__PURE__ */ jsxs("span", { style: caps, title: t("corner.zoom"), children: [
+              Math.round(zoom * 100),
+              "%"
+            ] })
+          ] }),
+          prompt ?? /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", fontSize: 11.5, color: T.muted }, children: [
+            picked && /* @__PURE__ */ jsx("span", { style: { color: T.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }, children: picked }),
+            hint.map(([gesture, deed], index) => /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5, whiteSpace: "nowrap" }, children: [
+              (index > 0 || picked) && /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { opacity: 0.4 }, children: "·" }),
+              /* @__PURE__ */ jsx(Keycap, { children: t(`corner.keys.${gesture}`) }),
+              t(`corner.does.${deed}`)
+            ] }, gesture))
+          ] })
+        ]
+      }
+    );
+  }
+
+  // src/shared/atlas/gestures.ts
+  function gesturesOf(state) {
+    const boxes = state.picks && !state.hand && !state.naming;
+    return {
+      click: state.naming ? "name" : "hear",
+      drag: boxes ? "pick" : "pan",
+      ...boxes ? { shiftDrag: state.picked > 0 ? "addMore" : "add" } : {},
+      ...state.hover ? { hover: "hear" } : {},
+      scroll: state.scrollPans ? "pan" : "zoom",
+      pinch: "zoom",
+      middleDrag: "pan",
+      ...state.naming ? { escape: "cancel" } : state.picks && state.picked > 0 ? { escape: "clear" } : {}
+    };
+  }
+  function hintOf(state) {
+    const does = gesturesOf(state);
+    const pointer = [state.hover ? "hover" : "click", "drag", "shiftDrag", "scroll", ...state.scrollPans ? ["pinch"] : state.hand ? [] : ["middleDrag"]];
+    const said = state.naming ? [] : state.hand ? [...pointer, "escape"] : state.picked > 0 && does.escape ? ["shiftDrag", "escape"] : pointer;
+    return said.flatMap((gesture) => does[gesture] ? [[gesture, does[gesture]]] : []);
+  }
+
   // src/shared/atlas/nebula.ts
   var NEBULA_SIDE = 128;
   var NEBULA_PAD = 0.12;
@@ -5977,186 +6296,6 @@
       glows.set(canvas, glow);
     }
     return glow;
-  }
-
-  // src/shared/mapUi.tsx
-  var glass = {
-    background: `color-mix(in srgb, ${T.raised} 90%, transparent)`,
-    backdropFilter: "blur(12px) saturate(1.15)",
-    WebkitBackdropFilter: "blur(12px) saturate(1.15)",
-    border: `1px solid color-mix(in srgb, ${T.border} 85%, transparent)`,
-    boxShadow: "0 10px 30px -12px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.03) inset",
-    borderRadius: 12
-  };
-  var PATHS = {
-    pick: /* @__PURE__ */ jsx("path", { d: "M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z", fill: "currentColor", strokeLinejoin: "round" }),
-    hand: /* @__PURE__ */ jsx(
-      "path",
-      {
-        d: "M5.2 8.5 V3.8 a1 1 0 0 1 2 0 V7.6 V2.9 a1 1 0 0 1 2 0 V7.6 V3.6 a1 1 0 0 1 2 0 V8 V5.4 a1 1 0 0 1 2 0 V9.6 c0 2.6 -1.8 4.6 -4.4 4.6 c-1.7 0 -2.7 -.7 -3.6 -1.9 L2.6 9.6 a1 1 0 0 1 1.5 -1.3 Z",
-        fill: "none",
-        stroke: "currentColor",
-        strokeLinejoin: "round",
-        strokeWidth: "1.2"
-      }
-    ),
-    tiles: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "2" }),
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "2" }),
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".7", height: "4.6", rx: "1.2", width: "4.6", x: "2", y: "9.4" }),
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", fillOpacity: ".45", height: "4.6", rx: "1.2", width: "4.6", x: "9.4", y: "9.4" })
-    ] }),
-    hover: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("path", { d: "M3 9.5 V8 a5 5 0 0 1 10 0 V9.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "2.2", y: "9" }),
-      /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "4.6", rx: "1.2", width: "2.8", x: "11", y: "9" })
-    ] }),
-    fit: /* @__PURE__ */ jsx("path", { d: "M2.5 6 V2.5 H6 M10 2.5 H13.5 V6 M13.5 10 V13.5 H10 M6 13.5 H2.5 V10", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" }),
-    grow: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("path", { d: "M2.5 13.5 C5 13 6 10.5 7.5 8.5 S11 4 13.5 2.5", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.3" }),
-      /* @__PURE__ */ jsx("circle", { cx: "2.6", cy: "13.4", fill: "currentColor", r: "1.6" }),
-      /* @__PURE__ */ jsx("circle", { cx: "13.4", cy: "2.6", fill: "currentColor", r: "1.6" }),
-      /* @__PURE__ */ jsx("path", { d: "M6.6 9.6 c-1.6 .2 -2.4 -.6 -2.6 -2 c1.4 -.1 2.4 .5 2.6 2 Z M9.4 5.8 c.3 -1.6 1.3 -2.2 2.6 -2 c-.1 1.4 -1 2.2 -2.6 2 Z", fill: "currentColor", fillOpacity: ".8" })
-    ] }),
-    arrange: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("circle", { cx: "5", cy: "5", fill: "currentColor", r: "2" }),
-      /* @__PURE__ */ jsx("path", { d: "M8.5 8.5 L13.5 13.5 M13.5 9.6 V13.5 H9.6", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
-    ] }),
-    layers: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("path", { d: "M8 2 L14 5.2 L8 8.4 L2 5.2 Z", fill: "currentColor", fillOpacity: ".9" }),
-      /* @__PURE__ */ jsx("path", { d: "M2.4 8 L8 11 L13.6 8 M2.4 10.8 L8 13.8 L13.6 10.8", fill: "none", stroke: "currentColor", strokeLinejoin: "round", strokeWidth: "1.2" })
-    ] }),
-    close: /* @__PURE__ */ jsx("path", { d: "M4 4 L12 12 M12 4 L4 12", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
-    play: /* @__PURE__ */ jsx("path", { d: "M5 3 L13 8 L5 13 Z", fill: "currentColor", strokeLinejoin: "round" }),
-    stop: /* @__PURE__ */ jsx("rect", { fill: "currentColor", height: "9", rx: "1.5", width: "9", x: "3.5", y: "3.5" }),
-    plus: /* @__PURE__ */ jsx("path", { d: "M8 3 V13 M3 8 H13", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeWidth: "1.6" }),
-    make: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("circle", { cx: "6", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" }),
-      /* @__PURE__ */ jsx("circle", { cx: "10", cy: "8", fill: "currentColor", fillOpacity: ".55", r: "4" })
-    ] }),
-    near: /* @__PURE__ */ jsxs(Fragment2, { children: [
-      /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", fill: "currentColor", r: "1.8" }),
-      /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", fill: "none", r: "4.4", stroke: "currentColor", strokeDasharray: "2 1.6", strokeWidth: "1.2" }),
-      /* @__PURE__ */ jsx("circle", { cx: "13.2", cy: "4", fill: "currentColor", r: "1.1" }),
-      /* @__PURE__ */ jsx("circle", { cx: "3.2", cy: "12.4", fill: "currentColor", r: "1.1" })
-    ] }),
-    reset: /* @__PURE__ */ jsx("path", { d: "M3.5 8 a4.5 4.5 0 1 0 1.4 -3.3 M3.5 2.8 V5.6 H6.3", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4" })
-  };
-  function Icon({ name, size = 16 }) {
-    return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none", display: "block" }, viewBox: "0 0 16 16", width: size, children: PATHS[name] });
-  }
-  function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }) {
-    return /* @__PURE__ */ jsxs(
-      "button",
-      {
-        "aria-expanded": expanded,
-        "aria-haspopup": expanded === void 0 ? void 0 : "menu",
-        "aria-label": children ? void 0 : label,
-        "aria-pressed": expanded === void 0 ? pressed : void 0,
-        className: FOCUSABLE,
-        disabled,
-        onClick,
-        title: title ?? label,
-        type: "button",
-        style: {
-          ...S.row,
-          justifyContent: "center",
-          gap: 5,
-          minWidth: 30,
-          height: 30,
-          padding: children ? "0 10px 0 8px" : 0,
-          font: "inherit",
-          fontSize: 12,
-          fontWeight: pressed ? 600 : 500,
-          borderRadius: 15,
-          border: "none",
-          background: pressed ? `color-mix(in srgb, ${T.accent} 22%, transparent)` : "transparent",
-          color: disabled ? T.faint : pressed ? T.accent : T.secondary,
-          cursor: disabled ? "default" : "pointer",
-          boxShadow: pressed ? `0 0 0 1px color-mix(in srgb, ${T.accent} 45%, transparent) inset` : "none",
-          transition: "background-color 140ms, color 140ms, box-shadow 160ms, transform 120ms",
-          flex: "none"
-        },
-        children: [
-          /* @__PURE__ */ jsx(Icon, { name: icon }),
-          children
-        ]
-      }
-    );
-  }
-  function ToolGroup({ children, label }) {
-    return /* @__PURE__ */ jsx("div", { "aria-label": label, role: "toolbar", style: { ...glass, ...S.row, position: "relative", zIndex: 2, gap: 2, padding: 3, borderRadius: 18, pointerEvents: "auto" }, children });
-  }
-  function Rule() {
-    return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
-  }
-  function LayoutMenu({ label, choices, current, onChoose, maxHeight }) {
-    const [open, setOpen] = useState(false);
-    const box = useRef(null);
-    const items = useRef([]);
-    useEffect(() => {
-      if (!open) return;
-      const away = (event) => {
-        if (!box.current?.contains(event.target)) setOpen(false);
-      };
-      window.addEventListener("pointerdown", away, true);
-      return () => window.removeEventListener("pointerdown", away, true);
-    }, [open]);
-    const shown = choices.find((choice) => choice.id === current) ?? choices[0];
-    useEffect(() => {
-      if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus();
-    }, [open]);
-    const keys = (event) => {
-      if (!open) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpen(false);
-        return;
-      }
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      event.preventDefault();
-      const at = items.current.findIndex((item) => item === event.target);
-      items.current[(at + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length]?.focus();
-    };
-    return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
-      /* @__PURE__ */ jsx(ToolButton, { expanded: open, icon: "layers", label, onClick: () => setOpen(!open), pressed: open || shown !== choices[0], title: `${label}: ${shown?.name ?? ""}`, children: shown !== choices[0] ? shown?.name : void 0 }),
-      open && /* @__PURE__ */ jsx("div", { "aria-label": label, className: "kumi-pop", role: "menu", style: { ...glass, position: "absolute", top: 38, right: -4, width: "max-content", maxWidth: 300, maxHeight, overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 1, zIndex: 3 }, children: choices.map((choice, index) => /* @__PURE__ */ jsxs(
-        "button",
-        {
-          "aria-checked": choice.id === shown?.id,
-          className: FOCUSABLE,
-          onClick: () => {
-            onChoose(choice.id);
-            setOpen(false);
-          },
-          ref: (element) => {
-            items.current[index] = element;
-          },
-          role: "menuitemradio",
-          type: "button",
-          style: {
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-            gap: 1,
-            font: "inherit",
-            textAlign: "left",
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: "none",
-            cursor: "pointer",
-            color: T.text,
-            background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent"
-          },
-          children: [
-            /* @__PURE__ */ jsx("span", { style: { fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }, children: choice.name }),
-            /* @__PURE__ */ jsx("span", { style: { fontSize: 11, color: T.muted }, children: choice.title })
-          ]
-        },
-        choice.id
-      )) })
-    ] });
   }
 
   // src/shared/atlas/Glyph.tsx
@@ -6808,6 +6947,7 @@
     const drag = useRef(null);
     const [box, setBox] = useState(null);
     const [handTool, setHandTool] = useState(false);
+    const [scrollPans, setScrollPans] = useState(null);
     const [grabbing, setGrabbing] = useState(false);
     const over = useRef(false);
     const [spaceHeld, setSpaceHeld] = useState(false);
@@ -6969,6 +7109,7 @@
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
     }, [searched, foundIds, indexOf, visible]);
     const pickedIds = useMemo(() => picked && picked.size > 0 ? model.points.filter((point) => picked.has(point.id)).map((point) => point.id) : [], [model, picked]);
+    const mapState = (held) => ({ picks: Boolean(onPicked), hand: held || handTool, naming: Boolean(grow?.choosing), picked: pickedIds.length, hover: trail, scrollPans });
     const nearName = useMemo(() => {
       const seeds = !searched && foundIds ? (found?.near ?? []).filter((id) => model.sounds[id]) : [];
       if (seeds.length === 0) return "";
@@ -7037,6 +7178,7 @@
         if (!base) return;
         const legacy = event;
         const pans = !event.ctrlKey && (wheelMode.current === "auto" ? wheelPans(legacy, memory, performance.now()) : wheelMode.current === "pan");
+        if (!event.ctrlKey) setScrollPans(pans);
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
         if (pans) {
           queueView({ ...base, dx: base.dx - event.deltaX * unit, dy: base.dy - event.deltaY * unit });
@@ -7313,7 +7455,7 @@
       if (event.button === 1) event.preventDefault();
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const [x, y] = at(event);
-      const boxing = event.button === 0 && Boolean(onPicked) && !space.current && !handTool && !grow?.choosing;
+      const boxing = event.button === 0 && gesturesOf(mapState(space.current)).drag === "pick";
       drag.current = { x, y, moved: false, view, box: boxing, add: event.shiftKey || event.metaKey || event.ctrlKey, button: event.button };
       rest(null);
       setHover(null);
@@ -7363,14 +7505,15 @@
     };
     const screenOf = (place) => place && view ? toScreen(view, mapSize, place[0], place[1]) : null;
     const onKey = (event) => {
-      if (event.key === "Escape" && grow?.choosing && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const escape = event.key === "Escape" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey ? gesturesOf(mapState(space.current)).escape : void 0;
+      if (escape === "cancel") {
         event.preventDefault();
-        grow.choose(false);
+        grow?.choose(false);
         return;
       }
-      if (event.key === "Escape" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && pickedIds.length > 0 && onPicked) {
+      if (escape === "clear") {
         event.preventDefault();
-        onPicked([], "replace");
+        onPicked?.([], "replace");
         setSaid(t("dock.cleared"));
         return;
       }
@@ -7476,8 +7619,11 @@
           /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
           /* @__PURE__ */ jsxs(ToolGroup, { label: t("map.tools"), children: [
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
+            onPicked && !handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.pickTool") }),
             onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
+            onPicked && handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.hand") }),
             grow && /* @__PURE__ */ jsx(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
+            grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("grow.tool") }),
             onPicked && /* @__PURE__ */ jsx(Rule, {}),
             layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
             onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
@@ -7523,12 +7669,6 @@
             group.key
           );
         }) }),
-        grow?.choosing && // Grow names its sounds with clicks on the map: which one this click names, and a way out.
-        /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...glass, borderRadius: 16, ...S.row, gap: 8, padding: "4px 6px 4px 12px", pointerEvents: "auto", maxWidth: "100%" }, children: [
-          /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
-          /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
-          /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
-        ] }),
         matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
           /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
             /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
@@ -7686,6 +7826,23 @@
           }
         )
       ] }),
+      /* @__PURE__ */ jsx(
+        Corner,
+        {
+          bottom: chosen ? 120 : 10,
+          families: model.groups.filter((group) => group.count > 0).length,
+          hint: hintOf(mapState(spaceHeld)),
+          layout: layoutChoices.length > 0 ? /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 150), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) }) : void 0,
+          picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
+          prompt: grow?.choosing ? /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+            /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
+            /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+            /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+          ] }) : void 0,
+          sounds: countWords,
+          zoom: view?.scale ?? 1
+        }
+      ),
       hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
       /* @__PURE__ */ jsxs(
         "div",

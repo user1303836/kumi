@@ -159,8 +159,10 @@ export interface LayoutChoice {
 
 /** The layout menu: a tool button (naming the layout shown, unless it's the first), opening a menu of `choices`. A
  *  choice closes it, as do Escape and a press anywhere else; the arrow keys move between choices. The menu scrolls
- *  within `maxHeight` (the room below the map's top bar), so every choice can be reached on a short map. */
-export function LayoutMenu({ label, choices, current, onChoose, maxHeight }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void; maxHeight?: number }) {
+ *  within `maxHeight` (the room below the map's top bar), so every choice can be reached on a short map. With `words`
+ *  it is the map's corner's instead: a button of words naming the layout ("Layout: Similarity"), its menu opening
+ *  upward. */
+export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void; maxHeight?: number; words?: (name: string) => string }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
   const items = useRef<(HTMLButtonElement | null)[]>([])
@@ -193,11 +195,34 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight }: { l
   }
   return (
     <div onKeyDown={keys} ref={box} style={{ position: 'relative', display: 'flex' }}>
-      <ToolButton expanded={open} icon="layers" label={label} onClick={() => setOpen(!open)} pressed={open || shown !== choices[0]} title={`${label}: ${shown?.name ?? ''}`}>
-        {shown !== choices[0] ? shown?.name : undefined}
-      </ToolButton>
+      {words ? (
+        <button
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className={FOCUSABLE}
+          onClick={() => setOpen(!open)}
+          title={shown?.title}
+          type="button"
+          style={{ ...S.row, gap: 5, font: 'inherit', fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 8, border: `1px solid ${open ? T.accent : T.border}`, background: `color-mix(in srgb, ${T.text} 4%, transparent)`, color: T.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >
+          {words(shown?.name ?? '')}
+          <span aria-hidden style={{ fontSize: 9, color: T.muted }}>
+            ▾
+          </span>
+        </button>
+      ) : (
+        <ToolButton expanded={open} icon="layers" label={label} onClick={() => setOpen(!open)} pressed={open || shown !== choices[0]} title={`${label}: ${shown?.name ?? ''}`}>
+          {shown !== choices[0] ? shown?.name : undefined}
+        </ToolButton>
+      )}
       {open && (
-        <div aria-label={label} className="kumi-pop" role="menu" style={{ ...glass, position: 'absolute', top: 38, right: -4, width: 'max-content', maxWidth: 300, maxHeight, overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}>
+        <div
+          aria-label={label}
+          className="kumi-pop"
+          role="menu"
+          // Inside the corner's glass a second blur shows nothing behind it: the corner's menu is the raised surface, whole.
+          style={{ ...glass, position: 'absolute', ...(words ? { bottom: 28, left: -4, background: T.raised } : { top: 38, right: -4 }), width: 'max-content', maxWidth: 300, maxHeight, overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}
+        >
           {choices.map((choice, index) => (
             <button
               aria-checked={choice.id === shown?.id}

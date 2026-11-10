@@ -9,6 +9,7 @@ const names = await load('src/shared/atlas/names.ts')
 const pulse = await load('src/shared/atlas/pulse.ts')
 const trail = await load('src/shared/atlas/trail.ts')
 const lineage = await load('src/shared/atlas/lineage.ts')
+const gestures = await load('src/shared/atlas/gestures.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -153,4 +154,30 @@ test("a made sound's lineage names the families it came from, in the sources' or
   ])
   assert.deepEqual(lineage.lineageOf([{ artifact_id: 'a-unknown' }, { sound_id: 's-gone' }], parentage), [{ color: null, share: 1 }])
   assert.deepEqual(lineage.lineageOf([], parentage), [])
+})
+
+test('the hint line says what each gesture does in the state the map is in, and nothing the map does not do', () => {
+  const idle = { picks: true, hand: false, naming: false, picked: 0, hover: true, scrollPans: null }
+  const line = state => gestures.hintOf(state).map(([gesture, deed]) => `${gesture} ${deed}`)
+  assert.deepEqual(line(idle), ['hover hear', 'drag pick', 'shiftDrag add', 'scroll zoom', 'middleDrag pan'])
+  // Hover-to-play off: a click is what plays. A trackpad's scroll was seen moving the map: it says so, and a pinch zooms.
+  assert.deepEqual(line({ ...idle, hover: false, scrollPans: true }), ['click hear', 'drag pick', 'shiftDrag add', 'scroll pan', 'pinch zoom'])
+  // With sounds picked, what the picks take.
+  assert.deepEqual(line({ ...idle, picked: 60 }), ['shiftDrag addMore', 'escape clear'])
+  // The hand tool has its own line: a drag moves the map and picks nothing, so Shift has nothing to add to; picks made
+  // before it can still be let go.
+  assert.deepEqual(line({ ...idle, hand: true }), ['hover hear', 'drag pan', 'scroll zoom'])
+  assert.deepEqual(line({ ...idle, hand: true, picked: 3 }), ['hover hear', 'drag pan', 'scroll zoom', 'escape clear'])
+  // A map that picks nothing (no palette to pick for): a drag moves it.
+  assert.deepEqual(line({ ...idle, picks: false }), ['hover hear', 'drag pan', 'scroll zoom', 'middleDrag pan'])
+  // While Grow names its sounds, its own prompt stands on the line; a click names a sound and Escape cancels.
+  const naming = { ...idle, naming: true, picked: 4 }
+  assert.deepEqual(line(naming), [])
+  assert.deepEqual([gestures.gesturesOf(naming).click, gestures.gesturesOf(naming).drag, gestures.gesturesOf(naming).escape], ['name', 'pan', 'cancel'])
+  // What the handlers ask: a drag boxes only on a map that picks, with the pick tool, outside Grow's naming; Escape
+  // has something to clear only with picks.
+  assert.equal(gestures.gesturesOf(idle).drag, 'pick')
+  assert.equal(gestures.gesturesOf(idle).escape, undefined)
+  assert.equal(gestures.gesturesOf({ ...idle, picked: 2 }).escape, 'clear')
+  assert.equal(gestures.gesturesOf({ ...idle, picks: false, picked: 2 }).escape, undefined)
 })
