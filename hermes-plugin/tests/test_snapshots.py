@@ -8,6 +8,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -150,6 +152,69 @@ class Files(StateTest):
         sound = snapshots.sound(self.state, "s-r7-0091")
         self.assertEqual((sound["class"], sound["revision"], sound["sound_id"]), ("snare", "r7", "s-r7-0091"))
         self.assertIsNone(snapshots.sound(self.state, "s-r6-0091"))
+
+
+class MapReads(StateTest):
+    def setUp(self) -> None:
+        super().setUp()
+        snapshots._MAP_PARSED = None
+        self.path = self.state / "map" / "r7.json"
+        self.whole = json.loads(self.path.read_text(encoding="utf-8"))
+
+    def _class(self) -> str | None:
+        current = snapshots.map_revision(self.state)
+        return None if current is None else current["sounds"]["s-r7-0091"]["class"]
+
+    def test_a_map_revision_read_again_is_not_parsed_again(self) -> None:
+        with mock.patch.object(snapshots, "_load", wraps=snapshots._load) as load:
+            first = snapshots.map_revision(self.state)
+            # Other snapshots are read every time, and don't take the map's place.
+            snapshots.read(self.state, "status")
+            snapshots.read(self.state, "status")
+            again = snapshots.map_revision(self.state)
+            sound = snapshots.sound(self.state, "s-r7-0091")
+        self.assertIs(again, first)
+        self.assertEqual(sound["class"], "snare")
+        parsed = [call.args[0].name for call in load.call_args_list]
+        self.assertEqual(parsed.count("r7.json"), 1, "a big library's map takes seconds to parse")
+        self.assertEqual(parsed.count("status.json"), 2)
+
+    def test_requests_that_arrive_together_share_one_parse(self) -> None:
+        load = snapshots._load
+
+        def slow(path: Path):
+            time.sleep(0.05)  # long enough for every thread to be waiting while the first one parses
+            return load(path)
+
+        with mock.patch.object(snapshots, "_load", side_effect=slow) as parse:
+            threads = [threading.Thread(target=snapshots.map_revision, args=(self.state,)) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(parse.call_count, 1, "a page's first requests would each hold a map of their own")
+
+    def test_a_replaced_map_file_is_read_anew_and_one_cut_short_or_too_big_is_never_kept(self) -> None:
+        self.assertEqual(self._class(), "snare")
+        # Replaced by atomic rename, as the runtime writes: the new file is what's read.
+        self.whole["sounds"]["s-r7-0091"]["class"] = "clap"
+        replacement = self.path.with_name("r7.json.tmp")
+        replacement.write_text(json.dumps(self.whole), encoding="utf-8")
+        os.replace(replacement, self.path)
+        self.assertEqual(self._class(), "clap")
+        # Cut short, it reads as missing, and once whole again it's read: nothing half-written was kept.
+        text = json.dumps(self.whole)
+        self.path.write_text(text[: len(text) // 2], encoding="utf-8")
+        self.assertIsNone(self._class())
+        self.whole["sounds"]["s-r7-0091"]["class"] = "snare"
+        self.path.write_text(json.dumps(self.whole), encoding="utf-8")
+        self.assertEqual(self._class(), "snare")
+        # Over the cap, it reads as missing too, and isn't kept.
+        self.whole["sounds"]["s-r7-0091"]["class"] = "kick"
+        self.path.write_text(json.dumps(self.whole), encoding="utf-8")
+        with mock.patch.object(snapshots, "SNAPSHOT_MAX_BYTES", 64):
+            self.assertIsNone(self._class())
+        self.assertEqual(self._class(), "kick")
 
 
 class Media(StateTest):

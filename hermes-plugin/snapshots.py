@@ -20,6 +20,7 @@ import posixpath
 import re
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -41,8 +42,9 @@ SCRIPT_EXTENSIONS = {"python": ".py", "lua": ".lua", "device": ".device.json"}
 # A device's spec holds its code (CC-19's cap) and up to 16 controls; JSON escaping can grow the code a little.
 DEVICE_MAX_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-# The largest snapshot read: a big library's map is a few MB.
-SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024
+# The largest snapshot read. A map revision costs about 460 bytes a sound (about 71 MiB for 160,000 sounds), and the
+# runtime refuses to write one bigger than this (crates/kumi/src/serve/map.rs, MAX_SNAPSHOT_BYTES): keep the two in step.
+SNAPSHOT_MAX_BYTES = 128 * 1024 * 1024
 # Ids that also name files (map revisions, jobs): no separators, no leading dot.
 _FILE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 # The media types a media id is served as: audio, and the listen card's spectrogram.
@@ -125,10 +127,44 @@ def _ms(value: object) -> int | None:
 
 def read(state: Path, name: str) -> dict | None:
     """One snapshot (`status`, `focus`, `map/r7`, `jobs/j3`, …), or None when it's missing or not schema 1."""
-    data = _load(state / f"{name}.json")
+    path = state / f"{name}.json"
+    data = _load_map(path) if name.startswith("map/") else _load(path)
     if not isinstance(data, dict) or data.get("schema") != SCHEMA:
         return None
     return data
+
+
+# The map revision last read, as parsed, by its file's identity: one per loaded copy of this file. The dashboard
+# (dashboard/plugin_api.py) loads its own copy and the tools use the package's, so one Hermes process can hold two.
+# A revision is written once, whole (by atomic replace), and never changed, while every map route, sound lookup, palette
+# and doctor check reads it: a 160,000-sound map takes seconds and a few hundred MB to parse. Only a schema-1 map whose
+# file kept its identity through the parse is kept, so a half-written, oversized or replaced file is never served from
+# here; callers share the result and never change it.
+_MAP_PARSED: tuple[tuple, dict] | None = None
+_MAP_LOCK = threading.Lock()
+
+
+def _identity(path: Path) -> tuple | None:
+    try:
+        found = path.stat()
+    except OSError:
+        return None
+    return (str(path), found.st_size, found.st_mtime_ns, found.st_ino, found.st_dev)
+
+
+def _load_map(path: Path) -> Any:
+    global _MAP_PARSED
+    identity = _identity(path)
+    if identity is None:
+        return None
+    # One parse at a time: a page's first requests arrive together, and each would otherwise hold a map of its own.
+    with _MAP_LOCK:
+        if _MAP_PARSED is not None and _MAP_PARSED[0] == identity:
+            return _MAP_PARSED[1]
+        data = _load(path)
+        if isinstance(data, dict) and data.get("schema") == SCHEMA and _identity(path) == identity:
+            _MAP_PARSED = (identity, data)
+        return data
 
 
 def file_id(value: object) -> str | None:
