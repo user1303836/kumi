@@ -1,6 +1,6 @@
 [package]
 name = "soundcraft-kumi"
-version = "1.24.80"
+version = "1.24.81"
 description = "Kumi's bridge beside SoundCraft: the client of SoundCraft's control channel, SoundCraft started with it on, and kumi-daw/1 for Kumi's host."
 edition.workspace = true
 license.workspace = true
