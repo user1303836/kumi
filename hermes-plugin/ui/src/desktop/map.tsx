@@ -315,6 +315,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         {palette.making && (
           <MakePanel
             colorOf={palette.colorOf}
+            lineage={result => palette.lineage(result.sources, result.at)}
             dock={dock}
             kept={palette.kept}
             onClose={palette.closeMake}
@@ -350,6 +351,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             </TextButton>
           )}
           landing={dock}
+          lineage={palette.madeLineage}
           make={palette.makeFromPalette}
           onDo={action => store.paletteDo(action)}
           onOpen={open => {

@@ -5,6 +5,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
+import { rgbOf } from './color.ts'
 import { progressOf } from './pulse.ts'
 
 /** How far through the sound a play is (0 to 1), a frame at a time while `playing`; null when it isn't, or is over. */
@@ -25,7 +26,7 @@ export function usePlayhead(playing: boolean, duration: number): number | null {
   return progress
 }
 
-export function Wave({ peaks, colors, width, height, progress = null }: { peaks: readonly number[] | null; colors: readonly string[]; width: number; height: number; progress?: number | null }) {
+export function Wave({ peaks, colors, width, height, progress = null }: { peaks: readonly number[] | null; colors: readonly (string | null)[]; width: number; height: number; progress?: number | null }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const tint = colors.join()
   useEffect(() => {
@@ -37,12 +38,14 @@ export function Wave({ peaks, colors, width, height, progress = null }: { peaks:
     element.height = Math.round(height * ratio)
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, width, height)
+    // A colour the canvas can't take (a theme variable, or none known) is the canvas's own CSS colour, the accent.
     const own = getComputedStyle(element).color
-    if (colors.length > 1) {
+    const tints = colors.map(color => (color && rgbOf(color) ? color : own))
+    if (tints.length > 1) {
       const across = context.createLinearGradient(0, 0, width, 0)
-      colors.forEach((color, index) => across.addColorStop(index / (colors.length - 1), color))
+      tints.forEach((color, index) => across.addColorStop(index / (tints.length - 1), color))
       context.fillStyle = across
-    } else context.fillStyle = colors[0] ?? own
+    } else context.fillStyle = tints[0] ?? own
     // A bar every three pixels, each the loudest of the peaks it covers.
     const bars = Math.max(1, Math.floor(width / 3))
     for (let bar = 0; bar < bars; bar++) {

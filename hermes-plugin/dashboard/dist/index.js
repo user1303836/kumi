@@ -3769,6 +3769,31 @@
     }) });
   }
 
+  // src/shared/atlas/color.ts
+  function rgbOf(color) {
+    const text = color.trim();
+    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+    if (hex) {
+      const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+      const value = parseInt(digits, 16);
+      return [value >> 16, value >> 8 & 255, value & 255];
+    }
+    const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
+    if (!rgb) return null;
+    const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+    return channels.every((channel) => channel <= 255) ? channels : null;
+  }
+  function rgba(color, alpha) {
+    return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+  }
+  function lighten(color, amount) {
+    const toward = (channel) => Math.round(channel + (255 - channel) * amount);
+    return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
+  }
+  function isDark(color) {
+    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+  }
+
   // src/shared/controls.tsx
   var clamp = (span, value) => Math.min(span.max, Math.max(span.min, value));
   var snap = (span, value) => {
@@ -4465,7 +4490,7 @@
       }
     );
   }
-  function Wave({ peaks, playing, duration }) {
+  function Wave({ peaks, playing, duration, colors }) {
     const canvas = useRef(null);
     const box = useRef(null);
     const [width, setWidth] = useState(0);
@@ -4500,9 +4525,13 @@
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
       const accent = getComputedStyle(element).color || "#4a90e2";
+      const tints = (colors ?? []).map((color) => color && rgbOf(color) ? color : accent);
       const gradient = context.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, accent);
-      gradient.addColorStop(1, `color-mix(in srgb, ${accent} 55%, transparent)`);
+      if (tints.length > 1) tints.forEach((tint, index) => gradient.addColorStop(index / (tints.length - 1), tint));
+      else {
+        gradient.addColorStop(0, tints[0] ?? accent);
+        gradient.addColorStop(1, `color-mix(in srgb, ${tints[0] ?? accent} 55%, transparent)`);
+      }
       context.fillStyle = gradient;
       const bars = peaks.length || 1;
       const step2 = width / bars;
@@ -4510,7 +4539,7 @@
         const tall = Math.max(1, peaks[bar] * (height - 4));
         context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.4), tall);
       }
-    }, [peaks, width]);
+    }, [peaks, width, colors?.join()]);
     const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1e3 / duration) : null;
     return /* @__PURE__ */ jsxs("div", { ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
       /* @__PURE__ */ jsx(
@@ -4531,7 +4560,7 @@
       /* @__PURE__ */ jsx("span", { style: { fontSize: 11, padding: "1px 7px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }, children: clean(stage, 80) })
     ] }, index)) });
   }
-  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources }) {
+  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage }) {
     const inline = placement === "inline";
     const t = useT();
     const [cardKey, setCardKey] = useState("blend");
@@ -4869,7 +4898,7 @@
                           children: isPlaying ? "■" : "▶"
                         }
                       ),
-                      /* @__PURE__ */ jsx("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx(Wave, { duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
+                      /* @__PURE__ */ jsx("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx(Wave, { colors: lineage?.(result).map((part) => part.color), duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                       /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
@@ -5445,31 +5474,6 @@
       }
     }
     return out.sort((a, b) => a - b);
-  }
-
-  // src/shared/atlas/color.ts
-  function rgbOf(color) {
-    const text = color.trim();
-    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-    if (hex) {
-      const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
-      const value = parseInt(digits, 16);
-      return [value >> 16, value >> 8 & 255, value & 255];
-    }
-    const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
-    if (!rgb) return null;
-    const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-    return channels.every((channel) => channel <= 255) ? channels : null;
-  }
-  function rgba(color, alpha) {
-    return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-  }
-  function lighten(color, amount) {
-    const toward = (channel) => Math.round(channel + (255 - channel) * amount);
-    return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
-  }
-  function isDark(color) {
-    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
   }
 
   // src/shared/atlas/pulse.ts
@@ -6191,11 +6195,12 @@
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
       const own = getComputedStyle(element).color;
-      if (colors.length > 1) {
+      const tints = colors.map((color) => color && rgbOf(color) ? color : own);
+      if (tints.length > 1) {
         const across = context.createLinearGradient(0, 0, width, 0);
-        colors.forEach((color, index) => across.addColorStop(index / (colors.length - 1), color));
+        tints.forEach((color, index) => across.addColorStop(index / (tints.length - 1), color));
         context.fillStyle = across;
-      } else context.fillStyle = colors[0] ?? own;
+      } else context.fillStyle = tints[0] ?? own;
       const bars = Math.max(1, Math.floor(width / 3));
       for (let bar = 0; bar < bars; bar++) {
         let peak = 0.06;
@@ -6408,6 +6413,9 @@
   // src/shared/GrowLayer.tsx
   var percent2 = (at) => Math.round(at * 100);
   var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
+  function GrownWave({ result, colors, playing }) {
+    return /* @__PURE__ */ jsx(Wave2, { colors, height: 26, peaks: result.peaks, progress: usePlayhead(playing, result.duration), width: 278 });
+  }
   function GrowLayer({
     grow,
     from,
@@ -6453,7 +6461,7 @@
     const xs = [from[0], to[0], cx];
     const ys = [from[1], to[1], cy];
     const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-    const card = floatBeside(anchor, 300, picked?.state === "ready" ? 132 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
+    const card = floatBeside(anchor, 300, picked?.state === "ready" ? 164 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
     const budView = (bud, scrubbed = false) => {
       const [x, y] = at(bud.at);
       const color = mixed(fromColor, toColor, bud.at);
@@ -6574,6 +6582,7 @@
                 /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
                 /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
               ] }),
+              /* @__PURE__ */ jsx(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }),
               /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
                 actions?.(picked.result),
@@ -7738,7 +7747,7 @@
   var OPEN_HEIGHT = 260;
   var LOWEST = 150;
   var HIGHEST = 620;
-  function Waveform2({ id, color, audio, width, height, bars }) {
+  function Waveform2({ id, color, audio, width, height, bars, tints }) {
     const canvas = useRef(null);
     const [peaks, setPeaks] = useState(() => id ? peaksKept(id, bars) : null);
     const [drawnWidth, setDrawnWidth] = useState(typeof width === "number" ? width : 0);
@@ -7774,7 +7783,12 @@
       element.height = height * ratio;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, drawnWidth, height);
-      context.fillStyle = getComputedStyle(element).color;
+      const own = getComputedStyle(element).color;
+      if (tints && tints.length > 1) {
+        const across = context.createLinearGradient(0, 0, drawnWidth, 0);
+        tints.forEach((tint, index) => across.addColorStop(index / (tints.length - 1), tint && rgbOf(tint) ? tint : own));
+        context.fillStyle = across;
+      } else context.fillStyle = own;
       const shown = peaks ?? new Array(bars).fill(0.08);
       const step2 = drawnWidth / shown.length;
       context.globalAlpha = peaks ? 0.95 : 0.35;
@@ -7782,7 +7796,7 @@
         const tall = Math.max(1, peak * (height - 2));
         context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.6), tall);
       });
-    }, [peaks, color, drawnWidth, height, bars]);
+    }, [peaks, color, drawnWidth, height, bars, tints?.join()]);
     return /* @__PURE__ */ jsx("canvas", { "aria-hidden": true, ref: canvas, style: { width, height, flex: "none", display: "block", color } });
   }
   function useItemKeys(index, onMove, onRemove) {
@@ -7823,7 +7837,7 @@
     };
   }
   function Chip2(props) {
-    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving } = props;
+    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints } = props;
     const t = useT();
     const id = playableId(item);
     const name = clean(item.name, 60) || item.key;
@@ -7866,7 +7880,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               type: "button",
               style: { ...S.row, gap: 5, minWidth: 0, font: "inherit", fontSize: 11.5, padding: "1px 3px", border: "none", background: "transparent", color: T.text, cursor: id ? "pointer" : "default" },
               children: [
-                /* @__PURE__ */ jsx(Waveform2, { audio, bars: 28, color, height: 16, id, width: 44 }),
+                /* @__PURE__ */ jsx(Waveform2, { audio, bars: 28, color, height: 16, id, tints, width: 44 }),
                 /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: name })
               ]
             }
@@ -7888,7 +7902,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     );
   }
   function Card(props) {
-    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use } = props;
+    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints } = props;
     const t = useT();
     const id = playableId(item);
     const name = clean(item.name, 80) || item.key;
@@ -7901,11 +7915,12 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         className: arriving === null ? void 0 : "kumi-pop",
         role: "listitem",
         style: {
+          position: "relative",
           display: "flex",
           flexDirection: "column",
           gap: 4,
           minWidth: 0,
-          padding: 7,
+          padding: "7px 7px 7px 10px",
           borderRadius: 10,
           border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
           background: playing ? `color-mix(in srgb, ${color} 12%, transparent)` : `color-mix(in srgb, ${T.card} 55%, transparent)`,
@@ -7916,6 +7931,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           animationDelay: arriving === null ? void 0 : `${380 + Math.min(arriving, 24) * 22}ms`
         },
         children: [
+          /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { position: "absolute", inset: 0, borderRadius: "inherit", overflow: "hidden", pointerEvents: "none" }, children: /* @__PURE__ */ jsx("span", { style: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: tints && tints.length > 1 ? `linear-gradient(${tints.map((tint) => tint ?? T.accent).join(", ")})` : tints?.[0] ?? color } }) }),
           /* @__PURE__ */ jsx(
             "button",
             {
@@ -7928,11 +7944,11 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               title: id ? t("dock.reorderHint") : t("dock.offMap"),
               type: "button",
               style: { display: "block", width: "100%", padding: 0, border: "none", background: "transparent", cursor: id ? "pointer" : "default" },
-              children: /* @__PURE__ */ jsx(Waveform2, { audio, bars: 64, color, height: 30, id, width: "100%" })
+              children: /* @__PURE__ */ jsx(Waveform2, { audio, bars: 64, color: tints?.length === 1 && tints[0] ? tints[0] : color, height: 30, id, tints, width: "100%" })
             }
           ),
           /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 5 }, children: [
-            /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" } }),
+            glyph === null ? /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { color, fontSize: 9, lineHeight: 1, flex: "none" }, children: item.source === "artifact" ? "✦" : "●" }) : /* @__PURE__ */ jsx(Glyph2, { color, glyph }),
             /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }, title: name, children: name }),
             /* @__PURE__ */ jsx(
               "button",
@@ -7993,7 +8009,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       }
     );
   }
-  function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen }) {
+  function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage }) {
     const t = useT();
     const current = palette?.current ?? null;
     const [editing, setEditing] = useState(null);
@@ -8052,6 +8068,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const itemProps = (item, index) => ({
       audio,
       color: colorOf2(item),
+      glyph: item.source === "artifact" || item.group === null ? null : glyphOf(item.group),
+      tints: item.source === "artifact" && item.artifact_id ? lineage?.(item.artifact_id)?.map((part) => part.color) ?? null : null,
       dragging,
       index,
       item,
@@ -8220,6 +8238,27 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     );
   }
 
+  // src/shared/atlas/lineage.ts
+  var MOST_FAMILIES = 6;
+  var GENERATIONS = 3;
+  function lineageOf(sources, parentage, at, generations = GENERATIONS) {
+    const shares = /* @__PURE__ */ new Map();
+    const grown = sources.length === 2 && typeof at === "number" && at >= 0 && at <= 1;
+    sources.forEach((source, index) => {
+      const weight = grown ? index === 0 ? 1 - at : at : 1 / sources.length;
+      const parents = source.sound_id || !source.artifact_id || generations <= 0 ? null : parentage.made(source.artifact_id);
+      const parts = parents ? lineageOf(parents.sources, parentage, parents.at, generations - 1) : [{ color: source.sound_id ? parentage.sound(source.sound_id) : null, share: 1 }];
+      for (const part of parts) shares.set(part.color, (shares.get(part.color) ?? 0) + part.share * weight);
+    });
+    let lineage = [...shares].map(([color, share]) => ({ color, share })).filter((part) => part.share > 0);
+    if (lineage.length > MOST_FAMILIES) {
+      const least = [...lineage].sort((a, b) => b.share - a.share)[MOST_FAMILIES - 1].share;
+      lineage = lineage.filter((part) => part.share >= least).slice(0, MOST_FAMILIES);
+    }
+    const whole = lineage.reduce((sum, part) => sum + part.share, 0);
+    return whole > 0 ? lineage.map((part) => ({ color: part.color, share: part.share / whole })) : [];
+  }
+
   // src/shared/paletteMap.ts
   function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     const revision = state.map?.revision ?? null;
@@ -8231,6 +8270,14 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [making, setMaking] = useState(null);
     const kept3 = useMemo(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
     const groupOf = useMemo(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
+    const designed = useMemo(() => new Map((state.designs ?? []).map((result) => [result.artifact_id, result])), [state.designs]);
+    const parentage = {
+      sound: (id) => {
+        const group = groupOf.get(id);
+        return group === void 0 ? null : groupColor(state.map?.groups[String(group)]?.color, group);
+      },
+      made: (id) => designed.get(id) ?? null
+    };
     useEffect(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
     const open = (sources) => {
       setMaking(sources);
@@ -8264,6 +8311,11 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       colorOf: (source) => {
         const group = source.sound_id ? groupOf.get(source.sound_id) : void 0;
         return group === void 0 ? T.accent : groupColor(state.map?.groups[String(group)]?.color, group);
+      },
+      lineage: (sources, at) => lineageOf(sources, parentage, at),
+      madeLineage: (id) => {
+        const result = designed.get(id);
+        return result ? lineageOf(result.sources, parentage, result.at) : null;
       },
       onPicked: (ids, how) => setPicks((current) => {
         const base = current.revision === revision ? current.ids : /* @__PURE__ */ new Set();
@@ -8537,6 +8589,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               groups: state.map?.groups,
               kit: (current) => /* @__PURE__ */ jsx(CopyButton, { label: t("dock.kitCopy"), text: kitRequest(current.name) }),
               landing: dock,
+              lineage: palette.madeLineage,
               make: palette.makeFromPalette,
               onDo: (action) => store.paletteDo(action),
               onOpen: (open) => {
@@ -8560,6 +8613,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           MakePanel,
           {
             colorOf: palette.colorOf,
+            lineage: (result) => palette.lineage(result.sources, result.at),
             dock,
             placement: "inline",
             kept: palette.kept,

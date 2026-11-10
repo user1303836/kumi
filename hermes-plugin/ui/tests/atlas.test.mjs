@@ -8,6 +8,7 @@ const nebula = await load('src/shared/atlas/nebula.ts')
 const names = await load('src/shared/atlas/names.ts')
 const pulse = await load('src/shared/atlas/pulse.ts')
 const trail = await load('src/shared/atlas/trail.ts')
+const lineage = await load('src/shared/atlas/lineage.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -126,4 +127,30 @@ test("the pointer's trail runs out when the pointer rests, and a new line never 
   // The pointer left and came back elsewhere, onto another family: a new line, in that sound's colour.
   const back = trail.stepTo(path, 600, 500, 1300, 'rgb(232, 93, 74)', true)
   assert.deepEqual([back.at(-1).joined, back.at(-1).color], [false, 'rgb(232, 93, 74)'])
+})
+
+test("a made sound's lineage names the families it came from, in the sources' order, each with its share", () => {
+  const colors = { 's-1': 'red', 's-2': 'red', 's-3': 'teal', 's-4': 'green' }
+  const made = { 'a-blend': { sources: [{ sound_id: 's-1' }, { sound_id: 's-3' }] }, 'a-grown': { sources: [{ sound_id: 's-1' }, { sound_id: 's-4' }], at: 0.25 } }
+  const parentage = { sound: id => colors[id] ?? null, made: id => made[id] ?? null }
+  // Four sounds of three families: the first family named has half.
+  assert.deepEqual(lineage.lineageOf([{ sound_id: 's-1' }, { sound_id: 's-3' }, { sound_id: 's-2' }, { sound_id: 's-4' }], parentage), [
+    { color: 'red', share: 0.5 },
+    { color: 'teal', share: 0.25 },
+    { color: 'green', share: 0.25 }
+  ])
+  // A sound grown a quarter of the way from a kick toward a perc is three quarters kick.
+  assert.deepEqual(lineage.lineageOf(made['a-grown'].sources, parentage, 0.25), [
+    { color: 'red', share: 0.75 },
+    { color: 'green', share: 0.25 }
+  ])
+  // A source Kumi made stands for its own families when the window knows them; one it doesn't know, or a sound off
+  // this map, for the accent (no colour).
+  assert.deepEqual(lineage.lineageOf([{ artifact_id: 'a-blend' }, { sound_id: 's-4' }], parentage), [
+    { color: 'red', share: 0.25 },
+    { color: 'teal', share: 0.25 },
+    { color: 'green', share: 0.5 }
+  ])
+  assert.deepEqual(lineage.lineageOf([{ artifact_id: 'a-unknown' }, { sound_id: 's-gone' }], parentage), [{ color: null, share: 1 }])
+  assert.deepEqual(lineage.lineageOf([], parentage), [])
 })

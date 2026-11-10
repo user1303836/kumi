@@ -310,6 +310,7 @@ function Dashboard() {
               groups={state.map?.groups}
               kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
               landing={dock}
+              lineage={palette.madeLineage}
               make={palette.makeFromPalette}
               onDo={action => store.paletteDo(action)}
               onOpen={open => {
@@ -335,6 +336,7 @@ function Dashboard() {
           <div style={{ gridColumn: 2, minWidth: 0 }}>
             <MakePanel
               colorOf={palette.colorOf}
+              lineage={result => palette.lineage(result.sources, result.at)}
               dock={dock}
               placement="inline"
               kept={palette.kept}

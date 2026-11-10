@@ -5038,6 +5038,31 @@ function useGrow(design, heard2, revision) {
 // src/shared/MakePanel.tsx
 import { useEffect as useEffect6, useLayoutEffect, useMemo, useRef as useRef4, useState as useState7 } from "react";
 
+// src/shared/atlas/color.ts
+function rgbOf(color) {
+  const text = color.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+  if (hex) {
+    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+    const value = parseInt(digits, 16);
+    return [value >> 16, value >> 8 & 255, value & 255];
+  }
+  const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
+  if (!rgb) return null;
+  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  return channels.every((channel) => channel <= 255) ? channels : null;
+}
+function rgba(color, alpha) {
+  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
+}
+function lighten(color, amount) {
+  const toward = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
+}
+function isDark(color) {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
+}
+
 // src/shared/MakeOptions.tsx
 import { useState as useState6 } from "react";
 
@@ -5741,7 +5766,7 @@ function Flying({ flight, onDone }) {
     }
   );
 }
-function Wave2({ peaks, playing, duration }) {
+function Wave2({ peaks, playing, duration, colors }) {
   const canvas = useRef4(null);
   const box = useRef4(null);
   const [width, setWidth] = useState7(0);
@@ -5776,9 +5801,13 @@ function Wave2({ peaks, playing, duration }) {
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     const accent = getComputedStyle(element).color || "#4a90e2";
+    const tints = (colors ?? []).map((color) => color && rgbOf(color) ? color : accent);
     const gradient = context.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, accent);
-    gradient.addColorStop(1, `color-mix(in srgb, ${accent} 55%, transparent)`);
+    if (tints.length > 1) tints.forEach((tint, index) => gradient.addColorStop(index / (tints.length - 1), tint));
+    else {
+      gradient.addColorStop(0, tints[0] ?? accent);
+      gradient.addColorStop(1, `color-mix(in srgb, ${tints[0] ?? accent} 55%, transparent)`);
+    }
     context.fillStyle = gradient;
     const bars = peaks.length || 1;
     const step2 = width / bars;
@@ -5786,7 +5815,7 @@ function Wave2({ peaks, playing, duration }) {
       const tall = Math.max(1, peaks[bar] * (height - 4));
       context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.4), tall);
     }
-  }, [peaks, width]);
+  }, [peaks, width, colors?.join()]);
   const progress = startedAt !== null && duration > 0 ? Math.min(1, (now - startedAt) / 1e3 / duration) : null;
   return /* @__PURE__ */ jsxs13("div", { ref: box, style: { position: "relative", height: 56, color: T.accent }, children: [
     /* @__PURE__ */ jsx13(
@@ -5808,7 +5837,7 @@ function Stages({ stages }) {
   ] }, index)) });
 }
 var sideSheetWidth = (area) => Math.min(430, area * 0.46);
-function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources }) {
+function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage }) {
   const inline = placement === "inline";
   const t = useT();
   const [cardKey, setCardKey] = useState7("blend");
@@ -6146,7 +6175,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                         children: isPlaying ? "■" : "▶"
                       }
                     ),
-                    /* @__PURE__ */ jsx13("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx13(Wave2, { duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
+                    /* @__PURE__ */ jsx13("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx13(Wave2, { colors: lineage?.(result).map((part) => part.color), duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
                   ] }),
                   /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                     /* @__PURE__ */ jsxs13("span", { style: S.faint, children: [
@@ -6728,31 +6757,6 @@ function pointsInBox(model, view, size, box, visible) {
     }
   }
   return out.sort((a, b) => a - b);
-}
-
-// src/shared/atlas/color.ts
-function rgbOf(color) {
-  const text = color.trim();
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
-  if (hex) {
-    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
-    const value = parseInt(digits, 16);
-    return [value >> 16, value >> 8 & 255, value & 255];
-  }
-  const rgb = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/i.exec(text);
-  if (!rgb) return null;
-  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-  return channels.every((channel) => channel <= 255) ? channels : null;
-}
-function rgba(color, alpha) {
-  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-}
-function lighten(color, amount) {
-  const toward = (channel) => Math.round(channel + (255 - channel) * amount);
-  return `rgb(${toward(color[0])}, ${toward(color[1])}, ${toward(color[2])})`;
-}
-function isDark(color) {
-  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
 }
 
 // src/shared/atlas/pulse.ts
@@ -7483,11 +7487,12 @@ function Wave3({ peaks, colors, width, height, progress = null }) {
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     const own = getComputedStyle(element).color;
-    if (colors.length > 1) {
+    const tints = colors.map((color) => color && rgbOf(color) ? color : own);
+    if (tints.length > 1) {
       const across = context.createLinearGradient(0, 0, width, 0);
-      colors.forEach((color, index) => across.addColorStop(index / (colors.length - 1), color));
+      tints.forEach((color, index) => across.addColorStop(index / (tints.length - 1), color));
       context.fillStyle = across;
-    } else context.fillStyle = colors[0] ?? own;
+    } else context.fillStyle = tints[0] ?? own;
     const bars = Math.max(1, Math.floor(width / 3));
     for (let bar = 0; bar < bars; bar++) {
       let peak = 0.06;
@@ -7703,6 +7708,9 @@ import { useRef as useRef9 } from "react";
 import { Fragment as Fragment7, jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
 var percent2 = (at) => Math.round(at * 100);
 var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
+function GrownWave({ result, colors, playing }) {
+  return /* @__PURE__ */ jsx19(Wave3, { colors, height: 26, peaks: result.peaks, progress: usePlayhead(playing, result.duration), width: 278 });
+}
 function GrowLayer({
   grow,
   from,
@@ -7748,7 +7756,7 @@ function GrowLayer({
   const xs = [from[0], to[0], cx];
   const ys = [from[1], to[1], cy];
   const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  const card = floatBeside(anchor, 300, picked?.state === "ready" ? 132 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
+  const card = floatBeside(anchor, 300, picked?.state === "ready" ? 164 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
   const budView = (bud, scrubbed = false) => {
     const [x, y] = at(bud.at);
     const color = mixed(fromColor, toColor, bud.at);
@@ -7869,6 +7877,7 @@ function GrowLayer({
               /* @__PURE__ */ jsx19("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
               /* @__PURE__ */ jsx19("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
             ] }),
+            /* @__PURE__ */ jsx19(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }),
             /* @__PURE__ */ jsxs17("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
               /* @__PURE__ */ jsx19(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
               actions?.(picked.result),
@@ -9038,7 +9047,7 @@ var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
 var LOWEST = 150;
 var HIGHEST = 620;
-function Waveform2({ id, color, audio, width, height, bars }) {
+function Waveform2({ id, color, audio, width, height, bars, tints }) {
   const canvas = useRef12(null);
   const [peaks, setPeaks] = useState13(() => id ? peaksKept(id, bars) : null);
   const [drawnWidth, setDrawnWidth] = useState13(typeof width === "number" ? width : 0);
@@ -9074,7 +9083,12 @@ function Waveform2({ id, color, audio, width, height, bars }) {
     element.height = height * ratio;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, drawnWidth, height);
-    context.fillStyle = getComputedStyle(element).color;
+    const own = getComputedStyle(element).color;
+    if (tints && tints.length > 1) {
+      const across = context.createLinearGradient(0, 0, drawnWidth, 0);
+      tints.forEach((tint, index) => across.addColorStop(index / (tints.length - 1), tint && rgbOf(tint) ? tint : own));
+      context.fillStyle = across;
+    } else context.fillStyle = own;
     const shown = peaks ?? new Array(bars).fill(0.08);
     const step2 = drawnWidth / shown.length;
     context.globalAlpha = peaks ? 0.95 : 0.35;
@@ -9082,7 +9096,7 @@ function Waveform2({ id, color, audio, width, height, bars }) {
       const tall = Math.max(1, peak * (height - 2));
       context.fillRect(bar * step2, (height - tall) / 2, Math.max(1, step2 - 0.6), tall);
     });
-  }, [peaks, color, drawnWidth, height, bars]);
+  }, [peaks, color, drawnWidth, height, bars, tints?.join()]);
   return /* @__PURE__ */ jsx22("canvas", { "aria-hidden": true, ref: canvas, style: { width, height, flex: "none", display: "block", color } });
 }
 function useItemKeys(index, onMove, onRemove) {
@@ -9123,7 +9137,7 @@ function useDrop({ item, dragging, onDrag, onDropHere }, name) {
   };
 }
 function Chip2(props) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving } = props;
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints } = props;
   const t = useT();
   const id = playableId(item);
   const name = clean(item.name, 60) || item.key;
@@ -9166,7 +9180,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             type: "button",
             style: { ...S.row, gap: 5, minWidth: 0, font: "inherit", fontSize: 11.5, padding: "1px 3px", border: "none", background: "transparent", color: T.text, cursor: id ? "pointer" : "default" },
             children: [
-              /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 28, color, height: 16, id, width: 44 }),
+              /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 28, color, height: 16, id, tints, width: 44 }),
               /* @__PURE__ */ jsx22("span", { style: S.ellipsis, children: name })
             ]
           }
@@ -9188,7 +9202,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
   );
 }
 function Card(props) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use } = props;
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints } = props;
   const t = useT();
   const id = playableId(item);
   const name = clean(item.name, 80) || item.key;
@@ -9201,11 +9215,12 @@ function Card(props) {
       className: arriving === null ? void 0 : "kumi-pop",
       role: "listitem",
       style: {
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         gap: 4,
         minWidth: 0,
-        padding: 7,
+        padding: "7px 7px 7px 10px",
         borderRadius: 10,
         border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
         background: playing ? `color-mix(in srgb, ${color} 12%, transparent)` : `color-mix(in srgb, ${T.card} 55%, transparent)`,
@@ -9216,6 +9231,7 @@ function Card(props) {
         animationDelay: arriving === null ? void 0 : `${380 + Math.min(arriving, 24) * 22}ms`
       },
       children: [
+        /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { position: "absolute", inset: 0, borderRadius: "inherit", overflow: "hidden", pointerEvents: "none" }, children: /* @__PURE__ */ jsx22("span", { style: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: tints && tints.length > 1 ? `linear-gradient(${tints.map((tint) => tint ?? T.accent).join(", ")})` : tints?.[0] ?? color } }) }),
         /* @__PURE__ */ jsx22(
           "button",
           {
@@ -9228,11 +9244,11 @@ function Card(props) {
             title: id ? t("dock.reorderHint") : t("dock.offMap"),
             type: "button",
             style: { display: "block", width: "100%", padding: 0, border: "none", background: "transparent", cursor: id ? "pointer" : "default" },
-            children: /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 64, color, height: 30, id, width: "100%" })
+            children: /* @__PURE__ */ jsx22(Waveform2, { audio, bars: 64, color: tints?.length === 1 && tints[0] ? tints[0] : color, height: 30, id, tints, width: "100%" })
           }
         ),
         /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 5 }, children: [
-          /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" } }),
+          glyph === null ? /* @__PURE__ */ jsx22("span", { "aria-hidden": true, style: { color, fontSize: 9, lineHeight: 1, flex: "none" }, children: item.source === "artifact" ? "✦" : "●" }) : /* @__PURE__ */ jsx22(Glyph2, { color, glyph }),
           /* @__PURE__ */ jsx22("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }, title: name, children: name }),
           /* @__PURE__ */ jsx22(
             "button",
@@ -9293,7 +9309,7 @@ function NameField({ initial, label, onDone }) {
     }
   );
 }
-function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen }) {
+function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage }) {
   const t = useT();
   const current = palette?.current ?? null;
   const [editing, setEditing] = useState13(null);
@@ -9352,6 +9368,8 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
   const itemProps = (item, index) => ({
     audio,
     color: colorOf2(item),
+    glyph: item.source === "artifact" || item.group === null ? null : glyphOf(item.group),
+    tints: item.source === "artifact" && item.artifact_id ? lineage?.(item.artifact_id)?.map((part) => part.color) ?? null : null,
     dragging,
     index,
     item,
@@ -9522,6 +9540,29 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
 
 // src/shared/paletteMap.ts
 import { useEffect as useEffect14, useMemo as useMemo4, useState as useState14 } from "react";
+
+// src/shared/atlas/lineage.ts
+var MOST_FAMILIES = 6;
+var GENERATIONS = 3;
+function lineageOf(sources, parentage, at, generations = GENERATIONS) {
+  const shares = /* @__PURE__ */ new Map();
+  const grown = sources.length === 2 && typeof at === "number" && at >= 0 && at <= 1;
+  sources.forEach((source, index) => {
+    const weight = grown ? index === 0 ? 1 - at : at : 1 / sources.length;
+    const parents = source.sound_id || !source.artifact_id || generations <= 0 ? null : parentage.made(source.artifact_id);
+    const parts = parents ? lineageOf(parents.sources, parentage, parents.at, generations - 1) : [{ color: source.sound_id ? parentage.sound(source.sound_id) : null, share: 1 }];
+    for (const part of parts) shares.set(part.color, (shares.get(part.color) ?? 0) + part.share * weight);
+  });
+  let lineage = [...shares].map(([color, share]) => ({ color, share })).filter((part) => part.share > 0);
+  if (lineage.length > MOST_FAMILIES) {
+    const least = [...lineage].sort((a, b) => b.share - a.share)[MOST_FAMILIES - 1].share;
+    lineage = lineage.filter((part) => part.share >= least).slice(0, MOST_FAMILIES);
+  }
+  const whole = lineage.reduce((sum, part) => sum + part.share, 0);
+  return whole > 0 ? lineage.map((part) => ({ color: part.color, share: part.share / whole })) : [];
+}
+
+// src/shared/paletteMap.ts
 function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const revision = state.map?.revision ?? null;
   const [picks, setPicks] = useState14({ revision, ids: /* @__PURE__ */ new Set() });
@@ -9532,6 +9573,14 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const [making, setMaking] = useState14(null);
   const kept3 = useMemo4(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
   const groupOf = useMemo4(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
+  const designed = useMemo4(() => new Map((state.designs ?? []).map((result) => [result.artifact_id, result])), [state.designs]);
+  const parentage = {
+    sound: (id) => {
+      const group = groupOf.get(id);
+      return group === void 0 ? null : groupColor(state.map?.groups[String(group)]?.color, group);
+    },
+    made: (id) => designed.get(id) ?? null
+  };
   useEffect14(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
   const open = (sources) => {
     setMaking(sources);
@@ -9565,6 +9614,11 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     colorOf: (source) => {
       const group = source.sound_id ? groupOf.get(source.sound_id) : void 0;
       return group === void 0 ? T.accent : groupColor(state.map?.groups[String(group)]?.color, group);
+    },
+    lineage: (sources, at) => lineageOf(sources, parentage, at),
+    madeLineage: (id) => {
+      const result = designed.get(id);
+      return result ? lineageOf(result.sources, parentage, result.at) : null;
     },
     onPicked: (ids, how) => setPicks((current) => {
       const base = current.revision === revision ? current.ids : /* @__PURE__ */ new Set();
@@ -9798,6 +9852,7 @@ function MapWorkspace({ ctx, store, audition }) {
         MakePanel,
         {
           colorOf: palette.colorOf,
+          lineage: (result) => palette.lineage(result.sources, result.at),
           dock,
           kept: palette.kept,
           onClose: palette.closeMake,
@@ -9825,6 +9880,7 @@ function MapWorkspace({ ctx, store, audition }) {
         groups: map?.groups,
         kit: (current) => /* @__PURE__ */ jsx23(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
         landing: dock,
+        lineage: palette.madeLineage,
         make: palette.makeFromPalette,
         onDo: (action) => store.paletteDo(action),
         onOpen: (open) => {

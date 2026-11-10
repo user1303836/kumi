@@ -9,8 +9,11 @@ import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { rgbOf } from './atlas/color.ts'
+import { Glyph } from './atlas/Glyph.tsx'
+import type { Share } from './atlas/lineage.ts'
 import { clean, num } from './format.ts'
-import { groupColor } from './mapModel.ts'
+import { glyphOf, groupColor } from './mapModel.ts'
 import { Icon } from './mapUi.tsx'
 import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
 import { peaksFor, peaksKept } from './peaks.ts'
@@ -49,11 +52,15 @@ export interface PaletteDockProps {
   /** Whether the drawer is open, kept by the parent (each UI half remembers it), and how to change it. */
   open: boolean
   onOpen: (open: boolean) => void
+  /** A made sound's lineage, by its id, when the window knows what it was made from (`atlas/lineage.ts`): its card
+   *  wears its families' colours. */
+  lineage?: (artifactId: string) => Share[] | null
 }
 
 /** A waveform drawn from the sound's own audio, decoded once it's on screen (a card scrolled out of view costs
- *  nothing), in `color`. */
-function Waveform({ id, color, audio, width, height, bars }: { id: string | null; color: string; audio: (id: string) => Promise<string>; width: number | '100%'; height: number; bars: number }) {
+ *  nothing), in `color`; or, for a sound Kumi made, in its families' colours left to right (`tints`: null is the
+ *  accent, the canvas's own colour). */
+function Waveform({ id, color, audio, width, height, bars, tints }: { id: string | null; color: string; audio: (id: string) => Promise<string>; width: number | '100%'; height: number; bars: number; tints?: readonly (string | null)[] | null }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const [peaks, setPeaks] = useState<number[] | null>(() => (id ? peaksKept(id, bars) : null))
   const [drawnWidth, setDrawnWidth] = useState(typeof width === 'number' ? width : 0)
@@ -91,7 +98,12 @@ function Waveform({ id, color, audio, width, height, bars }: { id: string | null
     context.clearRect(0, 0, drawnWidth, height)
     // A canvas takes no CSS variables, and a theme colour is one (`var(--ui-accent)`): the canvas wears the colour as
     // its own CSS colour, and the computed value is what it draws with.
-    context.fillStyle = getComputedStyle(element).color
+    const own = getComputedStyle(element).color
+    if (tints && tints.length > 1) {
+      const across = context.createLinearGradient(0, 0, drawnWidth, 0)
+      tints.forEach((tint, index) => across.addColorStop(index / (tints.length - 1), tint && rgbOf(tint) ? tint : own))
+      context.fillStyle = across
+    } else context.fillStyle = own
     const shown = peaks ?? new Array<number>(bars).fill(0.08)
     const step = drawnWidth / shown.length
     context.globalAlpha = peaks ? 0.95 : 0.35
@@ -99,7 +111,7 @@ function Waveform({ id, color, audio, width, height, bars }: { id: string | null
       const tall = Math.max(1, peak * (height - 2))
       context.fillRect(bar * step, (height - tall) / 2, Math.max(1, step - 0.6), tall)
     })
-  }, [peaks, color, drawnWidth, height, bars])
+  }, [peaks, color, drawnWidth, height, bars, tints?.join()]) // eslint-disable-line react-hooks/exhaustive-deps
   return <canvas aria-hidden ref={canvas} style={{ width, height, flex: 'none', display: 'block', color }} />
 }
 
@@ -120,6 +132,10 @@ interface ItemProps {
   item: PaletteItem
   index: number
   color: string
+  /** Its family's glyph on the map; null for a sound of no family here (one Kumi made, or one off this map). */
+  glyph: number | null
+  /** A made sound's families' colours, left to right, when they're known (null in one: the accent). */
+  tints: readonly (string | null)[] | null
   playing: boolean
   audio: (id: string) => Promise<string>
   onPlay: () => void
@@ -165,7 +181,7 @@ function useDrop({ item, dragging, onDrag, onDropHere }: Pick<ItemProps, 'item' 
 
 /** One sound in the folded drawer's row: its waveform and name. */
 function Chip(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints } = props
   const t = useT()
   const id = playableId(item)
   const name = clean(item.name, 60) || item.key
@@ -204,7 +220,7 @@ function Chip(props: ItemProps) {
         type="button"
         style={{ ...S.row, gap: 5, minWidth: 0, font: 'inherit', fontSize: 11.5, padding: '1px 3px', border: 'none', background: 'transparent', color: T.text, cursor: id ? 'pointer' : 'default' }}
       >
-        <Waveform audio={audio} bars={28} color={color} height={16} id={id} width={44} />
+        <Waveform audio={audio} bars={28} color={color} height={16} id={id} tints={tints} width={44} />
         <span style={S.ellipsis}>{name}</span>
       </button>
       <button
@@ -223,7 +239,7 @@ function Chip(props: ItemProps) {
 
 /** One sound in the open drawer: a card with its waveform across the top, its name, kind, Use… and ×. */
 function Card(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints } = props
   const t = useT()
   const id = playableId(item)
   const name = clean(item.name, 80) || item.key
@@ -235,11 +251,12 @@ function Card(props: ItemProps) {
       className={arriving === null ? undefined : 'kumi-pop'}
       role="listitem"
       style={{
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
         minWidth: 0,
-        padding: 7,
+        padding: '7px 7px 7px 10px',
         borderRadius: 10,
         border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
         background: playing ? `color-mix(in srgb, ${color} 12%, transparent)` : `color-mix(in srgb, ${T.card} 55%, transparent)`,
@@ -250,6 +267,12 @@ function Card(props: ItemProps) {
         animationDelay: arriving === null ? undefined : `${380 + Math.min(arriving, 24) * 22}ms`
       }}
     >
+      {/* The rule down its edge: its family's colour, or the colours of the families a made sound comes from. It sits
+          in a clipped layer of its own, so the card's corners round it and the card itself clips nothing (a grid's
+          rows shrink to nothing under items that clip). */}
+      <span aria-hidden style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', overflow: 'hidden', pointerEvents: 'none' }}>
+        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: tints && tints.length > 1 ? `linear-gradient(${tints.map(tint => tint ?? T.accent).join(', ')})` : (tints?.[0] ?? color) }} />
+      </span>
       <button
         aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
         aria-pressed={playing}
@@ -261,10 +284,17 @@ function Card(props: ItemProps) {
         type="button"
         style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: id ? 'pointer' : 'default' }}
       >
-        <Waveform audio={audio} bars={64} color={color} height={30} id={id} width="100%" />
+        <Waveform audio={audio} bars={64} color={tints?.length === 1 && tints[0] ? tints[0] : color} height={30} id={id} tints={tints} width="100%" />
       </button>
       <div style={{ ...S.row, gap: 5 }}>
-        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: color, flex: 'none' }} />
+        {/* The shape the map draws its family in; a made sound has none, and wears a spark. */}
+        {glyph === null ? (
+          <span aria-hidden style={{ color, fontSize: 9, lineHeight: 1, flex: 'none' }}>
+            {item.source === 'artifact' ? '✦' : '●'}
+          </span>
+        ) : (
+          <Glyph color={color} glyph={glyph} />
+        )}
         <span style={{ ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }} title={name}>
           {name}
         </span>
@@ -326,7 +356,7 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
@@ -394,6 +424,8 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   const itemProps = (item: PaletteItem, index: number): ItemProps => ({
     audio,
     color: colorOf(item),
+    glyph: item.source === 'artifact' || item.group === null ? null : glyphOf(item.group),
+    tints: item.source === 'artifact' && item.artifact_id ? (lineage?.(item.artifact_id)?.map(part => part.color) ?? null) : null,
     dragging,
     index,
     item,
