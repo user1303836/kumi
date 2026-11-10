@@ -336,11 +336,12 @@ class Media(StateTest):
     @unittest.skipUnless(os.name == "nt", "Windows path forms")
     def test_on_windows_a_typed_folder_keeps_its_drive_and_loses_a_trailing_backslash_or_cmds_stray_quote(self) -> None:
         folder = str(self.library)  # C:\…\samples
+        real = os.path.realpath(folder)  # as the disk spells it: a short name (RUNNER~1) written out
         for typed in (folder + "\\", folder.replace("\\", "/"), f'"{folder}\\"', folder + '\\"', folder.lower()):
             with self.subTest(typed=typed):
                 kept, refusal = snapshots.typed_library_folder(typed)
                 self.assertIsNone(refusal)
-                self.assertEqual(kept.lower(), folder.lower())
+                self.assertEqual(kept.lower(), real.lower())
                 self.assertFalse(kept.endswith("\\"))
         for typed in (folder[:3], "\\Samples", folder[:2] + "Samples"):  # a drive; a root with no drive; drive-relative
             with self.subTest(typed=typed):
