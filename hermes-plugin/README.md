@@ -68,10 +68,6 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *With **Ask before each change** on, Hermes shows exactly what Kumi will change in Live before it does, here the Drums fader from −6.0 dB to −4 dB.*
 
-![Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.](../docs/assets/hermes/screenshots/catalog-4-mastering.png)
-
-*Listening in REAPER with Kumi 1.24.71: a test tone measured beside its reference, in round 2, after a +3 dB level change.*
-
 ![The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
 *The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.*
@@ -84,8 +80,6 @@ Screenshots:
 - The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
   1.24.79 runtime, and real Renoise, in a project that started empty.
 - The approval is Kumi 1.24.73 on real Ableton Live 12.
-- The listening shot is Kumi 1.24.71 on real REAPER 7. It measures a synthetic test tone against a reference made 3 dB
-  louder, after a level change only; the struck row in its HISTORY is an earlier, undone calibration step.
 - The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
   samples are generated test data, and the made sounds come from Kumi's sound-design engine.
 - In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
