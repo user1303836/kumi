@@ -13,6 +13,7 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AtlasOverlay } from './atlas/AtlasOverlay.tsx'
+import { nearestTo, STARS } from './atlas/constellation.ts'
 import { Corner, ToolName } from './atlas/Corner.tsx'
 import { gesturesOf, hintOf, type MapState } from './atlas/gestures.ts'
 import { glowOf } from './atlas/glow.ts'
@@ -514,8 +515,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return () => canvas.removeEventListener('wheel', onWheel)
   }, [hasPoints])
 
-  // The sound under the pointer, for its glow: a move over the same sound draws nothing new.
+  // The sound under the pointer, for its glow: a move over the same sound draws nothing new. And its constellation:
+  // the sounds nearest it in the layout shown (by similarity, its "more like this"), among those the search and the
+  // legend keep. Tiles are a grid, where the nearest say nothing: none there.
   const hoverAt = hover ? hover.index : null
+  const constellation = useMemo(() => (hoverAt === null || tiles ? [] : nearestTo(arranged.points, hoverAt, STARS, index => mask[index] === 1)), [arranged, hoverAt, mask, tiles])
   // Draw whenever anything shown changes, and once a frame while something moves. Points are batched into one path
   // per group colour, so a 25,000-sound map is a few hundred fills, not 25,000. Each colour's points are split into
   // `ROUNDS` interleaved paths, drawn round by round: where groups overlap, their colours still mix as the map's own
@@ -836,6 +840,22 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (hovered !== null && hovered < count && mask[hovered] === 1) {
       const [x, y, blend] = placeOf(hovered)
       const color = groupColor.get(points[hovered].group) ?? colors.faint
+      // Its constellation: a thin line in its colour to each of the sounds most like it, the nearest brightest, and a
+      // fine ring on each. Zoomed out on a crowded map they sit under it; zoomed in they spread.
+      context.strokeStyle = glow.shape(color)
+      context.lineWidth = 1
+      constellation.forEach((other, rank) => {
+        if (other >= count || mask[other] !== 1) return
+        const [toX, toY, toBlend] = placeOf(other)
+        context.globalAlpha = 0.7 - rank * 0.09
+        context.beginPath()
+        context.moveTo(x, y)
+        context.lineTo(toX, toY)
+        context.moveTo(toX + reach(toBlend) + 2, toY)
+        context.arc(toX, toY, reach(toBlend) + 2, 0, Math.PI * 2)
+        context.stroke()
+      })
+      context.globalAlpha = 1
       const path = new Path2D()
       shape(path, x, y, blend, 1.45, glyphAt(hovered))
       context.save()
@@ -877,7 +897,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       })
       context.globalAlpha = 1
     }
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, t, topInset, coverRight])
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()

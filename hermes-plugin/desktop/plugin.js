@@ -7104,6 +7104,24 @@ function AtlasOverlay({
   return /* @__PURE__ */ jsx15("canvas", { "aria-hidden": true, ref: canvas, style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", color: T.text } });
 }
 
+// src/shared/atlas/constellation.ts
+var STARS = 5;
+function nearestTo(points, index, most, shown) {
+  const own = points[index];
+  if (!own || most <= 0) return [];
+  const best = [];
+  for (let other = 0; other < points.length; other++) {
+    if (other === index || shown && !shown(other)) continue;
+    const distance = (points[other].x - own.x) ** 2 + (points[other].y - own.y) ** 2;
+    if (best.length === most && distance >= best[most - 1][0]) continue;
+    let at = best.length;
+    while (at > 0 && best[at - 1][0] > distance) at--;
+    best.splice(at, 0, [distance, other]);
+    if (best.length > most) best.pop();
+  }
+  return best.map(([, other]) => other);
+}
+
 // src/shared/mapUi.tsx
 import { useEffect as useEffect8, useRef as useRef6, useState as useState8 } from "react";
 import { Fragment as Fragment6, jsx as jsx16, jsxs as jsxs14 } from "react/jsx-runtime";
@@ -8639,6 +8657,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [hasPoints]);
   const hoverAt = hover ? hover.index : null;
+  const constellation = useMemo2(() => hoverAt === null || tiles ? [] : nearestTo(arranged.points, hoverAt, STARS, (index) => mask[index] === 1), [arranged, hoverAt, mask, tiles]);
   useEffect12(() => {
     const canvas = canvasRef.current;
     if (!canvas || !view || size.width === 0) return;
@@ -8911,6 +8930,20 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     if (hovered2 !== null && hovered2 < count2 && mask[hovered2] === 1) {
       const [x, y, blend] = placeOf(hovered2);
       const color = groupColor2.get(points[hovered2].group) ?? colors.faint;
+      context.strokeStyle = glow.shape(color);
+      context.lineWidth = 1;
+      constellation.forEach((other, rank) => {
+        if (other >= count2 || mask[other] !== 1) return;
+        const [toX, toY, toBlend] = placeOf(other);
+        context.globalAlpha = 0.7 - rank * 0.09;
+        context.beginPath();
+        context.moveTo(x, y);
+        context.lineTo(toX, toY);
+        context.moveTo(toX + reach(toBlend) + 2, toY);
+        context.arc(toX, toY, reach(toBlend) + 2, 0, Math.PI * 2);
+        context.stroke();
+      });
+      context.globalAlpha = 1;
       const path = new Path2D();
       shape(path, x, y, blend, 1.45, glyphAt(hovered2));
       context.save();
@@ -8948,7 +8981,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       });
       context.globalAlpha = 1;
     }
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, t, topInset, coverRight]);
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];

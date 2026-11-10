@@ -10,6 +10,7 @@ const pulse = await load('src/shared/atlas/pulse.ts')
 const trail = await load('src/shared/atlas/trail.ts')
 const lineage = await load('src/shared/atlas/lineage.ts')
 const gestures = await load('src/shared/atlas/gestures.ts')
+const constellation = await load('src/shared/atlas/constellation.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -185,4 +186,27 @@ test('the hint line says what each gesture does in the state the map is in, and 
   assert.equal(gestures.gesturesOf(idle).escape, undefined)
   assert.equal(gestures.gesturesOf({ ...idle, picked: 2 }).escape, 'clear')
   assert.equal(gestures.gesturesOf({ ...idle, picks: false, picked: 2 }).escape, undefined)
+})
+
+test("a sound's constellation is the sounds nearest it, nearest first, without the ones the search hides", () => {
+  // Sound 0 at the origin; the others at growing distances, out of order.
+  const points = [
+    { x: 0, y: 0 },
+    { x: 0.5, y: 0 },
+    { x: 0, y: 0.1 },
+    { x: 0.3, y: 0 },
+    { x: 0, y: -0.2 },
+    { x: 0.9, y: 0.9 },
+    { x: -0.4, y: 0 }
+  ]
+  assert.deepEqual(constellation.nearestTo(points, 0, 5), [2, 4, 3, 6, 1])
+  assert.deepEqual(constellation.nearestTo(points, 0, 3), [2, 4, 3])
+  // The search hides 2 and 3: the next nearest take their places.
+  assert.deepEqual(
+    constellation.nearestTo(points, 0, 3, index => index !== 2 && index !== 3),
+    [4, 6, 1]
+  )
+  // A map of three sounds joins the two others; a sound the map doesn't have, none.
+  assert.deepEqual(constellation.nearestTo(points.slice(0, 3), 1, 5), [0, 2])
+  assert.deepEqual(constellation.nearestTo(points, 99, 5), [])
 })
