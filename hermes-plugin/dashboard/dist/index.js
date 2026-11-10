@@ -5572,7 +5572,8 @@
       this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null;
       if (pulse) this.core = getComputedStyle(this.canvas).color || this.core;
       if (pulse) this.fading = null;
-      if (pulse) this.tone = pulse.color;
+      const channels = pulse ? rgbOf(pulse.color) : null;
+      if (pulse) this.tone = channels ? lighten(channels, 0.3) : pulse.color;
       this.wake();
     }
     /** The playing sound's waveform arrived. */
@@ -5629,8 +5630,8 @@
           if (!to.joined) continue;
           const strength = strengthOf(to, now);
           context.strokeStyle = to.color;
-          context.globalAlpha = 0.12 + 0.6 * strength * strength;
-          context.lineWidth = 1 + 4 * strength * strength;
+          context.globalAlpha = 0.15 + 0.75 * strength ** 1.3;
+          context.lineWidth = 1 + 5 * strength ** 1.2;
           context.beginPath();
           context.moveTo(from.x, from.y);
           context.lineTo(to.x, to.y);

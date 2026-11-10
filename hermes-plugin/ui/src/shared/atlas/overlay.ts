@@ -59,7 +59,9 @@ export class Overlay {
     this.pulse = pulse ? { ...pulse, since: now, shown: 0, at: now } : null
     if (pulse) this.core = getComputedStyle(this.canvas).color || this.core
     if (pulse) this.fading = null
-    if (pulse) this.tone = pulse.color
+    // The trail's colour: the playing sound's, a little lighter, so the trail reads across its own family's cluster.
+    const channels = pulse ? rgbOf(pulse.color) : null
+    if (pulse) this.tone = channels ? lighten(channels, 0.3) : pulse.color
     this.wake()
   }
 
@@ -116,7 +118,8 @@ export class Overlay {
     context.clearRect(0, 0, this.width, this.height)
     this.path = this.path.filter(step => strengthOf(step, now) > 0)
     if (this.path.length > 1) {
-      // Each step a short stroke from the one before, thinner and fainter as it ages.
+      // Each step a short stroke from the one before, thinner and fainter as it ages: a comet's tail, widest and
+      // brightest at the pointer.
       context.save()
       context.globalCompositeOperation = 'lighter'
       // Butted, not round: round ends would overlap at every joint, and added light makes each overlap a bead.
@@ -126,8 +129,8 @@ export class Overlay {
         if (!to.joined) continue
         const strength = strengthOf(to, now)
         context.strokeStyle = to.color
-        context.globalAlpha = 0.12 + 0.6 * strength * strength
-        context.lineWidth = 1 + 4 * strength * strength
+        context.globalAlpha = 0.15 + 0.75 * strength ** 1.3
+        context.lineWidth = 1 + 5 * strength ** 1.2
         context.beginPath()
         context.moveTo(from.x, from.y)
         context.lineTo(to.x, to.y)
