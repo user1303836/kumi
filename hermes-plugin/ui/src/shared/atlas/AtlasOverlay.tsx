@@ -21,6 +21,7 @@ export function AtlasOverlay({
   width,
   height,
   playing,
+  kin,
   place,
   audio,
   still,
@@ -31,8 +32,10 @@ export function AtlasOverlay({
   width: number
   height: number
   playing: PlayingSound | null
-  /** Where the playing sound is drawn now, in the canvas's pixels (it moves with a pan, a zoom, a layout's move). */
-  place: () => readonly [number, number] | null
+  /** The sounds to ring: the parents of the made sound the pointer or the keyboard is on (their ids and colours). */
+  kin: readonly { id: string; color: string }[]
+  /** Where a sound is drawn now, in the canvas's pixels (it moves with a pan, a zoom, a layout's move). */
+  place: (id: string) => readonly [number, number] | null
   audio?: (id: string) => Promise<string>
   /** The system asks for less motion: the pulse is drawn once, still. */
   still: boolean
@@ -63,6 +66,7 @@ export function AtlasOverlay({
   }, [still])
   useEffect(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height])
   useEffect(() => overlay.current?.moved(), [moved])
+  useEffect(() => overlay.current?.kin(kin.map(sound => ({ place: () => placed.current(sound.id), color: sound.color }))), [kin])
   const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? '', playing?.glyph ?? 0, playing?.duration ?? 0]
   useEffect(() => {
     const element = target.current
@@ -89,7 +93,7 @@ export function AtlasOverlay({
       return
     }
     let live = true
-    drawn.play({ place: () => placed.current(), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) })
+    drawn.play({ place: () => placed.current(id), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) })
     // Wanted only while this sound still plays: a sweep across the map decodes only the sound it rests on.
     if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then(levels => live && drawn.levels(levels))
     return () => {

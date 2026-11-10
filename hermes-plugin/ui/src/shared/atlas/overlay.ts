@@ -18,6 +18,12 @@ export interface Pulse {
   levels: readonly number[] | null
 }
 
+/** A sound ringed on the map: where it is now, and its colour. */
+export interface Ringed {
+  place: () => readonly [number, number] | null
+  color: string
+}
+
 /** How long the pulse takes to fade once its sound stops, and the plain pulse's period. */
 const FADE_MS = 180
 const RIPPLE_MS = 1100
@@ -38,6 +44,8 @@ export class Overlay {
   private path: Step[] = []
   private tone: string | null = null
   private lifted = true
+  /** The sounds ringed on the map: the parents of the made sound under the pointer. */
+  private ringed: Ringed[] = []
   still = false
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -84,9 +92,15 @@ export class Overlay {
     this.lifted = true
   }
 
-  /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
+  /** Ring these sounds (the sounds a made sound came from, while the pointer or the keyboard is on it), or none. */
+  kin(ringed: Ringed[]): void {
+    this.ringed = ringed
+    if (this.frame === 0) this.draw(performance.now())
+  }
+
+  /** The map moved under what stands still here (a still pulse, the ringed parents): draw them where they are now. */
   moved(): void {
-    if (this.frame === 0 && (this.pulse || this.fading)) this.draw(performance.now())
+    if (this.frame === 0 && (this.pulse || this.fading || this.ringed.length > 0)) this.draw(performance.now())
   }
 
   dispose(): void {
@@ -134,6 +148,34 @@ export class Overlay {
         context.beginPath()
         context.moveTo(from.x, from.y)
         context.lineTo(to.x, to.y)
+        context.stroke()
+      }
+      context.restore()
+    }
+    // A made sound's parents: each ringed in its own colour, with a little light behind it. The light adds up, so
+    // many parents share it (a crowd of them zoomed out is a glow, not a white blot); the rings don't add.
+    if (this.ringed.length > 0) {
+      context.save()
+      context.lineWidth = 1.75
+      const light = Math.min(0.6, 3 / this.ringed.length)
+      for (const ringed of this.ringed) {
+        const place = ringed.place()
+        if (!place || place[0] < -20 || place[1] < -20 || place[0] > this.width + 20 || place[1] > this.height + 20) continue
+        const channels = rgbOf(ringed.color)
+        if (channels) {
+          const glow = context.createRadialGradient(place[0], place[1], 0, place[0], place[1], 16)
+          glow.addColorStop(0, rgba(channels, 0.7))
+          glow.addColorStop(1, rgba(channels, 0))
+          context.globalCompositeOperation = 'lighter'
+          context.globalAlpha = light
+          context.fillStyle = glow
+          context.fillRect(place[0] - 16, place[1] - 16, 32, 32)
+        }
+        context.globalCompositeOperation = 'source-over'
+        context.globalAlpha = 0.95
+        context.strokeStyle = channels ? lighten(channels, 0.3) : ringed.color
+        context.beginPath()
+        context.arc(place[0], place[1], 7.5, 0, Math.PI * 2)
         context.stroke()
       }
       context.restore()

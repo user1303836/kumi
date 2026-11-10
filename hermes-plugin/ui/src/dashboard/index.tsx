@@ -221,6 +221,7 @@ function Dashboard() {
             marked={palette.marked}
             onHover={palette.onHover}
             trail={hover}
+            kin={palette.kin}
             onPick={id => {
               setSelected(id)
               palette.play(id)
@@ -311,6 +312,7 @@ function Dashboard() {
               kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
               landing={dock}
               lineage={palette.madeLineage}
+              onKin={palette.showKinOf}
               make={palette.makeFromPalette}
               onDo={action => store.paletteDo(action)}
               onOpen={open => {
@@ -337,6 +339,7 @@ function Dashboard() {
             <MakePanel
               colorOf={palette.colorOf}
               lineage={result => palette.lineage(result.sources, result.at)}
+              onKin={result => palette.showKin(result ? result.sources : null)}
               dock={dock}
               placement="inline"
               kept={palette.kept}

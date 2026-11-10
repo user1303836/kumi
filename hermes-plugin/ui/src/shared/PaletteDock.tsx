@@ -55,6 +55,8 @@ export interface PaletteDockProps {
   /** A made sound's lineage, by its id, when the window knows what it was made from (`atlas/lineage.ts`): its card
    *  wears its families' colours. */
   lineage?: (artifactId: string) => Share[] | null
+  /** The pointer or the keyboard came onto a made sound's card (its id) or left it (null): the map rings its parents. */
+  onKin?: (artifactId: string | null) => void
 }
 
 /** A waveform drawn from the sound's own audio, decoded once it's on screen (a card scrolled out of view costs
@@ -136,6 +138,8 @@ interface ItemProps {
   glyph: number | null
   /** A made sound's families' colours, left to right, when they're known (null in one: the accent). */
   tints: readonly (string | null)[] | null
+  /** The pointer or the keyboard came onto a made sound's card (true) or left it: its parents are ringed on the map. */
+  onKin?: (on: boolean) => void
   playing: boolean
   audio: (id: string) => Promise<string>
   onPlay: () => void
@@ -179,17 +183,28 @@ function useDrop({ item, dragging, onDrag, onDropHere }: Pick<ItemProps, 'item' 
   }
 }
 
+/** A made sound's chip and card tell the map while the pointer or the keyboard is on them (it rings the sound's
+ *  parents), and when they go: a sound taken out from under the pointer leaves no ring behind. */
+function useKin(onKin: ItemProps['onKin']) {
+  const tell = useRef(onKin)
+  tell.current = onKin
+  useEffect(() => () => tell.current?.(false), [])
+  return { onBlur: () => onKin?.(false), onFocus: () => onKin?.(true), onPointerEnter: () => onKin?.(true), onPointerLeave: () => onKin?.(false) }
+}
+
 /** One sound in the folded drawer's row: its waveform and name. */
 function Chip(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin } = props
   const t = useT()
   const id = playableId(item)
   const name = clean(item.name, 60) || item.key
   const { over, handlers } = useDrop(props, name)
   const keys = useItemKeys(index, onMove, onRemove)
+  const kin = useKin(onKin)
   return (
     <div
       {...handlers}
+      {...kin}
       className={arriving === null ? undefined : 'kumi-pop'}
       role="listitem"
       style={{
@@ -239,15 +254,17 @@ function Chip(props: ItemProps) {
 
 /** One sound in the open drawer: a card with its waveform across the top, its name, kind, Use… and ×. */
 function Card(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin } = props
   const t = useT()
   const id = playableId(item)
   const name = clean(item.name, 80) || item.key
   const { over, handlers } = useDrop(props, name)
   const keys = useItemKeys(index, onMove, onRemove)
+  const kin = useKin(onKin)
   return (
     <div
       {...handlers}
+      {...kin}
       className={arriving === null ? undefined : 'kumi-pop'}
       role="listitem"
       style={{
@@ -356,7 +373,7 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
@@ -426,6 +443,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     color: colorOf(item),
     glyph: item.source === 'artifact' || item.group === null ? null : glyphOf(item.group),
     tints: item.source === 'artifact' && item.artifact_id ? (lineage?.(item.artifact_id)?.map(part => part.color) ?? null) : null,
+    onKin: item.source === 'artifact' && item.artifact_id && onKin ? on => onKin(on ? item.artifact_id : null) : undefined,
     dragging,
     index,
     item,

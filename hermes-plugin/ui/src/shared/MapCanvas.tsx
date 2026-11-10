@@ -84,6 +84,8 @@ export interface MapCanvasProps {
   onPlayMade?: (result: DesignResult) => void
   /** Hover-to-play is on: the pointer leaves a trail over the map, in the colours of what it played. */
   trail?: boolean
+  /** Sounds to ring in their own colours: the parents of the made sound the pointer or the keyboard is on. */
+  kin?: ReadonlySet<string> | null
 }
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
@@ -151,7 +153,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -371,6 +373,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // Escape does in it, and the corner's hint line is written from the same table. `held`: whether Space is held (the
   // handlers read it as it is now; the hint, as last drawn).
   const mapState = (held: boolean): MapState => ({ picks: Boolean(onPicked), hand: held || handTool, naming: Boolean(grow?.choosing), picked: pickedIds.length, hover: trail, scrollPans })
+  // A made sound's parents on this map, each with its colour: the overlay rings them while the pointer is on the sound.
+  const kinRings = useMemo(
+    () =>
+      [...(kin ?? [])].flatMap(id => {
+        const index = indexOf.get(id)
+        return index === undefined ? [] : [{ id, color: model.groups.find(group => group.key === model.points[index].group)?.color ?? T.accent }]
+      }),
+    [kin, indexOf, model]
+  )
   // CC-23: a near search names its seeds (the top-level `near`) from this map, the first by name and how many more;
   // seeds the map doesn't list head nothing.
   const nearName = useMemo(() => {
@@ -951,19 +962,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const chosenColor = chosenIndex === undefined ? T.accent : (model.groups.find(group => group.key === model.points[chosenIndex].group)?.color ?? T.accent)
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
-  // The sound that plays, when it's one of this map's: the overlay pulses on it, wherever the map last drew it (its
-  // place moves with a pan, a zoom and a layout's move).
+  // The sound that plays, when it's one of this map's: the overlay pulses on it, wherever the map last drew it (a
+  // sound's place moves with a pan, a zoom and a layout's move).
   const playingIndex = playing === null ? undefined : indexOf.get(playing)
   const playingGroup = playingIndex === undefined ? undefined : model.points[playingIndex].group
   const playingSound =
     playing === null || playingGroup === undefined
       ? null
       : { id: playing, color: model.groups.find(group => group.key === playingGroup)?.color ?? T.accent, glyph: glyphOf(playingGroup), duration: model.sounds[playing]?.duration ?? 0 }
-  const playingPlace = (): [number, number] | null => {
+  const placeOnScreen = (id: string): [number, number] | null => {
+    const index = indexOf.get(id)
     const [last, at] = [drawn.current, viewRef.current]
-    if (playingIndex === undefined || !last || !at || last.places.length < 2 * playingIndex + 2) return null
+    if (index === undefined || !last || !at || last.places.length < 2 * index + 2) return null
     const unit = mapSize * at.scale
-    return [last.places[2 * playingIndex] * unit + at.dx, last.places[2 * playingIndex + 1] * unit + at.dy]
+    return [last.places[2 * index] * unit + at.dx, last.places[2 * index + 1] * unit + at.dy]
   }
   const countWords =
     shown === model.points.length - leavingCount ? t('map.count', num(shown, 0)) : t('map.countOf', num(shown, 0), num(model.points.length - leavingCount, 0))
@@ -1164,7 +1176,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             touchAction: 'none'
           }}
         />
-        <AtlasOverlay audio={audio} height={size.height} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={playingPlace} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
+        <AtlasOverlay audio={audio} height={size.height} kin={kinRings} moved={`${view?.scale},${view?.dx},${view?.dy},${clock}`} place={placeOnScreen} playing={playingSound} still={still} target={canvasRef} trail={trail} width={size.width} />
         {box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && (
           // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
           <svg

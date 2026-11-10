@@ -44,3 +44,14 @@ export function lineageOf(sources: readonly DesignSource[], parentage: Parentage
   const whole = lineage.reduce((sum, part) => sum + part.share, 0)
   return whole > 0 ? lineage.map(part => ({ color: part.color, share: part.share / whole })) : []
 }
+
+/** The map sounds a sound made from `sources` comes from: each source that is a map sound, and, for a source Kumi made,
+ *  the sounds that one came from when the window knows them. Each id once, in the sources' order. */
+export function parentsOf(sources: readonly DesignSource[], made: Parentage['made'], generations = GENERATIONS): string[] {
+  const parents = new Set<string>()
+  for (const source of sources) {
+    if (source.sound_id) parents.add(source.sound_id)
+    else if (source.artifact_id && generations > 0) for (const id of parentsOf(made(source.artifact_id)?.sources ?? [], made, generations - 1)) parents.add(id)
+  }
+  return [...parents]
+}

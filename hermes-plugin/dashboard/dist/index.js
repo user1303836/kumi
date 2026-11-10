@@ -3820,6 +3820,12 @@
     return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 128;
   }
 
+  // src/shared/atlas/LineageBar.tsx
+  function LineageBar({ shares }) {
+    if (shares.length === 0) return null;
+    return /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { display: "flex", height: 4, borderRadius: 2, overflow: "hidden", flex: "none" }, children: shares.map((part, index) => /* @__PURE__ */ jsx("span", { style: { flex: `${part.share} 1 0`, minWidth: 2, background: part.color ?? T.accent } }, index)) });
+  }
+
   // src/shared/controls.tsx
   var clamp = (span, value) => Math.min(span.max, Math.max(span.min, value));
   var snap = (span, value) => {
@@ -4586,9 +4592,12 @@
       /* @__PURE__ */ jsx("span", { style: { fontSize: 11, padding: "1px 7px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${T.accent} 30%, transparent)`, color: T.secondary }, children: clean(stage, 80) })
     ] }, index)) });
   }
-  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage }) {
+  function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage, onKin }) {
     const inline = placement === "inline";
     const t = useT();
+    const tellKin = useRef(onKin);
+    tellKin.current = onKin;
+    useEffect(() => () => tellKin.current?.(null), []);
     const [cardKey, setCardKey] = useState("blend");
     const [lastMode, setLastMode] = useState({ cross: "blend", fuse: "texture", loop: "loop", stack: "stack" });
     const [options, setOptions] = useState({});
@@ -4850,6 +4859,10 @@
                     if (element) cards.current.set(result.artifact_id, element);
                     else cards.current.delete(result.artifact_id);
                   },
+                  onBlur: () => onKin?.(null),
+                  onFocus: () => onKin?.(result),
+                  onPointerEnter: () => onKin?.(result),
+                  onPointerLeave: () => onKin?.(null),
                   role: "listitem",
                   style: {
                     display: "flex",
@@ -4863,6 +4876,7 @@
                     transition: "border-color 160ms, background-color 160ms, box-shadow 160ms"
                   },
                   children: [
+                    lineage && /* @__PURE__ */ jsx(LineageBar, { shares: lineage(result) }),
                     /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
                       /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...stages.length ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, title: result.recipe, children: stages.length ? clean(result.recipe.split(":", 1)[0], 80) : clean(result.recipe, 220) || resultName(result) }),
                       onSources && /* @__PURE__ */ jsx(
@@ -5557,6 +5571,8 @@
     path = [];
     tone = null;
     lifted = true;
+    /** The sounds ringed on the map: the parents of the made sound under the pointer. */
+    ringed = [];
     still = false;
     resize(width, height, ratio) {
       if (width === this.width && height === this.height && ratio === this.ratio) return;
@@ -5592,9 +5608,14 @@
     lift() {
       this.lifted = true;
     }
-    /** The map moved under a still pulse (a pan, a zoom, a resize): draw it where the sound is now. */
+    /** Ring these sounds (the sounds a made sound came from, while the pointer or the keyboard is on it), or none. */
+    kin(ringed) {
+      this.ringed = ringed;
+      if (this.frame === 0) this.draw(performance.now());
+    }
+    /** The map moved under what stands still here (a still pulse, the ringed parents): draw them where they are now. */
     moved() {
-      if (this.frame === 0 && (this.pulse || this.fading)) this.draw(performance.now());
+      if (this.frame === 0 && (this.pulse || this.fading || this.ringed.length > 0)) this.draw(performance.now());
     }
     dispose() {
       cancelAnimationFrame(this.frame);
@@ -5635,6 +5656,32 @@
           context.beginPath();
           context.moveTo(from.x, from.y);
           context.lineTo(to.x, to.y);
+          context.stroke();
+        }
+        context.restore();
+      }
+      if (this.ringed.length > 0) {
+        context.save();
+        context.lineWidth = 1.75;
+        const light = Math.min(0.6, 3 / this.ringed.length);
+        for (const ringed of this.ringed) {
+          const place = ringed.place();
+          if (!place || place[0] < -20 || place[1] < -20 || place[0] > this.width + 20 || place[1] > this.height + 20) continue;
+          const channels = rgbOf(ringed.color);
+          if (channels) {
+            const glow = context.createRadialGradient(place[0], place[1], 0, place[0], place[1], 16);
+            glow.addColorStop(0, rgba(channels, 0.7));
+            glow.addColorStop(1, rgba(channels, 0));
+            context.globalCompositeOperation = "lighter";
+            context.globalAlpha = light;
+            context.fillStyle = glow;
+            context.fillRect(place[0] - 16, place[1] - 16, 32, 32);
+          }
+          context.globalCompositeOperation = "source-over";
+          context.globalAlpha = 0.95;
+          context.strokeStyle = channels ? lighten(channels, 0.3) : ringed.color;
+          context.beginPath();
+          context.arc(place[0], place[1], 7.5, 0, Math.PI * 2);
           context.stroke();
         }
         context.restore();
@@ -5709,6 +5756,7 @@
     width,
     height,
     playing,
+    kin,
     place,
     audio,
     still,
@@ -5736,6 +5784,7 @@
     }, [still]);
     useEffect(() => overlay.current?.resize(width, height, window.devicePixelRatio || 1), [width, height]);
     useEffect(() => overlay.current?.moved(), [moved2]);
+    useEffect(() => overlay.current?.kin(kin.map((sound) => ({ place: () => placed.current(sound.id), color: sound.color }))), [kin]);
     const [id, color, glyph, duration] = [playing?.id ?? null, playing?.color ?? "", playing?.glyph ?? 0, playing?.duration ?? 0];
     useEffect(() => {
       const element = target.current;
@@ -5761,7 +5810,7 @@
         return;
       }
       let live = true;
-      drawn.play({ place: () => placed.current(), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) });
+      drawn.play({ place: () => placed.current(id), color, glyph, duration, levels: peaksKept(id, WAVE_BARS) });
       if (fetched.current) void peaksFor(id, WAVE_BARS, fetched.current, () => live).then((levels) => live && drawn.levels(levels));
       return () => {
         live = false;
@@ -6936,7 +6985,7 @@
   }
   var ROUNDS = 8;
   var maps = 0;
-  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false }) {
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -7115,6 +7164,13 @@
     }, [searched, foundIds, indexOf, visible]);
     const pickedIds = useMemo(() => picked && picked.size > 0 ? model.points.filter((point) => picked.has(point.id)).map((point) => point.id) : [], [model, picked]);
     const mapState = (held) => ({ picks: Boolean(onPicked), hand: held || handTool, naming: Boolean(grow?.choosing), picked: pickedIds.length, hover: trail, scrollPans });
+    const kinRings = useMemo(
+      () => [...kin ?? []].flatMap((id) => {
+        const index = indexOf.get(id);
+        return index === void 0 ? [] : [{ id, color: model.groups.find((group) => group.key === model.points[index].group)?.color ?? T.accent }];
+      }),
+      [kin, indexOf, model]
+    );
     const nearName = useMemo(() => {
       const seeds = !searched && foundIds ? (found?.near ?? []).filter((id) => model.sounds[id]) : [];
       if (seeds.length === 0) return "";
@@ -7599,11 +7655,12 @@
     const playingIndex = playing === null ? void 0 : indexOf.get(playing);
     const playingGroup = playingIndex === void 0 ? void 0 : model.points[playingIndex].group;
     const playingSound = playing === null || playingGroup === void 0 ? null : { id: playing, color: model.groups.find((group) => group.key === playingGroup)?.color ?? T.accent, glyph: glyphOf(playingGroup), duration: model.sounds[playing]?.duration ?? 0 };
-    const playingPlace = () => {
+    const placeOnScreen = (id) => {
+      const index = indexOf.get(id);
       const [last, at2] = [drawn.current, viewRef.current];
-      if (playingIndex === void 0 || !last || !at2 || last.places.length < 2 * playingIndex + 2) return null;
+      if (index === void 0 || !last || !at2 || last.places.length < 2 * index + 2) return null;
       const unit = mapSize * at2.scale;
-      return [last.places[2 * playingIndex] * unit + at2.dx, last.places[2 * playingIndex + 1] * unit + at2.dy];
+      return [last.places[2 * index] * unit + at2.dx, last.places[2 * index + 1] * unit + at2.dy];
     };
     const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
     const hiddenCount = (map?.hidden ?? 0) + leavingCount;
@@ -7782,7 +7839,7 @@
             }
           }
         ),
-        /* @__PURE__ */ jsx(AtlasOverlay, { audio, height: size.height, moved: `${view?.scale},${view?.dx},${view?.dy},${clock}`, place: playingPlace, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
+        /* @__PURE__ */ jsx(AtlasOverlay, { audio, height: size.height, kin: kinRings, moved: `${view?.scale},${view?.dx},${view?.dy},${clock}`, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
         box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, its edge marching (`kumi-ants`, in FocusStyle).
         /* @__PURE__ */ jsx(
           "svg",
@@ -8010,17 +8067,25 @@
       }
     };
   }
+  function useKin(onKin) {
+    const tell = useRef(onKin);
+    tell.current = onKin;
+    useEffect(() => () => tell.current?.(false), []);
+    return { onBlur: () => onKin?.(false), onFocus: () => onKin?.(true), onPointerEnter: () => onKin?.(true), onPointerLeave: () => onKin?.(false) };
+  }
   function Chip2(props) {
-    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints } = props;
+    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin } = props;
     const t = useT();
     const id = playableId(item);
     const name = clean(item.name, 60) || item.key;
     const { over, handlers } = useDrop(props, name);
     const keys = useItemKeys(index, onMove, onRemove);
+    const kin = useKin(onKin);
     return /* @__PURE__ */ jsxs(
       "div",
       {
         ...handlers,
+        ...kin,
         className: arriving === null ? void 0 : "kumi-pop",
         role: "listitem",
         style: {
@@ -8076,16 +8141,18 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     );
   }
   function Card(props) {
-    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints } = props;
+    const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin } = props;
     const t = useT();
     const id = playableId(item);
     const name = clean(item.name, 80) || item.key;
     const { over, handlers } = useDrop(props, name);
     const keys = useItemKeys(index, onMove, onRemove);
+    const kin = useKin(onKin);
     return /* @__PURE__ */ jsxs(
       "div",
       {
         ...handlers,
+        ...kin,
         className: arriving === null ? void 0 : "kumi-pop",
         role: "listitem",
         style: {
@@ -8183,7 +8250,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       }
     );
   }
-  function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage }) {
+  function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }) {
     const t = useT();
     const current = palette?.current ?? null;
     const [editing, setEditing] = useState(null);
@@ -8244,6 +8311,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       color: colorOf2(item),
       glyph: item.source === "artifact" || item.group === null ? null : glyphOf(item.group),
       tints: item.source === "artifact" && item.artifact_id ? lineage?.(item.artifact_id)?.map((part) => part.color) ?? null : null,
+      onKin: item.source === "artifact" && item.artifact_id && onKin ? (on) => onKin(on ? item.artifact_id : null) : void 0,
       dragging,
       index,
       item,
@@ -8432,6 +8500,14 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const whole = lineage.reduce((sum, part) => sum + part.share, 0);
     return whole > 0 ? lineage.map((part) => ({ color: part.color, share: part.share / whole })) : [];
   }
+  function parentsOf(sources, made, generations = GENERATIONS) {
+    const parents = /* @__PURE__ */ new Set();
+    for (const source of sources) {
+      if (source.sound_id) parents.add(source.sound_id);
+      else if (source.artifact_id && generations > 0) for (const id of parentsOf(made(source.artifact_id)?.sources ?? [], made, generations - 1)) parents.add(id);
+    }
+    return [...parents];
+  }
 
   // src/shared/paletteMap.ts
   function usePaletteMap(store, state, audition, t, { hover, other, left }) {
@@ -8452,6 +8528,11 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       },
       made: (id) => designed.get(id) ?? null
     };
+    const [kinOf, setKinOf] = useState(null);
+    const kin = useMemo(() => {
+      if (kinOf === null) return null;
+      return new Set(parentsOf(typeof kinOf === "string" ? designed.get(kinOf)?.sources ?? [] : kinOf, (id) => designed.get(id) ?? null));
+    }, [kinOf, designed]);
     useEffect(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
     const open = (sources) => {
       setMaking(sources);
@@ -8490,6 +8571,12 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       madeLineage: (id) => {
         const result = designed.get(id);
         return result ? lineageOf(result.sources, parentage, result.at) : null;
+      },
+      kin,
+      showKin: setKinOf,
+      showKinOf: (id) => {
+        setKinOf(id);
+        if (id && !designed.has(id)) void store.readDesignsOnce();
       },
       onPicked: (ids, how) => setPicks((current) => {
         const base = current.revision === revision ? current.ids : /* @__PURE__ */ new Set();
@@ -8687,6 +8774,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               marked: palette.marked,
               onHover: palette.onHover,
               trail: hover,
+              kin: palette.kin,
               onPick: (id) => {
                 setSelected(id);
                 palette.play(id);
@@ -8764,6 +8852,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               kit: (current) => /* @__PURE__ */ jsx(CopyButton, { label: t("dock.kitCopy"), text: kitRequest(current.name) }),
               landing: dock,
               lineage: palette.madeLineage,
+              onKin: palette.showKinOf,
               make: palette.makeFromPalette,
               onDo: (action) => store.paletteDo(action),
               onOpen: (open) => {
@@ -8788,6 +8877,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           {
             colorOf: palette.colorOf,
             lineage: (result) => palette.lineage(result.sources, result.at),
+            onKin: (result) => palette.showKin(result ? result.sources : null),
             dock,
             placement: "inline",
             kept: palette.kept,

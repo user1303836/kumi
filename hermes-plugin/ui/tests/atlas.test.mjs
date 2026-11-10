@@ -157,6 +157,8 @@ test("a made sound's lineage names the families it came from, in the sources' or
   ])
   assert.deepEqual(lineage.lineageOf([{ artifact_id: 'a-unknown' }, { sound_id: 's-gone' }], parentage), [{ color: null, share: 1 }])
   assert.deepEqual(lineage.lineageOf([], parentage), [])
+  // The sounds to ring on the map for it: its parents on the map, and a made parent's own, each once.
+  assert.deepEqual(lineage.parentsOf([{ artifact_id: 'a-blend' }, { sound_id: 's-4' }, { sound_id: 's-1' }, { artifact_id: 'a-unknown' }], parentage.made), ['s-1', 's-3', 's-4'])
 })
 
 test('the hint line says what each gesture does in the state the map is in, and nothing the map does not do', () => {

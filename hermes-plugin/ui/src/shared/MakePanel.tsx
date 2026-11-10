@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { rgbOf } from './atlas/color.ts'
 import type { Share } from './atlas/lineage.ts'
+import { LineageBar } from './atlas/LineageBar.tsx'
 import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, type DesignTab, requestFor, requestOf, reroll, resultName, sourceOfResult, stagesOf, type Steer, TABS, takeKey } from './design.ts'
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
@@ -48,6 +49,8 @@ export interface MakePanelProps {
   /** The families a result's sounds come from, as colours with their shares: its waveform wears them, left to right.
    *  Without it (or for a result of no known family), the accent. */
   lineage?: (result: DesignResult) => Share[]
+  /** The pointer or the keyboard came onto a result (or left: null): its parents are ringed on the map. */
+  onKin?: (result: DesignResult | null) => void
 }
 
 /** A kept sound's flight: from its waveform's box to the dock's, as the viewport saw them when Keep was pressed, and
@@ -273,9 +276,13 @@ interface Take {
 /** The side sheet's width in a map `area` pixels wide, as its style's `min(430px, 46%)` sets it. */
 export const sideSheetWidth = (area: number): number => Math.min(430, area * 0.46)
 
-export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, placement = 'bottom', dock, onSources, lineage }: MakePanelProps) {
+export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept, use, placement = 'bottom', dock, onSources, lineage, onKin }: MakePanelProps) {
   const inline = placement === 'inline'
   const t = useT()
+  // The panel's results go with it, and so do the map's rings for the one the pointer or the keyboard was on.
+  const tellKin = useRef(onKin)
+  tellKin.current = onKin
+  useEffect(() => () => tellKin.current?.(null), [])
   const [cardKey, setCardKey] = useState('blend')
   // The mode each tab had last, so going back to Cross finds Attack where it was left.
   const [lastMode, setLastMode] = useState<Record<DesignTab, string>>({ cross: 'blend', fuse: 'texture', loop: 'loop', stack: 'stack' })
@@ -583,6 +590,10 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     else cards.current.delete(result.artifact_id)
                   }}
                   key={take.key}
+                  onBlur={() => onKin?.(null)}
+                  onFocus={() => onKin?.(result)}
+                  onPointerEnter={() => onKin?.(result)}
+                  onPointerLeave={() => onKin?.(null)}
                   role="listitem"
                   style={{
                     display: 'flex',
@@ -596,6 +607,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     transition: 'border-color 160ms, background-color 160ms, box-shadow 160ms'
                   }}
                 >
+                  {/* Its lineage along its top edge: the families it came from, each as wide as its share. */}
+                  {lineage && <LineageBar shares={lineage(result)} />}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     {/* Two lines of the recipe, all of it on hover; a modulate result names its stages in full below. */}
                     <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...(stages.length ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }) }} title={result.recipe}>

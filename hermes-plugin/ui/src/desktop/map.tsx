@@ -294,6 +294,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           }}
           tiles={tiles}
           trail={hover}
+          kin={palette.kin}
           arrangement={layout}
           onArrangement={id => {
             ctx.storage.set(LAYOUT, id)
@@ -316,6 +317,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           <MakePanel
             colorOf={palette.colorOf}
             lineage={result => palette.lineage(result.sources, result.at)}
+            onKin={result => palette.showKin(result ? result.sources : null)}
             dock={dock}
             kept={palette.kept}
             onClose={palette.closeMake}
@@ -352,6 +354,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           )}
           landing={dock}
           lineage={palette.madeLineage}
+          onKin={palette.showKinOf}
           make={palette.makeFromPalette}
           onDo={action => store.paletteDo(action)}
           onOpen={open => {
