@@ -64,6 +64,10 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 
 *Hermes Desktop with Kumi's pane in a real Renoise session: the chat ("now do that with literally every effect", Hermes's steps and Kumi's changes) beside the pane, showing the project at 109 BPM, FOCUS on the playing pattern, a sample scan running (95,633 of 160,889), and HISTORY at change 207 with Undo on the newest.*
 
+![A real Ableton Live session: the set Hermes built from a video tutorial in an empty Live set (seven tracks, two returns, their clips and an 808 Core Kit), beside Kumi's sound map of 29,176 of the producer's own samples, Make playing a 2-bar loop in 7/4 at 90 BPM made from them, and a palette of sounds made in Kumi.](../docs/assets/hermes/screenshots/catalog-5-live-set.png)
+
+*A real Ableton Live session: the set Hermes built from a video tutorial in an empty Live set (seven tracks, two returns, their clips and an 808 Core Kit), beside Kumi's sound map of 29,176 of the producer's own samples, Make playing a 2-bar loop in 7/4 at 90 BPM made from them, and a palette of sounds made in Kumi.*
+
 ![The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.](../docs/assets/hermes/screenshots/catalog-7-palette.png)
 
 *The palette: a box of 18 snares picked in white, with their actions beside them (Add to palette, Make…, More like these), the palette's 15 hats ringed in the accent, and the palette drawer below, each sound with its waveform in its family's colour.*
@@ -75,6 +79,10 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 Screenshots:
 - The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
   1.24.79 runtime, and real Renoise, in a project that started empty.
+- The Live set is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes,
+  and Ableton Live 12 Beta, in a set that started empty. Asked "watch this tutorial (a YouTube link) and recreate it in
+  the empty live project", Hermes read the tutorial's transcript (its video player wouldn't load) and built the tracks,
+  routing, devices and clips. The sound map holds 29,176 of the producer's own samples.
 - The map, palette and Make shots are Kumi 1.24.79 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
   samples are generated test data, and the made sounds come from Kumi's sound-design engine.
 - In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
