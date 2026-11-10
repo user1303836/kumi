@@ -152,6 +152,49 @@ class Files(StateTest):
         self.assertIsNone(snapshots.sound(self.state, "s-r6-0091"))
 
 
+class MapReads(StateTest):
+    def setUp(self) -> None:
+        super().setUp()
+        snapshots._MAP_PARSED = None
+        self.path = self.state / "map" / "r7.json"
+        self.whole = json.loads(self.path.read_text(encoding="utf-8"))
+
+    def _class(self) -> str | None:
+        current = snapshots.map_revision(self.state)
+        return None if current is None else current["sounds"]["s-r7-0091"]["class"]
+
+    def test_a_map_revision_read_again_is_not_parsed_again(self) -> None:
+        with mock.patch.object(snapshots, "_load", wraps=snapshots._load) as load:
+            first = snapshots.map_revision(self.state)
+            again = snapshots.map_revision(self.state)
+            sound = snapshots.sound(self.state, "s-r7-0091")
+        self.assertIs(again, first)
+        self.assertEqual(sound["class"], "snare")
+        self.assertEqual(load.call_count, 1, "a big library's map takes seconds to parse")
+
+    def test_a_replaced_map_file_is_read_anew_and_one_cut_short_or_too_big_is_never_kept(self) -> None:
+        self.assertEqual(self._class(), "snare")
+        # Replaced by atomic rename, as the runtime writes: the new file is what's read.
+        self.whole["sounds"]["s-r7-0091"]["class"] = "clap"
+        replacement = self.path.with_name("r7.json.tmp")
+        replacement.write_text(json.dumps(self.whole), encoding="utf-8")
+        os.replace(replacement, self.path)
+        self.assertEqual(self._class(), "clap")
+        # Cut short, it reads as missing, and once whole again it's read: nothing half-written was kept.
+        text = json.dumps(self.whole)
+        self.path.write_text(text[: len(text) // 2], encoding="utf-8")
+        self.assertIsNone(self._class())
+        self.whole["sounds"]["s-r7-0091"]["class"] = "snare"
+        self.path.write_text(json.dumps(self.whole), encoding="utf-8")
+        self.assertEqual(self._class(), "snare")
+        # Over the cap, it reads as missing too, and isn't kept.
+        self.whole["sounds"]["s-r7-0091"]["class"] = "kick"
+        self.path.write_text(json.dumps(self.whole), encoding="utf-8")
+        with mock.patch.object(snapshots, "SNAPSHOT_MAX_BYTES", 64):
+            self.assertIsNone(self._class())
+        self.assertEqual(self._class(), "kick")
+
+
 class Media(StateTest):
     def _add_artifact(self, artifact_id: str, path: Path) -> None:
         artifacts = json.loads((self.state / "artifacts.json").read_text(encoding="utf-8"))
