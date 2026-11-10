@@ -24,8 +24,10 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, Mutex};
 
-/// The Python snapshot reader refuses larger files, including the snapshot envelope.
-const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+/// The Python snapshot reader (hermes-plugin/snapshots.py, SNAPSHOT_MAX_BYTES) refuses larger files, including the
+/// snapshot envelope: keep the two in step. A sound costs about 460 bytes (its point and its catalog entry with the
+/// file's path), so this holds about 290,000 sounds; a 160,000-sound library's map is about 71 MiB.
+const MAX_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
 /// The most sounds one near search starts from.
 const MOST_NEAR: usize = 16;
 
@@ -359,7 +361,11 @@ impl MapStore {
                     kind: entry.kind,
                     class: entry.r#class,
                     folder: index.place(row).to_owned(),
-                    duration: entry.seconds.filter(|seconds| seconds.is_finite() && *seconds >= 0.0),
+                    // To the millisecond: the full f64 of a decoded length costs a big library megabytes.
+                    duration: entry
+                        .seconds
+                        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                        .map(|seconds| (seconds * 1e3).round() / 1e3),
                     bpm: entry.bpm,
                     key: entry.key.clone(),
                     note: entry.note.clone(),
@@ -380,14 +386,14 @@ impl MapStore {
             .filter(|sound| ids.contains_key(&sound.path) && (0.0..=1.0).contains(&sound.x) && (0.0..=1.0).contains(&sound.y))
             .collect();
         let layer = tokio::task::spawn_blocking(move || crate::map::sounds_layer(layer_sounds)).await.map_err(failed)?;
-        // `[id, x, y, group, x₁, y₁, …]`: after the similarity place and the group, each arrangement's place in
-        // `arrangements`' order, to 4 decimals.
+        // `[id, x, y, group, x₁, y₁, …]`: the similarity place to 5 decimals, the group, then each arrangement's place
+        // in `arrangements`' order, to 4 decimals.
         let points: Vec<_> = layer
             .points
             .iter()
             .map(|point| {
                 let mut row = Vec::with_capacity(4 + 2 * point.arranged.len());
-                row.extend([json!(ids[&point.path]), json!(point.x), json!(point.y), json!(point.group)]);
+                row.extend([json!(ids[&point.path]), json!(fine(point.x)), json!(fine(point.y)), json!(point.group)]);
                 row.extend(point.arranged.iter().flatten().map(|v| json!(decimals(*v))));
                 Value::Array(row)
             })
@@ -422,7 +428,7 @@ impl MapStore {
             if error.kind() == std::io::ErrorKind::InvalidData {
                 OpError::Refused {
                     code: "map_too_large",
-                    reason: "This sound map is too large for Kumi to read (over 64 MiB): scan fewer or smaller folders. Your previous map stays.".into(),
+                    reason: "This sound map is too large for Kumi to read (over 128 MiB): scan fewer or smaller folders. Your previous map stays while Kumi runs.".into(),
                     owner: None,
                 }
             } else {
@@ -598,6 +604,12 @@ impl MapStore {
 /// A place as the snapshot writes it: 4 decimals, not an f32's widened tail.
 fn decimals(value: f32) -> f64 {
     (value as f64 * 1e4).round() / 1e4
+}
+
+/// The similarity place as the snapshot writes it: 5 decimals, a hundred-thousandth of the map's side and one decimal
+/// finer than an arrangement's place, not an f32's widened tail (about 18 characters each).
+fn fine(value: f32) -> f64 {
+    (value as f64 * 1e5).round() / 1e5
 }
 
 fn prune(pointer: &Path, current: &str, previous: Option<&str>) {
@@ -786,7 +798,7 @@ mod tests {
                     vector: number.map(|number| pack_vector(&[number; VECTOR_LENGTH])),
                     kind: Some(kind),
                     class: Some(class),
-                    seconds: number.map(|_| 1.25),
+                    seconds: number.map(|_| if at == 2 { 1.2496 } else { 1.25 }),
                     bpm: [Some(120.0), Some(60.0), Some(240.0), None][at],
                     key: [Some("A minor"), Some("C major"), None, None][at].map(str::to_owned),
                     note: (at == 2).then(|| "A3".into()),
@@ -936,6 +948,19 @@ mod tests {
         }
         let again = fixture.snapshot(&fixture.publish().await);
         assert_eq!(places(&again), before, "the same library, the same places");
+        // The similarity place is the layout's to 5 decimals, never an f32's widened tail (0.9 is 0.8999999761581421
+        // as an f32), and a length is to the millisecond: a big library's map stays within what Kumi reads.
+        let similarity: BTreeMap<_, _> = first["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|point| (first["sounds"][point[0].as_str().unwrap()]["name"].as_str().unwrap(), (point[1].clone(), point[2].clone())))
+            .collect();
+        assert_eq!(similarity["Kick close"], (json!(0.9), json!(0.5)));
+        assert_eq!(similarity["Pad far"], (json!(0.01), json!(0.5)));
+        let duration =
+            |name: &str| first["sounds"].as_object().unwrap().values().find(|sound| sound["name"] == name).unwrap()["duration"].clone();
+        assert_eq!(duration("Pad far"), json!(1.25), "1.2496 s is written to the millisecond");
     }
 
     /// The fixture and three more measured sounds: two near the kick seed's features, one near the far pad's.
@@ -1313,7 +1338,7 @@ mod tests {
             ids: current.ids.clone(),
             search: current.search.clone(),
         };
-        // A small bound exercises exactly the production publication path without allocating 64 MiB per test.
+        // A small bound exercises exactly the production publication path without allocating 128 MiB per test.
         let result = fixture
             .ctx
             .maps()
