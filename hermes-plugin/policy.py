@@ -234,9 +234,9 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 
 
 # A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
-# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A device's
-# names its spec (CC-22), and a preset's its file's digest (CC-26's 26-w3): they outlive the chat, so even a clean
-# chat's "Always" covers only that one.
+# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A script's
+# names its code and a device's its spec (CC-19, CC-22), in every chat (the catalog's review), and a preset's its file's
+# digest (CC-26's 26-w3): they outlive the chat, so "Always" covers only that one, and any other is asked.
 ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:", "kumi:wavetable:")
 
 
@@ -1092,10 +1092,11 @@ _SCRIPT_FORMS = ((200, 12, 100, "path", "long"), (120, 6, 80, "path", "long"), (
 
 def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     """CC-19: a script runs in a chat with the producer in it, by the same rules as a device, and is always asked, with
-    its code. While the chat has read nothing from outside, it's asked under `kumi:script` (this chat's, so "Allow this
-    session" covers its next scripts); once it has read outside content, under the code's SHA-256, with why, and never
-    while nobody reviews it (YOLO or approvals off). The runtime checks the code first (the size cap, hidden
-    characters, the denylist), so refused code never reaches the producer."""
+    its code, under the code's SHA-256 in every chat (the catalog's review): "Allow this session" covers only that same
+    code in this chat, "Always" only that same code in any chat, and any other script is asked. Once the chat has read
+    outside content, the approval says why, and it's never asked while nobody reviews it (YOLO or approvals off). The
+    runtime checks the code first (the size cap, hidden characters, the denylist), so refused code never reaches the
+    producer."""
     language, code, purpose = args.get("language"), args.get("code"), args.get("purpose")
     if language not in scripts.LANGUAGE_NAMES or not isinstance(code, str) or not isinstance(purpose, str):
         return block("Kumi didn't run the script: it needs a language (python or lua), its purpose and its code."), {}
@@ -1139,11 +1140,10 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     facts = {"daw": daw, "language": language, "purpose": purpose, "why": why if tainted else "", "digest": digest,
              "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
              "deadline": f"{deadline:g}"}
-    message = _script_message(code, facts, surface, chat_line=not tainted)
+    message = _script_message(code, facts, surface)
     if message is None:
         return block(SCRIPT_TOO_LONG), {}
-    decision = {"action": "approve", "message": message,
-                "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:script:{digest}"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": language, "daw": daw,
                                "purpose": one_line(purpose, 200), "warning": scripts.WARNING, "sha256": digest,
@@ -1152,9 +1152,9 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     return decision, {}
 
 
-def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) -> str | None:
-    """The script's approval in the richest form that shows whole on `surface` (with the chat line Kumi's chat
-    scoping adds for a clean chat), or None when even the smallest doesn't."""
+def _script_message(code: str, facts: dict, surface: str) -> str | None:
+    """The script's approval in the richest form that shows whole on `surface`, or None when even the smallest
+    doesn't."""
     code_lines = code[:-1].split("\n") if code.endswith("\n") else code.split("\n")
     for purpose_limit, head, width, where, facts_form in _SCRIPT_FORMS:
         lines = [f"Kumi: run Hermes's {scripts.LANGUAGE_NAMES[facts['language']]} script in {facts['daw']}",
@@ -1174,7 +1174,7 @@ def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) ->
         elif where == "name":
             lines.append(f"Code: scripts/{facts['digest'][:12]}… in Kumi's data")
         message = "\n".join(lines)
-        if shows_whole(f"{message}\n{CHAT_ONLY}" if chat_line else message, surface):
+        if shows_whole(message, surface):
             return message
     return None
 

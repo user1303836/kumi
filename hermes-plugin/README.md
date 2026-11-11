@@ -310,15 +310,13 @@ project as…** with **Copy all media into project directory**), or they'll miss
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
     asks under its own kind. With Mirelo, an upload's covers its one file in this chat, and a paid generation's only
     its own estimate, once. A preset's covers its one file: each new preset is asked (with `ask_before_changes` on).
-  - **Scripts and devices:** each is asked, with its code (a device, its controls too), in every chat. In a chat that
-    hasn't read outside content, allowing a script for the session covers that chat's next scripts. Once a chat has
-    read outside content (web pages, transcripts, files Hermes fetched from the internet or read with its own file
-    tools, another plugin's results, or any terminal command or code run), each script is asked by its code: an
-    earlier allow no longer matches, and "Always" lets only that same code run again without asking, in any chat.
-    Installed skills and the names in your library and projects don't count. A device's approval names that device
-    only, so "Always" lets only that same device be built again without asking, in any chat. A messaging chat runs
-    none unless `scripts_in_messaging` is on; scheduled jobs, webhooks and Hermes's API
-    server never run one.
+  - **Scripts and devices:** each is asked, with its code (a device, its controls too), in every chat, and by its
+    code: allowing it for the session covers only that same code in this chat, and "Always" lets only that same code
+    run again without asking, in any chat. Any other script or device is asked. In a chat that has read outside content
+    (web pages, transcripts, files Hermes fetched from the internet or read with its own file tools, another plugin's
+    results, or any terminal command or code run), the approval says so; installed skills and the names in your
+    library and projects don't count. A messaging chat runs none unless `scripts_in_messaging` is on; scheduled jobs,
+    webhooks and Hermes's API server never run one.
   - **"Always"** leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that Kumi never edits; to
     remove it, delete the `plugin_rule:kumi:` entries there.
   - **When Hermes's approvals are off** (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs all of these

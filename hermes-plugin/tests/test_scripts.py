@@ -46,18 +46,24 @@ class Scripts(unittest.TestCase):
         policy.post_tool_call(self.host, tool_name=tool, tool_call_id="x1", args=args or {}, result="{}",
                               status="ok", session_id=session)
 
-    def test_a_clean_chat_asks_for_this_chat_and_after_web_content_asks_by_the_code_and_says_why(self):
+    def test_every_script_is_asked_by_its_code_and_after_web_content_says_why(self):
         self.start()
+        digest = scripts.sha256(CODE)
         clean = self.hook(script())
-        self.assertEqual((clean["action"], clean["rule_key"]), ("approve", "kumi:script:s1"))
+        self.assertEqual((clean["action"], clean["rule_key"]), ("approve", f"kumi:script:{digest}"),
+                         "keyed by its code even in a clean chat, so an allow covers only this code")
         self.assertIn(scripts.WARNING, clean["message"])
         self.assertIn('Hermes says: "Read the tempo"', clean["message"])
         self.assertIn("stopped after 10 s", clean["message"], "r9: the deadline is named before anyone approves")
+        self.assertNotIn(policy.CHAT_ONLY, clean["message"], "its key isn't this chat's")
+        meter = CODE + "result = song.signature_numerator\n"
+        other = self.hook(script(meter, "Read the meter"))
+        self.assertEqual(other["rule_key"], f"kumi:script:{scripts.sha256(meter)}",
+                         "a different script in the same chat is asked again: the first one's allow doesn't match")
+        self.assertEqual(self.hook(script())["rule_key"], clean["rule_key"], "the same code matches its allow")
         self.finished("web_extract", {"urls": ["https://example.com/tutorial"]})
         tainted = self.hook(script())
-        digest = scripts.sha256(CODE)
-        self.assertEqual(tainted["rule_key"], f"kumi:script:{digest}",
-                         "an earlier 'Allow this session' (kumi:script:s1) no longer matches")
+        self.assertEqual(tainted["rule_key"], f"kumi:script:{digest}")
         self.assertIn("This chat read outside content (web_extract), so each script is asked.", tainted["message"])
 
     def test_outside_content_taints_a_chat_and_local_tools_leave_it_clean(self):

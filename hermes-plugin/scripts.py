@@ -1,7 +1,7 @@
 """CC-19: scripts in the DAW (Live's Python, REAPER's and Renoise's Lua), trusted by the chat's provenance.
 
 A script is code with the DAW's access to the computer, so the approval is the boundary: every script is asked, with its
-code. What the approval covers depends on what the chat has read:
+code, under its code's SHA-256 in every chat (the catalog's review). What the chat has read decides the rest:
 - A chat is **clean** from its first turn until untrusted outside content enters it (19a, r2): any tool result that
   isn't Kumi's own or one of Hermes's local file-writing, to-do, question and skill tools. That includes the web, the
   browser, video, MCP, delegated subagents, memory, past sessions, every other plugin's output, Hermes's terminal and
@@ -13,11 +13,12 @@ code. What the approval covers depends on what the chat has read:
   Hermes can't name.
 - A **delegated subagent** never runs a script: its task is the model's words, not the producer's.
 
-Each script's approval asks under `kumi:script` while the chat is clean, which Kumi's chat scoping makes
-`kumi:script:<session id>`, so "Allow this session" covers the chat's next scripts. Once the chat is tainted, it asks
-under `kumi:script:<sha256 of the code>`: an earlier session allow no longer matches, and "Always" re-matches only the
-same code. Under Hermes's YOLO or `approvals.mode: off`, a clean chat's scripts run, as the owner uses Kumi, and a
-tainted chat's are refused, since nobody reviews them.
+Each script's approval asks under `kumi:script:<sha256 of the code>`, whatever the chat has read, as a device's asks
+under its spec's: "Allow this session" covers only that same code in this chat, "Always" only that same code in any
+chat (Hermes keeps it in its allowlist), and any other script is asked. What the chat has read decides the approval's
+line saying why each script is asked, the refusal under Hermes's YOLO or `approvals.mode: off` (a clean chat's scripts
+run there, as the owner uses Kumi, and a tainted chat's are refused, since nobody reviews them), and that a messaging
+chat counts as tainted.
 
 The code is saved before anyone is asked, to `<plugin data>/state/scripts/<sha256>.py|.lua` (0600, never
 overwritten), where the approval names it and Desktop's pane reads it (agent-i's route re-hashes it). A Max for Live

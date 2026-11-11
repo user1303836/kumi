@@ -295,13 +295,11 @@ When no change Kumi knows fits, Hermes can write code for it.
   Kumi loads it at the end of the track's chain, and can undo that. Moving it from there is a third
   change, which only Live's own Undo takes back. The file stays in your User Library after an undo.
 - **Asked every time, with its code:** each script and device, in every chat, whatever Ask before each change says.
-  In a chat that hasn't read outside content, allowing a script for the session covers that chat's next scripts.
-  Outside content is web pages, transcripts, files Hermes fetched from the internet or read with its own file tools,
-  another plugin's results, or any terminal command or code run; installed skills and the names in your library and
-  projects don't count. Once a chat has read any, each script is asked by its code: an earlier allow no longer
-  matches, and "Always" lets only that same code run again without asking, in any chat. A device's approval names
-  that device only, so "Always" lets only that same device be built again without asking, in any chat. In such a
-  chat, none runs while Hermes's approvals are off.
+  Each is asked by its code: allowing it for the session covers only that same code in this chat, and "Always" lets
+  only that same code run again without asking, in any chat; any other script or device is asked. In a chat that has
+  read outside content (web pages, transcripts, files Hermes fetched from the internet or read with its own file
+  tools, another plugin's results, or any terminal command or code run; installed skills and the names in your
+  library and projects don't count), the approval says so, and none runs while Hermes's approvals are off.
 - **Refused before anyone is asked:** a script, or a device's code, over 400 lines or 32 KB; a script with a hidden or
   direction-changing character, or one that runs processes or reaches the network (`os.execute`, `io.popen`,
   `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`). That check is a safeguard, not a sandbox.
@@ -357,7 +355,8 @@ before each change: off); scripts, devices, setup steps, sample folders and Mire
 
 Allowing a Kumi call for the session or always covers that kind of call in this chat only, including a one-shot run
 that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
-refused. A script or device asked by its code is the exception: "Always" lets that exact code run again, in any chat.
+refused. Scripts and devices are the exception: each is allowed by its code, so "Always" lets that exact code run
+again, in any chat.
 Scheduled jobs and webhooks never change anything. A new one-shot `hermes chat -q` run can: Kumi can't tell
 it from a chat, since Hermes runs its tools in its gateway, so by default it makes the changes it asks for, as a chat
 does. With Ask before each change on, Hermes refuses them there, since nobody can answer; it refuses scripts, devices,

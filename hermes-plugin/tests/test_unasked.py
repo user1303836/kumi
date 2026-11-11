@@ -112,8 +112,8 @@ class ByDefault(unittest.TestCase):
         digest = support.module("scripts").sha256(test_scripts.CODE)
         terminal = self.hook("kumi_script", test_scripts.script(), "s-0")
         self.assertIsNotNone(terminal, "a script is never run unasked (the catalog's review)")
-        self.assertEqual((terminal["action"], terminal["rule_key"]), ("approve", "kumi:script:s1"),
-                         "allowing it for the session covers this chat's next scripts, never another chat's")
+        self.assertEqual((terminal["action"], terminal["rule_key"]), ("approve", f"kumi:script:{digest}"),
+                         "by its code, so an allow covers that same code only")
         self.assertIn(f"SHA-256 {digest[:16]}", terminal["message"], "asked with its code's hash")
         self.assertIn("Full code: ", terminal["message"], "and its file, where the terminal's panel has no room")
         self.ctx.surface = "desktop"
