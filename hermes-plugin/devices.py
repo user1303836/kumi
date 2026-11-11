@@ -143,7 +143,8 @@ def next_step(built: dict) -> str:
     step = ("The device is in the User Library, not yet in the Set. To use it, first kumi_observe for the track's ref "
             "and the project key and epoch, then call kumi_change with only a load_device step "
             f"{{\"itemId\": {json.dumps(built.get('item'), ensure_ascii=False)}, \"trackRef\": …}}: it goes at the end "
-            "of the chain, the producer approves it on its own, and Kumi can undo it. Only if it belongs elsewhere "
+            "of the chain, as a change of its own (asked first with Ask before each change on), and Kumi can undo it. "
+            "Only if it belongs elsewhere "
             "(\"before the Saturator\"), observe again and move it with a second kumi_change holding move_device alone: "
             "Kumi can't undo a move on Live, only Live's own Undo can. The file stays in the User Library after an undo.")
     if built.get("listed") is False:

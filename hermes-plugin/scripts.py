@@ -1,23 +1,24 @@
 """CC-19: scripts in the DAW (Live's Python, REAPER's and Renoise's Lua), trusted by the chat's provenance.
 
-A script is code with the DAW's access to the computer, so the approval is the boundary. What it takes depends on what
-the chat has read:
+A script is code with the DAW's access to the computer, so the approval is the boundary: every script is asked, with its
+code, under its code's SHA-256 in every chat (the catalog's review). What the chat has read decides the rest:
 - A chat is **clean** from its first turn until untrusted outside content enters it (19a, r2): any tool result that
-  isn't Kumi's own or one of Hermes's local file, to-do, question and skill tools. That includes the web, the browser,
-  video, MCP, delegated subagents, memory, past sessions, every other plugin's output, and Hermes's terminal and code
-  tools, which can fetch anything (its youtube-content skill gets transcripts through the terminal): fail closed
-  (rgzm's answer to the lead's open question).
+  isn't Kumi's own or one of Hermes's local file-writing, to-do, question and skill tools. That includes the web, the
+  browser, video, MCP, delegated subagents, memory, past sessions, every other plugin's output, Hermes's terminal and
+  code tools, which can fetch anything (its youtube-content skill gets transcripts through the terminal), and the files
+  Hermes reads, which may have been downloaded: fail closed (rgzm's answer to the lead's open question).
 - Once **tainted**, a chat stays tainted (19c). The record is kept in the plugin's data (r1), so a restart doesn't
   clean a chat. A chat Kumi first sees after its first turn (resumed after a restart or an upgrade, or after
   compaction) has no record and counts as tainted. So does a messaging chat (Discord, Slack, Telegram…), and a surface
   Hermes can't name.
 - A **delegated subagent** never runs a script: its task is the model's words, not the producer's.
 
-Each script's approval asks under `kumi:script` while the chat is clean, which Kumi's chat scoping makes
-`kumi:script:<session id>`, so "Allow this session" covers the chat's next scripts. Once the chat is tainted, it asks
-under `kumi:script:<sha256 of the code>`: an earlier session allow no longer matches, and "Always" re-matches only the
-same code. Under Hermes's YOLO or `approvals.mode: off`, a clean chat's scripts run, as the owner uses Kumi, and a
-tainted chat's are refused, since nobody reviews them.
+Each script's approval asks under `kumi:script:<sha256 of the code>`, whatever the chat has read, as a device's asks
+under its spec's: "Allow this session" covers only that same code in this chat, "Always" only that same code in any
+chat (Hermes keeps it in its allowlist), and any other script is asked. What the chat has read decides the approval's
+line saying why each script is asked, the refusal under Hermes's YOLO or `approvals.mode: off` (a clean chat's scripts
+run there, as the owner uses Kumi, and a tainted chat's are refused, since nobody reviews them), and that a messaging
+chat counts as tainted.
 
 The code is saved before anyone is asked, to `<plugin data>/state/scripts/<sha256>.py|.lua` (0600, never
 overwritten), where the approval names it and Desktop's pane reads it (agent-i's route re-hashes it). A Max for Live
@@ -49,11 +50,11 @@ DAW_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
 # 19e, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it this way.
 WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the DAW's own Undo may."
 
-# Hermes's tools whose results bring nothing from outside this computer (r2): its local file tools, its to-do list,
+# Hermes's tools whose results bring nothing from outside this computer (r2): its tools that write files, its to-do list,
 # the producer's own answers (`clarify`) and the skills installed here (Kumi's included). Every other tool taints, its
-# terminal and code tools and a new tool included, until it's listed here.
-LOCAL_TOOLS = frozenset({"read_file", "write_file", "patch", "search_files", "todo_list", "clarify", "skills_list",
-                         "skill_view", "skill_manage"})
+# terminal and code tools, the files it reads (`read_file`, `search_files`: a file may have been downloaded) and a new
+# tool included, until it's listed here.
+LOCAL_TOOLS = frozenset({"write_file", "patch", "todo_list", "clarify", "skills_list", "skill_view", "skill_manage"})
 # Hermes's chat surfaces where the producer is at this computer: the terminal, Desktop, and an editor (ACP). Anything
 # else (a messaging app, or a surface Hermes can't name) is a messaging chat here: tainted, and refused unless
 # `scripts_in_messaging` is on.
@@ -70,17 +71,18 @@ TRUST_FILE = "script-trust.json"
 CODE_FOLDER = ("state", "scripts")
 
 
-def asked_because(why: str, what: str = "script") -> str:
-    """The approval's line saying why every script (or device, CC-22) in this chat is asked (r5)."""
+def asked_because(why: str) -> str:
+    """The approval's line saying that this chat read outside content, or counts as if it had (r5): there, a script or
+    a device never runs while Hermes's approvals are off."""
     if why == MESSAGING:
-        return f"This is a messaging chat, so each {what} is asked."
+        return "This is a messaging chat."
     if why in (NO_RECORD, UNNAMED):
-        return f"{why}, so each {what} is asked."
-    return f"This chat read outside content ({why}), so each {what} is asked."
+        return f"{why}, so it counts as having read outside content."
+    return f"This chat read outside content ({why})."
 
 
 def refused_because(why: str) -> str:
-    """Why a chat's scripts are asked each time, inside a refusal's parentheses."""
+    """Why a chat counts as having read outside content, inside a refusal's parentheses."""
     return why if why in (MESSAGING, NO_RECORD, UNNAMED) else f"it read outside content: {why}"
 
 

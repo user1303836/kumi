@@ -114,9 +114,10 @@ KUMI_PLUGIN_KNOWLEDGE = _tool(
 KUMI_CHANGE = _tool(
     "kumi_change",
     "Change the open project with a bounded, typed plan of up to 20 steps, each one of the DAW's own change steps "
-    "(look one up with kumi_read action schema), as one entry in Kumi's HISTORY. The producer approves the exact change "
-    "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read, or the ones a done "
-    "kumi_change returned (its project_key and epoch serve the next change in the same turn): a changed project is "
+    "(look one up with kumi_read action schema), as one entry in Kumi's HISTORY. With Ask before each change on, the "
+    "producer approves the exact change first (kumi_status says which). Pass the project key and epoch from your "
+    "latest kumi_observe or kumi_read, or the ones a done kumi_change returned (its project_key and epoch serve the "
+    "next change in the same turn): a changed project is "
     "refused, not guessed. A file goes in through the DAW's own file step (Live replace_sample or import_audio, REAPER "
     "item_import, Renoise sample_load), whose file field holds a source: {sound_id, map_revision}, {artifact_id} or "
     "{file, provenance}, never a path. "
@@ -135,8 +136,8 @@ KUMI_CHANGE = _tool(
 
 KUMI_UNDO = _tool(
     "kumi_undo",
-    "Undo a change Kumi made; the producer approves it first. With no history_id: this chat's newest change, whole "
-    "(every step it made, newest first, under one approval): what \"undo that\" means. With a history_id from "
+    "Undo a change Kumi made, asked first with Ask before each change on. With no history_id: this chat's newest "
+    "change, whole (every step it made, newest first, in one undo): what \"undo that\" means. With a history_id from "
     "kumi_history or a kumi_change result: that one row, or with whole_change: true the whole change it belongs to. "
     "Returns undone, partly_undone, kept (the producer changed it since, so it was left), unsure, expired or refused, "
     "with each row's state for a whole change; it stops at the first step it can't undo. A change made before Kumi's "
@@ -178,7 +179,8 @@ _LISTEN_SOURCE = {
     "description": _SOURCE["description"] + (
         f" Or, in {_TRACK_WHERE}, a track of the open project, or its mix, over a beat window: "
         "{\"track\": {\"ref\": \"<track ref from kumi_observe>\"} or {\"mix\": true}, \"from_beat\", \"beats\"}. "
-        "That plays the window in the DAW (60 s at most, only while it's stopped), so the producer approves it."
+        "That plays the window in the DAW (60 s at most, only while it's stopped), asked first with Ask before each "
+        "change on."
         if TRACK_LISTEN_DAWS else ""),
     "properties": {**_SOURCE["properties"], **({
         "track": {"type": "object", "description": "{\"ref\": \"…\"} for one track, {\"mix\": true} for the mix.",
@@ -199,7 +201,8 @@ _BASE_LISTEN = _tool(
     + ": loudness (LUFS), loudness range, true peak, spectral balance and centroid, tempo and key, and, with "
     "compare_to, the differences from a file. Returns the measurements and the audio as MEDIA:. Nothing is heard: "
     "these are measurements, so report them as such. A file only reads"
-    + ("; a track or the mix plays that window in the DAW while it's stopped, and the producer approves it first. "
+    + ("; a track or the mix plays that window in the DAW while it's stopped, asked first with Ask before each "
+       "change on. "
        "For a track or the mix, pass the project key and epoch kumi_observe gave, and refs from it."
        if TRACK_LISTEN_DAWS else ". This version of Kumi can't listen to a track or the mix in the DAW: to measure "
        "part of the project, ask the producer to bounce it to a file."),
@@ -312,7 +315,7 @@ KUMI_JOB = _tool(
 
 KUMI_TRANSPORT = _tool(
     "kumi_transport",
-    "Start or stop playback in the producer's DAW. play asks the producer first (once, or for this chat): it plays "
+    "Start or stop playback in the producer's DAW. play is asked first with Ask before each change on: it plays "
     "from where the playhead is; in REAPER from a bar (from_bar) or beat (from_beat); in Renoise from a sequence slot "
     "and line (from_slot, from_line); in Live by launching a Session clip (clip_ref) or scene (scene_index), since "
     "Live plays the Arrangement from its own start marker. stop stops playback, and the clips playing; it's never "
@@ -363,15 +366,15 @@ KUMI_SCRIPT = _tool(
     "Run a script in the DAW, for what no typed step can do: Python in Live, Lua in REAPER and Renoise. Prefer "
     "kumi_change's typed steps whenever one fits (skill kumi:daw, Scripts). A script runs with the DAW's access to the "
     "computer, and Kumi can't undo it (the DAW's own Undo may). The producer approves it first, reading its purpose and "
-    "code; in a chat that has read outside content (web pages, transcripts, other tools' results), every script is "
-    "asked and none runs while Hermes's approvals are off. At most 400 lines and 32 KB, with no hidden characters; "
+    "code: every script is asked, and in a chat that has read outside content (web pages, transcripts, other tools' "
+    "results) none runs while Hermes's approvals are off. At most 400 lines and 32 KB, with no hidden characters; "
     "code that runs processes or reaches the network (os.execute, io.popen, subprocess, os.system, socket, urllib, "
     "ctypes) is refused. Returns ran or failed with its output, unsure, or refused.",
     {"language": {"type": "string", "enum": ["python", "lua"],
                   "description": "python for Live, lua for REAPER and Renoise."},
      "purpose": {"type": "string", "minLength": 1, "maxLength": 200,
-                 "description": ("What the script does, in a short line the producer reads in HISTORY, and in the "
-                                 "approval when it's asked.")},
+                 "description": ("What the script does, in a short line the producer reads in HISTORY and in the "
+                                 "approval.")},
      "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS},
      "expected_project_key": {"type": "string", "description": "The project key from kumi_observe."}},
     ("language", "purpose", "code", "expected_project_key"))
@@ -384,8 +387,9 @@ KUMI_VARIATIONS = _tool(
     "kumi_variations",
     "Variations of a clip (Live), MIDI item (REAPER) or pattern (Renoise): numbered takes V1, V2… of a source, each "
     "written as its own new clip, item or pattern, never over the source. make draws takes (count, or takes as recipes "
-    "with a short direction each); change rewrites named takes; keep marks takes kept; list shows the set. The producer "
-    "approves make, change and keep after reading every take's line. A take the producer doesn't want is undone with "
+    "with a short direction each); change rewrites named takes; keep marks takes kept; list shows the set. With Ask "
+    "before each change on, the producer approves make, change and keep after reading every take's line. A take the "
+    "producer doesn't want is undone with "
     "kumi_undo and its HISTORY id (\"undo that\" takes a whole make back). Where there's no empty place for every take, "
     "make is refused rather than trimmed.",
     {"action": {"type": "string", "enum": ["make", "change", "keep", "list"]},
@@ -447,7 +451,7 @@ KUMI_DEVICE = _tool(
     {"spec": {"type": "object", "properties": {
         "name": {"type": "string", "minLength": 1, "maxLength": 32, "description": "The device's name in Live."},
         "about": {"type": "string", "minLength": 1, "maxLength": 400,
-                  "description": "What it does, in a sentence or two the producer reads, in the approval when it's asked."},
+                  "description": "What it does, in a sentence or two the producer reads in the approval."},
         "controls": {"type": "array", "maxItems": 16, "items": _DEVICE_CONTROL},
         "code": {"type": "string", "minLength": 1, "maxLength": SCRIPT_CHARACTERS, "description": "GenExpr."}},
         "required": ["name", "about", "controls", "code"], "additionalProperties": False}},
@@ -479,7 +483,8 @@ KUMI_PRESET_BUILD = _tool(
     "as the preset file stores them. Set a loaded instance's other controls by name with "
     "kumi_change once Live has them configured (skill kumi:daw, Plug-ins). Kumi keeps the result as a private copy and "
     "changes nothing in Live or the User Library; it answers each setting before and after, and an artifact_id for "
-    "kumi_preset, which the producer approves. A plug-in that isn't installed, or whose installed version Kumi hasn't "
+    "kumi_preset (asked first with Ask before each change on). A plug-in that isn't installed, or whose installed "
+    "version Kumi hasn't "
     "verified, is refused. Live only for now.",
     {"plugin": {"type": "string", "enum": PRESET_PLUGINS},
      "class": {"type": "string", "pattern": "^[0-9A-Fa-f]{32}$",
@@ -604,9 +609,10 @@ KUMI_DESIGN = _tool(
 KUMI_PRESET = _tool(
     "kumi_preset",
     "Put a plug-in preset that kumi_preset_build made into Live's User Library (Kumi folder) as a new .vstpreset file. "
-    "The producer approves it first, reading the plug-in, its verified version, every setting as the file stores it, "
-    "and the file. The file stays after an undo: Kumi never removes it. Returns the file and its Browser item; "
-    "loading it is a kumi_change of its own (observe first, then load_device with that item), asked again. When the "
+    "With Ask before each change on, the producer approves it first, reading the plug-in, its verified version, every "
+    "setting as the file stores it, and the file. The file stays after an undo: Kumi never removes it. Returns the "
+    "file and its Browser item; loading it is a kumi_change of its own (observe first, then load_device with that "
+    "item). When the "
     "answer says Live hasn't listed the file yet, follow its next step: never load it by path, never place it again. "
     "Live only.",
     {"artifact_id": {"type": "string", "minLength": 1, "description": "kumi_preset_build's artifact_id."}},

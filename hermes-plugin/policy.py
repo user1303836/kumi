@@ -6,9 +6,9 @@ Kumi asks for.
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
 current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. By default
 the changes the producer asks for in the DAW then run without an approval (UNASKED_BY_DEFAULT); the plugin's "Ask
-before each change" asks before each, as these words describe. A folder the producer adds, and a scan of the folders
-the runtime reads, are approved by name; setup's install and adopt in the words of the plan they carry out (C8).
-Anything else of Kumi's is blocked.
+before each change" asks before each, as these words describe. A script or a device is always asked, with its code. A
+folder the producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt
+in the words of the plan they carry out (C8). Anything else of Kumi's is blocked.
 
 Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
 approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
@@ -69,11 +69,11 @@ ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device",
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
 # refusal still refuses, unattended and forked turns still don't write, and setup, sample folders and Mirelo's uploads
-# and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
-UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
-                      "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound",
-                      "kumi_audition", "kumi_groove", "kumi_render", "kumi_form"}
-_ALWAYS_ASKED = "_always_asked"
+# and paid jobs are asked either way. A script or a device is code with the DAW's access to the computer, so it's never
+# in this set: the catalog's review asked that each go through Hermes's approval, with its code (CC-19, CC-22).
+UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_listen", "kumi_transport", "kumi_variations",
+                      "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_groove",
+                      "kumi_render", "kumi_form"}
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build", "kumi_design"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
@@ -187,10 +187,9 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
     compact = decision.pop(_COMPACT, None) if isinstance(decision, dict) else None
-    always = decision.pop(_ALWAYS_ASKED, False) if isinstance(decision, dict) else False
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
-    if decision is not None and decision["action"] == "approve" and asks_first(host, tool, always) is False:
+    if decision is not None and decision["action"] == "approve" and asks_first(host, tool) is False:
         return None, {**extra, "unasked": True}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
         scoped = not decision["rule_key"].startswith(ONE_THING)
@@ -205,11 +204,10 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     return decision, extra
 
 
-def asks_first(host: Any, tool: str, always: bool = False) -> bool:
-    """Whether the producer is asked before `tool`'s call: always outside UNASKED_BY_DEFAULT, or for a call its
-    decision marks always asked (a device in a chat that read outside content); else only with "Ask before each
-    change" on."""
-    return tool not in UNASKED_BY_DEFAULT or always or host.ask_before_changes()
+def asks_first(host: Any, tool: str) -> bool:
+    """Whether the producer is asked before `tool`'s call: always outside UNASKED_BY_DEFAULT (a script or a device
+    among them), else only with "Ask before each change" on."""
+    return tool not in UNASKED_BY_DEFAULT or host.ask_before_changes()
 
 
 def palette_read(tool: str, args: dict) -> bool:
@@ -236,9 +234,9 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 
 
 # A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
-# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A device's
-# names its spec (CC-22), and a preset's its file's digest (CC-26's 26-w3): they outlive the chat, so even a clean
-# chat's "Always" covers only that one.
+# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c). A script's
+# names its code and a device's its spec (CC-19, CC-22), in every chat (the catalog's review), and a preset's its file's
+# digest (CC-26's 26-w3): they outlive the chat, so "Always" covers only that one, and any other is asked.
 ONE_THING = ("kumi:paid:", "kumi:script:", "kumi:device:", "kumi:preset:", "kumi:wavetable:")
 
 
@@ -1078,10 +1076,11 @@ SCRIPT_SUBAGENT = ("Kumi runs scripts only in the producer's own chat, never in 
                    "run.")
 SCRIPT_MESSAGING = ("Kumi doesn't run scripts from a messaging chat unless the producer turns on \"Run scripts from "
                     "messaging chats\" in Kumi's settings, so this didn't run.")
-SCRIPT_UNREVIEWED = ("Kumi asks before each script in this chat ({why}), and Hermes's approvals are off here (YOLO or "
-                     "approvals.mode: off): nobody would review it, so it didn't run. Turn approvals back on to run it.")
-SCRIPT_UNKNOWN_APPROVALS = ("Kumi asks before each script in this chat ({why}), and Kumi can't tell whether Hermes's "
-                            "approvals are on here, so it didn't run.")
+SCRIPT_UNREVIEWED = ("In this chat ({why}), Kumi runs a script only once someone reviews it, and Hermes's approvals are "
+                     "off here (YOLO or approvals.mode: off): nobody would review it, so it didn't run. Turn approvals "
+                     "back on to run it.")
+SCRIPT_UNKNOWN_APPROVALS = ("In this chat ({why}), Kumi runs a script only once someone reviews it, and Kumi can't tell "
+                            "whether Hermes's approvals are on here, so it didn't run.")
 SCRIPT_TOO_LONG = ("Kumi didn't run the script: its approval can't be shown whole here, and Kumi asks only when all of "
                    "it is in view. Ask for it in Hermes Desktop, which shows it whole.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
@@ -1093,11 +1092,12 @@ _SCRIPT_FORMS = ((200, 12, 100, "path", "long"), (120, 6, 80, "path", "long"), (
 
 
 def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
-    """CC-19: a script runs in a chat with the producer in it, by the same rules as a device: unasked by default while
-    the chat has read nothing from outside, else asked under `kumi:script` (this chat's, so "Allow this session" covers
-    its next scripts); once it has read outside content, always asked, under the code's SHA-256, with why, and never
-    while nobody reviews it (YOLO or approvals off). The runtime checks the code first (the size cap, hidden
-    characters, the denylist), so refused code never reaches the producer."""
+    """CC-19: a script runs in a chat with the producer in it, by the same rules as a device, and is always asked, with
+    its code, under the code's SHA-256 in every chat (the catalog's review): "Allow this session" covers only that same
+    code in this chat, "Always" only that same code in any chat, and any other script is asked. Once the chat has read
+    outside content, the approval says why, and it's never asked while nobody reviews it (YOLO or approvals off). The
+    runtime checks the code first (the size cap, hidden characters, the denylist), so refused code never reaches the
+    producer."""
     language, code, purpose = args.get("language"), args.get("code"), args.get("purpose")
     if language not in scripts.LANGUAGE_NAMES or not isinstance(code, str) or not isinstance(purpose, str):
         return block("Kumi didn't run the script: it needs a language (python or lua), its purpose and its code."), {}
@@ -1141,13 +1141,10 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     facts = {"daw": daw, "language": language, "purpose": purpose, "why": why if tainted else "", "digest": digest,
              "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
              "deadline": f"{deadline:g}"}
-    message = _script_message(code, facts, surface, chat_line=not tainted)
-    if message is None and asks_first(host, "kumi_script", tainted):  # unasked, there's no window to fit
+    message = _script_message(code, facts, surface)
+    if message is None:
         return block(SCRIPT_TOO_LONG), {}
-    decision = {"action": "approve", "message": message or "",
-                "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
-    if tainted:
-        decision[_ALWAYS_ASKED] = True  # asked by provenance (CC-19), whatever the setting
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:script:{digest}"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": language, "daw": daw,
                                "purpose": one_line(purpose, 200), "warning": scripts.WARNING, "sha256": digest,
@@ -1156,9 +1153,9 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     return decision, {}
 
 
-def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) -> str | None:
-    """The script's approval in the richest form that shows whole on `surface` (with the chat line Kumi's chat
-    scoping adds for a clean chat), or None when even the smallest doesn't."""
+def _script_message(code: str, facts: dict, surface: str) -> str | None:
+    """The script's approval in the richest form that shows whole on `surface`, or None when even the smallest
+    doesn't."""
     code_lines = code[:-1].split("\n") if code.endswith("\n") else code.split("\n")
     for purpose_limit, head, width, where, facts_form in _SCRIPT_FORMS:
         lines = [f"Kumi: run Hermes's {scripts.LANGUAGE_NAMES[facts['language']]} script in {facts['daw']}",
@@ -1178,7 +1175,7 @@ def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) ->
         elif where == "name":
             lines.append(f"Code: scripts/{facts['digest'][:12]}… in Kumi's data")
         message = "\n".join(lines)
-        if shows_whole(f"{message}\n{CHAT_ONLY}" if chat_line else message, surface):
+        if shows_whole(message, surface):
             return message
     return None
 
@@ -1233,11 +1230,13 @@ DEVICE_SUBAGENT = ("Kumi builds devices only in the producer's own chat, never i
                    "run.")
 DEVICE_MESSAGING = ("Kumi doesn't build devices from a messaging chat unless the producer turns on \"Run scripts from "
                     "messaging chats\" in Kumi's settings, so this didn't run.")
-DEVICE_UNREVIEWED = ("Kumi asks before each device in this chat ({why}), and Hermes's approvals are off here (YOLO or "
-                     "approvals.mode: off): nobody would review it, so it wasn't built. Turn approvals back on to build "
-                     "it.")
-DEVICE_UNKNOWN_APPROVALS = ("Kumi asks before each device in this chat ({why}), and Kumi can't tell whether Hermes's "
-                            "approvals are on here, so it wasn't built.")
+DEVICE_UNREVIEWED = ("In this chat ({why}), Kumi builds a device only once someone reviews it, and Hermes's approvals "
+                     "are off here (YOLO or approvals.mode: off): nobody would review it, so it wasn't built. Turn "
+                     "approvals back on to build it.")
+DEVICE_UNKNOWN_APPROVALS = ("In this chat ({why}), Kumi builds a device only once someone reviews it, and Kumi can't "
+                            "tell whether Hermes's approvals are on here, so it wasn't built.")
+DEVICE_TOO_LONG = ("Kumi didn't build the device: its approval can't be shown whole here, and Kumi asks only when all "
+                   "of it is in view. Ask for it in Hermes Desktop, which shows it whole.")
 DEVICE_ONLY_LIVE = refused(DEVICE, "Kumi builds Max for Live devices only in Ableton Live.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
 # length, how many of the code's first lines and how wide, the controls (None: one line each, with its default; a
@@ -1249,10 +1248,10 @@ _DEVICE_FORMS = ((400, 12, 100, None, "long"), (200, 6, 80, None, "long"), (120,
 
 
 def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
-    """CC-22: a device is built only as the producer approved it, in a chat with the producer in it, by CC-19's
-    provenance rules. Its key is the canonical spec's SHA-256 even in a clean chat, since the device outlives the chat.
-    Serve previews the spec first (pure): one it refuses never reaches the producer, and a preview that hashed other
-    bytes than these is refused."""
+    """CC-22: a device is built only as the producer approved it, with its code, in a chat with the producer in it, by
+    CC-19's provenance rules. Its key is the canonical spec's SHA-256 even in a clean chat, since the device outlives
+    the chat. Serve previews the spec first (pure): one it refuses never reaches the producer, and a preview that hashed
+    other bytes than these is refused."""
     spec = args.get("spec")
     problem = devices.problem(spec)
     if problem is not None:
@@ -1301,11 +1300,9 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     facts = {"about": spec["about"], "why": why if tainted else "", "digest": digest, "lines": lines,
              "bytes": len(spec["code"].encode("utf-8")), "file": file}
     message = _device_message(spec, facts, surface)
-    if message is None and asks_first(host, "kumi_device", tainted):  # unasked, there's no window to fit
-        return block(TOO_LONG), {}
-    decision = {"action": "approve", "message": message or "", "rule_key": f"kumi:device:{digest}"}
-    if tainted:
-        decision[_ALWAYS_ASKED] = True  # asked by provenance, as a script is (CC-19), whatever the setting
+    if message is None:
+        return block(DEVICE_TOO_LONG), {}
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:device:{digest}"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": devices.LANGUAGE,
                                "daw": setup.DAWS.get("ableton", "Live"), "name": answer.get("name"), "file": file,
@@ -1332,7 +1329,7 @@ def _device_message(spec: dict, facts: dict, surface: str) -> str | None:
                  if facts_form == "long" else [f"Kumi: build {facts['file']}"])
         lines += [f"Hermes says: {quoted(facts['about'], about_limit)}", devices.WARNING]
         if facts["why"]:
-            lines.append(scripts.asked_because(one_line(facts["why"], 60), "device"))
+            lines.append(scripts.asked_because(one_line(facts["why"], 60)))
         count = f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''} of GenExpr"
         lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}…" if facts_form == "long"
                      else f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''} · SHA-256 {facts['digest'][:8]}…")
