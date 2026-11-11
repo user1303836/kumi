@@ -66,8 +66,10 @@ class Scripts(unittest.TestCase):
                    ("elevenlabs_music_compose", {"prompt": "pad"}), ("memory", {"action": "read"}),
                    ("session_search", {"query": "last week"}), ("vision_analyze", {"image_url": "https://x/y.png"}),
                    ("terminal", {"command": "ls -la ~/Music"}), ("execute_code", {"code": "print(2 + 2)"}),
+                   ("read_file", {"path": "/Users/me/Downloads/patch-notes.txt"}),
+                   ("search_files", {"pattern": "tempo", "path": "/Users/me/Downloads"}),
                    ("a_tool_hermes_adds_next_year", {})]
-        local = [("read_file", {"path": "/Users/me/notes.txt"}), ("kumi_observe", {"scope": "focus"}),
+        local = [("write_file", {"path": "/Users/me/notes.txt"}), ("kumi_observe", {"scope": "focus"}),
                  ("skill_view", {"name": "kumi:daw"}), ("clarify", {"question": "Which pad?"}),
                  ("todo_list", {"action": "add"})]
         for index, (tool, args) in enumerate(outside):

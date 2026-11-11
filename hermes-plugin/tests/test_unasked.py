@@ -1,7 +1,7 @@
 """Kumi's default, "Ask before each change" off (the owner's decision): the changes the producer asks for in the DAW
 run without an approval, each still previewed and bound to what its preview saw, while setup, sample folders and
-Mirelo's jobs are asked, a script or device in a chat that read outside content is asked, and every refusal and the
-guards for unattended and forked turns hold."""
+Mirelo's jobs are asked, every script and every device is asked with its code (the catalog's review), and every
+refusal and the guards for unattended and forked turns hold."""
 from __future__ import annotations
 
 import os
@@ -87,44 +87,58 @@ class ByDefault(unittest.TestCase):
         self.assertEqual(self.hook("kumi_preset", {"artifact_id": "a-preset-1"}, "p-2"),
                          policy.block(policy.PRESET_TOO_LONG), "asked, it must fit, as before")
 
-    def test_a_device_is_built_unasked_in_a_clean_chat_and_asked_once_the_chat_read_outside_content(self):
+    def test_a_device_is_asked_with_its_code_in_a_clean_chat_as_once_the_chat_read_outside_content(self):
         policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
+        self.assertFalse(self.host.ask_before_changes())
         spec = {"spec": test_device.SPEC}
-        self.assertIsNone(self.hook("kumi_device", spec, "d-1"))
+        digest = support.module("scripts").sha256(support.module("devices").canonical(test_device.SPEC))
+        self.ctx.surface = "desktop"
+        clean = self.hook("kumi_device", spec, "d-1")
+        self.assertIsNotNone(clean, "a device is never built unasked (the catalog's review)")
+        self.assertEqual((clean["action"], clean["rule_key"]), ("approve", f"kumi:device:{digest}"),
+                         "asked by its spec, which outlives the chat")
+        self.assertIn(test_device.SPEC["code"].splitlines()[0], clean["message"], "its code shown")
         built = support.handle(self.host, "kumi_device", spec, session_id="s1", task_id="t1")
-        self.assertEqual(built["file"], test_device.FILE)
+        self.assertEqual(built["file"], test_device.FILE, "built once approved")
         policy.post_tool_call(self.host, tool_name="web_extract", tool_call_id="x1", args={}, result="{}",
                               status="ok", session_id="s1")
-        self.ctx.surface = "desktop"
         with mock.patch.object(tools, "approvals_bypassed", lambda host, **kw: False):
             asked = self.hook("kumi_device", {"spec": {**test_device.SPEC, "name": "Warm Fold 2"}}, "d-2")
         self.assertEqual(asked["action"], "approve", "asked as a script is (CC-19)")
 
-    def test_a_script_runs_unasked_in_a_clean_chat_as_a_device_does(self):
+    def test_a_script_is_asked_with_its_code_in_a_clean_chat_and_runs_once_approved(self):
         policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
-        self.assertIsNone(self.hook("kumi_script", test_scripts.script(), "s-1"))
-        ran = support.handle(self.host, "kumi_script", test_scripts.script(), session_id="s1", task_id="t1")
-        self.assertEqual(ran["state"], "ran", ran)
+        self.assertFalse(self.host.ask_before_changes())
+        digest = support.module("scripts").sha256(test_scripts.CODE)
+        terminal = self.hook("kumi_script", test_scripts.script(), "s-0")
+        self.assertIsNotNone(terminal, "a script is never run unasked (the catalog's review)")
+        self.assertEqual((terminal["action"], terminal["rule_key"]), ("approve", "kumi:script:s1"),
+                         "allowing it for the session covers this chat's next scripts, never another chat's")
+        self.assertIn(f"SHA-256 {digest[:16]}", terminal["message"], "asked with its code's hash")
+        self.assertIn("Full code: ", terminal["message"], "and its file, where the terminal's panel has no room")
+        self.ctx.surface = "desktop"
+        asked = self.hook("kumi_script", test_scripts.script(), "s-1")
+        self.assertEqual(asked["action"], "approve")
+        self.assertIn(test_scripts.CODE.splitlines()[0], asked["message"], "its code shown")
+        for approval in ("s-0", "s-1"):
+            ran = support.handle(self.host, "kumi_script", test_scripts.script(), session_id="s1", task_id="t1")
+            self.assertEqual(ran["state"], "ran", (approval, ran))
         again = support.handle(self.host, "kumi_script", test_scripts.script(), session_id="s1", task_id="t1")
-        self.assertEqual(again["error"]["code"], "not_approved", "the hook's record is used once")
-        self.assertIn("runs your scripts without asking", tools.changes_mode(self.host))
+        self.assertEqual(again["error"]["code"], "not_approved", "each approval runs it once")
+        self.assertEqual(tools.changes_mode(self.host), tools.CHANGES_UNASKED)
+        self.assertIn("scripts, devices", tools.CHANGES_UNASKED, "the status says scripts and devices still ask")
 
-    def test_a_script_is_asked_with_the_setting_on_or_once_the_chat_read_outside_content(self):
+    def test_once_the_chat_read_outside_content_each_script_is_asked_by_its_code(self):
         policy.chat_turn(self.host, session_id="s1", is_first_turn=True)
         digest = support.module("scripts").sha256(test_scripts.CODE)
         with mock.patch.object(tools, "approvals_bypassed", lambda host, **kw: False):
-            self.ctx.settings["ask_before_changes"] = True
-            on = self.hook("kumi_script", test_scripts.script(), "s-1")
-            self.assertEqual((on["action"], on["rule_key"]), ("approve", "kumi:script:s1"))
-            self.assertIn(f"SHA-256 {digest[:16]}", on["message"], "asked with its code")
-            self.ctx.settings["ask_before_changes"] = False
             policy.post_tool_call(self.host, tool_name="web_extract", tool_call_id="x1", args={}, result="{}",
                                   status="ok", session_id="s1")
             self.ctx.surface = "desktop"
             for call in ("s-2", "s-3"):
                 tainted = self.hook("kumi_script", test_scripts.script(), call)
                 self.assertEqual((tainted["action"], tainted["rule_key"]), ("approve", f"kumi:script:{digest}"),
-                                 "asked every time, by its code, whatever the setting (CC-19)")
+                                 "asked every time, by its code (CC-19)")
                 self.assertIn(test_scripts.CODE.splitlines()[0], tainted["message"], "its code shown")
 
     def test_a_script_is_refused_in_messaging_scheduled_webhook_and_forked_turns(self):

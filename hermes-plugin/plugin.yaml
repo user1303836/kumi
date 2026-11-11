@@ -35,7 +35,7 @@ config_schema:
     type: bool
     default: false
     label: Ask before each change
-    description: "Off: Kumi makes the changes you ask for in your DAW, and runs the scripts and builds the devices you ask for, without asking; each one goes into HISTORY and most changes can be undone. On: Hermes asks before each one. Setup steps, sample folders and Mirelo jobs are asked either way, and so is a script or device in a chat that has read outside content."
+    description: "Off: Kumi makes the changes you ask for in your DAW without asking; each one goes into HISTORY and most can be undone. On: Hermes asks before each one. Every script and Max for Live device is asked either way, with its code, and so are setup steps, sample folders and Mirelo jobs."
   library_folders:
     type: list
     default: []

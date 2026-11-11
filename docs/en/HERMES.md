@@ -4,8 +4,8 @@ English · [简体中文](../zh-CN/HERMES.md) · [日本語](../ja/HERMES.md)
 
 Kumi is also a plugin for [Hermes Agent](https://hermes-agent.nousresearch.com). Hermes stays your agent, in its
 terminal, Hermes Desktop, the web dashboard or a chat app; Kumi gives it your DAW. Kumi makes the changes you ask for
-(Hermes asks before each one only if you turn on **Ask before each change**), records each one in its HISTORY and can
-undo most of them while it runs, and both run on your computer.
+(Hermes asks before each one only if you turn on **Ask before each change**; scripts and Max for Live devices are
+always asked), records each one in its HISTORY and can undo most of them while it runs, and both run on your computer.
 
 A standalone Kumi (the `kumi` app in a terminal) and Kumi for Hermes are separate installations. You don't need one to
 use the other.
@@ -294,12 +294,13 @@ When no change Kumi knows fits, Hermes can write code for it.
   untouched. Hermes Desktop shows its controls and code when it's asked. Putting it in your Set is a second change:
   Kumi loads it at the end of the track's chain, and can undo that. Moving it from there is a third
   change, which only Live's own Undo takes back. The file stays in your User Library after an undo.
-- **Asked every time, once a chat has read outside content:** web pages, transcripts, files Hermes fetched from the
-  internet, another plugin's results, or any terminal command or code run. Files already on your disk, installed
-  skills, and the names in your library and projects don't count. In such a chat, each script and device is asked
-  with its code, and none runs while Hermes's approvals are off. In a chat that hasn't, a script runs and a device is
-  built without asking unless Ask before each change is on; with it on, allowing a script for the session covers that
-  chat's scripts.
+- **Asked every time, with its code:** each script and device, in every chat, whatever Ask before each change says.
+  In a chat that hasn't read outside content, allowing a script for the session covers that chat's next scripts.
+  Outside content is web pages, transcripts, files Hermes fetched from the internet or read with its own file tools,
+  another plugin's results, or any terminal command or code run; installed skills and the names in your library and
+  projects don't count. Once a chat has read any, each script is asked by its code: an earlier allow no longer
+  matches, and "Always" covers only the same code. A device's approval names that device only, so "Always" covers
+  only the same device. In such a chat, none runs while Hermes's approvals are off.
 - **Refused before anyone is asked:** a script, or a device's code, over 400 lines or 32 KB; a script with a hidden or
   direction-changing character, or one that runs processes or reaches the network (`os.execute`, `io.popen`,
   `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`). That check is a safeguard, not a sandbox.
@@ -345,20 +346,19 @@ sections, turns, the first hook and which tracks play where, beside a reference'
 about 6½ minutes with Hermes's default tool deadline, or up to 15 if you raise `timeouts.tools.sequential_call` in
 Hermes's config.yaml; a longer song is read in parts. Stop ends it.
 
-**What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes, presets, and
-scripts and devices in a chat that hasn't read outside content without asking: each goes into HISTORY, and most can be
-undone. Setup steps, sample-folder adds and scans, Mirelo uploads and paid generations, and a script or device in a
-chat that has read outside content always ask. Turn on **Ask before each change** in Kumi's settings in Hermes
-(`ask_before_changes` in the plugin config) and Hermes asks before each of them, per kind of change and per chat. Kumi
-never approves anything in Hermes itself. `/kumi`, `hermes kumi status` and `hermes kumi doctor` say which applies,
-for example "Approvals: Kumi makes your changes and runs your scripts without asking (Ask before each change: off);
-setup steps, sample folders and Mirelo jobs still ask".
+**What asks first.** By default Kumi makes your changes, undos, track and mix listens, play, takes and presets without
+asking: each goes into HISTORY, and most can be undone. Scripts, devices, setup steps, sample-folder adds and scans,
+and Mirelo uploads and paid generations always ask. Turn on **Ask before each change** in Kumi's settings in Hermes
+(`ask_before_changes` in the plugin config) and Hermes also asks before each change, undo, listen, play, take and
+preset, per kind of change and per chat. Kumi never approves anything in Hermes itself. `/kumi`, `hermes kumi status`
+and `hermes kumi doctor` say which applies, for example "Approvals: Kumi makes your changes without asking (Ask
+before each change: off); scripts, devices, setup steps, sample folders and Mirelo jobs still ask".
 
 Allowing a Kumi call for the session or always covers that kind of call in this chat only, including a one-shot run
 that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
 refused. Scheduled jobs and webhooks never change anything. A new one-shot `hermes chat -q` run can: Kumi can't tell
-it from a chat, since Hermes runs its tools in its gateway, so by default it makes the changes and runs the scripts it
-asks for, as a chat does. With Ask before each change on, Hermes refuses them there, since nobody can answer; it
+it from a chat, since Hermes runs its tools in its gateway, so by default it makes the changes it asks for, as a chat
+does. With Ask before each change on, Hermes refuses them there, since nobody can answer; it
 refuses setup steps, sample folders and Mirelo jobs there either way. Kumi acts only in your own turns: when Hermes
 works on the chat in the background (its review after a turn) or answers a side question (`/btw`), Kumi only reads,
 whatever you allowed. With Ask before each change on, a change only your DAW's own Undo takes back asks under its own
@@ -368,7 +368,7 @@ delete the `plugin_rule:kumi:` entries there.
 
 With `--yolo`, a chat's `/yolo` or `approvals.mode: off`, Hermes runs Kumi's changes, undos, listens, play,
 sample-folder adds and scans, setup steps, and, with Mirelo set up, its paid generations and uploads (up to your credit
-cap) without asking. Scripts and devices also run unasked there, but only in a chat that hasn't read outside content:
+cap) without asking. Scripts and devices run unasked only there, and only in a chat that hasn't read outside content:
 in one that has, they're refused. `/kumi` says so, as `hermes kumi status` does when `approvals.single_query_mode` or
 `delegation.subagent_auto_approve` lets changes pass unasked. A one-shot `hermes -z` turn is yolo too: Kumi's calls
 run without asking there, and Kumi can't tell it from a chat.
@@ -408,7 +408,7 @@ Screenshots:
 | DAW | Live | Which DAW Kumi connects to. The first DAW you set up becomes it; switch with `hermes kumi setup --daw <daw> --use` (`ableton`, `reaper` or `renoise`) |
 | Sample folders | none | The folders Kumi may read for your sound map: a scan reads only the audio files in them, and nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | When what you're looking at changes, adds a short note to the chat connected to Kumi: what you're on (FOCUS), and what changed in the project while Kumi was away |
-| Ask before each change | off | Hermes asks before each Kumi change, undo, track or mix listen, play, take, preset, script and device, per kind of change and per chat. Off, Kumi makes them without asking and records each in HISTORY; setup steps, sample folders and Mirelo jobs ask either way, and so does a script or device in a chat that has read outside content |
+| Ask before each change | off | Hermes asks before each Kumi change, undo, track or mix listen, play, take and preset, per kind of change and per chat. Off, Kumi makes them without asking and records each in HISTORY; scripts, devices, setup steps, sample folders and Mirelo jobs ask either way |
 | Run scripts from messaging chats | off | Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, whatever Ask before each change says, and none runs while Hermes's approvals are off |
 | Interpret measurements with a model | off | Also sends measurements and a small band-energy image for a plain-words reading to the model set for Kumi's listening task in Hermes (Vision's, unless you change it), which must accept images |
 

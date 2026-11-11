@@ -6,9 +6,9 @@ Kumi asks for.
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
 current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. By default
 the changes the producer asks for in the DAW then run without an approval (UNASKED_BY_DEFAULT); the plugin's "Ask
-before each change" asks before each, as these words describe. A folder the producer adds, and a scan of the folders
-the runtime reads, are approved by name; setup's install and adopt in the words of the plan they carry out (C8).
-Anything else of Kumi's is blocked.
+before each change" asks before each, as these words describe. A script or a device is always asked, with its code. A
+folder the producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt
+in the words of the plan they carry out (C8). Anything else of Kumi's is blocked.
 
 Nobody is there in a scheduled job (Hermes's cron), and Hermes can pass an approval anyway (`approvals.cron_mode:
 approve`, or a chat's earlier "Always", which Hermes checks before it looks for a person). So a scheduled job only reads
@@ -69,11 +69,11 @@ ASKED = {"kumi_change", "kumi_undo", "kumi_setup", "kumi_script", "kumi_device",
 # HISTORY; the plugin's `ask_before_changes` setting asks before each again. Kumi doesn't approve anything for Hermes
 # (catalog rule 12): it just doesn't ask for its own changes, as a plugin whose tools act directly doesn't. Every
 # refusal still refuses, unattended and forked turns still don't write, and setup, sample folders and Mirelo's uploads
-# and paid jobs are asked either way, as is a script or a device in a chat that read outside content (CC-19).
-UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_device", "kumi_script", "kumi_listen",
-                      "kumi_transport", "kumi_variations", "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound",
-                      "kumi_audition", "kumi_groove", "kumi_render", "kumi_form"}
-_ALWAYS_ASKED = "_always_asked"
+# and paid jobs are asked either way. A script or a device is code with the DAW's access to the computer, so it's never
+# in this set: the catalog's review asked that each go through Hermes's approval, with its code (CC-19, CC-22).
+UNASKED_BY_DEFAULT = {"kumi_change", "kumi_undo", "kumi_preset", "kumi_listen", "kumi_transport", "kumi_variations",
+                      "kumi_judge", "kumi_tune", "kumi_wavetable", "kumi_sound", "kumi_audition", "kumi_groove",
+                      "kumi_render", "kumi_form"}
 # Writers asked of nobody, which still need someone in the chat: never unattended (26-w1), nor forked or scheduled.
 UNASKED_WRITERS = {"kumi_preset_build", "kumi_design"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
@@ -187,10 +187,9 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
     compact = decision.pop(_COMPACT, None) if isinstance(decision, dict) else None
-    always = decision.pop(_ALWAYS_ASKED, False) if isinstance(decision, dict) else False
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
-    if decision is not None and decision["action"] == "approve" and asks_first(host, tool, always) is False:
+    if decision is not None and decision["action"] == "approve" and asks_first(host, tool) is False:
         return None, {**extra, "unasked": True}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
         scoped = not decision["rule_key"].startswith(ONE_THING)
@@ -205,11 +204,10 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     return decision, extra
 
 
-def asks_first(host: Any, tool: str, always: bool = False) -> bool:
-    """Whether the producer is asked before `tool`'s call: always outside UNASKED_BY_DEFAULT, or for a call its
-    decision marks always asked (a device in a chat that read outside content); else only with "Ask before each
-    change" on."""
-    return tool not in UNASKED_BY_DEFAULT or always or host.ask_before_changes()
+def asks_first(host: Any, tool: str) -> bool:
+    """Whether the producer is asked before `tool`'s call: always outside UNASKED_BY_DEFAULT (a script or a device
+    among them), else only with "Ask before each change" on."""
+    return tool not in UNASKED_BY_DEFAULT or host.ask_before_changes()
 
 
 def palette_read(tool: str, args: dict) -> bool:
@@ -1093,9 +1091,9 @@ _SCRIPT_FORMS = ((200, 12, 100, "path", "long"), (120, 6, 80, "path", "long"), (
 
 
 def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
-    """CC-19: a script runs in a chat with the producer in it, by the same rules as a device: unasked by default while
-    the chat has read nothing from outside, else asked under `kumi:script` (this chat's, so "Allow this session" covers
-    its next scripts); once it has read outside content, always asked, under the code's SHA-256, with why, and never
+    """CC-19: a script runs in a chat with the producer in it, by the same rules as a device, and is always asked, with
+    its code. While the chat has read nothing from outside, it's asked under `kumi:script` (this chat's, so "Allow this
+    session" covers its next scripts); once it has read outside content, under the code's SHA-256, with why, and never
     while nobody reviews it (YOLO or approvals off). The runtime checks the code first (the size cap, hidden
     characters, the denylist), so refused code never reaches the producer."""
     language, code, purpose = args.get("language"), args.get("code"), args.get("purpose")
@@ -1142,12 +1140,10 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
              "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
              "deadline": f"{deadline:g}"}
     message = _script_message(code, facts, surface, chat_line=not tainted)
-    if message is None and asks_first(host, "kumi_script", tainted):  # unasked, there's no window to fit
+    if message is None:
         return block(SCRIPT_TOO_LONG), {}
-    decision = {"action": "approve", "message": message or "",
+    decision = {"action": "approve", "message": message,
                 "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
-    if tainted:
-        decision[_ALWAYS_ASKED] = True  # asked by provenance (CC-19), whatever the setting
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": language, "daw": daw,
                                "purpose": one_line(purpose, 200), "warning": scripts.WARNING, "sha256": digest,
@@ -1249,10 +1245,10 @@ _DEVICE_FORMS = ((400, 12, 100, None, "long"), (200, 6, 80, None, "long"), (120,
 
 
 def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
-    """CC-22: a device is built only as the producer approved it, in a chat with the producer in it, by CC-19's
-    provenance rules. Its key is the canonical spec's SHA-256 even in a clean chat, since the device outlives the chat.
-    Serve previews the spec first (pure): one it refuses never reaches the producer, and a preview that hashed other
-    bytes than these is refused."""
+    """CC-22: a device is built only as the producer approved it, with its code, in a chat with the producer in it, by
+    CC-19's provenance rules. Its key is the canonical spec's SHA-256 even in a clean chat, since the device outlives
+    the chat. Serve previews the spec first (pure): one it refuses never reaches the producer, and a preview that hashed
+    other bytes than these is refused."""
     spec = args.get("spec")
     problem = devices.problem(spec)
     if problem is not None:
@@ -1301,11 +1297,9 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     facts = {"about": spec["about"], "why": why if tainted else "", "digest": digest, "lines": lines,
              "bytes": len(spec["code"].encode("utf-8")), "file": file}
     message = _device_message(spec, facts, surface)
-    if message is None and asks_first(host, "kumi_device", tainted):  # unasked, there's no window to fit
+    if message is None:
         return block(TOO_LONG), {}
-    decision = {"action": "approve", "message": message or "", "rule_key": f"kumi:device:{digest}"}
-    if tainted:
-        decision[_ALWAYS_ASKED] = True  # asked by provenance, as a script is (CC-19), whatever the setting
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:device:{digest}"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": devices.LANGUAGE,
                                "daw": setup.DAWS.get("ableton", "Live"), "name": answer.get("name"), "file": file,

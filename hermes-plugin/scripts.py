@@ -1,12 +1,12 @@
 """CC-19: scripts in the DAW (Live's Python, REAPER's and Renoise's Lua), trusted by the chat's provenance.
 
-A script is code with the DAW's access to the computer, so the approval is the boundary. What it takes depends on what
-the chat has read:
+A script is code with the DAW's access to the computer, so the approval is the boundary: every script is asked, with its
+code. What the approval covers depends on what the chat has read:
 - A chat is **clean** from its first turn until untrusted outside content enters it (19a, r2): any tool result that
-  isn't Kumi's own or one of Hermes's local file, to-do, question and skill tools. That includes the web, the browser,
-  video, MCP, delegated subagents, memory, past sessions, every other plugin's output, and Hermes's terminal and code
-  tools, which can fetch anything (its youtube-content skill gets transcripts through the terminal): fail closed
-  (rgzm's answer to the lead's open question).
+  isn't Kumi's own or one of Hermes's local file-writing, to-do, question and skill tools. That includes the web, the
+  browser, video, MCP, delegated subagents, memory, past sessions, every other plugin's output, Hermes's terminal and
+  code tools, which can fetch anything (its youtube-content skill gets transcripts through the terminal), and the files
+  Hermes reads, which may have been downloaded: fail closed (rgzm's answer to the lead's open question).
 - Once **tainted**, a chat stays tainted (19c). The record is kept in the plugin's data (r1), so a restart doesn't
   clean a chat. A chat Kumi first sees after its first turn (resumed after a restart or an upgrade, or after
   compaction) has no record and counts as tainted. So does a messaging chat (Discord, Slack, Telegram…), and a surface
@@ -49,11 +49,11 @@ DAW_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
 # 19e, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it this way.
 WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the DAW's own Undo may."
 
-# Hermes's tools whose results bring nothing from outside this computer (r2): its local file tools, its to-do list,
+# Hermes's tools whose results bring nothing from outside this computer (r2): its tools that write files, its to-do list,
 # the producer's own answers (`clarify`) and the skills installed here (Kumi's included). Every other tool taints, its
-# terminal and code tools and a new tool included, until it's listed here.
-LOCAL_TOOLS = frozenset({"read_file", "write_file", "patch", "search_files", "todo_list", "clarify", "skills_list",
-                         "skill_view", "skill_manage"})
+# terminal and code tools, the files it reads (`read_file`, `search_files`: a file may have been downloaded) and a new
+# tool included, until it's listed here.
+LOCAL_TOOLS = frozenset({"write_file", "patch", "todo_list", "clarify", "skills_list", "skill_view", "skill_manage"})
 # Hermes's chat surfaces where the producer is at this computer: the terminal, Desktop, and an editor (ACP). Anything
 # else (a messaging app, or a surface Hermes can't name) is a messaging chat here: tainted, and refused unless
 # `scripts_in_messaging` is on.
