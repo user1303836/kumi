@@ -304,7 +304,7 @@ project as…** with **Copy all media into project directory**), or they'll miss
     a new one-shot run or a scheduled job asks again or is refused. Scheduled jobs and webhooks never change anything,
     whatever the setting. A new one-shot `hermes chat -q` run can: Kumi can't tell it from a chat, since Hermes runs
     its tools in its gateway, so by default it makes the changes it asks for. With `ask_before_changes` on, Hermes
-    refuses them there, and it refuses setup steps, sample folders and Mirelo jobs there either way.
+    refuses them there, and it refuses scripts, devices, setup steps, sample folders and Mirelo jobs there either way.
   - **Only your own turns:** when Hermes works on a chat in the background (its review after a turn) or answers a
     side question (`/btw`), Kumi only reads, whatever you allowed for the session.
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
@@ -314,9 +314,10 @@ project as…** with **Copy all media into project directory**), or they'll miss
     hasn't read outside content, allowing a script for the session covers that chat's next scripts. Once a chat has
     read outside content (web pages, transcripts, files Hermes fetched from the internet or read with its own file
     tools, another plugin's results, or any terminal command or code run), each script is asked by its code: an
-    earlier allow no longer matches, and "Always" covers only the same code. Installed skills and the names in your
-    library and projects don't count. A device's approval names that device only, so "Always" covers only the same
-    device. A messaging chat runs none unless `scripts_in_messaging` is on; scheduled jobs, webhooks and Hermes's API
+    earlier allow no longer matches, and "Always" lets only that same code run again without asking, in any chat.
+    Installed skills and the names in your library and projects don't count. A device's approval names that device
+    only, so "Always" lets only that same device be built again without asking, in any chat. A messaging chat runs
+    none unless `scripts_in_messaging` is on; scheduled jobs, webhooks and Hermes's API
     server never run one.
   - **"Always"** leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that Kumi never edits; to
     remove it, delete the `plugin_rule:kumi:` entries there.
