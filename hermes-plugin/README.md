@@ -40,8 +40,9 @@ Hermes stays the agent: Kumi gives it a DAW to work in.
 - **Build from a tutorial.** "Make the bass from this tutorial: <a YouTube link>." Hermes reads its transcript and,
   for values only on screen, views those moments in its browser; Kumi builds it. No video is downloaded.
 - **When no change fits, a script or a device.** Hermes can run a script (Python in Live, Lua in REAPER and Renoise),
-  or build a Max for Live audio effect from GenExpr code; each shows its code and is asked before it runs, in every
-  chat.
+  or build a Max for Live audio effect from GenExpr code; each is asked before it runs, in every chat: Hermes Desktop
+  shows its code; the terminal's prompt has room for its purpose, its size and SHA-256, a first line at most, and, for
+  a script, the file that holds all of it.
 - **A preset for a plug-in you have (Live).** "Make a Pro-Q 4 preset that cuts the mud around 300 Hz." Kumi builds it
   for the version installed (Serum 2, Pro-Q 4 or Ozone 12), shows every setting, and puts it in your User Library (asked
   first with Ask before each change on).
@@ -105,8 +106,8 @@ Screenshots:
 | `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or a window of a track or the mix (in Live, through Kumi Ears, before the fader), optionally beside a reference: part of one (up to 60 s), or up to five measured as one target | a track or the mix: only with Ask before each change on |
 | `kumi_transport` | Starts playback, or stops it; changes nothing in the project but where play starts | play: only with Ask before each change on; stop: no |
 | `kumi_variations` | Numbered takes of a clip, item or pattern, each written as a new one, never over it | only with Ask before each change on |
-| `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | always, with its code |
-| `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | always, with its code |
+| `kumi_script` | Runs a script in the DAW for what no typed change does: Python in Live, Lua in REAPER and Renoise | always; Hermes Desktop shows its code |
+| `kumi_device` | Builds a Max for Live audio effect from GenExpr code, as a new file in your User Library | always; Hermes Desktop shows its code |
 | `kumi_preset_build` | Builds a preset for Serum 2, Pro-Q 4 or Ozone 12, for the version installed, as Kumi's private copy, with Kumi's own preset writer and its limits (up to 512 verified controls); changes nothing in Live (Live only) | no |
 | `kumi_preset` | Puts a preset Kumi built into Live's User Library (Kumi folder) as a new `.vstpreset` file; loading it is a change of its own | only with Ask before each change on, with every setting |
 | `kumi_judge` | Works toward a loudness, true peak or reference's balance in rounds: Live plays a stretch through Kumi Ears, and Kumi keeps each change only if it helped, else takes it back (Live only) | only with Ask before each change on |
@@ -188,7 +189,7 @@ settings:
 | `library_folders` | none | The folders Kumi may read to build your sound map: a scan reads only the audio files in them, and nothing else is scanned. Add one from the sound map's **Sample folders**, with `hermes kumi samples add <folder>` or `/kumi samples add <folder>`, by asking Hermes, or here |
 | `inject_focus` | on | When what you're looking at changes, adds a short note to the chat connected to Kumi: what you're on (FOCUS), and what changed in the project while Kumi was away |
 | `ask_before_changes` | off | Ask before each change: Hermes asks before each Kumi change, undo, track or mix listen, play, take and preset, per kind of change and per chat. Off, Kumi makes them without asking and records each in HISTORY; scripts, devices, setup steps, sample folders and Mirelo jobs ask either way |
-| `scripts_in_messaging` | off | Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, whatever Ask before each change says, and none runs while Hermes's approvals are off |
+| `scripts_in_messaging` | off | Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked (a messaging app shows its purpose and SHA-256; Hermes Desktop shows the code), whatever Ask before each change says, and none runs while Hermes's approvals are off |
 | `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes (Vision's, unless you change it; it must accept images) to interpret measurements (see below) |
 
 ## Hermes Desktop and the dashboard
@@ -310,7 +311,7 @@ project as…** with **Copy all media into project directory**), or they'll miss
   - **Narrower approvals:** a setup step's approval covers its own plan. A change only your DAW's own Undo takes back
     asks under its own kind. With Mirelo, an upload's covers its one file in this chat, and a paid generation's only
     its own estimate, once. A preset's covers its one file: each new preset is asked (with `ask_before_changes` on).
-  - **Scripts and devices:** each is asked, with its code (a device, its controls too), in every chat, and by its
+  - **Scripts and devices:** each is asked in every chat, and by its
     code: allowing it for the session covers only that same code in this chat, and "Always" lets only that same code
     run again without asking, in any chat. Any other script or device is asked. In a chat that has read outside content
     (web pages, transcripts, files Hermes fetched from the internet or read with its own file tools, another plugin's

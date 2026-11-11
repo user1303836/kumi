@@ -35,7 +35,7 @@ config_schema:
     type: bool
     default: false
     label: Ask before each change
-    description: "Off: Kumi makes the changes you ask for in your DAW without asking; each one goes into HISTORY and most can be undone. On: Hermes asks before each one. Every script and Max for Live device is asked either way, with its code, and so are setup steps, sample folders and Mirelo jobs."
+    description: "Off: Kumi makes the changes you ask for in your DAW without asking; each one goes into HISTORY and most can be undone. On: Hermes asks before each one. Every script and Max for Live device is asked either way, and so are setup steps, sample folders and Mirelo jobs."
   library_folders:
     type: list
     default: []
@@ -50,7 +50,7 @@ config_schema:
     type: bool
     default: false
     label: Run scripts from messaging chats
-    description: "Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked, with its code, whatever Ask before each change says, and none runs while Hermes's approvals are off. A script runs with your DAW's access to your computer, and Kumi can't undo it."
+    description: "Lets a messaging chat (Discord, Slack, Telegram…) ask to run a script in your DAW, or to build a Max for Live device. Each one is asked (a messaging app shows its purpose and SHA-256; Hermes Desktop shows the code), whatever Ask before each change says, and none runs while Hermes's approvals are off. A script runs with your DAW's access to your computer, and Kumi can't undo it."
   mirelo_acknowledged:
     type: bool
     default: false

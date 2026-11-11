@@ -1076,10 +1076,11 @@ SCRIPT_SUBAGENT = ("Kumi runs scripts only in the producer's own chat, never in 
                    "run.")
 SCRIPT_MESSAGING = ("Kumi doesn't run scripts from a messaging chat unless the producer turns on \"Run scripts from "
                     "messaging chats\" in Kumi's settings, so this didn't run.")
-SCRIPT_UNREVIEWED = ("Kumi asks before each script in this chat ({why}), and Hermes's approvals are off here (YOLO or "
-                     "approvals.mode: off): nobody would review it, so it didn't run. Turn approvals back on to run it.")
-SCRIPT_UNKNOWN_APPROVALS = ("Kumi asks before each script in this chat ({why}), and Kumi can't tell whether Hermes's "
-                            "approvals are on here, so it didn't run.")
+SCRIPT_UNREVIEWED = ("In this chat ({why}), Kumi runs a script only once someone reviews it, and Hermes's approvals are "
+                     "off here (YOLO or approvals.mode: off): nobody would review it, so it didn't run. Turn approvals "
+                     "back on to run it.")
+SCRIPT_UNKNOWN_APPROVALS = ("In this chat ({why}), Kumi runs a script only once someone reviews it, and Kumi can't tell "
+                            "whether Hermes's approvals are on here, so it didn't run.")
 SCRIPT_TOO_LONG = ("Kumi didn't run the script: its approval can't be shown whole here, and Kumi asks only when all of "
                    "it is in view. Ask for it in Hermes Desktop, which shows it whole.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
@@ -1229,11 +1230,13 @@ DEVICE_SUBAGENT = ("Kumi builds devices only in the producer's own chat, never i
                    "run.")
 DEVICE_MESSAGING = ("Kumi doesn't build devices from a messaging chat unless the producer turns on \"Run scripts from "
                     "messaging chats\" in Kumi's settings, so this didn't run.")
-DEVICE_UNREVIEWED = ("Kumi asks before each device in this chat ({why}), and Hermes's approvals are off here (YOLO or "
-                     "approvals.mode: off): nobody would review it, so it wasn't built. Turn approvals back on to build "
-                     "it.")
-DEVICE_UNKNOWN_APPROVALS = ("Kumi asks before each device in this chat ({why}), and Kumi can't tell whether Hermes's "
-                            "approvals are on here, so it wasn't built.")
+DEVICE_UNREVIEWED = ("In this chat ({why}), Kumi builds a device only once someone reviews it, and Hermes's approvals "
+                     "are off here (YOLO or approvals.mode: off): nobody would review it, so it wasn't built. Turn "
+                     "approvals back on to build it.")
+DEVICE_UNKNOWN_APPROVALS = ("In this chat ({why}), Kumi builds a device only once someone reviews it, and Kumi can't "
+                            "tell whether Hermes's approvals are on here, so it wasn't built.")
+DEVICE_TOO_LONG = ("Kumi didn't build the device: its approval can't be shown whole here, and Kumi asks only when all "
+                   "of it is in view. Ask for it in Hermes Desktop, which shows it whole.")
 DEVICE_ONLY_LIVE = refused(DEVICE, "Kumi builds Max for Live devices only in Ableton Live.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
 # length, how many of the code's first lines and how wide, the controls (None: one line each, with its default; a
@@ -1298,7 +1301,7 @@ def _device(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
              "bytes": len(spec["code"].encode("utf-8")), "file": file}
     message = _device_message(spec, facts, surface)
     if message is None:
-        return block(TOO_LONG), {}
+        return block(DEVICE_TOO_LONG), {}
     decision = {"action": "approve", "message": message, "rule_key": f"kumi:device:{digest}"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
                                "tool_call_id": kwargs.get("tool_call_id"), "language": devices.LANGUAGE,
@@ -1326,7 +1329,7 @@ def _device_message(spec: dict, facts: dict, surface: str) -> str | None:
                  if facts_form == "long" else [f"Kumi: build {facts['file']}"])
         lines += [f"Hermes says: {quoted(facts['about'], about_limit)}", devices.WARNING]
         if facts["why"]:
-            lines.append(scripts.asked_because(one_line(facts["why"], 60), "device"))
+            lines.append(scripts.asked_because(one_line(facts["why"], 60)))
         count = f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''} of GenExpr"
         lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}…" if facts_form == "long"
                      else f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''} · SHA-256 {facts['digest'][:8]}…")

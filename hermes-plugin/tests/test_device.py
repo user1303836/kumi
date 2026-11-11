@@ -39,7 +39,7 @@ class Devices(unittest.TestCase):
         self.use()
 
     def use(self, *fixture_args: str) -> None:
-        self.host, self.ctx, self.data = support.host(self, None, *fixture_args)
+        self.host, self.ctx, self.data = support.host(self, None, *fixture_args, ask_before_changes=False)
         self.events: list[tuple[str, dict]] = []
         patched = mock.patch.object(tools, "broadcast", lambda event, payload: self.events.append((event, payload)))
         patched.start()
@@ -115,13 +115,13 @@ class Devices(unittest.TestCase):
                 self.start(f"chat-{surface}")
                 decision = self.hook(session=f"chat-{surface}")
                 if decision["action"] == "block":
-                    self.assertEqual(decision["message"], policy.TOO_LONG)
+                    self.assertEqual(decision["message"], policy.DEVICE_TOO_LONG)
                 else:
                     self.assertIn(devices.WARNING, decision["message"])
                     self.assertIn(FILE, decision["message"])
                     self.assertTrue(policy.shows_whole(decision["message"], surface))
         self.ctx.surface = "discord"
-        self.assertEqual(self.hook(session="chat-discord"), {"action": "block", "message": policy.TOO_LONG},
+        self.assertEqual(self.hook(session="chat-discord"), {"action": "block", "message": policy.DEVICE_TOO_LONG},
                          "Discord's 300 characters can't hold the warning and the file with the rest")
         self.assertEqual([payload for event, payload in self.events
                           if event == "script.pending" and payload["session_id"] == "chat-discord"], [],
@@ -140,7 +140,7 @@ class Devices(unittest.TestCase):
         asked = self.hook()
         self.assertEqual(asked["rule_key"], f"kumi:device:{digest()}")
         self.ctx.surface = "desktop"
-        self.assertIn("This chat read outside content (web_extract), so each device is asked.", self.hook()["message"])
+        self.assertIn("This chat read outside content (web_extract).", self.hook()["message"])
         self.bypassed = True
         refused = self.hook()
         self.assertEqual(refused["action"], "block")

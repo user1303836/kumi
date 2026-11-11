@@ -71,17 +71,18 @@ TRUST_FILE = "script-trust.json"
 CODE_FOLDER = ("state", "scripts")
 
 
-def asked_because(why: str, what: str = "script") -> str:
-    """The approval's line saying why every script (or device, CC-22) in this chat is asked (r5)."""
+def asked_because(why: str) -> str:
+    """The approval's line saying that this chat read outside content, or counts as if it had (r5): there, a script or
+    a device never runs while Hermes's approvals are off."""
     if why == MESSAGING:
-        return f"This is a messaging chat, so each {what} is asked."
+        return "This is a messaging chat."
     if why in (NO_RECORD, UNNAMED):
-        return f"{why}, so each {what} is asked."
-    return f"This chat read outside content ({why}), so each {what} is asked."
+        return f"{why}, so it counts as having read outside content."
+    return f"This chat read outside content ({why})."
 
 
 def refused_because(why: str) -> str:
-    """Why a chat's scripts are asked each time, inside a refusal's parentheses."""
+    """Why a chat counts as having read outside content, inside a refusal's parentheses."""
     return why if why in (MESSAGING, NO_RECORD, UNNAMED) else f"it read outside content: {why}"
 
 

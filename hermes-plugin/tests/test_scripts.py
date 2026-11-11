@@ -26,7 +26,7 @@ def script(code: str = CODE, purpose: str = "Read the tempo", language: str = "p
 
 class Scripts(unittest.TestCase):
     def setUp(self):
-        self.host, self.ctx, self.data = support.host(self)
+        self.host, self.ctx, self.data = support.host(self, ask_before_changes=False)
         self.events: list[tuple[str, dict]] = []
         self.enterContext(mock.patch.object(tools, "broadcast", lambda event, payload: self.events.append(
             (event, payload))))
@@ -64,7 +64,7 @@ class Scripts(unittest.TestCase):
         self.finished("web_extract", {"urls": ["https://example.com/tutorial"]})
         tainted = self.hook(script())
         self.assertEqual(tainted["rule_key"], f"kumi:script:{digest}")
-        self.assertIn("This chat read outside content (web_extract), so each script is asked.", tainted["message"])
+        self.assertIn("This chat read outside content (web_extract).", tainted["message"])
 
     def test_outside_content_taints_a_chat_and_local_tools_leave_it_clean(self):
         outside = [("web_search", {"query": "serum patch"}), ("browser_exec", {"code": "page.goto(x)"}),
@@ -95,7 +95,7 @@ class Scripts(unittest.TestCase):
         self.assertEqual(self.hook(script(), session="resumed")["rule_key"], f"kumi:script:{scripts.sha256(CODE)}")
         unnamed = self.hook(script(), session="")
         self.assertEqual(unnamed["rule_key"], f"kumi:script:{scripts.sha256(CODE)}")
-        self.assertIn("Hermes didn't name this chat, so each script is asked.", unnamed["message"])
+        self.assertIn("Hermes didn't name this chat, so it counts as having read outside content.", unnamed["message"])
         self.start("clean")
         self.start("read-the-web")
         self.finished("web_extract", {}, "read-the-web")
