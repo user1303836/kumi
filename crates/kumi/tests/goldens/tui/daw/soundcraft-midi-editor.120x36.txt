@@ -1,0 +1,36 @@
+  Kumi  ·  Night Drive                                                                                    ● SoundCraft
+
+                                                                                ╭─ FOCUS · MIDI ───────────────────────╮
+                                                                                │ ■  Bass › ▬  Bass line               │
+                                                                                │ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀     │
+                                                                                │ ⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠉⠀⠀⠀⠀⠤⠤⠤⠤⠤⠤⠤⠤⠀⠀⠀⠀⠀⠀⠀⠀     │
+                                                                                │ ⣀⣀⣀⣀⠀⠀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠉⠉⠉⠀⠀     │
+                                                                                │ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀     │
+                                                                                │ 2 bars · 5 notes                     │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         ├─ NOW ────────────────────────────────┤
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │ Ready                                │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                            “Which tracks are muted?”                           │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+    Kumi keeps each session's conversations: /conversations goes back to one.   │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your session                                               ─╯ ╰──────────────────────────────────────╯
+
