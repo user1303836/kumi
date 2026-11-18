@@ -266,51 +266,63 @@ test('a search opens the map beside the chat, not over it, and Measurements then
   ])
 })
 
-test("a narrow window holds a find's or a measurement's tab back only while Kumi's pane is in view, and opens it when the pane leaves", async () => {
-  const { default: plugin, ROOM_BESIDE_LEAST } = await load('src/desktop/plugin.tsx')
-  const was = globalThis.innerWidth
+test("a narrow window holds a find's or a measurement's tab back only while Kumi's pane is in view, and opens it once the pane has left", async () => {
+  const { default: plugin, ROOM_BESIDE_LEAST, POLL_MS } = await load('src/desktop/plugin.tsx')
+  const was = { width: globalThis.innerWidth, document: globalThis.document }
   const find = (h, id) => h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: id }, { sound_id: `${id}b` }] }) } })
   const paneOf = h => h.registered.find(c => c.id === 'pane').render().props.children.props
   const start = async () => {
     const h = inFront(harness())
     h.timers = []
+    h.ticks = []
     h.ctx.setTimeout = fn => (h.timers.push(fn), () => {})
+    h.ctx.setInterval = (fn, ms) => (h.ticks.push([fn, ms]), () => {})
     plugin.register(h.ctx)
     await settle()
+    // The pane answers whether it's in view when asked; the test says what it answers.
+    h.inView = false
+    paneOf(h).onAsk(() => h.inView)
+    h.poll = () => h.ticks.find(([, ms]) => ms === POLL_MS)[0]()
     return h
   }
   try {
     globalThis.innerWidth = ROOM_BESIDE_LEAST - 1
-    // Before the pane has said it's in view, nothing would show a held tab: the map opens as it always has.
+    globalThis.document = { visibilityState: 'visible' }
+    // Out of view, nothing would show a held tab: the map opens as it always has.
     const h = await start()
     find(h, 's-r7-0090')
     assert.deepEqual(h.calls.docks, [['kumi-sound-map', { pane: 'workspace', pos: 'right' }]])
-    // In view, the pane takes its column: the find waits at its top, and its action opens the map beside the chat.
+    // In view, the pane takes its column: the find waits at its top, the poll leaves it there, and the pane's action
+    // opens the map beside the chat.
     const h2 = await start()
     const pane = paneOf(h2)
-    pane.onShown(true)
+    h2.inView = true
     find(h2, 's-r7-0091')
     assert.deepEqual(h2.calls.workspaces, [], 'no tab beside a chat with no room for it')
     assert.deepEqual(pane.store.get().waiting, { tab: 'map', count: 2 })
+    h2.poll()
+    assert.deepEqual(h2.calls.workspaces, [], 'held while the pane shows')
     pane.onOpenMap()
     assert.deepEqual(h2.calls.docks, [['kumi-sound-map', { pane: 'workspace', pos: 'right' }]])
     assert.equal(pane.store.get().waiting, null)
-    // A measurement with no tool part waits the same way; the pane leaving view (its column closed, Files in front)
-    // opens what it held.
+    // A measurement with no tool part waits the same way; once the pane has left view (its column closed, Files in
+    // front), the status poll's next turn opens what it held.
     const h3 = await start()
     const pane3 = paneOf(h3)
-    pane3.onShown(true)
+    h3.inView = true
     h3.events.get('plugin.kumi.listen.done')({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-9', result: { metrics: { file: 'a.wav' } } } })
     h3.timers.at(-1)()
     assert.deepEqual(pane3.store.get().waiting, { tab: 'measurements' })
     assert.deepEqual(h3.calls.workspaces, [])
-    pane3.onShown(false)
-    h3.timers.at(-1)()
+    h3.inView = false
+    h3.poll()
     assert.deepEqual(h3.calls.workspaces.map(([id]) => id), ['kumi-measurements'])
     assert.equal(pane3.store.get().waiting, null)
   } finally {
-    if (was === undefined) delete globalThis.innerWidth
-    else globalThis.innerWidth = was
+    if (was.width === undefined) delete globalThis.innerWidth
+    else globalThis.innerWidth = was.width
+    if (was.document === undefined) delete globalThis.document
+    else globalThis.document = was.document
   }
 })
 

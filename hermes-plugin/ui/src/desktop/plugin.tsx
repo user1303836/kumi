@@ -34,7 +34,7 @@ import { StatusChip } from './chip.tsx'
 import { callId, Calls, forAnotherProfile, forChatInFront, forThisProfile, payloadOf } from './events.ts'
 import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
-import { KumiPane, ownerSession } from './pane.tsx'
+import { Clock, KumiPane, ownerSession } from './pane.tsx'
 import { PET_LINES, petLine } from './pet.ts'
 import { OPEN_MAP_ON_FIND, SettingsPage } from './settings.tsx'
 export const PLUGIN_ID = 'kumi'
@@ -95,6 +95,7 @@ const plugin: HermesPlugin = {
     // English, Japanese and Simplified Chinese; Desktop drops them when the plugin unloads.
     ctx.i18n?.register(MESSAGES)
     const store = new KumiStore((path, init) => ctx.rest(path, { timeoutMs: 15_000, ...init }))
+    const clock = new Clock()
     const audition = new Audition(id => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 60_000 }))
     let closeMap: (() => void) | null = null
     let mapPane: (() => void) | null = null
@@ -106,27 +107,26 @@ const plugin: HermesPlugin = {
       </WithT>
     )
 
-    // Whether Kumi's pane is in view, as the pane itself reports it (`KumiPane`'s `onShown`; out of view until it says
-    // so). With neither it nor a tab of Kumi's in view the status poll slows (X9). Desktop's own
+    // Whether Kumi's pane is in view now, as the pane itself answers (`KumiPane`'s `onAsk`; out of view while it's not
+    // mounted). With neither it nor a tab of Kumi's in view the status poll slows (X9). Desktop's own
     // `paneVisibility('kumi:pane')` reads false while the pane shows, since Kumi's pane is stacked with Desktop's hidden
     // Review pane, whose id stays the group's active one (`isPaneVisible`).
-    let paneInView = false
-    let disposed = false
+    let askPane: (() => boolean) | null = null
+    const notePane = (inView: (() => boolean) | null) => {
+      askPane = inView
+    }
+    const paneInView = () => askPane?.() ?? false
     // A tab is held back only while the pane is in view and the window has no room beside it (P8): the pane then takes
-    // its column, and the held tab is on screen at the pane's top. Anywhere else the tab opens as it always has, and
-    // the pane leaving view (its column closed, Files in front, a window under 640 px) opens what it held. The opening
-    // waits a turn, so a pane unmounted with the plugin opens nothing (`ctx`'s timers go with it).
-    const holdBack = () => paneInView && !roomBeside()
-    const notePane = (shown: boolean) => {
-      if (shown === paneInView) return
-      paneInView = shown
-      if (shown) return
-      ctx.setTimeout(() => {
-        if (paneInView || disposed) return
-        const held = store.get().waiting
-        if (held?.tab === 'map') openMap()
-        else if (held?.tab === 'measurements') openMeasurements()
-      }, 0)
+    // its column, and the held tab is on screen at the pane's top. Anywhere else the tab opens as it always has. The
+    // pane is asked when a find or a measurement arrives, and again at each turn of the status poll, where a held tab
+    // whose pane has left view since (its column closed, Files in front, a window under 640 px) opens.
+    const holdBack = () => paneInView() && !roomBeside()
+    const lookAtPane = () => {
+      const inView = paneInView()
+      const held = inView ? null : store.get().waiting
+      if (held?.tab === 'map') openMap()
+      else if (held?.tab === 'measurements') openMeasurements()
+      return inView
     }
     // 20rem at the least: at a 1024 px window Hermes's sidebar (237 px), the chat (225 px) and its right column (160 px,
     // where Kumi's pane is) leave about 400 px, and a wider minimum squeezed the pane to nothing (H4).
@@ -179,14 +179,20 @@ const plugin: HermesPlugin = {
 
     // Read /status now, every few seconds while a Kumi view is in view (the pane, the map or measurements, the settings
     // page) and every 30 s while only the chip shows Kumi (X9), and on every event that says something moved. An event
-    // about another profile's Kumi (#966's `profile`) moves nothing this window shows.
+    // about another profile's Kumi (#966's `profile`) moves nothing this window shows. The same turn moves the pane's
+    // "4 min ago" clock on: every 30 s while the pane shows, and as it comes back into view.
     const refresh = () => void store.refreshStatus()
     refresh()
-    const viewing = () => paneInView || closeMap !== null || closeMeasurements !== null || mapPane !== null || measurementsPane !== null || store.wants('setup')
+    const viewing = (paneShows: boolean) => paneShows || closeMap !== null || closeMeasurements !== null || mapPane !== null || measurementsPane !== null || store.wants('setup')
     let idle = 0
+    let turns = 0
+    let paneShowed = false
     ctx.setInterval(() => {
       if (document.visibilityState === 'hidden') return
-      if (!viewing() && ++idle < IDLE_POLLS) return
+      const paneShows = lookAtPane()
+      if (paneShows && (!paneShowed || ++turns % IDLE_POLLS === 0)) clock.tick()
+      paneShowed = paneShows
+      if (!viewing(paneShows) && ++idle < IDLE_POLLS) return
       idle = 0
       refresh()
     }, POLL_MS)
@@ -313,7 +319,6 @@ const plugin: HermesPlugin = {
       if (stop) ctx.onDispose(stop)
     }
     ctx.onDispose(() => {
-      disposed = true
       for (const cancel of waiting.values()) cancel()
       closeMap?.()
       closeMeasurements?.()
@@ -345,7 +350,7 @@ const plugin: HermesPlugin = {
         data: { placement: 'right', width: '320px', minWidth: '15rem', collapsible: true },
         render: () => (
           <WithT>
-            <KumiPane ctx={ctx} onOpenMap={openMap} onOpenMeasurements={openMeasurements} onShown={notePane} store={store} />
+            <KumiPane clock={clock} ctx={ctx} onAsk={notePane} onOpenMap={openMap} onOpenMeasurements={openMeasurements} store={store} />
           </WithT>
         )
       },

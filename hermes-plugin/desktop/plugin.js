@@ -5141,7 +5141,7 @@ function generationRequest(made, t = english) {
 }
 
 // src/desktop/pane.tsx
-import { useEffect as useEffect4, useRef as useRef4, useState as useState5 } from "react";
+import { useEffect as useEffect4, useRef as useRef4, useState as useState5, useSyncExternalStore as useSyncExternalStore2 } from "react";
 
 // src/shared/HistoryView.tsx
 import { useState as useState3 } from "react";
@@ -5542,14 +5542,21 @@ function SavedScript({ item, store }) {
 // src/desktop/pane.tsx
 import { Fragment as Fragment3, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 var STARTER_LABELS = { look: "pane.starterLook", change: "pane.starterChange", find: "pane.starterFind" };
-function useNow(every = 3e4) {
-  const [now, setNow] = useState5(() => Date.now());
-  useEffect4(() => {
-    const timer = setInterval(() => setNow(Date.now()), every);
-    return () => clearInterval(timer);
-  }, [every]);
-  return now;
-}
+var Clock = class {
+  now = Date.now();
+  listeners = /* @__PURE__ */ new Set();
+  get = () => this.now;
+  subscribe = (listener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  tick() {
+    this.now = Date.now();
+    for (const listener of this.listeners) listener();
+  }
+};
 function ownerSession(state) {
   const session = state.status?.owner?.session_id;
   return typeof session === "string" && session ? session : null;
@@ -5557,28 +5564,19 @@ function ownerSession(state) {
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 var LEAST_ON_SCREEN = 128;
 var STEPS = Array.from({ length: 101 }, (_, step2) => step2 / 100);
-var LOOK_AGAIN_MS = 1e3;
 var unhidden = (element) => typeof element.checkVisibility !== "function" || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
-function KumiPane({ onShown, ...props }) {
+function KumiPane({ onAsk, ...props }) {
   const root = useRef4(null);
   const [cut, setCut] = useState5({ left: 0, right: 0 });
   useEffect4(() => {
     const element = root.current;
     if (!element) return;
     let intersecting = false;
-    let said = null;
-    const say = () => {
-      const shown = intersecting && unhidden(element);
-      if (shown === said) return;
-      said = shown;
-      onShown?.(shown);
-    };
     const seen = new IntersectionObserver(
       (entries) => {
         const entry = entries[entries.length - 1];
         if (!entry) return;
         intersecting = entry.isIntersecting;
-        say();
         const box = entry.boundingClientRect;
         const shown = entry.intersectionRect;
         const left = entry.isIntersecting ? Math.max(0, Math.round(shown.left - box.left)) : 0;
@@ -5589,19 +5587,18 @@ function KumiPane({ onShown, ...props }) {
       { threshold: STEPS }
     );
     seen.observe(element);
-    const timer = setInterval(say, LOOK_AGAIN_MS);
+    onAsk?.(() => intersecting && unhidden(element));
     return () => {
       seen.disconnect();
-      clearInterval(timer);
-      onShown?.(false);
+      onAsk?.(null);
     };
-  }, [onShown]);
+  }, [onAsk]);
   return /* @__PURE__ */ jsx8("div", { ref: root, style: { height: "100%" }, children: /* @__PURE__ */ jsx8("div", { style: { height: "100%", marginLeft: cut.left, marginRight: cut.right }, children: /* @__PURE__ */ jsx8(PaneBody, { ...props }) }) });
 }
-function PaneBody({ ctx, store, onOpenMap, onOpenMeasurements }) {
+function PaneBody({ ctx, store, clock: clock2, onOpenMap, onOpenMeasurements }) {
   const t = useT();
   const state = useKumi(store);
-  const now = useNow();
+  const now = useSyncExternalStore2(clock2.subscribe, clock2.get, clock2.get);
   if (state.available === false) {
     return /* @__PURE__ */ jsxs8("div", { style: { padding: 12, display: "flex", flexDirection: "column", gap: 8 }, children: [
       /* @__PURE__ */ jsx8("span", { style: { ...TYPE.body, color: T.text }, children: t("pane.agentOff") }),
@@ -5747,7 +5744,7 @@ function GenerateCard({ media, audition, ctx, store }) {
 
 // src/desktop/composer.tsx
 import { host as host2 } from "@hermes/plugin-sdk";
-import { useCallback as useCallback2, useSyncExternalStore as useSyncExternalStore2 } from "react";
+import { useCallback as useCallback2, useSyncExternalStore as useSyncExternalStore3 } from "react";
 import { jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 var noChange = () => () => {
 };
@@ -5758,7 +5755,7 @@ function useFocusedChat() {
     [atom]
   );
   const read = () => atom?.get() ?? null;
-  return useSyncExternalStore2(subscribe, read, read);
+  return useSyncExternalStore3(subscribe, read, read);
 }
 function FocusHint({ store }) {
   const t = useT();
@@ -12317,25 +12314,25 @@ var plugin = {
   register(ctx) {
     ctx.i18n?.register(MESSAGES);
     const store = new KumiStore((path, init) => ctx.rest(path, { timeoutMs: 15e3, ...init }));
+    const clock2 = new Clock();
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;
     let closeMeasurements = null;
     let measurementsPane = null;
     const mapView = () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(MapWorkspace, { audition, ctx, store }) });
-    let paneInView = false;
-    let disposed = false;
-    const holdBack = () => paneInView && !roomBeside2();
-    const notePane = (shown) => {
-      if (shown === paneInView) return;
-      paneInView = shown;
-      if (shown) return;
-      ctx.setTimeout(() => {
-        if (paneInView || disposed) return;
-        const held = store.get().waiting;
-        if (held?.tab === "map") openMap();
-        else if (held?.tab === "measurements") openMeasurements();
-      }, 0);
+    let askPane = null;
+    const notePane = (inView) => {
+      askPane = inView;
+    };
+    const paneInView = () => askPane?.() ?? false;
+    const holdBack = () => paneInView() && !roomBeside2();
+    const lookAtPane = () => {
+      const inView = paneInView();
+      const held = inView ? null : store.get().waiting;
+      if (held?.tab === "map") openMap();
+      else if (held?.tab === "measurements") openMeasurements();
+      return inView;
     };
     const openMap = () => {
       if (store.get().waiting?.tab === "map") store.wait(null);
@@ -12380,11 +12377,16 @@ var plugin = {
     const openSettings = () => host6.navigate(typeof sdk3.pluginSettingsHref === "function" ? sdk3.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
     const refresh = () => void store.refreshStatus();
     refresh();
-    const viewing = () => paneInView || closeMap !== null || closeMeasurements !== null || mapPane !== null || measurementsPane !== null || store.wants("setup");
+    const viewing = (paneShows) => paneShows || closeMap !== null || closeMeasurements !== null || mapPane !== null || measurementsPane !== null || store.wants("setup");
     let idle = 0;
+    let turns = 0;
+    let paneShowed = false;
     ctx.setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      if (!viewing() && ++idle < IDLE_POLLS) return;
+      const paneShows = lookAtPane();
+      if (paneShows && (!paneShowed || ++turns % IDLE_POLLS === 0)) clock2.tick();
+      paneShowed = paneShows;
+      if (!viewing(paneShows) && ++idle < IDLE_POLLS) return;
       idle = 0;
       refresh();
     }, POLL_MS);
@@ -12491,7 +12493,6 @@ var plugin = {
       if (stop) ctx.onDispose(stop);
     }
     ctx.onDispose(() => {
-      disposed = true;
       for (const cancel of waiting.values()) cancel();
       closeMap?.();
       closeMeasurements?.();
@@ -12517,7 +12518,7 @@ var plugin = {
         // As Hermes's own side panes are: never squeezed below 15rem (P8: at 1000 px its words wrapped a letter at a
         // time while the map kept its 20rem), and on a narrow window an edge overlay rather than a column.
         data: { placement: "right", width: "320px", minWidth: "15rem", collapsible: true },
-        render: () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(KumiPane, { ctx, onOpenMap: openMap, onOpenMeasurements: openMeasurements, onShown: notePane, store }) })
+        render: () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(KumiPane, { clock: clock2, ctx, onAsk: notePane, onOpenMap: openMap, onOpenMeasurements: openMeasurements, store }) })
       },
       {
         id: "status",

@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
@@ -18,14 +18,22 @@ import { PendingScriptView, SavedScript } from './script.tsx'
 // The starters' labels, in the producer's language (their requests stay English, as every request does).
 const STARTER_LABELS = { look: 'pane.starterLook', change: 'pane.starterChange', find: 'pane.starterFind' } as const
 
-/** The time, re-read every `every` ms while mounted, for "4 min ago" labels. */
-export function useNow(every = 30_000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), every)
-    return () => clearInterval(timer)
-  }, [every])
-  return now
+/** The time for "4 min ago" labels. Kumi's status poll moves it on (every 30 s while the pane is in view, and as it
+ *  comes back into view): the pane keeps no timer of its own. */
+export class Clock {
+  private now = Date.now()
+  private readonly listeners = new Set<() => void>()
+  readonly get = (): number => this.now
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+  tick(): void {
+    this.now = Date.now()
+    for (const listener of this.listeners) listener()
+  }
 }
 
 export function ownerSession(state: KumiState): null | string {
@@ -38,6 +46,7 @@ const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 interface PaneProps {
   ctx: PluginContext
   store: KumiStore
+  clock: Clock
   onOpenMap: () => void
   onOpenMeasurements: () => void
 }
@@ -48,39 +57,30 @@ interface PaneProps {
 const LEAST_ON_SCREEN = 128
 /** Every hundredth of the pane coming into or going out of view: the observer then sees the window's edge move. */
 const STEPS = Array.from({ length: 101 }, (_, step) => step / 100)
-/** How often the pane looks again whether Desktop hides it: a pane behind another tab of its column (Files in front)
- *  keeps its box and is hidden with `visibility` and `opacity` on a parent, which no observer reports. */
-const LOOK_AGAIN_MS = 1000
 
 /** Whether nothing hides the element: `display`, `visibility` or `opacity` on it or a parent. */
 const unhidden = (element: Element) => typeof element.checkVisibility !== 'function' || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
 
-/** Kumi's pane, telling `onShown` whether it's in view. Desktop's own `paneVisibility('kumi:pane')` reads false while
- *  the pane shows (it's stacked with Desktop's hidden Review pane, whose id stays the group's active one), so Kumi
- *  watches its own root instead: off screen, hidden by Desktop, behind another tab of its column, or gone, it's out of
- *  view. The same watch keeps the pane's content in the part of it that's on screen: in a narrow window Desktop can
- *  run Kumi's column past the window's edge (P8: 95 px at 900 px with the map open beside the chat), and the right of
- *  every row, Undo with it, would be cut off. */
-export function KumiPane({ onShown, ...props }: PaneProps & { onShown?: (shown: boolean) => void }) {
+/** Kumi's pane, handing `onAsk` a function that says whether it's in view now (null once it's gone). Desktop's own
+ *  `paneVisibility('kumi:pane')` reads false while the pane shows (it's stacked with Desktop's hidden Review pane, whose
+ *  id stays the group's active one), so Kumi asks its own root instead: its observer knows whether its box is on
+ *  screen, and `checkVisibility` whether Desktop hides it behind another tab of its column (Files in front keeps the
+ *  pane's box and hides it with `visibility` and `opacity` on a parent, which no observer reports). It's asked, never
+ *  watched: no timer of the pane's own. The same observer keeps the pane's content in the part of it that's on screen:
+ *  in a narrow window Desktop can run Kumi's column past the window's edge (P8: 95 px at 900 px with the map open
+ *  beside the chat), and the right of every row, Undo with it, would be cut off. */
+export function KumiPane({ onAsk, ...props }: PaneProps & { onAsk?: (inView: (() => boolean) | null) => void }) {
   const root = useRef<HTMLDivElement | null>(null)
   const [cut, setCut] = useState({ left: 0, right: 0 })
   useEffect(() => {
     const element = root.current
     if (!element) return
     let intersecting = false
-    let said: boolean | null = null
-    const say = () => {
-      const shown = intersecting && unhidden(element)
-      if (shown === said) return
-      said = shown
-      onShown?.(shown)
-    }
     const seen = new IntersectionObserver(
       entries => {
         const entry = entries[entries.length - 1]
         if (!entry) return
         intersecting = entry.isIntersecting
-        say()
         const box = entry.boundingClientRect
         const shown = entry.intersectionRect
         const left = entry.isIntersecting ? Math.max(0, Math.round(shown.left - box.left)) : 0
@@ -91,13 +91,12 @@ export function KumiPane({ onShown, ...props }: PaneProps & { onShown?: (shown: 
       { threshold: STEPS }
     )
     seen.observe(element)
-    const timer = setInterval(say, LOOK_AGAIN_MS)
+    onAsk?.(() => intersecting && unhidden(element))
     return () => {
       seen.disconnect()
-      clearInterval(timer)
-      onShown?.(false)
+      onAsk?.(null)
     }
-  }, [onShown])
+  }, [onAsk])
   return (
     <div ref={root} style={{ height: '100%' }}>
       <div style={{ height: '100%', marginLeft: cut.left, marginRight: cut.right }}>
@@ -107,10 +106,10 @@ export function KumiPane({ onShown, ...props }: PaneProps & { onShown?: (shown: 
   )
 }
 
-function PaneBody({ ctx, store, onOpenMap, onOpenMeasurements }: PaneProps) {
+function PaneBody({ ctx, store, clock, onOpenMap, onOpenMeasurements }: PaneProps) {
   const t = useT()
   const state = useKumi(store)
-  const now = useNow()
+  const now = useSyncExternalStore(clock.subscribe, clock.get, clock.get)
   if (state.available === false) {
     return (
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
