@@ -123,14 +123,30 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
   )
 }
 
-/** A row's meta line: what the title doesn't already say. The track when the title doesn't name it, the kind of change
- *  when the title isn't that kind ("Tempo 120 → 124 BPM" over "tempo"), when, and "undone" for a row that was (the
- *  strike and the arrow alone could read as failed). Never the change's machine label. */
+/** A letter, a digit or an underscore: what a word is made of, in any script. */
+const WORDLY = /[\p{L}\p{N}_]/u
+
+/** Whether `title` names `name` as a word of its own, in its own case, with nothing wordly right before or after it: a
+ *  track named "A" or "1" sits inside nearly any title as letters (and "a" as a word), and only the name itself, whole,
+ *  says it. The runtime writes a track's name into a title as the track has it. */
+function namesWhole(title: string, name: string): boolean {
+  for (let at = title.indexOf(name); at >= 0; at = title.indexOf(name, at + 1)) {
+    const before = at > 0 ? title[at - 1] : ''
+    const after = title[at + name.length] ?? ''
+    if (!WORDLY.test(before) && !WORDLY.test(after)) return true
+  }
+  return false
+}
+
+/** A row's meta line: what the title doesn't already say. The track when the title doesn't name it, whole
+ *  (`namesWhole`), the kind of change when the title isn't that kind ("Tempo 120 → 124 BPM" over "tempo"; only a hint,
+ *  so any mention will do), when, and "undone" for a row that was (the strike and the arrow alone could read as
+ *  failed). Never the change's machine label. */
 function metaOf(item: HistoryItem, now: number | undefined, t: Translate): { track: string; text: string } {
-  const said = clean(item.title ?? item.label ?? item.id, 300).toLowerCase()
+  const title = clean(item.title ?? item.label ?? item.id, 300)
   const name = nameOf(item.track)
-  const track = name && !said.includes(name.toLowerCase()) ? clean(name, 24) : ''
-  const family = item.family && !said.includes(item.family.toLowerCase()) ? clean(item.family, 16) : ''
+  const track = name && !namesWhole(title, name) ? clean(name, 24) : ''
+  const family = item.family && !title.toLowerCase().includes(item.family.toLowerCase()) ? clean(item.family, 16) : ''
   return { track, text: [track, family, ago(item.at, now, t), item.state === 'undone' ? t('history.undone') : ''].filter(Boolean).join(' · ') }
 }
 

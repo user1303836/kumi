@@ -38,6 +38,8 @@ export const S = {
 export const FOCUSABLE = 'kumi-focusable'
 /** The class Kumi puts on the host's own buttons it draws (`@kumi/controls`), so its ring can sit on the host's. */
 export const HOST_CONTROL = 'kumi-host'
+/** The quiet "⋯" button a menu opens from (`@kumi/controls`' Menu, in both UIs): a 24 px square, no frame. */
+export const MENU_BUTTON: CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0, font: 'inherit', fontSize: 14, lineHeight: 1, borderRadius: 4, border: 'none', background: 'transparent', color: T.secondary, cursor: 'pointer', flex: 'none' }
 
 /** The focus ring for Kumi's controls, in the host theme's colour. Desktop turns focus rings off for every element
  *  (`*:focus-visible { outline: none }`); this rule's class beats that one, and only a keyboard focus shows it. Each UI

@@ -567,6 +567,11 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
   // The meta line says what the title doesn't: "Bass muted" names its track, so the line is the kind of change, and
   // never the machine label (c3).
   assert.ok(html.includes('>mixer<') && !html.includes('c3'), html)
+  // A track named "A" is in nearly any title as a letter, and as the word "a": the line still says it, unless the title
+  // names it whole ("Pan A left").
+  const trackA = title => renderToStaticMarkup(createElement(HistoryView, { history: { items: [{ id: 'h-g2-c5', label: 'c5', title, family: 'mixer', state: 'applied', undo_available: false, track: 'A', runtime_generation: 'g2' }] }, now: 0 }))
+  assert.ok(trackA('Pan the Drums a little left').includes('>A · mixer<'), trackA('Pan the Drums a little left'))
+  assert.ok(trackA('Pan A left').includes('>mixer<'), trackA('Pan A left'))
   // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since. That's said
   // once, under a divider, for every such row; a stale snapshot clears every row's undo, so there it says nothing of it.
   const restarted = english('history.restartedSinceAll', 'Live').replaceAll("'", '&#x27;')

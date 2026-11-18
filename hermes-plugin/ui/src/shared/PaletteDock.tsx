@@ -5,7 +5,7 @@
 // forgets one, sets it strict or loose, and offers it as a kit or as the sounds to make a new one from. Every edit
 // changes no project, so it runs at once (`POST /palette`); the agent's `kumi_palette` reads and edits the same
 // palette. Both UI halves use it: what "Use as kit", a card's "Use…" and "Make…" do comes from the parent.
-import { Button, Tip } from '@kumi/controls'
+import { Button, Menu, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -15,7 +15,7 @@ import { Glyph } from './atlas/Glyph.tsx'
 import type { Share } from './atlas/lineage.ts'
 import { clean, num } from './format.ts'
 import { glyphOf, groupColor } from './mapModel.ts'
-import { ActionMenu, Icon } from './mapUi.tsx'
+import { Icon } from './mapUi.tsx'
 import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
 import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapGroup } from './types.ts'
@@ -678,7 +678,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           )}
           {current && (
             <span ref={menuBox} style={{ display: 'contents' }}>
-              <ActionMenu
+              <Menu
                 actions={[
                   { id: 'rename', name: t('dock.rename'), title: t('dock.renameTitle'), onChoose: () => setEditing('rename') },
                   { id: 'forget', name: t('dock.forget'), title: t('dock.forgetTitle', clean(current.name, 40)), onChoose: () => setForgetting(true), danger: true }

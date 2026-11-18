@@ -301,13 +301,14 @@ class Media(unittest.TestCase):
 
     def test_a_palette_keeps_a_design_by_how_it_was_made_and_from_what_never_its_seed(self) -> None:
         self.assertEqual(self.snapshots.palette_artifact(self.state, self.id), "Stack of Kick + Tom")
-        name = self.snapshots._design_name
-        many = [{"sound_id": f"s-r7-{i:04}", "name": f"Punch Kick {i:02}"} for i in range(15)]
-        self.assertEqual(name({"op": "cross", "mode": "blend", "seed": 9, "sources": many}), "Blend of Punch Kick 00 + Punch Kick 01 + 13 more")
-        long = [{"name": "Very Long Granular Ambient Texture Recording " * 2}, {"name": "Tom"}, {"name": "Hat"}]
-        # Cut at a word to fit a palette name's 80 characters, the count of the rest kept whole.
-        self.assertEqual(name({"op": "fuse", "mode": "texture", "sources": long}), "Texture of Very Long Granular Ambient Texture Recording Very Long… + 2 more")
-        self.assertEqual(name({"op": "grow", "seed": 4, "recipe": "Grown 50% of the way from Kick toward Tom; seed 4"}), "Grown 50% of the way from Kick toward Tom")
+        # The UI's `resultName` follows the same rule, and ui/tests/design.test.mjs reads the same cases
+        # (made_names.json), so a way of making can't be named in one and not the other.
+        shared = json.loads(Path(__file__).with_name("made_names.json").read_text(encoding="utf-8"))
+        self.assertEqual(self.snapshots._MADE_WAYS, shared["ways"])
+        for case in shared["cases"]:
+            sources = [{"sound_id": f"s-r7-{i:04}", **({} if name is None else {"name": name})} for i, name in enumerate(case["sources"])]
+            answer = {"op": case["op"], "mode": case.get("mode"), "recipe": case.get("recipe"), "seed": 9, "sources": sources}
+            self.assertEqual(self.snapshots._design_name(answer), case["name"], case)
         self.assertIsNone(self.snapshots.palette_artifact(self.state, "a-d" + "B" * 22))
 
 

@@ -2741,6 +2741,7 @@
   };
   var FOCUSABLE = "kumi-focusable";
   var HOST_CONTROL = "kumi-host";
+  var MENU_BUTTON = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, font: "inherit", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "none", background: "transparent", color: T.secondary, cursor: "pointer", flex: "none" };
   function FocusStyle() {
     return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}.${FOCUSABLE}.${HOST_CONTROL}:focus-visible{outline-offset:0}.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
   }
@@ -2961,6 +2962,84 @@
   function Tip({ label, children }) {
     if (typeof label !== "string" || !label) return children;
     return /* @__PURE__ */ jsx("span", { style: { display: "contents" }, title: label, children });
+  }
+  function Menu({ label, actions, up = false }) {
+    const [open, setOpen] = useState(false);
+    const box = useRef(null);
+    const button = useRef(null);
+    const items = useRef([]);
+    useEffect(() => {
+      if (!open) return;
+      const away = (event) => {
+        if (!box.current?.contains(event.target)) setOpen(false);
+      };
+      window.addEventListener("pointerdown", away, true);
+      return () => window.removeEventListener("pointerdown", away, true);
+    }, [open]);
+    useEffect(() => {
+      if (open) items.current[0]?.focus();
+    }, [open]);
+    const close = () => {
+      setOpen(false);
+      button.current?.focus();
+    };
+    const keys = (event) => {
+      if (!open) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const at = items.current.findIndex((item) => item === event.target);
+      items.current[(at + (event.key === "ArrowDown" ? 1 : actions.length - 1)) % actions.length]?.focus();
+    };
+    return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          "aria-expanded": open,
+          "aria-haspopup": "menu",
+          "aria-label": label,
+          className: `${FOCUSABLE} kumi-btn`,
+          onClick: () => setOpen(!open),
+          ref: button,
+          title: label,
+          type: "button",
+          style: { ...MENU_BUTTON, background: open ? T.chip : "transparent" },
+          children: "⋯"
+        }
+      ),
+      open && /* @__PURE__ */ jsx(
+        "div",
+        {
+          "aria-label": label,
+          role: "menu",
+          style: { position: "absolute", ...up ? { bottom: 28 } : { top: 28 }, left: 0, zIndex: 3, minWidth: 160, width: "max-content", maxWidth: 280, padding: 4, display: "flex", flexDirection: "column", gap: 1, borderRadius: 6, border: `1px solid ${T.border}`, background: T.raised, boxShadow: "0 8px 24px -8px rgba(0,0,0,.45)" },
+          children: actions.map((action, index) => /* @__PURE__ */ jsx(
+            "button",
+            {
+              className: `${FOCUSABLE} kumi-btn`,
+              onClick: () => {
+                close();
+                action.onChoose();
+              },
+              ref: (element) => {
+                items.current[index] = element;
+              },
+              role: "menuitem",
+              title: action.title,
+              type: "button",
+              style: { font: "inherit", ...TYPE.small, textAlign: "left", padding: "5px 10px", borderRadius: 4, border: "none", background: "transparent", color: action.danger ? T.bad : T.text, cursor: "pointer", whiteSpace: "nowrap" },
+              children: action.name
+            },
+            action.id
+          ))
+        }
+      )
+    ] });
   }
 
   // src/shared/format.ts
@@ -4462,11 +4541,20 @@
     }
     return /* @__PURE__ */ jsx("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
   }
+  var WORDLY = /[\p{L}\p{N}_]/u;
+  function namesWhole(title, name) {
+    for (let at = title.indexOf(name); at >= 0; at = title.indexOf(name, at + 1)) {
+      const before = at > 0 ? title[at - 1] : "";
+      const after = title[at + name.length] ?? "";
+      if (!WORDLY.test(before) && !WORDLY.test(after)) return true;
+    }
+    return false;
+  }
   function metaOf(item, now, t) {
-    const said = clean(item.title ?? item.label ?? item.id, 300).toLowerCase();
+    const title = clean(item.title ?? item.label ?? item.id, 300);
     const name = nameOf(item.track);
-    const track2 = name && !said.includes(name.toLowerCase()) ? clean(name, 24) : "";
-    const family = item.family && !said.includes(item.family.toLowerCase()) ? clean(item.family, 16) : "";
+    const track2 = name && !namesWhole(title, name) ? clean(name, 24) : "";
+    const family = item.family && !title.toLowerCase().includes(item.family.toLowerCase()) ? clean(item.family, 16) : "";
     return { track: track2, text: [track2, family, ago(item.at, now, t), item.state === "undone" ? t("history.undone") : ""].filter(Boolean).join(" · ") };
   }
   function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }) {
@@ -7012,81 +7100,6 @@
       )
     ] });
   }
-  function ActionMenu({ label, actions, up = false }) {
-    const [open, setOpen] = useState(false);
-    const box = useRef(null);
-    const button = useRef(null);
-    const items = useRef([]);
-    useEffect(() => {
-      if (!open) return;
-      const away = (event) => {
-        if (!box.current?.contains(event.target)) setOpen(false);
-      };
-      window.addEventListener("pointerdown", away, true);
-      return () => window.removeEventListener("pointerdown", away, true);
-    }, [open]);
-    useEffect(() => {
-      if (open) items.current[0]?.focus();
-    }, [open]);
-    const close = () => {
-      setOpen(false);
-      button.current?.focus();
-    };
-    const keys = (event) => {
-      if (!open) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        close();
-        return;
-      }
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      event.preventDefault();
-      const at = items.current.findIndex((item) => item === event.target);
-      items.current[(at + (event.key === "ArrowDown" ? 1 : actions.length - 1)) % actions.length]?.focus();
-    };
-    return /* @__PURE__ */ jsxs("div", { onKeyDown: keys, ref: box, style: { position: "relative", display: "flex" }, children: [
-      /* @__PURE__ */ jsx(Tip, { label, children: /* @__PURE__ */ jsx(
-        "button",
-        {
-          "aria-expanded": open,
-          "aria-haspopup": "menu",
-          "aria-label": label,
-          className: `${FOCUSABLE} kumi-btn`,
-          onClick: () => setOpen(!open),
-          ref: button,
-          type: "button",
-          style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, font: "inherit", fontSize: 14, lineHeight: 1, borderRadius: 4, border: "none", background: open ? T.chip : "transparent", color: T.secondary, cursor: "pointer", flex: "none" },
-          children: "⋯"
-        }
-      ) }),
-      open && /* @__PURE__ */ jsx(
-        "div",
-        {
-          "aria-label": label,
-          role: "menu",
-          style: { position: "absolute", ...up ? { bottom: 28 } : { top: 28 }, left: 0, zIndex: 3, minWidth: 160, width: "max-content", maxWidth: 280, padding: 4, display: "flex", flexDirection: "column", gap: 1, borderRadius: 6, border: `1px solid ${T.border}`, background: T.raised, boxShadow: "0 8px 24px -8px rgba(0,0,0,.45)" },
-          children: actions.map((action, index) => /* @__PURE__ */ jsx(Tip, { label: action.title, children: /* @__PURE__ */ jsx(
-            "button",
-            {
-              className: `${FOCUSABLE} kumi-btn`,
-              onClick: () => {
-                close();
-                action.onChoose();
-              },
-              ref: (element) => {
-                items.current[index] = element;
-              },
-              role: "menuitem",
-              type: "button",
-              style: { font: "inherit", ...TYPE.small, textAlign: "left", padding: "5px 10px", borderRadius: 4, border: "none", background: "transparent", color: action.danger ? T.bad : T.text, cursor: "pointer", whiteSpace: "nowrap" },
-              children: action.name
-            }
-          ) }, action.id))
-        }
-      )
-    ] });
-  }
 
   // src/shared/atlas/Corner.tsx
   var caps = { ...TYPE.caption, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: T.faint, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
@@ -8485,11 +8498,10 @@
       return () => observer.disconnect();
     }, [hasPoints]);
     const moved2 = useRef(false);
-    const sideWas = useRef(mapSize);
-    if (sideWas.current !== mapSize) {
-      const was = sideWas.current;
-      sideWas.current = mapSize;
-      if (moved2.current && view) setView(keepPlace(view, was, mapSize));
+    const [sideWas, setSideWas] = useState(mapSize);
+    if (sideWas !== mapSize) {
+      setSideWas(mapSize);
+      if (moved2.current && view) setView(keepPlace(view, sideWas, mapSize));
     }
     useEffect(() => {
       if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
@@ -9215,15 +9227,13 @@
                 // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
                 // to its head (`listFolded`), so the map below still shows.
                 /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 2, padding: 6, width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: size.height > 0 && !listFolded ? Math.max(120, listRoom) : void 0, pointerEvents: "auto" }, children: [
-                  /* @__PURE__ */ jsxs("div", { style: { ...S.row, alignItems: "flex-start", gap: 6, padding: "0 0 4px 4px" }, children: [
-                    /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }, children: [
-                      /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.text }, children: searched ? t("map.matches") : nearName || t("map.found") }),
-                      facts && /* @__PURE__ */ jsx(Tip, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere" }, children: facts }) })
-                    ] }),
+                  /* @__PURE__ */ jsxs("div", { style: { ...S.row, alignItems: "center", gap: 6, padding: "0 0 0 4px" }, children: [
+                    /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...S.ellipsis, flex: 1, minWidth: 0, color: T.text }, children: searched ? t("map.matches") : nearName || t("map.found") }),
                     onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
                     /* @__PURE__ */ jsx(Button, { onClick: () => onPicked(matches, "replace"), tip: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
                     /* @__PURE__ */ jsx(Button, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                   ] }),
+                  facts && /* @__PURE__ */ jsx(Tip, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere", padding: "0 4px 4px" }, children: facts }) }),
                   !listFolded && /* @__PURE__ */ jsx("div", { ref: matchesList, style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
                     const sound = model.sounds[id];
                     const indexed = indexedValues(sound, t);
@@ -9957,7 +9967,7 @@
         palette === null && /* @__PURE__ */ jsx(Pending, { label: t("dock.reading"), width: "8rem" }),
         palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx("span", { ref: newBox, style: { display: "contents" }, children: /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => setEditing("new"), tip: t("dock.newName"), children: t("dock.newPalette") }) }),
         current && /* @__PURE__ */ jsx("span", { ref: menuBox, style: { display: "contents" }, children: /* @__PURE__ */ jsx(
-          ActionMenu,
+          Menu,
           {
             actions: [
               { id: "rename", name: t("dock.rename"), title: t("dock.renameTitle"), onChoose: () => setEditing("rename") },

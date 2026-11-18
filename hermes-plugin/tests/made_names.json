@@ -1,0 +1,35 @@
+{
+  "about": "The name a made sound gets: the UI's resultName (ui/src/shared/design.ts) and the backend's _design_name (snapshots.py) follow one rule, and ui/tests/design.test.mjs and tests/test_designs.py both read this file. A new way of making goes in `ways`, with a case; both tables must equal `ways`. In `sources`, null is a sound with no name.",
+  "ways": {
+    "blend": "Blend",
+    "attack": "Attack",
+    "resonate": "Resonance",
+    "modulate": "Modulation",
+    "texture": "Texture",
+    "smear": "Smear",
+    "loop": "Loop",
+    "cross": "Cross",
+    "fuse": "Fuse",
+    "stack": "Stack"
+  },
+  "cases": [
+    { "op": "cross", "mode": "blend", "sources": ["Kick 02", "Tom 4"], "name": "Blend of Kick 02 + Tom 4" },
+    {
+      "op": "cross",
+      "mode": "blend",
+      "sources": ["Punch Kick 00", "Punch Kick 01", "Punch Kick 02", "Punch Kick 03", "Punch Kick 04", "Punch Kick 05", "Punch Kick 06", "Punch Kick 07", "Punch Kick 08", "Punch Kick 09", "Punch Kick 10", "Punch Kick 11", "Punch Kick 12", "Punch Kick 13", "Punch Kick 14"],
+      "name": "Blend of Punch Kick 00 + Punch Kick 01 + 13 more"
+    },
+    { "op": "cross", "mode": "attack", "sources": ["Kick 02", "Tom 4"], "name": "Attack of Kick 02 + Tom 4" },
+    { "op": "cross", "mode": "resonate", "sources": ["Kick 02", "Tom 4"], "name": "Resonance of Kick 02 + Tom 4" },
+    { "op": "cross", "mode": "modulate", "sources": ["Kick 02", "Tom 4", "Hat 1"], "name": "Modulation of Kick 02 + Tom 4 + 1 more" },
+    { "op": "cross", "sources": [null], "name": "Cross" },
+    { "op": "fuse", "mode": "texture", "sources": ["Very Long Granular Ambient Texture Recording Very Long Granular Ambient Texture Recording ", "Tom", "Hat"], "name": "Texture of Very Long Granular Ambient Texture Recording Very Long… + 2 more" },
+    { "op": "fuse", "mode": "smear", "sources": ["“Dusty” Pad", "Tom"], "name": "Smear of Dusty Pad + Tom" },
+    { "op": "fuse", "sources": ["A Rather Long Field Recording Name", "Another Long Sample Name"], "name": "Fuse of A Rather Long Field Recording Name + 1 more" },
+    { "op": "loop", "sources": ["Break 7"], "name": "Loop of Break 7" },
+    { "op": "stack", "sources": ["Punch Kick 00", "Punch Kick 01", "Punch Kick 02"], "name": "Stack of Punch Kick 00 + Punch Kick 01 + 1 more" },
+    { "op": "stack", "sources": [null, null, null], "name": "Stack of 3 sounds" },
+    { "op": "grow", "recipe": "Grown 50% of the way from Kick toward Tom; seed 4", "sources": [], "name": "Grown 50% of the way from Kick toward Tom" }
+  ]
+}

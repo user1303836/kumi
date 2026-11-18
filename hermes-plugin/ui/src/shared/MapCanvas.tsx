@@ -547,12 +547,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const moved = useRef(false)
   // The map's side changes as its top settles, its height changes (the palette drawer) or a side sheet opens: a view
   // somebody moved, or a find framed, keeps every sound where it is on screen (`keepPlace`) rather than sliding a
-  // zoomed-in view's sounds out of sight. Done in the render that sees the new side, so no frame draws the slide.
-  const sideWas = useRef(mapSize)
-  if (sideWas.current !== mapSize) {
-    const was = sideWas.current
-    sideWas.current = mapSize
-    if (moved.current && view) setView(keepPlace(view, was, mapSize))
+  // zoomed-in view's sounds out of sight. Done in the render that sees the new side, so no frame draws the slide; the
+  // side it had is state, not a ref, so a render React throws away moves neither the side nor the view.
+  const [sideWas, setSideWas] = useState(mapSize)
+  if (sideWas !== mapSize) {
+    setSideWas(mapSize)
+    if (moved.current && view) setView(keepPlace(view, sideWas, mapSize))
   }
   // A new map, or a new size of a view nobody has moved: fit the whole map, below what floats over its top.
   useEffect(() => {
@@ -1446,16 +1446,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
               // to its head (`listFolded`), so the map below still shows.
               <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 2, padding: 6, width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: size.height > 0 && !listFolded ? Math.max(120, listRoom) : undefined, pointerEvents: 'auto' }}>
-                <div style={{ ...S.row, alignItems: 'flex-start', gap: 6, padding: '0 0 4px 4px' }}>
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                    {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
-                    <span style={{ ...TYPE.small, ...S.ellipsis, color: T.text }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
-                    {facts && (
-                      <Tip label={near ? t('map.closenessTitle') : undefined}>
-                        <span style={{ ...TYPE.caption, color: T.faint, overflowWrap: 'anywhere' }}>{facts}</span>
-                      </Tip>
-                    )}
-                  </span>
+                <div style={{ ...S.row, alignItems: 'center', gap: 6, padding: '0 0 0 4px' }}>
+                  {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
+                  <span style={{ ...TYPE.small, ...S.ellipsis, flex: 1, minWidth: 0, color: T.text }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
                   {onPicked && (
                     // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
                     <Button onClick={() => onPicked(matches, 'replace')} tip={searched !== null ? t('dock.pickAllTitle') : t('dock.pickFoundTitle')}>
@@ -1466,6 +1459,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                     ×
                   </Button>
                 </div>
+                {/* What every row shares, under the head across the card's whole width: it reads in a line or two. */}
+                {facts && (
+                  <Tip label={near ? t('map.closenessTitle') : undefined}>
+                    <span style={{ ...TYPE.caption, color: T.faint, overflowWrap: 'anywhere', padding: '0 4px 4px' }}>{facts}</span>
+                  </Tip>
+                )}
                 {!listFolded && (
                   <div ref={matchesList} style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
                     {listed.map(id => {

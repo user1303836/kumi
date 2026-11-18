@@ -1,11 +1,13 @@
-// Kumi's controls in Hermes Desktop are Hermes's own: its Button, Badge and Tip from the SDK (each exported from v0.22.7
-// on), so a button hovers, presses, focuses and disables as the app's own do, and a chip is the app's chip. The
-// dashboard build swaps this file for src/dashboard/controls.tsx (the same names). A host without one of them gets
-// Kumi's own drawing of it, never a missing control.
+// Kumi's controls in Hermes Desktop are Hermes's own: its Button, Badge, Tip and DropdownMenu from the SDK (each
+// exported from v0.22.7 on), so a button hovers, presses, focuses and disables as the app's own do, a chip is the
+// app's chip and a menu opens, moves and closes as the app's menus do. The dashboard build swaps this file for
+// src/dashboard/controls.tsx (the same names). A host without one of them gets Kumi's own drawing of it, never a
+// missing control.
 import * as sdk from '@hermes/plugin-sdk'
+import { T } from '@kumi/theme'
 import type { CSSProperties, ReactElement, ReactNode } from 'react'
 
-import { Chip, FOCUSABLE, HOST_CONTROL, TextButton, useRequestClick } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, HOST_CONTROL, MENU_BUTTON, TextButton, useRequestClick } from '../shared/ui.tsx'
 
 /** One button order everywhere: the one action a view exists for (`primary`), the usual action (`secondary`),
  *  everything else in a row (`quiet`), and an action that loses something, after its confirm (`destructive`). */
@@ -86,4 +88,39 @@ export function Tip({ label, children }: { label?: ReactNode; children: ReactEle
   const Host = sdk.Tip
   if (!label || typeof Host !== 'function') return children
   return <Host label={label}>{children}</Host>
+}
+
+/** One thing a menu does. */
+export interface MenuAction {
+  id: string
+  name: string
+  /** What hovering it teaches, where the menu shows hints (the dashboard's; Hermes's menus show none on an item). */
+  title?: string
+  onChoose: () => void
+  /** It loses something (after its own confirm): its name in the bad tone. */
+  danger?: boolean
+}
+
+/** A few actions behind a quiet "⋯" button (a palette's Rename… and Forget…): Hermes's DropdownMenu, as the composer
+ *  chip uses it, so it opens, moves under the arrows, closes and gives the focus back as the app's own menus do. `up`
+ *  opens it above the button, for a bar at the window's foot. */
+export function Menu({ label, actions, up = false }: { label: string; actions: MenuAction[]; up?: boolean }) {
+  return (
+    <sdk.DropdownMenu>
+      <Tip label={label}>
+        <sdk.DropdownMenuTrigger asChild>
+          <button aria-label={label} className={`${FOCUSABLE} kumi-btn`} type="button" style={MENU_BUTTON}>
+            ⋯
+          </button>
+        </sdk.DropdownMenuTrigger>
+      </Tip>
+      <sdk.DropdownMenuContent align="start" side={up ? 'top' : 'bottom'}>
+        {actions.map(action => (
+          <sdk.DropdownMenuItem key={action.id} onSelect={action.onChoose}>
+            {action.danger ? <span style={{ color: T.bad }}>{action.name}</span> : action.name}
+          </sdk.DropdownMenuItem>
+        ))}
+      </sdk.DropdownMenuContent>
+    </sdk.DropdownMenu>
+  )
 }
