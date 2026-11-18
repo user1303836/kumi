@@ -266,11 +266,11 @@ test('a search opens the map beside the chat, not over it, and Measurements then
   ])
 })
 
-test('in a window too narrow for the chat beside a tab, a find and a listen open nothing by themselves; a wide one opens the map as before', async () => {
-  const { default: plugin, ROOM_BESIDE_LEAST } = await load('src/desktop/plugin.tsx')
-  // Hermes's sidebar + the map's 20rem + Kumi's pane at 15rem + a 400 px chat.
-  assert.equal(ROOM_BESIDE_LEAST, 237 + 320 + 240 + 400)
+test("a window with no room beside the chat holds a find's or a measurement's tab back for Kumi's pane to offer; a hidden pane frees its room", async () => {
+  const { default: plugin, ROOM_BESIDE_LEAST, PANE_ROOM } = await load('src/desktop/plugin.tsx')
   const was = globalThis.innerWidth
+  const find = (h, id) => h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: id }, { sound_id: `${id}b` }] }) } })
+  const paneOf = h => h.registered.find(c => c.id === 'pane').render().props.children.props
   try {
     globalThis.innerWidth = ROOM_BESIDE_LEAST - 1
     const h = inFront(harness())
@@ -278,14 +278,27 @@ test('in a window too narrow for the chat beside a tab, a find and a listen open
     h.ctx.setTimeout = fn => (timers.push(fn), () => {})
     plugin.register(h.ctx)
     await settle()
-    h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }] }) } })
+    find(h, 's-r7-0091')
+    assert.deepEqual(h.calls.workspaces, [], 'no tab beside a chat with no room for it')
+    const pane = paneOf(h)
+    assert.deepEqual(pane.store.get().waiting, { tab: 'map', count: 2 })
+    // The pane's action opens it, beside the chat, and the wait is over.
+    pane.onOpenMap()
+    assert.deepEqual(h.calls.docks, [['kumi-sound-map', { pane: 'workspace', pos: 'right' }]])
+    assert.equal(pane.store.get().waiting, null)
+    // A measurement with no tool part waits the same way.
     h.events.get('plugin.kumi.listen.done')({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-9', result: { metrics: { file: 'a.wav' } } } })
     timers.at(-1)()
-    assert.deepEqual(h.calls.workspaces, [], 'no tab opened by itself')
-    // As wide as the room needs, the same find opens the map as before.
-    globalThis.innerWidth = ROOM_BESIDE_LEAST
-    h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: 's-r7-0092' }] }) } })
-    assert.deepEqual(h.calls.workspaces, [['kumi-sound-map', 'Sound map']])
+    assert.deepEqual(pane.store.get().waiting, { tab: 'measurements' })
+    assert.equal(h.calls.workspaces.length, 1)
+    // Kumi's pane out of view (it says so itself) takes no room: the chat and the tab fit from 877 px.
+    const h2 = inFront(harness())
+    plugin.register(h2.ctx)
+    await settle()
+    paneOf(h2).onShown(false)
+    globalThis.innerWidth = ROOM_BESIDE_LEAST - PANE_ROOM
+    find(h2, 's-r7-0092')
+    assert.deepEqual(h2.calls.docks, [['kumi-sound-map', { pane: 'workspace', pos: 'right' }]])
   } finally {
     if (was === undefined) delete globalThis.innerWidth
     else globalThis.innerWidth = was

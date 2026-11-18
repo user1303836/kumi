@@ -3,7 +3,7 @@
 // approval's own warning, and every line. A device (CC-22) shows its controls (name, range, default) beside its GenExpr
 // code, all from the one spec its hash names. A script's HISTORY row can show the code it ran, after a restart too.
 // The code comes from the file the plugin saved when it asked, re-hashed by `/script`; nothing here runs anything.
-import { Button } from '@kumi/controls'
+import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useEffect, useState } from 'react'
 
@@ -12,7 +12,7 @@ import { clean, dawName } from '../shared/format.ts'
 import type { Translate } from '../shared/i18n.ts'
 import type { KumiStore } from '../shared/store.ts'
 import type { DeviceSpec, HistoryItem, PendingScript, ScriptCode, ScriptLanguage } from '../shared/types.ts'
-import { S, useT } from '../shared/ui.tsx'
+import { S, TYPE, useT } from '../shared/ui.tsx'
 
 const LANGUAGE: Record<ScriptLanguage, string> = { python: 'script.python', lua: 'script.lua', device: 'script.device' }
 
@@ -55,9 +55,9 @@ function Controls({ spec }: { spec: DeviceSpec }) {
   if (!controls.length) return <span style={S.faint}>{t('script.noControls')}</span>
   const cell = { padding: '2px 6px', textAlign: 'left', whiteSpace: 'nowrap' } as const
   return (
-    <table aria-label={t('script.controls')} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, margin: 0 }}>
+    <table aria-label={t('script.controls')} style={{ borderCollapse: 'collapse', ...TYPE.small, color: T.text, margin: 0 }}>
       <thead>
-        <tr style={{ color: T.muted, fontSize: 11 }}>
+        <tr style={{ color: T.muted, ...TYPE.caption }}>
           <th style={{ ...cell, fontWeight: 400 }}>{t('script.control')}</th>
           <th style={{ ...cell, fontWeight: 400 }}>{t('script.range')}</th>
           <th style={{ ...cell, fontWeight: 400 }}>{t('script.default')}</th>
@@ -65,7 +65,7 @@ function Controls({ spec }: { spec: DeviceSpec }) {
       </thead>
       <tbody>
         {controls.map((control, index) => (
-          <tr key={index} style={{ borderTop: `1px solid ${T.border}` }}>
+          <tr key={index} style={{ borderTop: `1px solid ${T.hairline}` }}>
             <td style={cell}>{clean(String(control.name ?? ''), 32)}</td>
             <td style={{ ...cell, color: T.muted }}>{range(control, t)}</td>
             <td style={{ ...cell, color: T.muted }}>{defaultOf(control, t)}</td>
@@ -91,9 +91,9 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
       <span style={S.heading}>{heading}</span>
       {pending.purpose && <span style={S.text}>{t('script.says', clean(pending.purpose, 200))}</span>}
       {pending.file && <span style={S.muted}>{t('script.file', clean(pending.file, 200))}</span>}
-      <span style={S.faint} title={t('script.shaTitle', pending.sha256)}>
-        {facts.join(' · ')}
-      </span>
+      <Tip label={t('script.shaTitle', pending.sha256)}>
+        <span style={S.faint}>{facts.join(' · ')}</span>
+      </Tip>
       {pending.warning && <span style={{ ...S.muted, color: T.warn }}>{clean(pending.warning, 300)}</span>}
       {code ? (
         pending.language === 'device' ? (

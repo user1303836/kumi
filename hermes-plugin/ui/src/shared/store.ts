@@ -49,6 +49,9 @@ export interface KumiState {
   /** The latest `kumi_listen` result a `listen.done` event brought when the transcript showed none (CC-9); `result`
    *  is null when the event left it out for its size. */
   measured: { tool_call_id: string; result: unknown; at: number } | null
+  /** A tab of Kumi's that a find or a measurement would have opened, held back for a window with no room beside the
+   *  chat: Kumi's pane offers it at its top until it's opened or another takes its place. */
+  waiting: { tab: 'map'; count: number } | { tab: 'measurements' } | null
   /** Comparisons against each reference this window saw arrive (a mastering pass's rounds), oldest first, by
    *  `roundKey`. Only what arrived while the window was open, so a round is never numbered from a partial past. */
   rounds: Record<string, Round[]>
@@ -123,7 +126,7 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
+const EMPTY: KumiState = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, waiting: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
 
 /** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
 export const HIDE_BATCH_MS = 1200
@@ -506,6 +509,11 @@ export class KumiStore {
   /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
   measure(toolCallId: string, result: unknown): void {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } })
+  }
+
+  /** A tab held back for want of room (`waiting`), or none once it's opened. */
+  wait(waiting: KumiState['waiting']): void {
+    this.set({ waiting })
   }
 
   /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is

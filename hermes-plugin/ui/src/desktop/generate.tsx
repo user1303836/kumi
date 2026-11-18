@@ -3,7 +3,7 @@
 // one request to finish in the chat (CC-13). Nothing here spends, places or retries anything: the paid step was
 // Hermes's approval, and placing is a change the producer approves.
 import type { PluginContext, ToolMediaRendererProps } from '@hermes/plugin-sdk'
-import { Button } from '@kumi/controls'
+import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
@@ -32,7 +32,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
   return (
     <div
       data-kumi-card="generate"
-      style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.hairline}`, background: T.card, color: T.text }}
     >
       <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <span style={{ ...S.text, fontWeight: 600, minWidth: 0, whiteSpace: 'normal' }}>
@@ -47,9 +47,12 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
           ) : made.state === 'running' ? (
             <Chip>{t('generate.states.running')}</Chip>
           ) : (
-            <Chip title={t('generate.generatedTitle')} tone="accent">
-              {t('generate.generated')}
-            </Chip>
+            // A span for Hermes's Tip to hold: a chip passes no props on.
+            <Tip label={t('generate.generatedTitle')}>
+              <span>
+                <Chip tone="accent">{t('generate.generated')}</Chip>
+              </span>
+            </Tip>
           )}
         </span>
       </div>
@@ -66,11 +69,17 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
       {ENDED.has(made.state) && made.error?.reason && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{made.error.reason}</span>}
       {(cost || left) && (
         <span style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-          {cost && <Chip title={t('generate.creditsTitle')}>{cost}</Chip>}
+          {cost && (
+            <Tip label={t('generate.creditsTitle')}>
+              <span>
+                <Chip>{cost}</Chip>
+              </span>
+            </Tip>
+          )}
           {left && (
-            <span style={S.faint} title={t('generate.capTitle')}>
-              {left}
-            </span>
+            <Tip label={t('generate.capTitle')}>
+              <span style={S.faint}>{left}</span>
+            </Tip>
           )}
         </span>
       )}

@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
@@ -35,7 +35,36 @@ export function ownerSession(state: KumiState): null | string {
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void; onOpenMeasurements: () => void }) {
+interface PaneProps {
+  ctx: PluginContext
+  store: KumiStore
+  onOpenMap: () => void
+  onOpenMeasurements: () => void
+}
+
+/** Kumi's pane, telling `onShown` whether it's in view. Desktop's own `paneVisibility('kumi:pane')` reads false while
+ *  the pane shows (it's stacked with Desktop's hidden Review pane, whose id stays the group's active one), so Kumi
+ *  watches its own root instead: off screen, hidden by Desktop or gone, it's out of view. */
+export function KumiPane({ onShown, ...props }: PaneProps & { onShown?: (shown: boolean) => void }) {
+  const root = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = root.current
+    if (!element || !onShown) return
+    const seen = new IntersectionObserver(entries => onShown(entries.some(entry => entry.isIntersecting)))
+    seen.observe(element)
+    return () => {
+      seen.disconnect()
+      onShown(false)
+    }
+  }, [onShown])
+  return (
+    <div ref={root} style={{ height: '100%' }}>
+      <PaneBody {...props} />
+    </div>
+  )
+}
+
+function PaneBody({ ctx, store, onOpenMap, onOpenMeasurements }: PaneProps) {
   const t = useT()
   const state = useKumi(store)
   const now = useNow()
@@ -73,6 +102,17 @@ export function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }: { ctx: P
         </div>
         {setupMessage && <span style={note}>{setupMessage}</span>}
         {state.error && <span style={{ ...note, color: T.warn }}>{t('pane.backendError', state.error)}</span>}
+        {/* A find or a measurement whose tab a narrow window held back (P8): the one thing to do, at the top, until it's
+            opened or another takes its place. Under twenty HISTORY rows it was lost, while the chat said the sounds were
+            lit up on the map. */}
+        {state.waiting && (
+          <div role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ ...TYPE.small, color: T.text, flex: '1 1 auto' }}>{state.waiting.tab === 'map' ? t('pane.waitingFound', state.waiting.count) : t('pane.waitingMeasured')}</span>
+            <Button kind="primary" onClick={state.waiting.tab === 'map' ? onOpenMap : onOpenMeasurements}>
+              {state.waiting.tab === 'map' ? t('pane.showOnMap') : t('pane.showMeasurement')}
+            </Button>
+          </div>
+        )}
         {state.status?.unsure && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
             <span style={{ ...note, color: T.warn }}>

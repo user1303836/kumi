@@ -2,7 +2,7 @@
 // minute how it ended. A job is something Kumi was asked to do in the chat; this only shows it. A finished generation
 // offers its one request (Place… or Plan notes…), left unsent in the chat, as its transcript card does (CC-13): with
 // tool progress off, this row is where it shows.
-import { Button } from '@kumi/controls'
+import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 
 import { jobWords } from '../shared/format.ts'
@@ -28,9 +28,9 @@ export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>
               <span style={{ ...TYPE.body, color: job.ended_at === null ? T.text : TONE[words.tone] }}>{words.title}</span>
               {words.detail && (
                 // A generation's detail names credits: the tooltip says they're Mirelo API credits, not money (13d).
-                <span style={{ ...TYPE.small, ...S.ellipsis, color: T.faint }} title={generation ? t('generate.creditsTitle') : undefined}>
-                  {words.detail}
-                </span>
+                <Tip label={generation ? t('generate.creditsTitle') : undefined}>
+                  <span style={{ ...TYPE.small, ...S.ellipsis, color: T.faint }}>{words.detail}</span>
+                </Tip>
               )}
             </span>
             {job.ended_at === null && (
