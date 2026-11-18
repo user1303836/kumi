@@ -70,3 +70,27 @@ test('a map of one sound, or none, lays out without fault', () => {
   const none = map.tileLayout(map.buildModel(null))
   assert.equal(none.col.length, 0)
 })
+
+test("on a short map what docks at the foot is never covered: the picks' actions keep above the corner, and the map fits above it", () => {
+  // A 600 × 300 map whose top column reaches 230 px (a find's list) and whose foot takes 110 px (the corner over the
+  // player): no room between them for a 40 px card. It keeps above the foot, over the column's lower edge, never
+  // under the corner where it can't be seen or pressed.
+  const [card, top, foot] = [[320, 40], 230, 110]
+  for (const box of [null, [40, 100, 120, 140], [20, 60, 580, 280]]) {
+    const at = map.floatBeside(box, ...card, 600, 300, top, foot)
+    assert.ok(at.top + card[1] <= 300 - foot && at.top >= 8, `${JSON.stringify(at)} for ${box}`)
+  }
+  // Fit puts the whole map between the top and the corner's room at the foot, and a find's frame above all that docks
+  // there (the player too), on the same map size.
+  const [width, height, bar, corner] = [600, 400, 80, 76]
+  const side = map.mapSide(width, height, bar, corner)
+  const fitted = map.fitView(width, height, bar, 0, corner)
+  assert.ok(map.toScreen(fitted, side, 0, 0)[1] >= bar && map.toScreen(fitted, side, 1, 1)[1] <= height - corner, JSON.stringify(fitted))
+  const model = map.buildModel({ revision: 'r1', points: [['a', 0.2, 0.9, 0], ['b', 0.3, 0.95, 0], ['c', 0.5, 0.1, 0]], groups: {}, sounds: {} })
+  const framed = map.frame(model, new Set(['a', 'b']), width, height, bar, 0, 24, { bottom: 220 }, corner)
+  for (const id of ['a', 'b']) {
+    const point = model.points.find(each => each.id === id)
+    const [, y] = map.toScreen(framed, side, point.x, point.y)
+    assert.ok(y >= bar && y <= height - 220, `${id} framed above the foot at ${y}`)
+  }
+})

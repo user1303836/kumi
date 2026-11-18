@@ -55,6 +55,7 @@ export function Corner({
   box,
   first,
   cover = 0,
+  compact = false,
   still = false
 }: {
   /** The count in words ("8,960 sounds"), and how many families have sounds. */
@@ -74,6 +75,8 @@ export function Corner({
   bottom: number
   /** Its own box, for the map to keep its words from under it. */
   box?: RefObject<HTMLDivElement | null>
+  /** A short map: only the first line (and a prompt), so the map keeps room for its sounds. */
+  compact?: boolean
   /** The first-open steps still to do, while there are some: they stand over the corner's own lines. */
   first?: ReactNode
   /** How much of the map's right a side sheet covers: the corner keeps to the room left of it. */
@@ -113,7 +116,7 @@ export function Corner({
           </span>
         )}
       </div>
-      {prompt ?? (
+      {prompt ?? (compact ? null : (
         <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: T.muted }}>
           {picked && <span style={{ color: T.text, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{picked}</span>}
           {hint.map(([gesture, deed], index) => (
@@ -128,7 +131,7 @@ export function Corner({
             </span>
           ))}
         </div>
-      )}
+      ))}
     </div>
   )
 }

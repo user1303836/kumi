@@ -5,6 +5,7 @@ export const T = {
   muted: 'var(--color-muted-foreground)',
   faint: 'var(--color-muted-foreground)',
   border: 'var(--color-border)',
+  hairline: 'color-mix(in srgb, var(--color-border) 60%, transparent)',
   card: 'var(--color-card)',
   raised: 'var(--color-popover, var(--color-card))',
   chip: 'var(--color-muted)',

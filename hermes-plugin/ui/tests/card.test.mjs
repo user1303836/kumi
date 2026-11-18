@@ -277,13 +277,17 @@ test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the pa
   }
 })
 
-test('FOCUS says Kumi stopped (not "not answering") once it stopped, and keeps the catch-up when the DAW reports no focus', async () => {
+test('the status line says Kumi stopped (not "not answering") once it stopped, FOCUS doesn\'t say it again, and FOCUS keeps the catch-up when the DAW reports no focus', async () => {
   const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const { chipWords } = await load('src/shared/format.ts')
+  assert.equal(chipWords({ stale: true, running: false, daw: 'ableton', project: { name: 'Set' } }).text, 'Live · Set · Kumi stopped')
   const stopped = renderToStaticMarkup(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } } }, now: 0 }))
-  assert.ok(stopped.includes('Kumi stopped') && !stopped.includes('not answering'), stopped)
+  assert.ok(!stopped.includes('Kumi stopped') && !stopped.includes('not answering') && stopped.includes('opacity:0.6'), stopped)
   const closed = { project: { name: 'Night Drive' }, focus: null, catch_up: [{ set: 'Night Drive', lines: ['Bass muted'], more: 0 }] }
   const html = renderToStaticMarkup(createElement(FocusView, { focus: closed, now: 0 }))
   for (const text of ['Nothing selected', 'Night Drive', 'Since Kumi last looked', 'Bass muted']) assert.ok(html.includes(text), `${text} in ${html}`)
+  // While the status line names the project, FOCUS doesn't chip it again.
+  assert.ok(!renderToStaticMarkup(createElement(FocusView, { focus: { ...closed, catch_up: [] }, now: 0, project: false })).includes('Night Drive'))
   const reaper = { focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, section: { kind: 'marker', name: 'Arrange' } }, transport: { playing: true, line: 12 } }
   const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
   assert.ok(!/>[^<]*\b12\b[^<]*</.test(neutral), 'the line a snapshot was written at is never shown')
@@ -436,34 +440,91 @@ test('what the agent found, or a search, is also listed by name above the map, f
   }
   const draw = (found, selected = null) =>
     renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
-  // The listed rows: the list's own card, the last group before the canvas (the tools and the legend's toggles, before
-  // it, are pressed buttons too).
-  const rows = html => html.slice(html.lastIndexOf('<div', html.lastIndexOf('role="group"', html.indexOf('<canvas'))), html.indexOf('<canvas'))
+  // The listed rows: the list's own card, the last group before the map's own group (which holds the canvas; the tools
+  // and the legend's toggles, before the list, are pressed buttons too).
+  const rows = html => {
+    const mapGroup = html.lastIndexOf('<div', html.indexOf('<canvas'))
+    return html.slice(html.lastIndexOf('<div', html.lastIndexOf('role="group"', mapGroup)), mapGroup)
+  }
   const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
   assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
   assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
   assert.equal(rows(html).split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
   const many = draw({ revision: 'r7', ids })
   assert.equal(rows(many).split('<button aria-pressed').length - 1, 6)
-  assert.ok(many.includes('and 2 more on the map'), many)
+  assert.ok(many.includes(english('map.showMore', 2)), many)
   // A find from another map revision names sounds this map may not have: no list.
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
   assert.ok(!draw(null).includes('Sounds Kumi found'))
   // CC-23: each found hit with the map's indexed values and what Kumi said of it; a near search heads the list with
-  // its seeds, named from the map. Closeness is relative to this map, never a percentage.
+  // its seeds, named from the map. Closeness is relative to this map, never a percentage: the head says so once, and
+  // each row's number is its own.
   const indexed = { ...map, sounds: { ...map.sounds, [ids[0]]: { ...map.sounds[ids[0]], bpm: 124, key: 'A minor' }, [ids[1]]: { ...map.sounds[ids[1]], note: 'D2' } } }
   const nearFind = { revision: 'r7', ids: ids.slice(0, 2), near: ['s-r7-0099'], matches: { [ids[0]]: { why: ['measured: darker than most'], closeness: 87 }, [ids[1]]: { why: [] } } }
   const near = renderToStaticMarkup(createElement(MapCanvas, { map: indexed, found: nearFind, playing: null, selected: null, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
-  for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), `${english('map.closeness', '87')} · measured: darker than most`]) {
+  for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), english('map.closenessShown'), '>87<', 'measured: darker than most']) {
     assert.ok(near.includes(text), `${text} in ${near}`)
   }
   const words = rows(near).replace(/<[^>]*>/g, ' ')
   assert.ok(!words.includes('%'), words)
+  // What every row would repeat is said once, in the head: one kind, a reason they all share, and closeness all
+  // within two points; the rows then carry no number and no kind.
+  const close = draw({ ...nearFind, matches: { [ids[0]]: { why: ['near the seed'], closeness: 100 }, [ids[1]]: { why: ['near the seed'], closeness: 99 } } })
+  assert.ok(close.includes(`${english('map.allKind', 'snare')} · near the seed · ${english('map.closeness', '99–100')}`), close)
+  assert.ok(!close.includes('>100<') && !close.includes('>99<') && rows(close).split('>snare<').length === 1, close)
   // "More like these": several seeds, the first named and the rest counted.
   assert.ok(draw({ ...nearFind, near: ['s-r7-0099', ids[7]] }).includes(english('map.nearMany', 'Kick 1.wav', 1)))
   // The same hits found without a near search say their reasons alone; a seed the map doesn't list heads nothing.
   const plain = draw({ ...nearFind, near: ['s-gone'] })
   assert.ok(plain.includes('aria-label="Sounds Kumi found"') && plain.includes('measured: darker than most') && !plain.includes('closeness'), plain)
+})
+
+test("the map's keyboard stop is the sound reached: a checkbox in the map's group, named for the sound and checked as it's picked", async () => {
+  const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
+  const map = {
+    revision: 'r7',
+    points: [['s-r7-0010', 0.2, 0.3, 0], ['s-r7-0011', 0.6, 0.7, 0]],
+    groups: { 0: { name: 'snare', color: '#f59e0b', count: 2 } },
+    sounds: { 's-r7-0010': { name: 'Dusty Snare 1.wav', class: 'snare' }, 's-r7-0011': { name: 'Dusty Snare 2.wav', class: 'snare' } }
+  }
+  const draw = (selected, picked) => renderToStaticMarkup(createElement(MapCanvas, { map, found: null, playing: null, selected, picked, onPick: () => {}, onSelect: () => {}, onPicked: () => {}, empty: 'none' }))
+  // The stop: the map's group, from its opening tag to its end, holds it; nothing else in the map takes a tab of its own.
+  const stopOf = html => {
+    const group = html.slice(html.lastIndexOf('<div', html.indexOf('<canvas')))
+    assert.ok(group.startsWith(`<div aria-label="${english('map.canvas')}"`) && group.includes('role="group"'), group.slice(0, 200))
+    assert.equal(html.split('tabindex="0"').length - 1, 1, 'one keyboard stop')
+    const at = group.indexOf('tabindex="0"')
+    return group.slice(group.lastIndexOf('<div', at), group.indexOf('>', at) + 1)
+  }
+  const picked = stopOf(draw('s-r7-0011', new Set(['s-r7-0011'])))
+  assert.ok(picked.includes('role="checkbox"') && picked.includes('aria-checked="true"') && picked.includes('aria-label="Dusty Snare 2.wav, snare"'), picked)
+  const unpicked = stopOf(draw('s-r7-0011', new Set()))
+  assert.ok(unpicked.includes('role="checkbox"') && unpicked.includes('aria-checked="false"'), unpicked)
+  // Before the arrows reach a sound: a button named for the map, described by the keys hint.
+  const none = stopOf(draw(null, new Set()))
+  assert.ok(none.includes('role="button"') && none.includes(`aria-label="${english('map.canvas')}"`) && none.includes('aria-describedby') && !none.includes('aria-checked'), none)
+  // The canvas only draws: hidden from a screen reader, out of the tab order; no host-private marks anywhere.
+  const html = draw('s-r7-0011', new Set())
+  const canvas = html.slice(html.indexOf('<canvas'), html.indexOf('>', html.indexOf('<canvas')))
+  assert.ok(canvas.includes('aria-hidden="true"') && !canvas.includes('tabindex'), canvas)
+  for (const word of ['role="application"', 'role="listbox"', 'data-overlay-surface']) assert.ok(!html.includes(word), word)
+})
+
+test('a vine grown from a grown point names every point from the two map sounds, on one scale: never nested, never a seed', async () => {
+  const { GrowLayer } = await load('src/shared/GrowLayer.tsx', { react: 'real' })
+  const { alongPath, soundEnd } = await load('src/shared/grow.ts')
+  const punch = soundEnd('s-r7-0002', 'Punch Kick 89.wav', 'r7')
+  // "Grow from here" on the 50% bud of Boom Kick 89 → Punch Kick 89: the new vine is the rest of that path.
+  const grown = { source: { artifact_id: 'a-1', name: '50% from Boom Kick 89.wav toward Punch Kick 89.wav' }, id: null, place: [0.4, 0.4], name: '50% from Boom Kick 89.wav toward Punch Kick 89.wav', origin: 'Boom Kick 89.wav', along: 0.5 }
+  assert.equal(alongPath(grown, 0.5), 0.75)
+  assert.equal(alongPath(punch, 0.5), 0.5)
+  const result = { artifact_id: 'a-2', op: 'grow', seed: 1166296173, recipe: 'Grown 55% of the way from Grown 50% of the way from Boom Kick 89 toward Punch Kick 89, seed 99 toward Punch Kick 89 (highs first)', duration: 0.7, peaks: [], sources: [] }
+  const noop = () => {}
+  const grow = { choosing: null, from: grown, to: punch, buds: [{ at: 0.5, state: 'ready', result }], handle: 0.5, scrub: null, picked: 0.5, choose: noop, name: noop, between: noop, scrubTo: noop, pick: noop, reroll: noop, close: noop }
+  const html = renderToStaticMarkup(createElement(GrowLayer, { grow, from: [100, 100], to: [300, 200], fromMap: [0.4, 0.4], toMap: [0.8, 0.6], fromColor: '#e85d4a', toColor: '#4a90e2', width: 640, height: 480, top: 120, bottom: 90, playing: null, onPlay: noop, onStop: noop }))
+  assert.ok(html.includes(english('grow.title', 'Boom Kick 89.wav', 'Punch Kick 89.wav')), html)
+  assert.ok(html.includes(english('grow.bud', 75)) && html.includes('75%'), 'the point halfway along the rest of the path is 75% of the whole way')
+  for (const word of ['seed', 'Grown', 'of the way from']) assert.ok(!html.includes(word), `${word} in ${html}`)
 })
 
 test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why an undo didn't happen", async () => {
@@ -478,17 +539,21 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     ]
   }
   const html = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, action: () => null }))
-  for (const text of ['Live stopped answering mid-change.', english('history.lookFirst'), 'Bass was changed by hand since, so Kumi kept it.', 'Bass · mixer · c3', 'Tempo 120 → 124']) {
+  for (const text of ['Live stopped answering mid-change.', english('history.lookFirst'), 'Bass was changed by hand since, so Kumi kept it.', 'Tempo 120 → 124']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
-  // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since, and says
-  // where to undo it. A stale snapshot clears every row's undo, so there it says nothing of a restart.
-  const restarted = english('history.restartedSince', 'Live').replaceAll("'", '&#x27;')
+  // The meta line says what the title doesn't: "Bass muted" names its track, so the line is the kind of change, and
+  // never the machine label (c3).
+  assert.ok(html.includes('>mixer<') && !html.includes('c3'), html)
+  // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since. That's said
+  // once, under a divider, for every such row; a stale snapshot clears every row's undo, so there it says nothing of it.
+  const restarted = english('history.restartedSinceAll', 'Live').replaceAll("'", '&#x27;')
   const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
-  assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
-  assert.ok(!html.includes(restarted))
+  assert.ok(live.includes(restarted) && live.includes(english('history.beforeRestart')) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
+  assert.ok(!html.includes(restarted) && !html.includes(english('history.beforeRestart')))
   // A script's row has no undo from the start (Kumi never undoes one, CC-19): applied, saying so, never "restarted".
   assert.equal(live.split(restarted).length - 1, 1, live)
+  assert.ok(!live.includes(english('history.restartedSince', 'Live').replaceAll("'", '&#x27;')), 'no paragraph under each row')
   assert.ok(live.includes(english('history.scriptUndo', 'Live').replaceAll("'", '&#x27;')), live)
   assert.ok(live.includes(`aria-label="${english('history.applied')}"`), live)
 })
@@ -498,10 +563,10 @@ test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their
   const inJapanese = element => renderToStaticMarkup(createElement(I18n.Provider, { value: translator('ja') }, element))
   const history = { items: [{ id: 'h-1', label: 'c1', title: 'Drums volume −6.0 → −4.0 dB', family: 'mixer', state: 'undone', undo_available: false, at: 0, track: 'Drums' }] }
   const rows = inJapanese(createElement(HistoryView, { history, now: 0 }))
-  for (const text of ['aria-label="取り消し済み"', 'Drums volume −6.0 → −4.0 dB', 'Drums · mixer · c1 · たった今']) assert.ok(rows.includes(text), `${text} in ${rows}`)
+  for (const text of ['aria-label="取り消し済み"', 'Drums volume −6.0 → −4.0 dB', 'mixer · たった今']) assert.ok(rows.includes(text), `${text} in ${rows}`)
   assert.ok(inJapanese(createElement(HistoryView, { history: { items: [] } })).includes('まだ変更はありません'))
   const focus = inJapanese(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } }, transport: { playing: false } }, now: 0 }))
-  for (const text of ['Drums', '■ 停止中', 'Kumi は停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
+  for (const text of ['Drums', '■ 停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
 })
 
 test("a track listen's capture note shows as plain text under the capture line, and nothing shows for an empty one", () => {

@@ -2,10 +2,11 @@
 // same backend routes as the Desktop half. The dashboard has no chat input to put a request in, so it changes nothing
 // in the DAW: a row's request can be copied, to paste into a chat. It does only what changes no project, as Desktop
 // does: edits the palette and the sounds hidden from the map, and makes new sounds (the Make panel).
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { addFolderRequest, beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, undoRequest, undoRowOf } from '../shared/format.ts'
+import { addFolderRequest, beatSeconds, canUndoChange, chipWords, clean, cleanupWords, folderExample, LOOK_AGAIN_REQUEST, RESCAN_REQUEST, SCAN_REQUEST, soundRequest, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
@@ -22,7 +23,7 @@ import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { KumiStore } from '../shared/store.ts'
 import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
-import { Dot, FocusStyle, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
+import { Dot, FocusStyle, I18n, S, Section, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
@@ -47,21 +48,22 @@ function useNow(every = 30_000): number {
   return now
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+function CopyButton({ text, label, kind = 'secondary' }: { text: string; label: string; kind?: 'primary' | 'quiet' | 'secondary' }) {
   const t = useT()
   const [done, setDone] = useState(false)
   return (
-    <TextButton
+    <Button
+      kind={kind}
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setDone(true)
           setTimeout(() => setDone(false), 1500)
         })
       }}
-      title={t('dashboard.copyTitle', text)}
+      tip={t('dashboard.copyTitle', text)}
     >
       {done ? t('dashboard.copied') : label}
-    </TextButton>
+    </Button>
   )
 }
 
@@ -143,7 +145,8 @@ function Dashboard() {
     }
   }, [store, audition])
 
-  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
+  // One home per fact, as in Desktop's pane: the tempo is FOCUS's; the project is the status line's while it names it.
+  const words = chipWords(state.status, undefined, t)
   const tone = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }[words.tone]
   const connected = Boolean(state.status?.connected)
 
@@ -189,15 +192,14 @@ function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
           <Section title={t('pane.focus')}>
-            <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} />
+            <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} project={!statusNamesProject(state.status)} />
           </Section>
           <Section title={t('pane.history')}>
             <HistoryView
-              action={item => {
-                // One Copy undo per change, on the row its undo starts from, as in Desktop's pane (CC-3 A2).
-                const rows = changesOf(state.history?.items ?? []).find(change => change.includes(item))
-                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null
-              }}
+              action={(head, rows) =>
+                // One Copy undo per change, on its head, as in Desktop's pane (CC-3 A2).
+                canUndoChange(state.status, rows) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(head)} /> : null
+              }
               daw={state.status?.daw}
               history={state.history}
               loading={state.history === null && !state.failed.history}
@@ -230,10 +232,10 @@ function Dashboard() {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} title={t('dock.addTitle')}>
+                  <Button disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} tip={t('dock.addTitle')}>
                     {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
-                  </TextButton>
-                  {request && <CopyButton label={t('dashboard.copyReference')} text={request} />}
+                  </Button>
+                  {request && <CopyButton label={t('dashboard.copyUse')} text={request} />}
                 </>
               )
             }}
@@ -243,7 +245,7 @@ function Dashboard() {
                   <>
                     {t('map.failed', state.failed.map)}
                     <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
-                      <TextButton onClick={() => store.refresh('map')}>{t('map.retry')}</TextButton>
+                      <Button onClick={() => store.refresh('map')}>{t('map.retry')}</Button>
                     </div>
                   </>
                 ) : (
@@ -257,7 +259,7 @@ function Dashboard() {
                   {t('dashboard.mapEmpty')}
                   <div style={{ ...glass, marginTop: 12, padding: 12 }}>{folderControl()}</div>
                   <div style={{ marginTop: 10 }}>
-                    <CopyButton label={t('map.scanCopy')} text={SCAN_REQUEST} />
+                    <CopyButton kind="primary" label={t('map.scanCopy')} text={SCAN_REQUEST} />
                   </div>
                 </>
               )
@@ -265,10 +267,10 @@ function Dashboard() {
             found={state.found}
             hiddenActions={
               <>
-                <TextButton onClick={() => store.showHidden()} title={t('map.showHiddenTitle')}>
+                <Button kind="quiet" onClick={() => store.showHidden()} tip={t('map.showHiddenTitle')}>
                   {t('map.showHidden')}
-                </TextButton>
-                <CopyButton label={t('map.rescan')} text={RESCAN_REQUEST} />
+                </Button>
+                <CopyButton kind="quiet" label={t('map.rescan')} text={RESCAN_REQUEST} />
               </>
             }
             leaving={state.leaving}
@@ -290,14 +292,15 @@ function Dashboard() {
               const kept = palette.kept.has(result.artifact_id)
               return (
                 <>
-                  <TextButton disabled={kept} onClick={() => palette.keep(result)} title={t('make.keepTitle')}>
-                    {kept ? t('make.kept') : t('make.keep')}
-                  </TextButton>
-                  {request && <CopyButton label={t('make.copyUse')} text={request} />}
                   {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
-                  <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
+                  <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
                     {t('make.open')}
-                  </TextButton>
+                  </Button>
+                  <span style={{ flex: 1 }} />
+                  <Button disabled={kept} onClick={() => palette.keep(result)} tip={kept ? undefined : t('make.keepTitle')}>
+                    {kept ? t('make.kept') : t('make.keep')}
+                  </Button>
+                  {request && <CopyButton label={t('dashboard.copyUse')} text={request} />}
                 </>
               )
             }}
@@ -305,33 +308,33 @@ function Dashboard() {
             picked={palette.picked}
             pickedActions={ids => (
               <>
-                <TextButton onClick={() => palette.gather(ids)} strong title={t('dock.addTitle')}>
+                <Button kind="primary" onClick={() => palette.gather(ids)} tip={t('dock.addTitle')}>
                   {t('dock.addPicked', ids.length)}
-                </TextButton>
+                </Button>
                 {ids.length > 1 && (
-                  <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
+                  <Button onClick={() => palette.makeFromPicks(ids)} tip={t('make.openTitle')}>
                     {t('make.open')}
-                  </TextButton>
+                  </Button>
                 )}
                 {ids.length === 2 &&
                   (() => {
                     const [from, to] = ids.map(id => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null))
                     return from && to ? (
                       // The vine takes over from the picks: their actions would float over its card.
-                      <TextButton
+                      <Button
                         onClick={() => {
                           grow.between(from, to)
                           palette.clearPicks()
                         }}
-                        title={t('grow.betweenTitle')}
+                        tip={t('grow.betweenTitle')}
                       >
                         {t('grow.between')}
-                      </TextButton>
+                      </Button>
                     ) : null
                   })()}
-                <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
+                <Button kind="quiet" onClick={palette.clearPicks} tip={t('dock.clearPicksTitle')}>
                   {t('dock.clearPicks', ids.length)}
-                </TextButton>
+                </Button>
               </>
             )}
             playing={playing}
@@ -368,7 +371,7 @@ function Dashboard() {
             <PaletteDock
               audio={id => audition.url(id)}
               groups={state.map?.groups}
-              kit={current => <CopyButton label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
+              kit={current => <CopyButton kind="quiet" label={t('dock.kitCopy')} text={kitRequest(current.name)} />}
               landing={dock}
               lineage={palette.madeLineage}
               onKin={palette.showKinOf}
@@ -386,7 +389,7 @@ function Dashboard() {
               said={state.paletteSaid}
               use={item => {
                 const request = itemReference(item, state.palette?.map_revision ?? null)
-                return request ? <CopyButton label={t('dashboard.copyReference')} text={request} /> : null
+                return request ? <CopyButton kind="quiet" label={t('dashboard.copyUse')} text={request} /> : null
               }}
             />
           )}
@@ -414,7 +417,7 @@ function Dashboard() {
               tempo={state.focus?.transport?.tempo}
               use={result => {
                 const request = useRequest(result)
-                return request ? <CopyButton label={t('make.copyUse')} text={request} /> : null
+                return request ? <CopyButton label={t('dashboard.copyUse')} text={request} /> : null
               }}
             />
           </div>

@@ -14,8 +14,8 @@ export function useT(): Translate {
 }
 
 export const S = {
-  section: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderBottom: `1px solid ${T.border}` },
-  heading: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted },
+  section: { display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderBottom: `1px solid ${T.hairline}` },
+  heading: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, lineHeight: '14px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted },
   row: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
   // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
   text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: 'anywhere' },
@@ -28,6 +28,8 @@ export const S = {
 
 /** The class every Kumi control carries, so the keyboard's focus shows on it. */
 export const FOCUSABLE = 'kumi-focusable'
+/** The class Kumi puts on the host's own buttons it draws (`@kumi/controls`), so its ring can sit on the host's. */
+export const HOST_CONTROL = 'kumi-host'
 
 /** The focus ring for Kumi's controls, in the host theme's colour. Desktop turns focus rings off for every element
  *  (`*:focus-visible { outline: none }`); this rule's class beats that one, and only a keyboard focus shows it. Each UI
@@ -38,6 +40,12 @@ export function FocusStyle() {
   return (
     <style>
       {`.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}` +
+        // On Hermes's own buttons (`HOST_CONTROL`, Kumi's class) the ring sits right on the host's own, so v0.23 shows one
+        // ring, and v0.22.7, which turns every ring off, still shows Kumi's. Nothing of Hermes's is restyled.
+        `.${FOCUSABLE}.${HOST_CONTROL}:focus-visible{outline-offset:0}` +
+        // Where Kumi draws a button itself (the dashboard's), hover and press tint whatever its fill is, at once.
+        '.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}' +
+        '.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}' +
         '@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}' +
         '@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}' +
         '.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}' +
@@ -83,10 +91,60 @@ export function Dot({ color, size = 7, title, beat }: { color: string; size?: nu
   return <span aria-hidden={!title} className={pulse.className} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none', ...pulse.style }} />
 }
 
-/** A plain text button in the theme's colours: the shared views' only control. `label` names it for a screen reader
- *  when its face is a symbol (▶, ■). An `onClick` that answers with a promise (a request put in the chat) makes the
- *  button a request's: it holds, busy, until the promise settles, and a click meanwhile, or the second click of a
- *  double click, sends nothing more. */
+/** The type scale the design pass draws with (T2-DESIGN): body for what a row says, small for meta lines, hints and
+ *  buttons (Hermes's own button text is 12 px), caption for section headings, times and chips; weights 400 and 600. */
+export const TYPE = {
+  body: { fontSize: 13, lineHeight: '18px' },
+  small: { fontSize: 12, lineHeight: '16px' },
+  caption: { fontSize: 11, lineHeight: '14px' }
+} as const
+
+/** Hermes's segmented look, for a choice among a few (Make's ways and modes, Strict | Loose): a tinted track, the
+ *  chosen one raised in the theme's own colours. */
+export const SEGMENT_TRACK = { display: 'flex', flexWrap: 'wrap', gap: 2, padding: 2, borderRadius: 5, background: T.chip } as const
+export function segmentStyle(picked: boolean, disabled = false): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minWidth: 0,
+    font: 'inherit',
+    ...TYPE.small,
+    fontWeight: picked ? 600 : 400,
+    padding: '4px 8px',
+    border: 'none',
+    borderRadius: 3,
+    background: picked ? T.raised : 'transparent',
+    boxShadow: picked ? '0 1px 2px rgba(0,0,0,.18)' : 'none',
+    color: disabled ? T.faint : picked ? T.text : T.muted,
+    cursor: disabled ? 'default' : 'pointer',
+    transition: 'background-color 100ms, color 100ms'
+  }
+}
+
+/** A click that may put a request in the chat: an `onClick` that answers with a promise makes the button a request's.
+ *  It holds, busy, until the promise settles, and a click meanwhile, or the second click of a double click, sends
+ *  nothing more. Kumi's own button and Hermes's (through `@kumi/controls`) both click through it. */
+export function useRequestClick(onClick: () => unknown): { busy: boolean; click: (event: MouseEvent<HTMLElement>) => void } {
+  const [busy, setBusy] = useState(false)
+  // Whether this button's clicks have been requests: from then on a double click's second click is the same request.
+  const asks = useRef(false)
+  const click = (event: MouseEvent<HTMLElement>) => {
+    if (busy || (asks.current && event.detail > 1)) return
+    const answer = onClick()
+    if (!answer || typeof (answer as PromiseLike<unknown>).then !== 'function') return
+    asks.current = true
+    setBusy(true)
+    void Promise.resolve(answer)
+      .catch(() => undefined)
+      .finally(() => setBusy(false))
+  }
+  return { busy, click }
+}
+
+/** A plain text button in the theme's colours. `label` names it for a screen reader when its face is a symbol (▶, ■).
+ *  A request's button holds while it goes and never sends twice (`useRequestClick`). */
 export function TextButton({
   children,
   onClick,
@@ -104,19 +162,7 @@ export function TextButton({
   disabled?: boolean
   strong?: boolean
 }) {
-  const [busy, setBusy] = useState(false)
-  // Whether this button's clicks have been requests: from then on a double click's second click is the same request.
-  const asks = useRef(false)
-  const click = (event: MouseEvent<HTMLButtonElement>) => {
-    if (busy || (asks.current && event.detail > 1)) return
-    const answer = onClick()
-    if (!answer || typeof (answer as PromiseLike<unknown>).then !== 'function') return
-    asks.current = true
-    setBusy(true)
-    void Promise.resolve(answer)
-      .catch(() => undefined)
-      .finally(() => setBusy(false))
-  }
+  const { busy, click } = useRequestClick(onClick)
   return (
     <button
       aria-busy={busy || undefined}

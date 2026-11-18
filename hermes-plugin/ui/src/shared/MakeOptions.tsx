@@ -3,6 +3,7 @@
 // loop's tab (its style, tempo and bars, then rhythm, voices, feel, harmony and line), and the steer every card takes.
 // Every control rests until it's moved: an option the seed draws ("Auto", which Reroll varies), a steer control at its
 // neutral (it changes nothing).
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useState } from 'react'
 
@@ -42,7 +43,7 @@ import {
   TUNINGS
 } from './design.ts'
 import { clean, num, seconds } from './format.ts'
-import { S, TextButton, useT } from './ui.tsx'
+import { S, useT } from './ui.tsx'
 
 /** An option set or not: what a control hands back. */
 type Patch = (current: DesignOptions) => DesignOptions
@@ -263,9 +264,9 @@ export function LoopSection({ options, tempo, onChange }: { options: DesignOptio
           <Group
             actions={
               count > 0 ? (
-                <TextButton onClick={() => setLoop(Object.fromEntries(controls.map(name => [name, undefined])))} title={t('make.loop.resetTitle')}>
+                <Button kind="quiet" onClick={() => setLoop(Object.fromEntries(controls.map(name => [name, undefined])))} tip={t('make.loop.resetTitle')}>
                   {t('make.loop.reset')}
-                </TextButton>
+                </Button>
               ) : undefined
             }
             count={count > 0 ? t('make.steer.count', count) : undefined}
@@ -332,7 +333,7 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
     <Group
       actions={
         <span style={{ ...S.row, gap: 4 }}>
-          <TextButton onClick={() => onChange(rollSteer())} title={t('make.steer.rollTitle')}>
+          <Button kind="quiet" onClick={() => onChange(rollSteer())} tip={t('make.steer.rollTitle')}>
             <svg aria-hidden height="10" style={{ flex: 'none' }} viewBox="0 0 12 12" width="10">
               <rect fill="none" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.2" width="10" x="1" y="1" />
               <circle cx="4" cy="4" fill="currentColor" r="1" />
@@ -340,11 +341,11 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
               <circle cx="8" cy="8" fill="currentColor" r="1" />
             </svg>
             {t('make.steer.roll')}
-          </TextButton>
+          </Button>
           {count > 0 && (
-            <TextButton onClick={() => onChange({})} title={t('make.steer.resetTitle')}>
+            <Button kind="quiet" onClick={() => onChange({})} tip={t('make.steer.resetTitle')}>
               {t('make.steer.reset')}
-            </TextButton>
+            </Button>
           )}
         </span>
       }
@@ -357,9 +358,7 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
     >
       <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5 }}>{t('make.steer.sound')}</span>
       {(Object.keys(STEER_SOUND) as SteerSound[]).map(slider)}
-      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5, marginTop: 4 }} title={t('make.steer.layersHint')}>
-        {t('make.steer.layers')}
-      </span>
+      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5, marginTop: 4 }}>{t('make.steer.layers')}</span>
       {(Object.keys(STEER_LAYER) as SteerLayer[]).map(slider)}
       <span style={{ gridColumn: '1 / -1', fontSize: 10.5, color: T.faint }}>{t('make.steer.layersHint')}</span>
     </Group>

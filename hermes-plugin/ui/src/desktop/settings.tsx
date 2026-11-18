@@ -4,6 +4,7 @@
 // one link away.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
@@ -12,7 +13,7 @@ import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { dawChosen, nextSteps } from '../shared/steps.ts'
-import { Chip, FOCUSABLE, Pending, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, Pending, S, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 import { PET_LINES } from './pet.ts'
@@ -152,16 +153,18 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           </div>
           <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
             {steps.map(step => (
-              <TextButton
+              <Button
                 key={step.request}
+                kind={steps.length === 1 ? 'primary' : 'secondary'}
                 onClick={() => ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null })}
-                strong={steps.length === 1}
               >
                 {step.label}
-              </TextButton>
+              </Button>
             ))}
-            <TextButton onClick={onOpenMap}>{t('settings.openMap')}</TextButton>
-            <TextButton onClick={() => host.navigate('/settings?tab=plugins&agent=kumi')}>{t('settings.agentSettings')}</TextButton>
+            <Button onClick={onOpenMap}>{t('settings.openMap')}</Button>
+            <Button kind="quiet" onClick={() => host.navigate('/settings?tab=plugins&agent=kumi')}>
+              {t('settings.agentSettings')}
+            </Button>
           </div>
         </>
       )}

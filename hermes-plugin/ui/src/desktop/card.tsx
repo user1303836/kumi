@@ -2,6 +2,7 @@
 // it compared two files, the measured numbers side by side, and the differences Kumi computed. Every number is a
 // local measurement; a model's reading of them shows only when the user turned it on, and says so.
 import type { ToolMediaRendererProps } from '@hermes/plugin-sdk'
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
@@ -11,7 +12,7 @@ import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
 import { displayReferenceName, listenView, parseListen, referenceName, roundKey, roundWords, windowWords, type ListenView } from '../shared/listen.ts'
 import type { KumiStore } from '../shared/store.ts'
 import type { ListenReference, ListenResult } from '../shared/types.ts'
-import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, S, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
 async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
@@ -55,13 +56,14 @@ export function Wave({ audition, id, label, caption = label }: { audition: Audit
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
       <div style={{ ...S.row, justifyContent: 'space-between' }}>
         <span style={{ ...S.faint, ...S.ellipsis }}>{caption}</span>
-        <TextButton
+        <Button
+          kind="quiet"
           label={playing ? t('listen.stop', label) : t('listen.play', label)}
           onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}
           pressed={playing}
         >
           {playing ? '■' : '▶'}
-        </TextButton>
+        </Button>
       </div>
       <svg aria-label={t('listen.waveform', label)} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">
         {(peaks ?? []).map((peak, index) => (
@@ -203,7 +205,9 @@ function Interpretation({ view }: { view: ListenView }) {
       <span style={{ ...S.muted, whiteSpace: 'pre-wrap' }}>{long && !open ? `${text.slice(0, 320)}…` : text}</span>
       {long && (
         <span>
-          <TextButton onClick={() => setOpen(!open)}>{open ? t('listen.less') : t('listen.more')}</TextButton>
+          <Button kind="quiet" onClick={() => setOpen(!open)}>
+            {open ? t('listen.less') : t('listen.more')}
+          </Button>
         </span>
       )}
     </div>

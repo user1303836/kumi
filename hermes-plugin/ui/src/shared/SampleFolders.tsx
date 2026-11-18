@@ -3,12 +3,13 @@
 // plugin's own folder guard answers for the path (`POST /library/folder`), and its refusal shows here in its words. A
 // folder it takes is asked for in the chat (Desktop sends the request, the dashboard copies it), where the tool's
 // approval names it: nothing is added or read from here.
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { Translate } from './i18n.ts'
 import type { FolderCheck, KumiStore } from './store.ts'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { FOCUSABLE, S, TYPE, useT } from './ui.tsx'
 
 /** Where the request to add a folder went: sent to Kumi's chat, left in an input, copied, or nowhere. */
 export type FolderAsked = 'copied' | 'drafted' | 'none' | 'sent'
@@ -78,13 +79,13 @@ export function SampleFolders({
     }
   }
   return (
-    <div aria-label={t('folders.title')} role="group" style={{ display: 'grid', gap: 7, textAlign: 'left', fontSize: 12, color: T.text }}>
+    <div aria-label={t('folders.title')} role="group" style={{ display: 'grid', gap: 8, textAlign: 'left', ...TYPE.small, color: T.text }}>
       <div style={{ ...S.row, justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '.09em', textTransform: 'uppercase', color: T.secondary }}>{t('folders.title')}</span>
+        <span style={{ ...TYPE.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted }}>{t('folders.title')}</span>
         {onClose && (
-          <TextButton label={t('folders.close')} onClick={onClose}>
+          <Button kind="quiet" label={t('folders.close')} onClick={onClose}>
             ×
-          </TextButton>
+          </Button>
         )}
       </div>
       {folders === undefined ? (
@@ -94,7 +95,7 @@ export function SampleFolders({
       ) : (
         <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 2, maxHeight: 120, overflowY: 'auto' }}>
           {folders.map(folder => (
-            <li key={folder} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 11.5, overflowWrap: 'anywhere' }}>
+            <li key={folder} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', ...TYPE.caption, overflowWrap: 'anywhere' }}>
               {folder}
             </li>
           ))}
@@ -119,11 +120,11 @@ export function SampleFolders({
           }}
           placeholder={t('folders.pathHint', example)}
           spellCheck={false}
-          style={{ flex: '1 1 13rem', minWidth: 0, font: 'inherit', fontSize: 12, lineHeight: '18px', padding: '2px 7px', borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
+          style={{ flex: '1 1 13rem', minWidth: 0, height: 24, boxSizing: 'border-box', font: 'inherit', ...TYPE.small, padding: '0 7px', borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
           value={typed}
         />
         {pick && (
-          <TextButton
+          <Button
             disabled={busy}
             onClick={() =>
               void pick().then(path => {
@@ -132,14 +133,14 @@ export function SampleFolders({
                 setSaid(null)
               })
             }
-            title={t('folders.chooseTitle')}
+            tip={t('folders.chooseTitle')}
           >
             {t('folders.choose')}
-          </TextButton>
+          </Button>
         )}
-        <TextButton disabled={busy || !typed.trim()} onClick={() => void submit()} strong title={t(copies ? 'folders.copyTitle' : 'folders.addTitle')}>
+        <Button disabled={busy || !typed.trim()} kind="primary" onClick={() => void submit()} tip={t(copies ? 'folders.copyTitle' : 'folders.addTitle')}>
           {busy ? t('folders.checking') : t(copies ? 'folders.copy' : 'folders.add')}
-        </TextButton>
+        </Button>
       </form>
       {said && (
         <div role={said.refused ? 'alert' : 'status'} style={{ color: said.refused ? T.warn : T.secondary, overflowWrap: 'anywhere' }}>

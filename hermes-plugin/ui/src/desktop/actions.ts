@@ -62,7 +62,9 @@ export async function ask(ctx: PluginContext, text: string, options: { session?:
       // The chat couldn't be opened here: the words go to the input in front, below.
     }
   }
-  if (await composer.insertText(null, text)) {
+  // Opening a chat this Desktop doesn't have can leave no input in front (P7A-30: Undo all from a fresh New session page
+  // did nothing): the words then wait in a new chat's input, unsent, as a request no chat owns yet does.
+  if ((await composer.insertText(null, text)) || (await inNewChat(ctx, composer, text))) {
     host.notify({ kind: 'warning', message: t('notify.notOpenHere') })
     return { outcome: 'drafted' }
   }

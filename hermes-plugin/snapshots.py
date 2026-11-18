@@ -568,15 +568,49 @@ def _designed(state: Path, media_id: str) -> dict | None:
     return next((d for d in listed or [] if isinstance(d, dict) and d.get("artifact_id") == media_id), None)
 
 
+# How a made sound was made, as its name says it (the UI's `MADE_WAYS`): by its mode, or its op for one with none.
+_MADE_WAYS = {"blend": "Blend", "attack": "Attack", "resonate": "Resonance", "modulate": "Modulation", "texture": "Texture",
+              "smear": "Smear", "loop": "Loop", "cross": "Cross", "fuse": "Fuse", "stack": "Stack"}
+# The longest name a made sound gets: a palette name's longest.
+_MADE_NAME_MOST = 80
+_QUOTE_MARKS = re.compile(r"[\"“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]")
+
+
+def _said(text: Any, most: int) -> str:
+    """A name as the UI's `quotable` says it: one line, no quote marks, at most `most` characters (cut with "…")."""
+    one = " ".join(_QUOTE_MARKS.sub(" ", text).split()) if isinstance(text, str) else ""
+    return f"{one[:most - 1]}…" if len(one) > most else one
+
+
+def _cut_at_word(text: str, most: int) -> str:
+    """`text` in at most `most` characters, cut at a word where it's longer."""
+    if len(text) <= most:
+        return text
+    cut = text[:most - 1]
+    space = cut.rfind(" ")
+    return f"{(cut[:space] if space > most / 2 else cut).rstrip()}…"
+
+
 def _design_name(answer: dict) -> str:
-    """What a palette calls a sound the dashboard made: its recipe's lead ("Blend of 3", "Modulate Vox") and its seed,
-    so two variations of one recipe tell apart."""
+    """What a palette calls a sound the dashboard made, by the UI's rule (`resultName`): how it was made and from what,
+    "Blend of Kick 02 + Tom 4", "Stack of Punch Kick 09 + 14 more" (two names only when both are short), never a seed
+    or an id; a grown sound by its recipe's lead. At most 80 characters, the count of the rest always whole."""
     recipe = answer.get("recipe") if isinstance(answer.get("recipe"), str) else ""
-    lead = " ".join(re.split(r"[:;]", recipe, maxsplit=1)[0].split())[:60]
-    if not lead:
-        lead = str(answer.get("mode") or answer.get("op") or "Design").capitalize()
-    seed = answer.get("seed")
-    return f"{lead}, seed {seed}" if isinstance(seed, int) and not isinstance(seed, bool) else lead
+    if answer.get("op") == "grow":
+        return _cut_at_word(_said(re.split(r"[:;]", recipe, maxsplit=1)[0], 200), _MADE_NAME_MOST) or "Grown"
+    mode, op = (value if isinstance(value, str) else "" for value in (answer.get("mode"), answer.get("op")))
+    way = _MADE_WAYS.get(mode) or _MADE_WAYS.get(op) or "Design"
+    listed = answer.get("sources")
+    sources = [s for s in listed if isinstance(s, dict)] if isinstance(listed, list) else []
+    names = [name for name in (_said(s.get("name"), 200) for s in sources) if name]
+    named = names[:2] if len(names) > 1 and len(names[0]) + len(names[1]) <= 40 else names[:1]
+    total = len(sources)
+    if not named:
+        return f"{way} of {total} sounds" if total > 1 else way
+    lead = f"{way} of "
+    rest = f" + {total - len(named)} more" if total > len(named) else ""
+    second = f" + {named[1]}" if len(named) > 1 else ""
+    return f"{lead}{_cut_at_word(named[0], _MADE_NAME_MOST - len(lead) - len(rest) - len(second))}{second}{rest}"
 
 
 def media(state: Path, media_id: str, library_folders: list[str] | None = None, *, current: dict | None = None) -> dict | None:

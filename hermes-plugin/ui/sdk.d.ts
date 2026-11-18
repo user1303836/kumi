@@ -190,6 +190,15 @@ declare module '@hermes/plugin-sdk' {
   type Variant = 'default' | 'destructive' | 'ghost' | 'link' | 'outline' | 'secondary' | 'text'
   type Size = 'default' | 'icon-sm' | 'icon-xs' | 'inline' | 'lg' | 'micro' | 'sm' | 'xs'
   export function Button(props: ComponentProps<'button'> & { variant?: Variant; size?: Size }): ReactNode
+  type BadgeVariant = 'default' | 'destructive' | 'muted' | 'outline' | 'solid' | 'success' | 'warn'
+  /** Hermes's tag (radius 3, 0.65rem): exported from v0.22.7 on. Optional here: a host without it gets Kumi's own. */
+  export const Badge: ((props: ComponentProps<'span'> & { variant?: BadgeVariant; size?: 'default' | 'xs' }) => ReactNode) | undefined
+  /** Hermes's tooltip, instead of `title=`: wraps one element; nothing shows while `label` is empty. */
+  export const Tip: ((props: { label: ReactNode; children: ReactNode; delayDuration?: number; side?: 'bottom' | 'left' | 'right' | 'top' }) => ReactNode) | undefined
+  /** Hermes's one-row choice of a few (a tinted track, a raised active pill). */
+  export const SegmentedControl:
+    | (<V extends string>(props: { options: readonly { id: V; label: string }[]; value: V; onChange: (id: V) => void; className?: string; disabled?: boolean; sizing?: 'content' | 'equal' }) => ReactNode)
+    | undefined
   export function Codicon(props: { name: string; size?: number | string; spinning?: boolean; className?: string; style?: CSSProperties; title?: string }): ReactNode
   export function StatusDot(props: { tone: 'bad' | 'good' | 'muted' | 'warn'; className?: string }): ReactNode
   export function DropdownMenu(props: { children?: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }): ReactNode

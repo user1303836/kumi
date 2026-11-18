@@ -3,6 +3,7 @@
 // approval's own warning, and every line. A device (CC-22) shows its controls (name, range, default) beside its GenExpr
 // code, all from the one spec its hash names. A script's HISTORY row can show the code it ran, after a restart too.
 // The code comes from the file the plugin saved when it asked, re-hashed by `/script`; nothing here runs anything.
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useEffect, useState } from 'react'
 
@@ -11,7 +12,7 @@ import { clean, dawName } from '../shared/format.ts'
 import type { Translate } from '../shared/i18n.ts'
 import type { KumiStore } from '../shared/store.ts'
 import type { DeviceSpec, HistoryItem, PendingScript, ScriptCode, ScriptLanguage } from '../shared/types.ts'
-import { S, TextButton, useT } from '../shared/ui.tsx'
+import { S, useT } from '../shared/ui.tsx'
 
 const LANGUAGE: Record<ScriptLanguage, string> = { python: 'script.python', lua: 'script.lua', device: 'script.device' }
 
@@ -141,9 +142,9 @@ export function SavedScript({ item, store }: { item: HistoryItem; store: KumiSto
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
       <span>
-        <TextButton onClick={() => setOpen(!open)} pressed={open} title={t('script.showTitle')}>
+        <Button expanded={open} kind="quiet" onClick={() => setOpen(!open)} tip={t('script.showTitle')}>
           {open ? t('script.hide') : t('script.show')}
-        </TextButton>
+        </Button>
       </span>
       {open &&
         (code ? (

@@ -1,7 +1,8 @@
 // The first-open hints as the map's corner shows them: the steps left, one line each under its number, and Skip.
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 
-import { S, TextButton, useT } from '../ui.tsx'
+import { S, TYPE, useT } from '../ui.tsx'
 import type { FirstStep } from './first.ts'
 
 export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSkip: () => void }) {
@@ -10,7 +11,7 @@ export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSk
   return (
     <div aria-label={t('first.label')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: 7, borderBottom: `1px solid ${T.border}` }}>
       {steps.map((step, index) => (
-        <div key={step} style={{ ...S.row, gap: 8, fontSize: 12, color: T.text }}>
+        <div key={step} style={{ ...S.row, gap: 8, ...TYPE.small, color: T.text }}>
           <span
             aria-hidden
             style={{
@@ -31,9 +32,9 @@ export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSk
           </span>
           <span style={{ flex: 1 }}>{t(`first.${step}`)}</span>
           {index === 0 && (
-            <TextButton onClick={onSkip} title={t('first.skipTitle')}>
+            <Button kind="quiet" onClick={onSkip} tip={t('first.skipTitle')}>
               {t('first.skip')}
-            </TextButton>
+            </Button>
           )}
         </div>
       ))}

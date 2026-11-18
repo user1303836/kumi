@@ -13,6 +13,7 @@ const lineage = await load('src/shared/atlas/lineage.ts')
 const gestures = await load('src/shared/atlas/gestures.ts')
 const constellation = await load('src/shared/atlas/constellation.ts')
 const first = await load('src/shared/atlas/first.ts')
+const labels = await load('src/shared/atlas/labels.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
@@ -98,6 +99,25 @@ test('sounds carry their names only where there is room: clear of each other, ne
   // The map lists its sounds a family at a time: the first fifty offered a name come from all along that order.
   const offered = Array.from({ length: 600 }, (_, index) => index).sort((a, b) => names.nameRank(a) - names.nameRank(b)).slice(0, 50)
   for (const third of [0, 1, 2]) assert.ok(offered.filter(index => Math.floor(index / 200) === third).length >= 8, `third ${third}`)
+})
+
+test("a name the map writes is its sound's: each one written comes back with its box and which sound it names, so a click on it reaches the sound", () => {
+  // A stand-in canvas: every name 50 px wide; drawing does nothing.
+  const context = new Proxy({ measureText: () => ({ width: 50 }) }, { get: (target, key) => (key in target ? target[key] : () => {}), set: () => true })
+  const look = { family: 'sans-serif', ground: '#fff', muted: '#888' }
+  // Offered out of rank order: the third's name would lie over the second's (ranked first) and is left out; the first
+  // has room.
+  const offered = [
+    { text: 'Far Snare', color: '#f00', x: 300, y: 40, rank: 2 },
+    { text: 'Boom Kick', color: '#f00', x: 20, y: 40, rank: 0 },
+    { text: 'Sub Kick', color: '#f00', x: 20, y: 44, rank: 1 }
+  ]
+  const written = labels.drawNames(context, offered, 6, look, [])
+  assert.deepEqual(written.map(name => name.at).sort(), [0, 1], JSON.stringify(written))
+  const boom = written.find(name => name.at === 1)
+  assert.deepEqual(boom.box, [26, 33, 50, 14], 'the box is where the name was written, beside its sound')
+  // Under what floats over the map, nothing is written, so nothing there can be clicked as a name.
+  assert.deepEqual(labels.drawNames(context, offered, 6, look, [[0, 0, 400, 100]]), [])
 })
 
 test("the pulse follows the playing sound's level: up at once with a hit, settling after it, and plain before the waveform arrives", () => {

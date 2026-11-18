@@ -295,46 +295,55 @@ export function tileModel(model: MapModel, layout: TileLayout): MapModel {
   return { ...model, points, cells }
 }
 
-/** The map's square side in a `width` × `height` canvas whose top `top` pixels are covered (the floating bar): what
- *  every view of that canvas draws the map at, times its scale. */
-export function mapSide(width: number, height: number, top = 0): number {
-  return Math.max(1, Math.min(width, height - top) - 32)
+/** The map's square side in a `width` × `height` canvas whose top `top` pixels (the floating bar) and bottom `bottom`
+ *  pixels (the corner) are covered: what every view of that canvas draws the map at, times its scale. */
+export function mapSide(width: number, height: number, top = 0, bottom = 0): number {
+  return Math.max(1, Math.min(width, height - top - bottom) - 32)
 }
 
 /** The room left for the map across a `width` canvas whose right `right` pixels a side sheet covers: all of it when
  *  the sheet would leave too little to be worth centring in. */
 const roomBeside = (width: number, right: number): number => (width - right >= 240 ? width - right : width)
 
-/** The view that shows the whole map in a `width` × `height` canvas, below its top `top` pixels, with a margin: in the
- *  room left of a side sheet covering its right `right` pixels when the map fits there (the map's size stays the
- *  canvas's, so a sheet opening moves the map and never rescales it). */
-export function fitView(width: number, height: number, top = 0, right = 0): MapViewport {
-  const size = mapSide(width, height, top)
+/** The view that shows the whole map in a `width` × `height` canvas, between its top `top` and bottom `bottom` pixels,
+ *  with a margin: in the room left of a side sheet covering its right `right` pixels when the map fits there (the map's
+ *  size stays the canvas's, so a sheet opening moves the map and never rescales it). */
+export function fitView(width: number, height: number, top = 0, right = 0, bottom = 0): MapViewport {
+  const size = mapSide(width, height, top, bottom)
   const room = roomBeside(width, right)
-  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - size) / 2 }
+  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - bottom - size) / 2 }
 }
 
 /** Where a `w` × `h` card goes beside the screen box `box` ([x0, y0, x1, y1]: the picks) in a `width` × `height` map
  *  whose top `top` and bottom `bottom` pixels are taken: to the box's right, else its left, else above it, else below
- *  it, never over it; with no room anywhere, or no box (no picks in view), centred at the map's foot. */
+ *  it, never over it; with no room anywhere, or no box (no picks in view), centred at the map's foot. The foot is
+ *  never given up: on a map too short for the card between its top and its foot, the card keeps above the foot (what
+ *  docks there, the corner, would hide it) and lies over the top's lower edge instead. */
 export function floatBeside(box: readonly [number, number, number, number] | null, w: number, h: number, width: number, height: number, top: number, bottom: number): { left: number; top: number } {
   const GAP = 12
   const EDGE = 8
-  const floor = height - bottom - h
-  const docked = { left: Math.max(EDGE, (width - w) / 2), top: Math.max(top, floor) }
+  const floor = Math.max(EDGE, height - bottom - h)
+  const docked = { left: Math.max(EDGE, (width - w) / 2), top: floor }
   if (!box) return docked
   const [x0, y0, x1, y1] = box
-  const beside = Math.min(Math.max(top, y0 - 6), Math.max(top, floor))
+  const beside = Math.min(Math.max(top, y0 - 6), floor)
   const across = Math.min(Math.max(EDGE, (x0 + x1) / 2 - w / 2), Math.max(EDGE, width - w - EDGE))
   if (x1 + GAP + w <= width - EDGE) return { left: x1 + GAP, top: beside }
   if (x0 - GAP - w >= EDGE) return { left: x0 - GAP - w, top: beside }
-  if (y0 - GAP - h >= top) return { left: across, top: y0 - GAP - h }
-  if (y1 + GAP <= floor) return { left: across, top: y1 + GAP }
+  if (y0 - GAP - h >= top && y0 - GAP - h <= floor) return { left: across, top: y0 - GAP - h }
+  if (y1 + GAP <= floor && y1 + GAP >= top) return { left: across, top: y1 + GAP }
   return docked
 }
 
 export function toScreen(view: MapViewport, size: number, x: number, y: number): [number, number] {
   return [x * size * view.scale + view.dx, y * size * view.scale + view.dy]
+}
+
+/** The same view on a map whose side went from `from` to `to` pixels (its top, its height or a side sheet changed):
+ *  every sound stays where it was on screen. A view is a scale of the map's side, so without this a view zoomed in
+ *  (a find's frame) slides its sounds out of sight as the map's top settles. */
+export function keepPlace(view: MapViewport, from: number, to: number): MapViewport {
+  return from > 0 && to > 0 && from !== to ? { ...view, scale: (view.scale * from) / to } : view
 }
 
 /** Zoom by `factor` around the screen point (`px`, `py`), within 1× to 40×. */
@@ -561,21 +570,22 @@ export function searchSounds(model: MapModel, query: string): Set<string> | null
 }
 
 /** The view that centres the given points, zoomed in as far as they allow (for "show what the agent found"), below the
- *  canvas's top `top` pixels and left of a side sheet covering its right `right` pixels. `clear` moves the room's top
- *  edge down, or its left edge right, past something else floating over the map (the card listing the finds); the
- *  map's own size stays the one every view of this canvas draws it at. */
-export function frame(model: MapModel, ids: Set<string>, width: number, height: number, top = 0, right = 0, margin = 48, clear: { top?: number; left?: number } = {}): MapViewport | null {
+ *  canvas's top `top` pixels, above its bottom `bottom` pixels (as `mapSide` takes them) and left of a side sheet
+ *  covering its right `right` pixels. `clear` moves the room's top edge down, its left edge right, or its bottom edge
+ *  up, past something else floating over the map (the card listing the finds, the corner and the player at the foot);
+ *  the map's own size stays the one every view of this canvas draws it at. */
+export function frame(model: MapModel, ids: Set<string>, width: number, height: number, top = 0, right = 0, margin = 48, clear: { top?: number; left?: number; bottom?: number } = {}, bottom = 0): MapViewport | null {
   const chosen = model.points.filter(point => ids.has(point.id))
   if (!chosen.length) return null
   const xs = chosen.map(point => point.x)
   const ys = chosen.map(point => point.y)
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
   // The same map side `fitView` gives, zoomed so the found points fill the room left less a margin.
-  const size = mapSide(width, height, top)
+  const size = mapSide(width, height, top, bottom)
   const roomTop = Math.max(top, clear.top ?? 0)
   const roomLeft = Math.max(0, clear.left ?? 0)
   const across = Math.max(1, roomBeside(width, right) - roomLeft)
-  const down = Math.max(1, height - roomTop)
+  const down = Math.max(1, height - Math.max(bottom, clear.bottom ?? 0) - roomTop)
   const span = Math.max(x1 - x0, y1 - y0, 0.04)
   const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span * size)))
   const cx = (x0 + x1) / 2

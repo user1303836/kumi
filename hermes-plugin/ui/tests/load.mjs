@@ -42,8 +42,9 @@ const reactStub = `
   export default { Fragment }
 `
 
-/** Bundle `entry` (a path under src/) and import it. */
-export async function load(entry, { sdk = sdkStub(), react = 'stub', theme = 'src/desktop/theme.ts' } = {}) {
+/** Bundle `entry` (a path under src/) and import it. `@kumi/controls` is Kumi's own drawing of the controls (the
+ *  dashboard's), so a test reads the markup a screen reader gets, whatever the host's components draw. */
+export async function load(entry, { sdk = sdkStub(), react = 'stub', theme = 'src/desktop/theme.ts', controls = 'src/dashboard/controls.tsx' } = {}) {
   const stubs = {
     name: 'stubs',
     setup(b) {
@@ -60,7 +61,7 @@ export async function load(entry, { sdk = sdkStub(), react = 'stub', theme = 'sr
     jsx: 'automatic',
     write: false,
     logLevel: 'error',
-    alias: { '@kumi/theme': `${root}${theme}` },
+    alias: { '@kumi/theme': `${root}${theme}`, '@kumi/controls': `${root}${controls}` },
     external: react === 'real' ? ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/server'] : [],
     plugins: [stubs],
     absWorkingDir: root,

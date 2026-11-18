@@ -114,12 +114,20 @@ test('the picks and the palette become sounds by id, with names safe to quote; a
   assert.deepEqual(design.sourcesOf(items, null), [{ artifact_id: 'a-dAAAAAAAAAAAAAAAAAAAAAA', name: 'Blend of 2' }])
 })
 
-test("Use is the made sound's reference, its name and artifact id, and nothing for an id Kumi never made", () => {
+test("a made sound is named by how it was made and from what, never its seed; Use is its name and artifact id", () => {
   const made = design.resultOf(answer())
-  assert.equal(design.useRequest(made), '“Blend of 2, seed 482113” (artifact a-dAAAAAAAAAAAAAAAAAAAAAA)')
-  // Named as the palette names it once kept: the recipe's lead up to `:` or `;`, and the seed.
-  assert.equal(design.resultName({ ...made, recipe: 'Modulate Vox; read by Kick (PM 24 smp)', seed: 7 }), 'Modulate Vox, seed 7')
-  assert.equal(design.resultName({ ...made, recipe: '', mode: 'smear', seed: 3 }), 'Smear, seed 3')
+  assert.equal(design.useRequest(made), '“Blend of 2 sounds” (artifact a-dAAAAAAAAAAAAAAAAAAAAAA)')
+  // The palette's name for it once kept (the backend's `_design_name`, the same rule, the same cases in test_designs.py).
+  const from = names => names.map((name, index) => ({ sound_id: `s-r7-${index}`, map_revision: 'r7', name }))
+  assert.equal(design.resultName({ ...made, sources: from(['Kick 02', 'Tom 4']) }), 'Blend of Kick 02 + Tom 4')
+  const many = from(Array.from({ length: 15 }, (_, index) => `Punch Kick ${String(index).padStart(2, '0')}`))
+  assert.equal(design.resultName({ ...made, sources: many }), 'Blend of Punch Kick 00 + Punch Kick 01 + 13 more')
+  assert.equal(design.resultName({ ...made, op: 'stack', mode: undefined, sources: many.slice(0, 3) }), 'Stack of Punch Kick 00 + Punch Kick 01 + 1 more')
+  const long = from(['Very Long Granular Ambient Texture Recording '.repeat(2), 'Tom', 'Hat'])
+  assert.equal(design.resultName({ ...made, op: 'fuse', mode: 'texture', sources: long }), 'Texture of Very Long Granular Ambient Texture Recording Very Long… + 2 more')
+  assert.equal(design.resultName({ ...made, op: 'grow', mode: undefined, recipe: 'Grown 50% of the way from Kick toward Tom; seed 4' }), 'Grown 50% of the way from Kick toward Tom')
+  // A sound made from a made one names it as the palette does, so the next recipe never carries a seed either.
+  assert.deepEqual(design.sourceOfResult({ ...made, sources: from(['Kick 02', 'Tom 4']) }), { artifact_id: made.artifact_id, name: 'Blend of Kick 02 + Tom 4' })
   assert.equal(design.useRequest({ ...made, artifact_id: 'a-d x' }), null)
 })
 
