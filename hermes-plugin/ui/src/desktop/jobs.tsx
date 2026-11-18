@@ -43,6 +43,9 @@ export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>
                 style={{ display: 'block', height: 3, borderRadius: 2, background: T.border, overflow: 'hidden' }}
               >
                 <span
+                  // While the job can't say how far it is, a segment slides along the track, so the bar never reads as stuck
+                  // at a number (a system asking for less motion sees it still, beside the words).
+                  className={words.fraction === null ? 'kumi-slide' : undefined}
                   style={{
                     display: 'block',
                     height: '100%',

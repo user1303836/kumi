@@ -52,7 +52,9 @@ export function FocusStyle() {
         '@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}' +
         '@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}' +
         '.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
+        // A job that can't say how far it is: a segment slides along its track.
+        '@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }
