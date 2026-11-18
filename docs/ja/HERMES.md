@@ -13,7 +13,7 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` は Hermes のプラグインカタログでの Kumi の名前です。Kumi がカタログに載るまでは、Kumi のリポジトリから `hermes plugins install user1303836/kumi#hermes-plugin` でインストールし、同じように有効にしてください。
+`kumi` は Hermes のプラグインカタログでの Kumi の名前です。Hermes v0.22.7 と v0.23.0 では、カタログがこれらのバージョンで読める大きさを超えたため、`hermes plugins install kumi` は Kumi がカタログにないと答えます。Hermes を v0.23.1 以降に更新するか、Kumi のリポジトリから `hermes plugins install user1303836/kumi#hermes-plugin` でインストールして同じように有効にしてください。リポジトリからインストールした Kumi は、カタログではなくリポジトリから更新されます。
 
 Hermes Desktop では、**スキルとツール → プラグイン** で Kumi の **Desktop** スイッチもオンにしてください。プラグインの Desktop スイッチは最初はオフになっています。
 
