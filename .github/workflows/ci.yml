@@ -100,10 +100,10 @@ jobs:
   rust-linux:
     # The `ci` tests (.config/nextest.toml) of every package, after a merge and by hand, never on a pull request: in four
     # parts at once, so no part builds every test binary and each stays under four minutes on a slow runner. The app and
-    # Live's crate (kumi and kumi-daw-ableton, whose tests take the most time) in two halves, each building both
-    # packages' tests and running half of them (nextest's hash partition: a test always lands in the same half); Kumi's
-    # other crates (every package the others don't name, so a new crate is tested there); the bridges. A release waits for
-    # every part (scripts/release.py).
+    # Live's crate (kumi and kumi-daw-ableton, whose tests take the most time) in two halves by test binary, so each half
+    # builds only its own: their unit tests (--lib, --bins) with the app's terminal tests (tui), then their `it` tests
+    # with the app's commands (app), about the same test time each. Kumi's other crates (every package the others don't
+    # name, so a new crate is tested there); the bridges. A release waits for every part (scripts/release.py).
     name: Rust / ${{ matrix.label }}
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
@@ -116,10 +116,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: app-1, label: "Linux (the app and Live's crate, 1 of 2)", cache: kumi, crates: "-p kumi -p kumi-daw-ableton --partition hash:1/2" }
-          - { part: app-2, label: "Linux (the app and Live's crate, 2 of 2)", cache: kumi, crates: "-p kumi -p kumi-daw-ableton --partition hash:2/2" }
-          - { part: crates, label: "Linux (Kumi's other crates)", cache: kumi, crates: "--exclude kumi --exclude kumi-daw-ableton --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi --exclude soundcraft-kumi" }
-          - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
+          - { part: app-1, label: "Linux (the app and Live's crate, 1 of 2)", cache: kumi, targets: "--lib --bins --test tui", crates: "-p kumi -p kumi-daw-ableton" }
+          - { part: app-2, label: "Linux (the app and Live's crate, 2 of 2)", cache: kumi, targets: "--test it --test app", crates: "-p kumi -p kumi-daw-ableton" }
+          - { part: crates, label: "Linux (Kumi's other crates)", cache: kumi, targets: "--tests", crates: "--exclude kumi --exclude kumi-daw-ableton --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi --exclude soundcraft-kumi" }
+          - { part: bridges, label: "Linux (bridges)", cache: bridges, targets: "--tests", crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/rust-toolchain
@@ -148,9 +148,10 @@ jobs:
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
           # runner's disk makes several times slower.
           TMPDIR: /dev/shm
-        # (word splitting on purpose: the -p and --exclude options.) `--tests` builds what has tests (libraries, programs,
-        # the tests' own binaries) and leaves the examples out: none has a test, and Required CI's build checks them.
-        run: sh scripts/test-isolated.sh --profile ci --tests ${{ matrix.crates }}
+        # (word splitting on purpose: the target and -p/--exclude options.) `--tests` builds what has tests (libraries,
+        # programs, the tests' own binaries) and leaves the examples out: none has a test, and Required CI's build checks
+        # them. The app's halves name their targets instead: a test binary a package lacks is skipped for it, not an error.
+        run: sh scripts/test-isolated.sh --profile ci ${{ matrix.targets }} ${{ matrix.crates }}
       # The tests this part selected (`cargo nextest list`), to compare one run's tests with another's.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
