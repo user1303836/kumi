@@ -8,6 +8,7 @@
 // to the nearest sound that way, Shift+←/→ step through every sound in turn, Shift+↑/↓ zoom and Home shows the whole
 // map; each sound reached is named to a screen reader, and Tab goes on to its Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`, what the picks can do from `pickedActions`.
+import { Button, Tip } from '@kumi/controls'
 import { CANVAS, T, useThemeKey } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -29,12 +30,12 @@ import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
 import { GrowLayer } from './GrowLayer.tsx'
 import { useLessMotion } from './hooks.ts'
-import { arrangedModel, buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
+import { arrangedModel, buildModel, fitView, floatBeside, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { FOCUSABLE, S, TYPE, useT } from './ui.tsx'
 
 export interface MapCanvasProps {
   map: SoundMap | null
@@ -182,6 +183,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // 25,000-sound map redraws once per pause, not on every key.
   const [query, setQuery] = useState('')
   const [searchFor, setSearchFor] = useState('')
+  // The list of a search's or a find's sounds: all of them shown (not the first few), or put away, for the list it was
+  // asked of; a new list starts folded and shown again.
+  const [allOf, setAllOf] = useState<unknown>(null)
+  const [closedOf, setClosedOf] = useState<unknown>(null)
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
   // A drag: with the left button a box that picks what's in it (`add`: Shift, Command or Ctrl held, so it adds to the
@@ -1271,56 +1276,88 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             )
           })}
         </div>
-        {matches.length > 0 && (
-          // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
-          // scrolls inside it rather than running under the corner.
-          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: 'auto' }}>
-            <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
-              {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
-              <span style={{ ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
-              {onPicked && (
-                // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
-                <TextButton onClick={() => onPicked(matches, 'replace')} title={searched !== null ? t('dock.pickAllTitle') : t('dock.pickFoundTitle')}>
-                  {t('dock.pickAll', matches.length)}
-                </TextButton>
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
-            {matches.slice(0, MATCHES_LISTED).map(id => {
-              const sound = model.sounds[id]
-              const indexed = indexedValues(sound, t)
-              // A typed search lists names; the agent's find also says why each matched, as Kumi bounds it (CC-23).
-              const reasons = searched ? '' : foundLine(found?.matches?.[id], nearName !== '', t)
-              return (
-                <button
-                  aria-pressed={selected === id}
-                  className={FOCUSABLE}
-                  key={id}
-                  onClick={() => onPick(id)}
-                  type="button"
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0, font: 'inherit', fontSize: 11.5, padding: '2px 6px', borderRadius: 6, border: 'none', textAlign: 'left', cursor: 'pointer', color: T.text, background: selected === id ? T.card : 'transparent' }}
-                >
-                  <span style={{ ...S.row, gap: 6 }}>
-                    <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
-                    {indexed && (
-                      <span style={{ color: T.faint, whiteSpace: 'nowrap' }} title={t('map.indexedTitle')}>
-                        {t('map.indexed', indexed)}
-                      </span>
+        {matches.length > 0 &&
+          closedOf !== matches &&
+          (() => {
+            // What every listed row would repeat is said once, in the head: their kind when they're all one, the find's
+            // reasons they all share, and their closeness when it's all within two points (CC-23's words, "closeness N,
+            // relative to this map", never a percentage). A row then says only what's its own.
+            const listed = matches.slice(0, allOf === matches ? matches.length : MATCHES_LISTED)
+            const kinds = new Set(listed.map(id => model.sounds[id]?.class).filter(Boolean))
+            const oneKind = kinds.size === 1 ? clean([...kinds][0], 16) : ''
+            const whyOf = (id: string): string[] => (searched ? [] : (found?.matches?.[id]?.why ?? []))
+            const sharedWhy = listed.length > 1 ? whyOf(listed[0]).filter(why => listed.every(id => whyOf(id).includes(why))) : []
+            const near = nearName !== '' && !searched
+            const closeness = listed.map(id => found?.matches?.[id]?.closeness).filter((value): value is number => typeof value === 'number')
+            const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0]
+            const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2
+            const facts = [oneKind && t('map.allKind', oneKind), ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}–${high}`) : t('map.closenessShown')) : '']
+              .filter(Boolean)
+              .join(' · ')
+            return (
+              // At most the room between the legend and the corner (the player too, when it's open): in a short map its
+              // list scrolls inside it rather than running under the corner.
+              <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 2, padding: 6, width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: 'auto' }}>
+                <div style={{ ...S.row, alignItems: 'flex-start', gap: 6, padding: '0 0 4px 4px' }}>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                    {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
+                    <span style={{ ...TYPE.small, ...S.ellipsis, color: T.text }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
+                    {facts && (
+                      <Tip label={near ? t('map.closenessTitle') : undefined}>
+                        <span style={{ ...TYPE.caption, color: T.faint, overflowWrap: 'anywhere' }}>{facts}</span>
+                      </Tip>
                     )}
-                    {sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
                   </span>
-                  {reasons && (
-                    <span style={{ ...S.ellipsis, color: T.faint, fontSize: 10.5 }} title={nearName ? t('map.closenessTitle') : undefined}>
-                      {reasons}
-                    </span>
+                  {onPicked && (
+                    // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
+                    <Button onClick={() => onPicked(matches, 'replace')} tip={searched !== null ? t('dock.pickAllTitle') : t('dock.pickFoundTitle')}>
+                      {t('dock.pickAll', matches.length)}
+                    </Button>
                   )}
-                </button>
-              )
-            })}
-            {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>{t('map.more', matches.length - MATCHES_LISTED)}</span>}
-            </div>
-          </div>
-        )}
+                  <Button kind="quiet" label={t('map.closeList')} onClick={() => setClosedOf(matches)}>
+                    ×
+                  </Button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
+                  {listed.map(id => {
+                    const sound = model.sounds[id]
+                    const indexed = indexedValues(sound, t)
+                    const own = whyOf(id).filter(why => !sharedWhy.includes(why))
+                    const value = found?.matches?.[id]?.closeness
+                    return (
+                      <button
+                        aria-pressed={selected === id}
+                        className={FOCUSABLE}
+                        key={id}
+                        onClick={() => onPick(id)}
+                        type="button"
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0, font: 'inherit', ...TYPE.small, minHeight: 24, padding: '4px 6px', borderRadius: 4, border: 'none', textAlign: 'left', cursor: 'pointer', color: T.text, background: selected === id ? T.card : 'transparent' }}
+                      >
+                        <span style={{ ...S.row, gap: 8 }}>
+                          <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
+                          {indexed && (
+                            <span style={{ color: T.faint, whiteSpace: 'nowrap' }} title={t('map.indexedTitle')}>
+                              {t('map.indexed', indexed)}
+                            </span>
+                          )}
+                          {near && !flat && typeof value === 'number' && <span style={{ color: T.secondary, fontVariantNumeric: 'tabular-nums' }}>{value}</span>}
+                          {!oneKind && sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
+                        </span>
+                        {own.length > 0 && <span style={{ ...TYPE.caption, ...S.ellipsis, color: T.faint }}>{own.map(why => clean(why, 60)).join(' · ')}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+                {matches.length > MATCHES_LISTED && (
+                  <span style={{ padding: '2px 0 0 2px' }}>
+                    <Button kind="quiet" onClick={() => setAllOf(allOf === matches ? null : matches)}>
+                      {allOf === matches ? t('map.showFewer') : t('map.showMore', matches.length - MATCHES_LISTED)}
+                    </Button>
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         {hiddenCount > 0 && (
           // One quiet line for every sound that couldn't play here, never a notice per sound.
           <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
@@ -1505,8 +1542,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           grow?.choosing ? (
             <div className="kumi-pop" role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
               <Icon name="grow" size={13} />
-              <span style={{ fontSize: 12, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
-              <TextButton onClick={() => grow.choose(false)}>{t('grow.cancel')}</TextButton>
+              <span style={{ ...TYPE.small, color: T.text }}>{grow.choosing === 'from' ? t('grow.from') : t('grow.to', clean(grow.from?.name ?? '', 60))}</span>
+              <Button kind="quiet" onClick={() => grow.choose(false)}>
+                {t('grow.cancel')}
+              </Button>
             </div>
           ) : undefined
         }

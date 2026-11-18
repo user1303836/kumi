@@ -17,6 +17,7 @@ export interface ButtonProps {
   tip?: ReactNode
   disabled?: boolean
   pressed?: boolean
+  expanded?: boolean
 }
 
 const KIND: Record<Kind, CSSProperties> = {
@@ -26,11 +27,12 @@ const KIND: Record<Kind, CSSProperties> = {
   destructive: { background: `color-mix(in srgb, ${T.bad} 14%, transparent)`, color: T.bad }
 }
 
-export function Button({ children, onClick, kind = 'secondary', size = 'sm', label, tip, disabled, pressed }: ButtonProps) {
+export function Button({ children, onClick, kind = 'secondary', size = 'sm', label, tip, disabled, pressed, expanded }: ButtonProps) {
   const { busy, click } = useRequestClick(onClick)
   return (
     <button
       aria-busy={busy || undefined}
+      aria-expanded={expanded}
       aria-label={label}
       aria-pressed={pressed}
       className={`${FOCUSABLE} kumi-btn`}

@@ -7,10 +7,11 @@
 // play here leaves the map quietly (never a notice per sound), and one line under the map counts them.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useEffect, useRef, useState } from 'react'
 
-import { addFolderRequest, folderExample, jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
+import { addFolderRequest, clean, folderExample, jobWords, liveNote, MOST_NEAR, nearRequest, padRequest, RESCAN_REQUEST, SCAN_REQUEST, soundRequest } from '../shared/format.ts'
 import { useFirstOpen } from '../shared/atlas/first.ts'
 import { sourceOfResult, useRequest } from '../shared/design.ts'
 import { soundEnd, useGrow } from '../shared/grow.ts'
@@ -24,7 +25,7 @@ import { usePaletteMap } from '../shared/paletteMap.ts'
 import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { errorText, type KumiStore } from '../shared/store.ts'
 import { nextSteps } from '../shared/steps.ts'
-import { FOCUSABLE, TextButton, useT } from '../shared/ui.tsx'
+import { FOCUSABLE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 
@@ -170,7 +171,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <>
           {t('map.failed', state.failed.map)}
           <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
-            <TextButton onClick={() => store.refresh('map')}>{t('map.retry')}</TextButton>
+            <Button onClick={() => store.refresh('map')}>{t('map.retry')}</Button>
           </div>
         </>
       ) : (
@@ -188,14 +189,14 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
           {setupSteps.length > 0 ? (
             setupSteps.map(step => (
-              <TextButton key={step.request} onClick={() => ask(ctx, step.request, { send: true, session: null })} strong={setupSteps.length === 1}>
+              <Button key={step.request} kind={setupSteps.length === 1 ? 'primary' : 'secondary'} onClick={() => ask(ctx, step.request, { send: true, session: null })}>
                 {step.label}
-              </TextButton>
+              </Button>
             ))
           ) : (
-            <TextButton onClick={() => ask(ctx, SCAN_REQUEST, { send: false, session })} title={t('map.scanTitle')}>
+            <Button kind="primary" onClick={() => ask(ctx, SCAN_REQUEST, { send: false, session })} tip={t('map.scanTitle')}>
               {t('map.scan')}
-            </TextButton>
+            </Button>
           )}
         </div>
       </>
@@ -213,23 +214,23 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const near = nearRequest([{ id, name: sound.name }], map?.revision)
             return (
               <>
-                <TextButton disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} title={t('dock.addTitle')}>
+                <Button disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} tip={t('dock.addTitle')}>
                   {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
-                </TextButton>
+                </Button>
                 {near && (
-                  <TextButton onClick={() => ask(ctx, near, { send: false, session })} title={t('map.moreLikeTitle')}>
+                  <Button kind="quiet" onClick={() => ask(ctx, near, { send: false, session })} tip={t('map.moreLikeTitle')}>
                     {t('map.moreLike')}
-                  </TextButton>
+                  </Button>
                 )}
                 {request && (
-                  <TextButton onClick={() => setPadsFor(padsFor === id ? null : id)} pressed={padsFor === id} title={t('map.useOnPadTitle')}>
+                  <Button kind="quiet" onClick={() => setPadsFor(padsFor === id ? null : id)} pressed={padsFor === id} tip={t('map.useOnPadTitle')}>
                     {t('map.useOnPad')}
-                  </TextButton>
+                  </Button>
                 )}
                 {request && (
-                  <TextButton onClick={() => ask(ctx, request, { send: false, session })} strong title={t('map.useTitle')}>
+                  <Button onClick={() => ask(ctx, request, { send: false, session })} tip={t('map.useTitle')}>
                     {t('map.use')}
-                  </TextButton>
+                  </Button>
                 )}
                 {request && padsFor === id && (
                   <PadPicker
@@ -249,12 +250,12 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           found={state.found}
           hiddenActions={
             <>
-              <TextButton onClick={() => store.showHidden()} title={t('map.showHiddenTitle')}>
+              <Button kind="quiet" onClick={() => store.showHidden()} tip={t('map.showHiddenTitle')}>
                 {t('map.showHidden')}
-              </TextButton>
-              <TextButton onClick={() => ask(ctx, RESCAN_REQUEST, { send: false, session })} title={t('map.rescanTitle')}>
+              </Button>
+              <Button kind="quiet" onClick={() => ask(ctx, RESCAN_REQUEST, { send: false, session })} tip={t('map.rescanTitle')}>
                 {t('map.rescan')}
-              </TextButton>
+              </Button>
             </>
           }
           leaving={state.leaving}
@@ -273,18 +274,18 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const kept = palette.kept.has(result.artifact_id)
             return (
               <>
-                <TextButton disabled={kept} onClick={() => palette.keep(result)} title={t('make.keepTitle')}>
-                  {kept ? t('make.kept') : t('make.keep')}
-                </TextButton>
-                {request && (
-                  <TextButton onClick={() => ask(ctx, request, { send: false, session })} title={t('make.useTitle')}>
-                    {t('make.use')}
-                  </TextButton>
-                )}
-                {/* From the grown point and the vine's far end: two sounds, so every way of making one is open. */}
-                <TextButton onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} title={t('make.openTitle')}>
+                <Button kind="quiet" onClick={() => palette.makeFrom([sourceOfResult(result), ...(grow.to ? [grow.to.source] : [])])} tip={t('make.openTitle')}>
                   {t('make.open')}
-                </TextButton>
+                </Button>
+                <span style={{ flex: 1 }} />
+                <Button disabled={kept} onClick={() => palette.keep(result)} tip={kept ? undefined : t('make.keepTitle')}>
+                  {kept ? t('make.kept') : t('make.keep')}
+                </Button>
+                {request && (
+                  <Button onClick={() => ask(ctx, request, { send: false, session })} tip={t('make.useTitle')}>
+                    {t('make.use')}
+                  </Button>
+                )}
               </>
             )
           }}
@@ -297,41 +298,38 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const near = ids.length > 1 ? nearRequest(ids.map(id => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null
             return (
               <>
-                <TextButton onClick={() => palette.gather(ids)} strong title={t('dock.addTitle')}>
+                <Button kind="primary" onClick={() => palette.gather(ids)} tip={t('dock.addTitle')}>
                   {t('dock.addPicked', ids.length)}
-                </TextButton>
+                </Button>
                 {ids.length > 1 && (
-                  <TextButton onClick={() => palette.makeFromPicks(ids)} title={t('make.openTitle')}>
+                  <Button onClick={() => palette.makeFromPicks(ids)} tip={t('make.openTitle')}>
                     {t('make.open')}
-                  </TextButton>
+                  </Button>
                 )}
                 {ids.length === 2 &&
                   (() => {
                     const [from, to] = ids.map(id => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null))
                     return from && to ? (
                       // The vine takes over from the picks: their actions would float over its card.
-                      <TextButton
+                      <Button
                         onClick={() => {
                           grow.between(from, to)
                           palette.clearPicks()
                         }}
-                        title={t('grow.betweenTitle')}
+                        tip={t('grow.betweenTitle')}
                       >
                         {t('grow.between')}
-                      </TextButton>
+                      </Button>
                     ) : null
                   })()}
                 {near && (
-                  <TextButton
-                    onClick={() => ask(ctx, near, { send: false, session })}
-                    title={ids.length > MOST_NEAR ? t('map.moreLikeTheseFirst', MOST_NEAR, ids.length) : t('map.moreLikeTheseTitle')}
-                  >
+                  <Button kind="quiet" onClick={() => ask(ctx, near, { send: false, session })} tip={ids.length > MOST_NEAR ? t('map.moreLikeTheseFirst', MOST_NEAR, ids.length) : t('map.moreLikeTheseTitle')}>
                     {t('map.moreLikeThese', Math.min(ids.length, MOST_NEAR))}
-                  </TextButton>
+                  </Button>
                 )}
-                <TextButton onClick={palette.clearPicks} title={t('dock.clearPicksTitle')}>
+                <Button kind="quiet" onClick={palette.clearPicks} tip={t('dock.clearPicksTitle')}>
                   {t('dock.clearPicks', ids.length)}
-                </TextButton>
+                </Button>
               </>
             )
           }}
@@ -401,9 +399,9 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             use={result => {
               const request = useRequest(result)
               return request ? (
-                <TextButton onClick={() => ask(ctx, request, { send: false, session })} strong title={t('make.useTitle')}>
+                <Button onClick={() => ask(ctx, request, { send: false, session })} tip={t('make.useTitle')}>
                   {t('make.use')}
-                </TextButton>
+                </Button>
               ) : null
             }}
           />
@@ -415,9 +413,9 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           audio={id => audition.url(id)}
           groups={map?.groups}
           kit={current => (
-            <TextButton onClick={() => ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
+            <Button kind="quiet" onClick={() => ask(ctx, kitRequest(current.name), { send: false, session })} tip={t('dock.kitTitle')}>
               {t('dock.kit')}
-            </TextButton>
+            </Button>
           )}
           landing={dock}
           lineage={palette.madeLineage}
@@ -437,9 +435,10 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           use={item => {
             const request = itemReference(item, state.palette?.map_revision ?? null)
             return request ? (
-              <TextButton onClick={() => ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
+              // Every card has one: its accessible name says which sound (D10).
+              <Button kind="quiet" label={t('dock.useNamed', clean(item.name ?? '', 60))} onClick={() => ask(ctx, request, { send: false, session })} tip={t('map.useTitle')}>
                 {t('map.use')}
-              </TextButton>
+              </Button>
             ) : null
           }}
         />

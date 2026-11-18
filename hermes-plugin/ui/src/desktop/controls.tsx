@@ -25,11 +25,13 @@ export interface ButtonProps {
   tip?: ReactNode
   disabled?: boolean
   pressed?: boolean
+  /** The button of something it shows and hides (the palette's drawer): open or not. */
+  expanded?: boolean
 }
 
 const BUSY: CSSProperties = { opacity: 0.6, cursor: 'progress' }
 
-export function Button({ children, onClick, kind = 'secondary', size = 'sm', label, tip, disabled, pressed }: ButtonProps) {
+export function Button({ children, onClick, kind = 'secondary', size = 'sm', label, tip, disabled, pressed, expanded }: ButtonProps) {
   const { busy, click } = useRequestClick(onClick)
   const Host = sdk.Button
   if (typeof Host !== 'function') {
@@ -48,6 +50,7 @@ export function Button({ children, onClick, kind = 'secondary', size = 'sm', lab
         // class beats; FocusStyle takes the host's own ring off these buttons, so v0.23 shows one ring, not two.
         className={FOCUSABLE}
         aria-busy={busy || undefined}
+        aria-expanded={expanded}
         aria-label={label}
         aria-pressed={pressed}
         disabled={disabled}

@@ -449,20 +449,26 @@ test('what the agent found, or a search, is also listed by name above the map, f
   assert.equal(rows(html).split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
   const many = draw({ revision: 'r7', ids })
   assert.equal(rows(many).split('<button aria-pressed').length - 1, 6)
-  assert.ok(many.includes('and 2 more on the map'), many)
+  assert.ok(many.includes(english('map.showMore', 2)), many)
   // A find from another map revision names sounds this map may not have: no list.
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
   assert.ok(!draw(null).includes('Sounds Kumi found'))
   // CC-23: each found hit with the map's indexed values and what Kumi said of it; a near search heads the list with
-  // its seeds, named from the map. Closeness is relative to this map, never a percentage.
+  // its seeds, named from the map. Closeness is relative to this map, never a percentage: the head says so once, and
+  // each row's number is its own.
   const indexed = { ...map, sounds: { ...map.sounds, [ids[0]]: { ...map.sounds[ids[0]], bpm: 124, key: 'A minor' }, [ids[1]]: { ...map.sounds[ids[1]], note: 'D2' } } }
   const nearFind = { revision: 'r7', ids: ids.slice(0, 2), near: ['s-r7-0099'], matches: { [ids[0]]: { why: ['measured: darker than most'], closeness: 87 }, [ids[1]]: { why: [] } } }
   const near = renderToStaticMarkup(createElement(MapCanvas, { map: indexed, found: nearFind, playing: null, selected: null, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
-  for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), `${english('map.closeness', '87')} · measured: darker than most`]) {
+  for (const text of [english('map.near', 'Kick 1.wav'), english('map.indexed', '124 BPM · A minor'), english('map.indexed', english('map.note', 'D2')), english('map.closenessShown'), '>87<', 'measured: darker than most']) {
     assert.ok(near.includes(text), `${text} in ${near}`)
   }
   const words = rows(near).replace(/<[^>]*>/g, ' ')
   assert.ok(!words.includes('%'), words)
+  // What every row would repeat is said once, in the head: one kind, a reason they all share, and closeness all
+  // within two points; the rows then carry no number and no kind.
+  const close = draw({ ...nearFind, matches: { [ids[0]]: { why: ['near the seed'], closeness: 100 }, [ids[1]]: { why: ['near the seed'], closeness: 99 } } })
+  assert.ok(close.includes(`${english('map.allKind', 'snare')} · near the seed · ${english('map.closeness', '99–100')}`), close)
+  assert.ok(!close.includes('>100<') && !close.includes('>99<') && rows(close).split('>snare<').length === 1, close)
   // "More like these": several seeds, the first named and the rest counted.
   assert.ok(draw({ ...nearFind, near: ['s-r7-0099', ids[7]] }).includes(english('map.nearMany', 'Kick 1.wav', 1)))
   // The same hits found without a near search say their reasons alone; a seed the map doesn't list heads nothing.

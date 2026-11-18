@@ -96,6 +96,30 @@ export const TYPE = {
   caption: { fontSize: 11, lineHeight: '14px' }
 } as const
 
+/** Hermes's segmented look, for a choice among a few (Make's ways and modes, Strict | Loose): a tinted track, the
+ *  chosen one raised in the theme's own colours. */
+export const SEGMENT_TRACK = { display: 'flex', flexWrap: 'wrap', gap: 2, padding: 2, borderRadius: 5, background: T.chip } as const
+export function segmentStyle(picked: boolean, disabled = false): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minWidth: 0,
+    font: 'inherit',
+    ...TYPE.small,
+    fontWeight: picked ? 600 : 400,
+    padding: '4px 8px',
+    border: 'none',
+    borderRadius: 3,
+    background: picked ? T.raised : 'transparent',
+    boxShadow: picked ? '0 1px 2px rgba(0,0,0,.18)' : 'none',
+    color: disabled ? T.faint : picked ? T.text : T.muted,
+    cursor: disabled ? 'default' : 'pointer',
+    transition: 'background-color 100ms, color 100ms'
+  }
+}
+
 /** A click that may put a request in the chat: an `onClick` that answers with a promise makes the button a request's.
  *  It holds, busy, until the promise settles, and a click meanwhile, or the second click of a double click, sends
  *  nothing more. Kumi's own button and Hermes's (through `@kumi/controls`) both click through it. */

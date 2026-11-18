@@ -2,6 +2,7 @@
 // point part of the way, breathing while the engine grows it and opening once grown (a click plays it); the handle,
 // dragged along the vine to grow and hear any point; and a card for the point picked, with what can be done with it
 // (the parent's Keep, Use… and Make from; Grow from here, another path, close).
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useRef } from 'react'
@@ -12,7 +13,7 @@ import { clean, seconds } from './format.ts'
 import { type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
 import { floatBeside } from './mapModel.ts'
 import { glass, Icon } from './mapUi.tsx'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { FOCUSABLE, S, useT } from './ui.tsx'
 
 type Point = readonly [number, number]
 
@@ -100,9 +101,9 @@ export function GrowLayer({
   const failed = grow.buds.some(bud => bud.state !== 'failed') ? undefined : grow.buds.find((bud): bud is Extract<Bud, { state: 'failed' }> => bud.state === 'failed')
   // Another path: the same two sounds on a new seed, offered with a grown point and with a failure.
   const another = (
-    <TextButton onClick={grow.reroll} title={t('grow.rerollTitle')}>
+    <Button kind="quiet" onClick={grow.reroll} tip={t('grow.rerollTitle')}>
       {t('grow.reroll')}
-    </TextButton>
+    </Button>
   )
   // The card floats beside the point picked, else beside the whole vine (its ends and its bow), never over them.
   const xs = [from[0], to[0], cx]
@@ -242,25 +243,27 @@ export function GrowLayer({
             </span>
             {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
             <GrownWave colors={[fromColor, toColor]} key={picked.result.artifact_id} playing={playing === picked.result.artifact_id} result={picked.result} />
+            {/* One order: the sound's own play, the quiet ones, then what's made of it (Keep and Use… at the right edge). */}
             <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-              <TextButton onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>
+              <Button kind="quiet" onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>
                 <span aria-hidden="true">{playing === picked.result.artifact_id ? '■' : '▶'}</span>
                 {playing === picked.result.artifact_id ? t('map.stop') : t('map.play')}
-              </TextButton>
-              {actions?.(picked.result)}
+              </Button>
               {fromMap && toMap && (
-                <TextButton
+                <Button
+                  kind="quiet"
                   onClick={() => {
                     const place = vinePoint(fromMap, toMap, picked.at)
                     const end: GrowEnd = { source: sourceOfResult(picked.result), id: null, place, name: t('grow.bud', percent(picked.at)) }
                     if (grow.to) grow.between(end, grow.to)
                   }}
-                  title={t('grow.againTitle')}
+                  tip={t('grow.againTitle')}
                 >
                   {t('grow.again')}
-                </TextButton>
+                </Button>
               )}
               {another}
+              {actions?.(picked.result)}
             </div>
           </>
         ) : picked.state === 'failed' ? (

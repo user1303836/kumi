@@ -3,13 +3,14 @@
 // one request to finish in the chat (CC-13). Nothing here spends, places or retries anything: the paid step was
 // Hermes's approval, and placing is a change the producer approves.
 import type { PluginContext, ToolMediaRendererProps } from '@hermes/plugin-sdk'
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
 import { capWords, costWords, generationRequest, generationTitle, lengthWords, outputKind, parseGeneration } from '../shared/generate.ts'
 import type { Audition } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, S, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { Wave } from './card.tsx'
 import { ownerSession } from './pane.tsx'
@@ -76,9 +77,9 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
       {made.ledger?.frozen && <span style={{ ...S.text, color: T.warn, whiteSpace: 'normal' }}>{t('generate.frozen')}</span>}
       {offer && (
         <span>
-          <TextButton onClick={() => ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) })} strong title={offer.title}>
+          <Button kind="primary" onClick={() => ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) })} tip={offer.title}>
             {offer.label}
-          </TextButton>
+          </Button>
         </span>
       )}
     </div>

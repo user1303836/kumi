@@ -123,27 +123,37 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
   )
 }
 
-/** A row's words: its title in two lines (the rest on a click), what the meta line adds to it, and any note the row
- *  carries. The meta line drops what the title already says: the track when the title names it, the kind of change
- *  when the title is that kind ("Tempo 120 → 124 BPM" over "tempo"), and never the change's machine label. */
-function RowWords({ item, live, daw, target, now, detail, restartSaid }: { item: HistoryItem; live: boolean; daw: unknown; target?: string; now?: number; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean }) {
+/** A row's meta line: what the title doesn't already say. The track when the title doesn't name it, the kind of change
+ *  when the title isn't that kind ("Tempo 120 → 124 BPM" over "tempo"), when, and "undone" for a row that was (the
+ *  strike and the arrow alone could read as failed). Never the change's machine label. */
+function metaOf(item: HistoryItem, now: number | undefined, t: Translate): { track: string; text: string } {
+  const said = clean(item.title ?? item.label ?? item.id, 300).toLowerCase()
+  const name = nameOf(item.track)
+  const track = name && !said.includes(name.toLowerCase()) ? clean(name, 24) : ''
+  const family = item.family && !said.includes(item.family.toLowerCase()) ? clean(item.family, 16) : ''
+  return { track, text: [track, family, ago(item.at, now, t), item.state === 'undone' ? t('history.undone') : ''].filter(Boolean).join(' · ') }
+}
+
+/** A row's words: its title (in two lines with the rest on a click, or `whole`), its meta line unless `meta` is false,
+ *  and any note the row carries. */
+function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }: { item: HistoryItem; live: boolean; daw: unknown; target?: string; now?: number; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean; whole?: boolean; meta?: boolean }) {
   const t = useT()
   const title = clean(item.title ?? item.label ?? item.id, 300)
-  const said = title.toLowerCase()
-  const track = nameOf(item.track)
-  const showTrack = track && !said.includes(track.toLowerCase())
-  const family = item.family && !said.includes(item.family.toLowerCase()) ? clean(item.family, 16) : ''
+  const line = metaOf(item, now, t)
   const dawUndo = item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? item.daw_undo : null
   const note = { ...TYPE.small, color: T.muted, whiteSpace: 'normal', overflowWrap: 'anywhere' } as const
+  const titleStyle = { ...TYPE.body, color: item.state === 'undone' ? T.muted : T.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined, overflowWrap: 'anywhere' } as const
   return (
     <>
       {/* Two lines, then the rest on a click or Enter: the part of a title that differs is often its end ("…→ Dusty
-          Snare 04.wav"), which a one-line cut hid. */}
-      <Clamp style={{ ...TYPE.body, color: item.state === 'undone' ? T.muted : T.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined }} text={title} />
-      <span style={{ ...S.row, gap: 6 }}>
-        {showTrack && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
-        <span style={{ ...TYPE.small, ...S.ellipsis, color: T.faint }}>{[showTrack && clean(track, 24), family, ago(item.at, now, t)].filter(Boolean).join(' · ')}</span>
-      </span>
+          Snare 04.wav"), which a one-line cut hid. A step the producer opened to read is read whole. */}
+      {whole ? <span style={titleStyle}>{title}</span> : <Clamp style={titleStyle} text={title} />}
+      {meta && (
+        <span style={{ ...S.row, gap: 6 }}>
+          {line.track && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
+          <span style={{ ...TYPE.small, ...S.ellipsis, color: T.faint }}>{line.text}</span>
+        </span>
+      )}
       {item.state === 'unsure' || item.state === 'partial' ? (
         <span style={{ ...note, color: T.warn }}>
           {[clean(item.reason ?? item.note ?? t('history.unconfirmed'), 200), cleanupWords(item.cleanup, t), t('history.lookFirst')].filter(Boolean).join(' ')}
@@ -175,7 +185,9 @@ function Mark({ item, live }: { item: HistoryItem; live: boolean }) {
 }
 
 /** One change: its newest step as the head (the one its undo starts from), with the change's action beside it, and
- *  its other steps folded under "N more steps". */
+ *  its other steps folded under "N more steps". Opened, the steps take the row's whole width (no column is kept for a
+ *  button there), read in full, and say only what the head doesn't: a step's mark only when its state differs, its
+ *  meta line only when it isn't the head's. */
 function Change({ rows, live, daw, target, now, action, detail, restartSaid }: { rows: HistoryItem[]; live: boolean; daw: unknown; target?: string; now?: number; action?: (head: HistoryItem, rows: HistoryItem[]) => ReactNode; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -183,13 +195,15 @@ function Change({ rows, live, daw, target, now, action, detail, restartSaid }: {
   const others = rows.filter(row => row !== head)
   const dawUndo = head.state === 'applied' && (head.daw_undo === 'next' || head.daw_undo === 'buried')
   const words = { live, daw, target, now, detail, restartSaid }
+  const headMark = stateOf(head, t, live).mark
+  const headMeta = metaOf(head, now, t).text
   return (
-    <li style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderTop: `1px solid ${T.hairline}` }}>
-      <Mark item={head} live={live} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-        <RowWords item={head} {...words} />
-        {others.length > 0 && (
-          <>
+    <li style={{ display: 'flex', flexDirection: 'column', padding: '8px 0', borderTop: `1px solid ${T.hairline}` }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <Mark item={head} live={live} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+          <RowWords item={head} {...words} />
+          {others.length > 0 && (
             <button
               aria-expanded={open}
               className={FOCUSABLE}
@@ -202,22 +216,22 @@ function Change({ rows, live, daw, target, now, action, detail, restartSaid }: {
               </span>
               {t('history.moreSteps', others.length)}
             </button>
-            {open && (
-              <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
-                {others.map(row => (
-                  <li key={row.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', borderTop: `1px solid ${T.hairline}` }}>
-                    <Mark item={row} live={live} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                      <RowWords item={row} {...words} />
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </>
-        )}
+          )}
+        </div>
+        {dawUndo ? null : action?.(head, rows)}
       </div>
-      {dawUndo ? null : action?.(head, rows)}
+      {open && (
+        <ol style={{ listStyle: 'none', margin: '2px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {others.map(row => (
+            <li key={row.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              {stateOf(row, t, live).mark !== headMark ? <Mark item={row} live={live} /> : <span aria-hidden style={{ width: 14, flex: 'none' }} />}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                <RowWords item={row} {...words} meta={metaOf(row, now, t).text !== headMeta} whole />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
     </li>
   )
 }

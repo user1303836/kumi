@@ -5,6 +5,7 @@
 // forgets one, sets it strict or loose, and offers it as a kit or as the sounds to make a new one from. Every edit
 // changes no project, so it runs at once (`POST /palette`); the agent's `kumi_palette` reads and edits the same
 // palette. Both UI halves use it: what "Use as kit", a card's "Use…" and "Make…" do comes from the parent.
+import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -14,11 +15,11 @@ import { Glyph } from './atlas/Glyph.tsx'
 import type { Share } from './atlas/lineage.ts'
 import { clean, num } from './format.ts'
 import { glyphOf, groupColor } from './mapModel.ts'
-import { Icon } from './mapUi.tsx'
+import { ActionMenu, Icon } from './mapUi.tsx'
 import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
 import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapGroup } from './types.ts'
-import { FOCUSABLE, Pending, S, TextButton, useT } from './ui.tsx'
+import { FOCUSABLE, Pending, S, SEGMENT_TRACK, segmentStyle, TYPE, useT } from './ui.tsx'
 
 /** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
@@ -509,9 +510,11 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     use: use?.(item)
   })
 
+  // The header (D6): the palette's name with its own menu (Rename…, Forget…), Strict | Loose, then what's done with its
+  // sounds (Make… and Use as kit…, quiet) and the drawer's button at the right edge. It wraps at the narrowest widths.
   const header = (
     <div style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
-      <span style={{ ...S.heading, fontSize: 11, color: T.secondary }}>{t('dock.title')}</span>
+      <span style={{ ...TYPE.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted }}>{t('dock.title')}</span>
       {editing ? (
         <NameField
           initial={editing === 'rename' ? (current?.name ?? '') : ''}
@@ -534,7 +537,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
                 if (value === '\u0000new') setEditing('new')
                 else if (value !== current?.id) void run({ action: 'use', id: value })
               }}
-              style={{ font: 'inherit', fontSize: 12, fontWeight: 600, maxWidth: '14rem', padding: '0 4px', borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
+              style={{ font: 'inherit', ...TYPE.small, fontWeight: 600, maxWidth: '14rem', height: 24, padding: '0 4px', borderRadius: 4, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
               value={current?.id ?? ''}
             >
               {!current && <option value="">{t('dock.choose')}</option>}
@@ -547,67 +550,48 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
             </select>
           )}
           {palette === null ? <Pending label={t('dock.reading')} width="8rem" /> : palette.palettes.length === 0 && <span style={S.faint}>{t('dock.none')}</span>}
-          {current && (
-            <TextButton onClick={() => setEditing('rename')} title={t('dock.renameTitle')}>
-              {t('dock.rename')}
-            </TextButton>
-          )}
           {palette && palette.palettes.length === 0 && (
-            <TextButton onClick={() => setEditing('new')} title={t('dock.newName')}>
+            <Button kind="quiet" onClick={() => setEditing('new')} tip={t('dock.newName')}>
               {t('dock.newPalette')}
-            </TextButton>
+            </Button>
+          )}
+          {current && (
+            <ActionMenu
+              actions={[
+                { id: 'rename', name: t('dock.rename'), title: t('dock.renameTitle'), onChoose: () => setEditing('rename') },
+                { id: 'forget', name: t('dock.forget'), title: t('dock.forgetTitle', clean(current.name, 40)), onChoose: () => setForgetting(true), danger: true }
+              ]}
+              label={t('dock.menu', clean(current.name, 40))}
+              up
+            />
           )}
         </>
       )}
       {current && (
-        <span role="group" aria-label={t('dock.mode')} style={{ ...S.row, gap: 0 }}>
-          <TextButton onClick={() => current.reach !== 0 && void run({ action: 'reach', reach: 0 })} pressed={current.reach === 0} title={t('dock.strictTitle')}>
+        <span aria-label={t('dock.mode')} role="group" style={{ ...SEGMENT_TRACK, flexWrap: 'nowrap' }}>
+          <button aria-pressed={current.reach === 0} className={FOCUSABLE} onClick={() => current.reach !== 0 && void run({ action: 'reach', reach: 0 })} title={t('dock.strictTitle')} type="button" style={segmentStyle(current.reach === 0)}>
             {t('dock.strict')}
-          </TextButton>
-          <TextButton onClick={() => current.reach === 0 && void run({ action: 'reach', reach: LOOSE })} pressed={current.reach > 0} title={t('dock.looseTitle', current.reach || LOOSE)}>
+          </button>
+          <button aria-pressed={current.reach > 0} className={FOCUSABLE} onClick={() => current.reach === 0 && void run({ action: 'reach', reach: LOOSE })} title={t('dock.looseTitle', current.reach || LOOSE)} type="button" style={segmentStyle(current.reach > 0)}>
             {current.reach > 0 ? t('dock.looseN', current.reach) : t('dock.loose')}
-          </TextButton>
+          </button>
         </span>
       )}
-      {current && current.excluded > 0 && <span style={S.faint}>{t('dock.excluded', current.excluded)}</span>}
+      {current && current.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', current.excluded)}</span>}
+      <span style={{ flex: 1 }} />
       {current && current.items.length > 1 && make && (
-        <TextButton onClick={() => make(current)} title={t('make.openTitle')}>
+        <Button kind="quiet" onClick={() => make(current)} tip={t('make.openTitle')}>
           {t('make.open')}
-        </TextButton>
+        </Button>
       )}
       {current && current.items.length > 0 && kit?.(current)}
-      {current && !forgetting && (
-        <TextButton onClick={() => setForgetting(true)} title={t('dock.forgetTitle', clean(current.name, 40))}>
-          {t('dock.forget')}
-        </TextButton>
-      )}
       {current && items.length > 0 && (
-        <button
-          aria-expanded={open}
-          className={FOCUSABLE}
-          onClick={() => onOpen(!open)}
-          title={open ? t('dock.collapse') : t('dock.expand')}
-          type="button"
-          style={{
-            ...S.row,
-            gap: 4,
-            font: 'inherit',
-            fontSize: 11.5,
-            fontWeight: 600,
-            padding: '2px 10px',
-            borderRadius: 12,
-            border: `1px solid ${T.accent}`,
-            background: `color-mix(in srgb, ${T.accent} ${open ? 10 : 18}%, transparent)`,
-            color: T.accent,
-            cursor: 'pointer',
-            flex: 'none'
-          }}
-        >
+        <Button expanded={open} onClick={() => onOpen(!open)} tip={open ? t('dock.collapse') : t('dock.expand')}>
           {open ? t('dock.fold') : t('dock.showAll', items.length)}
-          <span aria-hidden style={{ display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
+          <span aria-hidden style={{ display: 'inline-block', marginLeft: 4, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
             ▴
           </span>
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -680,16 +664,19 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
           <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>
-          <TextButton
+          <span style={{ flex: 1 }} />
+          <Button kind="quiet" onClick={() => setForgetting(false)}>
+            {t('dock.keep')}
+          </Button>
+          <Button
+            kind="destructive"
             onClick={() => {
               setForgetting(false)
               void run({ action: 'forget', id: current.id })
             }}
-            strong
           >
             {t('dock.forgetYes')}
-          </TextButton>
-          <TextButton onClick={() => setForgetting(false)}>{t('dock.keep')}</TextButton>
+          </Button>
         </div>
       )}
       {current && items.length > 0 && open && (
