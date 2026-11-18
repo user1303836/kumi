@@ -9087,11 +9087,16 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const [painted, setPainted] = useState14("");
   useEffect12(() => {
     const canvas = canvasRef.current;
-    if (!canvas || themeKey !== null) return;
-    const timer = setInterval(() => {
+    if (!canvas) return;
+    const look = () => {
       const now = Object.values(resolve(canvas)).join();
       setPainted((current) => current === now ? current : now);
-    }, 1e3);
+    };
+    if (themeKey !== null) {
+      const frame2 = requestAnimationFrame(look);
+      return () => cancelAnimationFrame(frame2);
+    }
+    const timer = setInterval(look, 1e3);
     return () => clearInterval(timer);
   }, [hasPoints, themeKey]);
   useEffect12(() => {

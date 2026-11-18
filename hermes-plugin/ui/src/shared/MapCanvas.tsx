@@ -437,18 +437,24 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return seeds.length === 1 ? t('map.near', first) : t('map.nearMany', first, seeds.length - 1)
   }, [searched, foundIds, found, model, t])
 
-  // The canvas paints the theme's colours itself. Desktop's theme hook (v0.23 and later) says when they change, and a
-  // change redraws it (`themeKey` in the draw's inputs); where nothing says (older Desktops, the dashboard), it looks
-  // at them once a second, and a light or dark switch redraws it.
+  // The canvas paints the theme's colours itself. Desktop's theme hook (v0.23 and later) says when they change, but it
+  // ticks before Hermes's provider has written the new colours, so the canvas looks again on the next frame, once
+  // they're there, and a change redraws it (`painted` in the draw's inputs); where nothing says (older Desktops, the
+  // dashboard), it looks at them once a second.
   const themeKey = useThemeKey()
   const [painted, setPainted] = useState('')
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || themeKey !== null) return
-    const timer = setInterval(() => {
+    if (!canvas) return
+    const look = () => {
       const now = Object.values(resolve(canvas)).join()
       setPainted(current => (current === now ? current : now))
-    }, 1000)
+    }
+    if (themeKey !== null) {
+      const frame = requestAnimationFrame(look)
+      return () => cancelAnimationFrame(frame)
+    }
+    const timer = setInterval(look, 1000)
     return () => clearInterval(timer)
   }, [hasPoints, themeKey])
 
