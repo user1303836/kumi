@@ -14,6 +14,7 @@ use std::{
 
 use async_trait::async_trait;
 use kumi::config::{load_inference_config, safe_error};
+use kumi::KUMI_VERSION;
 use kumi_agent::{
     core::contracts::{KernelEmit, StopReason},
     create_agent_kernel, AgentKernel, AgentKernelOptions, KernelEvent,
@@ -36,7 +37,6 @@ use kumi_types::{
     contracts::{JsonObject, KernelTool, ToolResult},
     errors::RuntimeError,
     system,
-    version::KUMI_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -434,6 +434,7 @@ fn report(record: Value) {
 }
 
 fn main() {
+    kumi_types::version::set(KUMI_VERSION);
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {

@@ -1,4 +1,5 @@
 //! `kumi report`, with native runtime version information.
+use crate::KUMI_VERSION;
 use crate::{
     config::{load_auth_file, load_db_file, load_gaps_file, load_projects_dir, load_settings_file, load_timings_file, read_settings},
     doctor::{doctor_sections, format_doctor, format_sections, DoctorIo},
@@ -22,7 +23,6 @@ use kumi_types::place::IMPORTED;
 use kumi_types::{
     errors::RuntimeError,
     system::{self, Env},
-    version::KUMI_VERSION,
 };
 use serde_json::Value;
 use std::{path::Path, rc::Rc};

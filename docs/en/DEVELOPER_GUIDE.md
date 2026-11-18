@@ -336,11 +336,12 @@ python3 scripts/release.py --go     # the release
 - **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"
-  on `release/vX.Y.Z`: the version in the root `package.json`,
-  `crates/kumi-types/src/version.rs`, the `kumi`, `kumi-common` and
-  `kumi-types` Cargo manifests and `Cargo.lock` (the packaging tests hold
-  these equal), and the bridge's when it changed; the Status line of the three
-  READMEs; the ships-with line under "Bridge versions" in the three
+  on `release/vX.Y.Z`: the version in the root `package.json`, the Cargo
+  manifests of the programs that say it (`kumi`, `daw-mcp-server` and
+  `soundcraft-kumi`) and `Cargo.lock` (the packaging tests hold these equal;
+  the crates under them keep their own numbers, and `kumi` gives the version
+  to them as it starts), and the bridge's when it changed; the Status line of
+  the three READMEs; the ships-with line under "Bridge versions" in the three
   `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens
   the pull request "Kumi X.Y.Z", merges it with the admin bypass as
   "Kumi X.Y.Z (#PR)" without waiting for its CI (it changes only versions and

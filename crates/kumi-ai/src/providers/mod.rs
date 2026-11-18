@@ -109,7 +109,7 @@ pub static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
     };
     #[cfg(not(any(unix, windows)))]
     let release = String::new();
-    format!("kumi/{} ({platform} {release}; {arch})", kumi_types::version::KUMI_VERSION)
+    format!("kumi/{} ({platform} {release}; {arch})", kumi_types::version::kumi())
 });
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

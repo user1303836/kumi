@@ -189,7 +189,13 @@ class Edits(unittest.TestCase):
     def test_a_release_with_the_same_bridge(self):
         plan, texts = self.released(new_bridge=False)
         self.assertEqual(json.loads(texts["package.json"])["version"], plan.new)
-        self.assertIn(f'"{plan.new}"', texts["crates/kumi-types/src/version.rs"])
+        # Nothing under Kumi's programs moves: kumi-types has its own number, kumi-common stays (the bridge's too), and
+        # each program gives the version to the crates below it as it starts.
+        for name in ("kumi-types", "kumi-common"):
+            self.assertEqual(texts[f"crates/{name}/Cargo.toml"], (ROOT / f"crates/{name}/Cargo.toml").read_text(encoding="utf-8"))
+            self.assertNotIn(f'name = "{name}"\nversion = "{plan.new}"', texts["Cargo.lock"])
+        self.assertEqual(texts["crates/kumi-types/src/version.rs"], (ROOT / "crates/kumi-types/src/version.rs").read_text(encoding="utf-8"))
+        self.assertEqual(set(release.CRATES), {"kumi", "daw-mcp-server", *release.PROGRAMS})
         for crate, folder in release.CRATES.items():
             self.assertIn(f'version = "{plan.new}"', texts[f"{folder}/Cargo.toml"])
             self.assertIn(f'name = "{crate}"\nversion = "{plan.new}"', texts["Cargo.lock"])
@@ -452,9 +458,9 @@ class DawEdits(unittest.TestCase):
     def test_daw_bridges_as_they_were_say_nothing(self):
         plan, texts, changed, really = self.released()
         self.assertEqual(sorted(changed), really)
-        # what a release changed before REAPER and Renoise, the host for them and kumi-types, less kumi-runtime's manifest
-        # (kumi-agent, which took its place, isn't at Kumi's version), and each DAW's program at Kumi's version
-        self.assertEqual(len(changed), 14 + len(release.PROGRAMS))
+        # what a release changes before REAPER and Renoise: the notes, package.json, Cargo.lock, and the manifests of Kumi,
+        # its host for them and each DAW's program, the programs at Kumi's version
+        self.assertEqual(len(changed), 11 + len(release.PROGRAMS))
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertNotIn("REAPER", new)
         self.assertNotIn("Renoise", new)

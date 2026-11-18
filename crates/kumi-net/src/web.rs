@@ -24,7 +24,7 @@ use serde_json::Value;
 use url::Url;
 
 use kumi_types::errors::RuntimeError;
-use kumi_types::version::KUMI_VERSION;
+use kumi_types::version::kumi;
 
 /// What kind of trouble a web error is, for trying elsewhere: none of it is shown as is.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -195,7 +195,10 @@ pub fn busy_words(text: &str) -> bool {
 
 /// Sites answer a browser; Kumi says who it is too.
 pub static WEB_USER_AGENT: LazyLock<String> = LazyLock::new(|| {
-    format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Kumi/{KUMI_VERSION}")
+    format!(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Kumi/{}",
+        kumi()
+    )
 });
 
 const MAX_REDIRECTS: u32 = 5;

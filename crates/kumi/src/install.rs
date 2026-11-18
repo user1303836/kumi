@@ -1,6 +1,7 @@
 //! Installed Kumi and its native release bundles.
 mod migration;
 pub use crate::config::kumi_dir as kumi_home;
+use crate::KUMI_VERSION;
 use crate::{
     config::{json_files, load_db_file},
     input::TerminalInput,
@@ -35,7 +36,6 @@ use kumi_types::{
     disk::{free_bytes, size, MB},
     errors::RuntimeError,
     system::{self, Env, SystemProgram},
-    version::KUMI_VERSION,
 };
 pub use migration::{ensure_native_launcher, has_app, launcher, write_launcher};
 use serde::{Deserialize, Serialize};

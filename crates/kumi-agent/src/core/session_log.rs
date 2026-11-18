@@ -957,7 +957,7 @@ impl Log {
             v: LOG_VERSION,
             id: self.id.clone(),
             at: now(),
-            kumi: kumi_types::version::KUMI_VERSION.into(),
+            kumi: kumi_types::version::kumi().into(),
             before: self.begin.before,
             from: None,
         };

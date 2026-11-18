@@ -146,7 +146,7 @@ case!(with_nothing_kept_kumi_export_says_so_in_the_daws_words, async {
 case!(help_version_errors_and_checkout_commands, async {
     let f = Fixture::new(false);
     assert_eq!(run(f.io(&["--version"]), unused_factory()).await, 0);
-    assert_eq!(f.output(), format!("Kumi {}\n", kumi_types::version::KUMI_VERSION));
+    assert_eq!(f.output(), format!("Kumi {}\n", kumi::KUMI_VERSION));
     assert!(f.err.0.borrow().is_empty());
     assert!(!f.folder.path().join("settings.json").exists());
     f.out.0.borrow_mut().clear();

@@ -1,3 +1,7 @@
+/// Kumi's release, as `kumi --version`, the doctor and updates say it: this package's version, which a release moves.
+/// `main` gives it to `kumi_types::version::set` first thing, so the crates below say the same.
+pub const KUMI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod awake;
 pub mod cli;
 pub mod config;

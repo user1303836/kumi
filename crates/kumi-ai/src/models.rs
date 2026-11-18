@@ -271,7 +271,7 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
     let partial = to.with_extension(format!("partial-{}", std::process::id()));
     let fetched: Result<(), String> = async {
         let client = kumi_net::client()
-            .user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION))
+            .user_agent(format!("kumi/{}", kumi_types::version::kumi()))
             .https_only(true)
             .connect_timeout(std::time::Duration::from_secs(20))
             .read_timeout(std::time::Duration::from_secs(60))
@@ -336,7 +336,7 @@ pub async fn fetch_unpinned(url: &str, to: &Path, signal: &Signal) -> Result<(),
 /// than wait for Esc.
 async fn download_at_most(url: &str, path: &Path, most: Option<u64>, signal: &Signal) -> Result<String, String> {
     let client = kumi_net::client()
-        .user_agent(format!("kumi/{}", kumi_types::version::KUMI_VERSION))
+        .user_agent(format!("kumi/{}", kumi_types::version::kumi()))
         .connect_timeout(std::time::Duration::from_secs(20))
         .read_timeout(std::time::Duration::from_secs(60))
         .build()

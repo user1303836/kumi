@@ -1,5 +1,6 @@
 //! `kumi doctor`; native installs also diagnose legacy bridge configurations.
 mod installation;
+use crate::KUMI_VERSION;
 use crate::{
     config::*,
     spinner::step,
@@ -43,7 +44,6 @@ use kumi_types::{
     command::{INSTALLED, KUMI, KUMI_REPAIR},
     errors::RuntimeError,
     system::{self, Env},
-    version::KUMI_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;

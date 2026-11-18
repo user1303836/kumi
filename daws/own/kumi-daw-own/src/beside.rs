@@ -34,7 +34,7 @@ use kumi_types::{
     daw::{DawId, DawProfile},
     errors::RuntimeError,
     system::Env,
-    version::KUMI_VERSION,
+    version::kumi,
 };
 use std::{
     cell::RefCell,
@@ -325,7 +325,7 @@ impl DawProvider for Beside {
     }
     /// The program comes with Kumi, at Kumi's version.
     fn bundled_bridge_version(&self) -> Option<String> {
-        self.program().map(|_| KUMI_VERSION.to_string())
+        self.program().map(|_| kumi().to_string())
     }
     /// The program in use is the one beside this Kumi.
     fn installed_bridge_version(&self, _bridge_config: &str, _env: &Env) -> Option<String> {
@@ -610,7 +610,7 @@ impl DawSetup for BesideSetup {
     /// Nothing goes into the DAW: what's said is the program's version, Kumi's.
     async fn install(&self) -> Result<String, String> {
         match self.beside.program() {
-            Some(_) => Ok(KUMI_VERSION.to_string()),
+            Some(_) => Ok(kumi().to_string()),
             None => Err(format!("{}: run {} to repair it", self.beside.not_carried(), *KUMI_REPAIR)),
         }
     }

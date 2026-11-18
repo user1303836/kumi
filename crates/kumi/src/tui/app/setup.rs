@@ -14,13 +14,13 @@ use super::drawing::{sp, st};
 use super::models::Models;
 use super::panels::{ChatGptPanel, KeyPanel};
 use super::*;
+use crate::KUMI_VERSION;
 use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
 use kumi_daw::{
     provider::{older_than, EnableStep, Installed as LiveInstalled},
     setup::{DawSetup, Reopens},
 };
-use kumi_types::version::KUMI_VERSION;
 use tokio::sync::oneshot;
 
 /// How long Kumi keeps watching, after the producer put the Live step off, for Live to quit on the

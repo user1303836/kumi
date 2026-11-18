@@ -9,7 +9,7 @@ use kumi_common::{
 };
 use kumi_store::gaps;
 use kumi_types::daw::{DawId, DawProfile};
-use kumi_types::version::KUMI_VERSION;
+use kumi_types::version::kumi;
 use kumi_types::{
     contracts::{with_final, JsonObject, KernelTool, ToolResult},
     errors::RuntimeError,
@@ -83,7 +83,7 @@ impl KernelTool for GapTool {
         if missing.is_empty() {
             return Ok(ToolResult::error("Say what's missing."));
         }
-        let mut entry = json!({"at":iso_string(now_ms()),"kumi":KUMI_VERSION,"missing":missing});
+        let mut entry = json!({"at":iso_string(now_ms()),"kumi":kumi(),"missing":missing});
         // The DAW it was missing in, when it isn't Live (never written for Live; kumi.db's gaps keep no DAW yet).
         if let Some(daw) = self.profile.id.filter(|daw| *daw != DawId::Ableton) {
             entry["daw"] = json!(daw);
@@ -100,7 +100,7 @@ impl KernelTool for GapTool {
         if let Some(store) = &self.store {
             let text = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
             let gap = gaps::Gap {
-                kumi_version: KUMI_VERSION.into(),
+                kumi_version: kumi().into(),
                 missing: missing.clone(),
                 asked: text("asked"),
                 workaround: text("workaround"),

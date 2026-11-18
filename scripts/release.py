@@ -72,10 +72,13 @@ KUMI = ("crates/kumi/", "crates/kumi-agent/", "crates/kumi-types/", "crates/kumi
         "crates/kumi-listening/", "crates/kumi-common/", "crates/kumi-store/", "daws/ableton/kumi-daw-ableton/",
         *(daw["integration"] + "/" for daw in native.DAW_BRIDGES.values()), "daws/own/kumi-daw-own/",
         "daws/own/daw-bridge/", "daws/own/daw-mcp-server/", *(crate + "/" for crate in PROGRAMS.values()), "install.sh", "install.ps1")
-# Kumi's own crates, at Kumi's version, and their folders: Kumi, its common parts and shared types (with the version), its
-# host for the other DAWs, and the DAWs' programs it starts.
-CRATES = {"kumi": "crates/kumi", "kumi-common": "crates/kumi-common", "kumi-types": "crates/kumi-types",
-          "daw-mcp-server": "daws/own/daw-mcp-server", **PROGRAMS}
+# The crates at Kumi's version, which a release moves, and their folders: the programs Kumi ships that say it (Kumi,
+# its host for the other DAWs, and the DAWs' programs it starts), and nothing under them, so a release rebuilds only
+# these. Kumi gives its version to the crates below it as it starts (kumi_types::version::set). kumi-types has a number
+# of its own. kumi-common is frozen at the last version it shared with Kumi on purpose: it's the bridge's too, so a
+# change under it is a new bridge for Live (BRIDGE), and its number is tidied at the next bridge bump that comes for its
+# own reasons.
+CRATES = {"kumi": "crates/kumi", "daw-mcp-server": "daws/own/daw-mcp-server", **PROGRAMS}
 # Where paths moved in the repository, oldest first (scripts/moves.toml, which `dev.py rebase-moves` reads too).
 MOVES = [(move["from"], move["to"]) for move in
          tomllib.loads((ROOT / "scripts/moves.toml").read_text(encoding="utf-8")).get("move", [])]
@@ -412,7 +415,6 @@ def apply(root: Path, plan: Plan) -> list[str]:
 
     for folder in CRATES.values():
         replace_once(edit(f"{folder}/Cargo.toml"), f'version = "{plan.old}"', f'version = "{plan.new}"')
-    replace_once(edit("crates/kumi-types/src/version.rs"), f'"{plan.old}"', f'"{plan.new}"')
     replace_once(edit("package.json"), f'"version": "{plan.old}"', f'"version": "{plan.new}"')
     moves = {crate: (plan.old, plan.new) for crate in CRATES}
     if not plan.same_bridge:
@@ -552,7 +554,7 @@ def pr_body(plan: Plan, changes: list[Change], head: str, left: list[str]) -> st
              for name in plan.moved()]
     lines += [
         "", "### Set here",
-        f"- Versions {plan.old} → {plan.new} in the three crates, `version.rs`, `package.json` and Cargo.lock.{bridge}", *moved,
+        f"- Versions {plan.old} → {plan.new} in {', '.join(CRATES)}, `package.json` and Cargo.lock.{bridge}", *moved,
         f"- CHANGELOG `## {plan.new} — {plan.date}`, with each pull request's changelog line as written.",
         "- The README status lines and the KUMI_CHANGES ships-with line, in en, ja and zh-CN.",
         "", f"### Checks (on main {head[:8]} with this commit)",

@@ -35,7 +35,7 @@ use kumi_types::{
         DevicePlacement, TrackChip, Usage,
     },
     picture::{ChangePicture, Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureValue},
-    version::KUMI_VERSION,
+    version::kumi,
 };
 use serde_json::{json, Value};
 use std::{
@@ -710,7 +710,7 @@ async fn recipes_techniques_and_lessons_keep_their_bytes() {
 fn normalised_line(line: &str) -> String {
     let mut value: Value = serde_json::from_str(line).unwrap();
     value["at"] = json!("2025-10-09T08:53:20.000Z");
-    if value["kumi"] == KUMI_VERSION {
+    if value["kumi"] == kumi() {
         value["kumi"] = json!("<version>");
     }
     stringify(&value)

@@ -253,7 +253,7 @@ case!(a_first_run_signs_in_puts_the_bridge_in_and_waits_for_the_control_surface,
     let first = rows(&h);
     println!("--- sign in, 80 columns ---\n{first}");
     let kumi = first.lines().nth(1).unwrap();
-    assert!(kumi.starts_with("  kumi") && kumi.ends_with(kumi_types::version::KUMI_VERSION), "{kumi}");
+    assert!(kumi.starts_with("  kumi") && kumi.ends_with(kumi::KUMI_VERSION), "{kumi}");
     assert_eq!(first.lines().nth(2).unwrap().trim(), kumi::tui::app::waveform(kumi::tui::app::WAVE_WIDTH, None), "still");
     for line in [
         "  Sign in             now",

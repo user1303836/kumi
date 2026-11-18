@@ -33,7 +33,7 @@ use super::types::{
 };
 use kumi_types::contracts::JsonObject;
 use kumi_types::errors::RuntimeError;
-use kumi_types::version::KUMI_VERSION;
+use kumi_types::version::kumi;
 
 /// The most one message from the bridge may hold: a big Set's reads come in pages well under it.
 pub const MAX_BRIDGE_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -775,7 +775,7 @@ impl Endpoint {
             let params = json!({
                 "protocolVersion": LATEST_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": { "name": "kumi", "version": KUMI_VERSION },
+                "clientInfo": { "name": "kumi", "version": kumi() },
             });
             let result = self.request("initialize", Some(params), connect_timeout, signal).await?;
             let result: InitializeResult =

@@ -1,6 +1,7 @@
 //! Command dispatch and native process I/O.
 mod session;
 mod shutdown;
+use crate::KUMI_VERSION;
 use crate::{
     config::*,
     doctor::{self, DoctorIo},
@@ -26,7 +27,7 @@ use kumi_daw::{
     io::{Answers, DawIo},
     provider::{BridgeCommand, DawSession, WatchWords},
 };
-use kumi_types::{errors::RuntimeError, system::Env, version::KUMI_VERSION};
+use kumi_types::{errors::RuntimeError, system::Env};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
