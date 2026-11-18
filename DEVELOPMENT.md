@@ -1,6 +1,7 @@
 # Development
 
-From a copy of this repository, with Rust, Cargo, cargo-nextest and Python 3.11 or later:
+From a copy of this repository, with Rust through rustup (it takes the version `rust-toolchain.toml` pins), Cargo,
+cargo-nextest and Python 3.11 or later:
 
 ```sh
 cargo build --release --locked --workspace --bins

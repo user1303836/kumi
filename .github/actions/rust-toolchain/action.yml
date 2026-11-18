@@ -1,0 +1,40 @@
+name: Rust, as rust-toolchain.toml pins it
+description: >-
+  The Rust that rust-toolchain.toml pins, and only that one on the runner. Every workflow that builds Rust installs it
+  here, so CI tests with the compiler the Installer builds releases with, and a new stable reaches neither until a pull
+  request changes the file. The runner image's own toolchains go first: rust-cache keys its caches on every installed
+  toolchain, and the image's stable changes whenever GitHub updates the image (runners on old and new images at once
+  would save and miss the cache by turns).
+
+inputs:
+  targets:
+    description: Comma-separated targets to add, as dtolnay/rust-toolchain takes them.
+    required: false
+    default: ""
+  components:
+    description: Comma-separated components to add, as dtolnay/rust-toolchain takes them.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        channel="$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+        test -n "$channel"
+        # (no rustup yet on an image without Rust: dtolnay/rust-toolchain installs it)
+        for toolchain in $(rustup toolchain list --quiet 2>/dev/null || true); do
+          case "$toolchain" in
+            "$channel"-*) ;;
+            *) rustup toolchain uninstall "$toolchain" ;;
+          esac
+        done
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+    - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      with:
+        toolchain: ${{ steps.pin.outputs.channel }}
+        targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}

@@ -66,8 +66,9 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p test_models_catalog.py
       - name: The installers are POSIX sh, and PowerShell that parses and is ASCII
         run: sh scripts/check-installers.sh .
+      # The Rust rust-toolchain.toml pins, which releases build with too (.github/actions/rust-toolchain).
       - if: steps.affected.outputs.rust_lint == 'true'
-        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        uses: ./.github/actions/rust-toolchain
         with:
           components: rustfmt, clippy
       - if: steps.affected.outputs.rust_lint == 'true'
@@ -111,7 +112,7 @@ jobs:
           - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
