@@ -3,7 +3,7 @@
 // `kumi-btn` class gives (FocusStyle). The dashboard's tooltip is the browser's `title`: it has no Tip of its own.
 import { T } from '@kumi/theme'
 import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { cloneElement, useEffect, useRef, useState } from 'react'
 
 import { Chip, FOCUSABLE, MENU_BUTTON, TYPE, useRequestClick } from '../shared/ui.tsx'
 
@@ -76,14 +76,12 @@ export function Badge({ children, tone = 'fact', tip }: { children: ReactNode; t
   )
 }
 
-/** The browser's `title` on a box that draws nothing of its own (`display: contents`), around the one element. */
+/** The browser's `title`, set on the one element itself: no wrapper, so the element keeps its place among its
+ *  siblings, as Hermes's Tip (`asChild`) keeps it in Desktop. A wrapper broke Make's radio groups: their arrow keys
+ *  move the focus to the next sibling (`radioKeys`), and with each radio in a box of its own there was none. */
 export function Tip({ label, children }: { label?: ReactNode; children: ReactElement }) {
   if (typeof label !== 'string' || !label) return children
-  return (
-    <span style={{ display: 'contents' }} title={label}>
-      {children}
-    </span>
-  )
+  return cloneElement(children as ReactElement<{ title?: string }>, { title: label })
 }
 
 /** One thing a menu does. */

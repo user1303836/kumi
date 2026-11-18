@@ -24,6 +24,7 @@ const React = sdk.React
 export default React
 export const {
   Fragment,
+  cloneElement,
   createContext,
   createElement,
   useCallback,

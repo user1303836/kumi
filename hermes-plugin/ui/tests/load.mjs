@@ -39,6 +39,7 @@ const reactStub = `
   export const useContext = context => context.value
   export const Fragment = 'Fragment'
   export const jsx = (type, props) => ({ type, props }), jsxs = jsx
+  export const cloneElement = (element, props) => ({ ...element, props: { ...element.props, ...props } })
   export default { Fragment }
 `
 

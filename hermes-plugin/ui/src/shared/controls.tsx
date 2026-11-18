@@ -220,38 +220,39 @@ export function Pills<V extends number | string>({
   const all: { value: V | undefined; label: string; title?: string; glyph?: ReactNode }[] = rest === null ? options : [{ value: undefined, label: rest }, ...options]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-      <span style={{ fontSize: 11.5, color: value === undefined ? T.muted : T.secondary }}>{label}</span>
+      <span style={{ ...TYPE.small, color: value === undefined ? T.muted : T.secondary }}>{label}</span>
       <div aria-label={label} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 4 }}>
         {all.map((option, index) => {
           const chosen = option.value === value
           return (
-            <button
-              aria-checked={chosen}
-              className={FOCUSABLE}
-              key={String(option.value ?? '')}
-              onClick={() => onChange(option.value)}
-              {...radioKeys(index, all.length, all.findIndex(each => each.value === value), next => onChange(all[next].value))}
-              role="radio"
-              title={option.title}
-              type="button"
-              style={{
-                ...S.row,
-                gap: 4,
-                font: 'inherit',
-                fontSize: 11.5,
-                fontWeight: chosen ? 600 : 500,
-                padding: '2px 9px',
-                borderRadius: 12,
-                border: `1px solid ${chosen ? T.accent : T.border}`,
-                background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent',
-                color: chosen ? T.accent : option.value === undefined ? T.muted : T.secondary,
-                cursor: 'pointer',
-                transition: 'border-color 140ms, background-color 140ms, color 140ms'
-              }}
-            >
-              {option.glyph}
-              {option.label}
-            </button>
+            // Its hint in Hermes's Tip (on hover and keyboard focus), never a native title.
+            <Tip key={String(option.value ?? '')} label={option.title}>
+              <button
+                aria-checked={chosen}
+                className={FOCUSABLE}
+                onClick={() => onChange(option.value)}
+                {...radioKeys(index, all.length, all.findIndex(each => each.value === value), next => onChange(all[next].value))}
+                role="radio"
+                type="button"
+                style={{
+                  ...S.row,
+                  gap: 4,
+                  font: 'inherit',
+                  ...TYPE.small,
+                  fontWeight: chosen ? 600 : 500,
+                  padding: '2px 9px',
+                  borderRadius: 12,
+                  border: `1px solid ${chosen ? T.accent : T.border}`,
+                  background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent',
+                  color: chosen ? T.accent : option.value === undefined ? T.muted : T.secondary,
+                  cursor: 'pointer',
+                  transition: 'border-color 140ms, background-color 140ms, color 140ms'
+                }}
+              >
+                {option.glyph}
+                {option.label}
+              </button>
+            </Tip>
           )
         })}
       </div>
@@ -262,12 +263,12 @@ export function Pills<V extends number | string>({
 /** A long list of choices as a menu: the rest first. */
 export function Choice<V extends string>({ label, options, value, onChange, rest }: { label: string; options: { value: V; label: string }[]; value: V | undefined; onChange: (value: V | undefined) => void; rest: string }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 11.5, color: value === undefined ? T.muted : T.secondary }}>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, ...TYPE.small, color: value === undefined ? T.muted : T.secondary }}>
       {label}
       <select
         className={FOCUSABLE}
         onChange={event => onChange(event.target.value === '' ? undefined : (event.target.value as V))}
-        style={{ font: 'inherit', fontSize: 12, padding: '2px 6px', borderRadius: 6, border: `1px solid ${value === undefined ? T.border : T.accent}`, background: 'transparent', color: value === undefined ? T.secondary : T.accent }}
+        style={{ font: 'inherit', ...TYPE.small, padding: '2px 6px', borderRadius: 6, border: `1px solid ${value === undefined ? T.border : T.accent}`, background: 'transparent', color: value === undefined ? T.secondary : T.accent }}
         value={value ?? ''}
       >
         <option value="">{rest}</option>
@@ -286,39 +287,39 @@ export function Toggles<V extends string>({ label, options, value, onChange, res
   const chosen = value ?? []
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-      <span style={{ ...S.row, gap: 6, fontSize: 11.5, color: chosen.length ? T.secondary : T.muted }}>
+      <span style={{ ...S.row, gap: 6, ...TYPE.small, color: chosen.length ? T.secondary : T.muted }}>
         {label}
-        {chosen.length === 0 && <span style={{ color: T.faint, fontSize: 10.5 }}>{rest}</span>}
+        {chosen.length === 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{rest}</span>}
       </span>
       <div aria-label={label} role="group" style={{ ...S.row, flexWrap: 'wrap', gap: 4 }}>
         {options.map(option => {
           const on = chosen.includes(option.value)
           return (
-            <button
-              aria-pressed={on}
-              className={FOCUSABLE}
-              key={option.value}
-              onClick={() => {
-                const next = on ? chosen.filter(other => other !== option.value) : [...chosen, option.value]
-                onChange(next.length ? next : undefined)
-              }}
-              title={option.title}
-              type="button"
-              style={{
-                font: 'inherit',
-                fontSize: 11.5,
-                padding: '2px 9px',
-                borderRadius: 6,
-                border: `1px solid ${on ? T.accent : T.border}`,
-                background: on ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent',
-                color: on ? T.accent : T.secondary,
-                cursor: 'pointer',
-                transition: 'border-color 140ms, background-color 140ms, color 140ms'
-              }}
-            >
-              {on ? '✓ ' : ''}
-              {option.label}
-            </button>
+            <Tip key={option.value} label={option.title}>
+              <button
+                aria-pressed={on}
+                className={FOCUSABLE}
+                onClick={() => {
+                  const next = on ? chosen.filter(other => other !== option.value) : [...chosen, option.value]
+                  onChange(next.length ? next : undefined)
+                }}
+                type="button"
+                style={{
+                  font: 'inherit',
+                  ...TYPE.small,
+                  padding: '2px 9px',
+                  borderRadius: 6,
+                  border: `1px solid ${on ? T.accent : T.border}`,
+                  background: on ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent',
+                  color: on ? T.accent : T.secondary,
+                  cursor: 'pointer',
+                  transition: 'border-color 140ms, background-color 140ms, color 140ms'
+                }}
+              >
+                {on ? '✓ ' : ''}
+                {option.label}
+              </button>
+            </Tip>
           )
         })}
       </div>
@@ -330,25 +331,25 @@ export function Toggles<V extends string>({ label, options, value, onChange, res
  *  wide as the panel allows. */
 export function Group({ title, count, summary, open, onToggle, actions, children, hint }: { title: string; count?: string; summary?: string; open: boolean; onToggle: () => void; actions?: ReactNode; children: ReactNode; hint?: string }) {
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 10px', borderRadius: 10, border: `1px solid ${open ? `color-mix(in srgb, ${T.border} 100%, transparent)` : T.border}`, background: open ? `color-mix(in srgb, ${T.card} 60%, transparent)` : 'transparent', transition: 'background-color 160ms' }}>
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 10px', borderRadius: 10, border: `1px solid ${T.hairline}`, background: open ? `color-mix(in srgb, ${T.card} 60%, transparent)` : 'transparent', transition: 'background-color 160ms' }}>
       <div style={{ ...S.row, gap: 6 }}>
         <button
           aria-expanded={open}
           className={FOCUSABLE}
           onClick={onToggle}
           type="button"
-          style={{ ...S.row, gap: 6, flex: 1, font: 'inherit', fontSize: 12, fontWeight: 650, padding: 0, border: 'none', background: 'transparent', color: T.text, cursor: 'pointer', textAlign: 'left' }}
+          style={{ ...S.row, gap: 6, flex: 1, font: 'inherit', ...TYPE.small, fontWeight: 600, padding: 0, border: 'none', background: 'transparent', color: T.text, cursor: 'pointer', textAlign: 'left' }}
         >
           <span aria-hidden style={{ display: 'inline-block', color: T.muted, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 160ms' }}>
             ▸
           </span>
           {title}
-          {count && <span style={{ fontSize: 10.5, fontWeight: 500, padding: '0 6px', borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 14%, transparent)`, color: T.accent }}>{count}</span>}
-          {!open && summary && <span style={{ ...S.ellipsis, flex: 1, fontSize: 11, fontWeight: 400, color: T.muted }}>{summary}</span>}
+          {count && <span style={{ ...TYPE.caption, fontWeight: 500, padding: '0 6px', borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 14%, transparent)`, color: T.accent }}>{count}</span>}
+          {!open && summary && <span style={{ ...S.ellipsis, flex: 1, ...TYPE.caption, fontWeight: 400, color: T.muted }}>{summary}</span>}
         </button>
         {actions}
       </div>
-      {open && hint && <span style={{ ...S.faint, fontSize: 11, marginTop: -4 }}>{hint}</span>}
+      {open && hint && <span style={{ ...S.faint, ...TYPE.caption, marginTop: -4 }}>{hint}</span>}
       {open && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px 16px', alignItems: 'start' }}>{children}</div>}
     </section>
   )
