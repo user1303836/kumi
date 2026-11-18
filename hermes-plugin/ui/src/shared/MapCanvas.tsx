@@ -113,6 +113,17 @@ const ROOM_LEAST = 200
 /** The least height a find's list needs to show any of its rows (its head and a few): with less it folds to its head,
  *  and "Show" opens it anyway. */
 const LIST_LEAST = 150
+/** The free room the map keeps for its sounds while a find's list is open: a third of its height, and at least this.
+ *  With less, the corner's first-open steps give way first (it folds to its first line), then the list folds to its
+ *  head; a find's frame then lands in the room left. */
+const FREE_LEAST = 180
+/** What a find's list takes as laid out, for the map to decide before drawing it (deciding from its measured height
+ *  would fold and unfold it in turn): its head with the shared facts, each row, and its "Show n more". */
+const LIST_HEAD = 70
+const LIST_ROW = 31
+const LIST_MORE = 34
+/** The corner's height with its first-open steps over its two lines. */
+const CORNER_WITH_STEPS = 180
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
 // The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
@@ -1178,8 +1189,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What docks at the map's foot: the player, and the corner above it (at least the player's usual 110 px while it
   // measures). On a short map (less than `ROOM_LEAST` between the top column and the player) the corner folds to its
   // first line, and steps aside while the player is open: the map keeps some of its sounds in view whatever is open.
+  // With a find's list open, the corner folds the same way (its first-open steps give way) when the list and the
+  // corner as they'd stand would leave the map less than its free room (`FREE_LEAST`, or a third of its height). Both
+  // decisions read estimates (`listWants`, `CORNER_WITH_STEPS`), never what they change, so neither flips back and forth.
   const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10
+  const listOpen = matches.length > 0 && closedOf !== matches
+  const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED)
+  const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0)
+  const freeLeast = Math.max(FREE_LEAST, size.height / 3)
+  const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast
   const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST
+  const compact = short || crowded
   const cornerShown = !(short && playerShown)
   const foot = cornerBottom + (cornerShown && cornerHeight > 0 ? cornerHeight + 8 : 0)
   footing.current = { corner: cornerBottom, foot }
@@ -1238,10 +1258,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, columnTop, foot)
   clusterBox.current = picksShown ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
   // A find's list keeps to the room between the legend and the foot, less the picks' actions' (docked at the foot when
-  // there's no room beside the picks): its rows scroll inside it. With too little room for any row it folds to its
-  // head, whose "Show" opens it anyway.
+  // there's no room beside the picks): its rows scroll inside it. It folds to its head, whose "Show" opens it anyway,
+  // when there's too little room for any row, or when its rows would leave the map less than its free room. A find's
+  // frame reads the list as drawn, folded or not, so the found sounds land in the room left.
   const listRoom = size.height - topInset - foot - (picksShown ? clusterSize[1] : 0)
-  const listFolded = size.height > 0 && listRoom < LIST_LEAST && allOf !== matches
+  const listFolded = size.height > 0 && allOf !== matches && (listRoom < LIST_LEAST || listRoom - listWants < freeLeast)
 
   return (
     <div
@@ -1607,10 +1628,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         <Corner
           bottom={cornerBottom}
           box={cornerRef}
-          compact={short}
+          compact={compact}
           cover={coverRight}
           still={still}
-          first={first && firstSteps.length > 0 && !short ? <FirstOpen onSkip={() => first.onDone(FIRST_STEPS)} steps={firstSteps} /> : undefined}
+          first={first && firstSteps.length > 0 && !compact ? <FirstOpen onSkip={() => first.onDone(FIRST_STEPS)} steps={firstSteps} /> : undefined}
           families={model.groups.filter(group => group.count > 0).length}
           hint={hintOf(mapState(spaceHeld))}
           layout={

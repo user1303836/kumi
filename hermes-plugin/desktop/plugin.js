@@ -9199,6 +9199,11 @@ var CORNER_ZOOM_ROOM = 480;
 var CORNER_ROOM = 76;
 var ROOM_LEAST = 200;
 var LIST_LEAST = 150;
+var FREE_LEAST = 180;
+var LIST_HEAD = 70;
+var LIST_ROW = 31;
+var LIST_MORE = 34;
+var CORNER_WITH_STEPS = 180;
 var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
@@ -10049,7 +10054,13 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => observer.disconnect();
   }, [playerShown]);
   const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10;
+  const listOpen = matches.length > 0 && closedOf !== matches;
+  const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED);
+  const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0);
+  const freeLeast = Math.max(FREE_LEAST, size.height / 3);
+  const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast;
   const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST;
+  const compact2 = short || crowded;
   const cornerShown = !(short && playerShown);
   const foot = cornerBottom + (cornerShown && cornerHeight > 0 ? cornerHeight + 8 : 0);
   footing.current = { corner: cornerBottom, foot };
@@ -10090,7 +10101,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, columnTop, foot);
   clusterBox.current = picksShown ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
   const listRoom = size.height - topInset - foot - (picksShown ? clusterSize[1] : 0);
-  const listFolded = size.height > 0 && listRoom < LIST_LEAST && allOf !== matches;
+  const listFolded = size.height > 0 && allOf !== matches && (listRoom < LIST_LEAST || listRoom - listWants < freeLeast);
   return /* @__PURE__ */ jsxs22(
     "div",
     {
@@ -10407,10 +10418,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           {
             bottom: cornerBottom,
             box: cornerRef,
-            compact: short,
+            compact: compact2,
             cover: coverRight,
             still,
-            first: first && firstSteps.length > 0 && !short ? /* @__PURE__ */ jsx26(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
+            first: first && firstSteps.length > 0 && !compact2 ? /* @__PURE__ */ jsx26(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
             families: model.groups.filter((group) => group.count > 0).length,
             hint: hintOf(mapState(spaceHeld)),
             layout: layoutChoices.length > 0 ? (
