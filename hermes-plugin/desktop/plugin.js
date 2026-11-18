@@ -10437,7 +10437,7 @@ function GlyphShape({ glyph, color }) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect14, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
+import { useEffect as useEffect14, useLayoutEffect as useLayoutEffect3, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
 import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs23 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
@@ -10824,6 +10824,17 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
   }, [said, shownFor]);
   const saying = said && now - said.at < shownFor ? said : null;
   const sayingText = saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "";
+  const sentence = useRef14(null);
+  const [sentenceFits, setSentenceFits] = useState17(true);
+  useLayoutEffect3(() => {
+    const element = sentence.current;
+    if (!element) return;
+    const check = () => setSentenceFits(element.scrollWidth <= element.clientWidth + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [sayingText]);
   const grip = useRef14(null);
   const gripDown = (event) => {
     if (!open || event.button !== 0) return;
@@ -10933,8 +10944,8 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       "span",
       {
         "aria-live": "polite",
-        title: sayingText || void 0,
-        style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: saying?.failed ? T.warn : T.muted, opacity: saying ? 1 : 0, transition: "opacity 160ms" },
+        ref: sentence,
+        style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", color: saying?.failed ? T.warn : T.muted, opacity: saying && sentenceFits ? 1 : 0, transition: "opacity 160ms" },
         children: sayingText
       }
     ),

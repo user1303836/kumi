@@ -8,7 +8,7 @@
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { rgbOf } from './atlas/color.ts'
 import { Glyph } from './atlas/Glyph.tsx'
@@ -511,6 +511,18 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   }, [said, shownFor])
   const saying = said && now - said.at < shownFor ? said : null
   const sayingText = saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''
+  // Shown only whole: in a crowded header a cut sentence ("Ad…") says nothing (a screen reader still hears it).
+  const sentence = useRef<HTMLSpanElement | null>(null)
+  const [sentenceFits, setSentenceFits] = useState(true)
+  useLayoutEffect(() => {
+    const element = sentence.current
+    if (!element) return
+    const check = () => setSentenceFits(element.scrollWidth <= element.clientWidth + 1)
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [sayingText])
 
   // The grip: a click folds or opens the drawer; a drag on an open one resizes it.
   const grip = useRef<{ y: number; height: number; moved: boolean } | null>(null)
@@ -639,11 +651,11 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
       )}
       {current && current.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', current.excluded)}</span>}
       {/* What the last edit said, for a few seconds, in the header's free room: it never adds a line (a line that came and
-          went resized the map) and never covers what floats over the map (Make's foot, P7A-38); its title says it whole. */}
+          went resized the map) and never covers what floats over the map (Make's foot, P7A-38). */}
       <span
         aria-live="polite"
-        title={sayingText || undefined}
-        style={{ flex: 1, minWidth: 0, ...TYPE.caption, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: saying?.failed ? T.warn : T.muted, opacity: saying ? 1 : 0, transition: 'opacity 160ms' }}
+        ref={sentence}
+        style={{ flex: 1, minWidth: 0, ...TYPE.caption, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', color: saying?.failed ? T.warn : T.muted, opacity: saying && sentenceFits ? 1 : 0, transition: 'opacity 160ms' }}
       >
         {sayingText}
       </span>

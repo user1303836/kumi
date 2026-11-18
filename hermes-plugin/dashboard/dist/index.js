@@ -9475,6 +9475,17 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     }, [said, shownFor]);
     const saying = said && now - said.at < shownFor ? said : null;
     const sayingText = saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "";
+    const sentence = useRef(null);
+    const [sentenceFits, setSentenceFits] = useState(true);
+    useLayoutEffect(() => {
+      const element = sentence.current;
+      if (!element) return;
+      const check = () => setSentenceFits(element.scrollWidth <= element.clientWidth + 1);
+      check();
+      const observer = new ResizeObserver(check);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [sayingText]);
     const grip = useRef(null);
     const gripDown = (event) => {
       if (!open || event.button !== 0) return;
@@ -9584,8 +9595,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         "span",
         {
           "aria-live": "polite",
-          title: sayingText || void 0,
-          style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: saying?.failed ? T.warn : T.muted, opacity: saying ? 1 : 0, transition: "opacity 160ms" },
+          ref: sentence,
+          style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", color: saying?.failed ? T.warn : T.muted, opacity: saying && sentenceFits ? 1 : 0, transition: "opacity 160ms" },
           children: sayingText
         }
       ),
