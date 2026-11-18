@@ -440,9 +440,12 @@ test('what the agent found, or a search, is also listed by name above the map, f
   }
   const draw = (found, selected = null) =>
     renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
-  // The listed rows: the list's own card, the last group before the canvas (the tools and the legend's toggles, before
-  // it, are pressed buttons too).
-  const rows = html => html.slice(html.lastIndexOf('<div', html.lastIndexOf('role="group"', html.indexOf('<canvas'))), html.indexOf('<canvas'))
+  // The listed rows: the list's own card, the last group before the map's own group (which holds the canvas; the tools
+  // and the legend's toggles, before the list, are pressed buttons too).
+  const rows = html => {
+    const mapGroup = html.lastIndexOf('<div', html.indexOf('<canvas'))
+    return html.slice(html.lastIndexOf('<div', html.lastIndexOf('role="group"', mapGroup)), mapGroup)
+  }
   const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
   assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
   assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
@@ -474,6 +477,37 @@ test('what the agent found, or a search, is also listed by name above the map, f
   // The same hits found without a near search say their reasons alone; a seed the map doesn't list heads nothing.
   const plain = draw({ ...nearFind, near: ['s-gone'] })
   assert.ok(plain.includes('aria-label="Sounds Kumi found"') && plain.includes('measured: darker than most') && !plain.includes('closeness'), plain)
+})
+
+test("the map's keyboard stop is the sound reached: a checkbox in the map's group, named for the sound and checked as it's picked", async () => {
+  const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
+  const map = {
+    revision: 'r7',
+    points: [['s-r7-0010', 0.2, 0.3, 0], ['s-r7-0011', 0.6, 0.7, 0]],
+    groups: { 0: { name: 'snare', color: '#f59e0b', count: 2 } },
+    sounds: { 's-r7-0010': { name: 'Dusty Snare 1.wav', class: 'snare' }, 's-r7-0011': { name: 'Dusty Snare 2.wav', class: 'snare' } }
+  }
+  const draw = (selected, picked) => renderToStaticMarkup(createElement(MapCanvas, { map, found: null, playing: null, selected, picked, onPick: () => {}, onSelect: () => {}, onPicked: () => {}, empty: 'none' }))
+  // The stop: the map's group, from its opening tag to its end, holds it; nothing else in the map takes a tab of its own.
+  const stopOf = html => {
+    const group = html.slice(html.lastIndexOf('<div', html.indexOf('<canvas')))
+    assert.ok(group.startsWith(`<div aria-label="${english('map.canvas')}"`) && group.includes('role="group"'), group.slice(0, 200))
+    assert.equal(html.split('tabindex="0"').length - 1, 1, 'one keyboard stop')
+    const at = group.indexOf('tabindex="0"')
+    return group.slice(group.lastIndexOf('<div', at), group.indexOf('>', at) + 1)
+  }
+  const picked = stopOf(draw('s-r7-0011', new Set(['s-r7-0011'])))
+  assert.ok(picked.includes('role="checkbox"') && picked.includes('aria-checked="true"') && picked.includes('aria-label="Dusty Snare 2.wav, snare"'), picked)
+  const unpicked = stopOf(draw('s-r7-0011', new Set()))
+  assert.ok(unpicked.includes('role="checkbox"') && unpicked.includes('aria-checked="false"'), unpicked)
+  // Before the arrows reach a sound: a button named for the map, described by the keys hint.
+  const none = stopOf(draw(null, new Set()))
+  assert.ok(none.includes('role="button"') && none.includes(`aria-label="${english('map.canvas')}"`) && none.includes('aria-describedby') && !none.includes('aria-checked'), none)
+  // The canvas only draws: hidden from a screen reader, out of the tab order; no host-private marks anywhere.
+  const html = draw('s-r7-0011', new Set())
+  const canvas = html.slice(html.indexOf('<canvas'), html.indexOf('>', html.indexOf('<canvas')))
+  assert.ok(canvas.includes('aria-hidden="true"') && !canvas.includes('tabindex'), canvas)
+  for (const word of ['role="application"', 'role="listbox"', 'data-overlay-surface']) assert.ok(!html.includes(word), word)
 })
 
 test('a vine grown from a grown point names every point from the two map sounds, on one scale: never nested, never a seed', async () => {

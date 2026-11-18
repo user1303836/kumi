@@ -30,7 +30,7 @@ import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd, vinePoint } from './grow.ts'
 import { GrowLayer } from './GrowLayer.tsx'
 import { useLessMotion } from './hooks.ts'
-import { arrangedModel, buildModel, fitView, floatBeside, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
+import { arrangedModel, buildModel, fitView, floatBeside, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, keepPlace, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
 import type { KumiState } from './store.ts'
@@ -113,17 +113,20 @@ const ROOM_LEAST = 200
 /** The least height a find's list needs to show any of its rows (its head and a few): with less it folds to its head,
  *  and "Show" opens it anyway. */
 const LIST_LEAST = 150
-/** The free room the map keeps for its sounds while a find's list is open: a third of its height, and at least this.
- *  With less, the corner's first-open steps give way first (it folds to its first line), then the list folds to its
- *  head; a find's frame then lands in the room left. */
-const FREE_LEAST = 180
+/** The free room the map keeps for its sounds while a find's list is open: a quarter of its height, and at least
+ *  this. With less, the corner's first-open steps give way first (it folds to its first line), then the list folds to
+ *  its head; a find's frame then lands in the room left. */
+const FREE_LEAST = 160
 /** What a find's list takes as laid out, for the map to decide before drawing it (deciding from its measured height
  *  would fold and unfold it in turn): its head with the shared facts, each row, and its "Show n more". */
 const LIST_HEAD = 70
 const LIST_ROW = 31
 const LIST_MORE = 34
-/** The corner's height with its first-open steps over its two lines. */
+/** The corner's height with its first-open steps over its two lines, and folded to its first line. The folded height
+ *  stands in for the measured one: in the render that folds the corner, the measure is still the unfolded corner's, and
+ *  what's decided from it (the list's fold, a find's frame) would be decided for a corner that is gone. */
 const CORNER_WITH_STEPS = 180
+const CORNER_FOLDED = 40
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
 // The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
@@ -234,7 +237,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const down = (event: globalThis.KeyboardEvent) => {
       if (event.code !== 'Space' || event.defaultPrevented || !over.current) return
       const target = event.target as HTMLElement | null
-      if (target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return
+      // The map's own keyboard stop takes Space as a pick (a checkbox's key), never as a hold to pan.
+      if (target === keysRef.current || target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return
       event.preventDefault()
       hold(true)
     }
@@ -295,8 +299,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const [cornerHeight, setCornerHeight] = useState(0)
   // The sounds' names as the map last wrote them (each its box, and its sound's index): a click on one reaches it.
   const named = useRef<{ box: readonly [number, number, number, number]; index: number }[]>([])
-  // Whether the canvas has the keyboard's focus: while it has, the map keeps its keys from Desktop's (the marker below).
-  const [keysHere, setKeysHere] = useState(false)
+  // The map's one keyboard stop (`keys` in the render): it stands for the sound the arrows reached, with a standard
+  // role, and takes every key the map does; the canvas only takes the pointer.
+  const keysRef = useRef<HTMLDivElement | null>(null)
   // What the overlay hands back to be called after each paint: what stands still on it follows the map.
   const overlayFollow = useRef<(() => void) | null>(null)
   const [topInset, setTopInset] = useState(0)
@@ -521,6 +526,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // Whether the producer moved the view since it was last fitted, or a find framed it: a view nobody moved follows the
   // map's size, its top and a side sheet; a moved one stays where it was put until the map is fitted again.
   const moved = useRef(false)
+  // The map's side changes as its top settles, its height changes (the palette drawer) or a side sheet opens: a view
+  // somebody moved, or a find framed, keeps every sound where it is on screen (`keepPlace`) rather than sliding a
+  // zoomed-in view's sounds out of sight. Done in the render that sees the new side, so no frame draws the slide.
+  const sideWas = useRef(mapSize)
+  if (sideWas.current !== mapSize) {
+    const was = sideWas.current
+    sideWas.current = mapSize
+    if (moved.current && view) setView(keepPlace(view, was, mapSize))
+  }
   // A new map, or a new size of a view nobody has moved: fit the whole map, below what floats over its top.
   useEffect(() => {
     if (size.width > 0 && size.height > 0) setView(current => (current && moved.current ? current : fit()))
@@ -1076,10 +1090,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }
   const screenOf = (place: readonly [number, number] | null): [number, number] | null => (place && view ? toScreen(view, mapSize, place[0], place[1]) : null)
 
-  const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
+  const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     // Escape stops Grow naming its sounds, else lets go of the picks; with neither, it goes on to the map's own
-    // handler, which puts Grow's vine away. While the canvas has the focus, Desktop's own keys stand down (the marker
-    // below), so an Escape with nothing to cancel does nothing here, as on any focused widget.
+    // handler, which puts Grow's vine away.
     const escape = event.key === 'Escape' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey ? gesturesOf(mapState(space.current)).escape : undefined
     if (escape === 'cancel') {
       event.preventDefault()
@@ -1092,9 +1105,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       setSaid(t('dock.cleared'))
       return
     }
-    // Enter does on the sound the arrow keys reached what a click does on it: while Grow names its sounds it names this
-    // one, else it adds it to the picks or lets it go (a click with Command or Ctrl), so Make is a keyboard's too.
-    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+    // Enter, or Space (a checkbox's own key), does on the sound the arrow keys reached what a click does on it: while
+    // Grow names its sounds it names this one, else it adds it to the picks or lets it go (a click with Command or
+    // Ctrl), so Make is a keyboard's too.
+    if ((event.key === 'Enter' || event.key === ' ') && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
       event.preventDefault()
       if (grow?.choosing) {
         const end = endOf(selected)
@@ -1126,9 +1140,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       const point = active.points[next]
       const [x, y] = toScreen(view, mapSize, point.x, point.y)
       setView(keepInView(view, x, y, size.width, size.height))
+      // The keyboard stop now stands for this sound: its name and state are what a screen reader says, once.
       onSelect(point.id)
-      const sound = model.sounds[point.id]
-      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(', '))
     }
   }
 
@@ -1196,12 +1209,13 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const listOpen = matches.length > 0 && closedOf !== matches
   const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED)
   const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0)
-  const freeLeast = Math.max(FREE_LEAST, size.height / 3)
+  const freeLeast = Math.max(FREE_LEAST, size.height / 4)
   const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast
   const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST
   const compact = short || crowded
   const cornerShown = !(short && playerShown)
-  const foot = cornerBottom + (cornerShown && cornerHeight > 0 ? cornerHeight + 8 : 0)
+  const cornerRoom = !cornerShown ? 0 : compact && !grow?.choosing ? CORNER_FOLDED : cornerHeight
+  const foot = cornerBottom + (cornerRoom > 0 ? cornerRoom + 8 : 0)
   footing.current = { corner: cornerBottom, foot }
   useEffect(() => {
     const element = cornerRef.current
@@ -1231,6 +1245,14 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const chosen = selected ? model.sounds[selected] : undefined
   const chosenIndex = selected ? indexOf.get(selected) : undefined
   const chosenColor = chosenIndex === undefined ? T.accent : (model.groups.find(group => group.key === model.points[chosenIndex].group)?.color ?? T.accent)
+  // The sound the map's keyboard stop stands for: the one the arrows (or a click) reached, while the search and the
+  // legend keep it; its name and kind, where it sits on screen, and the stop's role (a checkbox for picking it; a
+  // button while Grow names its ends, or on a map that picks nothing).
+  const reachedId = selected !== null && chosenIndex !== undefined && visible(chosenIndex) ? selected : null
+  const reachedSound = reachedId ? model.sounds[reachedId] : undefined
+  const reachedName = reachedId ? [clean(reachedSound?.name ?? reachedId, 80), clean(reachedSound?.class, 16)].filter(Boolean).join(', ') : ''
+  const reachedAt = reachedId && view && chosenIndex !== undefined ? toScreen(view, mapSize, active.points[chosenIndex].x, active.points[chosenIndex].y) : null
+  const keysRole = reachedId && onPicked && !grow?.choosing ? 'checkbox' : 'button'
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
   // The sound that plays, when it's one of this map's: the overlay pulses on it, wherever the map last drew it (a
@@ -1454,16 +1476,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           </div>
         )}
       </div>
-      <div ref={boxRef} style={{ position: 'absolute', inset: 0 }}>
+      {/* The map, for the keyboard and a screen reader: a group named for it, holding one keyboard stop for the sound
+          reached (`keys`). The canvas only draws and takes the pointer. */}
+      <div aria-label={t('map.canvas')} aria-roledescription={t('map.roledescription')} ref={boxRef} role="group" style={{ position: 'absolute', inset: 0 }}>
         <canvas
           ref={canvasRef}
-          aria-describedby={hintId}
-          aria-label={t('map.canvas')}
-          aria-roledescription={t('map.roledescription')}
-          className={FOCUSABLE}
-          onKeyDown={onKey}
-          onFocus={() => setKeysHere(true)}
-          onBlur={() => setKeysHere(false)}
+          aria-hidden
           onPointerDown={press}
           onPointerMove={event => {
             const [x, y] = at(event)
@@ -1493,23 +1511,23 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             setHover(null)
             rest(null)
           }}
-          // The middle button's own press would start the page's autoscroll on some systems.
+          // A press keeps the keyboard on the map: it moves the focus to the map's keyboard stop (a canvas takes none),
+          // so the arrows go on from the sound just clicked. The middle button's own press would also start the page's
+          // autoscroll on some systems.
           onMouseDown={event => {
-            if (event.button === 1) event.preventDefault()
+            if (event.button !== 0 && event.button !== 1) return
+            event.preventDefault()
+            keysRef.current?.focus({ preventScroll: true })
           }}
           onDoubleClick={() => {
             moved.current = false
             setView(fit())
           }}
-          role="application"
-          tabIndex={0}
-          // The box clips what's outside it: the focus ring sits inside the canvas's edge.
           style={{
             position: 'absolute',
             inset: 0,
             width: '100%',
             height: '100%',
-            outlineOffset: -3,
             cursor: grabbing ? 'grabbing' : spaceHeld || handTool || !onPicked ? 'grab' : box ? 'crosshair' : hover ? 'pointer' : 'default',
             touchAction: 'none'
           }}
@@ -1522,16 +1540,21 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         <span id={hintId} style={S.hidden}>
           {t('map.keys')}
         </span>
-        {keysHere && (
-          // While the canvas has the focus, the map's keys are its own. Hermes Desktop reads keys on the window before
-          // anything on the page (app/hooks/use-keybinds.ts, in capture), and its soft keys (Enter and typing focus the
-          // chat's composer; Escape stops a turn) stand down for an editable target, a button-like one, or while a
-          // surface that keeps its keys is open (lib/keybinds/composer-focus-keys.ts, `composerFocusBlockedBySurface`,
-          // which looks for `[data-overlay-surface]`, the mark Desktop's own overlays carry). The canvas is none of
-          // those, so Enter on a sound picked it and threw the focus into the chat: this mark, there only while the map
-          // has the focus, is Desktop's own way of saying so.
-          <span aria-hidden data-overlay-surface="" hidden />
-        )}
+        {/* The map's one keyboard stop, over the sound the arrows reached (the whole map before any is), never in the
+            pointer's way. A sound is picked or not, so it's a checkbox named for the sound; while Grow names its ends
+            Enter names the sound instead, so it's a button. Standard roles: Hermes Desktop leaves Enter and Space to
+            them rather than moving the focus to its chat. (Typed letters still go to the chat: the host's rule.) */}
+        <div
+          aria-checked={keysRole === 'checkbox' ? Boolean(reachedId && picked?.has(reachedId)) : undefined}
+          aria-describedby={reachedId ? undefined : hintId}
+          aria-label={reachedName || t('map.canvas')}
+          className={FOCUSABLE}
+          onKeyDown={onKey}
+          ref={keysRef}
+          role={keysRole}
+          style={reachedAt ? { position: 'absolute', left: reachedAt[0] - 14, top: reachedAt[1] - 14, width: 28, height: 28, borderRadius: '50%', pointerEvents: 'none' } : { position: 'absolute', inset: 0, outlineOffset: -3, pointerEvents: 'none' }}
+          tabIndex={0}
+        />
         <span aria-live="polite" style={S.hidden}>
           {said}
         </span>

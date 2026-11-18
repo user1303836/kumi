@@ -5,7 +5,7 @@
 import * as sdk from '@hermes/plugin-sdk'
 import type { CSSProperties, ReactElement, ReactNode } from 'react'
 
-import { Chip, FOCUSABLE, TextButton, useRequestClick } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, HOST_CONTROL, TextButton, useRequestClick } from '../shared/ui.tsx'
 
 /** One button order everywhere: the one action a view exists for (`primary`), the usual action (`secondary`),
  *  everything else in a row (`quiet`), and an action that loses something, after its confirm (`destructive`). */
@@ -46,9 +46,9 @@ export function Button({ children, onClick, kind = 'secondary', size = 'sm', lab
   return (
     <Tip label={tip}>
       <Host
-        // Kumi's ring, not the host's: v0.22.7 turns every focus ring in Desktop off (its styles.css), which Kumi's
-        // class beats; FocusStyle takes the host's own ring off these buttons, so v0.23 shows one ring, not two.
-        className={FOCUSABLE}
+        // Kumi's ring on the host's own: v0.22.7 turns every focus ring in Desktop off (its styles.css), which Kumi's
+        // class beats; on v0.23 it sits right on the host's ring (FocusStyle), so either version shows one ring.
+        className={`${FOCUSABLE} ${HOST_CONTROL}`}
         aria-busy={busy || undefined}
         aria-expanded={expanded}
         aria-label={label}

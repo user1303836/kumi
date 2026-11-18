@@ -8,7 +8,7 @@
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { rgbOf } from './atlas/color.ts'
 import { Glyph } from './atlas/Glyph.tsx'
@@ -55,6 +55,9 @@ export interface PaletteDockProps {
   onDo: (action: PaletteAction) => Promise<boolean>
   /** What the last edit said, or why it was refused (the store's `paletteSaid`): shown a few seconds. */
   said: { text: string; failed: boolean; at: number } | null
+  /** While Make is open over the map: the sentence is heard, not shown (Make says "✓ In palette" in place, and the
+   *  sentence would float over Make's foot, P7A-38). */
+  hush?: boolean
   /** The audio behind an id, as a data URL (the audition's cache), for the waveforms. */
   audio: (id: string) => Promise<string>
   /** "Use as kit": Desktop drafts a chat request, the dashboard copies it. */
@@ -402,7 +405,7 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
   )
 }
 
-export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }: PaletteDockProps) {
+export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, hush = false, audio, kit, use, make, landing, open, onOpen, lineage, onKin }: PaletteDockProps) {
   const t = useT()
   const current = palette?.current ?? null
   const [editing, setEditing] = useState<'new' | 'rename' | null>(null)
@@ -511,18 +514,6 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   }, [said, shownFor])
   const saying = said && now - said.at < shownFor ? said : null
   const sayingText = saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''
-  // Shown only whole: in a crowded header a cut sentence ("Ad…") says nothing (a screen reader still hears it).
-  const sentence = useRef<HTMLSpanElement | null>(null)
-  const [sentenceFits, setSentenceFits] = useState(true)
-  useLayoutEffect(() => {
-    const element = sentence.current
-    if (!element) return
-    const check = () => setSentenceFits(element.scrollWidth <= element.clientWidth + 1)
-    check()
-    const observer = new ResizeObserver(check)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [sayingText])
 
   // The grip: a click folds or opens the drawer; a drag on an open one resizes it.
   const grip = useRef<{ y: number; height: number; moved: boolean } | null>(null)
@@ -650,15 +641,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </span>
       )}
       {current && current.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', current.excluded)}</span>}
-      {/* What the last edit said, for a few seconds, in the header's free room: it never adds a line (a line that came and
-          went resized the map) and never covers what floats over the map (Make's foot, P7A-38). */}
-      <span
-        aria-live="polite"
-        ref={sentence}
-        style={{ flex: 1, minWidth: 0, ...TYPE.caption, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', color: saying?.failed ? T.warn : T.muted, opacity: saying && sentenceFits ? 1 : 0, transition: 'opacity 160ms' }}
-      >
-        {sayingText}
-      </span>
+      <span style={{ flex: 1 }} />
       {current && current.items.length > 1 && make && (
         <Button kind="quiet" onClick={() => make(current)} tip={t('make.openTitle')}>
           {t('make.open')}
@@ -718,6 +701,30 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
       </button>
       {header}
+      {/* What the last edit said, for a few seconds, floating just above the dock's top edge: it never adds a line (a line
+          that came and went resized the map, and an unmoved map refit), and however crowded the header, it's never cut. */}
+      <span
+        aria-live="polite"
+        style={{
+          position: 'absolute',
+          right: 10,
+          bottom: 'calc(100% + 6px)',
+          maxWidth: 'calc(100% - 20px)',
+          zIndex: 3,
+          padding: '3px 10px',
+          borderRadius: 12,
+          border: `1px solid ${T.border}`,
+          background: T.raised,
+          boxShadow: '0 6px 18px -10px rgba(0,0,0,.5)',
+          ...TYPE.caption,
+          color: saying?.failed ? T.warn : T.muted,
+          pointerEvents: 'none',
+          opacity: saying && !hush ? 1 : 0,
+          transition: 'opacity 160ms'
+        }}
+      >
+        {sayingText}
+      </span>
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
           <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>

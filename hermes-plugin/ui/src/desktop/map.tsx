@@ -432,6 +432,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           palette={state.palette}
           playing={playing}
           said={state.paletteSaid}
+          hush={Boolean(palette.making)}
           use={item => {
             const request = itemReference(item, state.palette?.map_revision ?? null)
             return request ? (

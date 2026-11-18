@@ -339,6 +339,13 @@ export function toScreen(view: MapViewport, size: number, x: number, y: number):
   return [x * size * view.scale + view.dx, y * size * view.scale + view.dy]
 }
 
+/** The same view on a map whose side went from `from` to `to` pixels (its top, its height or a side sheet changed):
+ *  every sound stays where it was on screen. A view is a scale of the map's side, so without this a view zoomed in
+ *  (a find's frame) slides its sounds out of sight as the map's top settles. */
+export function keepPlace(view: MapViewport, from: number, to: number): MapViewport {
+  return from > 0 && to > 0 && from !== to ? { ...view, scale: (view.scale * from) / to } : view
+}
+
 /** Zoom by `factor` around the screen point (`px`, `py`), within 1× to 40×. */
 export function zoomAt(view: MapViewport, factor: number, px: number, py: number): MapViewport {
   const scale = Math.min(40, Math.max(1, view.scale * factor))

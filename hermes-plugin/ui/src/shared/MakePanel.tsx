@@ -333,7 +333,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
   // ancestor too, the pane the map sits in among them.
   const list = useRef<HTMLDivElement | null>(null)
-  const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start', instant = false) => {
+  const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start') => {
     const box = list.current
     if (!box || !element) return
     const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()]
@@ -342,25 +342,39 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
     else if (inner.top < outer.top) top += inner.top - outer.top - 8
     else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8
     else return
-    box.scrollTo({ top, behavior: instant || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    box.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   }
   useEffect(() => {
     if (!arrived) return
     reveal(cards.current.get(arrived), 'nearest')
     setArrived(null)
   }, [arrived, results]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The result being worked on (kept, or holding the keyboard) stays in view when the panel's height changes under it
-  // (the first Keep makes a palette, and the dock opening with it takes room from the map, so from the panel), until
-  // the producer scrolls the list themselves.
+  // The result being worked on (kept, made, or holding the keyboard) stays whole in view while the room around it
+  // changes: the list's own box (the foot grows with chosen results; the first Keep's dock takes room from the map, so
+  // from the panel) and the results in it (a kept card's row rewraps as Keep becomes "In palette"). Taller than the
+  // list, it shows its bottom, where its actions are. It lets go when the producer scrolls the list, or takes the
+  // keyboard elsewhere in it.
   const held = useRef<string | null>(null)
-  useEffect(() => {
+  // Measured by layout (the list is the cards' offset parent), so a card still popping in, scaled, measures whole.
+  const hold = () => {
     const box = list.current
-    if (!box) return
-    const observer = new ResizeObserver(() => {
-      if (held.current) reveal(cards.current.get(held.current), 'nearest', true)
-    })
-    observer.observe(box)
-    return () => observer.disconnect()
+    const card = held.current ? cards.current.get(held.current) : undefined
+    if (!box || !card) return
+    const [top, bottom] = [card.offsetTop, card.offsetTop + card.offsetHeight]
+    if (bottom > box.scrollTop + box.clientHeight - 8 || card.offsetHeight > box.clientHeight - 16) box.scrollTop = bottom - box.clientHeight + 8
+    else if (top < box.scrollTop + 8) box.scrollTop = top - 8
+  }
+  // One observer for the list and the results, made at the first of them; a stable callback, so a render observes
+  // nothing again.
+  const watcher = useRef<ResizeObserver | null>(null)
+  const watch = useRef((element: Element | null) => {
+    if (!element) return
+    watcher.current ??= new ResizeObserver(() => hold())
+    watcher.current.observe(element)
+  }).current
+  useEffect(() => {
+    watch(list.current)
+    return () => watcher.current?.disconnect()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Where the keyboard goes after an action that takes its control away, once the panel has drawn what follows: Make
   // after the sounds change, the chosen results' action after Back, a Choose after Clear.
@@ -591,8 +605,15 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
       </div>
       {/* The options and the results scroll; Make stays in the foot below them, in view however far they run. Positioned,
           so the screen-reader-only words inside (absolutely placed) scroll and clip with the list instead of hanging
-          below the pane, which gave the pane room to scroll. Scrolling it by hand lets go of the result held in view. */}
+          below the pane, which gave the pane room to scroll. Scrolling it by hand (a wheel, a touch, its scroll bar) lets
+          go of the result held in view, and so does the keyboard going to anything in it outside that result. */}
       <div
+        onFocus={event => {
+          if (!(held.current && cards.current.get(held.current)?.contains(event.target))) held.current = null
+        }}
+        onPointerDown={event => {
+          if (event.target === event.currentTarget) held.current = null
+        }}
         onTouchMove={() => (held.current = null)}
         onWheel={() => (held.current = null)}
         ref={list}
@@ -639,7 +660,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
         {card.key === 'loop' ? <LoopSection onChange={setOptions} options={options} tempo={dawTempo} /> : <CardOptions card={card} onChange={setOptions} options={options} sources={sources} />}
         <SteerSection onChange={next => setSteers(current => ({ ...current, [card.key]: next }))} onToggle={() => setSteerOpen(!steerOpen)} open={steerOpen} steer={steer} />
         {takes.length > 0 && (
-          <div aria-label={t('make.results')} role="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div aria-label={t('make.results')} ref={watch} role="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {takes.map(take => {
               const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1)
               const result = take.results[at]
@@ -802,7 +823,9 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                         return onKeep(result)
                       }}
                       pressed={inPalette}
-                      tip={inPalette ? undefined : t('make.keepTitle')}
+                      // Always a tip, so the button keeps its place in the tree as Keep becomes "In palette" (a tip
+                      // that comes and goes wraps it anew, and the keyboard would lose it).
+                      tip={inPalette ? t('make.keptTitle') : t('make.keepTitle')}
                     >
                       <span aria-hidden>{inPalette ? '✓' : '+'}</span>
                       {inPalette ? t('make.kept') : t('make.keep')}

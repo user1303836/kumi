@@ -28,6 +28,8 @@ export const S = {
 
 /** The class every Kumi control carries, so the keyboard's focus shows on it. */
 export const FOCUSABLE = 'kumi-focusable'
+/** The class Kumi puts on the host's own buttons it draws (`@kumi/controls`), so its ring can sit on the host's. */
+export const HOST_CONTROL = 'kumi-host'
 
 /** The focus ring for Kumi's controls, in the host theme's colour. Desktop turns focus rings off for every element
  *  (`*:focus-visible { outline: none }`); this rule's class beats that one, and only a keyboard focus shows it. Each UI
@@ -38,8 +40,9 @@ export function FocusStyle() {
   return (
     <style>
       {`.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}` +
-        // On Hermes's own buttons Kumi draws, Kumi's ring stands in for the host's (one ring on every version).
-        `.${FOCUSABLE}[data-slot="button"]:focus-visible{--tw-ring-shadow:0 0 #0000;--tw-ring-offset-shadow:0 0 #0000}` +
+        // On Hermes's own buttons (`HOST_CONTROL`, Kumi's class) the ring sits right on the host's own, so v0.23 shows one
+        // ring, and v0.22.7, which turns every ring off, still shows Kumi's. Nothing of Hermes's is restyled.
+        `.${FOCUSABLE}.${HOST_CONTROL}:focus-visible{outline-offset:0}` +
         // Where Kumi draws a button itself (the dashboard's), hover and press tint whatever its fill is, at once.
         '.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}' +
         '.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}' +

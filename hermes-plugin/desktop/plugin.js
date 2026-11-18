@@ -125,7 +125,7 @@ var en = {
     tab: "Sound map",
     canvas: "Sound map",
     roledescription: "sound map",
-    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Enter adds the sound to the picks or lets it go (while Grow names its sounds, it names this one). Tab goes on to Play and Use… for the sound picked.",
+    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Enter or Space adds the sound to the picks or lets it go (while Grow names its sounds, it names this one). Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
     failed: (error) => `Kumi couldn't read the sound map: ${error}`,
@@ -532,6 +532,7 @@ var en = {
     rerollTitle: "Make another variation: the same sounds and way, a new roll",
     keep: "Keep",
     keepTitle: "Put it in your palette",
+    keptTitle: "It’s in your palette already",
     kept: "In palette",
     use: "Use…",
     useTitle: "Put its name and id in the chat, then say what to do with it",
@@ -939,7 +940,7 @@ var ja = {
     tab: "サンプルマップ",
     canvas: "サンプルマップ",
     roledescription: "サンプルマップ",
-    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Enter でそのサウンドを選択に加えるか外します（グロウがサウンドを選んでいる間は、そのサウンドを選びます）。Tab で選んだサウンドの再生と使用に移れます。",
+    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Enter かスペースでそのサウンドを選択に加えるか外します（グロウがサウンドを選んでいる間は、そのサウンドを選びます）。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
     failed: (error) => `サンプルマップを読み込めませんでした: ${error}`,
@@ -1337,6 +1338,7 @@ var ja = {
     rerollTitle: "別のバリエーションを作ります（同じサウンドと作り方で、新しいロール）",
     keep: "キープ",
     keepTitle: "パレットに入れます",
+    keptTitle: "もうパレットに入っています",
     kept: "パレットにあります",
     use: "使う…",
     useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
@@ -1743,7 +1745,7 @@ var zh = {
     tab: "采样地图",
     canvas: "采样地图",
     roledescription: "采样地图",
-    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Enter 把这个声音加入已选或取消选择（生长在选声音时，按 Enter 选中这个声音）。按 Tab 可到所选声音的播放和使用。",
+    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Enter 或空格把这个声音加入已选或取消选择（生长在选声音时，按 Enter 或空格选中这个声音）。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
     failed: (error) => `无法读取采样地图：${error}`,
@@ -2141,6 +2143,7 @@ var zh = {
     rerollTitle: "再做一个变体：同样的声音和做法，换一个种子",
     keep: "保留",
     keepTitle: "放进调色板",
+    keptTitle: "它已经在调色板里了",
     kept: "已在调色板中",
     use: "使用…",
     useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
@@ -3985,8 +3988,9 @@ var S = {
   hidden: { position: "absolute", width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
 };
 var FOCUSABLE = "kumi-focusable";
+var HOST_CONTROL = "kumi-host";
 function FocusStyle() {
-  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}.${FOCUSABLE}[data-slot="button"]:focus-visible{--tw-ring-shadow:0 0 #0000;--tw-ring-offset-shadow:0 0 #0000}.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
+  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}.${FOCUSABLE}.${HOST_CONTROL}:focus-visible{outline-offset:0}.kumi-btn:hover:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.14),rgba(127,127,127,.14))}.kumi-btn:active:not(:disabled){background-image:linear-gradient(rgba(127,127,127,.24),rgba(127,127,127,.24))}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
 }
 function Chip({ children, title, tone }) {
   const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -4228,7 +4232,7 @@ function Button2({ children, onClick, kind = "secondary", size = "sm", label, ti
   return /* @__PURE__ */ jsx2(Tip2, { label: tip, children: /* @__PURE__ */ jsx2(
     Host,
     {
-      className: FOCUSABLE,
+      className: `${FOCUSABLE} ${HOST_CONTROL}`,
       "aria-busy": busy || void 0,
       "aria-expanded": expanded,
       "aria-label": label,
@@ -6450,7 +6454,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const canvases = useRef6(/* @__PURE__ */ new Map());
   const chooses = useRef6(/* @__PURE__ */ new Map());
   const list = useRef6(null);
-  const reveal = (element, where, instant = false) => {
+  const reveal = (element, where) => {
     const box = list.current;
     if (!box || !element) return;
     const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()];
@@ -6459,7 +6463,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     else if (inner.top < outer.top) top += inner.top - outer.top - 8;
     else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8;
     else return;
-    box.scrollTo({ top, behavior: instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    box.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   useEffect6(() => {
     if (!arrived) return;
@@ -6467,14 +6471,23 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     setArrived(null);
   }, [arrived, results]);
   const held = useRef6(null);
-  useEffect6(() => {
+  const hold = () => {
     const box = list.current;
-    if (!box) return;
-    const observer = new ResizeObserver(() => {
-      if (held.current) reveal(cards.current.get(held.current), "nearest", true);
-    });
-    observer.observe(box);
-    return () => observer.disconnect();
+    const card2 = held.current ? cards.current.get(held.current) : void 0;
+    if (!box || !card2) return;
+    const [top, bottom] = [card2.offsetTop, card2.offsetTop + card2.offsetHeight];
+    if (bottom > box.scrollTop + box.clientHeight - 8 || card2.offsetHeight > box.clientHeight - 16) box.scrollTop = bottom - box.clientHeight + 8;
+    else if (top < box.scrollTop + 8) box.scrollTop = top - 8;
+  };
+  const watcher = useRef6(null);
+  const watch = useRef6((element) => {
+    if (!element) return;
+    watcher.current ??= new ResizeObserver(() => hold());
+    watcher.current.observe(element);
+  }).current;
+  useEffect6(() => {
+    watch(list.current);
+    return () => watcher.current?.disconnect();
   }, []);
   const makeRow = useRef6(null);
   const chosenBar = useRef6(null);
@@ -6667,6 +6680,12 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
         /* @__PURE__ */ jsxs13(
           "div",
           {
+            onFocus: (event) => {
+              if (!(held.current && cards.current.get(held.current)?.contains(event.target))) held.current = null;
+            },
+            onPointerDown: (event) => {
+              if (event.target === event.currentTarget) held.current = null;
+            },
             onTouchMove: () => held.current = null,
             onWheel: () => held.current = null,
             ref: list,
@@ -6705,7 +6724,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
               chooser,
               card.key === "loop" ? /* @__PURE__ */ jsx15(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx15(CardOptions, { card, onChange: setOptions, options, sources }),
               /* @__PURE__ */ jsx15(SteerSection, { onChange: (next) => setSteers((current) => ({ ...current, [card.key]: next })), onToggle: () => setSteerOpen(!steerOpen), open: steerOpen, steer }),
-              takes.length > 0 && /* @__PURE__ */ jsx15("div", { "aria-label": t("make.results"), role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
+              takes.length > 0 && /* @__PURE__ */ jsx15("div", { "aria-label": t("make.results"), ref: watch, role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
                 const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1);
                 const result = take.results[at];
                 const isPlaying = playing === result.artifact_id;
@@ -6850,7 +6869,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                               return onKeep(result);
                             },
                             pressed: inPalette,
-                            tip: inPalette ? void 0 : t("make.keepTitle"),
+                            tip: inPalette ? t("make.keptTitle") : t("make.keepTitle"),
                             children: [
                               /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: inPalette ? "✓" : "+" }),
                               inPalette ? t("make.kept") : t("make.keep")
@@ -7286,6 +7305,9 @@ function floatBeside(box, w, h, width, height, top, bottom) {
 }
 function toScreen(view, size, x, y) {
   return [x * size * view.scale + view.dx, y * size * view.scale + view.dy];
+}
+function keepPlace(view, from, to) {
+  return from > 0 && to > 0 && from !== to ? { ...view, scale: view.scale * from / to } : view;
 }
 function zoomAt(view, factor, px, py) {
   const scale = Math.min(40, Math.max(1, view.scale * factor));
@@ -9199,11 +9221,12 @@ var CORNER_ZOOM_ROOM = 480;
 var CORNER_ROOM = 76;
 var ROOM_LEAST = 200;
 var LIST_LEAST = 150;
-var FREE_LEAST = 180;
+var FREE_LEAST = 160;
 var LIST_HEAD = 70;
 var LIST_ROW = 31;
 var LIST_MORE = 34;
 var CORNER_WITH_STEPS = 180;
+var CORNER_FOLDED = 40;
 var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
@@ -9272,7 +9295,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const down = (event) => {
       if (event.code !== "Space" || event.defaultPrevented || !over.current) return;
       const target = event.target;
-      if (target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      if (target === keysRef.current || target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
       event.preventDefault();
       hold(true);
     };
@@ -9322,7 +9345,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const clusterBox = useRef13(null);
   const [cornerHeight, setCornerHeight] = useState16(0);
   const named = useRef13([]);
-  const [keysHere, setKeysHere] = useState16(false);
+  const keysRef = useRef13(null);
   const overlayFollow = useRef13(null);
   const [topInset, setTopInset] = useState16(0);
   const [columnBottom, setColumnBottom] = useState16(0);
@@ -9499,6 +9522,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => observer.disconnect();
   }, [hasPoints]);
   const moved2 = useRef13(false);
+  const sideWas = useRef13(mapSize);
+  if (sideWas.current !== mapSize) {
+    const was = sideWas.current;
+    sideWas.current = mapSize;
+    if (moved2.current && view) setView(keepPlace(view, was, mapSize));
+  }
   useEffect13(() => {
     if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
   }, [size.width, size.height]);
@@ -9972,7 +10001,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       setSaid(t("dock.cleared"));
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+    if ((event.key === "Enter" || event.key === " ") && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
       event.preventDefault();
       if (grow?.choosing) {
         const end = endOf(selected);
@@ -10004,8 +10033,6 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       const [x, y] = toScreen(view, mapSize, point.x, point.y);
       setView(keepInView(view, x, y, size.width, size.height));
       onSelect(point.id);
-      const sound = model.sounds[point.id];
-      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(", "));
     }
   };
   const picksBox = useMemo2(() => {
@@ -10057,12 +10084,13 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const listOpen = matches.length > 0 && closedOf !== matches;
   const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED);
   const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0);
-  const freeLeast = Math.max(FREE_LEAST, size.height / 3);
+  const freeLeast = Math.max(FREE_LEAST, size.height / 4);
   const crowded = listOpen && size.height > 0 && size.height - topInset - cornerBottom - (firstSteps.length > 0 ? CORNER_WITH_STEPS : CORNER_ROOM) - listWants < freeLeast;
   const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST;
   const compact2 = short || crowded;
   const cornerShown = !(short && playerShown);
-  const foot = cornerBottom + (cornerShown && cornerHeight > 0 ? cornerHeight + 8 : 0);
+  const cornerRoom = !cornerShown ? 0 : compact2 && !grow?.choosing ? CORNER_FOLDED : cornerHeight;
+  const foot = cornerBottom + (cornerRoom > 0 ? cornerRoom + 8 : 0);
   footing.current = { corner: cornerBottom, foot };
   useEffect13(() => {
     const element = cornerRef.current;
@@ -10083,6 +10111,11 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const chosen = selected ? model.sounds[selected] : void 0;
   const chosenIndex = selected ? indexOf.get(selected) : void 0;
   const chosenColor = chosenIndex === void 0 ? T.accent : model.groups.find((group) => group.key === model.points[chosenIndex].group)?.color ?? T.accent;
+  const reachedId = selected !== null && chosenIndex !== void 0 && visible(chosenIndex) ? selected : null;
+  const reachedSound = reachedId ? model.sounds[reachedId] : void 0;
+  const reachedName = reachedId ? [clean(reachedSound?.name ?? reachedId, 80), clean(reachedSound?.class, 16)].filter(Boolean).join(", ") : "";
+  const reachedAt = reachedId && view && chosenIndex !== void 0 ? toScreen(view, mapSize, active.points[chosenIndex].x, active.points[chosenIndex].y) : null;
+  const keysRole = reachedId && onPicked && !grow?.choosing ? "checkbox" : "button";
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
   const playingIndex = playing === null ? void 0 : indexOf.get(playing);
@@ -10254,18 +10287,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             hiddenActions
           ] })
         ] }),
-        /* @__PURE__ */ jsxs22("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
+        /* @__PURE__ */ jsxs22("div", { "aria-label": t("map.canvas"), "aria-roledescription": t("map.roledescription"), ref: boxRef, role: "group", style: { position: "absolute", inset: 0 }, children: [
           /* @__PURE__ */ jsx26(
             "canvas",
             {
               ref: canvasRef,
-              "aria-describedby": hintId,
-              "aria-label": t("map.canvas"),
-              "aria-roledescription": t("map.roledescription"),
-              className: FOCUSABLE,
-              onKeyDown: onKey,
-              onFocus: () => setKeysHere(true),
-              onBlur: () => setKeysHere(false),
+              "aria-hidden": true,
               onPointerDown: press,
               onPointerMove: (event) => {
                 const [x, y] = at(event);
@@ -10296,20 +10323,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                 rest(null);
               },
               onMouseDown: (event) => {
-                if (event.button === 1) event.preventDefault();
+                if (event.button !== 0 && event.button !== 1) return;
+                event.preventDefault();
+                keysRef.current?.focus({ preventScroll: true });
               },
               onDoubleClick: () => {
                 moved2.current = false;
                 setView(fit());
               },
-              role: "application",
-              tabIndex: 0,
               style: {
                 position: "absolute",
                 inset: 0,
                 width: "100%",
                 height: "100%",
-                outlineOffset: -3,
                 cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
                 touchAction: "none"
               }
@@ -10319,14 +10345,20 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
           /* @__PURE__ */ jsx26(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
           /* @__PURE__ */ jsx26("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
-          keysHere && // While the canvas has the focus, the map's keys are its own. Hermes Desktop reads keys on the window before
-          // anything on the page (app/hooks/use-keybinds.ts, in capture), and its soft keys (Enter and typing focus the
-          // chat's composer; Escape stops a turn) stand down for an editable target, a button-like one, or while a
-          // surface that keeps its keys is open (lib/keybinds/composer-focus-keys.ts, `composerFocusBlockedBySurface`,
-          // which looks for `[data-overlay-surface]`, the mark Desktop's own overlays carry). The canvas is none of
-          // those, so Enter on a sound picked it and threw the focus into the chat: this mark, there only while the map
-          // has the focus, is Desktop's own way of saying so.
-          /* @__PURE__ */ jsx26("span", { "aria-hidden": true, "data-overlay-surface": "", hidden: true }),
+          /* @__PURE__ */ jsx26(
+            "div",
+            {
+              "aria-checked": keysRole === "checkbox" ? Boolean(reachedId && picked?.has(reachedId)) : void 0,
+              "aria-describedby": reachedId ? void 0 : hintId,
+              "aria-label": reachedName || t("map.canvas"),
+              className: FOCUSABLE,
+              onKeyDown: onKey,
+              ref: keysRef,
+              role: keysRole,
+              style: reachedAt ? { position: "absolute", left: reachedAt[0] - 14, top: reachedAt[1] - 14, width: 28, height: 28, borderRadius: "50%", pointerEvents: "none" } : { position: "absolute", inset: 0, outlineOffset: -3, pointerEvents: "none" },
+              tabIndex: 0
+            }
+          ),
           /* @__PURE__ */ jsx26("span", { "aria-live": "polite", style: S.hidden, children: said }),
           hovered && hoveredSound && hover && /* @__PURE__ */ jsx26(
             HoverPill,
@@ -10448,7 +10480,7 @@ function GlyphShape({ glyph, color }) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect14, useLayoutEffect as useLayoutEffect3, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
+import { useEffect as useEffect14, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
 import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs23 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
@@ -10740,7 +10772,7 @@ function NameField({ initial, label, onDone }) {
     }
   );
 }
-function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }) {
+function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, hush = false, audio, kit, use, make, landing, open, onOpen, lineage, onKin }) {
   const t = useT();
   const current = palette?.current ?? null;
   const [editing, setEditing] = useState17(null);
@@ -10835,17 +10867,6 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
   }, [said, shownFor]);
   const saying = said && now - said.at < shownFor ? said : null;
   const sayingText = saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "";
-  const sentence = useRef14(null);
-  const [sentenceFits, setSentenceFits] = useState17(true);
-  useLayoutEffect3(() => {
-    const element = sentence.current;
-    if (!element) return;
-    const check = () => setSentenceFits(element.scrollWidth <= element.clientWidth + 1);
-    check();
-    const observer = new ResizeObserver(check);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [sayingText]);
   const grip = useRef14(null);
   const gripDown = (event) => {
     if (!open || event.button !== 0) return;
@@ -10951,15 +10972,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       /* @__PURE__ */ jsx27("button", { "aria-pressed": current.reach > 0, className: FOCUSABLE, onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), title: t("dock.looseTitle", current.reach || LOOSE), type: "button", style: segmentStyle(current.reach > 0), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
     ] }),
     current && current.excluded > 0 && /* @__PURE__ */ jsx27("span", { style: { ...TYPE.caption, color: T.faint }, children: t("dock.excluded", current.excluded) }),
-    /* @__PURE__ */ jsx27(
-      "span",
-      {
-        "aria-live": "polite",
-        ref: sentence,
-        style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", color: saying?.failed ? T.warn : T.muted, opacity: saying && sentenceFits ? 1 : 0, transition: "opacity 160ms" },
-        children: sayingText
-      }
-    ),
+    /* @__PURE__ */ jsx27("span", { style: { flex: 1 } }),
     current && current.items.length > 1 && make && /* @__PURE__ */ jsx27(Button2, { kind: "quiet", onClick: () => make(current), tip: t("make.openTitle"), children: t("make.open") }),
     current && current.items.length > 0 && kit?.(current),
     current && items.length > 0 && /* @__PURE__ */ jsxs23(Button2, { expanded: open, onClick: () => onOpen(!open), tip: open ? t("dock.collapse") : t("dock.expand"), children: [
@@ -11011,6 +11024,30 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           }
         ),
         header,
+        /* @__PURE__ */ jsx27(
+          "span",
+          {
+            "aria-live": "polite",
+            style: {
+              position: "absolute",
+              right: 10,
+              bottom: "calc(100% + 6px)",
+              maxWidth: "calc(100% - 20px)",
+              zIndex: 3,
+              padding: "3px 10px",
+              borderRadius: 12,
+              border: `1px solid ${T.border}`,
+              background: T.raised,
+              boxShadow: "0 6px 18px -10px rgba(0,0,0,.5)",
+              ...TYPE.caption,
+              color: saying?.failed ? T.warn : T.muted,
+              pointerEvents: "none",
+              opacity: saying && !hush ? 1 : 0,
+              transition: "opacity 160ms"
+            },
+            children: sayingText
+          }
+        ),
         current && forgetting && /* @__PURE__ */ jsxs23("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
           /* @__PURE__ */ jsx27("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
           /* @__PURE__ */ jsx27("span", { style: { flex: 1 } }),
@@ -11587,6 +11624,7 @@ function MapWorkspace({ ctx, store, audition }) {
         palette: state.palette,
         playing,
         said: state.paletteSaid,
+        hush: Boolean(palette.making),
         use: (item) => {
           const request = itemReference(item, state.palette?.map_revision ?? null);
           return request ? (
