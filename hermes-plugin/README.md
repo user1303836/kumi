@@ -88,7 +88,7 @@ Screenshots:
 - The map, palette and Make shots are Kumi 1.24.81 in Hermes v0.23.0's Desktop interface: the 3,840-sound map and its
   samples are generated test data, and the made sounds come from Kumi's sound-design engine.
 - In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
-  Kumi's side is real.
+  Kumi's side is its real plugin, answering from a test runtime, with the made sounds from Kumi's engine.
 
 ## Tools
 
