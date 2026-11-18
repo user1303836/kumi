@@ -11,7 +11,7 @@ import { S, TextButton, useT } from '../shared/ui.tsx'
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>; onRequest?: (request: string) => void }) {
+export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>; onRequest?: (request: string) => unknown }) {
   const t = useT()
   const shown = Object.entries(jobs)
   if (!shown.length) return null

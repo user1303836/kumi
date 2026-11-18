@@ -333,7 +333,7 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
       actions={
         <span style={{ ...S.row, gap: 4 }}>
           <TextButton onClick={() => onChange(rollSteer())} title={t('make.steer.rollTitle')}>
-            <svg aria-hidden height="10" style={{ marginRight: 4, verticalAlign: '-1px' }} viewBox="0 0 12 12" width="10">
+            <svg aria-hidden height="10" style={{ flex: 'none' }} viewBox="0 0 12 12" width="10">
               <rect fill="none" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.2" width="10" x="1" y="1" />
               <circle cx="4" cy="4" fill="currentColor" r="1" />
               <circle cx="6" cy="6" fill="currentColor" r="1" />

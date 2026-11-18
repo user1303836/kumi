@@ -189,7 +189,7 @@ function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
           <Section title={t('pane.focus')}>
-            <FocusView focus={state.focus} now={now} />
+            <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} />
           </Section>
           <Section title={t('pane.history')}>
             <HistoryView
@@ -200,6 +200,7 @@ function Dashboard() {
               }}
               daw={state.status?.daw}
               history={state.history}
+              loading={state.history === null && !state.failed.history}
               live={Boolean(state.status?.connected) && state.status?.stale !== true}
               now={now}
               target={state.setup?.target}
@@ -229,7 +230,7 @@ function Dashboard() {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
+                  <TextButton disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} title={t('dock.addTitle')}>
                     {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                   </TextButton>
                   {request && <CopyButton label={t('dashboard.copyReference')} text={request} />}
@@ -238,7 +239,16 @@ function Dashboard() {
             }}
             empty={
               state.map === null ? (
-                t('map.reading')
+                state.failed.map ? (
+                  <>
+                    {t('map.failed', state.failed.map)}
+                    <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+                      <TextButton onClick={() => store.refresh('map')}>{t('map.retry')}</TextButton>
+                    </div>
+                  </>
+                ) : (
+                  t('map.reading')
+                )
               ) : ['needs_runtime', 'outdated_runtime', 'damaged_runtime'].includes(state.setup?.state ?? '') ? (
                 // No runtime yet: setup comes first (the dashboard's header says how).
                 t('map.setupFirst')
@@ -255,7 +265,7 @@ function Dashboard() {
             found={state.found}
             hiddenActions={
               <>
-                <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
+                <TextButton onClick={() => store.showHidden()} title={t('map.showHiddenTitle')}>
                   {t('map.showHidden')}
                 </TextButton>
                 <CopyButton label={t('map.rescan')} text={RESCAN_REQUEST} />
@@ -280,7 +290,7 @@ function Dashboard() {
               const kept = palette.kept.has(result.artifact_id)
               return (
                 <>
-                  <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                  <TextButton disabled={kept} onClick={() => palette.keep(result)} title={t('make.keepTitle')}>
                     {kept ? t('make.kept') : t('make.keep')}
                   </TextButton>
                   {request && <CopyButton label={t('make.copyUse')} text={request} />}
@@ -295,7 +305,7 @@ function Dashboard() {
             picked={palette.picked}
             pickedActions={ids => (
               <>
-                <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
+                <TextButton onClick={() => palette.gather(ids)} strong title={t('dock.addTitle')}>
                   {t('dock.addPicked', ids.length)}
                 </TextButton>
                 {ids.length > 1 && (

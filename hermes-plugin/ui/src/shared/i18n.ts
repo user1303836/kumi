@@ -131,6 +131,8 @@ const en = {
     keys: 'Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.',
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: 'Reading the sound map…',
+    failed: (error: string) => `Kumi couldn't read the sound map: ${error}`,
+    retry: 'Try again',
     empty: 'No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.',
     search: 'Search sounds',
     searchHint: 'Search the map: name, kind or folder',
@@ -218,7 +220,7 @@ const en = {
     rerollTitle: 'The same two sounds by another path: every point grown again',
     close: 'Close the vine',
     between: 'Grow between',
-    betweenTitle: 'Grow the first pick toward the second: the sounds between them, along a vine'
+    betweenTitle: 'Grow one pick toward the other: the sounds between them, along a vine'
   },
   // The map's corner: its count, layout and zoom, and the hint line (each gesture that does something now, as a
   // keycap, then what it does).
@@ -422,6 +424,7 @@ const en = {
     sounds: 'Sounds in the palette',
     empty: 'Nothing in your palette yet. Drag a box over sounds on the map (Shift adds another box) and press Add to palette.',
     none: 'No palette yet: Add to palette makes one.',
+    reading: 'Reading the palette…',
     choose: 'Choose a palette',
     switch: 'Palette',
     newPalette: 'New palette…',
@@ -926,6 +929,8 @@ const ja: Shape<typeof en> = {
     keys: '矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。',
     agentOff: 'このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。',
     reading: 'サンプルマップを読み込み中…',
+    failed: (error: string) => `サンプルマップを読み込めませんでした: ${error}`,
+    retry: 'もう一度読み込む',
     empty: 'まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。',
     search: 'サウンドを検索',
     searchHint: 'マップを検索: 名前・種類・フォルダ',
@@ -1011,7 +1016,7 @@ const ja: Shape<typeof en> = {
     rerollTitle: '同じ2つのサウンドを別の道筋で。すべての地点を育て直します',
     close: 'つるを閉じる',
     between: '間を育てる',
-    betweenTitle: '1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます'
+    betweenTitle: '選んだ2つの一方をもう一方へ育てます。その間のサウンドがつるに沿って並びます'
   },
   corner: {
     label: 'マップと、いまできる操作',
@@ -1209,6 +1214,7 @@ const ja: Shape<typeof en> = {
     sounds: 'パレットのサウンド',
     empty: 'パレットはまだ空です。マップ上でサウンドをドラッグで囲み（Shift で囲みを追加）、「パレットに追加」を押してください。',
     none: 'パレットはまだありません。「パレットに追加」で作られます。',
+    reading: 'パレットを読み込み中…',
     choose: 'パレットを選ぶ',
     switch: 'パレット',
     newPalette: '新しいパレット…',
@@ -1709,6 +1715,8 @@ const zh: Shape<typeof en> = {
     keys: '方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。',
     agentOff: '此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。',
     reading: '正在读取采样地图…',
+    failed: (error: string) => `无法读取采样地图：${error}`,
+    retry: '重试',
     empty: '还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。',
     search: '搜索声音',
     searchHint: '搜索地图：名称、种类或文件夹',
@@ -1794,7 +1802,7 @@ const zh: Shape<typeof en> = {
     rerollTitle: '同样两个声音，换一条路径：每一点都重新生长',
     close: '关闭藤蔓',
     between: '在两者之间生长',
-    betweenTitle: '让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开'
+    betweenTitle: '让一个选中的声音长向另一个：它们之间的声音沿着藤蔓排开'
   },
   corner: {
     label: '地图，以及现在可以做的操作',
@@ -1990,6 +1998,7 @@ const zh: Shape<typeof en> = {
     sounds: '调色板里的声音',
     empty: '调色板还是空的。在地图上拖出一个框选中声音（按住 Shift 可再加一个框），然后按“加入调色板”。',
     none: '还没有调色板：“加入调色板”会新建一个。',
+    reading: '正在读取调色板…',
     choose: '选择调色板',
     switch: '调色板',
     newPalette: '新建调色板…',

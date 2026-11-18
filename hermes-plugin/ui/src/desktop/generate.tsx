@@ -43,6 +43,8 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
           {length && <Chip>{length}</Chip>}
           {ENDED.has(made.state) ? (
             <Chip tone="bad">{t(`generate.states.${made.state}`)}</Chip>
+          ) : made.state === 'running' ? (
+            <Chip>{t('generate.states.running')}</Chip>
           ) : (
             <Chip title={t('generate.generatedTitle')} tone="accent">
               {t('generate.generated')}
@@ -74,7 +76,7 @@ export function GenerateCard({ media, audition, ctx, store }: { media: ToolMedia
       {made.ledger?.frozen && <span style={{ ...S.text, color: T.warn, whiteSpace: 'normal' }}>{t('generate.frozen')}</span>}
       {offer && (
         <span>
-          <TextButton onClick={() => void ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) })} strong title={offer.title}>
+          <TextButton onClick={() => ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) })} strong title={offer.title}>
             {offer.label}
           </TextButton>
         </span>

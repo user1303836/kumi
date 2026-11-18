@@ -12,7 +12,7 @@ import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { dawChosen, nextSteps } from '../shared/steps.ts'
-import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, Pending, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 import { PET_LINES } from './pet.ts'
@@ -81,7 +81,15 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
         <>
           <div>
             <h3 style={HEADING}>{t('settings.setup')}</h3>
-            <Line label={t('settings.state')}>{STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40)}</Line>
+            <Line label={t('settings.state')}>
+              {setup === null && !state.failed.setup && !partWorks ? (
+                <Pending label={t('pane.reading')} width="6rem" />
+              ) : STATES.has(setupState) ? (
+                t(`settings.states.${setupState}`)
+              ) : (
+                clean(setupState, 40)
+              )}
+            </Line>
             {next && <Line label={t('settings.next')}>{clean(next, 300)}</Line>}
             {runtime && (
               <Line label={t('settings.runtime')}>
@@ -146,7 +154,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             {steps.map(step => (
               <TextButton
                 key={step.request}
-                onClick={() => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null })}
+                onClick={() => ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null })}
                 strong={steps.length === 1}
               >
                 {step.label}

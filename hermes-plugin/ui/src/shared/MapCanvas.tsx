@@ -1127,7 +1127,16 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
 
   return (
-    <div style={{ position: 'relative', height: '100%', minHeight: 240, overflow: 'hidden', color: T.text }}>
+    <div
+      onKeyDown={event => {
+        // Escape leaves Grow's naming wherever the keyboard is in the map (on the Grow tool just pressed, say), not only
+        // on the canvas, whose own Escape comes first: past the map, Desktop takes it and stops the chat's turn.
+        if (event.key !== 'Escape' || event.defaultPrevented || !grow?.choosing) return
+        event.preventDefault()
+        grow.choose(false)
+      }}
+      style={{ position: 'relative', height: '100%', minHeight: 240, overflow: 'hidden', color: T.text }}
+    >
       {/* What floats over the map's top: the search and the tools, the legend, a search's or a find's sounds by name, and
           the quiet line about sounds that can't play. Only the pieces take the pointer; the map shows through the gaps.
           It comes before the canvas, so the keyboard meets the search and the tools first, as it always has; z-index

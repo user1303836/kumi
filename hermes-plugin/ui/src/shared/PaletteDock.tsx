@@ -18,7 +18,7 @@ import { Icon } from './mapUi.tsx'
 import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
 import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapGroup } from './types.ts'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { FOCUSABLE, Pending, S, TextButton, useT } from './ui.tsx'
 
 /** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
@@ -501,7 +501,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
               <option value={'\u0000new'}>{t('dock.newPalette')}</option>
             </select>
           )}
-          {(!palette || palette.palettes.length === 0) && <span style={S.faint}>{t('dock.none')}</span>}
+          {palette === null ? <Pending label={t('dock.reading')} width="8rem" /> : palette.palettes.length === 0 && <span style={S.faint}>{t('dock.none')}</span>}
           {current && (
             <TextButton onClick={() => setEditing('rename')} title={t('dock.renameTitle')}>
               {t('dock.rename')}
@@ -637,7 +637,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           {items.length > CHIPS_SHOWN && <span style={{ ...S.faint, alignSelf: 'center', flex: 'none' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
         </div>
       )}
-      {(!current || items.length === 0) && (
+      {palette !== null && (!current || items.length === 0) && (
         <span style={{ ...S.row, gap: 6, ...S.faint }}>
           <Icon name="plus" size={12} />
           {t('dock.empty')}

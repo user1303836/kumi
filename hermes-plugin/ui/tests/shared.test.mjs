@@ -582,6 +582,19 @@ test('a failed /status read shows the last state as not answering, with nothing 
   assert.equal(state.error, '504: gateway timeout')
 })
 
+test("a map read that fails says why, in the backend's words, until a read of it answers: never 'reading' for good", async () => {
+  let fail = true
+  const kumi = new store.KumiStore(async path => {
+    if (path === '/map' && fail) throw new Error('500: {"detail":"Kumi couldn\'t read the map file."}')
+    return { revision: 'r1', points: [] }
+  })
+  await kumi.refresh('map')
+  assert.deepEqual([kumi.get().map, kumi.get().failed.map], [null, "Kumi couldn't read the map file."])
+  fail = false
+  await kumi.refresh('map')
+  assert.deepEqual([kumi.get().map.revision, kumi.get().failed.map], ['r1', undefined])
+})
+
 test('a read asked for while an older one runs is made again after it, so HISTORY never sticks behind', async () => {
   let seq = 9
   let release

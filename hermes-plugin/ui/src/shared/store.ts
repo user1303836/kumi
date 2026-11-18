@@ -26,8 +26,11 @@ export interface FolderCheck {
 export interface KumiState {
   /** null until the first answer; false when the backend half isn't mounted (the agent plugin is off). */
   available: boolean | null
-  /** The last read's failure, other than "not mounted". */
+  /** The last read's failure, other than "not mounted", in the backend's words. */
   error: string | null
+  /** Why a part's last read failed (the backend's words), until a read of it answers: a view says so, never "reading…"
+   *  for good. */
+  failed: Partial<Record<Part, string>>
   status: Status | null
   focus: Focus | null
   history: History | null
@@ -114,7 +117,7 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
+const EMPTY: KumiState = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
 
 /** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
 export const HIDE_BATCH_MS = 1200
@@ -273,7 +276,7 @@ export class KumiStore {
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404) this.set({ available: false, error: null })
-        else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) })
+        else this.set({ ...notLive(this.state), error: clean(errorText(error), 200) })
         return
       }
       if (generation !== this.generation) return
@@ -308,11 +311,13 @@ export class KumiStore {
       try {
         const value = await this.fetch<unknown>(path)
         if (generation !== this.generation) return
-        this.set({ [part]: heard(value) } as Partial<KumiState>)
+        const { [part]: _answered, ...failed } = this.state.failed
+        this.set({ [part]: heard(value), ...(_answered === undefined ? {} : { failed }) } as Partial<KumiState>)
         if (part === 'map') this.mapRead()
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404 && part !== 'setup') this.set({ available: false })
+        else this.set({ failed: { ...this.state.failed, [part]: clean(errorText(error), 200) } })
       }
     })
   }

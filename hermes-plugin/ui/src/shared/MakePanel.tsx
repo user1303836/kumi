@@ -175,8 +175,9 @@ function Flying({ flight, onDone }: { flight: Flight; onDone: () => void }) {
 }
 
 /** A result's waveform, from the engine's 256 peaks, mirrored about the middle, in the colours of the families it was
- *  made from, left to right (`colors`; null, or none, is the accent); a line runs across it while it plays. */
-function Wave({ peaks, playing, duration, colors }: { peaks: number[]; playing: boolean; duration: number; colors?: readonly (string | null)[] }) {
+ *  made from, left to right (`colors`; null, or none, is the accent); a line runs across it while it plays. `onCanvas`
+ *  hears its canvas element, for Keep's flight to start from. */
+function Wave({ peaks, playing, duration, colors, onCanvas }: { peaks: number[]; playing: boolean; duration: number; colors?: readonly (string | null)[]; onCanvas?: (element: HTMLCanvasElement | null) => void }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const box = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -234,7 +235,10 @@ function Wave({ peaks, playing, duration, colors }: { peaks: number[]; playing: 
     <div ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
       <canvas
         aria-hidden
-        ref={canvas}
+        ref={element => {
+          canvas.current = element
+          onCanvas?.(element)
+        }}
         style={{ width: '100%', height: 56, display: 'block', clipPath: drawn ? 'inset(0 0 0 0)' : 'inset(0 100% 0 0)', transition: 'clip-path 520ms cubic-bezier(.2,.8,.2,1)' }}
       />
       {progress !== null && progress > 0 && progress < 1 && (
@@ -302,8 +306,10 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set())
   // The sound just made, brought into view once it's drawn (the cards above it can fill a narrow pane).
   const [arrived, setArrived] = useState<string | null>(null)
-  // Each shown result's card, by its sound's id: where a new one scrolls to, and where a kept one flies from.
+  // Each shown result's card, by its sound's id: where a new one scrolls to; and its waveform's canvas, where a kept
+  // one flies from.
   const cards = useRef(new Map<string, HTMLDivElement>())
+  const canvases = useRef(new Map<string, HTMLCanvasElement>())
   // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
   // ancestor too, the pane the map sits in among them.
   const list = useRef<HTMLDivElement | null>(null)
@@ -328,7 +334,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   /** Keep's flight from the card's waveform into the dock; none for a system that asks for less motion, or with no
    *  dock on screen. */
   const fly = (id: string) => {
-    const canvas = cards.current.get(id)?.querySelector('canvas')
+    const canvas = canvases.current.get(id)
     const to = dock?.current?.getBoundingClientRect()
     if (!canvas || !to || to.width === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const key = ++flightKey.current
@@ -673,7 +679,16 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                       {isPlaying ? '■' : '▶'}
                     </button>
                     <div aria-hidden onClick={() => (isPlaying ? onStop() : onPlay(result.artifact_id))} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                      <Wave colors={lineage?.(result).map(part => part.color)} duration={result.duration} peaks={result.peaks} playing={isPlaying} />
+                      <Wave
+                        colors={lineage?.(result).map(part => part.color)}
+                        duration={result.duration}
+                        onCanvas={element => {
+                          if (element) canvases.current.set(result.artifact_id, element)
+                          else canvases.current.delete(result.artifact_id)
+                        }}
+                        peaks={result.peaks}
+                        playing={isPlaying}
+                      />
                     </div>
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
@@ -698,7 +713,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     )}
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-                    <TextButton disabled={busy !== null} onClick={() => void make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
+                    <TextButton disabled={busy !== null} onClick={() => make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
                       {busy === take.key ? (
                         t('make.rerolling')
                       ) : (
@@ -712,7 +727,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                       disabled={inPalette}
                       onClick={() => {
                         fly(result.artifact_id)
-                        void onKeep(result)
+                        return onKeep(result)
                       }}
                       pressed={inPalette}
                       title={t('make.keepTitle')}
