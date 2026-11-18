@@ -98,9 +98,12 @@ jobs:
         run: cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref
 
   rust-linux:
-    # The `ci` tests (.config/nextest.toml) of every package, after a merge and by hand, never on a pull request: in three
-    # parts at once by crate, so no part builds every test binary: the app; Kumi's other crates (every package the other
-    # two don't name, so a new crate is tested there); the bridges. A release waits for them (scripts/release.py).
+    # The `ci` tests (.config/nextest.toml) of every package, after a merge and by hand, never on a pull request: in four
+    # parts at once, so no part builds every test binary and each stays under four minutes on a slow runner. The app and
+    # Live's crate (kumi and kumi-daw-ableton, whose tests take the most time) in two halves, each building both
+    # packages' tests and running half of them (nextest's hash partition: a test always lands in the same half); Kumi's
+    # other crates (every package the others don't name, so a new crate is tested there); the bridges. A release waits for
+    # every part (scripts/release.py).
     name: Rust / ${{ matrix.label }}
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
@@ -113,8 +116,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: app, label: Linux, cache: kumi, crates: "-p kumi" }
-          - { part: crates, label: "Linux (Kumi's crates)", cache: kumi, crates: "--exclude kumi --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi --exclude soundcraft-kumi" }
+          - { part: app-1, label: "Linux (the app and Live's crate, 1 of 2)", cache: kumi, crates: "-p kumi -p kumi-daw-ableton --partition hash:1/2" }
+          - { part: app-2, label: "Linux (the app and Live's crate, 2 of 2)", cache: kumi, crates: "-p kumi -p kumi-daw-ableton --partition hash:2/2" }
+          - { part: crates, label: "Linux (Kumi's other crates)", cache: kumi, crates: "--exclude kumi --exclude kumi-daw-ableton --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi --exclude soundcraft-kumi" }
           - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -122,9 +126,9 @@ jobs:
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
-      # Saved from main only. The app's and Kumi's crates' parts build the same crates from crates.io, so they share one
-      # cache (the first to finish on main saves it); the bridges build others. Each cache has a name of its own, not the
-      # job's: Extended's Linux build restores it by name.
+      # Saved from main only. The app's halves and Kumi's other crates build the same crates from crates.io, so they share
+      # one cache (the first to finish on main saves it); the bridges build others. Each cache has a name of its own, not
+      # the job's: Extended's Linux build restores it by name.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           shared-key: ${{ matrix.cache }}-rust-linux
