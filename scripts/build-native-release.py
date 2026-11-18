@@ -323,25 +323,9 @@ def archive(folder: Path, destination: Path, prefix: str, timestamp: int) -> str
 
 def archive_xz(folder: Path, destination: Path, prefix: str, timestamp: int) -> str:
     """The same entries xz-compressed: a bundle of binaries comes out a third smaller than gzipped. A tar that reads
-    xz (macOS's bsdtar, GNU tar beside xz) takes this one; every other, and Windows, the gzipped one.
-
-    With xz installed, on every core: one .xz stream of 16 MiB blocks, which every liblzma decoder reads (bsdtar's
-    libarchive, and the `xz` GNU tar runs; neither installer nor `kumi update` decodes xz itself). Python's lzma, one
-    core, otherwise. The bytes differ between the two, and the SHA-256 is taken after."""
-    xz = shutil.which("xz")
-    if xz is None:
-        with lzma.open(destination, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed:
-            write_tar(compressed, folder, prefix, timestamp)
-        return digest(destination)
-    with destination.open("wb") as output:
-        compressor = subprocess.Popen([xz, "-9", "--threads=0", "--block-size=16MiB", "--check=crc64", "--stdout"],
-                                      stdin=subprocess.PIPE, stdout=output)
-        try:
-            write_tar(compressor.stdin, folder, prefix, timestamp)
-        finally:
-            compressor.stdin.close()
-            if compressor.wait() != 0:
-                raise RuntimeError(f"xz failed ({compressor.returncode}) compressing {destination.name}")
+    xz (macOS's bsdtar, GNU tar beside xz) takes this one; every other, and Windows, the gzipped one."""
+    with lzma.open(destination, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed:
+        write_tar(compressed, folder, prefix, timestamp)
     return digest(destination)
 
 def stage_hands(root: Path, bundle: Path, target: str) -> None:
