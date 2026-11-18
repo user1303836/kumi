@@ -7405,7 +7405,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
 }
 
 // src/shared/MapCanvas.tsx
-import { useEffect as useEffect13, useMemo as useMemo2, useRef as useRef15, useState as useState16 } from "react";
+import { Fragment as Fragment9, useEffect as useEffect13, useMemo as useMemo2, useRef as useRef15, useState as useState16 } from "react";
 
 // src/shared/atlas/AtlasOverlay.tsx
 import { useEffect as useEffect7, useRef as useRef9 } from "react";
@@ -10644,7 +10644,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             const closeness = listed.map((id) => found?.matches?.[id]?.closeness).filter((value) => typeof value === "number");
             const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0];
             const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2;
-            const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}⁠–⁠${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
+            const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}–${high}`) : t("map.closenessShown") : ""].filter(Boolean);
             return (
               // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
               // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
@@ -10656,7 +10656,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                   /* @__PURE__ */ jsx26(Button2, { onClick: () => onPicked(matches, "replace"), tip: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
                   /* @__PURE__ */ jsx26(Button2, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                 ] }),
-                facts && /* @__PURE__ */ jsx26(Tip2, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx26("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere", padding: "0 4px 4px" }, children: facts }) }),
+                facts.length > 0 && /* @__PURE__ */ jsx26(Tip2, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx26("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere", padding: "0 4px 4px" }, children: facts.map((fact, index) => /* @__PURE__ */ jsxs23(Fragment9, { children: [
+                  index > 0 && " ",
+                  /* @__PURE__ */ jsx26("span", { style: { display: "inline-block", maxWidth: "100%" }, children: index < facts.length - 1 ? `${fact} ·` : fact })
+                ] }, index)) }) }),
                 !listFolded && /* @__PURE__ */ jsx26("div", { ref: matchesList, style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
                   const sound = model.sounds[id];
                   const indexed = indexedValues(sound, t);
@@ -10890,7 +10893,7 @@ function GlyphShape({ glyph, color }) {
 
 // src/shared/PaletteDock.tsx
 import { useEffect as useEffect14, useLayoutEffect as useLayoutEffect4, useMemo as useMemo3, useRef as useRef16, useState as useState17 } from "react";
-import { Fragment as Fragment9, jsx as jsx27, jsxs as jsxs24 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs24 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
 var LOWEST = 150;
@@ -11368,7 +11371,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, hus
           }
         }
       }
-    ) : /* @__PURE__ */ jsxs24(Fragment9, { children: [
+    ) : /* @__PURE__ */ jsxs24(Fragment10, { children: [
       palette && palette.palettes.length > 0 && /* @__PURE__ */ jsxs24(
         "select",
         {
@@ -11790,7 +11793,7 @@ function SampleFolders({
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment10, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
 var HOVER_PLAY = "mapHover";
 var TILES = "mapTiles";
 var PALETTE_OPEN = "paletteOpen";
@@ -11902,13 +11905,13 @@ function MapWorkspace({ ctx, store, audition }) {
   );
   const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ""] ? nextSteps(state, t) : [];
   const scanning = Object.values(state.jobs).find((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0));
-  const empty = state.available === false ? t("map.agentOff") : map === null ? state.failed.map ? /* @__PURE__ */ jsxs26(Fragment10, { children: [
+  const empty = state.available === false ? t("map.agentOff") : map === null ? state.failed.map ? /* @__PURE__ */ jsxs26(Fragment11, { children: [
     t("map.failed", state.failed.map),
     /* @__PURE__ */ jsx29("div", { style: { marginTop: 10, display: "flex", justifyContent: "center" }, children: /* @__PURE__ */ jsx29(Button2, { onClick: () => store.refresh("map"), children: t("map.retry") }) })
-  ] }) : t("map.reading") : scanning ? /* @__PURE__ */ jsxs26(Fragment10, { children: [
+  ] }) : t("map.reading") : scanning ? /* @__PURE__ */ jsxs26(Fragment11, { children: [
     t("map.scanningNow"),
     jobWords(scanning, t).detail && /* @__PURE__ */ jsx29("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
-  ] }) : /* @__PURE__ */ jsxs26(Fragment10, { children: [
+  ] }) : /* @__PURE__ */ jsxs26(Fragment11, { children: [
     setupSteps.length > 0 ? t("map.setupFirst") : t("map.empty"),
     setupSteps.length === 0 && /* @__PURE__ */ jsx29("div", { style: { ...glass, marginTop: 12, padding: 12 }, children: folderControl() }),
     /* @__PURE__ */ jsx29("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx29(Button2, { kind: setupSteps.length === 1 ? "primary" : "secondary", onClick: () => ask(ctx, step2.request, { send: true, session: null }), children: step2.label }, step2.request)) : /* @__PURE__ */ jsx29(Button2, { kind: "primary", onClick: () => ask(ctx, SCAN_REQUEST, { send: false, session }), tip: t("map.scanTitle"), children: t("map.scan") }) })
@@ -11925,7 +11928,7 @@ function MapWorkspace({ ctx, store, audition }) {
           actions: (id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision);
             const near = nearRequest([{ id, name: sound.name }], map?.revision);
-            return /* @__PURE__ */ jsxs26(Fragment10, { children: [
+            return /* @__PURE__ */ jsxs26(Fragment11, { children: [
               /* @__PURE__ */ jsx29(Button2, { disabled: palette.marked.has(id), onClick: () => palette.gather([id]), tip: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
               near && /* @__PURE__ */ jsx29(Button2, { kind: "quiet", onClick: () => ask(ctx, near, { send: false, session }), tip: t("map.moreLikeTitle"), children: t("map.moreLike") }),
               request && /* @__PURE__ */ jsx29(Button2, { kind: "quiet", onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, tip: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
@@ -11946,7 +11949,7 @@ function MapWorkspace({ ctx, store, audition }) {
           },
           empty,
           found: state.found,
-          hiddenActions: /* @__PURE__ */ jsxs26(Fragment10, { children: [
+          hiddenActions: /* @__PURE__ */ jsxs26(Fragment11, { children: [
             /* @__PURE__ */ jsx29(Button2, { kind: "quiet", onClick: () => store.showHidden(), tip: t("map.showHiddenTitle"), children: t("map.showHidden") }),
             /* @__PURE__ */ jsx29(Button2, { kind: "quiet", onClick: () => ask(ctx, RESCAN_REQUEST, { send: false, session }), tip: t("map.rescanTitle"), children: t("map.rescan") })
           ] }),
@@ -11964,7 +11967,7 @@ function MapWorkspace({ ctx, store, audition }) {
           growActions: (result) => {
             const request = useRequest(result, madeName(result));
             const kept3 = palette.kept.has(result.artifact_id);
-            return /* @__PURE__ */ jsxs26(Fragment10, { children: [
+            return /* @__PURE__ */ jsxs26(Fragment11, { children: [
               /* @__PURE__ */ jsx29(Button2, { kind: "quiet", onClick: () => palette.makeFrom([sourceOfResult(result, madeName(result)), ...grow.to ? [grow.to.source] : []]), tip: t("make.openTitle"), children: t("make.open") }),
               /* @__PURE__ */ jsx29("span", { style: { flex: 1 } }),
               /* @__PURE__ */ jsx29(Button2, { disabled: kept3, onClick: () => palette.keep(result), tip: kept3 ? void 0 : t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
@@ -11978,7 +11981,7 @@ function MapWorkspace({ ctx, store, audition }) {
           picked: palette.picked,
           pickedActions: (ids) => {
             const near = ids.length > 1 ? nearRequest(ids.map((id) => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null;
-            return /* @__PURE__ */ jsxs26(Fragment10, { children: [
+            return /* @__PURE__ */ jsxs26(Fragment11, { children: [
               /* @__PURE__ */ jsx29(Button2, { kind: "primary", onClick: () => palette.gather(ids), tip: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
               ids.length > 1 && /* @__PURE__ */ jsx29(Button2, { onClick: () => palette.makeFromPicks(ids), tip: t("make.openTitle"), children: t("make.open") }),
               ids.length === 2 && (() => {
@@ -12019,7 +12022,7 @@ function MapWorkspace({ ctx, store, audition }) {
             ctx.storage.set(LAYOUT, id);
             setLayout(id);
           },
-          tools: /* @__PURE__ */ jsxs26(Fragment10, { children: [
+          tools: /* @__PURE__ */ jsxs26(Fragment11, { children: [
             /* @__PURE__ */ jsx29(
               ToolButton,
               {
@@ -12110,12 +12113,12 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment11, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment12, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
   const note = (text) => /* @__PURE__ */ jsx30("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx30("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs27(Fragment11, { children: [
+  return /* @__PURE__ */ jsx30("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs27(Fragment12, { children: [
     /* @__PURE__ */ jsx30("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
     /* @__PURE__ */ jsx30(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
@@ -12144,7 +12147,7 @@ function petLine(before, after, t) {
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState21 } from "react";
-import { Fragment as Fragment12, jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
+import { Fragment as Fragment13, jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
@@ -12187,7 +12190,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsx31("span", { style: { ...TYPE.body, fontWeight: 600 }, children: "Kumi" }),
       /* @__PURE__ */ jsx31("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx31("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs28(Fragment12, { children: [
+    state.available === false ? /* @__PURE__ */ jsx31("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs28(Fragment13, { children: [
       /* @__PURE__ */ jsxs28("div", { children: [
         /* @__PURE__ */ jsx31("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx31(Line, { label: t("settings.state"), children: setup === null && !state.failed.setup && !partWorks ? /* @__PURE__ */ jsx31(Pending, { label: t("pane.reading"), width: "6rem" }) : STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),

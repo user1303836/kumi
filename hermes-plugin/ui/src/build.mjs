@@ -55,11 +55,24 @@ const bundles = [
   }
 ]
 
+// An invisible or bidi control character, or a tag character, as the bundle carries it: a `\u…` escape in a string
+// reaches the bundle as the character itself (`charset: 'utf8'`), and Hermes's install scan flags each one as a high
+// finding, which makes its verdict a caution and blocks a git install (Nov 18: U+2060 in the find card's range).
+const INVISIBLE = /[\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]|[\u{e0000}-\u{e007f}]/gu
+
 let stale = 0
+let hidden = 0
 for (const { out, options } of bundles) {
   const result = await build(options)
   const text = result.outputFiles[0].text
   const file = join(plugin, out)
+  for (const [index, line] of text.split('\n').entries()) {
+    for (const match of line.matchAll(INVISIBLE)) {
+      hidden += 1
+      const code = match[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')
+      console.error(`${out}:${index + 1}:${match.index + 1} carries U+${code}: write it so no such character reaches the bundle (in ui/src/).`)
+    }
+  }
   if (check) {
     let committed = ''
     try {
@@ -75,4 +88,4 @@ for (const { out, options } of bundles) {
     console.log(`built ${out} (${Math.round(text.length / 1024)} KB)`)
   }
 }
-process.exitCode = stale ? 1 : 0
+process.exitCode = stale || hidden ? 1 : 0

@@ -9253,7 +9253,7 @@
               const closeness = listed.map((id) => found?.matches?.[id]?.closeness).filter((value) => typeof value === "number");
               const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0];
               const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2;
-              const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}⁠–⁠${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
+              const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}–${high}`) : t("map.closenessShown") : ""].filter(Boolean);
               return (
                 // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
                 // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
@@ -9265,7 +9265,10 @@
                     /* @__PURE__ */ jsx(Button, { onClick: () => onPicked(matches, "replace"), tip: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
                     /* @__PURE__ */ jsx(Button, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                   ] }),
-                  facts && /* @__PURE__ */ jsx(Tip, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere", padding: "0 4px 4px" }, children: facts }) }),
+                  facts.length > 0 && /* @__PURE__ */ jsx(Tip, { label: near ? t("map.closenessTitle") : void 0, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint, overflowWrap: "anywhere", padding: "0 4px 4px" }, children: facts.map((fact, index) => /* @__PURE__ */ jsxs(Fragment, { children: [
+                    index > 0 && " ",
+                    /* @__PURE__ */ jsx("span", { style: { display: "inline-block", maxWidth: "100%" }, children: index < facts.length - 1 ? `${fact} ·` : fact })
+                  ] }, index)) }) }),
                   !listFolded && /* @__PURE__ */ jsx("div", { ref: matchesList, style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
                     const sound = model.sounds[id];
                     const indexed = indexedValues(sound, t);
