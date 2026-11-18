@@ -137,13 +137,14 @@ fn the_built_kumi_says_its_release_in_its_user_agent() {
                     Ok(n) => head.extend_from_slice(&buffer[..n]),
                 }
             }
+            // Kept before it's answered: the doctor can't end, and the heads be read, before this one is in.
+            if heads.send(String::from_utf8_lossy(&head).to_ascii_lowercase()).is_err() {
+                return;
+            }
             let body = br#"{"version":"0.12.0","models":[]}"#;
             let answer =
                 format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
             let _ = stream.write_all(answer.as_bytes()).and_then(|()| stream.write_all(body));
-            if heads.send(String::from_utf8_lossy(&head).to_ascii_lowercase()).is_err() {
-                return;
-            }
         }
     });
     let home = tempfile::tempdir().unwrap();
