@@ -24,14 +24,11 @@ fn artifact() -> PathBuf {
         return path.into();
     }
     let folder = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-    let profiles = [folder.parent(), folder.ancestors().nth(4).filter(|_| folder.ancestors().nth(3).is_some_and(|f| f.ends_with("build")))];
-    profiles
-        .into_iter()
-        .flatten()
-        .map(|profile| profile.join(NAME))
-        .chain([folder.join(NAME)])
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| panic!("no {NAME} beside {} or in its profile's folder", folder.display()))
+    let built = folder.ancestors().nth(3).is_some_and(|unit| unit.ends_with("build"));
+    let profiles = [folder.parent(), folder.ancestors().nth(4).filter(|_| built)];
+    let candidates: Vec<PathBuf> = profiles.into_iter().flatten().map(|profile| profile.join(NAME)).chain([folder.join(NAME)]).collect();
+    let found = candidates.into_iter().find(|path| path.is_file());
+    found.unwrap_or_else(|| panic!("no {NAME} beside {} or in its profile's folder", folder.display()))
 }
 
 #[cfg(unix)]
