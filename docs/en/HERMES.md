@@ -400,7 +400,7 @@ run without asking there, and Kumi can't tell it from a chat.
 Screenshots:
 - The pane is a real session, not scripted: Hermes Desktop v0.23.1 on Windows with a real model, Kumi for Hermes on the
   1.24.79 runtime, and real Renoise, in a project that started empty.
-- The map, palette, Make and dashboard shots are Kumi 1.24.81 on a generated 3,840-sound test map, with the made
+- The palette, Make and dashboard shots are Kumi 1.24.81 on a generated 3,840-sound test map, with the made
   sounds from Kumi's sound-design engine.
 - In the other shots, Hermes's side of the chat came from a scripted stand-in model, so the words are illustrative;
   Kumi's side is real.
