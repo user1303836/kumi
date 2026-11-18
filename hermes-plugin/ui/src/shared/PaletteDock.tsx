@@ -570,11 +570,6 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </span>
       )}
       {current && current.excluded > 0 && <span style={S.faint}>{t('dock.excluded', current.excluded)}</span>}
-      {/* What the last edit said, in the header's free room for a few seconds: it never adds a line, so the drawer and
-          the map above it keep their size (a line that came and went resized the map, and an unmoved map refit). */}
-      <span aria-live="polite" style={{ ...S.faint, ...S.ellipsis, flex: '1 1 0', color: saying?.failed ? T.warn : T.muted }} title={saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : undefined}>
-        {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
-      </span>
       {current && current.items.length > 1 && make && (
         <TextButton onClick={() => make(current)} title={t('make.openTitle')}>
           {t('make.open')}
@@ -658,6 +653,30 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
       </button>
       {header}
+      {/* What the last edit said, for a few seconds, floating just above the dock's top edge: it never adds a line (a line
+          that came and went resized the map, and an unmoved map refit), and however crowded the header, it's never cut. */}
+      <span
+        aria-live="polite"
+        style={{
+          position: 'absolute',
+          right: 10,
+          bottom: 'calc(100% + 6px)',
+          maxWidth: 'calc(100% - 20px)',
+          zIndex: 3,
+          padding: '3px 10px',
+          borderRadius: 12,
+          border: `1px solid ${T.border}`,
+          background: T.raised,
+          boxShadow: '0 6px 18px -10px rgba(0,0,0,.5)',
+          fontSize: 11.5,
+          color: saying?.failed ? T.warn : T.muted,
+          pointerEvents: 'none',
+          opacity: saying ? 1 : 0,
+          transition: 'opacity 160ms'
+        }}
+      >
+        {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
+      </span>
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
           <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>

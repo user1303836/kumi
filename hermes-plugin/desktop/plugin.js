@@ -10305,7 +10305,6 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       /* @__PURE__ */ jsx26(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
     ] }),
     current && current.excluded > 0 && /* @__PURE__ */ jsx26("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
-    /* @__PURE__ */ jsx26("span", { "aria-live": "polite", style: { ...S.faint, ...S.ellipsis, flex: "1 1 0", color: saying?.failed ? T.warn : T.muted }, title: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : void 0, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" }),
     current && current.items.length > 1 && make && /* @__PURE__ */ jsx26(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
     current && current.items.length > 0 && kit?.(current),
     current && !forgetting && /* @__PURE__ */ jsx26(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
@@ -10381,6 +10380,30 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           }
         ),
         header,
+        /* @__PURE__ */ jsx26(
+          "span",
+          {
+            "aria-live": "polite",
+            style: {
+              position: "absolute",
+              right: 10,
+              bottom: "calc(100% + 6px)",
+              maxWidth: "calc(100% - 20px)",
+              zIndex: 3,
+              padding: "3px 10px",
+              borderRadius: 12,
+              border: `1px solid ${T.border}`,
+              background: T.raised,
+              boxShadow: "0 6px 18px -10px rgba(0,0,0,.5)",
+              fontSize: 11.5,
+              color: saying?.failed ? T.warn : T.muted,
+              pointerEvents: "none",
+              opacity: saying ? 1 : 0,
+              transition: "opacity 160ms"
+            },
+            children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : ""
+          }
+        ),
         current && forgetting && /* @__PURE__ */ jsxs23("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
           /* @__PURE__ */ jsx26("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
           /* @__PURE__ */ jsx26(
