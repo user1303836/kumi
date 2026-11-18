@@ -64,7 +64,7 @@ not (
   | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
   | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
-      & not ((binary_id(kumi-daw-ableton::it) & test(/^changes::/)) | (binary_id(kumi::it) & test(/^pin_first_request::/))))
+      & not ((binary_id(kumi-daw-ableton::it) & test(/^changes::/)) | (binary_id(kumi::app) & test(/^pin_first_request::/))))
   | test(/kit::clock::tests::(a_tempo_change_of_any_size|lives_loop_starts|play_after_a_stop|stopping_ends_the_steps|a_jump_lands_on_its_step|on_lives_own_recordings|a_tempo_ramp)/)
   | test(/kit::clock::tests::(steps_start_on_the_sample|a_start_inside_a_step|a_jump_by_whole_beats|a_tempo_rise_just_after|a_division_or_swing_moved)/)
   | test(/core::layers::fake_backend_tests::(a_late_flipped_layer|glue_hears_the_group)/)

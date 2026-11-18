@@ -80,7 +80,7 @@ Working:
 
 Tests:
 - They never need a running DAW, a sign-in, the network or anything from this machine, and never touch `~/.kumi` or a DAW's folders.
-- A crate's integration tests are one binary: `tests/it/<file>.rs`, listed in `tests/it/main.rs`. Shared support goes in `kumi-testkit`.
+- A crate's integration tests are one binary: `tests/it/<file>.rs`, listed in `tests/it/main.rs`. Shared support goes in `kumi-testkit`. One exception: kumi's are three binaries (`tests/it/`, the DAWs, the library and serve; `tests/tui/`, the terminal app; `tests/app/`, the commands and setup), because they're the last link of every build's chain and three compile at once. A new kumi test goes in the one its subject belongs to; no other crate splits its tests.
 - `ci` is the set main runs after each merge; long simulations, oracle replays and SDK interop belong in Extended, which runs by hand (`.config/nextest.toml` says what `ci` leaves out).
 - Pull requests run no tests, and CI stays minimal on the way to no PR checks at all: section 6 says what runs. Cutting a test that costs more time than the breaks it catches is welcome.
 - Goldens (`tests/goldens/` in `kumi`, `kumi-agent`, `kumi-daw-ableton`; `daw-mcp-server/tests/golden`; `daw-bridge/tests/vectors`) are byte-exact. `KUMI_BLESS=1` rewrites them: bless only an intended change, and say why in the PR. Oracles are never regenerated or edited.

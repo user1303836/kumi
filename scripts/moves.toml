@@ -4718,3 +4718,296 @@ to = "kumi_daw_renoise::ears::renoise_stem_steps"
 [[rust]]
 from = "kumi_daw_own::ears::Slot"
 to = "kumi_daw_renoise::ears::Slot"
+
+# kumi's integration tests, split into three binaries by subject (2026-11).
+[[move]]
+from = "crates/kumi/tests/it/activity.rs"
+to = "crates/kumi/tests/tui/activity.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/app_text.rs"
+to = "crates/kumi/tests/tui/app_text.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/app_voice.rs"
+to = "crates/kumi/tests/tui/app_voice.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/focus_fill.rs"
+to = "crates/kumi/tests/tui/focus_fill.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/history.rs"
+to = "crates/kumi/tests/tui/history.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/icons.rs"
+to = "crates/kumi/tests/tui/icons.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/map_server.rs"
+to = "crates/kumi/tests/tui/map_server.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/markdown.rs"
+to = "crates/kumi/tests/tui/markdown.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pin_model_ids.rs"
+to = "crates/kumi/tests/tui/pin_model_ids.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pin_plain.rs"
+to = "crates/kumi/tests/tui/pin_plain.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pin_screens.rs"
+to = "crates/kumi/tests/tui/pin_screens.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pin_startup.rs"
+to = "crates/kumi/tests/tui/pin_startup.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/plain_farewell.rs"
+to = "crates/kumi/tests/tui/plain_farewell.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/print.rs"
+to = "crates/kumi/tests/tui/print.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/session_thread.rs"
+to = "crates/kumi/tests/tui/session_thread.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/spinner.rs"
+to = "crates/kumi/tests/tui/spinner.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/stdin_handoff.rs"
+to = "crates/kumi/tests/tui/stdin_handoff.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/terminal.rs"
+to = "crates/kumi/tests/tui/terminal.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/transcript.rs"
+to = "crates/kumi/tests/tui/transcript.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tree.rs"
+to = "crates/kumi/tests/tui/tree.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui.rs"
+to = "crates/kumi/tests/tui/tui.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_app.rs"
+to = "crates/kumi/tests/tui/tui_app.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_app_helpers.rs"
+to = "crates/kumi/tests/tui/tui_app_helpers.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_app_panels.rs"
+to = "crates/kumi/tests/tui/tui_app_panels.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_app_voice.rs"
+to = "crates/kumi/tests/tui/tui_app_voice.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_away.rs"
+to = "crates/kumi/tests/tui/tui_away.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_composer.rs"
+to = "crates/kumi/tests/tui/tui_composer.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_details.rs"
+to = "crates/kumi/tests/tui/tui_details.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_drawer.rs"
+to = "crates/kumi/tests/tui/tui_drawer.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_jobs.rs"
+to = "crates/kumi/tests/tui/tui_jobs.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_keys.rs"
+to = "crates/kumi/tests/tui/tui_keys.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_map.rs"
+to = "crates/kumi/tests/tui/tui_map.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_menu.rs"
+to = "crates/kumi/tests/tui/tui_menu.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_music.rs"
+to = "crates/kumi/tests/tui/tui_music.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_own_bodies.rs"
+to = "crates/kumi/tests/tui/tui_own_bodies.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_palette.rs"
+to = "crates/kumi/tests/tui/tui_palette.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_pictures.rs"
+to = "crates/kumi/tests/tui/tui_pictures.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_replay.rs"
+to = "crates/kumi/tests/tui/tui_replay.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_setup.rs"
+to = "crates/kumi/tests/tui/tui_setup.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_slots.rs"
+to = "crates/kumi/tests/tui/tui_slots.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_take_back.rs"
+to = "crates/kumi/tests/tui/tui_take_back.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_theme.rs"
+to = "crates/kumi/tests/tui/tui_theme.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_threaded.rs"
+to = "crates/kumi/tests/tui/tui_threaded.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_usage.rs"
+to = "crates/kumi/tests/tui/tui_usage.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/tui_view.rs"
+to = "crates/kumi/tests/tui/tui_view.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/voice_input.rs"
+to = "crates/kumi/tests/tui/voice_input.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/windows_console_control.rs"
+to = "crates/kumi/tests/tui/windows_console_control.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/windows_stdin.rs"
+to = "crates/kumi/tests/tui/windows_stdin.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/windows_tty.rs"
+to = "crates/kumi/tests/tui/windows_tty.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/bridge_setup.rs"
+to = "crates/kumi/tests/app/bridge_setup.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/cli.rs"
+to = "crates/kumi/tests/app/cli.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/cli_binary.rs"
+to = "crates/kumi/tests/app/cli_binary.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/config.rs"
+to = "crates/kumi/tests/app/config.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/daw_choice.rs"
+to = "crates/kumi/tests/app/daw_choice.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/daw_neutral_guard.rs"
+to = "crates/kumi/tests/app/daw_neutral_guard.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/daws_doc.rs"
+to = "crates/kumi/tests/app/daws_doc.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/doctor.rs"
+to = "crates/kumi/tests/app/doctor.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/drum_kits.rs"
+to = "crates/kumi/tests/app/drum_kits.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/export.rs"
+to = "crates/kumi/tests/app/export.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/install.rs"
+to = "crates/kumi/tests/app/install.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/jobs.rs"
+to = "crates/kumi/tests/app/jobs.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/live_extension.rs"
+to = "crates/kumi/tests/app/live_extension.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/login.rs"
+to = "crates/kumi/tests/app/login.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/models.rs"
+to = "crates/kumi/tests/app/models.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/native_editing_live.rs"
+to = "crates/kumi/tests/app/native_editing_live.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/observed_names.rs"
+to = "crates/kumi/tests/app/observed_names.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pack_tests.rs"
+to = "crates/kumi/tests/app/pack_tests.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/report.rs"
+to = "crates/kumi/tests/app/report.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/serve_setup.rs"
+to = "crates/kumi/tests/app/serve_setup.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/update.rs"
+to = "crates/kumi/tests/app/update.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/willington.rs"
+to = "crates/kumi/tests/app/willington.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/session.rs"
+to = "crates/kumi/tests/app/session.rs"
+
+[[move]]
+from = "crates/kumi/tests/it/pin_first_request.rs"
+to = "crates/kumi/tests/app/pin_first_request.rs"
