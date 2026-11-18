@@ -1,6 +1,6 @@
 # The Rust that CI tests with and the Installer builds releases with, and that rustup takes locally. A new stable is taken
 # on purpose, by a pull request that changes this line (its own CI run shows the cold build once), never by a new release
-# alone: Rust 1.100 made main red and every CI cache cold without a commit of ours. Each workflow's toolchain step reads
-# the channel from here.
+# alone: Rust 1.100 made main red and every CI cache cold without a commit of ours. Every workflow installs it through
+# .github/actions/rust-toolchain.
 [toolchain]
 channel = "1.100.0"

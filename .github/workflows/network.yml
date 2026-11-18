@@ -48,12 +48,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Where the test authority is kept
         run: echo "KUMI_TEST_AUTHORITY=$RUNNER_TEMP/kumi-test-authority" >> "$GITHUB_ENV"
-      # Rust at the version rust-toolchain.toml pins, as CI's.
-      - id: rust
-        run: sed -n 's/^channel = "\([^"]*\)".*/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          toolchain: ${{ steps.rust.outputs.channel }}
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
         with:
           key: network

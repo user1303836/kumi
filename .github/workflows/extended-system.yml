@@ -54,13 +54,7 @@ jobs:
         shell: pwsh
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # Rust at the version rust-toolchain.toml pins, as CI's.
-      - id: rust
-        shell: bash
-        run: sed -n 's/^channel = "\([^"]*\)".*/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          toolchain: ${{ steps.rust.outputs.channel }}
+      - uses: ./.github/actions/rust-toolchain
       # Restores the cache CI's tests save from main for Linux, by its name; saves none of its own, so the repository's
       # 10 GB keeps main's.
       - if: inputs.cache != ''
@@ -99,14 +93,8 @@ jobs:
         shell: pwsh
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # rustc, which the update tests build a stand-in Kumi with, and cargo to run nextest: the version rust-toolchain.toml
-      # pins.
-      - id: rust
-        shell: bash
-        run: sed -n 's/^channel = "\([^"]*\)".*/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          toolchain: ${{ steps.rust.outputs.channel }}
+      # rustc, which the update tests build a stand-in Kumi with, and cargo to run nextest.
+      - uses: ./.github/actions/rust-toolchain
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2
         with:
           tool: nextest
