@@ -4405,7 +4405,14 @@ function Pending({ label, width = "60%" }) {
   return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
 }
 function PathBreaks({ text }) {
-  const parts = text.split(/(?<=[/\\])/);
+  const parts = [];
+  let from = 0;
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] !== "/" && text[at] !== "\\") continue;
+    parts.push(text.slice(from, at + 1));
+    from = at + 1;
+  }
+  if (from < text.length || parts.length === 0) parts.push(text.slice(from));
   return /* @__PURE__ */ jsx(Fragment2, { children: parts.map((part, index) => /* @__PURE__ */ jsxs(Fragment, { children: [
     part,
     index < parts.length - 1 && /* @__PURE__ */ jsx("wbr", {})

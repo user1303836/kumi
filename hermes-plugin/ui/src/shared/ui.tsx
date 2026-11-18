@@ -284,9 +284,18 @@ export function Pending({ label, width = '60%' }: { label: string; width?: numbe
 
 /** Text whose paths break between folders, not in the middle of a name: a `<wbr>` after each `/` and `\`. It's an
  *  element, so nothing invisible reaches the bundle (Hermes's install scan flags invisible characters). The text's own
- *  `overflow-wrap: anywhere` then breaks only a single name longer than the line. */
+ *  `overflow-wrap: anywhere` then breaks only a single name longer than the line. Cut by a loop, not a regex
+ *  lookbehind: the dashboard runs in the producer's own browser, and Safari before 16.4 can't even parse one, which
+ *  would take Kumi's whole page down. */
 export function PathBreaks({ text }: { text: string }) {
-  const parts = text.split(/(?<=[/\\])/)
+  const parts: string[] = []
+  let from = 0
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] !== '/' && text[at] !== '\\') continue
+    parts.push(text.slice(from, at + 1))
+    from = at + 1
+  }
+  if (from < text.length || parts.length === 0) parts.push(text.slice(from))
   return (
     <>
       {parts.map((part, index) => (
