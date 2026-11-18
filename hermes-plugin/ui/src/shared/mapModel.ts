@@ -561,8 +561,10 @@ export function searchSounds(model: MapModel, query: string): Set<string> | null
 }
 
 /** The view that centres the given points, zoomed in as far as they allow (for "show what the agent found"), below the
- *  canvas's top `top` pixels and left of a side sheet covering its right `right` pixels. */
-export function frame(model: MapModel, ids: Set<string>, width: number, height: number, top = 0, right = 0, margin = 48): MapViewport | null {
+ *  canvas's top `top` pixels and left of a side sheet covering its right `right` pixels. `clear` moves the room's top
+ *  edge down, or its left edge right, past something else floating over the map (the card listing the finds); the
+ *  map's own size stays the one every view of this canvas draws it at. */
+export function frame(model: MapModel, ids: Set<string>, width: number, height: number, top = 0, right = 0, margin = 48, clear: { top?: number; left?: number } = {}): MapViewport | null {
   const chosen = model.points.filter(point => ids.has(point.id))
   if (!chosen.length) return null
   const xs = chosen.map(point => point.x)
@@ -570,12 +572,15 @@ export function frame(model: MapModel, ids: Set<string>, width: number, height: 
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
   // The same map side `fitView` gives, zoomed so the found points fill the room left less a margin.
   const size = mapSide(width, height, top)
-  const room = roomBeside(width, right)
+  const roomTop = Math.max(top, clear.top ?? 0)
+  const roomLeft = Math.max(0, clear.left ?? 0)
+  const across = Math.max(1, roomBeside(width, right) - roomLeft)
+  const down = Math.max(1, height - roomTop)
   const span = Math.max(x1 - x0, y1 - y0, 0.04)
-  const scale = Math.min(40, Math.max(1, (Math.min(room, height - top) - 2 * margin) / (span * size)))
+  const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span * size)))
   const cx = (x0 + x1) / 2
   const cy = (y0 + y1) / 2
-  return { scale, dx: room / 2 - cx * size * scale, dy: top + (height - top) / 2 - cy * size * scale }
+  return { scale, dx: roomLeft + across / 2 - cx * size * scale, dy: roomTop + down / 2 - cy * size * scale }
 }
 
 /** The points inside a screen box (a drag's corners, any order), among those `visible` allows, in the map's own order:

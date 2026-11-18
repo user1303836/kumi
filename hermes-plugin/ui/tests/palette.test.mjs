@@ -149,6 +149,15 @@ test("a thumbnail's bars follow the loudest sample in each stretch, scaled to th
   assert.equal(palette.peaksOf(new Float32Array(3).fill(0.5), 8).length, 8, 'more bars than samples still fills each bar')
 })
 
+test("a waveform pooled from the one fine decode is the one decoding at each drawn size gave", async () => {
+  const peaks = await load('src/shared/peaks.ts')
+  // A second of a decaying, wobbling hit: every stretch has a different loudest sample.
+  const samples = Float32Array.from({ length: 44_100 }, (_, at) => Math.sin(at * 0.37) * Math.exp(-at / 9000) * (1 + 0.3 * Math.sin(at / 700)))
+  const fine = palette.peaksOf(samples, peaks.FINE_BARS)
+  for (const bars of [28, 64, 160]) assert.deepEqual(peaks.poolPeaks(fine, bars), palette.peaksOf(samples, bars), `${bars} bars`)
+  assert.deepEqual(peaks.poolPeaks([], 4), [0, 0, 0, 0])
+})
+
 test('a drag picks the points inside its box, whichever corner it started from, among those shown', () => {
   const points = [
     ['s-1', 0.1, 0.1, 0],

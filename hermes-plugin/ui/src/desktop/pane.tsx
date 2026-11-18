@@ -84,14 +84,14 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
                 .join(' ')}
             </span>
             <div style={S.row}>
-              <TextButton onClick={() => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>{t('pane.lookAgain')}</TextButton>
+              <TextButton onClick={() => ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>{t('pane.lookAgain')}</TextButton>
             </div>
           </div>
         )}
         {steps.length > 0 && (
           <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
             {steps.map(step => (
-              <TextButton key={step.request} onClick={() => void ask(ctx, step.request, { send: true, session: connected ? session : null })} strong={steps.length === 1}>
+              <TextButton key={step.request} onClick={() => ask(ctx, step.request, { send: true, session: connected ? session : null })} strong={steps.length === 1}>
                 {step.label}
               </TextButton>
             ))}
@@ -99,11 +99,11 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         )}
       </div>
       <Section title={t('pane.focus')}>
-        <FocusView focus={state.focus} now={now} />
+        <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} />
       </Section>
       {Object.keys(state.jobs).length > 0 && (
         <Section title={t('pane.jobs')}>
-          <JobsView jobs={state.jobs} onRequest={request => void ask(ctx, request, { send: false, session })} />
+          <JobsView jobs={state.jobs} onRequest={request => ask(ctx, request, { send: false, session })} />
         </Section>
       )}
       <Section
@@ -116,6 +116,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         <HistoryView
           daw={state.status?.daw}
           history={state.history}
+          loading={state.history === null && !state.failed.history}
           live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
           target={state.setup?.target}
@@ -127,7 +128,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
             return (
               <TextButton
                 label={t('pane.undoLabel', clean(item.title ?? item.label ?? item.id, 120))}
-                onClick={() => void ask(ctx, undoRequest(item), { send: true, session })}
+                onClick={() => ask(ctx, undoRequest(item), { send: true, session })}
                 title={left > 1 ? t('pane.undoChangeTitle', left) : t('pane.undoTitle')}
               >
                 {t('pane.undo')}
@@ -138,11 +139,11 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         {/* Rows are kept while Kumi is away, but undoing one needs it back: said under them, and only when there are some. */}
         {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
         {/* Nothing in HISTORY yet, with Kumi connected: three requests to try, each only put in the chat to send. */}
-        {connected && (state.history?.items?.length ?? 0) === 0 && (
+        {connected && state.history !== null && (state.history.items?.length ?? 0) === 0 && (
           <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             <span style={S.faint}>{t('pane.starters')}</span>
             {STARTER_REQUESTS.map(starter => (
-              <TextButton key={starter.key} onClick={() => void ask(ctx, starter.request, { send: false, session })} title={t('pane.starterTitle')}>
+              <TextButton key={starter.key} onClick={() => ask(ctx, starter.request, { send: false, session })} title={t('pane.starterTitle')}>
                 {t(STARTER_LABELS[starter.key])}
               </TextButton>
             ))}

@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import { ago, bpm, catchUpLines, clean, cleanupWords, colorOf, dawName, focusParameter, focusPath, focusPlace, nameOf } from './format.ts'
 import { english, type Translate } from './i18n.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
-import { Chip, Dot, S, useT } from './ui.tsx'
+import { Chip, Clamp, Dot, Pending, S, useT } from './ui.tsx'
 
 // Each state's mark, tone, and word (a catalog key). `kept` is muted, not a success: the producer changed it since,
 // so Kumi left it as it is.
@@ -37,9 +37,11 @@ export function stateOf(item: HistoryItem, t: Translate = english, live = false)
 
 const TONE: Record<'bad' | 'good' | 'muted' | 'warn', string> = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }
 
-export function FocusView({ focus, now }: { focus: Focus | null; now?: number }) {
+/** FOCUS. `loading`: its first read is still on its way (null focus then says nothing yet, not "nothing in focus"). */
+export function FocusView({ focus, now, loading = false }: { focus: Focus | null; now?: number; loading?: boolean }) {
   const t = useT()
   const catchUp = catchUpLines(focus)
+  if (loading && !focus) return <Pending label={t('pane.reading')} />
   // With the DAW closed, focus.json keeps the project and what changed: show those, not "nothing yet".
   if (!focus || (!focus.focus && !focus.project && !catchUp.lines.length)) {
     return <span style={S.muted}>{t('focus.nothing')}</span>
@@ -118,7 +120,7 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
 
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
  *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. `detail` adds
- *  a surface's own part under a row's words (a script's code). */
+ *  a surface's own part under a row's words (a script's code). `loading`: the first read is still on its way. */
 export function HistoryView({
   history,
   now,
@@ -126,7 +128,8 @@ export function HistoryView({
   detail,
   live = false,
   daw,
-  target
+  target,
+  loading = false
 }: {
   history: History | null
   now?: number
@@ -135,9 +138,11 @@ export function HistoryView({
   live?: boolean
   daw?: unknown
   target?: string
+  loading?: boolean
 }) {
   const t = useT()
   const items = history?.items ?? []
+  if (loading && !history) return <Pending label={t('pane.reading')} />
   if (!items.length) {
     return <span style={S.muted}>{t('history.empty')}</span>
   }
@@ -148,14 +153,14 @@ export function HistoryView({
         const track = nameOf(item.track)
         const dawUndo = item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? item.daw_undo : null
         return (
-          <li key={item.id} style={{ ...S.row, gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
-            <span aria-label={state.word} title={state.word} style={{ width: 14, textAlign: 'center', color: TONE[state.tone], flex: 'none' }}>
+          <li key={item.id} style={{ ...S.row, alignItems: 'flex-start', gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
+            <span aria-label={state.word} title={state.word} style={{ width: 14, lineHeight: '18px', textAlign: 'center', color: TONE[state.tone], flex: 'none' }}>
               {state.mark}
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-              <span style={{ ...S.text, ...S.ellipsis, textDecoration: item.state === 'undone' ? 'line-through' : undefined }} title={clean(item.title ?? '', 300)}>
-                {clean(item.title ?? item.label ?? item.id, 120)}
-              </span>
+              {/* Two lines, then the rest on a click or Enter: the part of a title that differs is often its end ("…→ Dusty
+                  Snare 04.wav"), which a one-line cut hid. */}
+              <Clamp style={{ ...S.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined }} text={clean(item.title ?? item.label ?? item.id, 300)} />
               <span style={{ ...S.row, gap: 5 }}>
                 {track && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
                 <span style={{ ...S.faint, ...S.ellipsis }}>

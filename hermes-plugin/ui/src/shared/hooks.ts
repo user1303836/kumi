@@ -14,6 +14,21 @@ export function useWant(store: KumiStore, part: Part): void {
   useEffect(() => store.want(part), [store, part])
 }
 
+const LESS_MOTION = '(prefers-reduced-motion: reduce)'
+const lessMotion = () => typeof matchMedia === 'function' && matchMedia(LESS_MOTION).matches
+const onLessMotion = (changed: () => void) => {
+  if (typeof matchMedia !== 'function') return () => {}
+  const query = matchMedia(LESS_MOTION)
+  query.addEventListener('change', changed)
+  return () => query.removeEventListener('change', changed)
+}
+
+/** Whether the system asks for less motion, followed while the view is open: turning Reduce motion on mid-session
+ *  stills the view at once, not at its next mount. */
+export function useLessMotion(): boolean {
+  return useSyncExternalStore(onLessMotion, lessMotion, lessMotion)
+}
+
 /** How much audio the window keeps for replays, counted in data-URL characters (about bytes). */
 export const AUDITION_CACHE_CHARS = 48 * 1024 * 1024
 /** A hover's preview, as native Kumi's map plays one: the first two seconds, cut with a 0.2 s fade. */

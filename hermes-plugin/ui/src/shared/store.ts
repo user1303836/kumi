@@ -26,8 +26,11 @@ export interface FolderCheck {
 export interface KumiState {
   /** null until the first answer; false when the backend half isn't mounted (the agent plugin is off). */
   available: boolean | null
-  /** The last read's failure, other than "not mounted". */
+  /** The last read's failure, other than "not mounted", in the backend's words. */
   error: string | null
+  /** Why a part's last read failed (the backend's words), until a read of it answers: a view says so, never "reading…"
+   *  for good. */
+  failed: Partial<Record<Part, string>>
   status: Status | null
   focus: Focus | null
   history: History | null
@@ -114,7 +117,7 @@ export const MOST_JOBS = 20
 const MOST_ROUNDS = 6
 const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
+const EMPTY: KumiState = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: new Set(), palette: null, paletteSaid: null, designs: null }
 
 /** How long failed plays gather before they're reported as one batch, and the most ids one report carries. */
 export const HIDE_BATCH_MS = 1200
@@ -148,19 +151,22 @@ export function statusOf(error: unknown): number {
 }
 
 /** Why a request failed, in the backend's words: Desktop's `ctx.rest` rejects with "<status>: <body>", and FastAPI's
- *  body says why in `detail`; the dashboard's error already is that sentence. */
+ *  body says why in `detail`; the dashboard's error already is that sentence. A Python traceback in it says only the
+ *  error it ends with ("RuntimeError: state.db locked"), never its file and line frames. */
 export function errorText(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error ?? '')
+  let said = text
   const json = text.indexOf('{')
   if (json >= 0) {
     try {
       const body: unknown = JSON.parse(text.slice(json))
-      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
+      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') said = body.detail
     } catch {
       // not JSON: the text as it came
     }
   }
-  return text || 'no answer'
+  if (said.includes('Traceback (most recent call last)')) said = said.trim().split('\n').filter(line => line.trim()).pop()?.trim() ?? said
+  return said || 'no answer'
 }
 
 /** What's shown once Kumi stops answering: the last known state, nothing live in it and nothing to undo. */
@@ -185,12 +191,24 @@ function heard<T>(reply: T): T {
   return { ...reply, heard_at: typeof age === 'number' && Number.isFinite(age) ? Date.now() - age : null }
 }
 
+/** Whether two answers say the same, leaving out how long ago the runtime was heard (that moves on every read). An
+ *  answer that says nothing new keeps the object the views already hold, so nothing re-renders for a poll that found
+ *  nothing: the map's whole tree used to redraw every 5 s. Small answers only: never the map. */
+function sameAnswer(before: unknown, after: unknown): boolean {
+  if (before === after) return true
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object') return false
+  const unheard = (key: string, value: unknown) => (key === 'age_ms' || key === 'heard_at' ? undefined : value)
+  return JSON.stringify(before, unheard) === JSON.stringify(after, unheard)
+}
+
 export class KumiStore {
   private state: KumiState = EMPTY
   private listeners = new Set<() => void>()
   private reads = new Map<string, { promise: Promise<void>; again: boolean }>()
   private wanted = new Map<Part, number>()
   private generation = 0
+  /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+  private stale = new Set<Part>()
   /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
    *  window made before (a grow renders before the Make panel ever opens). */
   private designsRead = false
@@ -219,10 +237,11 @@ export class KumiStore {
     for (const fn of [...this.listeners]) fn()
   }
 
-  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+   *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
   want(part: Part): () => void {
     this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1)
-    if (!this.state[part]) void this.refresh(part)
+    if (!this.state[part] || this.stale.delete(part)) void this.refresh(part)
     return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1))
   }
 
@@ -234,6 +253,7 @@ export class KumiStore {
     this.cards.clear()
     this.started.clear()
     this.toHide.clear()
+    this.stale.clear()
     clearTimeout(this.hideTimer ?? undefined)
     this.hideTimer = null
     this.hiddenSeq = null
@@ -273,7 +293,7 @@ export class KumiStore {
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404) this.set({ available: false, error: null })
-        else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) })
+        else this.set({ ...notLive(this.state), error: clean(errorText(error), 200) })
         return
       }
       if (generation !== this.generation) return
@@ -282,7 +302,9 @@ export class KumiStore {
       const first = this.state.available !== true
       // Any change of liveness (answering, quiet, or stopped) re-reads what the routes judge by it.
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running
-      this.set({ available: true, error: null, status: heard(status) })
+      const next = heard(status)
+      const kept = sameAnswer(before, next)
+      if (!kept || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept ? before : next })
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null }
       const moved = (part: 'focus' | 'history' | 'map' | 'palette'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
       const hidden = typeof after.hidden === 'number' ? after.hidden : 0
@@ -302,17 +324,27 @@ export class KumiStore {
   }
 
   refresh(part: Part): Promise<void> {
+    // The map (44 MiB at 160,000 sounds) and the palette are read only while a view shows them; an event about either
+    // with none open marks it for the next one.
+    if ((part === 'map' || part === 'palette') && (this.wanted.get(part) ?? 0) === 0) {
+      this.stale.add(part)
+      return Promise.resolve()
+    }
     return this.once(part, async () => {
       const generation = this.generation
       const path = part === 'history' ? `/history?limit=${this.historyLimit}` : `/${part}`
       try {
         const value = await this.fetch<unknown>(path)
         if (generation !== this.generation) return
-        this.set({ [part]: heard(value) } as Partial<KumiState>)
+        const { [part]: _answered, ...failed } = this.state.failed
+        const answer = heard(value)
+        const kept = part !== 'map' && sameAnswer(this.state[part], answer)
+        if (!kept || _answered !== undefined) this.set({ ...(kept ? {} : { [part]: answer }), ...(_answered === undefined ? {} : { failed }) } as Partial<KumiState>)
         if (part === 'map') this.mapRead()
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404 && part !== 'setup') this.set({ available: false })
+        else this.set({ failed: { ...this.state.failed, [part]: clean(errorText(error), 200) } })
       }
     })
   }

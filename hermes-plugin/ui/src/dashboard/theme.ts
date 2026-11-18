@@ -23,3 +23,6 @@ export const CANVAS = {
   strong: '--color-foreground',
   ground: '--color-card'
 } as const
+
+/** The dashboard tells a plugin nothing when its theme changes: a canvas looks at its colours once a second. */
+export const useThemeKey = (): unknown => null

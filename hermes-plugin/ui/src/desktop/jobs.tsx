@@ -11,7 +11,7 @@ import { S, TextButton, useT } from '../shared/ui.tsx'
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>; onRequest?: (request: string) => void }) {
+export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>; onRequest?: (request: string) => unknown }) {
   const t = useT()
   const shown = Object.entries(jobs)
   if (!shown.length) return null
@@ -43,6 +43,9 @@ export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>
                 style={{ display: 'block', height: 3, borderRadius: 2, background: T.border, overflow: 'hidden' }}
               >
                 <span
+                  // While the job can't say how far it is, a segment slides along the track, so the bar never reads as stuck
+                  // at a number (a system asking for less motion sees it still, beside the words).
+                  className={words.fraction === null ? 'kumi-slide' : undefined}
                   style={{
                     display: 'block',
                     height: '100%',

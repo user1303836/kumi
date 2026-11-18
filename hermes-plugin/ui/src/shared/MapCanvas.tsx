@@ -8,7 +8,7 @@
 // to the nearest sound that way, Shift+←/→ step through every sound in turn, Shift+↑/↓ zoom and Home shows the whole
 // map; each sound reached is named to a screen reader, and Tab goes on to its Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`, what the picks can do from `pickedActions`.
-import { CANVAS, T } from '@kumi/theme'
+import { CANVAS, T, useThemeKey } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -28,6 +28,7 @@ import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
 import { GrowLayer } from './GrowLayer.tsx'
+import { useLessMotion } from './hooks.ts'
 import { arrangedModel, buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
@@ -97,6 +98,9 @@ export interface MapCanvasProps {
 
 /** How many searched or found sounds are listed by name above the map; the rest stay rings on it. */
 const MATCHES_LISTED = 6
+/** How wide the map's free room must be for the corner's first line to hold the zoom too (the count, the layout's
+ *  button and the zoom at 11 px); narrower, the zoom is left out rather than wrapped onto a line of its own. */
+const CORNER_ZOOM_ROOM = 480
 /** How long a sound that couldn't play takes to fade off the map. */
 const FADE_MS = 450
 // The map's motion, all of it short and none of it while the map sits still: a new map's points pop in from the
@@ -265,6 +269,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What the overlay hands back to be called after each paint: what stands still on it follows the map.
   const overlayFollow = useRef<(() => void) | null>(null)
   const [topInset, setTopInset] = useState(0)
+  // Where everything floating over the map's top ends (a find's card included): what floats beside the picks keeps below it.
+  const [columnBottom, setColumnBottom] = useState(0)
   const mapSize = mapSide(size.width, size.height, topInset)
   const fit = () => fitView(size.width, size.height, topInset, coverRight)
   // The canvas exists only once the map has points: the effects that attach to it wait for that.
@@ -296,8 +302,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // Motion: when each leaving sound started fading, when the map arrived (its points pop in from the middle out), the
   // dots-to-tiles morph, and the sounds flying into the palette. One clock moves once a frame while any of them runs,
   // and not otherwise: a map that sits still draws nothing, and a sound playing redraws only the overlay. A system
-  // asking for less motion gets none of it.
-  const still = useMemo(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, [])
+  // asking for less motion gets none of it, from the moment it asks.
+  const still = useLessMotion()
   const leftAt = useRef(new Map<string, number>())
   const introAt = useRef(-Infinity)
   const until = useRef(0)
@@ -431,19 +437,26 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return seeds.length === 1 ? t('map.near', first) : t('map.nearMany', first, seeds.length - 1)
   }, [searched, foundIds, found, model, t])
 
-  // The canvas paints the theme's colours itself, and neither host tells a plugin its theme changed (Desktop's
-  // useTheme is newer than some Desktops; the dashboard has none): it looks at them once a second, and a light or dark
-  // switch redraws it.
+  // The canvas paints the theme's colours itself. Desktop's theme hook (v0.23 and later) says when they change, but it
+  // ticks before Hermes's provider has written the new colours, so the canvas looks again on the next frame, once
+  // they're there, and a change redraws it (`painted` in the draw's inputs); where nothing says (older Desktops, the
+  // dashboard), it looks at them once a second.
+  const themeKey = useThemeKey()
   const [painted, setPainted] = useState('')
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const timer = setInterval(() => {
+    const look = () => {
       const now = Object.values(resolve(canvas)).join()
       setPainted(current => (current === now ? current : now))
-    }, 1000)
+    }
+    if (themeKey !== null) {
+      const frame = requestAnimationFrame(look)
+      return () => cancelAnimationFrame(frame)
+    }
+    const timer = setInterval(look, 1000)
     return () => clearInterval(timer)
-  }, [hasPoints])
+  }, [hasPoints, themeKey])
 
   // Follow the box's size (the pane or tab is resized all the time), and the height of what floats over its top.
   useEffect(() => {
@@ -463,6 +476,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const observer = new ResizeObserver(() => {
       const legend = legendRef.current
       setTopInset(legend ? Math.ceil(8 + legend.offsetTop + legend.offsetHeight + 8) : 0)
+      setColumnBottom(Math.ceil(8 + top.offsetHeight + 8))
     })
     observer.observe(top)
     return () => observer.disconnect()
@@ -486,12 +500,25 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }, [topInset, coverRight]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the agent found: frame it, once the map has a size and its top has laid out, and once only. The frame counts
-  // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again.
+  // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again. It
+  // keeps clear of the card that lists the finds (below it, or beside it, whichever leaves more room): the card used
+  // to sit over the very sounds it named.
   const framedFound = useRef<ReadonlySet<string> | null>(null)
+  const matchesRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return
     framedFound.current = foundIds
-    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight)
+    // The card sits in the top column (8 px in from the map's corner), which is its offset parent.
+    const card = matchesRef.current
+    let clear = {}
+    if (card && card.offsetHeight > 0) {
+      const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 }
+      const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 }
+      const areaBelow = (size.width - coverRight) * (size.height - below.top)
+      const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset)
+      clear = areaBelow >= areaBeside ? below : beside
+    }
+    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear)
     if (!framed) return
     moved.current = true
     setView(framed)
@@ -920,7 +947,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.globalAlpha = 1
     }
     overlayFollow.current?.()
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -1007,6 +1034,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       setSaid(t('dock.cleared'))
       return
     }
+    // Enter does on the sound the arrow keys reached what a click does on it: while Grow names its sounds it names this
+    // one, else it adds it to the picks or lets it go (a click with Command or Ctrl), so Make is a keyboard's too.
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+      event.preventDefault()
+      if (grow?.choosing) {
+        const end = endOf(selected)
+        if (end) grow.name(end)
+      } else if (onPicked) {
+        const count = pickedIds.length + (pickedIds.includes(selected) ? -1 : 1)
+        onPicked([selected], 'toggle')
+        setSaid(count > 0 ? t('dock.picked', count) : t('dock.cleared'))
+      }
+      return
+    }
     const key = mapKey(event)
     if (!view || !key) return
     event.preventDefault()
@@ -1079,6 +1120,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     observer.observe(element)
     return () => observer.disconnect()
   }, [hasPoints])
+  // The player's own height: it grows (a pad grid under Use on pad…), and what sits above it (the corner, the picks'
+  // actions, Grow's card) keeps above all of it, never over its name, Play or ×.
+  const [playerHeight, setPlayerHeight] = useState(0)
+  const playerOpen = Boolean(selected && model.sounds[selected])
+  useEffect(() => {
+    const element = playerRef.current
+    if (!playerOpen || !element) return setPlayerHeight(0)
+    const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [playerOpen])
 
   // No sounds yet: what builds the map, in the middle of the pane it will fill.
   if (!model.points.length) {
@@ -1122,12 +1174,24 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const hiddenCount = (map?.hidden ?? 0) + leavingCount
   // The picks' actions float beside the picks, never over them; with the picks out of view, at the map's foot: above
   // the corner, and above the player when there is one. Grow's card docks there too.
-  const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0)
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot)
+  // Where the corner stands: at the map's foot, or above the player (at least its usual 110 px while it measures).
+  const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10
+  const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0)
+  // A find's card is in the top column, so with one open the picks' actions keep below the whole column, not just the legend.
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot)
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null
 
   return (
-    <div style={{ position: 'relative', height: '100%', minHeight: 240, overflow: 'hidden', color: T.text }}>
+    <div
+      onKeyDown={event => {
+        // Escape leaves Grow's naming wherever the keyboard is in the map (on the Grow tool just pressed, say), not only
+        // on the canvas, whose own Escape comes first: past the map, Desktop takes it and stops the chat's turn.
+        if (event.key !== 'Escape' || event.defaultPrevented || !grow?.choosing) return
+        event.preventDefault()
+        grow.choose(false)
+      }}
+      style={{ position: 'relative', height: '100%', minHeight: 240, overflow: 'hidden', color: T.text }}
+    >
       {/* What floats over the map's top: the search and the tools, the legend, a search's or a find's sounds by name, and
           the quiet line about sounds that can't play. Only the pieces take the pointer; the map shows through the gaps.
           It comes before the canvas, so the keyboard meets the search and the tools first, as it always has; z-index
@@ -1142,7 +1206,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               className={FOCUSABLE}
               onChange={event => setQuery(event.target.value)}
               placeholder={t('map.searchHint')}
-              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', fontSize: 12.5, padding: '0 12px', paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2 }}
+              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', fontSize: 12.5, padding: '0 12px', paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2, textOverflow: 'ellipsis' }}
               value={query}
             />
             <span
@@ -1177,7 +1241,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             />
           </ToolGroup>
         </div>
-        <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: '100%' }}>
+        {/* The legend and the cards under it keep left of a side sheet (Make beside the map), which starts below the bar. */}
+        <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
           {/* Serve names every class it knows, most of them empty in a small library: the legend lists those with sounds. */}
           {model.groups.filter(group => group.count > 0).map(group => {
             const off = hidden.has(group.key)
@@ -1207,7 +1272,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           })}
         </div>
         {matches.length > 0 && (
-          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: 'min(340px, 100%)', pointerEvents: 'auto' }}>
+          // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
+          // scrolls inside it rather than running under the corner.
+          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: 'auto' }}>
             <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
               {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
               <span style={{ ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
@@ -1218,6 +1285,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                 </TextButton>
               )}
             </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
             {matches.slice(0, MATCHES_LISTED).map(id => {
               const sound = model.sounds[id]
               const indexed = indexedValues(sound, t)
@@ -1250,11 +1318,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               )
             })}
             {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>{t('map.more', matches.length - MATCHES_LISTED)}</span>}
+            </div>
           </div>
         )}
         {hiddenCount > 0 && (
           // One quiet line for every sound that couldn't play here, never a notice per sound.
-          <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: '100%' }}>
+          <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
             <span style={{ ...S.faint, fontSize: 11 }}>{t('map.hidden', hiddenCount)}</span>
             {hiddenActions}
           </div>
@@ -1393,7 +1462,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       )}
       {selected && chosen && (
         // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-        <div style={{ position: 'absolute', left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: 'flex', justifyContent: 'center', pointerEvents: 'none', transition: still ? 'none' : 'right 260ms cubic-bezier(.2,.8,.2,1)' }}>
+        <div style={{ position: 'absolute', left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: 'flex', justifyContent: 'center', pointerEvents: 'none', transition: still ? 'none' : 'right 260ms cubic-bezier(.2,.8,.2,1)' }}>
           <div ref={playerRef} style={{ width: 'min(640px, 100%)' }}>
             <Player
               actions={actions?.(selected, chosen)}
@@ -1418,7 +1487,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           stands on its hint line while Grow names its sounds: which one this click names, and a way out. Last here,
           so Tab from the map still goes to the picks' actions and the player first, as the keys' hint says. */}
       <Corner
-        bottom={chosen ? 120 : 10}
+        bottom={cornerBottom}
         box={cornerRef}
         cover={coverRight}
         still={still}
@@ -1442,7 +1511,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           ) : undefined
         }
         sounds={countWords}
-        zoom={view?.scale ?? 1}
+        // The zoom is the line's least needed word: a narrow map drops it rather than give it a line of its own.
+        zoom={size.width - coverRight >= CORNER_ZOOM_ROOM ? (view?.scale ?? 1) : undefined}
       />
     </div>
   )

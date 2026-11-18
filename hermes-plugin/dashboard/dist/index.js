@@ -25,6 +25,7 @@
     strong: "--color-foreground",
     ground: "--color-card"
   };
+  var useThemeKey = () => null;
 
   // src/dashboard/react.ts
   var sdk = window.__HERMES_PLUGIN_SDK__;
@@ -56,6 +57,7 @@
       stopped: "Kumi stopped",
       notAnswering: "not answering",
       notConnected: (daw) => `Kumi · ${daw} not connected`,
+      dawClosed: (daw) => `Kumi · ${daw} is closed`,
       label: (text) => `Kumi: ${text}`,
       openMap: "Open the sound map",
       settings: "Kumi settings"
@@ -160,9 +162,11 @@
       tab: "Sound map",
       canvas: "Sound map",
       roledescription: "sound map",
-      keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
+      keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Enter adds the sound to the picks or lets it go (while Grow names its sounds, it names this one). Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
+      failed: (error) => `Kumi couldn't read the sound map: ${error}`,
+      retry: "Try again",
       empty: "No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.",
       search: "Search sounds",
       searchHint: "Search the map: name, kind or folder",
@@ -181,8 +185,8 @@
       near: (name) => `Near “${name}”`,
       nearMany: (name, n) => `Near “${name}” and ${n} more`,
       more: (n) => `and ${n} more on the map`,
-      play: "▶ Play",
-      stop: "■ Stop",
+      play: "Play",
+      stop: "Stop",
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
       useTitle: "Put its name and id in the chat, then say what to do with it",
@@ -250,7 +254,7 @@
       rerollTitle: "The same two sounds by another path: every point grown again",
       close: "Close the vine",
       between: "Grow between",
-      betweenTitle: "Grow the first pick toward the second: the sounds between them, along a vine"
+      betweenTitle: "Grow one pick toward the other: the sounds between them, along a vine"
     },
     // The map's corner: its count, layout and zoom, and the hint line (each gesture that does something now, as a
     // keycap, then what it does).
@@ -451,6 +455,7 @@
       sounds: "Sounds in the palette",
       empty: "Nothing in your palette yet. Drag a box over sounds on the map (Shift adds another box) and press Add to palette.",
       none: "No palette yet: Add to palette makes one.",
+      reading: "Reading the palette…",
       choose: "Choose a palette",
       switch: "Palette",
       newPalette: "New palette…",
@@ -535,6 +540,7 @@
       making: "Making…",
       needTwo: (n) => `Pick at least ${n} sounds to make one.`,
       moreSources: (n) => `+${n} more`,
+      fewerSources: "Fewer",
       missing: "This Kumi for Hermes can't make sounds yet: update it, then try again.",
       failed: (error) => `Kumi couldn't make it: ${error}`,
       seedTitle: "Its seed: the same sounds, way and seed make the same sound again",
@@ -845,6 +851,7 @@
       stopped: "Kumi は停止中",
       notAnswering: "応答なし",
       notConnected: (daw) => `Kumi · ${daw} 未接続`,
+      dawClosed: (daw) => `Kumi · ${daw} は閉じています`,
       label: (text) => `Kumi: ${text}`,
       openMap: "サンプルマップを開く",
       settings: "Kumi の設定"
@@ -949,9 +956,11 @@
       tab: "サンプルマップ",
       canvas: "サンプルマップ",
       roledescription: "サンプルマップ",
-      keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
+      keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Enter でそのサウンドを選択に加えるか外します（グロウがサウンドを選んでいる間は、そのサウンドを選びます）。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
+      failed: (error) => `サンプルマップを読み込めませんでした: ${error}`,
+      retry: "もう一度読み込む",
       empty: "まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。",
       search: "サウンドを検索",
       searchHint: "マップを検索: 名前・種類・フォルダ",
@@ -970,8 +979,8 @@
       near: (name) => `「${name}」に近いサウンド`,
       nearMany: (name, n) => `「${name}」ほか ${n} 個に近いサウンド`,
       more: (n) => `ほか ${n} 個はマップ上に`,
-      play: "▶ 再生",
-      stop: "■ 停止",
+      play: "再生",
+      stop: "停止",
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
       useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
@@ -1037,7 +1046,7 @@
       rerollTitle: "同じ2つのサウンドを別の道筋で。すべての地点を育て直します",
       close: "つるを閉じる",
       between: "間を育てる",
-      betweenTitle: "1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます"
+      betweenTitle: "選んだ2つの一方をもう一方へ育てます。その間のサウンドがつるに沿って並びます"
     },
     corner: {
       label: "マップと、いまできる操作",
@@ -1233,6 +1242,7 @@
       sounds: "パレットのサウンド",
       empty: "パレットはまだ空です。マップ上でサウンドをドラッグで囲み（Shift で囲みを追加）、「パレットに追加」を押してください。",
       none: "パレットはまだありません。「パレットに追加」で作られます。",
+      reading: "パレットを読み込み中…",
       choose: "パレットを選ぶ",
       switch: "パレット",
       newPalette: "新しいパレット…",
@@ -1316,6 +1326,7 @@
       making: "作成中…",
       needTwo: (n) => `作るには ${n} 個以上のサウンドを選んでください。`,
       moreSources: (n) => `ほか ${n} 個`,
+      fewerSources: "折りたたむ",
       missing: "この Kumi for Hermes はまだサウンドを作れません。更新してから、もう一度お試しください。",
       failed: (error) => `作れませんでした：${error}`,
       seedTitle: "シード：同じサウンド、同じ作り方、同じシードで同じ音がもう一度できます",
@@ -1625,6 +1636,7 @@
       stopped: "Kumi 已停止",
       notAnswering: "无响应",
       notConnected: (daw) => `Kumi · ${daw} 未连接`,
+      dawClosed: (daw) => `Kumi · ${daw} 未打开`,
       label: (text) => `Kumi：${text}`,
       openMap: "打开采样地图",
       settings: "Kumi 设置"
@@ -1729,9 +1741,11 @@
       tab: "采样地图",
       canvas: "采样地图",
       roledescription: "采样地图",
-      keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
+      keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Enter 把这个声音加入已选或取消选择（生长在选声音时，按 Enter 选中这个声音）。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
+      failed: (error) => `无法读取采样地图：${error}`,
+      retry: "重试",
       empty: "还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。",
       search: "搜索声音",
       searchHint: "搜索地图：名称、种类或文件夹",
@@ -1750,8 +1764,8 @@
       near: (name) => `与“${name}”相近的声音`,
       nearMany: (name, n) => `与“${name}”及另外 ${n} 个相近的声音`,
       more: (n) => `地图上还有 ${n} 个`,
-      play: "▶ 播放",
-      stop: "■ 停止",
+      play: "播放",
+      stop: "停止",
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
       useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
@@ -1817,7 +1831,7 @@
       rerollTitle: "同样两个声音，换一条路径：每一点都重新生长",
       close: "关闭藤蔓",
       between: "在两者之间生长",
-      betweenTitle: "让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开"
+      betweenTitle: "让一个选中的声音长向另一个：它们之间的声音沿着藤蔓排开"
     },
     corner: {
       label: "地图，以及现在可以做的操作",
@@ -2013,6 +2027,7 @@
       sounds: "调色板里的声音",
       empty: "调色板还是空的。在地图上拖出一个框选中声音（按住 Shift 可再加一个框），然后按“加入调色板”。",
       none: "还没有调色板：“加入调色板”会新建一个。",
+      reading: "正在读取调色板…",
       choose: "选择调色板",
       switch: "调色板",
       newPalette: "新建调色板…",
@@ -2096,6 +2111,7 @@
       making: "制作中…",
       needTwo: (n) => `至少选择 ${n} 个声音才能制作。`,
       moreSources: (n) => `还有 ${n} 个`,
+      fewerSources: "收起",
       missing: "这个版本的 Kumi for Hermes 还不能制作声音：请先更新，再试一次。",
       failed: (error) => `Kumi 没能做出来：${error}`,
       seedTitle: "种子：同样的声音、同样的做法和同样的种子会再次做出同样的声音",
@@ -2567,6 +2583,7 @@
     }
     if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
     if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
+    if (!status.stale && status.setup?.daw_open === false) return { tone: "muted", text: t("chip.dawClosed", daw) };
     return { tone: "muted", text: t("chip.notConnected", daw) };
   }
 
@@ -3157,7 +3174,7 @@
   var MOST_JOBS = 20;
   var MOST_ROUNDS = 6;
   var MOST_REFERENCES = 8;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
+  var EMPTY = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
   var HIDE_BATCH_MS = 1200;
   var HIDE_MOST = 500;
   var SHA256 = /^[0-9a-f]{64}$/;
@@ -3182,15 +3199,17 @@
   }
   function errorText(error) {
     const text = error instanceof Error ? error.message : String(error ?? "");
+    let said = text;
     const json = text.indexOf("{");
     if (json >= 0) {
       try {
         const body = JSON.parse(text.slice(json));
-        if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") return body.detail;
+        if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") said = body.detail;
       } catch {
       }
     }
-    return text || "no answer";
+    if (said.includes("Traceback (most recent call last)")) said = said.trim().split("\n").filter((line) => line.trim()).pop()?.trim() ?? said;
+    return said || "no answer";
   }
   function notLive(state) {
     return {
@@ -3209,6 +3228,12 @@
     const age = reply.age_ms;
     return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
   }
+  function sameAnswer(before, after) {
+    if (before === after) return true;
+    if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
+    const unheard = (key, value) => key === "age_ms" || key === "heard_at" ? void 0 : value;
+    return JSON.stringify(before, unheard) === JSON.stringify(after, unheard);
+  }
   var KumiStore = class {
     constructor(fetch, historyLimit = 50) {
       this.fetch = fetch;
@@ -3221,6 +3246,8 @@
     reads = /* @__PURE__ */ new Map();
     wanted = /* @__PURE__ */ new Map();
     generation = 0;
+    /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+    stale = /* @__PURE__ */ new Set();
     /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
      *  window made before (a grow renders before the Make panel ever opens). */
     designsRead = false;
@@ -3243,10 +3270,11 @@
       this.state = { ...this.state, ...patch };
       for (const fn of [...this.listeners]) fn();
     }
-    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+     *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
     want(part) {
       this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
-      if (!this.state[part]) void this.refresh(part);
+      if (!this.state[part] || this.stale.delete(part)) void this.refresh(part);
       return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
     }
     /** Forget everything (another profile or connection): what's shown must be that profile's. */
@@ -3257,6 +3285,7 @@
       this.cards.clear();
       this.started.clear();
       this.toHide.clear();
+      this.stale.clear();
       clearTimeout(this.hideTimer ?? void 0);
       this.hideTimer = null;
       this.hiddenSeq = null;
@@ -3294,7 +3323,7 @@
         } catch (error) {
           if (generation !== this.generation) return;
           if (statusOf(error) === 404) this.set({ available: false, error: null });
-          else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
+          else this.set({ ...notLive(this.state), error: clean(errorText(error), 200) });
           return;
         }
         if (generation !== this.generation) return;
@@ -3302,7 +3331,9 @@
         const after = status.revisions ?? {};
         const first = this.state.available !== true;
         const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
-        this.set({ available: true, error: null, status: heard(status) });
+        const next = heard(status);
+        const kept3 = sameAnswer(before, next);
+        if (!kept3 || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept3 ? before : next });
         const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null };
         const moved2 = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
         const hidden = typeof after.hidden === "number" ? after.hidden : 0;
@@ -3318,17 +3349,25 @@
       });
     }
     refresh(part) {
+      if ((part === "map" || part === "palette") && (this.wanted.get(part) ?? 0) === 0) {
+        this.stale.add(part);
+        return Promise.resolve();
+      }
       return this.once(part, async () => {
         const generation = this.generation;
         const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
         try {
           const value = await this.fetch(path);
           if (generation !== this.generation) return;
-          this.set({ [part]: heard(value) });
+          const { [part]: _answered, ...failed } = this.state.failed;
+          const answer = heard(value);
+          const kept3 = part !== "map" && sameAnswer(this.state[part], answer);
+          if (!kept3 || _answered !== void 0) this.set({ ...kept3 ? {} : { [part]: answer }, ..._answered === void 0 ? {} : { failed } });
           if (part === "map") this.mapRead();
         } catch (error) {
           if (generation !== this.generation) return;
           if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });
+          else this.set({ failed: { ...this.state.failed, [part]: clean(errorText(error), 200) } });
         }
       });
     }
@@ -3595,6 +3634,18 @@
   function useWant(store, part) {
     useEffect(() => store.want(part), [store, part]);
   }
+  var LESS_MOTION = "(prefers-reduced-motion: reduce)";
+  var lessMotion = () => typeof matchMedia === "function" && matchMedia(LESS_MOTION).matches;
+  var onLessMotion = (changed) => {
+    if (typeof matchMedia !== "function") return () => {
+    };
+    const query = matchMedia(LESS_MOTION);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  };
+  function useLessMotion() {
+    return useSyncExternalStore(onLessMotion, lessMotion, lessMotion);
+  }
   var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
   var PREVIEW_SECONDS = 2;
   var PREVIEW_FADE_SECONDS = 0.2;
@@ -3804,7 +3855,7 @@
   };
   var FOCUSABLE = "kumi-focusable";
   function FocusStyle() {
-    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
+    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
   }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -3828,17 +3879,33 @@
     disabled,
     strong
   }) {
+    const [busy, setBusy] = useState(false);
+    const asks = useRef(false);
+    const click = (event) => {
+      if (busy || asks.current && event.detail > 1) return;
+      const answer = onClick();
+      if (!answer || typeof answer.then !== "function") return;
+      asks.current = true;
+      setBusy(true);
+      void Promise.resolve(answer).catch(() => void 0).finally(() => setBusy(false));
+    };
     return /* @__PURE__ */ jsx(
       "button",
       {
+        "aria-busy": busy || void 0,
         "aria-label": label,
         "aria-pressed": pressed,
         className: FOCUSABLE,
         disabled,
-        onClick,
+        onClick: click,
         title,
         type: "button",
         style: {
+          // The face is a row: an icon sits beside its word whatever the host's CSS does with an `svg` (Hermes's base
+          // styles make every `svg` a block, which stacked "Surprise"'s die above its word).
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
           font: "inherit",
           fontSize: 11.5,
           lineHeight: "18px",
@@ -3848,7 +3915,8 @@
           border: `1px solid ${strong || pressed ? T.accent : T.border}`,
           background: pressed ? `color-mix(in srgb, ${T.accent} 14%, transparent)` : "transparent",
           color: disabled ? T.faint : strong || pressed ? T.accent : T.secondary,
-          cursor: disabled ? "default" : "pointer",
+          cursor: disabled ? "default" : busy ? "progress" : "pointer",
+          opacity: busy ? 0.6 : 1,
           whiteSpace: "nowrap",
           flex: "none",
           transition: "background-color 120ms, border-color 120ms, color 120ms"
@@ -3865,6 +3933,63 @@
       ] }),
       children
     ] });
+  }
+  function Pending({ label, width = "60%" }) {
+    return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
+  }
+  function Clamp({ text, lines = 2, style, title }) {
+    const box = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [cut, setCut] = useState(false);
+    useLayoutEffect(() => {
+      const element = box.current;
+      if (!element || open) return;
+      const measure = () => setCut(element.scrollHeight > element.clientHeight + 1);
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [text, open, lines]);
+    const folded = open ? {} : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
+    if (!cut && !open) {
+      return /* @__PURE__ */ jsx("span", { ref: box, style: { ...style, ...folded }, title, children: text });
+    }
+    return /* @__PURE__ */ jsx(
+      "span",
+      {
+        "aria-expanded": open,
+        className: FOCUSABLE,
+        onClick: (event) => {
+          event.stopPropagation();
+          setOpen(!open);
+        },
+        onKeyDown: (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen(!open);
+        },
+        ref: box,
+        role: "button",
+        style: { ...style, ...folded, cursor: "pointer" },
+        tabIndex: 0,
+        title,
+        children: text
+      }
+    );
+  }
+  function radioKeys(index, count, chosen, choose) {
+    return {
+      tabIndex: index === Math.max(0, chosen) ? 0 : -1,
+      onKeyDown: (event) => {
+        const step2 = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+        if (!step2 || count < 2 || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        const next = (index + step2 + count) % count;
+        choose(next);
+        const radio = event.currentTarget.parentElement?.children[next];
+        if (radio instanceof HTMLElement) radio.focus();
+      }
+    };
   }
 
   // src/shared/HistoryView.tsx
@@ -3888,9 +4013,10 @@
     return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
   }
   var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-  function FocusView({ focus, now }) {
+  function FocusView({ focus, now, loading: loading2 = false }) {
     const t = useT();
     const catchUp = catchUpLines(focus);
+    if (loading2 && !focus) return /* @__PURE__ */ jsx(Pending, { label: t("pane.reading") });
     if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
       return /* @__PURE__ */ jsx("span", { style: S.muted, children: t("focus.nothing") });
     }
@@ -3941,10 +4067,12 @@
     detail,
     live = false,
     daw,
-    target
+    target,
+    loading: loading2 = false
   }) {
     const t = useT();
     const items = history?.items ?? [];
+    if (loading2 && !history) return /* @__PURE__ */ jsx(Pending, { label: t("pane.reading") });
     if (!items.length) {
       return /* @__PURE__ */ jsx("span", { style: S.muted, children: t("history.empty") });
     }
@@ -3952,10 +4080,10 @@
       const state = stateOf(item, t, live);
       const track2 = nameOf(item.track);
       const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
-      return /* @__PURE__ */ jsxs("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
-        /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
+      return /* @__PURE__ */ jsxs("li", { style: { ...S.row, alignItems: "flex-start", gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
+        /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, lineHeight: "18px", textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
         /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
-          /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, textDecoration: item.state === "undone" ? "line-through" : void 0 }, title: clean(item.title ?? "", 300), children: clean(item.title ?? item.label ?? item.id, 120) }),
+          /* @__PURE__ */ jsx(Clamp, { style: { ...S.text, textDecoration: item.state === "undone" ? "line-through" : void 0 }, text: clean(item.title ?? item.label ?? item.id, 300) }),
           /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5 }, children: [
             track2 && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
             /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track2 && clean(track2, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
@@ -4182,7 +4310,7 @@
     const all = rest === null ? options : [{ value: void 0, label: rest }, ...options];
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
       /* @__PURE__ */ jsx("span", { style: { fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: label }),
-      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option) => {
+      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option, index) => {
         const chosen = option.value === value;
         return /* @__PURE__ */ jsxs(
           "button",
@@ -4190,6 +4318,7 @@
             "aria-checked": chosen,
             className: FOCUSABLE,
             onClick: () => onChange(option.value),
+            ...radioKeys(index, all.length, all.findIndex((each) => each.value === value), (next) => onChange(all[next].value)),
             role: "radio",
             title: option.title,
             type: "button",
@@ -4591,7 +4720,7 @@
       {
         actions: /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 4 }, children: [
           /* @__PURE__ */ jsxs(TextButton, { onClick: () => onChange(rollSteer()), title: t("make.steer.rollTitle"), children: [
-            /* @__PURE__ */ jsxs("svg", { "aria-hidden": true, height: "10", style: { marginRight: 4, verticalAlign: "-1px" }, viewBox: "0 0 12 12", width: "10", children: [
+            /* @__PURE__ */ jsxs("svg", { "aria-hidden": true, height: "10", style: { flex: "none" }, viewBox: "0 0 12 12", width: "10", children: [
               /* @__PURE__ */ jsx("rect", { fill: "none", height: "10", rx: "2.5", stroke: "currentColor", strokeWidth: "1.2", width: "10", x: "1", y: "1" }),
               /* @__PURE__ */ jsx("circle", { cx: "4", cy: "4", fill: "currentColor", r: "1" }),
               /* @__PURE__ */ jsx("circle", { cx: "6", cy: "6", fill: "currentColor", r: "1" }),
@@ -4653,6 +4782,7 @@
     return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "0 0 28 20", width: size * 28 / 20, children: GLYPHS[card] });
   }
   var TAB_GLYPH = { cross: "blend", fuse: "smear", loop: "loop", stack: "stack" };
+  var SOURCES_FOLDED = 8;
   var SOURCE_CHIPS = 48;
   function Flying({ flight, onDone }) {
     const ghost = useRef(null);
@@ -4701,7 +4831,7 @@
       }
     );
   }
-  function Wave({ peaks, playing, duration, colors }) {
+  function Wave({ peaks, playing, duration, colors, onCanvas }) {
     const canvas = useRef(null);
     const box = useRef(null);
     const [width, setWidth] = useState(0);
@@ -4757,7 +4887,10 @@
         "canvas",
         {
           "aria-hidden": true,
-          ref: canvas,
+          ref: (element) => {
+            canvas.current = element;
+            onCanvas?.(element);
+          },
           style: { width: "100%", height: 56, display: "block", clipPath: drawn ? "inset(0 0 0 0)" : "inset(0 100% 0 0)", transition: "clip-path 520ms cubic-bezier(.2,.8,.2,1)" }
         }
       ),
@@ -4782,6 +4915,7 @@
     const [options, setOptions] = useState({});
     const [steers, setSteers] = useState({});
     const [steerOpen, setSteerOpen] = useState(false);
+    const [allSources, setAllSources] = useState(false);
     const [chosen, setChosen] = useState([]);
     const [trail, setTrail] = useState([]);
     const [busy, setBusy] = useState(null);
@@ -4791,6 +4925,7 @@
     const [fresh2, setFresh] = useState(() => /* @__PURE__ */ new Set());
     const [arrived, setArrived] = useState(null);
     const cards = useRef(/* @__PURE__ */ new Map());
+    const canvases = useRef(/* @__PURE__ */ new Map());
     const list = useRef(null);
     const reveal = (element, where) => {
       const box = list.current;
@@ -4811,17 +4946,25 @@
     const [flights, setFlights] = useState([]);
     const flightKey = useRef(0);
     const fly = (id) => {
-      const canvas = cards.current.get(id)?.querySelector("canvas");
+      const canvas = canvases.current.get(id);
       const to = dock?.current?.getBoundingClientRect();
       if (!canvas || !to || to.width === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       const key = ++flightKey.current;
       setFlights((current) => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }]);
     };
     const [open, setOpen] = useState(false);
+    const panel = useRef(null);
+    const opener = useRef(null);
     useEffect(() => {
+      panel.current?.focus({ preventScroll: true });
       const frame2 = requestAnimationFrame(() => setOpen(true));
       return () => cancelAnimationFrame(frame2);
     }, []);
+    const close = () => {
+      const back = opener.current;
+      onClose();
+      if (back?.isConnected) back.focus({ preventScroll: true });
+    };
     const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
     const note = cardNote(sources.length);
     const refused = note !== null;
@@ -4874,6 +5017,7 @@
             className: FOCUSABLE,
             disabled: refused,
             onClick: () => setCardKey(lastMode[tab]),
+            ...radioKeys(index, TABS.length, TABS.indexOf(card.tab), (next) => setCardKey(lastMode[TABS[next]])),
             role: "radio",
             title: t(`make.opHints.${tab}`),
             type: "button",
@@ -4902,18 +5046,20 @@
           tab
         );
       }) }),
-      modes.length > 1 && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry) => {
+      modes.length > 1 && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry, index) => {
         const picked = entry.key === card.key;
+        const choose = (chosen2) => {
+          setCardKey(chosen2.key);
+          setLastMode((current) => ({ ...current, [chosen2.tab]: chosen2.key }));
+        };
         return /* @__PURE__ */ jsxs(
           "button",
           {
             "aria-checked": picked,
             className: FOCUSABLE,
             disabled: refused,
-            onClick: () => {
-              setCardKey(entry.key);
-              setLastMode((current) => ({ ...current, [entry.tab]: entry.key }));
-            },
+            onClick: () => choose(entry),
+            ...radioKeys(index, modes.length, modes.findIndex((each) => each.key === card.key), (next) => choose(modes[next])),
             role: "radio",
             title: t(`make.cards.${entry.key}.hint`),
             type: "button",
@@ -4946,7 +5092,19 @@
       "section",
       {
         "aria-label": t("make.title"),
+        onFocus: (event) => {
+          if (opener.current === null && event.target === event.currentTarget && event.relatedTarget instanceof HTMLElement) opener.current = event.relatedTarget;
+        },
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          event.preventDefault();
+          close();
+        },
+        ref: panel,
+        tabIndex: -1,
         style: {
+          // It holds the focus only as it opens (Tab goes on to its controls, which show the ring): no ring round it all.
+          outline: "none",
           ...placement === "side" ? { position: "absolute", right: 8, top: 52, bottom: 8, width: "min(430px, 46%)" } : placement === "bottom" ? { position: "absolute", left: 8, right: 8, bottom: 8, maxHeight: "82%" } : {},
           display: "flex",
           flexDirection: "column",
@@ -4981,15 +5139,17 @@
                 ]
               }
             ),
-            /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
+            /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: close, title: t("make.close"), children: "×" })
           ] }),
           /* @__PURE__ */ jsxs("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-              sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }, children: [
+            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
+              sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: "100%" }, children: [
                 source.artifact_id ? /* @__PURE__ */ jsx("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
-                /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })
+                /* @__PURE__ */ jsx("span", { style: { minWidth: 0, overflowWrap: "anywhere" }, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 60) })
               ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
-              sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) })
+              !allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx(TextButton, { onClick: () => setAllSources(true), title: t("make.sources"), children: t("make.moreSources", sources.length - SOURCES_FOLDED) }),
+              allSources && sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) }),
+              allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx(TextButton, { onClick: () => setAllSources(false), children: t("make.fewerSources") })
             ] }),
             chooser,
             card.key === "loop" ? /* @__PURE__ */ jsx(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx(CardOptions, { card, onChange: setOptions, options, sources }),
@@ -5057,7 +5217,7 @@
                   children: [
                     lineage && /* @__PURE__ */ jsx(LineageBar, { shares: lineage(result) }),
                     /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
-                      /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...stages.length ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, title: result.recipe, children: stages.length ? clean(result.recipe.split(":", 1)[0], 80) : clean(result.recipe, 220) || resultName(result) }),
+                      stages.length ? /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, children: clean(result.recipe.split(":", 1)[0], 80) }) : /* @__PURE__ */ jsx(Clamp, { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, text: clean(result.recipe, 220) || resultName(result) }),
                       onSources && /* @__PURE__ */ jsx(
                         "button",
                         {
@@ -5117,7 +5277,19 @@
                           children: isPlaying ? "■" : "▶"
                         }
                       ),
-                      /* @__PURE__ */ jsx("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx(Wave, { colors: lineage?.(result).map((part) => part.color), duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
+                      /* @__PURE__ */ jsx("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx(
+                        Wave,
+                        {
+                          colors: lineage?.(result).map((part) => part.color),
+                          duration: result.duration,
+                          onCanvas: (element) => {
+                            if (element) canvases.current.set(result.artifact_id, element);
+                            else canvases.current.delete(result.artifact_id);
+                          },
+                          peaks: result.peaks,
+                          playing: isPlaying
+                        }
+                      ) })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                       /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
@@ -5138,7 +5310,7 @@
                       ] })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                      /* @__PURE__ */ jsx(TextButton, { disabled: busy !== null, onClick: () => void make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs(Fragment2, { children: [
+                      /* @__PURE__ */ jsx(TextButton, { disabled: busy !== null, onClick: () => make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs(Fragment2, { children: [
                         /* @__PURE__ */ jsx("span", { "aria-hidden": true, children: "↻ " }),
                         t("make.reroll")
                       ] }) }),
@@ -5148,7 +5320,7 @@
                           disabled: inPalette,
                           onClick: () => {
                             fly(result.artifact_id);
-                            void onKeep(result);
+                            return onKeep(result);
                           },
                           pressed: inPalette,
                           title: t("make.keepTitle"),
@@ -5253,23 +5425,58 @@
 
   // src/shared/peaks.ts
   var DECODE_MOST = 12 * 1024 * 1024;
+  var FINE_BARS = 2240;
+  var KEPT_SOUNDS = 1024;
   var kept = /* @__PURE__ */ new Map();
   var loading = /* @__PURE__ */ new Map();
   var askers = /* @__PURE__ */ new Map();
   var queue = Promise.resolve();
   var SKIPPED = /* @__PURE__ */ Symbol("skipped");
-  function peaksFor(id, bars, audio, wanted = () => true) {
-    const key = `${bars}:${id}`;
-    const done = kept.get(key);
-    if (done !== void 0) return Promise.resolve(done);
-    const running = loading.get(key);
-    if (running) {
-      askers.get(key)?.push(wanted);
-      return running;
+  function poolPeaks(fine, bars) {
+    const out = new Array(Math.max(0, bars)).fill(0);
+    if (fine.length === 0 || bars <= 0) return out;
+    let loudest = 0;
+    for (let bar = 0; bar < bars; bar++) {
+      const start = Math.floor(bar * fine.length / bars);
+      const end = Math.max(start + 1, Math.floor((bar + 1) * fine.length / bars));
+      let peak = 0;
+      for (let at = start; at < end && at < fine.length; at++) if (fine[at] > peak) peak = fine[at];
+      out[bar] = peak;
+      if (peak > loudest) loudest = peak;
     }
-    askers.set(key, [wanted]);
+    return loudest > 0 ? out.map((peak) => peak / loudest) : out;
+  }
+  function sized(id, bars) {
+    const entry = kept.get(id);
+    if (!entry) return void 0;
+    kept.delete(id);
+    kept.set(id, entry);
+    if (!entry.fine) return null;
+    let peaks = entry.sizes.get(bars);
+    if (!peaks) {
+      peaks = poolPeaks(entry.fine, bars);
+      entry.sizes.set(bars, peaks);
+    }
+    return peaks;
+  }
+  function keep(id, fine) {
+    kept.set(id, { fine, sizes: /* @__PURE__ */ new Map() });
+    if (kept.size > KEPT_SOUNDS) {
+      const oldest = kept.keys().next().value;
+      if (oldest !== void 0) kept.delete(oldest);
+    }
+  }
+  function peaksFor(id, bars, audio, wanted = () => true) {
+    const done = sized(id, bars);
+    if (done !== void 0) return Promise.resolve(done);
+    const running = loading.get(id);
+    if (running) {
+      askers.get(id)?.push(wanted);
+      return running.then(() => sized(id, bars) ?? null);
+    }
+    askers.set(id, [wanted]);
     const run = async () => {
-      if (!(askers.get(key) ?? []).some((ask) => ask())) return SKIPPED;
+      if (!(askers.get(id) ?? []).some((ask) => ask())) return SKIPPED;
       const url = await audio(id);
       const comma = url.indexOf(",");
       if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
@@ -5282,21 +5489,19 @@
         const data = buffer.getChannelData(channel);
         for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
       }
-      return peaksOf(mixed2, bars);
+      return peaksOf(mixed2, FINE_BARS);
     };
-    const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-      loading.delete(key);
-      askers.delete(key);
-      if (peaks === SKIPPED) return null;
-      kept.set(key, peaks);
-      return peaks;
+    const promise = queue.then(run, run).catch(() => null).then((fine) => {
+      loading.delete(id);
+      askers.delete(id);
+      if (fine !== SKIPPED) keep(id, fine);
     });
     queue = promise;
-    loading.set(key, promise);
-    return promise;
+    loading.set(id, promise);
+    return promise.then(() => sized(id, bars) ?? null);
   }
   function peaksKept(id, bars) {
-    return kept.get(`${bars}:${id}`) ?? null;
+    return sized(id, bars) ?? null;
   }
 
   // src/shared/mapModel.ts
@@ -5659,19 +5864,22 @@
     });
     return found;
   }
-  function frame(model, ids, width, height, top = 0, right = 0, margin = 48) {
+  function frame(model, ids, width, height, top = 0, right = 0, margin = 48, clear = {}) {
     const chosen = model.points.filter((point) => ids.has(point.id));
     if (!chosen.length) return null;
     const xs = chosen.map((point) => point.x);
     const ys = chosen.map((point) => point.y);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const size = mapSide(width, height, top);
-    const room = roomBeside(width, right);
+    const roomTop = Math.max(top, clear.top ?? 0);
+    const roomLeft = Math.max(0, clear.left ?? 0);
+    const across = Math.max(1, roomBeside(width, right) - roomLeft);
+    const down = Math.max(1, height - roomTop);
     const span = Math.max(x1 - x0, y1 - y0, 0.04);
-    const scale = Math.min(40, Math.max(1, (Math.min(room, height - top) - 2 * margin) / (span * size)));
+    const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span * size)));
     const cx = (x0 + x1) / 2;
     const cy = (y0 + y1) / 2;
-    return { scale, dx: room / 2 - cx * size * scale, dy: top + (height - top) / 2 - cy * size * scale };
+    return { scale, dx: roomLeft + across / 2 - cx * size * scale, dy: roomTop + down / 2 - cy * size * scale };
   }
   function pointsInBox(model, view, size, box, visible) {
     const unit = size * view.scale;
@@ -6310,7 +6518,7 @@
               t("corner.families", families)
             ] }),
             layout,
-            /* @__PURE__ */ jsxs("span", { style: caps, title: t("corner.zoom"), children: [
+            zoom !== void 0 && /* @__PURE__ */ jsxs("span", { style: caps, title: t("corner.zoom"), children: [
               Math.round(zoom * 100),
               "%"
             ] })
@@ -6405,14 +6613,14 @@
       }
     }
   }
-  function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+  function nebulaField(points, keep2, colorOf2, side = NEBULA_SIDE) {
     const cells = side * side;
     const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
     const [red, green, blue, weight] = sums;
     const span = side / (1 + 2 * NEBULA_PAD);
     const colors = /* @__PURE__ */ new Map();
     for (let index = 0; index < points.length; index++) {
-      if (!keep(index)) continue;
+      if (!keep2(index)) continue;
       const point = points[index];
       let color = colors.get(point.group);
       if (!color) {
@@ -7121,7 +7329,10 @@
               ] }),
               /* @__PURE__ */ jsx(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }, picked.result.artifact_id),
               /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
+                /* @__PURE__ */ jsxs(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: [
+                  /* @__PURE__ */ jsx("span", { "aria-hidden": "true", children: playing === picked.result.artifact_id ? "■" : "▶" }),
+                  playing === picked.result.artifact_id ? t("map.stop") : t("map.play")
+                ] }),
                 actions?.(picked.result),
                 fromMap && toMap && /* @__PURE__ */ jsx(
                   TextButton,
@@ -7223,6 +7434,11 @@
       "section",
       {
         "aria-label": t("map.player", name),
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          event.preventDefault();
+          onClose();
+        },
         style: {
           ...glass,
           position: "relative",
@@ -7297,6 +7513,7 @@
 
   // src/shared/MapCanvas.tsx
   var MATCHES_LISTED = 6;
+  var CORNER_ZOOM_ROOM = 480;
   var FADE_MS2 = 450;
   var INTRO_MS = 900;
   var MORPH_MS = 760;
@@ -7414,6 +7631,7 @@
     const [cornerHeight, setCornerHeight] = useState(0);
     const overlayFollow = useRef(null);
     const [topInset, setTopInset] = useState(0);
+    const [columnBottom, setColumnBottom] = useState(0);
     const mapSize = mapSide(size.width, size.height, topInset);
     const fit = () => fitView(size.width, size.height, topInset, coverRight);
     const hasPoints = model.points.length > 0;
@@ -7436,9 +7654,9 @@
       return out;
     }, [model, hidden, searched, leaving]);
     const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
-    const shown = useMemo(() => mask.reduce((count, keep) => count + (keep === 1 ? 1 : 0), 0), [mask]);
-    const leavingCount = useMemo(() => mask.reduce((count, keep) => count + (keep === 2 ? 1 : 0), 0), [mask]);
-    const still = useMemo(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
+    const shown = useMemo(() => mask.reduce((count, keep2) => count + (keep2 === 1 ? 1 : 0), 0), [mask]);
+    const leavingCount = useMemo(() => mask.reduce((count, keep2) => count + (keep2 === 2 ? 1 : 0), 0), [mask]);
+    const still = useLessMotion();
     const leftAt = useRef(/* @__PURE__ */ new Map());
     const introAt = useRef(-Infinity);
     const until = useRef(0);
@@ -7548,16 +7766,22 @@
       const first2 = clean(model.sounds[seeds[0]].name ?? "", 60);
       return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
     }, [searched, foundIds, found, model, t]);
+    const themeKey = useThemeKey();
     const [painted, setPainted] = useState("");
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const timer = setInterval(() => {
+      const look = () => {
         const now = Object.values(resolve(canvas)).join();
         setPainted((current) => current === now ? current : now);
-      }, 1e3);
+      };
+      if (themeKey !== null) {
+        const frame2 = requestAnimationFrame(look);
+        return () => cancelAnimationFrame(frame2);
+      }
+      const timer = setInterval(look, 1e3);
       return () => clearInterval(timer);
-    }, [hasPoints]);
+    }, [hasPoints, themeKey]);
     useEffect(() => {
       const box2 = boxRef.current;
       if (!box2) return;
@@ -7574,6 +7798,7 @@
       const observer = new ResizeObserver(() => {
         const legend = legendRef.current;
         setTopInset(legend ? Math.ceil(8 + legend.offsetTop + legend.offsetHeight + 8) : 0);
+        setColumnBottom(Math.ceil(8 + top.offsetHeight + 8));
       });
       observer.observe(top);
       return () => observer.disconnect();
@@ -7590,10 +7815,20 @@
       if (!moved2.current && size.width > 0) setView(fit());
     }, [topInset, coverRight]);
     const framedFound = useRef(null);
+    const matchesRef = useRef(null);
     useEffect(() => {
       if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
       framedFound.current = foundIds;
-      const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
+      const card = matchesRef.current;
+      let clear = {};
+      if (card && card.offsetHeight > 0) {
+        const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 };
+        const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 };
+        const areaBelow = (size.width - coverRight) * (size.height - below.top);
+        const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset);
+        clear = areaBelow >= areaBeside ? below : beside;
+      }
+      const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear);
       if (!framed) return;
       moved2.current = true;
       setView(framed);
@@ -7955,7 +8190,7 @@
         context.globalAlpha = 1;
       }
       overlayFollow.current?.();
-    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -8028,6 +8263,18 @@
         setSaid(t("dock.cleared"));
         return;
       }
+      if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+        event.preventDefault();
+        if (grow?.choosing) {
+          const end = endOf(selected);
+          if (end) grow.name(end);
+        } else if (onPicked) {
+          const count = pickedIds.length + (pickedIds.includes(selected) ? -1 : 1);
+          onPicked([selected], "toggle");
+          setSaid(count > 0 ? t("dock.picked", count) : t("dock.cleared"));
+        }
+        return;
+      }
       const key = mapKey(event);
       if (!view || !key) return;
       event.preventDefault();
@@ -8094,6 +8341,15 @@
       observer.observe(element);
       return () => observer.disconnect();
     }, [hasPoints]);
+    const [playerHeight, setPlayerHeight] = useState(0);
+    const playerOpen = Boolean(selected && model.sounds[selected]);
+    useEffect(() => {
+      const element = playerRef.current;
+      if (!playerOpen || !element) return setPlayerHeight(0);
+      const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight));
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [playerOpen]);
     if (!model.points.length) {
       return /* @__PURE__ */ jsx("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs("div", { style: { maxWidth: 380 }, children: [
         empty,
@@ -8120,298 +8376,314 @@
     };
     const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
     const hiddenCount = (map?.hidden ?? 0) + leavingCount;
-    const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0);
-    const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot);
+    const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10;
+    const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0);
+    const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot);
     clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
-    return /* @__PURE__ */ jsxs("div", { style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text }, children: [
-      /* @__PURE__ */ jsxs("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
-        /* @__PURE__ */ jsxs("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
-          /* @__PURE__ */ jsxs("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
-            /* @__PURE__ */ jsx(
-              "input",
-              {
-                "aria-label": t("map.search"),
-                className: FOCUSABLE,
-                onChange: (event) => setQuery(event.target.value),
-                placeholder: t("map.searchHint"),
-                style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2 },
-                value: query
-              }
-            ),
-            /* @__PURE__ */ jsx(
-              "span",
-              {
-                style: { ...S.faint, fontSize: 10.5, lineHeight: "18px", padding: "0 7px", borderRadius: 9, background: T.chip, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
-                title: model.revision ? t("map.revision", model.revision) : void 0,
-                children: countWords
-              }
-            )
+    return /* @__PURE__ */ jsxs(
+      "div",
+      {
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || !grow?.choosing) return;
+          event.preventDefault();
+          grow.choose(false);
+        },
+        style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text },
+        children: [
+          /* @__PURE__ */ jsxs("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
+            /* @__PURE__ */ jsxs("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
+              /* @__PURE__ */ jsxs("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
+                /* @__PURE__ */ jsx(
+                  "input",
+                  {
+                    "aria-label": t("map.search"),
+                    className: FOCUSABLE,
+                    onChange: (event) => setQuery(event.target.value),
+                    placeholder: t("map.searchHint"),
+                    style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2, textOverflow: "ellipsis" },
+                    value: query
+                  }
+                ),
+                /* @__PURE__ */ jsx(
+                  "span",
+                  {
+                    style: { ...S.faint, fontSize: 10.5, lineHeight: "18px", padding: "0 7px", borderRadius: 9, background: T.chip, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
+                    title: model.revision ? t("map.revision", model.revision) : void 0,
+                    children: countWords
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
+              /* @__PURE__ */ jsxs(ToolGroup, { label: t("map.tools"), children: [
+                onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
+                onPicked && !handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.pickTool") }),
+                onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
+                onPicked && handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.hand") }),
+                grow && /* @__PURE__ */ jsx(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
+                grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("grow.tool") }),
+                onPicked && /* @__PURE__ */ jsx(Rule, {}),
+                layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
+                onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
+                tools,
+                /* @__PURE__ */ jsx(Rule, {}),
+                /* @__PURE__ */ jsx(
+                  ToolButton,
+                  {
+                    icon: "fit",
+                    label: t("map.fit"),
+                    onClick: () => {
+                      moved2.current = false;
+                      setView(fit());
+                    },
+                    title: t("map.fitTitle")
+                  }
+                )
+              ] })
+            ] }),
+            /* @__PURE__ */ jsx("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: model.groups.filter((group) => group.count > 0).map((group) => {
+              const off = hidden.has(group.key);
+              return /* @__PURE__ */ jsxs(
+                "button",
+                {
+                  "aria-pressed": !off,
+                  className: FOCUSABLE,
+                  onClick: () => setHidden((current) => {
+                    const next = new Set(current);
+                    if (next.has(group.key)) next.delete(group.key);
+                    else next.add(group.key);
+                    return next;
+                  }),
+                  title: off ? t("map.show", group.name) : t("map.hide", group.name),
+                  type: "button",
+                  style: { ...S.row, gap: 5, font: "inherit", fontSize: 11, padding: "2px 8px 2px 6px", borderRadius: 10, border: "none", background: off ? "transparent" : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.55 : 1, transition: "background-color 140ms, opacity 140ms" },
+                  children: [
+                    /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
+                    group.name,
+                    " ",
+                    /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: group.count })
+                  ]
+                },
+                group.key
+              );
+            }) }),
+            matches.length > 0 && // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
+            // scrolls inside it rather than running under the corner.
+            /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: "auto" }, children: [
+              /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
+                /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
+                onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: [
+                matches.slice(0, MATCHES_LISTED).map((id) => {
+                  const sound = model.sounds[id];
+                  const indexed = indexedValues(sound, t);
+                  const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
+                  return /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      "aria-pressed": selected === id,
+                      className: FOCUSABLE,
+                      onClick: () => onPick(id),
+                      type: "button",
+                      style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+                      children: [
+                        /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6 }, children: [
+                          /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                          indexed && /* @__PURE__ */ jsx("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
+                          sound?.class && /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+                        ] }),
+                        reasons && /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
+                      ]
+                    },
+                    id
+                  );
+                }),
+                matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+              ] })
+            ] }),
+            hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
+            /* @__PURE__ */ jsxs("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: [
+              /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
+              hiddenActions
+            ] })
           ] }),
-          /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
-          /* @__PURE__ */ jsxs(ToolGroup, { label: t("map.tools"), children: [
-            onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
-            onPicked && !handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.pickTool") }),
-            onPicked && /* @__PURE__ */ jsx(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
-            onPicked && handTool && !grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("map.hand") }),
-            grow && /* @__PURE__ */ jsx(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
-            grow?.choosing && /* @__PURE__ */ jsx(ToolName, { children: t("grow.tool") }),
-            onPicked && /* @__PURE__ */ jsx(Rule, {}),
-            layoutChoices.length > 0 && /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
-            onTiles && /* @__PURE__ */ jsx(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
-            tools,
-            /* @__PURE__ */ jsx(Rule, {}),
+          /* @__PURE__ */ jsxs("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
             /* @__PURE__ */ jsx(
-              ToolButton,
+              "canvas",
               {
-                icon: "fit",
-                label: t("map.fit"),
-                onClick: () => {
+                ref: canvasRef,
+                "aria-describedby": hintId,
+                "aria-label": t("map.canvas"),
+                "aria-roledescription": t("map.roledescription"),
+                className: FOCUSABLE,
+                onKeyDown: onKey,
+                onPointerDown: press,
+                onPointerMove: (event) => {
+                  const [x, y] = at(event);
+                  const held = drag.current;
+                  if (held) {
+                    if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
+                    if (held.box) setBox([held.x, held.y, x, y]);
+                    else if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
+                    return;
+                  }
+                  if (!view) return;
+                  const index = pick2(active, view, mapSize, x, y, reachPx(8), visible);
+                  setHover(index >= 0 ? { index, x, y } : null);
+                  rest(index >= 0 ? model.points[index].id : null);
+                },
+                onPointerUp: release,
+                onPointerCancel: () => {
+                  drag.current = null;
+                  setBox(null);
+                  setGrabbing(false);
+                },
+                onPointerEnter: () => {
+                  over.current = true;
+                },
+                onPointerLeave: () => {
+                  over.current = false;
+                  setHover(null);
+                  rest(null);
+                },
+                onMouseDown: (event) => {
+                  if (event.button === 1) event.preventDefault();
+                },
+                onDoubleClick: () => {
                   moved2.current = false;
                   setView(fit());
                 },
-                title: t("map.fitTitle")
+                role: "application",
+                tabIndex: 0,
+                style: {
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  outlineOffset: -3,
+                  cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
+                  touchAction: "none"
+                }
+              }
+            ),
+            /* @__PURE__ */ jsx(AtlasOverlay, { audio, follow: overlayFollow, height: size.height, kin: kinRings, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
+            box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
+            /* @__PURE__ */ jsx(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
+            /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+            /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: S.hidden, children: said }),
+            hovered && hoveredSound && hover && /* @__PURE__ */ jsx(
+              HoverPill,
+              {
+                at: [hover.x, hover.y],
+                audio,
+                color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
+                glyph: glyphOf(hovered.group),
+                id: hovered.id,
+                playing: playing === hovered.id,
+                sound: hoveredSound,
+                within: [size.width - coverRight, size.height]
+              },
+              hovered.id
+            ),
+            grow && (grow.from || grow.to) && /* @__PURE__ */ jsx(
+              GrowLayer,
+              {
+                actions: growActions,
+                bottom: foot,
+                card: growCardRef,
+                from: screenOf(placeOfEnd(grow.from)),
+                fromColor: colorOfEnd(grow.from),
+                fromMap: placeOfEnd(grow.from),
+                grow,
+                height: size.height,
+                onPlay: (result) => onPlayMade?.(result),
+                onStop: () => onStop?.(),
+                playing,
+                to: screenOf(placeOfEnd(grow.to)),
+                toColor: colorOfEnd(grow.to),
+                toMap: placeOfEnd(grow.to),
+                top: topInset,
+                width: size.width - coverRight
               }
             )
-          ] })
-        ] }),
-        /* @__PURE__ */ jsx("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
-          const off = hidden.has(group.key);
-          return /* @__PURE__ */ jsxs(
-            "button",
-            {
-              "aria-pressed": !off,
-              className: FOCUSABLE,
-              onClick: () => setHidden((current) => {
-                const next = new Set(current);
-                if (next.has(group.key)) next.delete(group.key);
-                else next.add(group.key);
-                return next;
-              }),
-              title: off ? t("map.show", group.name) : t("map.hide", group.name),
-              type: "button",
-              style: { ...S.row, gap: 5, font: "inherit", fontSize: 11, padding: "2px 8px 2px 6px", borderRadius: 10, border: "none", background: off ? "transparent" : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.55 : 1, transition: "background-color 140ms, opacity 140ms" },
-              children: [
-                /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
-                group.name,
-                " ",
-                /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: group.count })
-              ]
-            },
-            group.key
-          );
-        }) }),
-        matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
-          /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
-            /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
-            onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
-            /* @__PURE__ */ jsx(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
           ] }),
-          matches.slice(0, MATCHES_LISTED).map((id) => {
-            const sound = model.sounds[id];
-            const indexed = indexedValues(sound, t);
-            const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
-            return /* @__PURE__ */ jsxs(
-              "button",
-              {
-                "aria-pressed": selected === id,
-                className: FOCUSABLE,
-                onClick: () => onPick(id),
-                type: "button",
-                style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
-                children: [
-                  /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6 }, children: [
-                    /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-                    indexed && /* @__PURE__ */ jsx("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
-                    sound?.class && /* @__PURE__ */ jsx("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
-                  ] }),
-                  reasons && /* @__PURE__ */ jsx("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
-                ]
+          hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
+          /* @__PURE__ */ jsxs(
+            "div",
+            {
+              "aria-label": t("dock.picked", pickedIds.length),
+              className: "kumi-pop",
+              ref: cluster,
+              role: "group",
+              style: {
+                ...glass,
+                position: "absolute",
+                zIndex: 1,
+                left: clusterAt.left,
+                top: clusterAt.top,
+                maxWidth: `calc(100% - 16px)`,
+                ...S.row,
+                flexWrap: "wrap",
+                gap: 6,
+                padding: "5px 6px 5px 10px",
+                transition: still ? "none" : "left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)"
               },
-              id
-            );
-          }),
-          matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
-        ] }),
-        hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
-        /* @__PURE__ */ jsxs("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: "100%" }, children: [
-          /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
-          hiddenActions
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
-        /* @__PURE__ */ jsx(
-          "canvas",
-          {
-            ref: canvasRef,
-            "aria-describedby": hintId,
-            "aria-label": t("map.canvas"),
-            "aria-roledescription": t("map.roledescription"),
-            className: FOCUSABLE,
-            onKeyDown: onKey,
-            onPointerDown: press,
-            onPointerMove: (event) => {
-              const [x, y] = at(event);
-              const held = drag.current;
-              if (held) {
-                if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
-                if (held.box) setBox([held.x, held.y, x, y]);
-                else if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
-                return;
-              }
-              if (!view) return;
-              const index = pick2(active, view, mapSize, x, y, reachPx(8), visible);
-              setHover(index >= 0 ? { index, x, y } : null);
-              rest(index >= 0 ? model.points[index].id : null);
-            },
-            onPointerUp: release,
-            onPointerCancel: () => {
-              drag.current = null;
-              setBox(null);
-              setGrabbing(false);
-            },
-            onPointerEnter: () => {
-              over.current = true;
-            },
-            onPointerLeave: () => {
-              over.current = false;
-              setHover(null);
-              rest(null);
-            },
-            onMouseDown: (event) => {
-              if (event.button === 1) event.preventDefault();
-            },
-            onDoubleClick: () => {
-              moved2.current = false;
-              setView(fit());
-            },
-            role: "application",
-            tabIndex: 0,
-            style: {
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              outlineOffset: -3,
-              cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
-              touchAction: "none"
+              children: [
+                /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
+                  /* @__PURE__ */ jsx(Icon, { name: "pick", size: 12 }),
+                  t("dock.picked", pickedIds.length)
+                ] }),
+                pickedActions?.(pickedIds)
+              ]
             }
-          }
-        ),
-        /* @__PURE__ */ jsx(AtlasOverlay, { audio, follow: overlayFollow, height: size.height, kin: kinRings, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
-        box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
-        /* @__PURE__ */ jsx(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
-        /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
-        /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: S.hidden, children: said }),
-        hovered && hoveredSound && hover && /* @__PURE__ */ jsx(
-          HoverPill,
-          {
-            at: [hover.x, hover.y],
-            audio,
-            color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
-            glyph: glyphOf(hovered.group),
-            id: hovered.id,
-            playing: playing === hovered.id,
-            sound: hoveredSound,
-            within: [size.width - coverRight, size.height]
-          },
-          hovered.id
-        ),
-        grow && (grow.from || grow.to) && /* @__PURE__ */ jsx(
-          GrowLayer,
-          {
-            actions: growActions,
-            bottom: foot,
-            card: growCardRef,
-            from: screenOf(placeOfEnd(grow.from)),
-            fromColor: colorOfEnd(grow.from),
-            fromMap: placeOfEnd(grow.from),
-            grow,
-            height: size.height,
-            onPlay: (result) => onPlayMade?.(result),
-            onStop: () => onStop?.(),
-            playing,
-            to: screenOf(placeOfEnd(grow.to)),
-            toColor: colorOfEnd(grow.to),
-            toMap: placeOfEnd(grow.to),
-            top: topInset,
-            width: size.width - coverRight
-          }
-        )
-      ] }),
-      hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
-      /* @__PURE__ */ jsxs(
-        "div",
-        {
-          "aria-label": t("dock.picked", pickedIds.length),
-          className: "kumi-pop",
-          ref: cluster,
-          role: "group",
-          style: {
-            ...glass,
-            position: "absolute",
-            zIndex: 1,
-            left: clusterAt.left,
-            top: clusterAt.top,
-            maxWidth: `calc(100% - 16px)`,
-            ...S.row,
-            flexWrap: "wrap",
-            gap: 6,
-            padding: "5px 6px 5px 10px",
-            transition: still ? "none" : "left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)"
-          },
-          children: [
-            /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
-              /* @__PURE__ */ jsx(Icon, { name: "pick", size: 12 }),
-              t("dock.picked", pickedIds.length)
-            ] }),
-            pickedActions?.(pickedIds)
-          ]
-        }
-      ),
-      selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-      /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
-        Player,
-        {
-          actions: actions?.(selected, chosen),
-          audio: audio ?? (() => Promise.reject(new Error("no audio"))),
-          color: chosenColor,
-          id: selected,
-          onClose: () => {
-            if (playing === selected) onStop?.();
-            onSelect(null);
-          },
-          onPlay: () => onPick(selected),
-          onStop: () => onStop?.(),
-          playing: playing === selected,
-          sound: chosen
-        },
-        selected
-      ) }) }),
-      /* @__PURE__ */ jsx(
-        Corner,
-        {
-          bottom: chosen ? 120 : 10,
-          box: cornerRef,
-          cover: coverRight,
-          still,
-          first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
-          families: model.groups.filter((group) => group.count > 0).length,
-          hint: hintOf(mapState(spaceHeld)),
-          layout: layoutChoices.length > 0 ? (
-            // The menu opens upward from the corner, which sits higher while the player is under it.
-            /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
-          ) : void 0,
-          picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
-          prompt: grow?.choosing ? /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-            /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
-            /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
-            /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
-          ] }) : void 0,
-          sounds: countWords,
-          zoom: view?.scale ?? 1
-        }
-      )
-    ] });
+          ),
+          selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
+          /* @__PURE__ */ jsx("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx(
+            Player,
+            {
+              actions: actions?.(selected, chosen),
+              audio: audio ?? (() => Promise.reject(new Error("no audio"))),
+              color: chosenColor,
+              id: selected,
+              onClose: () => {
+                if (playing === selected) onStop?.();
+                onSelect(null);
+              },
+              onPlay: () => onPick(selected),
+              onStop: () => onStop?.(),
+              playing: playing === selected,
+              sound: chosen
+            },
+            selected
+          ) }) }),
+          /* @__PURE__ */ jsx(
+            Corner,
+            {
+              bottom: cornerBottom,
+              box: cornerRef,
+              cover: coverRight,
+              still,
+              first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
+              families: model.groups.filter((group) => group.count > 0).length,
+              hint: hintOf(mapState(spaceHeld)),
+              layout: layoutChoices.length > 0 ? (
+                // The menu opens upward from the corner, which sits higher while the player is under it.
+                /* @__PURE__ */ jsx(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
+              ) : void 0,
+              picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
+              prompt: grow?.choosing ? /* @__PURE__ */ jsxs("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+                /* @__PURE__ */ jsx(Icon, { name: "grow", size: 13 }),
+                /* @__PURE__ */ jsx("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+              ] }) : void 0,
+              sounds: countWords,
+              zoom: size.width - coverRight >= CORNER_ZOOM_ROOM ? view?.scale ?? 1 : void 0
+            }
+          )
+        ]
+      }
+    );
   }
   function GlyphShape({ glyph, color }) {
     const shape = GLYPH_SHAPES[glyph];
@@ -8423,6 +8695,8 @@
   var OPEN_HEIGHT = 260;
   var LOWEST = 150;
   var HIGHEST = 620;
+  var MAP_LEAST = 240;
+  var POP_FOR_MS = 1500;
   function Waveform2({ id, color, audio, width, height, bars, tints }) {
     const canvas = useRef(null);
     const [peaks, setPeaks] = useState(() => id ? peaksKept(id, bars) : null);
@@ -8705,11 +8979,13 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [order, setOrder] = useState(null);
     useEffect(() => setOrder(null), [palette]);
     const known = useRef(null);
+    const arrivedAt = useRef(0);
     const arrived = useMemo(() => {
       const keys = new Set((current?.items ?? []).map((item) => item.key));
       const before = known.current;
       const fresh2 = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
       known.current = { id: current?.id ?? null, keys };
+      if (fresh2.length > 0) arrivedAt.current = Date.now();
       return new Map(fresh2.map((key, order2) => [key, order2]));
     }, [current]);
     const strip = useRef(null);
@@ -8719,6 +8995,41 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       const smooth = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
       element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth });
     }, [arrived, open]);
+    const [edges, setEdges] = useState({ start: false, end: false });
+    useEffect(() => {
+      const element = strip.current;
+      if (open || !element) return;
+      const measure = () => {
+        const next = { start: element.scrollLeft > 1, end: element.scrollLeft + element.clientWidth < element.scrollWidth - 1 };
+        setEdges((before) => before.start === next.start && before.end === next.end ? before : next);
+      };
+      const wheel = (event) => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return;
+        event.preventDefault();
+        element.scrollLeft += event.deltaY;
+      };
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      element.addEventListener("scroll", measure, { passive: true });
+      element.addEventListener("wheel", wheel, { passive: false });
+      return () => {
+        observer.disconnect();
+        element.removeEventListener("scroll", measure);
+        element.removeEventListener("wheel", wheel);
+      };
+    }, [open, current?.items.length]);
+    const section = useRef(null);
+    const [room, setRoom] = useState(Number.POSITIVE_INFINITY);
+    useEffect(() => {
+      const parent = section.current?.parentElement;
+      if (!parent) return;
+      const observer = new ResizeObserver(() => setRoom(parent.clientHeight));
+      observer.observe(parent);
+      return () => observer.disconnect();
+    }, []);
+    const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST));
+    const rowMask = `linear-gradient(to right, ${edges.start ? "transparent" : "#000"}, #000 28px, #000 calc(100% - 28px), ${edges.end ? "transparent" : "#000"})`;
     const [now, setNow] = useState(() => Date.now());
     const shownFor = said?.failed ? 8e3 : 4e3;
     useEffect(() => {
@@ -8739,7 +9050,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       if (!held) return;
       const delta = held.y - event.clientY;
       if (Math.abs(delta) > 3) held.moved = true;
-      if (held.moved) setHeight(Math.min(HIGHEST, Math.max(LOWEST, held.height + delta)));
+      if (held.moved) setHeight(Math.min(highest, Math.max(LOWEST, held.height + delta)));
     };
     const run = (action) => onDo(action).then((done) => {
       if (!done) setOrder(null);
@@ -8760,7 +9071,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       dragging,
       index,
       item,
-      arriving: arrived.get(item.key) ?? null,
+      arriving: Date.now() - arrivedAt.current < POP_FOR_MS ? arrived.get(item.key) ?? null : null,
       onDrag: setDragging,
       onDropHere: () => dragging && move(dragging, index),
       onMove: (to) => move(item.key, to),
@@ -8810,7 +9121,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             ]
           }
         ),
-        (!palette || palette.palettes.length === 0) && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("dock.none") }),
+        palette === null ? /* @__PURE__ */ jsx(Pending, { label: t("dock.reading"), width: "8rem" }) : palette.palettes.length === 0 && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("dock.none") }),
         current && /* @__PURE__ */ jsx(TextButton, { onClick: () => setEditing("rename"), title: t("dock.renameTitle"), children: t("dock.rename") }),
         palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx(TextButton, { onClick: () => setEditing("new"), title: t("dock.newName"), children: t("dock.newPalette") })
       ] }),
@@ -8819,7 +9130,6 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         /* @__PURE__ */ jsx(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
       ] }),
       current && current.excluded > 0 && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
-      /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
       current && current.items.length > 1 && make && /* @__PURE__ */ jsx(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
       current && current.items.length > 0 && kit?.(current),
       current && !forgetting && /* @__PURE__ */ jsx(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
@@ -8856,7 +9166,10 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       "section",
       {
         "aria-label": t("dock.title"),
-        ref: landing,
+        ref: (element) => {
+          section.current = element;
+          if (landing) landing.current = element;
+        },
         style: {
           position: "relative",
           display: "flex",
@@ -8867,7 +9180,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
           color: T.text,
           flex: "none",
-          height: open && items.length > 0 ? height : void 0,
+          height: open && items.length > 0 ? Math.min(height, highest) : void 0,
           transition: grip.current ? "none" : "height 260ms cubic-bezier(.2,.8,.2,1)"
         },
         children: [
@@ -8892,6 +9205,30 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             }
           ),
           header,
+          /* @__PURE__ */ jsx(
+            "span",
+            {
+              "aria-live": "polite",
+              style: {
+                position: "absolute",
+                right: 10,
+                bottom: "calc(100% + 6px)",
+                maxWidth: "calc(100% - 20px)",
+                zIndex: 3,
+                padding: "3px 10px",
+                borderRadius: 12,
+                border: `1px solid ${T.border}`,
+                background: T.raised,
+                boxShadow: "0 6px 18px -10px rgba(0,0,0,.5)",
+                fontSize: 11.5,
+                color: saying?.failed ? T.warn : T.muted,
+                pointerEvents: "none",
+                opacity: saying ? 1 : 0,
+                transition: "opacity 160ms"
+              },
+              children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : ""
+            }
+          ),
           current && forgetting && /* @__PURE__ */ jsxs("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
             /* @__PURE__ */ jsx("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
             /* @__PURE__ */ jsx(
@@ -8911,15 +9248,32 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Card, { ...itemProps(item, index) }, item.key)),
             items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
           ] }),
-          current && items.length > 0 && !open && /* @__PURE__ */ jsxs("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "nowrap", gap: 5, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-            items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Chip2, { ...itemProps(item, index) }, item.key)),
-            items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
-          ] }),
-          (!current || items.length === 0) && /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
+          current && items.length > 0 && !open && /* @__PURE__ */ jsxs(
+            "div",
+            {
+              "aria-label": t("dock.sounds"),
+              ref: strip,
+              role: "list",
+              style: {
+                display: "flex",
+                flexWrap: "nowrap",
+                gap: 5,
+                overflowX: "auto",
+                paddingBottom: 2,
+                scrollbarWidth: "thin",
+                maskImage: rowMask,
+                WebkitMaskImage: rowMask
+              },
+              children: [
+                items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Chip2, { ...itemProps(item, index) }, item.key)),
+                items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
+              ]
+            }
+          ),
+          palette !== null && (!current || items.length === 0) && /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
             /* @__PURE__ */ jsx(Icon, { name: "plus", size: 12 }),
             t("dock.empty")
-          ] }),
-          /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" })
+          ] })
         ]
       }
     );
@@ -9291,7 +9645,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 2fr)", gap: 12, alignItems: "stretch" }, children: [
         /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", alignSelf: "start" }, children: [
-          /* @__PURE__ */ jsx(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx(FocusView, { focus: state.focus, now }) }),
+          /* @__PURE__ */ jsx(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx(FocusView, { focus: state.focus, loading: state.focus === null && !state.failed.focus, now }) }),
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
             {
@@ -9301,6 +9655,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               },
               daw: state.status?.daw,
               history: state.history,
+              loading: state.history === null && !state.failed.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
               now,
               target: state.setup?.target
@@ -9328,11 +9683,14 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               actions: (id, sound) => {
                 const request = soundRequest(id, sound.name, state.map?.revision);
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
-                  /* @__PURE__ */ jsx(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
+                  /* @__PURE__ */ jsx(TextButton, { disabled: palette.marked.has(id), onClick: () => palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyReference"), text: request })
                 ] });
               },
-              empty: state.map === null ? t("map.reading") : ["needs_runtime", "outdated_runtime", "damaged_runtime"].includes(state.setup?.state ?? "") ? (
+              empty: state.map === null ? state.failed.map ? /* @__PURE__ */ jsxs(Fragment2, { children: [
+                t("map.failed", state.failed.map),
+                /* @__PURE__ */ jsx("div", { style: { marginTop: 10, display: "flex", justifyContent: "center" }, children: /* @__PURE__ */ jsx(TextButton, { onClick: () => store.refresh("map"), children: t("map.retry") }) })
+              ] }) : t("map.reading") : ["needs_runtime", "outdated_runtime", "damaged_runtime"].includes(state.setup?.state ?? "") ? (
                 // No runtime yet: setup comes first (the dashboard's header says how).
                 t("map.setupFirst")
               ) : /* @__PURE__ */ jsxs(Fragment2, { children: [
@@ -9342,7 +9700,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               ] }),
               found: state.found,
               hiddenActions: /* @__PURE__ */ jsxs(Fragment2, { children: [
-                /* @__PURE__ */ jsx(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
                 /* @__PURE__ */ jsx(CopyButton, { label: t("map.rescan"), text: RESCAN_REQUEST })
               ] }),
               leaving: state.leaving,
@@ -9364,7 +9722,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
                 const request = useRequest(result);
                 const kept3 = palette.kept.has(result.artifact_id);
                 return /* @__PURE__ */ jsxs(Fragment2, { children: [
-                  /* @__PURE__ */ jsx(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
+                  /* @__PURE__ */ jsx(TextButton, { disabled: kept3, onClick: () => palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
                   request && /* @__PURE__ */ jsx(CopyButton, { label: t("make.copyUse"), text: request }),
                   /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
                 ] });
@@ -9372,7 +9730,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
               onSelect: setSelected,
               picked: palette.picked,
               pickedActions: (ids) => /* @__PURE__ */ jsxs(Fragment2, { children: [
-                /* @__PURE__ */ jsx(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
+                /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
                 ids.length > 1 && /* @__PURE__ */ jsx(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
                 ids.length === 2 && (() => {
                   const [from, to] = ids.map((id) => soundEnd(id, state.map?.sounds[id]?.name, state.map?.revision ?? null));

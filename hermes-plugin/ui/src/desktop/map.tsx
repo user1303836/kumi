@@ -166,7 +166,16 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
     state.available === false ? (
       t('map.agentOff')
     ) : map === null ? (
-      t('map.reading')
+      state.failed.map ? (
+        <>
+          {t('map.failed', state.failed.map)}
+          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+            <TextButton onClick={() => store.refresh('map')}>{t('map.retry')}</TextButton>
+          </div>
+        </>
+      ) : (
+        t('map.reading')
+      )
     ) : scanning ? (
       <>
         {t('map.scanningNow')}
@@ -179,12 +188,12 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
           {setupSteps.length > 0 ? (
             setupSteps.map(step => (
-              <TextButton key={step.request} onClick={() => void ask(ctx, step.request, { send: true, session: null })} strong={setupSteps.length === 1}>
+              <TextButton key={step.request} onClick={() => ask(ctx, step.request, { send: true, session: null })} strong={setupSteps.length === 1}>
                 {step.label}
               </TextButton>
             ))
           ) : (
-            <TextButton onClick={() => void ask(ctx, SCAN_REQUEST, { send: false, session })} title={t('map.scanTitle')}>
+            <TextButton onClick={() => ask(ctx, SCAN_REQUEST, { send: false, session })} title={t('map.scanTitle')}>
               {t('map.scan')}
             </TextButton>
           )}
@@ -204,11 +213,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const near = nearRequest([{ id, name: sound.name }], map?.revision)
             return (
               <>
-                <TextButton disabled={palette.marked.has(id)} onClick={() => void palette.gather([id])} title={t('dock.addTitle')}>
+                <TextButton disabled={palette.marked.has(id)} onClick={() => palette.gather([id])} title={t('dock.addTitle')}>
                   {palette.marked.has(id) ? t('dock.inPalette') : t('dock.add')}
                 </TextButton>
                 {near && (
-                  <TextButton onClick={() => void ask(ctx, near, { send: false, session })} title={t('map.moreLikeTitle')}>
+                  <TextButton onClick={() => ask(ctx, near, { send: false, session })} title={t('map.moreLikeTitle')}>
                     {t('map.moreLike')}
                   </TextButton>
                 )}
@@ -218,7 +227,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                   </TextButton>
                 )}
                 {request && (
-                  <TextButton onClick={() => void ask(ctx, request, { send: false, session })} strong title={t('map.useTitle')}>
+                  <TextButton onClick={() => ask(ctx, request, { send: false, session })} strong title={t('map.useTitle')}>
                     {t('map.use')}
                   </TextButton>
                 )}
@@ -240,10 +249,10 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           found={state.found}
           hiddenActions={
             <>
-              <TextButton onClick={() => void store.showHidden()} title={t('map.showHiddenTitle')}>
+              <TextButton onClick={() => store.showHidden()} title={t('map.showHiddenTitle')}>
                 {t('map.showHidden')}
               </TextButton>
-              <TextButton onClick={() => void ask(ctx, RESCAN_REQUEST, { send: false, session })} title={t('map.rescanTitle')}>
+              <TextButton onClick={() => ask(ctx, RESCAN_REQUEST, { send: false, session })} title={t('map.rescanTitle')}>
                 {t('map.rescan')}
               </TextButton>
             </>
@@ -264,11 +273,11 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const kept = palette.kept.has(result.artifact_id)
             return (
               <>
-                <TextButton disabled={kept} onClick={() => void palette.keep(result)} title={t('make.keepTitle')}>
+                <TextButton disabled={kept} onClick={() => palette.keep(result)} title={t('make.keepTitle')}>
                   {kept ? t('make.kept') : t('make.keep')}
                 </TextButton>
                 {request && (
-                  <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('make.useTitle')}>
+                  <TextButton onClick={() => ask(ctx, request, { send: false, session })} title={t('make.useTitle')}>
                     {t('make.use')}
                   </TextButton>
                 )}
@@ -288,7 +297,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             const near = ids.length > 1 ? nearRequest(ids.map(id => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null
             return (
               <>
-                <TextButton onClick={() => void palette.gather(ids)} strong title={t('dock.addTitle')}>
+                <TextButton onClick={() => palette.gather(ids)} strong title={t('dock.addTitle')}>
                   {t('dock.addPicked', ids.length)}
                 </TextButton>
                 {ids.length > 1 && (
@@ -314,7 +323,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
                   })()}
                 {near && (
                   <TextButton
-                    onClick={() => void ask(ctx, near, { send: false, session })}
+                    onClick={() => ask(ctx, near, { send: false, session })}
                     title={ids.length > MOST_NEAR ? t('map.moreLikeTheseFirst', MOST_NEAR, ids.length) : t('map.moreLikeTheseTitle')}
                   >
                     {t('map.moreLikeThese', Math.min(ids.length, MOST_NEAR))}
@@ -392,7 +401,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
             use={result => {
               const request = useRequest(result)
               return request ? (
-                <TextButton onClick={() => void ask(ctx, request, { send: false, session })} strong title={t('make.useTitle')}>
+                <TextButton onClick={() => ask(ctx, request, { send: false, session })} strong title={t('make.useTitle')}>
                   {t('make.use')}
                 </TextButton>
               ) : null
@@ -406,7 +415,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           audio={id => audition.url(id)}
           groups={map?.groups}
           kit={current => (
-            <TextButton onClick={() => void ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
+            <TextButton onClick={() => ask(ctx, kitRequest(current.name), { send: false, session })} title={t('dock.kitTitle')}>
               {t('dock.kit')}
             </TextButton>
           )}
@@ -428,7 +437,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
           use={item => {
             const request = itemReference(item, state.palette?.map_revision ?? null)
             return request ? (
-              <TextButton onClick={() => void ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
+              <TextButton onClick={() => ask(ctx, request, { send: false, session })} title={t('map.useTitle')}>
                 {t('map.use')}
               </TextButton>
             ) : null

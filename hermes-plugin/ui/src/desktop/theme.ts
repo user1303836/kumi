@@ -1,5 +1,7 @@
 // Hermes Desktop's theme variables, so Kumi's views follow every theme. The dashboard build swaps this file for
 // src/dashboard/theme.ts (the same names over the dashboard's variables).
+import * as sdk from '@hermes/plugin-sdk'
+
 export const T = {
   text: 'var(--ui-text-primary)',
   secondary: 'var(--ui-text-secondary)',
@@ -28,3 +30,7 @@ export const CANVAS = {
   // What the map's words are haloed in, so they read over the points.
   ground: '--ui-bg-elevated'
 } as const
+
+/** Something that changes whenever Desktop's theme does (its theme hook, v0.23 and later), for a canvas that paints the
+ *  theme's colours itself; null on a Desktop that can't say, where the canvas looks at its colours once a second. */
+export const useThemeKey: () => unknown = typeof sdk.useTheme === 'function' ? sdk.useTheme : () => null

@@ -62,8 +62,8 @@ export function Corner({
   families: number
   /** The layout's button (it opens the layout menu), when the map has layouts. */
   layout?: ReactNode
-  /** The view's scale: 1 is the whole map. */
-  zoom: number
+  /** The view's scale: 1 is the whole map. Left out where the line has no room for it. */
+  zoom?: number
   /** The picks' count in words, while there are some: it leads the hint line. */
   picked?: string
   /** The hint line's gestures, each with what it does (`hintOf`). */
@@ -107,9 +107,11 @@ export function Corner({
           {sounds} · {t('corner.families', families)}
         </span>
         {layout}
-        <span style={caps} title={t('corner.zoom')}>
-          {Math.round(zoom * 100)}%
-        </span>
+        {zoom !== undefined && (
+          <span style={caps} title={t('corner.zoom')}>
+            {Math.round(zoom * 100)}%
+          </span>
+        )}
       </div>
       {prompt ?? (
         <div style={{ ...S.row, gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: T.muted }}>

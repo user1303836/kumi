@@ -2,8 +2,8 @@
 // component reads as native in Hermes Desktop and in the web dashboard. Their words come from the translator a UI
 // root provides (`I18n`): Desktop's for its language, the dashboard's for its locale, English outside any.
 import { T } from '@kumi/theme'
-import type { CSSProperties, ReactNode } from 'react'
-import { createContext, useContext } from 'react'
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
 
 import { english, type Translate } from './i18n.ts'
 
@@ -52,7 +52,9 @@ export function FocusStyle() {
         '@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}' +
         '@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}' +
         '.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}' +
-        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
+        // A job that can't say how far it is: a segment slides along its track.
+        '@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}' +
+        '@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}'}
     </style>
   )
 }
@@ -82,7 +84,9 @@ export function Dot({ color, size = 7, title, beat }: { color: string; size?: nu
 }
 
 /** A plain text button in the theme's colours: the shared views' only control. `label` names it for a screen reader
- *  when its face is a symbol (▶, ■). */
+ *  when its face is a symbol (▶, ■). An `onClick` that answers with a promise (a request put in the chat) makes the
+ *  button a request's: it holds, busy, until the promise settles, and a click meanwhile, or the second click of a
+ *  double click, sends nothing more. */
 export function TextButton({
   children,
   onClick,
@@ -93,23 +97,42 @@ export function TextButton({
   strong
 }: {
   children: ReactNode
-  onClick: () => void
+  onClick: () => unknown
   title?: string
   label?: string
   pressed?: boolean
   disabled?: boolean
   strong?: boolean
 }) {
+  const [busy, setBusy] = useState(false)
+  // Whether this button's clicks have been requests: from then on a double click's second click is the same request.
+  const asks = useRef(false)
+  const click = (event: MouseEvent<HTMLButtonElement>) => {
+    if (busy || (asks.current && event.detail > 1)) return
+    const answer = onClick()
+    if (!answer || typeof (answer as PromiseLike<unknown>).then !== 'function') return
+    asks.current = true
+    setBusy(true)
+    void Promise.resolve(answer)
+      .catch(() => undefined)
+      .finally(() => setBusy(false))
+  }
   return (
     <button
+      aria-busy={busy || undefined}
       aria-label={label}
       aria-pressed={pressed}
       className={FOCUSABLE}
       disabled={disabled}
-      onClick={onClick}
+      onClick={click}
       title={title}
       type="button"
       style={{
+        // The face is a row: an icon sits beside its word whatever the host's CSS does with an `svg` (Hermes's base
+        // styles make every `svg` a block, which stacked "Surprise"'s die above its word).
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
         font: 'inherit',
         fontSize: 11.5,
         lineHeight: '18px',
@@ -119,7 +142,8 @@ export function TextButton({
         border: `1px solid ${strong || pressed ? T.accent : T.border}`,
         background: pressed ? `color-mix(in srgb, ${T.accent} 14%, transparent)` : 'transparent',
         color: disabled ? T.faint : strong || pressed ? T.accent : T.secondary,
-        cursor: disabled ? 'default' : 'pointer',
+        cursor: disabled ? 'default' : busy ? 'progress' : 'pointer',
+        opacity: busy ? 0.6 : 1,
         whiteSpace: 'nowrap',
         flex: 'none',
         transition: 'background-color 120ms, border-color 120ms, color 120ms'
@@ -141,4 +165,77 @@ export function Section({ title, right, children }: { title: ReactNode; right?: 
       {children}
     </section>
   )
+}
+
+/** What a view shows while its first read is on its way: a quiet line where its words will be, never words that say
+ *  there's nothing ("No changes yet" before HISTORY has been read is untrue). `label` is what a screen reader hears. */
+export function Pending({ label, width = '60%' }: { label: string; width?: number | string }) {
+  return <span aria-busy="true" aria-label={label} role="status" style={{ display: 'block', width, maxWidth: '100%', height: 10, margin: '4px 0', borderRadius: 3, background: T.chip, opacity: 0.7 }} />
+}
+
+/** Text that wraps to at most `lines` lines and, when that cuts it, shows the rest on a click or Enter (and folds it
+ *  again the same way): nothing is cut without a way to read it, and a pointer is never the only way. Whether it's cut
+ *  is measured, so a short text is plain text. `title` stays for the full words on hover. */
+export function Clamp({ text, lines = 2, style, title }: { text: string; lines?: number; style?: CSSProperties; title?: string }) {
+  const box = useRef<HTMLSpanElement | null>(null)
+  const [open, setOpen] = useState(false)
+  const [cut, setCut] = useState(false)
+  useLayoutEffect(() => {
+    const element = box.current
+    if (!element || open) return
+    const measure = () => setCut(element.scrollHeight > element.clientHeight + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [text, open, lines])
+  const folded: CSSProperties = open ? {} : { display: '-webkit-box', WebkitLineClamp: lines, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
+  if (!cut && !open) {
+    return (
+      <span ref={box} style={{ ...style, ...folded }} title={title}>
+        {text}
+      </span>
+    )
+  }
+  return (
+    <span
+      aria-expanded={open}
+      className={FOCUSABLE}
+      onClick={(event: MouseEvent) => {
+        event.stopPropagation()
+        setOpen(!open)
+      }}
+      onKeyDown={(event: KeyboardEvent) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        setOpen(!open)
+      }}
+      ref={box}
+      role="button"
+      style={{ ...style, ...folded, cursor: 'pointer' }}
+      tabIndex={0}
+      title={title}
+    >
+      {text}
+    </span>
+  )
+}
+
+/** A radio group's keyboard, as a native one has (WAI-ARIA's radio group): the group is one Tab stop, its chosen radio
+ *  (the first while none is), and the arrow keys move to the next or previous radio and choose it, wrapping at the
+ *  ends. Spread on radio `index` of `count`, `chosen` being the chosen one's index (-1: none). Focus moves through the
+ *  group's own children, which must be its radios in order. */
+export function radioKeys(index: number, count: number, chosen: number, choose: (index: number) => void): { tabIndex: number; onKeyDown: (event: KeyboardEvent<HTMLElement>) => void } {
+  return {
+    tabIndex: index === Math.max(0, chosen) ? 0 : -1,
+    onKeyDown: event => {
+      const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+      if (!step || count < 2 || event.altKey || event.ctrlKey || event.metaKey) return
+      event.preventDefault()
+      const next = (index + step + count) % count
+      choose(next)
+      const radio = event.currentTarget.parentElement?.children[next]
+      if (radio instanceof HTMLElement) radio.focus()
+    }
+  }
 }

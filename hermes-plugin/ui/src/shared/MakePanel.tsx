@@ -17,7 +17,7 @@ import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, t
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { Clamp, FOCUSABLE, radioKeys, S, TextButton, useT } from './ui.tsx'
 
 export interface MakePanelProps {
   /** The sounds to make from, in order (the picks, or the palette's), with their names. */
@@ -117,8 +117,9 @@ function Glyph({ card, size = 20 }: { card: string; size?: number }) {
 
 /** Each tab's picture: two sounds becoming one, a long wave, a loop, and layers. */
 const TAB_GLYPH: Record<DesignTab, string> = { cross: 'blend', fuse: 'smear', loop: 'loop', stack: 'stack' }
-/** The sources drawn as chips: every source goes in, but a pick of thousands draws a few dozen, then says how many
- *  more. */
+/** The sources drawn as chips: every source goes in, but the chips wrap and the first few show (`SOURCES_FOLDED`), with
+ *  the rest on request; a pick of thousands draws a few dozen at most (`SOURCE_CHIPS`), then says how many more. */
+const SOURCES_FOLDED = 8
 const SOURCE_CHIPS = 48
 
 /** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
@@ -175,8 +176,9 @@ function Flying({ flight, onDone }: { flight: Flight; onDone: () => void }) {
 }
 
 /** A result's waveform, from the engine's 256 peaks, mirrored about the middle, in the colours of the families it was
- *  made from, left to right (`colors`; null, or none, is the accent); a line runs across it while it plays. */
-function Wave({ peaks, playing, duration, colors }: { peaks: number[]; playing: boolean; duration: number; colors?: readonly (string | null)[] }) {
+ *  made from, left to right (`colors`; null, or none, is the accent); a line runs across it while it plays. `onCanvas`
+ *  hears its canvas element, for Keep's flight to start from. */
+function Wave({ peaks, playing, duration, colors, onCanvas }: { peaks: number[]; playing: boolean; duration: number; colors?: readonly (string | null)[]; onCanvas?: (element: HTMLCanvasElement | null) => void }) {
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const box = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
@@ -234,7 +236,10 @@ function Wave({ peaks, playing, duration, colors }: { peaks: number[]; playing: 
     <div ref={box} style={{ position: 'relative', height: 56, color: T.accent }}>
       <canvas
         aria-hidden
-        ref={canvas}
+        ref={element => {
+          canvas.current = element
+          onCanvas?.(element)
+        }}
         style={{ width: '100%', height: 56, display: 'block', clipPath: drawn ? 'inset(0 0 0 0)' : 'inset(0 100% 0 0)', transition: 'clip-path 520ms cubic-bezier(.2,.8,.2,1)' }}
       />
       {progress !== null && progress > 0 && progress < 1 && (
@@ -290,6 +295,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   // The steer, kept per mode: Blend's stays Blend's when the producer tries Resonate and comes back.
   const [steers, setSteers] = useState<Record<string, Steer>>({})
   const [steerOpen, setSteerOpen] = useState(false)
+  // Whether every source shows as a chip, or the first few with "+N more".
+  const [allSources, setAllSources] = useState(false)
   // Results chosen to make from next, in the order they were chosen; and the sounds made from before, for Back.
   const [chosen, setChosen] = useState<string[]>([])
   const [trail, setTrail] = useState<DesignSource[][]>([])
@@ -302,8 +309,10 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set())
   // The sound just made, brought into view once it's drawn (the cards above it can fill a narrow pane).
   const [arrived, setArrived] = useState<string | null>(null)
-  // Each shown result's card, by its sound's id: where a new one scrolls to, and where a kept one flies from.
+  // Each shown result's card, by its sound's id: where a new one scrolls to; and its waveform's canvas, where a kept
+  // one flies from.
   const cards = useRef(new Map<string, HTMLDivElement>())
+  const canvases = useRef(new Map<string, HTMLCanvasElement>())
   // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
   // ancestor too, the pane the map sits in among them.
   const list = useRef<HTMLDivElement | null>(null)
@@ -328,17 +337,27 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   /** Keep's flight from the card's waveform into the dock; none for a system that asks for less motion, or with no
    *  dock on screen. */
   const fly = (id: string) => {
-    const canvas = cards.current.get(id)?.querySelector('canvas')
+    const canvas = canvases.current.get(id)
     const to = dock?.current?.getBoundingClientRect()
     if (!canvas || !to || to.width === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const key = ++flightKey.current
     setFlights(current => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }])
   }
   const [open, setOpen] = useState(false)
+  // Make opens only from a click or a key on something of the map's ("Make…" on the picks or the palette): the keyboard
+  // comes with it, to the panel itself, and goes back to what opened it when it closes (if that's still there).
+  const panel = useRef<HTMLElement | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
   useEffect(() => {
+    panel.current?.focus({ preventScroll: true })
     const frame = requestAnimationFrame(() => setOpen(true))
     return () => cancelAnimationFrame(frame)
   }, [])
+  const close = () => {
+    const back = opener.current
+    onClose()
+    if (back?.isConnected) back.focus({ preventScroll: true })
+  }
   const card = CARDS.find(entry => entry.key === cardKey) ?? CARDS[0]
   const note = cardNote(sources.length)
   const refused = note !== null
@@ -405,6 +424,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               disabled={refused}
               key={tab}
               onClick={() => setCardKey(lastMode[tab])}
+              {...radioKeys(index, TABS.length, TABS.indexOf(card.tab), next => setCardKey(lastMode[TABS[next]]))}
               role="radio"
               title={t(`make.opHints.${tab}`)}
               type="button"
@@ -434,18 +454,20 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
       </div>
       {modes.length > 1 && (
         <div aria-label={t(`make.ops.${card.tab}`)} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
-          {modes.map(entry => {
+          {modes.map((entry, index) => {
             const picked = entry.key === card.key
+            const choose = (chosen: (typeof modes)[number]) => {
+              setCardKey(chosen.key)
+              setLastMode(current => ({ ...current, [chosen.tab]: chosen.key }))
+            }
             return (
               <button
                 aria-checked={picked}
                 className={FOCUSABLE}
                 disabled={refused}
                 key={entry.key}
-                onClick={() => {
-                  setCardKey(entry.key)
-                  setLastMode(current => ({ ...current, [entry.tab]: entry.key }))
-                }}
+                onClick={() => choose(entry)}
+                {...radioKeys(index, modes.length, modes.findIndex(each => each.key === card.key), next => choose(modes[next]))}
                 role="radio"
                 title={t(`make.cards.${entry.key}.hint`)}
                 type="button"
@@ -479,7 +501,22 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   return (
     <section
       aria-label={t('make.title')}
+      onFocus={event => {
+        // The first focus is the one Make took as it opened: what had it before opened Make.
+        if (opener.current === null && event.target === event.currentTarget && event.relatedTarget instanceof HTMLElement) opener.current = event.relatedTarget
+      }}
+      // Escape closes Make from anywhere in it, and only then: it's the map's to take (past the map, Desktop's Escape
+      // stops the chat's turn, and stands down for a key already taken).
+      onKeyDown={event => {
+        if (event.key !== 'Escape' || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+        event.preventDefault()
+        close()
+      }}
+      ref={panel}
+      tabIndex={-1}
       style={{
+        // It holds the focus only as it opens (Tab goes on to its controls, which show the ring): no ring round it all.
+        outline: 'none',
         ...(placement === 'side'
           ? { position: 'absolute', right: 8, top: 52, bottom: 8, width: 'min(430px, 46%)' }
           : placement === 'bottom'
@@ -516,19 +553,18 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
             {t('make.back')}
           </TextButton>
         )}
-        <TextButton label={t('make.close')} onClick={onClose} title={t('make.close')}>
+        <TextButton label={t('make.close')} onClick={close} title={t('make.close')}>
           ×
         </TextButton>
       </div>
       {/* Positioned, so the screen-reader-only words inside (absolutely placed) scroll and clip with the list instead
           of hanging below the pane, which gave the pane room to scroll. */}
       <div ref={list} style={{ position: 'relative', overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* The sounds that go in (all of them), on one line that scrolls: the first ones as chips (a sound Kumi made
-            marked as one), then how many more. A row that scrolls may shrink to nothing in this column once results
-            fill it, so it keeps its own height. */}
-        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
-          {sources.slice(0, SOURCE_CHIPS).map((source, index) => (
-            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }}>
+        {/* The sounds that go in (all of them): the first few as chips that wrap, whole (a sound Kumi made marked as one),
+            then the rest on request. Nothing is cut at the panel's edge. */}
+        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'wrap', gap: 4 }}>
+          {sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => (
+            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: '100%' }}>
               {source.artifact_id ? (
                 <span aria-label={t('make.made')} role="img" style={{ color: T.accent, fontSize: 10, flex: 'none' }}>
                   ✦
@@ -536,10 +572,16 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               ) : (
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
               )}
-              <span style={S.ellipsis}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}</span>
+              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 60)}</span>
             </span>
           ))}
-          {sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
+          {!allSources && sources.length > SOURCES_FOLDED && (
+            <TextButton onClick={() => setAllSources(true)} title={t('make.sources')}>
+              {t('make.moreSources', sources.length - SOURCES_FOLDED)}
+            </TextButton>
+          )}
+          {allSources && sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
+          {allSources && sources.length > SOURCES_FOLDED && <TextButton onClick={() => setAllSources(false)}>{t('make.fewerSources')}</TextButton>}
         </div>
         {chooser}
         {card.key === 'loop' ? <LoopSection onChange={setOptions} options={options} tempo={dawTempo} /> : <CardOptions card={card} onChange={setOptions} options={options} sources={sources} />}
@@ -610,10 +652,12 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   {/* Its lineage along its top edge: the families it came from, each as wide as its share. */}
                   {lineage && <LineageBar shares={lineage(result)} />}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    {/* Two lines of the recipe, all of it on hover; a modulate result names its stages in full below. */}
-                    <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...(stages.length ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }) }} title={result.recipe}>
-                      {stages.length ? clean(result.recipe.split(':', 1)[0], 80) : clean(result.recipe, 220) || resultName(result)}
-                    </span>
+                    {/* Two lines of the recipe, the rest on a click or Enter; a modulate result names its stages in full below. */}
+                    {stages.length ? (
+                      <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }}>{clean(result.recipe.split(':', 1)[0], 80)}</span>
+                    ) : (
+                      <Clamp style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }} text={clean(result.recipe, 220) || resultName(result)} />
+                    )}
                     {onSources && (
                       <button
                         aria-label={t('make.choose')}
@@ -673,7 +717,16 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                       {isPlaying ? '■' : '▶'}
                     </button>
                     <div aria-hidden onClick={() => (isPlaying ? onStop() : onPlay(result.artifact_id))} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                      <Wave colors={lineage?.(result).map(part => part.color)} duration={result.duration} peaks={result.peaks} playing={isPlaying} />
+                      <Wave
+                        colors={lineage?.(result).map(part => part.color)}
+                        duration={result.duration}
+                        onCanvas={element => {
+                          if (element) canvases.current.set(result.artifact_id, element)
+                          else canvases.current.delete(result.artifact_id)
+                        }}
+                        peaks={result.peaks}
+                        playing={isPlaying}
+                      />
                     </div>
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
@@ -698,7 +751,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     )}
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-                    <TextButton disabled={busy !== null} onClick={() => void make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
+                    <TextButton disabled={busy !== null} onClick={() => make(reroll(take.request), take.key)} title={t('make.rerollTitle')}>
                       {busy === take.key ? (
                         t('make.rerolling')
                       ) : (
@@ -712,7 +765,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                       disabled={inPalette}
                       onClick={() => {
                         fly(result.artifact_id)
-                        void onKeep(result)
+                        return onKeep(result)
                       }}
                       pressed={inPalette}
                       title={t('make.keepTitle')}

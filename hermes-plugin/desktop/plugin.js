@@ -1,7 +1,7 @@
 // Built from hermes-plugin/ui/src/ by `npm run build` in hermes-plugin/ui/. Edit ui/src/, not this file.
 
 // src/desktop/plugin.tsx
-import * as sdk from "@hermes/plugin-sdk";
+import * as sdk2 from "@hermes/plugin-sdk";
 import { host as host6, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from "@hermes/plugin-sdk";
 
 // src/shared/i18n.ts
@@ -14,6 +14,7 @@ var en = {
     stopped: "Kumi stopped",
     notAnswering: "not answering",
     notConnected: (daw) => `Kumi · ${daw} not connected`,
+    dawClosed: (daw) => `Kumi · ${daw} is closed`,
     label: (text) => `Kumi: ${text}`,
     openMap: "Open the sound map",
     settings: "Kumi settings"
@@ -118,9 +119,11 @@ var en = {
     tab: "Sound map",
     canvas: "Sound map",
     roledescription: "sound map",
-    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
+    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Enter adds the sound to the picks or lets it go (while Grow names its sounds, it names this one). Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
+    failed: (error) => `Kumi couldn't read the sound map: ${error}`,
+    retry: "Try again",
     empty: "No sound map yet. Add a sample folder here and Kumi scans it: the map is made from what it finds there.",
     search: "Search sounds",
     searchHint: "Search the map: name, kind or folder",
@@ -139,8 +142,8 @@ var en = {
     near: (name) => `Near “${name}”`,
     nearMany: (name, n) => `Near “${name}” and ${n} more`,
     more: (n) => `and ${n} more on the map`,
-    play: "▶ Play",
-    stop: "■ Stop",
+    play: "Play",
+    stop: "Stop",
     playTitle: "Play it here (nothing changes in your DAW)",
     use: "Use…",
     useTitle: "Put its name and id in the chat, then say what to do with it",
@@ -208,7 +211,7 @@ var en = {
     rerollTitle: "The same two sounds by another path: every point grown again",
     close: "Close the vine",
     between: "Grow between",
-    betweenTitle: "Grow the first pick toward the second: the sounds between them, along a vine"
+    betweenTitle: "Grow one pick toward the other: the sounds between them, along a vine"
   },
   // The map's corner: its count, layout and zoom, and the hint line (each gesture that does something now, as a
   // keycap, then what it does).
@@ -409,6 +412,7 @@ var en = {
     sounds: "Sounds in the palette",
     empty: "Nothing in your palette yet. Drag a box over sounds on the map (Shift adds another box) and press Add to palette.",
     none: "No palette yet: Add to palette makes one.",
+    reading: "Reading the palette…",
     choose: "Choose a palette",
     switch: "Palette",
     newPalette: "New palette…",
@@ -493,6 +497,7 @@ var en = {
     making: "Making…",
     needTwo: (n) => `Pick at least ${n} sounds to make one.`,
     moreSources: (n) => `+${n} more`,
+    fewerSources: "Fewer",
     missing: "This Kumi for Hermes can't make sounds yet: update it, then try again.",
     failed: (error) => `Kumi couldn't make it: ${error}`,
     seedTitle: "Its seed: the same sounds, way and seed make the same sound again",
@@ -803,6 +808,7 @@ var ja = {
     stopped: "Kumi は停止中",
     notAnswering: "応答なし",
     notConnected: (daw) => `Kumi · ${daw} 未接続`,
+    dawClosed: (daw) => `Kumi · ${daw} は閉じています`,
     label: (text) => `Kumi: ${text}`,
     openMap: "サンプルマップを開く",
     settings: "Kumi の設定"
@@ -907,9 +913,11 @@ var ja = {
     tab: "サンプルマップ",
     canvas: "サンプルマップ",
     roledescription: "サンプルマップ",
-    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
+    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Enter でそのサウンドを選択に加えるか外します（グロウがサウンドを選んでいる間は、そのサウンドを選びます）。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
+    failed: (error) => `サンプルマップを読み込めませんでした: ${error}`,
+    retry: "もう一度読み込む",
     empty: "まだサンプルマップがありません。ここでサンプルフォルダを追加すると Kumi がスキャンします。見つかったサウンドからマップが作られます。",
     search: "サウンドを検索",
     searchHint: "マップを検索: 名前・種類・フォルダ",
@@ -928,8 +936,8 @@ var ja = {
     near: (name) => `「${name}」に近いサウンド`,
     nearMany: (name, n) => `「${name}」ほか ${n} 個に近いサウンド`,
     more: (n) => `ほか ${n} 個はマップ上に`,
-    play: "▶ 再生",
-    stop: "■ 停止",
+    play: "再生",
+    stop: "停止",
     playTitle: "ここで再生（DAW は何も変わりません）",
     use: "使う…",
     useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
@@ -995,7 +1003,7 @@ var ja = {
     rerollTitle: "同じ2つのサウンドを別の道筋で。すべての地点を育て直します",
     close: "つるを閉じる",
     between: "間を育てる",
-    betweenTitle: "1つ目の選択を2つ目へ育てます。その間のサウンドがつるに沿って並びます"
+    betweenTitle: "選んだ2つの一方をもう一方へ育てます。その間のサウンドがつるに沿って並びます"
   },
   corner: {
     label: "マップと、いまできる操作",
@@ -1191,6 +1199,7 @@ var ja = {
     sounds: "パレットのサウンド",
     empty: "パレットはまだ空です。マップ上でサウンドをドラッグで囲み（Shift で囲みを追加）、「パレットに追加」を押してください。",
     none: "パレットはまだありません。「パレットに追加」で作られます。",
+    reading: "パレットを読み込み中…",
     choose: "パレットを選ぶ",
     switch: "パレット",
     newPalette: "新しいパレット…",
@@ -1274,6 +1283,7 @@ var ja = {
     making: "作成中…",
     needTwo: (n) => `作るには ${n} 個以上のサウンドを選んでください。`,
     moreSources: (n) => `ほか ${n} 個`,
+    fewerSources: "折りたたむ",
     missing: "この Kumi for Hermes はまだサウンドを作れません。更新してから、もう一度お試しください。",
     failed: (error) => `作れませんでした：${error}`,
     seedTitle: "シード：同じサウンド、同じ作り方、同じシードで同じ音がもう一度できます",
@@ -1583,6 +1593,7 @@ var zh = {
     stopped: "Kumi 已停止",
     notAnswering: "无响应",
     notConnected: (daw) => `Kumi · ${daw} 未连接`,
+    dawClosed: (daw) => `Kumi · ${daw} 未打开`,
     label: (text) => `Kumi：${text}`,
     openMap: "打开采样地图",
     settings: "Kumi 设置"
@@ -1687,9 +1698,11 @@ var zh = {
     tab: "采样地图",
     canvas: "采样地图",
     roledescription: "采样地图",
-    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
+    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Enter 把这个声音加入已选或取消选择（生长在选声音时，按 Enter 选中这个声音）。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
+    failed: (error) => `无法读取采样地图：${error}`,
+    retry: "重试",
     empty: "还没有采样地图。在这里添加一个采样文件夹，Kumi 就会扫描它；地图会根据找到的声音生成。",
     search: "搜索声音",
     searchHint: "搜索地图：名称、种类或文件夹",
@@ -1708,8 +1721,8 @@ var zh = {
     near: (name) => `与“${name}”相近的声音`,
     nearMany: (name, n) => `与“${name}”及另外 ${n} 个相近的声音`,
     more: (n) => `地图上还有 ${n} 个`,
-    play: "▶ 播放",
-    stop: "■ 停止",
+    play: "播放",
+    stop: "停止",
     playTitle: "在这里播放（DAW 不会有任何改动）",
     use: "使用…",
     useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
@@ -1775,7 +1788,7 @@ var zh = {
     rerollTitle: "同样两个声音，换一条路径：每一点都重新生长",
     close: "关闭藤蔓",
     between: "在两者之间生长",
-    betweenTitle: "让第一个选中的声音长向第二个：它们之间的声音沿着藤蔓排开"
+    betweenTitle: "让一个选中的声音长向另一个：它们之间的声音沿着藤蔓排开"
   },
   corner: {
     label: "地图，以及现在可以做的操作",
@@ -1971,6 +1984,7 @@ var zh = {
     sounds: "调色板里的声音",
     empty: "调色板还是空的。在地图上拖出一个框选中声音（按住 Shift 可再加一个框），然后按“加入调色板”。",
     none: "还没有调色板：“加入调色板”会新建一个。",
+    reading: "正在读取调色板…",
     choose: "选择调色板",
     switch: "调色板",
     newPalette: "新建调色板…",
@@ -2054,6 +2068,7 @@ var zh = {
     making: "制作中…",
     needTwo: (n) => `至少选择 ${n} 个声音才能制作。`,
     moreSources: (n) => `还有 ${n} 个`,
+    fewerSources: "收起",
     missing: "这个版本的 Kumi for Hermes 还不能制作声音：请先更新，再试一次。",
     failed: (error) => `Kumi 没能做出来：${error}`,
     seedTitle: "种子：同样的声音、同样的做法和同样的种子会再次做出同样的声音",
@@ -2611,6 +2626,7 @@ function chipWords(status, tempo, t = english) {
   }
   if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
   if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
+  if (!status.stale && status.setup?.daw_open === false) return { tone: "muted", text: t("chip.dawClosed", daw) };
   return { tone: "muted", text: t("chip.notConnected", daw) };
 }
 
@@ -3164,7 +3180,7 @@ var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
 var MOST_ROUNDS = 6;
 var MOST_REFERENCES = 8;
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
+var EMPTY = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
 var HIDE_BATCH_MS = 1200;
 var HIDE_MOST = 500;
 var SHA256 = /^[0-9a-f]{64}$/;
@@ -3189,15 +3205,17 @@ function statusOf(error) {
 }
 function errorText(error) {
   const text = error instanceof Error ? error.message : String(error ?? "");
+  let said = text;
   const json = text.indexOf("{");
   if (json >= 0) {
     try {
       const body = JSON.parse(text.slice(json));
-      if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") return body.detail;
+      if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") said = body.detail;
     } catch {
     }
   }
-  return text || "no answer";
+  if (said.includes("Traceback (most recent call last)")) said = said.trim().split("\n").filter((line) => line.trim()).pop()?.trim() ?? said;
+  return said || "no answer";
 }
 function notLive(state) {
   return {
@@ -3216,6 +3234,12 @@ function heard(reply) {
   const age = reply.age_ms;
   return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
 }
+function sameAnswer(before, after) {
+  if (before === after) return true;
+  if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
+  const unheard = (key, value) => key === "age_ms" || key === "heard_at" ? void 0 : value;
+  return JSON.stringify(before, unheard) === JSON.stringify(after, unheard);
+}
 var KumiStore = class {
   constructor(fetch, historyLimit = 50) {
     this.fetch = fetch;
@@ -3228,6 +3252,8 @@ var KumiStore = class {
   reads = /* @__PURE__ */ new Map();
   wanted = /* @__PURE__ */ new Map();
   generation = 0;
+  /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+  stale = /* @__PURE__ */ new Set();
   /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
    *  window made before (a grow renders before the Make panel ever opens). */
   designsRead = false;
@@ -3250,10 +3276,11 @@ var KumiStore = class {
     this.state = { ...this.state, ...patch };
     for (const fn of [...this.listeners]) fn();
   }
-  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+   *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
   want(part) {
     this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
-    if (!this.state[part]) void this.refresh(part);
+    if (!this.state[part] || this.stale.delete(part)) void this.refresh(part);
     return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
   }
   /** Forget everything (another profile or connection): what's shown must be that profile's. */
@@ -3264,6 +3291,7 @@ var KumiStore = class {
     this.cards.clear();
     this.started.clear();
     this.toHide.clear();
+    this.stale.clear();
     clearTimeout(this.hideTimer ?? void 0);
     this.hideTimer = null;
     this.hiddenSeq = null;
@@ -3301,7 +3329,7 @@ var KumiStore = class {
       } catch (error) {
         if (generation !== this.generation) return;
         if (statusOf(error) === 404) this.set({ available: false, error: null });
-        else this.set({ ...notLive(this.state), error: error instanceof Error ? error.message : String(error) });
+        else this.set({ ...notLive(this.state), error: clean(errorText(error), 200) });
         return;
       }
       if (generation !== this.generation) return;
@@ -3309,7 +3337,9 @@ var KumiStore = class {
       const after = status.revisions ?? {};
       const first = this.state.available !== true;
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
-      this.set({ available: true, error: null, status: heard(status) });
+      const next = heard(status);
+      const kept3 = sameAnswer(before, next);
+      if (!kept3 || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept3 ? before : next });
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null };
       const moved2 = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
       const hidden = typeof after.hidden === "number" ? after.hidden : 0;
@@ -3325,17 +3355,25 @@ var KumiStore = class {
     });
   }
   refresh(part) {
+    if ((part === "map" || part === "palette") && (this.wanted.get(part) ?? 0) === 0) {
+      this.stale.add(part);
+      return Promise.resolve();
+    }
     return this.once(part, async () => {
       const generation = this.generation;
       const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
       try {
         const value = await this.fetch(path);
         if (generation !== this.generation) return;
-        this.set({ [part]: heard(value) });
+        const { [part]: _answered, ...failed } = this.state.failed;
+        const answer = heard(value);
+        const kept3 = part !== "map" && sameAnswer(this.state[part], answer);
+        if (!kept3 || _answered !== void 0) this.set({ ...kept3 ? {} : { [part]: answer }, ..._answered === void 0 ? {} : { failed } });
         if (part === "map") this.mapRead();
       } catch (error) {
         if (generation !== this.generation) return;
         if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });
+        else this.set({ failed: { ...this.state.failed, [part]: clean(errorText(error), 200) } });
       }
     });
   }
@@ -3618,6 +3656,18 @@ function useKumi(store) {
 function useWant(store, part) {
   useEffect(() => store.want(part), [store, part]);
 }
+var LESS_MOTION = "(prefers-reduced-motion: reduce)";
+var lessMotion = () => typeof matchMedia === "function" && matchMedia(LESS_MOTION).matches;
+var onLessMotion = (changed) => {
+  if (typeof matchMedia !== "function") return () => {
+  };
+  const query = matchMedia(LESS_MOTION);
+  query.addEventListener("change", changed);
+  return () => query.removeEventListener("change", changed);
+};
+function useLessMotion() {
+  return useSyncExternalStore(onLessMotion, lessMotion, lessMotion);
+}
 var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
 var PREVIEW_SECONDS = 2;
 var PREVIEW_FADE_SECONDS = 0.2;
@@ -3802,6 +3852,7 @@ function playFailure(error) {
 }
 
 // src/desktop/theme.ts
+import * as sdk from "@hermes/plugin-sdk";
 var T = {
   text: "var(--ui-text-primary)",
   secondary: "var(--ui-text-secondary)",
@@ -3828,9 +3879,10 @@ var CANVAS = {
   // What the map's words are haloed in, so they read over the points.
   ground: "--ui-bg-elevated"
 };
+var useThemeKey = typeof sdk.useTheme === "function" ? sdk.useTheme : () => null;
 
 // src/shared/ui.tsx
-import { createContext, useContext } from "react";
+import { createContext, useContext, useLayoutEffect, useRef as useRef2, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 var I18n = createContext(english);
 function useT() {
@@ -3850,7 +3902,7 @@ var S = {
 };
 var FOCUSABLE = "kumi-focusable";
 function FocusStyle() {
-  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
+  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}@keyframes kumi-ants{to{stroke-dashoffset:-18}}.kumi-ants{animation:kumi-ants .7s linear infinite}@keyframes kumi-pop{0%{transform:scale(.55) translateY(6px);opacity:0}70%{transform:scale(1.06);opacity:1}100%{transform:none;opacity:1}}.kumi-pop{animation:kumi-pop .34s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-spin{to{transform:rotate(360deg)}}.kumi-spin{display:inline-block;animation:kumi-spin .8s linear infinite}@keyframes kumi-vine{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}.kumi-vine{stroke-dasharray:1;animation:kumi-vine .9s cubic-bezier(.3,.6,.2,1) both}@keyframes kumi-breathe{50%{opacity:.35}}.kumi-breathe{animation:kumi-breathe 1.1s ease-in-out infinite}@keyframes kumi-open{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}.kumi-open{transform-box:fill-box;transform-origin:center;animation:kumi-open .42s cubic-bezier(.2,.8,.3,1) both}@keyframes kumi-beat{0%{transform:scale(1.45);box-shadow:0 0 0 1px color-mix(in srgb,currentColor 55%,transparent)}50%{transform:scale(1);box-shadow:0 0 0 5px transparent}100%{transform:scale(1);box-shadow:0 0 0 5px transparent}}@keyframes kumi-swell{0%{transform:scale(1.45)}50%{transform:scale(1)}100%{transform:scale(1)}}.kumi-beat{border-radius:50%;animation:kumi-beat .5s cubic-bezier(.2,.7,.3,1) infinite}.kumi-swell{animation:kumi-swell .5s cubic-bezier(.2,.7,.3,1) infinite}@keyframes kumi-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}.kumi-slide{animation:kumi-slide 1.6s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.kumi-ants,.kumi-pop,.kumi-vine,.kumi-open,.kumi-beat,.kumi-swell,.kumi-slide{animation:none}.kumi-breathe{animation-duration:3s}.kumi-spin{animation-duration:2.4s}}` });
 }
 function Chip({ children, title, tone }) {
   const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
@@ -3874,17 +3926,33 @@ function TextButton({
   disabled,
   strong
 }) {
+  const [busy, setBusy] = useState(false);
+  const asks = useRef2(false);
+  const click = (event) => {
+    if (busy || asks.current && event.detail > 1) return;
+    const answer = onClick();
+    if (!answer || typeof answer.then !== "function") return;
+    asks.current = true;
+    setBusy(true);
+    void Promise.resolve(answer).catch(() => void 0).finally(() => setBusy(false));
+  };
   return /* @__PURE__ */ jsx(
     "button",
     {
+      "aria-busy": busy || void 0,
       "aria-label": label,
       "aria-pressed": pressed,
       className: FOCUSABLE,
       disabled,
-      onClick,
+      onClick: click,
       title,
       type: "button",
       style: {
+        // The face is a row: an icon sits beside its word whatever the host's CSS does with an `svg` (Hermes's base
+        // styles make every `svg` a block, which stacked "Surprise"'s die above its word).
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
         font: "inherit",
         fontSize: 11.5,
         lineHeight: "18px",
@@ -3894,7 +3962,8 @@ function TextButton({
         border: `1px solid ${strong || pressed ? T.accent : T.border}`,
         background: pressed ? `color-mix(in srgb, ${T.accent} 14%, transparent)` : "transparent",
         color: disabled ? T.faint : strong || pressed ? T.accent : T.secondary,
-        cursor: disabled ? "default" : "pointer",
+        cursor: disabled ? "default" : busy ? "progress" : "pointer",
+        opacity: busy ? 0.6 : 1,
         whiteSpace: "nowrap",
         flex: "none",
         transition: "background-color 120ms, border-color 120ms, color 120ms"
@@ -3911,6 +3980,63 @@ function Section({ title, right, children }) {
     ] }),
     children
   ] });
+}
+function Pending({ label, width = "60%" }) {
+  return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
+}
+function Clamp({ text, lines = 2, style, title }) {
+  const box = useRef2(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element || open) return;
+    const measure = () => setCut(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text, open, lines]);
+  const folded = open ? {} : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
+  if (!cut && !open) {
+    return /* @__PURE__ */ jsx("span", { ref: box, style: { ...style, ...folded }, title, children: text });
+  }
+  return /* @__PURE__ */ jsx(
+    "span",
+    {
+      "aria-expanded": open,
+      className: FOCUSABLE,
+      onClick: (event) => {
+        event.stopPropagation();
+        setOpen(!open);
+      },
+      onKeyDown: (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        setOpen(!open);
+      },
+      ref: box,
+      role: "button",
+      style: { ...style, ...folded, cursor: "pointer" },
+      tabIndex: 0,
+      title,
+      children: text
+    }
+  );
+}
+function radioKeys(index, count2, chosen, choose) {
+  return {
+    tabIndex: index === Math.max(0, chosen) ? 0 : -1,
+    onKeyDown: (event) => {
+      const step2 = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step2 || count2 < 2 || event.altKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      const next = (index + step2 + count2) % count2;
+      choose(next);
+      const radio = event.currentTarget.parentElement?.children[next];
+      if (radio instanceof HTMLElement) radio.focus();
+    }
+  };
 }
 
 // src/desktop/actions.ts
@@ -3975,7 +4101,7 @@ async function inNewChat(ctx, composer, text) {
 }
 
 // src/desktop/card.tsx
-import { useEffect as useEffect2, useState } from "react";
+import { useEffect as useEffect2, useState as useState2 } from "react";
 import { Fragment, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 async function peaksOf(dataUrl, buckets = 96) {
   const comma = dataUrl.indexOf(",");
@@ -3996,8 +4122,8 @@ async function peaksOf(dataUrl, buckets = 96) {
 }
 function Wave({ audition, id, label, caption = label }) {
   const t = useT();
-  const [peaks, setPeaks] = useState(null);
-  const [failed, setFailed] = useState(false);
+  const [peaks, setPeaks] = useState2(null);
+  const [failed, setFailed] = useState2(false);
   const playing = usePlaying(audition) === id;
   useEffect2(() => {
     let live = true;
@@ -4116,7 +4242,7 @@ function Bands({ view }) {
 }
 function Interpretation({ view }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState2(false);
   if (view.interpretationError) return /* @__PURE__ */ jsx2("span", { style: S.faint, children: t("listen.noInterpretation", view.interpretationError) });
   if (!view.interpretation) return null;
   const text = view.interpretation.text;
@@ -4466,7 +4592,7 @@ function generationRequest(made, t = english) {
 }
 
 // src/desktop/pane.tsx
-import { useEffect as useEffect4, useState as useState3 } from "react";
+import { useEffect as useEffect4, useState as useState4 } from "react";
 
 // src/shared/HistoryView.tsx
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
@@ -4490,9 +4616,10 @@ function stateOf(item, t = english, live = false) {
   return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
 }
 var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-function FocusView({ focus, now }) {
+function FocusView({ focus, now, loading: loading2 = false }) {
   const t = useT();
   const catchUp = catchUpLines(focus);
+  if (loading2 && !focus) return /* @__PURE__ */ jsx3(Pending, { label: t("pane.reading") });
   if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: t("focus.nothing") });
   }
@@ -4543,10 +4670,12 @@ function HistoryView({
   detail,
   live = false,
   daw,
-  target
+  target,
+  loading: loading2 = false
 }) {
   const t = useT();
   const items = history?.items ?? [];
+  if (loading2 && !history) return /* @__PURE__ */ jsx3(Pending, { label: t("pane.reading") });
   if (!items.length) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: t("history.empty") });
   }
@@ -4554,10 +4683,10 @@ function HistoryView({
     const state = stateOf(item, t, live);
     const track2 = nameOf(item.track);
     const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
-    return /* @__PURE__ */ jsxs3("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
-      /* @__PURE__ */ jsx3("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
+    return /* @__PURE__ */ jsxs3("li", { style: { ...S.row, alignItems: "flex-start", gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
+      /* @__PURE__ */ jsx3("span", { "aria-label": state.word, title: state.word, style: { width: 14, lineHeight: "18px", textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
       /* @__PURE__ */ jsxs3("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
-        /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, textDecoration: item.state === "undone" ? "line-through" : void 0 }, title: clean(item.title ?? "", 300), children: clean(item.title ?? item.label ?? item.id, 120) }),
+        /* @__PURE__ */ jsx3(Clamp, { style: { ...S.text, textDecoration: item.state === "undone" ? "line-through" : void 0 }, text: clean(item.title ?? item.label ?? item.id, 300) }),
         /* @__PURE__ */ jsxs3("span", { style: { ...S.row, gap: 5 }, children: [
           track2 && /* @__PURE__ */ jsx3(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
           /* @__PURE__ */ jsx3("span", { style: { ...S.faint, ...S.ellipsis }, children: [track2 && clean(track2, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
@@ -4630,6 +4759,7 @@ function JobsView({ jobs, onRequest }) {
           children: /* @__PURE__ */ jsx4(
             "span",
             {
+              className: words.fraction === null ? "kumi-slide" : void 0,
               style: {
                 display: "block",
                 height: "100%",
@@ -4647,7 +4777,7 @@ function JobsView({ jobs, onRequest }) {
 }
 
 // src/desktop/script.tsx
-import { useEffect as useEffect3, useState as useState2 } from "react";
+import { useEffect as useEffect3, useState as useState3 } from "react";
 
 // src/shared/Code.tsx
 import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
@@ -4768,8 +4898,8 @@ function SavedScript({ item, store }) {
   const t = useT();
   const sha = item.script?.sha256;
   const language = item.script?.language === "python" || item.script?.language === "lua" ? item.script.language : null;
-  const [open, setOpen] = useState2(false);
-  const [code, setCode] = useState2(null);
+  const [open, setOpen] = useState3(false);
+  const [code, setCode] = useState3(null);
   useEffect3(() => {
     if (!open || code !== null || !sha || !language) return;
     let current = true;
@@ -4791,7 +4921,7 @@ function SavedScript({ item, store }) {
 import { Fragment as Fragment3, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 var STARTER_LABELS = { look: "pane.starterLook", change: "pane.starterChange", find: "pane.starterFind" };
 function useNow(every = 3e4) {
-  const [now, setNow] = useState3(() => Date.now());
+  const [now, setNow] = useState4(() => Date.now());
   useEffect4(() => {
     const timer = setInterval(() => setNow(Date.now()), every);
     return () => clearInterval(timer);
@@ -4843,12 +4973,12 @@ function KumiPane({ ctx, store, onOpenMap }) {
           cleanupWords(state.status.unsure.cleanup, t),
           t("pane.needsLook")
         ].filter(Boolean).join(" ") }),
-        /* @__PURE__ */ jsx7("div", { style: S.row, children: /* @__PURE__ */ jsx7(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
+        /* @__PURE__ */ jsx7("div", { style: S.row, children: /* @__PURE__ */ jsx7(TextButton, { onClick: () => ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
       ] }),
-      steps.length > 0 && /* @__PURE__ */ jsx7("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: steps.map((step2) => /* @__PURE__ */ jsx7(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: steps.length === 1, children: step2.label }, step2.request)) })
+      steps.length > 0 && /* @__PURE__ */ jsx7("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: steps.map((step2) => /* @__PURE__ */ jsx7(TextButton, { onClick: () => ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: steps.length === 1, children: step2.label }, step2.request)) })
     ] }),
-    /* @__PURE__ */ jsx7(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx7(FocusView, { focus: state.focus, now }) }),
-    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx7(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx7(JobsView, { jobs: state.jobs, onRequest: (request) => void ask(ctx, request, { send: false, session }) }) }),
+    /* @__PURE__ */ jsx7(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx7(FocusView, { focus: state.focus, loading: state.focus === null && !state.failed.focus, now }) }),
+    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx7(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx7(JobsView, { jobs: state.jobs, onRequest: (request) => ask(ctx, request, { send: false, session }) }) }),
     /* @__PURE__ */ jsxs7(
       Section,
       {
@@ -4863,6 +4993,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
             {
               daw: state.status?.daw,
               history: state.history,
+              loading: state.history === null && !state.failed.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
               now,
               target: state.setup?.target,
@@ -4875,7 +5006,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
                   TextButton,
                   {
                     label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
-                    onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
+                    onClick: () => ask(ctx, undoRequest(item), { send: true, session }),
                     title: left > 1 ? t("pane.undoChangeTitle", left) : t("pane.undoTitle"),
                     children: t("pane.undo")
                   }
@@ -4884,9 +5015,9 @@ function KumiPane({ ctx, store, onOpenMap }) {
             }
           ),
           !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("pane.undoNeedsConnection") }),
-          connected && (state.history?.items?.length ?? 0) === 0 && /* @__PURE__ */ jsxs7("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", marginTop: 8 }, children: [
+          connected && state.history !== null && (state.history.items?.length ?? 0) === 0 && /* @__PURE__ */ jsxs7("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", marginTop: 8 }, children: [
             /* @__PURE__ */ jsx7("span", { style: S.faint, children: t("pane.starters") }),
-            STARTER_REQUESTS.map((starter) => /* @__PURE__ */ jsx7(TextButton, { onClick: () => void ask(ctx, starter.request, { send: false, session }), title: t("pane.starterTitle"), children: t(STARTER_LABELS[starter.key]) }, starter.key))
+            STARTER_REQUESTS.map((starter) => /* @__PURE__ */ jsx7(TextButton, { onClick: () => ask(ctx, starter.request, { send: false, session }), title: t("pane.starterTitle"), children: t(STARTER_LABELS[starter.key]) }, starter.key))
           ] })
         ]
       }
@@ -4925,7 +5056,7 @@ function GenerateCard({ media, audition, ctx, store }) {
             made.outputType && OUTPUTS.has(made.outputType) && /* @__PURE__ */ jsx8(Chip, { children: t(`generate.outputs.${made.outputType}`) }),
             made.noteCount !== null && /* @__PURE__ */ jsx8(Chip, { children: t("generate.notes", made.noteCount, String(made.noteCount)) }),
             length && /* @__PURE__ */ jsx8(Chip, { children: length }),
-            ENDED.has(made.state) ? /* @__PURE__ */ jsx8(Chip, { tone: "bad", children: t(`generate.states.${made.state}`) }) : /* @__PURE__ */ jsx8(Chip, { title: t("generate.generatedTitle"), tone: "accent", children: t("generate.generated") })
+            ENDED.has(made.state) ? /* @__PURE__ */ jsx8(Chip, { tone: "bad", children: t(`generate.states.${made.state}`) }) : made.state === "running" ? /* @__PURE__ */ jsx8(Chip, { children: t("generate.states.running") }) : /* @__PURE__ */ jsx8(Chip, { title: t("generate.generatedTitle"), tone: "accent", children: t("generate.generated") })
           ] })
         ] }),
         made.file && /* @__PURE__ */ jsx8("span", { style: { ...S.faint, ...S.ellipsis }, children: made.file }),
@@ -4942,7 +5073,7 @@ function GenerateCard({ media, audition, ctx, store }) {
           left && /* @__PURE__ */ jsx8("span", { style: S.faint, title: t("generate.capTitle"), children: left })
         ] }),
         made.ledger?.frozen && /* @__PURE__ */ jsx8("span", { style: { ...S.text, color: T.warn, whiteSpace: "normal" }, children: t("generate.frozen") }),
-        offer && /* @__PURE__ */ jsx8("span", { children: /* @__PURE__ */ jsx8(TextButton, { onClick: () => void ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) }), strong: true, title: offer.title, children: offer.label }) })
+        offer && /* @__PURE__ */ jsx8("span", { children: /* @__PURE__ */ jsx8(TextButton, { onClick: () => ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) }), strong: true, title: offer.title, children: offer.label }) })
       ]
     }
   );
@@ -5086,10 +5217,10 @@ function payloadOf(event) {
 
 // src/desktop/map.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
-import { useEffect as useEffect16, useRef as useRef14, useState as useState17 } from "react";
+import { useEffect as useEffect16, useRef as useRef15, useState as useState18 } from "react";
 
 // src/shared/atlas/first.ts
-import { useRef as useRef2, useState as useState4 } from "react";
+import { useRef as useRef3, useState as useState5 } from "react";
 var FIRST_STEPS = ["hover", "box", "make"];
 var keptSteps = (kept3) => (kept3 ?? "").split(",");
 function firstLeft(kept3, offers) {
@@ -5101,8 +5232,8 @@ function firstKept(kept3, steps) {
   return FIRST_STEPS.filter((step2) => done.includes(step2) || steps.includes(step2)).join(",");
 }
 function useFirstOpen(read, write) {
-  const [kept3, setKept] = useState4(() => read() ?? "");
-  const latest = useRef2(kept3);
+  const [kept3, setKept] = useState5(() => read() ?? "");
+  const latest = useRef3(kept3);
   return {
     kept: kept3,
     done: (steps) => {
@@ -5116,7 +5247,7 @@ function useFirstOpen(read, write) {
 }
 
 // src/shared/grow.ts
-import { useEffect as useEffect5, useRef as useRef3, useState as useState5 } from "react";
+import { useEffect as useEffect5, useRef as useRef4, useState as useState6 } from "react";
 var BUDS = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
 var RENDERS = 2;
 var SCRUB_STEP = 0.04;
@@ -5146,18 +5277,18 @@ function nextToGrow(buds, scrub, running) {
 var newSeed = () => Math.floor(Math.random() * 2 ** 31);
 var fresh = () => BUDS.map((at) => ({ at, state: "waiting" }));
 function useGrow(design, heard2, revision) {
-  const [choosing, setChoosing] = useState5(null);
-  const [path, setPath] = useState5(null);
-  const [pending, setPending] = useState5(null);
-  const [buds, setBuds] = useState5([]);
-  const [scrub, setScrub] = useState5(null);
-  const [handle, setHandle] = useState5(0.5);
-  const [picked, setPicked] = useState5(null);
-  const [running, setRunning] = useState5(0);
-  const generation = useRef3(0);
-  const heardRef = useRef3(heard2);
+  const [choosing, setChoosing] = useState6(null);
+  const [path, setPath] = useState6(null);
+  const [pending, setPending] = useState6(null);
+  const [buds, setBuds] = useState6([]);
+  const [scrub, setScrub] = useState6(null);
+  const [handle, setHandle] = useState6(0.5);
+  const [picked, setPicked] = useState6(null);
+  const [running, setRunning] = useState6(0);
+  const generation = useRef4(0);
+  const heardRef = useRef4(heard2);
   heardRef.current = heard2;
-  const scrubAt = useRef3(null);
+  const scrubAt = useRef4(null);
   const start = (from, to) => {
     generation.current += 1;
     setPath({ from, to, seed: newSeed() });
@@ -5253,7 +5384,7 @@ function useGrow(design, heard2, revision) {
 }
 
 // src/shared/MakePanel.tsx
-import { useEffect as useEffect6, useLayoutEffect, useMemo, useRef as useRef5, useState as useState8 } from "react";
+import { useEffect as useEffect6, useLayoutEffect as useLayoutEffect2, useMemo, useRef as useRef6, useState as useState9 } from "react";
 
 // src/shared/atlas/color.ts
 function rgbOf(color) {
@@ -5288,10 +5419,10 @@ function LineageBar({ shares }) {
 }
 
 // src/shared/MakeOptions.tsx
-import { useState as useState7 } from "react";
+import { useState as useState8 } from "react";
 
 // src/shared/controls.tsx
-import { useRef as useRef4, useState as useState6 } from "react";
+import { useRef as useRef5, useState as useState7 } from "react";
 import { jsx as jsx12, jsxs as jsxs11 } from "react/jsx-runtime";
 var clamp = (span2, value) => Math.min(span2.max, Math.max(span2.min, value));
 var snap = (span2, value) => {
@@ -5312,8 +5443,8 @@ function Slider({
   range: range2 = false,
   title
 }) {
-  const track2 = useRef4(null);
-  const [dragging, setDragging] = useState6(null);
+  const track2 = useRef5(null);
+  const [dragging, setDragging] = useState7(null);
   const middle = span2.neutral ?? (range2 ? span2.min : (span2.min + span2.max) / 2);
   const resting = restAt ?? middle;
   const values = value === void 0 ? range2 ? [resting, resting] : [resting] : Array.isArray(value) ? value : [value];
@@ -5469,7 +5600,7 @@ function Pills({
   const all = rest === null ? options : [{ value: void 0, label: rest }, ...options];
   return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
     /* @__PURE__ */ jsx12("span", { style: { fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: label }),
-    /* @__PURE__ */ jsx12("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option) => {
+    /* @__PURE__ */ jsx12("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option, index) => {
       const chosen = option.value === value;
       return /* @__PURE__ */ jsxs11(
         "button",
@@ -5477,6 +5608,7 @@ function Pills({
           "aria-checked": chosen,
           className: FOCUSABLE,
           onClick: () => onChange(option.value),
+          ...radioKeys(index, all.length, all.findIndex((each) => each.value === value), (next) => onChange(all[next].value)),
           role: "radio",
           title: option.title,
           type: "button",
@@ -5728,7 +5860,7 @@ function LoopSection({ options, tempo, onChange }) {
   const auto = t("make.auto");
   const loop = options.loop ?? {};
   const style = loop.style === "melody" ? "melody" : "beat";
-  const [open, setOpen] = useState7({ rhythm: true });
+  const [open, setOpen] = useState8({ rhythm: true });
   const setLoop = (patch) => onChange((current) => ({ ...current, loop: { ...current.loop ?? {}, ...patch } }));
   const control = (name) => {
     const label = t(`make.loop.controls.${name}`);
@@ -5879,7 +6011,7 @@ function SteerSection({ steer, onChange, open, onToggle }) {
     {
       actions: /* @__PURE__ */ jsxs12("span", { style: { ...S.row, gap: 4 }, children: [
         /* @__PURE__ */ jsxs12(TextButton, { onClick: () => onChange(rollSteer()), title: t("make.steer.rollTitle"), children: [
-          /* @__PURE__ */ jsxs12("svg", { "aria-hidden": true, height: "10", style: { marginRight: 4, verticalAlign: "-1px" }, viewBox: "0 0 12 12", width: "10", children: [
+          /* @__PURE__ */ jsxs12("svg", { "aria-hidden": true, height: "10", style: { flex: "none" }, viewBox: "0 0 12 12", width: "10", children: [
             /* @__PURE__ */ jsx13("rect", { fill: "none", height: "10", rx: "2.5", stroke: "currentColor", strokeWidth: "1.2", width: "10", x: "1", y: "1" }),
             /* @__PURE__ */ jsx13("circle", { cx: "4", cy: "4", fill: "currentColor", r: "1" }),
             /* @__PURE__ */ jsx13("circle", { cx: "6", cy: "6", fill: "currentColor", r: "1" }),
@@ -5942,13 +6074,14 @@ function Glyph({ card, size = 20 }) {
   return /* @__PURE__ */ jsx14("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "0 0 28 20", width: size * 28 / 20, children: GLYPHS[card] });
 }
 var TAB_GLYPH = { cross: "blend", fuse: "smear", loop: "loop", stack: "stack" };
+var SOURCES_FOLDED = 8;
 var SOURCE_CHIPS = 48;
 function Flying({ flight, onDone }) {
-  const ghost = useRef5(null);
-  const done = useRef5(onDone);
+  const ghost = useRef6(null);
+  const done = useRef6(onDone);
   done.current = onDone;
-  const [origin, setOrigin] = useState8(null);
-  useLayoutEffect(() => {
+  const [origin, setOrigin] = useState9(null);
+  useLayoutEffect2(() => {
     const box = ghost.current?.getBoundingClientRect();
     setOrigin(box ? { left: box.left, top: box.top } : null);
   }, []);
@@ -5990,13 +6123,13 @@ function Flying({ flight, onDone }) {
     }
   );
 }
-function Wave2({ peaks, playing, duration, colors }) {
-  const canvas = useRef5(null);
-  const box = useRef5(null);
-  const [width, setWidth] = useState8(0);
-  const [drawn, setDrawn] = useState8(false);
-  const [startedAt, setStartedAt] = useState8(null);
-  const [now, setNow] = useState8(0);
+function Wave2({ peaks, playing, duration, colors, onCanvas }) {
+  const canvas = useRef6(null);
+  const box = useRef6(null);
+  const [width, setWidth] = useState9(0);
+  const [drawn, setDrawn] = useState9(false);
+  const [startedAt, setStartedAt] = useState9(null);
+  const [now, setNow] = useState9(0);
   useEffect6(() => {
     const element = box.current;
     if (!element) return;
@@ -6046,7 +6179,10 @@ function Wave2({ peaks, playing, duration, colors }) {
       "canvas",
       {
         "aria-hidden": true,
-        ref: canvas,
+        ref: (element) => {
+          canvas.current = element;
+          onCanvas?.(element);
+        },
         style: { width: "100%", height: 56, display: "block", clipPath: drawn ? "inset(0 0 0 0)" : "inset(0 100% 0 0)", transition: "clip-path 520ms cubic-bezier(.2,.8,.2,1)" }
       }
     ),
@@ -6064,24 +6200,26 @@ var sideSheetWidth = (area) => Math.min(430, area * 0.46);
 function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage, onKin }) {
   const inline = placement === "inline";
   const t = useT();
-  const tellKin = useRef5(onKin);
+  const tellKin = useRef6(onKin);
   tellKin.current = onKin;
   useEffect6(() => () => tellKin.current?.(null), []);
-  const [cardKey, setCardKey] = useState8("blend");
-  const [lastMode, setLastMode] = useState8({ cross: "blend", fuse: "texture", loop: "loop", stack: "stack" });
-  const [options, setOptions] = useState8({});
-  const [steers, setSteers] = useState8({});
-  const [steerOpen, setSteerOpen] = useState8(false);
-  const [chosen, setChosen] = useState8([]);
-  const [trail, setTrail] = useState8([]);
-  const [busy, setBusy] = useState8(null);
-  const [error, setError] = useState8(null);
-  const requests = useRef5(/* @__PURE__ */ new Map());
-  const [shown, setShown] = useState8({});
-  const [fresh2, setFresh] = useState8(() => /* @__PURE__ */ new Set());
-  const [arrived, setArrived] = useState8(null);
-  const cards = useRef5(/* @__PURE__ */ new Map());
-  const list = useRef5(null);
+  const [cardKey, setCardKey] = useState9("blend");
+  const [lastMode, setLastMode] = useState9({ cross: "blend", fuse: "texture", loop: "loop", stack: "stack" });
+  const [options, setOptions] = useState9({});
+  const [steers, setSteers] = useState9({});
+  const [steerOpen, setSteerOpen] = useState9(false);
+  const [allSources, setAllSources] = useState9(false);
+  const [chosen, setChosen] = useState9([]);
+  const [trail, setTrail] = useState9([]);
+  const [busy, setBusy] = useState9(null);
+  const [error, setError] = useState9(null);
+  const requests = useRef6(/* @__PURE__ */ new Map());
+  const [shown, setShown] = useState9({});
+  const [fresh2, setFresh] = useState9(() => /* @__PURE__ */ new Set());
+  const [arrived, setArrived] = useState9(null);
+  const cards = useRef6(/* @__PURE__ */ new Map());
+  const canvases = useRef6(/* @__PURE__ */ new Map());
+  const list = useRef6(null);
   const reveal = (element, where) => {
     const box = list.current;
     if (!box || !element) return;
@@ -6098,20 +6236,28 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     reveal(cards.current.get(arrived), "nearest");
     setArrived(null);
   }, [arrived, results]);
-  const [flights, setFlights] = useState8([]);
-  const flightKey = useRef5(0);
+  const [flights, setFlights] = useState9([]);
+  const flightKey = useRef6(0);
   const fly = (id) => {
-    const canvas = cards.current.get(id)?.querySelector("canvas");
+    const canvas = canvases.current.get(id);
     const to = dock?.current?.getBoundingClientRect();
     if (!canvas || !to || to.width === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const key = ++flightKey.current;
     setFlights((current) => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }]);
   };
-  const [open, setOpen] = useState8(false);
+  const [open, setOpen] = useState9(false);
+  const panel = useRef6(null);
+  const opener = useRef6(null);
   useEffect6(() => {
+    panel.current?.focus({ preventScroll: true });
     const frame2 = requestAnimationFrame(() => setOpen(true));
     return () => cancelAnimationFrame(frame2);
   }, []);
+  const close = () => {
+    const back = opener.current;
+    onClose();
+    if (back?.isConnected) back.focus({ preventScroll: true });
+  };
   const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
   const note = cardNote(sources.length);
   const refused = note !== null;
@@ -6164,6 +6310,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
           className: FOCUSABLE,
           disabled: refused,
           onClick: () => setCardKey(lastMode[tab]),
+          ...radioKeys(index, TABS.length, TABS.indexOf(card.tab), (next) => setCardKey(lastMode[TABS[next]])),
           role: "radio",
           title: t(`make.opHints.${tab}`),
           type: "button",
@@ -6192,18 +6339,20 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
         tab
       );
     }) }),
-    modes.length > 1 && /* @__PURE__ */ jsx14("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry) => {
+    modes.length > 1 && /* @__PURE__ */ jsx14("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry, index) => {
       const picked = entry.key === card.key;
+      const choose = (chosen2) => {
+        setCardKey(chosen2.key);
+        setLastMode((current) => ({ ...current, [chosen2.tab]: chosen2.key }));
+      };
       return /* @__PURE__ */ jsxs13(
         "button",
         {
           "aria-checked": picked,
           className: FOCUSABLE,
           disabled: refused,
-          onClick: () => {
-            setCardKey(entry.key);
-            setLastMode((current) => ({ ...current, [entry.tab]: entry.key }));
-          },
+          onClick: () => choose(entry),
+          ...radioKeys(index, modes.length, modes.findIndex((each) => each.key === card.key), (next) => choose(modes[next])),
           role: "radio",
           title: t(`make.cards.${entry.key}.hint`),
           type: "button",
@@ -6236,7 +6385,19 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     "section",
     {
       "aria-label": t("make.title"),
+      onFocus: (event) => {
+        if (opener.current === null && event.target === event.currentTarget && event.relatedTarget instanceof HTMLElement) opener.current = event.relatedTarget;
+      },
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        close();
+      },
+      ref: panel,
+      tabIndex: -1,
       style: {
+        // It holds the focus only as it opens (Tab goes on to its controls, which show the ring): no ring round it all.
+        outline: "none",
         ...placement === "side" ? { position: "absolute", right: 8, top: 52, bottom: 8, width: "min(430px, 46%)" } : placement === "bottom" ? { position: "absolute", left: 8, right: 8, bottom: 8, maxHeight: "82%" } : {},
         display: "flex",
         flexDirection: "column",
@@ -6271,15 +6432,17 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
               ]
             }
           ),
-          /* @__PURE__ */ jsx14(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
+          /* @__PURE__ */ jsx14(TextButton, { label: t("make.close"), onClick: close, title: t("make.close"), children: "×" })
         ] }),
         /* @__PURE__ */ jsxs13("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-          /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-            sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs13("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }, children: [
+          /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
+            sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => /* @__PURE__ */ jsxs13("span", { role: "listitem", style: { ...S.row, gap: 4, fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: "100%" }, children: [
               source.artifact_id ? /* @__PURE__ */ jsx14("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx14("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
-              /* @__PURE__ */ jsx14("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })
+              /* @__PURE__ */ jsx14("span", { style: { minWidth: 0, overflowWrap: "anywhere" }, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 60) })
             ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
-            sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx14("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) })
+            !allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx14(TextButton, { onClick: () => setAllSources(true), title: t("make.sources"), children: t("make.moreSources", sources.length - SOURCES_FOLDED) }),
+            allSources && sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx14("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) }),
+            allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx14(TextButton, { onClick: () => setAllSources(false), children: t("make.fewerSources") })
           ] }),
           chooser,
           card.key === "loop" ? /* @__PURE__ */ jsx14(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx14(CardOptions, { card, onChange: setOptions, options, sources }),
@@ -6347,7 +6510,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                 children: [
                   lineage && /* @__PURE__ */ jsx14(LineageBar, { shares: lineage(result) }),
                   /* @__PURE__ */ jsxs13("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
-                    /* @__PURE__ */ jsx14("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...stages.length ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, title: result.recipe, children: stages.length ? clean(result.recipe.split(":", 1)[0], 80) : clean(result.recipe, 220) || resultName(result) }),
+                    stages.length ? /* @__PURE__ */ jsx14("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, children: clean(result.recipe.split(":", 1)[0], 80) }) : /* @__PURE__ */ jsx14(Clamp, { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, text: clean(result.recipe, 220) || resultName(result) }),
                     onSources && /* @__PURE__ */ jsx14(
                       "button",
                       {
@@ -6407,7 +6570,19 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                         children: isPlaying ? "■" : "▶"
                       }
                     ),
-                    /* @__PURE__ */ jsx14("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx14(Wave2, { colors: lineage?.(result).map((part) => part.color), duration: result.duration, peaks: result.peaks, playing: isPlaying }) })
+                    /* @__PURE__ */ jsx14("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx14(
+                      Wave2,
+                      {
+                        colors: lineage?.(result).map((part) => part.color),
+                        duration: result.duration,
+                        onCanvas: (element) => {
+                          if (element) canvases.current.set(result.artifact_id, element);
+                          else canvases.current.delete(result.artifact_id);
+                        },
+                        peaks: result.peaks,
+                        playing: isPlaying
+                      }
+                    ) })
                   ] }),
                   /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
                     /* @__PURE__ */ jsxs13("span", { style: S.faint, children: [
@@ -6428,7 +6603,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                     ] })
                   ] }),
                   /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                    /* @__PURE__ */ jsx14(TextButton, { disabled: busy !== null, onClick: () => void make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs13(Fragment5, { children: [
+                    /* @__PURE__ */ jsx14(TextButton, { disabled: busy !== null, onClick: () => make(reroll(take.request), take.key), title: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs13(Fragment5, { children: [
                       /* @__PURE__ */ jsx14("span", { "aria-hidden": true, children: "↻ " }),
                       t("make.reroll")
                     ] }) }),
@@ -6438,7 +6613,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
                         disabled: inPalette,
                         onClick: () => {
                           fly(result.artifact_id);
-                          void onKeep(result);
+                          return onKeep(result);
                         },
                         pressed: inPalette,
                         title: t("make.keepTitle"),
@@ -6486,10 +6661,10 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
 }
 
 // src/shared/MapCanvas.tsx
-import { useEffect as useEffect12, useMemo as useMemo2, useRef as useRef12, useState as useState13 } from "react";
+import { useEffect as useEffect12, useMemo as useMemo2, useRef as useRef13, useState as useState14 } from "react";
 
 // src/shared/atlas/AtlasOverlay.tsx
-import { useEffect as useEffect7, useRef as useRef6 } from "react";
+import { useEffect as useEffect7, useRef as useRef7 } from "react";
 
 // src/shared/palette.ts
 var MOST_GATHERED = 1e4;
@@ -6549,23 +6724,58 @@ function peaksOf2(samples, bins) {
 
 // src/shared/peaks.ts
 var DECODE_MOST = 12 * 1024 * 1024;
+var FINE_BARS = 2240;
+var KEPT_SOUNDS = 1024;
 var kept = /* @__PURE__ */ new Map();
 var loading = /* @__PURE__ */ new Map();
 var askers = /* @__PURE__ */ new Map();
 var queue = Promise.resolve();
 var SKIPPED = /* @__PURE__ */ Symbol("skipped");
-function peaksFor(id, bars, audio, wanted = () => true) {
-  const key = `${bars}:${id}`;
-  const done = kept.get(key);
-  if (done !== void 0) return Promise.resolve(done);
-  const running = loading.get(key);
-  if (running) {
-    askers.get(key)?.push(wanted);
-    return running;
+function poolPeaks(fine, bars) {
+  const out = new Array(Math.max(0, bars)).fill(0);
+  if (fine.length === 0 || bars <= 0) return out;
+  let loudest = 0;
+  for (let bar = 0; bar < bars; bar++) {
+    const start = Math.floor(bar * fine.length / bars);
+    const end = Math.max(start + 1, Math.floor((bar + 1) * fine.length / bars));
+    let peak = 0;
+    for (let at = start; at < end && at < fine.length; at++) if (fine[at] > peak) peak = fine[at];
+    out[bar] = peak;
+    if (peak > loudest) loudest = peak;
   }
-  askers.set(key, [wanted]);
+  return loudest > 0 ? out.map((peak) => peak / loudest) : out;
+}
+function sized(id, bars) {
+  const entry = kept.get(id);
+  if (!entry) return void 0;
+  kept.delete(id);
+  kept.set(id, entry);
+  if (!entry.fine) return null;
+  let peaks = entry.sizes.get(bars);
+  if (!peaks) {
+    peaks = poolPeaks(entry.fine, bars);
+    entry.sizes.set(bars, peaks);
+  }
+  return peaks;
+}
+function keep(id, fine) {
+  kept.set(id, { fine, sizes: /* @__PURE__ */ new Map() });
+  if (kept.size > KEPT_SOUNDS) {
+    const oldest = kept.keys().next().value;
+    if (oldest !== void 0) kept.delete(oldest);
+  }
+}
+function peaksFor(id, bars, audio, wanted = () => true) {
+  const done = sized(id, bars);
+  if (done !== void 0) return Promise.resolve(done);
+  const running = loading.get(id);
+  if (running) {
+    askers.get(id)?.push(wanted);
+    return running.then(() => sized(id, bars) ?? null);
+  }
+  askers.set(id, [wanted]);
   const run = async () => {
-    if (!(askers.get(key) ?? []).some((ask2) => ask2())) return SKIPPED;
+    if (!(askers.get(id) ?? []).some((ask2) => ask2())) return SKIPPED;
     const url = await audio(id);
     const comma = url.indexOf(",");
     if (comma < 0 || url.length > DECODE_MOST || typeof OfflineAudioContext !== "function") return null;
@@ -6578,21 +6788,19 @@ function peaksFor(id, bars, audio, wanted = () => true) {
       const data = buffer.getChannelData(channel);
       for (let at = 0; at < data.length; at++) mixed2[at] += data[at];
     }
-    return peaksOf2(mixed2, bars);
+    return peaksOf2(mixed2, FINE_BARS);
   };
-  const promise = queue.then(run, run).catch(() => null).then((peaks) => {
-    loading.delete(key);
-    askers.delete(key);
-    if (peaks === SKIPPED) return null;
-    kept.set(key, peaks);
-    return peaks;
+  const promise = queue.then(run, run).catch(() => null).then((fine) => {
+    loading.delete(id);
+    askers.delete(id);
+    if (fine !== SKIPPED) keep(id, fine);
   });
   queue = promise;
-  loading.set(key, promise);
-  return promise;
+  loading.set(id, promise);
+  return promise.then(() => sized(id, bars) ?? null);
 }
 function peaksKept(id, bars) {
-  return kept.get(`${bars}:${id}`) ?? null;
+  return sized(id, bars) ?? null;
 }
 
 // src/shared/mapModel.ts
@@ -6955,19 +7163,22 @@ function searchSounds(model, query) {
   });
   return found;
 }
-function frame(model, ids, width, height, top = 0, right = 0, margin = 48) {
+function frame(model, ids, width, height, top = 0, right = 0, margin = 48, clear = {}) {
   const chosen = model.points.filter((point) => ids.has(point.id));
   if (!chosen.length) return null;
   const xs = chosen.map((point) => point.x);
   const ys = chosen.map((point) => point.y);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const size = mapSide(width, height, top);
-  const room = roomBeside(width, right);
+  const roomTop = Math.max(top, clear.top ?? 0);
+  const roomLeft = Math.max(0, clear.left ?? 0);
+  const across = Math.max(1, roomBeside(width, right) - roomLeft);
+  const down = Math.max(1, height - roomTop);
   const span2 = Math.max(x1 - x0, y1 - y0, 0.04);
-  const scale = Math.min(40, Math.max(1, (Math.min(room, height - top) - 2 * margin) / (span2 * size)));
+  const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span2 * size)));
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
-  return { scale, dx: room / 2 - cx * size * scale, dy: top + (height - top) / 2 - cy * size * scale };
+  return { scale, dx: roomLeft + across / 2 - cx * size * scale, dy: roomTop + down / 2 - cy * size * scale };
 }
 function pointsInBox(model, view, size, box, visible) {
   const unit = size * view.scale;
@@ -7255,11 +7466,11 @@ function AtlasOverlay({
   target,
   trail
 }) {
-  const canvas = useRef6(null);
-  const overlay = useRef6(null);
-  const placed = useRef6(place);
+  const canvas = useRef7(null);
+  const overlay = useRef7(null);
+  const placed = useRef7(place);
   placed.current = place;
-  const fetched = useRef6(audio);
+  const fetched = useRef7(audio);
   fetched.current = audio;
   useEffect7(() => {
     if (!canvas.current) return;
@@ -7326,7 +7537,7 @@ function nearestTo(points, index, most, shown) {
 }
 
 // src/shared/mapUi.tsx
-import { useEffect as useEffect8, useRef as useRef7, useState as useState9 } from "react";
+import { useEffect as useEffect8, useRef as useRef8, useState as useState10 } from "react";
 import { Fragment as Fragment6, jsx as jsx16, jsxs as jsxs14 } from "react/jsx-runtime";
 var glass = {
   background: `color-mix(in srgb, ${T.raised} 90%, transparent)`,
@@ -7449,9 +7660,9 @@ function Rule() {
   return /* @__PURE__ */ jsx16("span", { "aria-hidden": true, style: { width: 1, height: 18, margin: "0 3px", background: T.border, flex: "none" } });
 }
 function LayoutMenu({ label, choices, current, onChoose, maxHeight, words }) {
-  const [open, setOpen] = useState9(false);
-  const box = useRef7(null);
-  const items = useRef7([]);
+  const [open, setOpen] = useState10(false);
+  const box = useRef8(null);
+  const items = useRef8([]);
   useEffect8(() => {
     if (!open) return;
     const away = (event) => {
@@ -7610,7 +7821,7 @@ function Corner({
             t("corner.families", families)
           ] }),
           layout,
-          /* @__PURE__ */ jsxs15("span", { style: caps, title: t("corner.zoom"), children: [
+          zoom !== void 0 && /* @__PURE__ */ jsxs15("span", { style: caps, title: t("corner.zoom"), children: [
             Math.round(zoom * 100),
             "%"
           ] })
@@ -7706,14 +7917,14 @@ function blur(from, into, side, radius, step2) {
     }
   }
 }
-function nebulaField(points, keep, colorOf2, side = NEBULA_SIDE) {
+function nebulaField(points, keep2, colorOf2, side = NEBULA_SIDE) {
   const cells = side * side;
   const sums = [new Float32Array(cells), new Float32Array(cells), new Float32Array(cells), new Float32Array(cells)];
   const [red, green, blue, weight] = sums;
   const span2 = side / (1 + 2 * NEBULA_PAD);
   const colors = /* @__PURE__ */ new Map();
   for (let index = 0; index < points.length; index++) {
-    if (!keep(index)) continue;
+    if (!keep2(index)) continue;
     const point = points[index];
     let color = colors.get(point.group);
     if (!color) {
@@ -7929,7 +8140,7 @@ function glowOf(canvas) {
 }
 
 // src/shared/atlas/HoverPill.tsx
-import { useEffect as useEffect10, useRef as useRef9, useState as useState11 } from "react";
+import { useEffect as useEffect10, useRef as useRef10, useState as useState12 } from "react";
 
 // src/shared/atlas/Glyph.tsx
 import { jsx as jsx19 } from "react/jsx-runtime";
@@ -7949,11 +8160,11 @@ function labelPlace(at, room) {
 }
 
 // src/shared/atlas/Wave.tsx
-import { useEffect as useEffect9, useRef as useRef8, useState as useState10 } from "react";
+import { useEffect as useEffect9, useRef as useRef9, useState as useState11 } from "react";
 import { jsx as jsx20, jsxs as jsxs17 } from "react/jsx-runtime";
 function usePlayhead(playing, duration) {
-  const [startedAt, setStartedAt] = useState10(null);
-  const [now, setNow] = useState10(0);
+  const [startedAt, setStartedAt] = useState11(null);
+  const [now, setNow] = useState11(0);
   useEffect9(() => {
     setStartedAt(playing ? performance.now() : null);
     setNow(performance.now());
@@ -7968,7 +8179,7 @@ function usePlayhead(playing, duration) {
   return progress;
 }
 function Wave3({ peaks, colors, width, height, progress = null }) {
-  const canvas = useRef8(null);
+  const canvas = useRef9(null);
   const tint = colors.join();
   useEffect9(() => {
     const element = canvas.current;
@@ -8017,8 +8228,8 @@ function HoverPill({
   at,
   within
 }) {
-  const [peaks, setPeaks] = useState11(() => peaksKept(id, WAVE_BARS));
-  const fetched = useRef9(audio);
+  const [peaks, setPeaks] = useState12(() => peaksKept(id, WAVE_BARS));
+  const fetched = useRef10(audio);
   fetched.current = audio;
   useEffect10(() => {
     setPeaks(peaksKept(id, WAVE_BARS));
@@ -8255,7 +8466,7 @@ function PickBox({
 }
 
 // src/shared/GrowLayer.tsx
-import { useRef as useRef10 } from "react";
+import { useRef as useRef11 } from "react";
 import { Fragment as Fragment8, jsx as jsx23, jsxs as jsxs20 } from "react/jsx-runtime";
 var percent2 = (at) => Math.round(at * 100);
 var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
@@ -8281,7 +8492,7 @@ function GrowLayer({
   card: cardBox
 }) {
   const t = useT();
-  const press = useRef10(null);
+  const press = useRef11(null);
   if (!from) return null;
   if (!to || !grow.to) {
     return /* @__PURE__ */ jsx23("svg", { "aria-hidden": true, height, style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: /* @__PURE__ */ jsx23("circle", { className: "kumi-breathe", cx: from[0], cy: from[1], fill: "none", r: 11, stroke: fromColor, strokeWidth: 2.5 }) });
@@ -8432,7 +8643,10 @@ function GrowLayer({
             ] }),
             /* @__PURE__ */ jsx23(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }, picked.result.artifact_id),
             /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-              /* @__PURE__ */ jsx23(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
+              /* @__PURE__ */ jsxs20(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: [
+                /* @__PURE__ */ jsx23("span", { "aria-hidden": "true", children: playing === picked.result.artifact_id ? "■" : "▶" }),
+                playing === picked.result.artifact_id ? t("map.stop") : t("map.play")
+              ] }),
               actions?.(picked.result),
               fromMap && toMap && /* @__PURE__ */ jsx23(
                 TextButton,
@@ -8459,15 +8673,15 @@ function GrowLayer({
 }
 
 // src/shared/Player.tsx
-import { useEffect as useEffect11, useRef as useRef11, useState as useState12 } from "react";
+import { useEffect as useEffect11, useRef as useRef12, useState as useState13 } from "react";
 import { jsx as jsx24, jsxs as jsxs21 } from "react/jsx-runtime";
 var BARS = 160;
 function Waveform({ id, color, playing, duration, audio, onClick }) {
-  const canvas = useRef11(null);
-  const [peaks, setPeaks] = useState12(() => peaksKept(id, BARS));
-  const [width, setWidth] = useState12(0);
-  const [startedAt, setStartedAt] = useState12(null);
-  const [now, setNow] = useState12(0);
+  const canvas = useRef12(null);
+  const [peaks, setPeaks] = useState13(() => peaksKept(id, BARS));
+  const [width, setWidth] = useState13(0);
+  const [startedAt, setStartedAt] = useState13(null);
+  const [now, setNow] = useState13(0);
   useEffect11(() => {
     let live = true;
     setPeaks(peaksKept(id, BARS));
@@ -8526,7 +8740,7 @@ function Player({
   audio
 }) {
   const t = useT();
-  const [shown, setShown] = useState12(false);
+  const [shown, setShown] = useState13(false);
   useEffect11(() => {
     const frame2 = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(frame2);
@@ -8536,6 +8750,11 @@ function Player({
     "section",
     {
       "aria-label": t("map.player", name),
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        onClose();
+      },
       style: {
         ...glass,
         position: "relative",
@@ -8611,6 +8830,7 @@ function Player({
 // src/shared/MapCanvas.tsx
 import { jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
+var CORNER_ZOOM_ROOM = 480;
 var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
@@ -8652,22 +8872,22 @@ var maps = 0;
 function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }) {
   const t = useT();
   const model = useMemo2(() => buildModel(map), [map]);
-  const canvasRef = useRef12(null);
-  const boxRef = useRef12(null);
-  const [size, setSize] = useState13({ width: 0, height: 0 });
-  const [view, setView] = useState13(null);
-  const [query, setQuery] = useState13("");
-  const [searchFor, setSearchFor] = useState13("");
-  const [hidden, setHidden] = useState13(() => /* @__PURE__ */ new Set());
-  const [hover, setHover] = useState13(null);
-  const drag = useRef12(null);
-  const [box, setBox] = useState13(null);
-  const [handTool, setHandTool] = useState13(false);
-  const [scrollPans, setScrollPans] = useState13(null);
-  const [grabbing, setGrabbing] = useState13(false);
-  const over = useRef12(false);
-  const [spaceHeld, setSpaceHeld] = useState13(false);
-  const space = useRef12(false);
+  const canvasRef = useRef13(null);
+  const boxRef = useRef13(null);
+  const [size, setSize] = useState14({ width: 0, height: 0 });
+  const [view, setView] = useState14(null);
+  const [query, setQuery] = useState14("");
+  const [searchFor, setSearchFor] = useState14("");
+  const [hidden, setHidden] = useState14(() => /* @__PURE__ */ new Set());
+  const [hover, setHover] = useState14(null);
+  const drag = useRef13(null);
+  const [box, setBox] = useState14(null);
+  const [handTool, setHandTool] = useState14(false);
+  const [scrollPans, setScrollPans] = useState14(null);
+  const [grabbing, setGrabbing] = useState14(false);
+  const over = useRef13(false);
+  const [spaceHeld, setSpaceHeld] = useState14(false);
+  const space = useRef13(false);
   useEffect12(() => {
     const hold = (held) => {
       if (space.current === held) return;
@@ -8694,16 +8914,16 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       window.removeEventListener("blur", blur2);
     };
   }, []);
-  const rested = useRef12(null);
+  const rested = useRef13(null);
   const rest = (id) => {
     if (rested.current === id) return;
     rested.current = id;
     onHover?.(id);
   };
-  const viewRef = useRef12(null);
+  const viewRef = useRef13(null);
   viewRef.current = view;
-  const nextView = useRef12(null);
-  const frameRef = useRef12(0);
+  const nextView = useRef13(null);
+  const frameRef = useRef13(0);
   const queueView = (next) => {
     moved2.current = true;
     nextView.current = next;
@@ -8716,18 +8936,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     });
   };
   useEffect12(() => () => cancelAnimationFrame(frameRef.current), []);
-  const backing = useRef12("");
-  const [said, setSaid] = useState13("");
-  const [hintId] = useState13(() => `kumi-map-keys-${maps += 1}`);
-  const topRef = useRef12(null);
-  const legendRef = useRef12(null);
-  const cornerRef = useRef12(null);
-  const playerRef = useRef12(null);
-  const growCardRef = useRef12(null);
-  const clusterBox = useRef12(null);
-  const [cornerHeight, setCornerHeight] = useState13(0);
-  const overlayFollow = useRef12(null);
-  const [topInset, setTopInset] = useState13(0);
+  const backing = useRef13("");
+  const [said, setSaid] = useState14("");
+  const [hintId] = useState14(() => `kumi-map-keys-${maps += 1}`);
+  const topRef = useRef13(null);
+  const legendRef = useRef13(null);
+  const cornerRef = useRef13(null);
+  const playerRef = useRef13(null);
+  const growCardRef = useRef13(null);
+  const clusterBox = useRef13(null);
+  const [cornerHeight, setCornerHeight] = useState14(0);
+  const overlayFollow = useRef13(null);
+  const [topInset, setTopInset] = useState14(0);
+  const [columnBottom, setColumnBottom] = useState14(0);
   const mapSize = mapSide(size.width, size.height, topInset);
   const fit = () => fitView(size.width, size.height, topInset, coverRight);
   const hasPoints = model.points.length > 0;
@@ -8750,13 +8971,13 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return out;
   }, [model, hidden, searched, leaving]);
   const visible = useMemo2(() => (index) => mask[index] === 1, [mask]);
-  const shown = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 1 ? 1 : 0), 0), [mask]);
-  const leavingCount = useMemo2(() => mask.reduce((count2, keep) => count2 + (keep === 2 ? 1 : 0), 0), [mask]);
-  const still = useMemo2(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
-  const leftAt = useRef12(/* @__PURE__ */ new Map());
-  const introAt = useRef12(-Infinity);
-  const until = useRef12(0);
-  const [clock2, setClock] = useState13(0);
+  const shown = useMemo2(() => mask.reduce((count2, keep2) => count2 + (keep2 === 1 ? 1 : 0), 0), [mask]);
+  const leavingCount = useMemo2(() => mask.reduce((count2, keep2) => count2 + (keep2 === 2 ? 1 : 0), 0), [mask]);
+  const still = useLessMotion();
+  const leftAt = useRef13(/* @__PURE__ */ new Map());
+  const introAt = useRef13(-Infinity);
+  const until = useRef13(0);
+  const [clock2, setClock] = useState14(0);
   const animate = (ms2) => {
     until.current = Math.max(until.current, performance.now() + ms2);
     setClock(performance.now());
@@ -8772,7 +8993,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     introAt.current = performance.now();
     animate(INTRO_MS);
   }, [model.revision]);
-  const [morph, setMorph] = useState13(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
+  const [morph, setMorph] = useState14(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
   useEffect12(() => {
     const now = performance.now();
     setMorph((current) => current.to === (tiles ? 1 : 0) ? current : { from: still ? tiles ? 1 : 0 : morphAt(current, now), to: tiles ? 1 : 0, at: now });
@@ -8781,8 +9002,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   useEffect12(() => {
     if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
   }, [flying]);
-  const popped = useRef12(null);
-  const pickedBefore = useRef12(void 0);
+  const popped = useRef13(null);
+  const pickedBefore = useRef13(void 0);
   useEffect12(() => {
     const before = pickedBefore.current;
     pickedBefore.current = picked;
@@ -8802,7 +9023,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const frame2 = requestAnimationFrame(setClock);
     return () => cancelAnimationFrame(frame2);
   }, [clock2]);
-  const [ownArrangement, setOwnArrangement] = useState13("");
+  const [ownArrangement, setOwnArrangement] = useState14("");
   const arrangementId = arrangement ?? ownArrangement;
   const arrangementIndex = LAYOUTS.includes(arrangementId) ? model.arrangements.findIndex((each) => each.id === arrangementId) : -1;
   const arranged = useMemo2(() => arrangedModel(model, arrangementIndex), [model, arrangementIndex]);
@@ -8814,10 +9035,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const named = LAYOUTS.filter((id) => model.arrangements.some((each) => each.id === id));
     return named.length === 0 ? [] : [{ id: "", name: t("arrange.similar.name"), title: t("arrange.similar.title") }, ...named.map((id) => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))];
   }, [model, t]);
-  const drawn = useRef12(null);
-  const shift = useRef12(null);
-  const lastPaint = useRef12(0);
-  const shiftedTo = useRef12(arranged);
+  const drawn = useRef13(null);
+  const shift = useRef13(null);
+  const lastPaint = useRef13(0);
+  const shiftedTo = useRef13(arranged);
   if (shiftedTo.current !== arranged) {
     shiftedTo.current = arranged;
     const last = drawn.current;
@@ -8862,16 +9083,22 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const first2 = clean(model.sounds[seeds[0]].name ?? "", 60);
     return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
   }, [searched, foundIds, found, model, t]);
-  const [painted, setPainted] = useState13("");
+  const themeKey = useThemeKey();
+  const [painted, setPainted] = useState14("");
   useEffect12(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const timer = setInterval(() => {
+    const look = () => {
       const now = Object.values(resolve(canvas)).join();
       setPainted((current) => current === now ? current : now);
-    }, 1e3);
+    };
+    if (themeKey !== null) {
+      const frame2 = requestAnimationFrame(look);
+      return () => cancelAnimationFrame(frame2);
+    }
+    const timer = setInterval(look, 1e3);
     return () => clearInterval(timer);
-  }, [hasPoints]);
+  }, [hasPoints, themeKey]);
   useEffect12(() => {
     const box2 = boxRef.current;
     if (!box2) return;
@@ -8888,11 +9115,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const observer = new ResizeObserver(() => {
       const legend = legendRef.current;
       setTopInset(legend ? Math.ceil(8 + legend.offsetTop + legend.offsetHeight + 8) : 0);
+      setColumnBottom(Math.ceil(8 + top.offsetHeight + 8));
     });
     observer.observe(top);
     return () => observer.disconnect();
   }, [hasPoints]);
-  const moved2 = useRef12(false);
+  const moved2 = useRef13(false);
   useEffect12(() => {
     if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
   }, [size.width, size.height]);
@@ -8903,16 +9131,26 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   useEffect12(() => {
     if (!moved2.current && size.width > 0) setView(fit());
   }, [topInset, coverRight]);
-  const framedFound = useRef12(null);
+  const framedFound = useRef13(null);
+  const matchesRef = useRef13(null);
   useEffect12(() => {
     if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
     framedFound.current = foundIds;
-    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
+    const card = matchesRef.current;
+    let clear = {};
+    if (card && card.offsetHeight > 0) {
+      const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 };
+      const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 };
+      const areaBelow = (size.width - coverRight) * (size.height - below.top);
+      const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset);
+      clear = areaBelow >= areaBeside ? below : beside;
+    }
+    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear);
     if (!framed) return;
     moved2.current = true;
     setView(framed);
   }, [foundIds, model, size.width, size.height, topInset]);
-  const wheelMode = useRef12(wheel);
+  const wheelMode = useRef13(wheel);
   wheelMode.current = wheel;
   useEffect12(() => {
     const canvas = canvasRef.current;
@@ -9269,7 +9507,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.globalAlpha = 1;
     }
     overlayFollow.current?.();
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -9342,6 +9580,18 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       setSaid(t("dock.cleared"));
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+      event.preventDefault();
+      if (grow?.choosing) {
+        const end = endOf(selected);
+        if (end) grow.name(end);
+      } else if (onPicked) {
+        const count2 = pickedIds.length + (pickedIds.includes(selected) ? -1 : 1);
+        onPicked([selected], "toggle");
+        setSaid(count2 > 0 ? t("dock.picked", count2) : t("dock.cleared"));
+      }
+      return;
+    }
     const key = mapKey(event);
     if (!view || !key) return;
     event.preventDefault();
@@ -9378,8 +9628,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const inView = Number.isFinite(x0) && x1 >= 0 && y1 >= 0 && x0 <= size.width && y0 <= size.height;
     return inView ? [x0, y0, x1, y1] : null;
   }, [view, pickedIds, indexOf, mask, active, mapSize, size.width, size.height]);
-  const cluster = useRef12(null);
-  const [clusterSize, setClusterSize] = useState13([320, 40]);
+  const cluster = useRef13(null);
+  const [clusterSize, setClusterSize] = useState14([320, 40]);
   const hasPicks = pickedIds.length > 0;
   const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : [];
   const boxed = drag.current?.add && picked?.size ? (/* @__PURE__ */ new Set([...picked, ...inBox.map((index) => model.points[index].id)])).size : inBox.length;
@@ -9408,6 +9658,15 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     observer.observe(element);
     return () => observer.disconnect();
   }, [hasPoints]);
+  const [playerHeight, setPlayerHeight] = useState14(0);
+  const playerOpen = Boolean(selected && model.sounds[selected]);
+  useEffect12(() => {
+    const element = playerRef.current;
+    if (!playerOpen || !element) return setPlayerHeight(0);
+    const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [playerOpen]);
   if (!model.points.length) {
     return /* @__PURE__ */ jsx25("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs22("div", { style: { maxWidth: 380 }, children: [
       empty,
@@ -9434,298 +9693,314 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   };
   const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
   const hiddenCount = (map?.hidden ?? 0) + leavingCount;
-  const foot = (chosen ? 120 : 10) + (cornerHeight > 0 ? cornerHeight + 8 : 0);
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, topInset, foot);
+  const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10;
+  const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0);
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot);
   clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
-  return /* @__PURE__ */ jsxs22("div", { style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text }, children: [
-    /* @__PURE__ */ jsxs22("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
-      /* @__PURE__ */ jsxs22("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
-        /* @__PURE__ */ jsxs22("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
-          /* @__PURE__ */ jsx25(
-            "input",
-            {
-              "aria-label": t("map.search"),
-              className: FOCUSABLE,
-              onChange: (event) => setQuery(event.target.value),
-              placeholder: t("map.searchHint"),
-              style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2 },
-              value: query
-            }
-          ),
-          /* @__PURE__ */ jsx25(
-            "span",
-            {
-              style: { ...S.faint, fontSize: 10.5, lineHeight: "18px", padding: "0 7px", borderRadius: 9, background: T.chip, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
-              title: model.revision ? t("map.revision", model.revision) : void 0,
-              children: countWords
-            }
-          )
+  return /* @__PURE__ */ jsxs22(
+    "div",
+    {
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || !grow?.choosing) return;
+        event.preventDefault();
+        grow.choose(false);
+      },
+      style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text },
+      children: [
+        /* @__PURE__ */ jsxs22("div", { ref: topRef, style: { position: "absolute", top: 8, left: 8, right: 8, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, pointerEvents: "none" }, children: [
+          /* @__PURE__ */ jsxs22("div", { style: { ...S.row, alignSelf: "stretch", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }, children: [
+            /* @__PURE__ */ jsxs22("div", { style: { ...glass, borderRadius: 18, position: "relative", display: "flex", alignItems: "center", flex: "1 1 180px", maxWidth: 420, minWidth: 150, height: 36, pointerEvents: "auto" }, children: [
+              /* @__PURE__ */ jsx25(
+                "input",
+                {
+                  "aria-label": t("map.search"),
+                  className: FOCUSABLE,
+                  onChange: (event) => setQuery(event.target.value),
+                  placeholder: t("map.searchHint"),
+                  style: { flex: 1, minWidth: 0, height: "100%", font: "inherit", fontSize: 12.5, padding: "0 12px", paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: "none", background: "transparent", color: T.text, outlineOffset: -2, textOverflow: "ellipsis" },
+                  value: query
+                }
+              ),
+              /* @__PURE__ */ jsx25(
+                "span",
+                {
+                  style: { ...S.faint, fontSize: 10.5, lineHeight: "18px", padding: "0 7px", borderRadius: 9, background: T.chip, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", cursor: "default" },
+                  title: model.revision ? t("map.revision", model.revision) : void 0,
+                  children: countWords
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsx25("span", { style: { flex: 1 } }),
+            /* @__PURE__ */ jsxs22(ToolGroup, { label: t("map.tools"), children: [
+              onPicked && /* @__PURE__ */ jsx25(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
+              onPicked && !handTool && !grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("map.pickTool") }),
+              onPicked && /* @__PURE__ */ jsx25(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
+              onPicked && handTool && !grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("map.hand") }),
+              grow && /* @__PURE__ */ jsx25(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
+              grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("grow.tool") }),
+              onPicked && /* @__PURE__ */ jsx25(Rule, {}),
+              layoutChoices.length > 0 && /* @__PURE__ */ jsx25(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
+              onTiles && /* @__PURE__ */ jsx25(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
+              tools,
+              /* @__PURE__ */ jsx25(Rule, {}),
+              /* @__PURE__ */ jsx25(
+                ToolButton,
+                {
+                  icon: "fit",
+                  label: t("map.fit"),
+                  onClick: () => {
+                    moved2.current = false;
+                    setView(fit());
+                  },
+                  title: t("map.fitTitle")
+                }
+              )
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx25("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: model.groups.filter((group) => group.count > 0).map((group) => {
+            const off = hidden.has(group.key);
+            return /* @__PURE__ */ jsxs22(
+              "button",
+              {
+                "aria-pressed": !off,
+                className: FOCUSABLE,
+                onClick: () => setHidden((current) => {
+                  const next = new Set(current);
+                  if (next.has(group.key)) next.delete(group.key);
+                  else next.add(group.key);
+                  return next;
+                }),
+                title: off ? t("map.show", group.name) : t("map.hide", group.name),
+                type: "button",
+                style: { ...S.row, gap: 5, font: "inherit", fontSize: 11, padding: "2px 8px 2px 6px", borderRadius: 10, border: "none", background: off ? "transparent" : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.55 : 1, transition: "background-color 140ms, opacity 140ms" },
+                children: [
+                  /* @__PURE__ */ jsx25("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx25(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
+                  group.name,
+                  " ",
+                  /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: group.count })
+                ]
+              },
+              group.key
+            );
+          }) }),
+          matches.length > 0 && // At most the room between the legend and the corner (the player too, when it's open): in a short map its list
+          // scrolls inside it rather than running under the corner.
+          /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: "auto" }, children: [
+            /* @__PURE__ */ jsxs22("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
+              /* @__PURE__ */ jsx25("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
+              onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
+              /* @__PURE__ */ jsx25(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
+            ] }),
+            /* @__PURE__ */ jsxs22("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: [
+              matches.slice(0, MATCHES_LISTED).map((id) => {
+                const sound = model.sounds[id];
+                const indexed = indexedValues(sound, t);
+                const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
+                return /* @__PURE__ */ jsxs22(
+                  "button",
+                  {
+                    "aria-pressed": selected === id,
+                    className: FOCUSABLE,
+                    onClick: () => onPick(id),
+                    type: "button",
+                    style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+                    children: [
+                      /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 6 }, children: [
+                        /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+                        indexed && /* @__PURE__ */ jsx25("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
+                        sound?.class && /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+                      ] }),
+                      reasons && /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
+                    ]
+                  },
+                  id
+                );
+              }),
+              matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx25("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
+            ] })
+          ] }),
+          hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
+          /* @__PURE__ */ jsxs22("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: [
+            /* @__PURE__ */ jsx25("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
+            hiddenActions
+          ] })
         ] }),
-        /* @__PURE__ */ jsx25("span", { style: { flex: 1 } }),
-        /* @__PURE__ */ jsxs22(ToolGroup, { label: t("map.tools"), children: [
-          onPicked && /* @__PURE__ */ jsx25(ToolButton, { icon: "pick", label: t("map.pickTool"), onClick: () => setHandTool(false), pressed: !handTool, title: t("map.pickToolTitle") }),
-          onPicked && !handTool && !grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("map.pickTool") }),
-          onPicked && /* @__PURE__ */ jsx25(ToolButton, { icon: "hand", label: t("map.hand"), onClick: () => setHandTool(true), pressed: handTool, title: t("map.handTitle") }),
-          onPicked && handTool && !grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("map.hand") }),
-          grow && /* @__PURE__ */ jsx25(ToolButton, { icon: "grow", label: t("grow.tool"), onClick: () => grow.choose(!grow.choosing), pressed: grow.choosing !== null, title: t("grow.toolTitle") }),
-          grow?.choosing && /* @__PURE__ */ jsx25(ToolName, { children: t("grow.tool") }),
-          onPicked && /* @__PURE__ */ jsx25(Rule, {}),
-          layoutChoices.length > 0 && /* @__PURE__ */ jsx25(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - 60), onChoose: chooseArrangement }),
-          onTiles && /* @__PURE__ */ jsx25(ToolButton, { icon: "tiles", label: t("map.tiles"), onClick: () => onTiles(!tiles), pressed: tiles, title: t("map.tilesTitle") }),
-          tools,
-          /* @__PURE__ */ jsx25(Rule, {}),
+        /* @__PURE__ */ jsxs22("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
           /* @__PURE__ */ jsx25(
-            ToolButton,
+            "canvas",
             {
-              icon: "fit",
-              label: t("map.fit"),
-              onClick: () => {
+              ref: canvasRef,
+              "aria-describedby": hintId,
+              "aria-label": t("map.canvas"),
+              "aria-roledescription": t("map.roledescription"),
+              className: FOCUSABLE,
+              onKeyDown: onKey,
+              onPointerDown: press,
+              onPointerMove: (event) => {
+                const [x, y] = at(event);
+                const held = drag.current;
+                if (held) {
+                  if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
+                  if (held.box) setBox([held.x, held.y, x, y]);
+                  else if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
+                  return;
+                }
+                if (!view) return;
+                const index = pick2(active, view, mapSize, x, y, reachPx(8), visible);
+                setHover(index >= 0 ? { index, x, y } : null);
+                rest(index >= 0 ? model.points[index].id : null);
+              },
+              onPointerUp: release,
+              onPointerCancel: () => {
+                drag.current = null;
+                setBox(null);
+                setGrabbing(false);
+              },
+              onPointerEnter: () => {
+                over.current = true;
+              },
+              onPointerLeave: () => {
+                over.current = false;
+                setHover(null);
+                rest(null);
+              },
+              onMouseDown: (event) => {
+                if (event.button === 1) event.preventDefault();
+              },
+              onDoubleClick: () => {
                 moved2.current = false;
                 setView(fit());
               },
-              title: t("map.fitTitle")
+              role: "application",
+              tabIndex: 0,
+              style: {
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                outlineOffset: -3,
+                cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
+                touchAction: "none"
+              }
+            }
+          ),
+          /* @__PURE__ */ jsx25(AtlasOverlay, { audio, follow: overlayFollow, height: size.height, kin: kinRings, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
+          box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
+          /* @__PURE__ */ jsx25(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
+          /* @__PURE__ */ jsx25("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+          /* @__PURE__ */ jsx25("span", { "aria-live": "polite", style: S.hidden, children: said }),
+          hovered && hoveredSound && hover && /* @__PURE__ */ jsx25(
+            HoverPill,
+            {
+              at: [hover.x, hover.y],
+              audio,
+              color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
+              glyph: glyphOf(hovered.group),
+              id: hovered.id,
+              playing: playing === hovered.id,
+              sound: hoveredSound,
+              within: [size.width - coverRight, size.height]
+            },
+            hovered.id
+          ),
+          grow && (grow.from || grow.to) && /* @__PURE__ */ jsx25(
+            GrowLayer,
+            {
+              actions: growActions,
+              bottom: foot,
+              card: growCardRef,
+              from: screenOf(placeOfEnd(grow.from)),
+              fromColor: colorOfEnd(grow.from),
+              fromMap: placeOfEnd(grow.from),
+              grow,
+              height: size.height,
+              onPlay: (result) => onPlayMade?.(result),
+              onStop: () => onStop?.(),
+              playing,
+              to: screenOf(placeOfEnd(grow.to)),
+              toColor: colorOfEnd(grow.to),
+              toMap: placeOfEnd(grow.to),
+              top: topInset,
+              width: size.width - coverRight
             }
           )
-        ] })
-      ] }),
-      /* @__PURE__ */ jsx25("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
-        const off = hidden.has(group.key);
-        return /* @__PURE__ */ jsxs22(
-          "button",
-          {
-            "aria-pressed": !off,
-            className: FOCUSABLE,
-            onClick: () => setHidden((current) => {
-              const next = new Set(current);
-              if (next.has(group.key)) next.delete(group.key);
-              else next.add(group.key);
-              return next;
-            }),
-            title: off ? t("map.show", group.name) : t("map.hide", group.name),
-            type: "button",
-            style: { ...S.row, gap: 5, font: "inherit", fontSize: 11, padding: "2px 8px 2px 6px", borderRadius: 10, border: "none", background: off ? "transparent" : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.55 : 1, transition: "background-color 140ms, opacity 140ms" },
-            children: [
-              /* @__PURE__ */ jsx25("svg", { "aria-hidden": true, height: "9", style: { flex: "none", opacity: off ? 0.35 : 1 }, viewBox: "-1.5 -1.5 3 3", width: "9", children: /* @__PURE__ */ jsx25(GlyphShape, { color: group.color, glyph: glyphOf(group.key) }) }),
-              group.name,
-              " ",
-              /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: group.count })
-            ]
-          },
-          group.key
-        );
-      }) }),
-      matches.length > 0 && /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
-        /* @__PURE__ */ jsxs22("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
-          /* @__PURE__ */ jsx25("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
-          onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
-          /* @__PURE__ */ jsx25(TextButton, { onClick: () => onPicked(matches, "replace"), title: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) })
         ] }),
-        matches.slice(0, MATCHES_LISTED).map((id) => {
-          const sound = model.sounds[id];
-          const indexed = indexedValues(sound, t);
-          const reasons = searched ? "" : foundLine(found?.matches?.[id], nearName !== "", t);
-          return /* @__PURE__ */ jsxs22(
-            "button",
-            {
-              "aria-pressed": selected === id,
-              className: FOCUSABLE,
-              onClick: () => onPick(id),
-              type: "button",
-              style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0, font: "inherit", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
-              children: [
-                /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 6 }, children: [
-                  /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
-                  indexed && /* @__PURE__ */ jsx25("span", { style: { color: T.faint, whiteSpace: "nowrap" }, title: t("map.indexedTitle"), children: t("map.indexed", indexed) }),
-                  sound?.class && /* @__PURE__ */ jsx25("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
-                ] }),
-                reasons && /* @__PURE__ */ jsx25("span", { style: { ...S.ellipsis, color: T.faint, fontSize: 10.5 }, title: nearName ? t("map.closenessTitle") : void 0, children: reasons })
-              ]
+        hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
+        /* @__PURE__ */ jsxs22(
+          "div",
+          {
+            "aria-label": t("dock.picked", pickedIds.length),
+            className: "kumi-pop",
+            ref: cluster,
+            role: "group",
+            style: {
+              ...glass,
+              position: "absolute",
+              zIndex: 1,
+              left: clusterAt.left,
+              top: clusterAt.top,
+              maxWidth: `calc(100% - 16px)`,
+              ...S.row,
+              flexWrap: "wrap",
+              gap: 6,
+              padding: "5px 6px 5px 10px",
+              transition: still ? "none" : "left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)"
             },
-            id
-          );
-        }),
-        matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx25("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
-      ] }),
-      hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
-      /* @__PURE__ */ jsxs22("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: "100%" }, children: [
-        /* @__PURE__ */ jsx25("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
-        hiddenActions
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxs22("div", { ref: boxRef, style: { position: "absolute", inset: 0 }, children: [
-      /* @__PURE__ */ jsx25(
-        "canvas",
-        {
-          ref: canvasRef,
-          "aria-describedby": hintId,
-          "aria-label": t("map.canvas"),
-          "aria-roledescription": t("map.roledescription"),
-          className: FOCUSABLE,
-          onKeyDown: onKey,
-          onPointerDown: press,
-          onPointerMove: (event) => {
-            const [x, y] = at(event);
-            const held = drag.current;
-            if (held) {
-              if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
-              if (held.box) setBox([held.x, held.y, x, y]);
-              else if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
-              return;
-            }
-            if (!view) return;
-            const index = pick2(active, view, mapSize, x, y, reachPx(8), visible);
-            setHover(index >= 0 ? { index, x, y } : null);
-            rest(index >= 0 ? model.points[index].id : null);
-          },
-          onPointerUp: release,
-          onPointerCancel: () => {
-            drag.current = null;
-            setBox(null);
-            setGrabbing(false);
-          },
-          onPointerEnter: () => {
-            over.current = true;
-          },
-          onPointerLeave: () => {
-            over.current = false;
-            setHover(null);
-            rest(null);
-          },
-          onMouseDown: (event) => {
-            if (event.button === 1) event.preventDefault();
-          },
-          onDoubleClick: () => {
-            moved2.current = false;
-            setView(fit());
-          },
-          role: "application",
-          tabIndex: 0,
-          style: {
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            outlineOffset: -3,
-            cursor: grabbing ? "grabbing" : spaceHeld || handTool || !onPicked ? "grab" : box ? "crosshair" : hover ? "pointer" : "default",
-            touchAction: "none"
+            children: [
+              /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
+                /* @__PURE__ */ jsx25(Icon, { name: "pick", size: 12 }),
+                t("dock.picked", pickedIds.length)
+              ] }),
+              pickedActions?.(pickedIds)
+            ]
           }
-        }
-      ),
-      /* @__PURE__ */ jsx25(AtlasOverlay, { audio, follow: overlayFollow, height: size.height, kin: kinRings, place: placeOnScreen, playing: playingSound, still, target: canvasRef, trail, width: size.width }),
-      box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
-      /* @__PURE__ */ jsx25(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
-      /* @__PURE__ */ jsx25("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
-      /* @__PURE__ */ jsx25("span", { "aria-live": "polite", style: S.hidden, children: said }),
-      hovered && hoveredSound && hover && /* @__PURE__ */ jsx25(
-        HoverPill,
-        {
-          at: [hover.x, hover.y],
-          audio,
-          color: model.groups.find((group) => group.key === hovered.group)?.color ?? T.accent,
-          glyph: glyphOf(hovered.group),
-          id: hovered.id,
-          playing: playing === hovered.id,
-          sound: hoveredSound,
-          within: [size.width - coverRight, size.height]
-        },
-        hovered.id
-      ),
-      grow && (grow.from || grow.to) && /* @__PURE__ */ jsx25(
-        GrowLayer,
-        {
-          actions: growActions,
-          bottom: foot,
-          card: growCardRef,
-          from: screenOf(placeOfEnd(grow.from)),
-          fromColor: colorOfEnd(grow.from),
-          fromMap: placeOfEnd(grow.from),
-          grow,
-          height: size.height,
-          onPlay: (result) => onPlayMade?.(result),
-          onStop: () => onStop?.(),
-          playing,
-          to: screenOf(placeOfEnd(grow.to)),
-          toColor: colorOfEnd(grow.to),
-          toMap: placeOfEnd(grow.to),
-          top: topInset,
-          width: size.width - coverRight
-        }
-      )
-    ] }),
-    hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
-    /* @__PURE__ */ jsxs22(
-      "div",
-      {
-        "aria-label": t("dock.picked", pickedIds.length),
-        className: "kumi-pop",
-        ref: cluster,
-        role: "group",
-        style: {
-          ...glass,
-          position: "absolute",
-          zIndex: 1,
-          left: clusterAt.left,
-          top: clusterAt.top,
-          maxWidth: `calc(100% - 16px)`,
-          ...S.row,
-          flexWrap: "wrap",
-          gap: 6,
-          padding: "5px 6px 5px 10px",
-          transition: still ? "none" : "left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)"
-        },
-        children: [
-          /* @__PURE__ */ jsxs22("span", { style: { ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }, children: [
-            /* @__PURE__ */ jsx25(Icon, { name: "pick", size: 12 }),
-            t("dock.picked", pickedIds.length)
-          ] }),
-          pickedActions?.(pickedIds)
-        ]
-      }
-    ),
-    selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
-    /* @__PURE__ */ jsx25("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 1, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx25("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx25(
-      Player,
-      {
-        actions: actions?.(selected, chosen),
-        audio: audio ?? (() => Promise.reject(new Error("no audio"))),
-        color: chosenColor,
-        id: selected,
-        onClose: () => {
-          if (playing === selected) onStop?.();
-          onSelect(null);
-        },
-        onPlay: () => onPick(selected),
-        onStop: () => onStop?.(),
-        playing: playing === selected,
-        sound: chosen
-      },
-      selected
-    ) }) }),
-    /* @__PURE__ */ jsx25(
-      Corner,
-      {
-        bottom: chosen ? 120 : 10,
-        box: cornerRef,
-        cover: coverRight,
-        still,
-        first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx25(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
-        families: model.groups.filter((group) => group.count > 0).length,
-        hint: hintOf(mapState(spaceHeld)),
-        layout: layoutChoices.length > 0 ? (
-          // The menu opens upward from the corner, which sits higher while the player is under it.
-          /* @__PURE__ */ jsx25(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
-        ) : void 0,
-        picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
-        prompt: grow?.choosing ? /* @__PURE__ */ jsxs22("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-          /* @__PURE__ */ jsx25(Icon, { name: "grow", size: 13 }),
-          /* @__PURE__ */ jsx25("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
-          /* @__PURE__ */ jsx25(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
-        ] }) : void 0,
-        sounds: countWords,
-        zoom: view?.scale ?? 1
-      }
-    )
-  ] });
+        ),
+        selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
+        /* @__PURE__ */ jsx25("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx25("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx25(
+          Player,
+          {
+            actions: actions?.(selected, chosen),
+            audio: audio ?? (() => Promise.reject(new Error("no audio"))),
+            color: chosenColor,
+            id: selected,
+            onClose: () => {
+              if (playing === selected) onStop?.();
+              onSelect(null);
+            },
+            onPlay: () => onPick(selected),
+            onStop: () => onStop?.(),
+            playing: playing === selected,
+            sound: chosen
+          },
+          selected
+        ) }) }),
+        /* @__PURE__ */ jsx25(
+          Corner,
+          {
+            bottom: cornerBottom,
+            box: cornerRef,
+            cover: coverRight,
+            still,
+            first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx25(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
+            families: model.groups.filter((group) => group.count > 0).length,
+            hint: hintOf(mapState(spaceHeld)),
+            layout: layoutChoices.length > 0 ? (
+              // The menu opens upward from the corner, which sits higher while the player is under it.
+              /* @__PURE__ */ jsx25(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
+            ) : void 0,
+            picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
+            prompt: grow?.choosing ? /* @__PURE__ */ jsxs22("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+              /* @__PURE__ */ jsx25(Icon, { name: "grow", size: 13 }),
+              /* @__PURE__ */ jsx25("span", { style: { fontSize: 12, color: T.text }, children: grow.choosing === "from" ? t("grow.from") : t("grow.to", clean(grow.from?.name ?? "", 60)) }),
+              /* @__PURE__ */ jsx25(TextButton, { onClick: () => grow.choose(false), children: t("grow.cancel") })
+            ] }) : void 0,
+            sounds: countWords,
+            zoom: size.width - coverRight >= CORNER_ZOOM_ROOM ? view?.scale ?? 1 : void 0
+          }
+        )
+      ]
+    }
+  );
 }
 function GlyphShape({ glyph, color }) {
   const shape = GLYPH_SHAPES[glyph];
@@ -9733,16 +10008,18 @@ function GlyphShape({ glyph, color }) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect13, useMemo as useMemo3, useRef as useRef13, useState as useState14 } from "react";
+import { useEffect as useEffect13, useMemo as useMemo3, useRef as useRef14, useState as useState15 } from "react";
 import { Fragment as Fragment9, jsx as jsx26, jsxs as jsxs23 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
 var LOWEST = 150;
 var HIGHEST = 620;
+var MAP_LEAST = 240;
+var POP_FOR_MS = 1500;
 function Waveform2({ id, color, audio, width, height, bars, tints }) {
-  const canvas = useRef13(null);
-  const [peaks, setPeaks] = useState14(() => id ? peaksKept(id, bars) : null);
-  const [drawnWidth, setDrawnWidth] = useState14(typeof width === "number" ? width : 0);
+  const canvas = useRef14(null);
+  const [peaks, setPeaks] = useState15(() => id ? peaksKept(id, bars) : null);
+  const [drawnWidth, setDrawnWidth] = useState15(typeof width === "number" ? width : 0);
   useEffect13(() => {
     const element = canvas.current;
     if (!id || !element || peaks) return;
@@ -9803,7 +10080,7 @@ function useItemKeys(index, onMove, onRemove) {
   };
 }
 function useDrop({ item, dragging, onDrag, onDropHere }, name) {
-  const [over, setOver] = useState14(false);
+  const [over, setOver] = useState15(false);
   return {
     over,
     handlers: {
@@ -9829,7 +10106,7 @@ function useDrop({ item, dragging, onDrag, onDropHere }, name) {
   };
 }
 function useKin(onKin) {
-  const tell = useRef13(onKin);
+  const tell = useRef14(onKin);
   tell.current = onKin;
   useEffect13(() => () => tell.current?.(false), []);
   return { onBlur: () => onKin?.(false), onFocus: () => onKin?.(true), onPointerEnter: () => onKin?.(true), onPointerLeave: () => onKin?.(false) };
@@ -9974,9 +10251,9 @@ function Card(props) {
   );
 }
 function NameField({ initial, label, onDone }) {
-  const [text, setText] = useState14(initial);
-  const field = useRef13(null);
-  const done = useRef13(false);
+  const [text, setText] = useState15(initial);
+  const field = useRef14(null);
+  const done = useRef14(false);
   useEffect13(() => {
     field.current?.focus();
     field.current?.select();
@@ -10014,28 +10291,65 @@ function NameField({ initial, label, onDone }) {
 function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }) {
   const t = useT();
   const current = palette?.current ?? null;
-  const [editing, setEditing] = useState14(null);
-  const [forgetting, setForgetting] = useState14(false);
-  const [dragging, setDragging] = useState14(null);
-  const [height, setHeight] = useState14(OPEN_HEIGHT);
-  const [order, setOrder] = useState14(null);
+  const [editing, setEditing] = useState15(null);
+  const [forgetting, setForgetting] = useState15(false);
+  const [dragging, setDragging] = useState15(null);
+  const [height, setHeight] = useState15(OPEN_HEIGHT);
+  const [order, setOrder] = useState15(null);
   useEffect13(() => setOrder(null), [palette]);
-  const known = useRef13(null);
+  const known = useRef14(null);
+  const arrivedAt = useRef14(0);
   const arrived = useMemo3(() => {
     const keys = new Set((current?.items ?? []).map((item) => item.key));
     const before = known.current;
     const fresh2 = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
     known.current = { id: current?.id ?? null, keys };
+    if (fresh2.length > 0) arrivedAt.current = Date.now();
     return new Map(fresh2.map((key, order2) => [key, order2]));
   }, [current]);
-  const strip = useRef13(null);
+  const strip = useRef14(null);
   useEffect13(() => {
     const element = strip.current;
     if (!element || arrived.size === 0) return;
     const smooth = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth });
   }, [arrived, open]);
-  const [now, setNow] = useState14(() => Date.now());
+  const [edges, setEdges] = useState15({ start: false, end: false });
+  useEffect13(() => {
+    const element = strip.current;
+    if (open || !element) return;
+    const measure = () => {
+      const next = { start: element.scrollLeft > 1, end: element.scrollLeft + element.clientWidth < element.scrollWidth - 1 };
+      setEdges((before) => before.start === next.start && before.end === next.end ? before : next);
+    };
+    const wheel = (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return;
+      event.preventDefault();
+      element.scrollLeft += event.deltaY;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    element.addEventListener("scroll", measure, { passive: true });
+    element.addEventListener("wheel", wheel, { passive: false });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", measure);
+      element.removeEventListener("wheel", wheel);
+    };
+  }, [open, current?.items.length]);
+  const section = useRef14(null);
+  const [room, setRoom] = useState15(Number.POSITIVE_INFINITY);
+  useEffect13(() => {
+    const parent = section.current?.parentElement;
+    if (!parent) return;
+    const observer = new ResizeObserver(() => setRoom(parent.clientHeight));
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
+  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST));
+  const rowMask = `linear-gradient(to right, ${edges.start ? "transparent" : "#000"}, #000 28px, #000 calc(100% - 28px), ${edges.end ? "transparent" : "#000"})`;
+  const [now, setNow] = useState15(() => Date.now());
   const shownFor = said?.failed ? 8e3 : 4e3;
   useEffect13(() => {
     if (!said) return;
@@ -10044,7 +10358,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     return () => clearTimeout(timer);
   }, [said, shownFor]);
   const saying = said && now - said.at < shownFor ? said : null;
-  const grip = useRef13(null);
+  const grip = useRef14(null);
   const gripDown = (event) => {
     if (!open || event.button !== 0) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -10055,7 +10369,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     if (!held) return;
     const delta = held.y - event.clientY;
     if (Math.abs(delta) > 3) held.moved = true;
-    if (held.moved) setHeight(Math.min(HIGHEST, Math.max(LOWEST, held.height + delta)));
+    if (held.moved) setHeight(Math.min(highest, Math.max(LOWEST, held.height + delta)));
   };
   const run = (action) => onDo(action).then((done) => {
     if (!done) setOrder(null);
@@ -10076,7 +10390,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     dragging,
     index,
     item,
-    arriving: arrived.get(item.key) ?? null,
+    arriving: Date.now() - arrivedAt.current < POP_FOR_MS ? arrived.get(item.key) ?? null : null,
     onDrag: setDragging,
     onDropHere: () => dragging && move(dragging, index),
     onMove: (to) => move(item.key, to),
@@ -10126,7 +10440,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           ]
         }
       ),
-      (!palette || palette.palettes.length === 0) && /* @__PURE__ */ jsx26("span", { style: S.faint, children: t("dock.none") }),
+      palette === null ? /* @__PURE__ */ jsx26(Pending, { label: t("dock.reading"), width: "8rem" }) : palette.palettes.length === 0 && /* @__PURE__ */ jsx26("span", { style: S.faint, children: t("dock.none") }),
       current && /* @__PURE__ */ jsx26(TextButton, { onClick: () => setEditing("rename"), title: t("dock.renameTitle"), children: t("dock.rename") }),
       palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx26(TextButton, { onClick: () => setEditing("new"), title: t("dock.newName"), children: t("dock.newPalette") })
     ] }),
@@ -10135,7 +10449,6 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       /* @__PURE__ */ jsx26(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
     ] }),
     current && current.excluded > 0 && /* @__PURE__ */ jsx26("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
-    /* @__PURE__ */ jsx26("span", { style: { flex: 1 } }),
     current && current.items.length > 1 && make && /* @__PURE__ */ jsx26(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
     current && current.items.length > 0 && kit?.(current),
     current && !forgetting && /* @__PURE__ */ jsx26(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
@@ -10172,7 +10485,10 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     "section",
     {
       "aria-label": t("dock.title"),
-      ref: landing,
+      ref: (element) => {
+        section.current = element;
+        if (landing) landing.current = element;
+      },
       style: {
         position: "relative",
         display: "flex",
@@ -10183,7 +10499,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
         background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
         color: T.text,
         flex: "none",
-        height: open && items.length > 0 ? height : void 0,
+        height: open && items.length > 0 ? Math.min(height, highest) : void 0,
         transition: grip.current ? "none" : "height 260ms cubic-bezier(.2,.8,.2,1)"
       },
       children: [
@@ -10208,6 +10524,30 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           }
         ),
         header,
+        /* @__PURE__ */ jsx26(
+          "span",
+          {
+            "aria-live": "polite",
+            style: {
+              position: "absolute",
+              right: 10,
+              bottom: "calc(100% + 6px)",
+              maxWidth: "calc(100% - 20px)",
+              zIndex: 3,
+              padding: "3px 10px",
+              borderRadius: 12,
+              border: `1px solid ${T.border}`,
+              background: T.raised,
+              boxShadow: "0 6px 18px -10px rgba(0,0,0,.5)",
+              fontSize: 11.5,
+              color: saying?.failed ? T.warn : T.muted,
+              pointerEvents: "none",
+              opacity: saying ? 1 : 0,
+              transition: "opacity 160ms"
+            },
+            children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : ""
+          }
+        ),
         current && forgetting && /* @__PURE__ */ jsxs23("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
           /* @__PURE__ */ jsx26("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
           /* @__PURE__ */ jsx26(
@@ -10227,22 +10567,39 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx26(Card, { ...itemProps(item, index) }, item.key)),
           items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx26("span", { style: { ...S.faint, alignSelf: "center" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
         ] }),
-        current && items.length > 0 && !open && /* @__PURE__ */ jsxs23("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "nowrap", gap: 5, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-          items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx26(Chip2, { ...itemProps(item, index) }, item.key)),
-          items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx26("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
-        ] }),
-        (!current || items.length === 0) && /* @__PURE__ */ jsxs23("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
+        current && items.length > 0 && !open && /* @__PURE__ */ jsxs23(
+          "div",
+          {
+            "aria-label": t("dock.sounds"),
+            ref: strip,
+            role: "list",
+            style: {
+              display: "flex",
+              flexWrap: "nowrap",
+              gap: 5,
+              overflowX: "auto",
+              paddingBottom: 2,
+              scrollbarWidth: "thin",
+              maskImage: rowMask,
+              WebkitMaskImage: rowMask
+            },
+            children: [
+              items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx26(Chip2, { ...itemProps(item, index) }, item.key)),
+              items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx26("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
+            ]
+          }
+        ),
+        palette !== null && (!current || items.length === 0) && /* @__PURE__ */ jsxs23("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
           /* @__PURE__ */ jsx26(Icon, { name: "plus", size: 12 }),
           t("dock.empty")
-        ] }),
-        /* @__PURE__ */ jsx26("span", { "aria-live": "polite", style: saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" })
+        ] })
       ]
     }
   );
 }
 
 // src/shared/paletteMap.ts
-import { useEffect as useEffect14, useMemo as useMemo4, useState as useState15 } from "react";
+import { useEffect as useEffect14, useMemo as useMemo4, useState as useState16 } from "react";
 
 // src/shared/atlas/lineage.ts
 var MOST_FAMILIES = 6;
@@ -10276,12 +10633,12 @@ function parentsOf(sources, made, generations = GENERATIONS) {
 // src/shared/paletteMap.ts
 function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const revision = state.map?.revision ?? null;
-  const [picks, setPicks] = useState15({ revision, ids: /* @__PURE__ */ new Set() });
+  const [picks, setPicks] = useState16({ revision, ids: /* @__PURE__ */ new Set() });
   const picked = picks.revision === revision ? picks.ids : /* @__PURE__ */ new Set();
   useEffect14(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
   const marked = useMemo4(() => marksOf(state.palette, revision), [state.palette, revision]);
-  const [flying, setFlying] = useState15(null);
-  const [making, setMaking] = useState15(null);
+  const [flying, setFlying] = useState16(null);
+  const [making, setMaking] = useState16(null);
   const kept3 = useMemo4(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
   const groupOf = useMemo4(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
   const designed = useMemo4(() => new Map((state.designs ?? []).map((result) => [result.artifact_id, result])), [state.designs]);
@@ -10292,7 +10649,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     },
     made: (id) => designed.get(id) ?? null
   };
-  const [kinOf, setKinOf] = useState15(null);
+  const [kinOf, setKinOf] = useState16(null);
   const kin = useMemo4(() => {
     if (kinOf === null) return null;
     return new Set(parentsOf(typeof kinOf === "string" ? designed.get(kinOf)?.sources ?? [] : kinOf, (id) => designed.get(id) ?? null));
@@ -10360,10 +10717,10 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
 }
 
 // src/shared/SampleFolders.tsx
-import { useCallback as useCallback3, useEffect as useEffect15, useState as useState16 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect15, useState as useState17 } from "react";
 import { jsx as jsx27, jsxs as jsxs24 } from "react/jsx-runtime";
 function useSampleFolders(store, revision) {
-  const [folders, setFolders] = useState16(void 0);
+  const [folders, setFolders] = useState17(void 0);
   const read = useCallback3(() => void store.libraryFolders().then(setFolders), [store]);
   useEffect15(read, [read, revision]);
   return folders;
@@ -10386,9 +10743,9 @@ function SampleFolders({
   onClose
 }) {
   const t = useT();
-  const [typed, setTyped] = useState16("");
-  const [busy, setBusy] = useState16(false);
-  const [said, setSaid] = useState16(null);
+  const [typed, setTyped] = useState17("");
+  const [busy, setBusy] = useState17(false);
+  const [said, setSaid] = useState17(null);
   const submit = async () => {
     const folder = typed.trim();
     if (!folder || busy) return;
@@ -10469,7 +10826,7 @@ var RUNTIME_MISSING = { needs_runtime: true, outdated_runtime: true, damaged_run
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
-  const first = useRef14(null);
+  const first = useRef15(null);
   useEffect16(() => first.current?.focus(), []);
   return /* @__PURE__ */ jsx28(
     "div",
@@ -10508,11 +10865,11 @@ function MapWorkspace({ ctx, store, audition }) {
   useWant(store, "palette");
   const state = useKumi(store);
   const playing = usePlaying(audition);
-  const [selected, setSelected] = useState17(null);
-  const [padsFor, setPadsFor] = useState17(null);
-  const [hover, setHover] = useState17(() => ctx.storage.get(HOVER_PLAY, true) !== false);
-  const [tiles, setTiles] = useState17(() => ctx.storage.get(TILES, false) === true);
-  const [layout, setLayout] = useState17(() => ctx.storage.get(LAYOUT, "") ?? "");
+  const [selected, setSelected] = useState18(null);
+  const [padsFor, setPadsFor] = useState18(null);
+  const [hover, setHover] = useState18(() => ctx.storage.get(HOVER_PLAY, true) !== false);
+  const [tiles, setTiles] = useState18(() => ctx.storage.get(TILES, false) === true);
+  const [layout, setLayout] = useState18(() => ctx.storage.get(LAYOUT, "") ?? "");
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
@@ -10520,8 +10877,8 @@ function MapWorkspace({ ctx, store, audition }) {
   });
   const playMade = (id) => void audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   const grow = useGrow((request) => store.design(request), (result) => playMade(result.artifact_id), state.map?.revision ?? null);
-  const dock = useRef14(null);
-  const [paletteOpen, setPaletteOpen] = useState17(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
+  const dock = useRef15(null);
+  const [paletteOpen, setPaletteOpen] = useState18(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
   const first = useFirstOpen(
     () => ctx.storage.get(FIRST_OPEN, ""),
     (kept3) => ctx.storage.set(FIRST_OPEN, kept3)
@@ -10530,8 +10887,8 @@ function MapWorkspace({ ctx, store, audition }) {
   useEffect16(() => {
     if (makeOpen) first.done(["make"]);
   }, [makeOpen]);
-  const area = useRef14(null);
-  const [areaWidth, setAreaWidth] = useState17(0);
+  const area = useRef15(null);
+  const [areaWidth, setAreaWidth] = useState18(0);
   useEffect16(() => {
     const element = area.current;
     if (!element) return;
@@ -10543,7 +10900,7 @@ function MapWorkspace({ ctx, store, audition }) {
   const session = ownerSession(state);
   const map = state.map;
   const folders = useSampleFolders(store, map?.revision);
-  const [foldersOpen, setFoldersOpen] = useState17(false);
+  const [foldersOpen, setFoldersOpen] = useState18(false);
   const files = ctx.files;
   const folderControl = (onClose) => /* @__PURE__ */ jsx28(
     SampleFolders,
@@ -10564,13 +10921,16 @@ function MapWorkspace({ ctx, store, audition }) {
   );
   const setupSteps = RUNTIME_MISSING[state.setup?.state ?? ""] ? nextSteps(state, t) : [];
   const scanning = Object.values(state.jobs).find((job) => job.kind === "scan" && (job.state === "running" || job.state === void 0));
-  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : scanning ? /* @__PURE__ */ jsxs25(Fragment10, { children: [
+  const empty = state.available === false ? t("map.agentOff") : map === null ? state.failed.map ? /* @__PURE__ */ jsxs25(Fragment10, { children: [
+    t("map.failed", state.failed.map),
+    /* @__PURE__ */ jsx28("div", { style: { marginTop: 10, display: "flex", justifyContent: "center" }, children: /* @__PURE__ */ jsx28(TextButton, { onClick: () => store.refresh("map"), children: t("map.retry") }) })
+  ] }) : t("map.reading") : scanning ? /* @__PURE__ */ jsxs25(Fragment10, { children: [
     t("map.scanningNow"),
     jobWords(scanning, t).detail && /* @__PURE__ */ jsx28("div", { style: { marginTop: 6, color: T.faint }, children: jobWords(scanning, t).detail })
   ] }) : /* @__PURE__ */ jsxs25(Fragment10, { children: [
     setupSteps.length > 0 ? t("map.setupFirst") : t("map.empty"),
     setupSteps.length === 0 && /* @__PURE__ */ jsx28("div", { style: { ...glass, marginTop: 12, padding: 12 }, children: folderControl() }),
-    /* @__PURE__ */ jsx28("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, SCAN_REQUEST, { send: false, session }), title: t("map.scanTitle"), children: t("map.scan") }) })
+    /* @__PURE__ */ jsx28("div", { style: { marginTop: 10, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }, children: setupSteps.length > 0 ? setupSteps.map((step2) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, step2.request, { send: true, session: null }), strong: setupSteps.length === 1, children: step2.label }, step2.request)) : /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, SCAN_REQUEST, { send: false, session }), title: t("map.scanTitle"), children: t("map.scan") }) })
   ] });
   return /* @__PURE__ */ jsxs25("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }, children: [
     /* @__PURE__ */ jsxs25("div", { ref: area, style: { flex: 1, minHeight: 0, position: "relative" }, children: [
@@ -10584,10 +10944,10 @@ function MapWorkspace({ ctx, store, audition }) {
             const request = soundRequest(id, sound.name, map?.revision);
             const near = nearRequest([{ id, name: sound.name }], map?.revision);
             return /* @__PURE__ */ jsxs25(Fragment10, { children: [
-              /* @__PURE__ */ jsx28(TextButton, { disabled: palette.marked.has(id), onClick: () => void palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
-              near && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
+              /* @__PURE__ */ jsx28(TextButton, { disabled: palette.marked.has(id), onClick: () => palette.gather([id]), title: t("dock.addTitle"), children: palette.marked.has(id) ? t("dock.inPalette") : t("dock.add") }),
+              near && /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, near, { send: false, session }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
               request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => setPadsFor(padsFor === id ? null : id), pressed: padsFor === id, title: t("map.useOnPadTitle"), children: t("map.useOnPad") }),
-              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
+              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, request, { send: false, session }), strong: true, title: t("map.useTitle"), children: t("map.use") }),
               request && padsFor === id && /* @__PURE__ */ jsx28(
                 PadPicker,
                 {
@@ -10605,8 +10965,8 @@ function MapWorkspace({ ctx, store, audition }) {
           empty,
           found: state.found,
           hiddenActions: /* @__PURE__ */ jsxs25(Fragment10, { children: [
-            /* @__PURE__ */ jsx28(TextButton, { onClick: () => void store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
-            /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
+            /* @__PURE__ */ jsx28(TextButton, { onClick: () => store.showHidden(), title: t("map.showHiddenTitle"), children: t("map.showHidden") }),
+            /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, RESCAN_REQUEST, { send: false, session }), title: t("map.rescanTitle"), children: t("map.rescan") })
           ] }),
           leaving: state.leaving,
           map,
@@ -10623,8 +10983,8 @@ function MapWorkspace({ ctx, store, audition }) {
             const request = useRequest(result);
             const kept3 = palette.kept.has(result.artifact_id);
             return /* @__PURE__ */ jsxs25(Fragment10, { children: [
-              /* @__PURE__ */ jsx28(TextButton, { disabled: kept3, onClick: () => void palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
-              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
+              /* @__PURE__ */ jsx28(TextButton, { disabled: kept3, onClick: () => palette.keep(result), title: t("make.keepTitle"), children: kept3 ? t("make.kept") : t("make.keep") }),
+              request && /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, request, { send: false, session }), title: t("make.useTitle"), children: t("make.use") }),
               /* @__PURE__ */ jsx28(TextButton, { onClick: () => palette.makeFrom([sourceOfResult(result), ...grow.to ? [grow.to.source] : []]), title: t("make.openTitle"), children: t("make.open") })
             ] });
           },
@@ -10636,7 +10996,7 @@ function MapWorkspace({ ctx, store, audition }) {
           pickedActions: (ids) => {
             const near = ids.length > 1 ? nearRequest(ids.map((id) => ({ id, name: map?.sounds[id]?.name })), map?.revision) : null;
             return /* @__PURE__ */ jsxs25(Fragment10, { children: [
-              /* @__PURE__ */ jsx28(TextButton, { onClick: () => void palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
+              /* @__PURE__ */ jsx28(TextButton, { onClick: () => palette.gather(ids), strong: true, title: t("dock.addTitle"), children: t("dock.addPicked", ids.length) }),
               ids.length > 1 && /* @__PURE__ */ jsx28(TextButton, { onClick: () => palette.makeFromPicks(ids), title: t("make.openTitle"), children: t("make.open") }),
               ids.length === 2 && (() => {
                 const [from, to] = ids.map((id) => soundEnd(id, map?.sounds[id]?.name, map?.revision ?? null));
@@ -10658,7 +11018,7 @@ function MapWorkspace({ ctx, store, audition }) {
               near && /* @__PURE__ */ jsx28(
                 TextButton,
                 {
-                  onClick: () => void ask(ctx, near, { send: false, session }),
+                  onClick: () => ask(ctx, near, { send: false, session }),
                   title: ids.length > MOST_NEAR ? t("map.moreLikeTheseFirst", MOST_NEAR, ids.length) : t("map.moreLikeTheseTitle"),
                   children: t("map.moreLikeThese", Math.min(ids.length, MOST_NEAR))
                 }
@@ -10733,7 +11093,7 @@ function MapWorkspace({ ctx, store, audition }) {
           tempo: state.focus?.transport?.tempo,
           use: (result) => {
             const request = useRequest(result);
-            return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
+            return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, request, { send: false, session }), strong: true, title: t("make.useTitle"), children: t("make.use") }) : null;
           }
         }
       )
@@ -10743,7 +11103,7 @@ function MapWorkspace({ ctx, store, audition }) {
       {
         audio: (id) => audition.url(id),
         groups: map?.groups,
-        kit: (current) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
+        kit: (current) => /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, kitRequest(current.name), { send: false, session }), title: t("dock.kitTitle"), children: t("dock.kit") }),
         landing: dock,
         lineage: palette.madeLineage,
         onKin: palette.showKinOf,
@@ -10761,7 +11121,7 @@ function MapWorkspace({ ctx, store, audition }) {
         said: state.paletteSaid,
         use: (item) => {
           const request = itemReference(item, state.palette?.map_revision ?? null);
-          return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => void ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
+          return request ? /* @__PURE__ */ jsx28(TextButton, { onClick: () => ask(ctx, request, { send: false, session }), title: t("map.useTitle"), children: t("map.use") }) : null;
         }
       }
     )
@@ -10802,7 +11162,7 @@ function petLine(before, after, t) {
 
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
-import { useState as useState18 } from "react";
+import { useState as useState19 } from "react";
 import { Fragment as Fragment12, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
@@ -10829,8 +11189,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const t = useT();
   useWant(store, "setup");
   const state = useKumi(store);
-  const [openOnFind, setOpenOnFind] = useState18(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
-  const [petLines, setPetLines] = useState18(() => ctx.storage.get(PET_LINES, false));
+  const [openOnFind, setOpenOnFind] = useState19(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
+  const [petLines, setPetLines] = useState19(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
   const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
@@ -10849,7 +11209,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
     state.available === false ? /* @__PURE__ */ jsx30("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs27(Fragment12, { children: [
       /* @__PURE__ */ jsxs27("div", { children: [
         /* @__PURE__ */ jsx30("h3", { style: HEADING, children: t("settings.setup") }),
-        /* @__PURE__ */ jsx30(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        /* @__PURE__ */ jsx30(Line, { label: t("settings.state"), children: setup === null && !state.failed.setup && !partWorks ? /* @__PURE__ */ jsx30(Pending, { label: t("pane.reading"), width: "6rem" }) : STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
         next && /* @__PURE__ */ jsx30(Line, { label: t("settings.next"), children: clean(next, 300) }),
         runtime && /* @__PURE__ */ jsxs27(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
@@ -10897,7 +11257,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         steps.map((step2) => /* @__PURE__ */ jsx30(
           TextButton,
           {
-            onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
+            onClick: () => ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
             strong: steps.length === 1,
             children: step2.label
           },
@@ -10951,7 +11311,7 @@ var MEASUREMENTS_WORKSPACE = "kumi-measurements";
 var LISTEN_FALLBACK_MS = 2e3;
 var POLL_MS = 5e3;
 var JOB_POLL_MS = 2e3;
-var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
+var usePluginWords = typeof sdk2.usePluginI18n === "function" ? sdk2.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
   return /* @__PURE__ */ jsxs28(I18n.Provider, { value: t, children: [
@@ -11011,7 +11371,7 @@ var plugin = {
       }
       measurementsPane ??= ctx.register({ id: "measurements-pane", area: PANES_AREA, title, data: { placement: "main" }, render });
     };
-    const openSettings = () => host6.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
+    const openSettings = () => host6.navigate(typeof sdk2.pluginSettingsHref === "function" ? sdk2.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
     const refresh = () => void store.refreshStatus();
     refresh();
     ctx.setInterval(() => {
@@ -11149,10 +11509,10 @@ var plugin = {
         render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
       }
     ];
-    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
+    if (typeof sdk2.TOOL_MEDIA_RENDERER_AREA === "string") {
       contributions.push({
         id: "listen-card",
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        area: sdk2.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
           render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(ListenCard, { audition, media: props, store }) })
@@ -11160,17 +11520,17 @@ var plugin = {
       });
       contributions.push({
         id: "generate-card",
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        area: sdk2.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_job"],
           render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });
     }
-    if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
+    if (typeof sdk2.COMPOSER_AREAS?.underside === "string") {
       contributions.push({
         id: "focus-hint",
-        area: sdk.COMPOSER_AREAS.underside,
+        area: sdk2.COMPOSER_AREAS.underside,
         render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(FocusHint, { store }) })
       });
     }

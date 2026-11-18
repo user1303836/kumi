@@ -184,6 +184,8 @@ declare module '@hermes/plugin-sdk' {
   export function pluginSettingsHref(pluginId: string, subpage?: string): string
   /** A React translator for this plugin's bundles, re-rendering on a language switch. Older Desktops have none. */
   export const usePluginI18n: ((pluginId: string) => (key: string, ...args: unknown[]) => string) | undefined
+  /** The app's theme, re-rendering when the theme or its mode changes (v0.23 and later); older Desktops have none. */
+  export const useTheme: (() => unknown) | undefined
 
   type Variant = 'default' | 'destructive' | 'ghost' | 'link' | 'outline' | 'secondary' | 'text'
   type Size = 'default' | 'icon-sm' | 'icon-xs' | 'inline' | 'lg' | 'micro' | 'sm' | 'xs'
