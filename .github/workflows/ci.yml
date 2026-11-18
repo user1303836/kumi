@@ -137,8 +137,9 @@ jobs:
           # Temporary files in memory: the tests' homes, Sets and stores write and sync many small files, which a
           # runner's disk makes several times slower.
           TMPDIR: /dev/shm
-        # (word splitting on purpose: the -p and --exclude options)
-        run: sh scripts/test-isolated.sh --profile ci ${{ matrix.crates }}
+        # (word splitting on purpose: the -p and --exclude options.) `--tests` builds what has tests (libraries, programs,
+        # the tests' own binaries) and leaves the examples out: none has a test, and Required CI's build checks them.
+        run: sh scripts/test-isolated.sh --profile ci --tests ${{ matrix.crates }}
       # The tests this part selected (`cargo nextest list`), to compare one run's tests with another's.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
@@ -206,9 +207,12 @@ jobs:
           git checkout -q FETCH_HEAD
           echo "$RUNNER_TEMP/luals/bin" >> "$GITHUB_PATH"
           echo "RENOISE_DEFINITIONS=$RUNNER_TEMP/definitions/library" >> "$GITHUB_ENV"
-      - name: The Renoise tool's tests and the type check (a missing lua-language-server fails)
+      # run.sh runs the type check beside the tests, which run on one core.
+      - name: The Renoise tool's tests and the type check, at once (a missing lua-language-server fails)
         env:
           KUMI_REQUIRE_LUALS: "1"
+          # The tests' temporary folders in memory, as the Rust tests' are.
+          TMPDIR: /dev/shm
         run: sh daws/renoise/tests/run.sh
 
   hermes-plugin:
@@ -259,14 +263,25 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"python={python}\n")
           PY
+      # The two runs go at once, each into a log of its own, shown one after the other: a run spends most of its time
+      # waiting on the fixture runtime's deadlines and starting it, so neither slows the other. Either failing fails the step.
       - name: The plugin's tests, on Python 3.11 and on Hermes's own Python
         env:
           PYTHON: ${{ steps.runtime.outputs.python }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python3.11 -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
           "$PYTHON" --version
-          "$PYTHON" -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
+          python3.11 -m unittest discover -s hermes-plugin/tests -p 'test_*.py' > "$RUNNER_TEMP/tests-3.11.log" 2>&1 &
+          floor=$!
+          "$PYTHON" -m unittest discover -s hermes-plugin/tests -p 'test_*.py' > "$RUNNER_TEMP/tests-hermes.log" 2>&1 &
+          hermes=$!
+          floor_status=0; wait "$floor" || floor_status=$?
+          hermes_status=0; wait "$hermes" || hermes_status=$?
+          echo "On Python 3.11 (exit $floor_status):"
+          cat "$RUNNER_TEMP/tests-3.11.log"
+          echo "On Hermes's own Python (exit $hermes_status):"
+          cat "$RUNNER_TEMP/tests-hermes.log"
+          [ "$floor_status" = 0 ] && [ "$hermes_status" = 0 ]
       - name: The Hermes catalog's checks (validate --install-deps, doctor --ci, the payload scan, the self-updater check)
         env:
           PYTHON: ${{ steps.runtime.outputs.python }}
