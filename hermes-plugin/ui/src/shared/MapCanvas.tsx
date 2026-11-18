@@ -640,7 +640,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // `ROUNDS` interleaved paths, drawn round by round: where groups overlap, their colours still mix as the map's own
   // order left them, instead of the last colour covering the rest. A point is a dot, a square tile, or between the
   // two while the morph runs.
-  useEffect(() => {
+  const drawNow = () => {
     const canvas = canvasRef.current
     if (!canvas || !view || size.width === 0) return
     const ratio = window.devicePixelRatio || 1
@@ -1032,7 +1032,38 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.globalAlpha = 1
     }
     overlayFollow.current?.()
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight, grow?.from, grow?.to, grow?.handle, grow?.choosing])
+  }
+  // The draw runs in a task of its own, posted when anything shown changes (one waits at a time, drawing what the
+  // latest render shows), never inside the task that rendered: React runs a commit's effects in the render's own task
+  // when that commit also set state as it attached (Hermes's Tip does, on mounting), and a search on a 160,000-sound
+  // map mounts some in its list of matches. Drawn in that task, typing a search froze one frame for 110 ms where the
+  // pin's froze 62 (medians of five, M6's A/B against the pin); in a task of its own, 74, and the browser can paint the
+  // list in between. The task is a message on the map's own channel, as React's scheduler posts its own: a hidden
+  // window's timers wait for a second, its messages don't.
+  const drawTask = useRef<{ port: MessagePort; draw: (() => void) | null } | null>(null)
+  useEffect(() => {
+    const channel = new MessageChannel()
+    const task: { port: MessagePort; draw: (() => void) | null } = { port: channel.port2, draw: null }
+    channel.port1.onmessage = () => {
+      const draw = task.draw
+      task.draw = null
+      draw?.()
+    }
+    drawTask.current = task
+    return () => {
+      channel.port1.onmessage = null
+      channel.port1.close()
+      channel.port2.close()
+      drawTask.current = null
+    }
+  }, [])
+  useEffect(() => {
+    const task = drawTask.current
+    if (!task) return
+    const waiting = task.draw !== null
+    task.draw = drawNow
+    if (!waiting) task.port.postMessage(null)
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight, grow?.from, grow?.to, grow?.handle, grow?.choosing]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
