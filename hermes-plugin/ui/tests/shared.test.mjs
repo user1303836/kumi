@@ -519,12 +519,13 @@ test("the picks' actions float beside the picks and never over them; with no roo
   }
 })
 
-test('the store reads what moved: FOCUS and HISTORY again only when their revision changes', async () => {
+test('the store reads what moved: FOCUS and HISTORY again only when their revision changes; a poll with nothing new tells no view', async () => {
   const reads = []
   let revisions = { focus: 1, history: 1, map: 'r1' }
+  let age = 400
   const kumi = new store.KumiStore(async path => {
     reads.push(path)
-    if (path === '/status') return { connected: true, revisions }
+    if (path === '/status') return { connected: true, revisions, age_ms: (age += 1000) }
     if (path === '/setup') return { state: 'ready' }
     if (path === '/focus') return { seq: revisions.focus }
     return { items: [], seq: revisions.history }
@@ -532,8 +533,13 @@ test('the store reads what moved: FOCUS and HISTORY again only when their revisi
   await kumi.refreshStatus()
   assert.deepEqual(reads.sort(), ['/focus', '/history?limit=50', '/setup', '/status'])
   reads.length = 0
+  // Only the runtime's age moved: every view keeps what it holds (the map's whole tree used to redraw on each poll).
+  let told = 0
+  kumi.subscribe(() => (told += 1))
+  const before = kumi.get()
   await kumi.refreshStatus()
   assert.deepEqual(reads, ['/status'])
+  assert.deepEqual([told, kumi.get() === before], [0, true])
   reads.length = 0
   revisions = { ...revisions, history: 2 }
   await kumi.refreshStatus()
@@ -597,12 +603,18 @@ test('a failed /status read shows the last state as not answering, with nothing 
   assert.equal(state.error, '504: gateway timeout')
 })
 
-test("a map read that fails says why, in the backend's words, until a read of it answers: never 'reading' for good", async () => {
+test("the map is read only while a view shows it, then what moved meanwhile; a failed read says why until one answers", async () => {
   let fail = true
+  const reads = []
   const kumi = new store.KumiStore(async path => {
+    reads.push(path)
     if (path === '/map' && fail) throw new Error('500: {"detail":"Kumi couldn\'t read the map file."}')
     return { revision: 'r1', points: [] }
   })
+  // A map.changed event with no map open (a scan from the chat): 44 MiB at 160,000 sounds, for nothing on screen.
+  await kumi.refresh('map')
+  assert.deepEqual(reads, [], 'nothing is read for an event while no view shows the map')
+  kumi.want('map')
   await kumi.refresh('map')
   assert.deepEqual([kumi.get().map, kumi.get().failed.map], [null, "Kumi couldn't read the map file."])
   fail = false
@@ -844,6 +856,7 @@ test("sounds that can't play leave the map at once and are reported as one batch
       }
       return { revision: 'r7', points: points.filter(point => !hidden.has(point[0])), groups: {}, sounds: {}, hidden: hidden.size }
     })
+    kumi.want('map')
     await kumi.refresh('map')
     kumi.hide('s-r7-1', 'gone')
     kumi.hide('s-r7-2', 'unplayable')

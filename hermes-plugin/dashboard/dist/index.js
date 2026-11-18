@@ -25,6 +25,7 @@
     strong: "--color-foreground",
     ground: "--color-card"
   };
+  var useThemeKey = () => null;
 
   // src/dashboard/react.ts
   var sdk = window.__HERMES_PLUGIN_SDK__;
@@ -3223,6 +3224,12 @@
     const age = reply.age_ms;
     return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
   }
+  function sameAnswer(before, after) {
+    if (before === after) return true;
+    if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
+    const unheard = (key, value) => key === "age_ms" || key === "heard_at" ? void 0 : value;
+    return JSON.stringify(before, unheard) === JSON.stringify(after, unheard);
+  }
   var KumiStore = class {
     constructor(fetch, historyLimit = 50) {
       this.fetch = fetch;
@@ -3235,6 +3242,8 @@
     reads = /* @__PURE__ */ new Map();
     wanted = /* @__PURE__ */ new Map();
     generation = 0;
+    /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+    stale = /* @__PURE__ */ new Set();
     /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
      *  window made before (a grow renders before the Make panel ever opens). */
     designsRead = false;
@@ -3257,10 +3266,11 @@
       this.state = { ...this.state, ...patch };
       for (const fn of [...this.listeners]) fn();
     }
-    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+    /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+     *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
     want(part) {
       this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
-      if (!this.state[part]) void this.refresh(part);
+      if (!this.state[part] || this.stale.delete(part)) void this.refresh(part);
       return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
     }
     /** Forget everything (another profile or connection): what's shown must be that profile's. */
@@ -3271,6 +3281,7 @@
       this.cards.clear();
       this.started.clear();
       this.toHide.clear();
+      this.stale.clear();
       clearTimeout(this.hideTimer ?? void 0);
       this.hideTimer = null;
       this.hiddenSeq = null;
@@ -3316,7 +3327,9 @@
         const after = status.revisions ?? {};
         const first = this.state.available !== true;
         const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
-        this.set({ available: true, error: null, status: heard(status) });
+        const next = heard(status);
+        const kept3 = sameAnswer(before, next);
+        if (!kept3 || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept3 ? before : next });
         const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null };
         const moved2 = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
         const hidden = typeof after.hidden === "number" ? after.hidden : 0;
@@ -3332,6 +3345,10 @@
       });
     }
     refresh(part) {
+      if ((part === "map" || part === "palette") && (this.wanted.get(part) ?? 0) === 0) {
+        this.stale.add(part);
+        return Promise.resolve();
+      }
       return this.once(part, async () => {
         const generation = this.generation;
         const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
@@ -3339,7 +3356,9 @@
           const value = await this.fetch(path);
           if (generation !== this.generation) return;
           const { [part]: _answered, ...failed } = this.state.failed;
-          this.set({ [part]: heard(value), ..._answered === void 0 ? {} : { failed } });
+          const answer = heard(value);
+          const kept3 = part !== "map" && sameAnswer(this.state[part], answer);
+          if (!kept3 || _answered !== void 0) this.set({ ...kept3 ? {} : { [part]: answer }, ..._answered === void 0 ? {} : { failed } });
           if (part === "map") this.mapRead();
         } catch (error) {
           if (generation !== this.generation) return;
@@ -7652,16 +7671,17 @@
       const first2 = clean(model.sounds[seeds[0]].name ?? "", 60);
       return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
     }, [searched, foundIds, found, model, t]);
+    const themeKey = useThemeKey();
     const [painted, setPainted] = useState("");
     useEffect(() => {
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas || themeKey !== null) return;
       const timer = setInterval(() => {
         const now = Object.values(resolve(canvas)).join();
         setPainted((current) => current === now ? current : now);
       }, 1e3);
       return () => clearInterval(timer);
-    }, [hasPoints]);
+    }, [hasPoints, themeKey]);
     useEffect(() => {
       const box2 = boxRef.current;
       if (!box2) return;
@@ -8070,7 +8090,7 @@
         context.globalAlpha = 1;
       }
       overlayFollow.current?.();
-    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+    }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];

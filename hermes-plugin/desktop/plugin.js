@@ -1,7 +1,7 @@
 // Built from hermes-plugin/ui/src/ by `npm run build` in hermes-plugin/ui/. Edit ui/src/, not this file.
 
 // src/desktop/plugin.tsx
-import * as sdk from "@hermes/plugin-sdk";
+import * as sdk2 from "@hermes/plugin-sdk";
 import { host as host6, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from "@hermes/plugin-sdk";
 
 // src/shared/i18n.ts
@@ -3230,6 +3230,12 @@ function heard(reply) {
   const age = reply.age_ms;
   return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
 }
+function sameAnswer(before, after) {
+  if (before === after) return true;
+  if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
+  const unheard = (key, value) => key === "age_ms" || key === "heard_at" ? void 0 : value;
+  return JSON.stringify(before, unheard) === JSON.stringify(after, unheard);
+}
 var KumiStore = class {
   constructor(fetch, historyLimit = 50) {
     this.fetch = fetch;
@@ -3242,6 +3248,8 @@ var KumiStore = class {
   reads = /* @__PURE__ */ new Map();
   wanted = /* @__PURE__ */ new Map();
   generation = 0;
+  /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+  stale = /* @__PURE__ */ new Set();
   /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
    *  window made before (a grow renders before the Make panel ever opens). */
   designsRead = false;
@@ -3264,10 +3272,11 @@ var KumiStore = class {
     this.state = { ...this.state, ...patch };
     for (const fn of [...this.listeners]) fn();
   }
-  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+   *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
   want(part) {
     this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1);
-    if (!this.state[part]) void this.refresh(part);
+    if (!this.state[part] || this.stale.delete(part)) void this.refresh(part);
     return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1));
   }
   /** Forget everything (another profile or connection): what's shown must be that profile's. */
@@ -3278,6 +3287,7 @@ var KumiStore = class {
     this.cards.clear();
     this.started.clear();
     this.toHide.clear();
+    this.stale.clear();
     clearTimeout(this.hideTimer ?? void 0);
     this.hideTimer = null;
     this.hiddenSeq = null;
@@ -3323,7 +3333,9 @@ var KumiStore = class {
       const after = status.revisions ?? {};
       const first = this.state.available !== true;
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
-      this.set({ available: true, error: null, status: heard(status) });
+      const next = heard(status);
+      const kept3 = sameAnswer(before, next);
+      if (!kept3 || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept3 ? before : next });
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null };
       const moved2 = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
       const hidden = typeof after.hidden === "number" ? after.hidden : 0;
@@ -3339,6 +3351,10 @@ var KumiStore = class {
     });
   }
   refresh(part) {
+    if ((part === "map" || part === "palette") && (this.wanted.get(part) ?? 0) === 0) {
+      this.stale.add(part);
+      return Promise.resolve();
+    }
     return this.once(part, async () => {
       const generation = this.generation;
       const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
@@ -3346,7 +3362,9 @@ var KumiStore = class {
         const value = await this.fetch(path);
         if (generation !== this.generation) return;
         const { [part]: _answered, ...failed } = this.state.failed;
-        this.set({ [part]: heard(value), ..._answered === void 0 ? {} : { failed } });
+        const answer = heard(value);
+        const kept3 = part !== "map" && sameAnswer(this.state[part], answer);
+        if (!kept3 || _answered !== void 0) this.set({ ...kept3 ? {} : { [part]: answer }, ..._answered === void 0 ? {} : { failed } });
         if (part === "map") this.mapRead();
       } catch (error) {
         if (generation !== this.generation) return;
@@ -3818,6 +3836,7 @@ function playFailure(error) {
 }
 
 // src/desktop/theme.ts
+import * as sdk from "@hermes/plugin-sdk";
 var T = {
   text: "var(--ui-text-primary)",
   secondary: "var(--ui-text-secondary)",
@@ -3844,6 +3863,7 @@ var CANVAS = {
   // What the map's words are haloed in, so they read over the points.
   ground: "--ui-bg-elevated"
 };
+var useThemeKey = typeof sdk.useTheme === "function" ? sdk.useTheme : () => null;
 
 // src/shared/ui.tsx
 import { createContext, useContext, useLayoutEffect, useRef as useRef2, useState } from "react";
@@ -8967,16 +8987,17 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const first2 = clean(model.sounds[seeds[0]].name ?? "", 60);
     return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
   }, [searched, foundIds, found, model, t]);
+  const themeKey = useThemeKey();
   const [painted, setPainted] = useState14("");
   useEffect12(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || themeKey !== null) return;
     const timer = setInterval(() => {
       const now = Object.values(resolve(canvas)).join();
       setPainted((current) => current === now ? current : now);
     }, 1e3);
     return () => clearInterval(timer);
-  }, [hasPoints]);
+  }, [hasPoints, themeKey]);
   useEffect12(() => {
     const box2 = boxRef.current;
     if (!box2) return;
@@ -9385,7 +9406,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.globalAlpha = 1;
     }
     overlayFollow.current?.();
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -11177,7 +11198,7 @@ var MEASUREMENTS_WORKSPACE = "kumi-measurements";
 var LISTEN_FALLBACK_MS = 2e3;
 var POLL_MS = 5e3;
 var JOB_POLL_MS = 2e3;
-var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
+var usePluginWords = typeof sdk2.usePluginI18n === "function" ? sdk2.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
   return /* @__PURE__ */ jsxs28(I18n.Provider, { value: t, children: [
@@ -11237,7 +11258,7 @@ var plugin = {
       }
       measurementsPane ??= ctx.register({ id: "measurements-pane", area: PANES_AREA, title, data: { placement: "main" }, render });
     };
-    const openSettings = () => host6.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
+    const openSettings = () => host6.navigate(typeof sdk2.pluginSettingsHref === "function" ? sdk2.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
     const refresh = () => void store.refreshStatus();
     refresh();
     ctx.setInterval(() => {
@@ -11375,10 +11396,10 @@ var plugin = {
         render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
       }
     ];
-    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
+    if (typeof sdk2.TOOL_MEDIA_RENDERER_AREA === "string") {
       contributions.push({
         id: "listen-card",
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        area: sdk2.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
           render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(ListenCard, { audition, media: props, store }) })
@@ -11386,17 +11407,17 @@ var plugin = {
       });
       contributions.push({
         id: "generate-card",
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        area: sdk2.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_job"],
           render: (props) => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });
     }
-    if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
+    if (typeof sdk2.COMPOSER_AREAS?.underside === "string") {
       contributions.push({
         id: "focus-hint",
-        area: sdk.COMPOSER_AREAS.underside,
+        area: sdk2.COMPOSER_AREAS.underside,
         render: () => /* @__PURE__ */ jsx31(WithT, { children: /* @__PURE__ */ jsx31(FocusHint, { store }) })
       });
     }

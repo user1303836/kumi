@@ -8,7 +8,7 @@
 // to the nearest sound that way, Shift+←/→ step through every sound in turn, Shift+↑/↓ zoom and Home shows the whole
 // map; each sound reached is named to a screen reader, and Tab goes on to its Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`, what the picks can do from `pickedActions`.
-import { CANVAS, T } from '@kumi/theme'
+import { CANVAS, T, useThemeKey } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -436,19 +436,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return seeds.length === 1 ? t('map.near', first) : t('map.nearMany', first, seeds.length - 1)
   }, [searched, foundIds, found, model, t])
 
-  // The canvas paints the theme's colours itself, and neither host tells a plugin its theme changed (Desktop's
-  // useTheme is newer than some Desktops; the dashboard has none): it looks at them once a second, and a light or dark
-  // switch redraws it.
+  // The canvas paints the theme's colours itself. Desktop's theme hook (v0.23 and later) says when they change, and a
+  // change redraws it (`themeKey` in the draw's inputs); where nothing says (older Desktops, the dashboard), it looks
+  // at them once a second, and a light or dark switch redraws it.
+  const themeKey = useThemeKey()
   const [painted, setPainted] = useState('')
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || themeKey !== null) return
     const timer = setInterval(() => {
       const now = Object.values(resolve(canvas)).join()
       setPainted(current => (current === now ? current : now))
     }, 1000)
     return () => clearInterval(timer)
-  }, [hasPoints])
+  }, [hasPoints, themeKey])
 
   // Follow the box's size (the pane or tab is resized all the time), and the height of what floats over its top.
   useEffect(() => {
@@ -939,7 +940,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       context.globalAlpha = 1
     }
     overlayFollow.current?.()
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()

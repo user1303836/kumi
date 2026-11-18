@@ -191,12 +191,24 @@ function heard<T>(reply: T): T {
   return { ...reply, heard_at: typeof age === 'number' && Number.isFinite(age) ? Date.now() - age : null }
 }
 
+/** Whether two answers say the same, leaving out how long ago the runtime was heard (that moves on every read). An
+ *  answer that says nothing new keeps the object the views already hold, so nothing re-renders for a poll that found
+ *  nothing: the map's whole tree used to redraw every 5 s. Small answers only: never the map. */
+function sameAnswer(before: unknown, after: unknown): boolean {
+  if (before === after) return true
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object') return false
+  const unheard = (key: string, value: unknown) => (key === 'age_ms' || key === 'heard_at' ? undefined : value)
+  return JSON.stringify(before, unheard) === JSON.stringify(after, unheard)
+}
+
 export class KumiStore {
   private state: KumiState = EMPTY
   private listeners = new Set<() => void>()
   private reads = new Map<string, { promise: Promise<void>; again: boolean }>()
   private wanted = new Map<Part, number>()
   private generation = 0
+  /** Parts an event said moved while no view showed them: the next view that wants one reads it again. */
+  private stale = new Set<Part>()
   /** Whether this window asked for the engine's earlier results (`readDesignsOnce`): once, however many results this
    *  window made before (a grow renders before the Make panel ever opens). */
   private designsRead = false
@@ -225,10 +237,11 @@ export class KumiStore {
     for (const fn of [...this.listeners]) fn()
   }
 
-  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it. */
+  /** A view that shows `part` asks for it while mounted: the map isn't read until something shows it, nor read again
+   *  for an event while nothing does (`refresh`); the next view to want it reads what moved meanwhile. */
   want(part: Part): () => void {
     this.wanted.set(part, (this.wanted.get(part) ?? 0) + 1)
-    if (!this.state[part]) void this.refresh(part)
+    if (!this.state[part] || this.stale.delete(part)) void this.refresh(part)
     return () => this.wanted.set(part, Math.max(0, (this.wanted.get(part) ?? 1) - 1))
   }
 
@@ -240,6 +253,7 @@ export class KumiStore {
     this.cards.clear()
     this.started.clear()
     this.toHide.clear()
+    this.stale.clear()
     clearTimeout(this.hideTimer ?? undefined)
     this.hideTimer = null
     this.hiddenSeq = null
@@ -288,7 +302,9 @@ export class KumiStore {
       const first = this.state.available !== true
       // Any change of liveness (answering, quiet, or stopped) re-reads what the routes judge by it.
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running
-      this.set({ available: true, error: null, status: heard(status) })
+      const next = heard(status)
+      const kept = sameAnswer(before, next)
+      if (!kept || this.state.available !== true || this.state.error !== null) this.set({ available: true, error: null, status: kept ? before : next })
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null, palette: this.state.palette?.seq ?? null }
       const moved = (part: 'focus' | 'history' | 'map' | 'palette'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
       const hidden = typeof after.hidden === 'number' ? after.hidden : 0
@@ -308,6 +324,12 @@ export class KumiStore {
   }
 
   refresh(part: Part): Promise<void> {
+    // The map (44 MiB at 160,000 sounds) and the palette are read only while a view shows them; an event about either
+    // with none open marks it for the next one.
+    if ((part === 'map' || part === 'palette') && (this.wanted.get(part) ?? 0) === 0) {
+      this.stale.add(part)
+      return Promise.resolve()
+    }
     return this.once(part, async () => {
       const generation = this.generation
       const path = part === 'history' ? `/history?limit=${this.historyLimit}` : `/${part}`
@@ -315,7 +337,9 @@ export class KumiStore {
         const value = await this.fetch<unknown>(path)
         if (generation !== this.generation) return
         const { [part]: _answered, ...failed } = this.state.failed
-        this.set({ [part]: heard(value), ...(_answered === undefined ? {} : { failed }) } as Partial<KumiState>)
+        const answer = heard(value)
+        const kept = part !== 'map' && sameAnswer(this.state[part], answer)
+        if (!kept || _answered !== undefined) this.set({ ...(kept ? {} : { [part]: answer }), ...(_answered === undefined ? {} : { failed }) } as Partial<KumiState>)
         if (part === 'map') this.mapRead()
       } catch (error) {
         if (generation !== this.generation) return
