@@ -16,19 +16,27 @@ const NAME: &str = if cfg!(target_os = "macos") {
     "libreaper_kumi.so"
 };
 
-/// The library to load: the one named, or the one this test's build made: in the profile's folder, which is one up from
-/// this test binary's `<profile>/deps/` before Cargo 1.100 and four up from its `<profile>/build/<package>/<hash>/out/`
-/// since; or beside it.
+/// The library to load: the one named, or the one this test's build made. Before Cargo 1.100 this test binary runs from
+/// `<profile>/deps/`, with the library beside it or one folder up. Since, it runs from its own build unit's folder
+/// (`<profile>/build/reaper-kumi/<hash>/out/`) and the library is in the library's unit beside it (the newest, if several),
+/// or in `<profile>`.
 fn artifact() -> PathBuf {
     if let Some(path) = std::env::var_os("REAPER_KUMI_ARTIFACT").filter(|path| !path.is_empty()) {
         return path.into();
     }
     let folder = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-    let built = folder.ancestors().nth(3).is_some_and(|unit| unit.ends_with("build"));
-    let profiles = [folder.parent(), folder.ancestors().nth(4).filter(|_| built)];
-    let candidates: Vec<PathBuf> = profiles.into_iter().flatten().map(|profile| profile.join(NAME)).chain([folder.join(NAME)]).collect();
+    let mut candidates: Vec<PathBuf> = folder.parent().into_iter().map(|up| up.join(NAME)).chain([folder.join(NAME)]).collect();
+    if folder.ancestors().nth(3).is_some_and(|build| build.ends_with("build")) {
+        let package = folder.ancestors().nth(2).unwrap();
+        let mut units: Vec<PathBuf> =
+            std::fs::read_dir(package).into_iter().flatten().flatten().map(|unit| unit.path().join("out").join(NAME)).collect();
+        units.retain(|path| path.is_file());
+        units.sort_by_key(|path| std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok());
+        candidates.extend(units.into_iter().rev());
+        candidates.extend(folder.ancestors().nth(4).map(|profile| profile.join(NAME)));
+    }
     let found = candidates.into_iter().find(|path| path.is_file());
-    found.unwrap_or_else(|| panic!("no {NAME} beside {} or in its profile's folder", folder.display()))
+    found.unwrap_or_else(|| panic!("no {NAME} beside {}, in its profile's folder or in its package's build units", folder.display()))
 }
 
 #[cfg(unix)]
