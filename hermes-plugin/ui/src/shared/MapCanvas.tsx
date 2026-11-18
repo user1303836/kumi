@@ -1166,8 +1166,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       const point = hit.points[next]
       const [x, y] = toScreen(view, mapSize, point.x, point.y)
       setView(keepInView(view, x, y, size.width, size.height))
-      // The keyboard stop now stands for this sound: its name and state are what a screen reader says, once.
+      // The keyboard stop now stands for this sound, and its name changes with it; NVDA speaks that, VoiceOver
+      // usually doesn't speak a focused element's new name. So the polite region says it too: said twice on one
+      // screen reader is a smaller fault than not said on another.
       onSelect(point.id)
+      const sound = model.sounds[point.id]
+      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(', '))
     }
   }
 

@@ -35,7 +35,7 @@ export function ownerSession(state: KumiState): null | string {
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void }) {
+export function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void; onOpenMeasurements: () => void }) {
   const t = useT()
   const state = useKumi(store)
   const now = useNow()
@@ -147,8 +147,15 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           </div>
         )}
       </Section>
-      <div style={{ ...S.row, padding: 12, gap: 8 }}>
+      <div style={{ ...S.row, flexWrap: 'wrap', padding: 12, gap: 8 }}>
         <Button onClick={onOpenMap}>{t('pane.openMap')}</Button>
+        {/* A measurement with no tool part to draw its card (Hermes's tool progress off): a narrow window doesn't open
+            its tab by itself, so it's here for the producer to open, as the map is. */}
+        {state.measured && (
+          <Button kind="quiet" onClick={onOpenMeasurements}>
+            {t('pane.openMeasurements')}
+          </Button>
+        )}
       </div>
     </div>
   )

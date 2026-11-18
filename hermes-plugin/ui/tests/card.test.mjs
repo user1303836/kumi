@@ -736,3 +736,18 @@ test("a missing source profile quantity says why in the card's words, never its 
   assert.ok(bare.includes(english('listen.profile.reasons.not_measured')), bare)
   assert.ok(!bare.includes('a_newer_reason'), bare)
 })
+
+test("a choice's radios stay siblings with their hints on them, so the arrow keys carry the focus from one to the next", async () => {
+  // The dashboard's Tip once wrapped each radio in a box of its own: the arrows changed the choice, but `radioKeys`
+  // moves the focus to the next sibling, and there was none. Its hint is the radio's own title now, with no wrapper.
+  const { Pills } = await load('src/shared/controls.tsx', { react: 'real' })
+  const options = [{ value: 'soft', label: 'Soft', title: 'Gentle onsets' }, { value: 'hard', label: 'Hard', title: 'Sharp onsets' }]
+  const html = renderToStaticMarkup(createElement(Pills, { label: 'Attack', options, value: 'hard', onChange: () => {}, rest: 'Auto' }))
+  const group = html.slice(html.indexOf('role="radiogroup"'))
+  const inner = group.slice(group.indexOf('>') + 1)
+  // Every child of the group is a radio button, the hint on the button itself.
+  const children = inner.split('<button').slice(1)
+  assert.equal(children.length, 3, inner)
+  assert.ok(!inner.startsWith('<span') && !inner.includes('display:contents'), inner)
+  assert.ok(children[1].includes('title="Gentle onsets"') && children[2].includes('title="Sharp onsets"'), inner)
+})

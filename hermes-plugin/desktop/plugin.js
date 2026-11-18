@@ -50,6 +50,7 @@ var en = {
     undoLabel: (change) => `Undo ${change}`,
     undoAllLabel: (n, change) => `Undo all ${n} steps of ${change}`,
     openMap: "Open the sound map",
+    openMeasurements: "Show the last measurement",
     undoNeedsConnection: "Undo needs a connected Kumi.",
     starters: "Try one:",
     starterLook: "What am I looking at?",
@@ -936,6 +937,7 @@ var ja = {
     undoLabel: (change) => `${change} を取り消す`,
     undoAllLabel: (n, change) => `${change} の ${n} ステップを取り消す`,
     openMap: "サンプルマップを開く",
+    openMeasurements: "最後の測定を表示",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。",
     starters: "試してみる:",
     starterLook: "いま何を見てる？",
@@ -1812,6 +1814,7 @@ var zh = {
     undoLabel: (change) => `撤销 ${change}`,
     undoAllLabel: (n, change) => `全部撤销（${n} 步）：${change}`,
     openMap: "打开采样地图",
+    openMeasurements: "显示最近的测量",
     undoNeedsConnection: "撤销需要 Kumi 已连接。",
     starters: "试试：",
     starterLook: "我现在在看什么？",
@@ -5541,7 +5544,7 @@ function ownerSession(state) {
   return typeof session === "string" && session ? session : null;
 }
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-function KumiPane({ ctx, store, onOpenMap }) {
+function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }) {
   const t = useT();
   const state = useKumi(store);
   const now = useNow();
@@ -5621,7 +5624,10 @@ function KumiPane({ ctx, store, onOpenMap }) {
         ]
       }
     ),
-    /* @__PURE__ */ jsx8("div", { style: { ...S.row, padding: 12, gap: 8 }, children: /* @__PURE__ */ jsx8(Button2, { onClick: onOpenMap, children: t("pane.openMap") }) })
+    /* @__PURE__ */ jsxs8("div", { style: { ...S.row, flexWrap: "wrap", padding: 12, gap: 8 }, children: [
+      /* @__PURE__ */ jsx8(Button2, { onClick: onOpenMap, children: t("pane.openMap") }),
+      state.measured && /* @__PURE__ */ jsx8(Button2, { kind: "quiet", onClick: onOpenMeasurements, children: t("pane.openMeasurements") })
+    ] })
   ] });
 }
 
@@ -6202,52 +6208,53 @@ function Pills({
 }) {
   const all = rest === null ? options : [{ value: void 0, label: rest }, ...options];
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
-    /* @__PURE__ */ jsx13("span", { style: { fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: label }),
+    /* @__PURE__ */ jsx13("span", { style: { ...TYPE.small, color: value === void 0 ? T.muted : T.secondary }, children: label }),
     /* @__PURE__ */ jsx13("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option, index) => {
       const chosen = option.value === value;
-      return /* @__PURE__ */ jsxs12(
-        "button",
-        {
-          "aria-checked": chosen,
-          className: FOCUSABLE,
-          onClick: () => onChange(option.value),
-          ...radioKeys(index, all.length, all.findIndex((each) => each.value === value), (next) => onChange(all[next].value)),
-          role: "radio",
-          title: option.title,
-          type: "button",
-          style: {
-            ...S.row,
-            gap: 4,
-            font: "inherit",
-            fontSize: 11.5,
-            fontWeight: chosen ? 600 : 500,
-            padding: "2px 9px",
-            borderRadius: 12,
-            border: `1px solid ${chosen ? T.accent : T.border}`,
-            background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
-            color: chosen ? T.accent : option.value === void 0 ? T.muted : T.secondary,
-            cursor: "pointer",
-            transition: "border-color 140ms, background-color 140ms, color 140ms"
-          },
-          children: [
-            option.glyph,
-            option.label
-          ]
-        },
-        String(option.value ?? "")
+      return (
+        // Its hint in Hermes's Tip (on hover and keyboard focus), never a native title.
+        /* @__PURE__ */ jsx13(Tip2, { label: option.title, children: /* @__PURE__ */ jsxs12(
+          "button",
+          {
+            "aria-checked": chosen,
+            className: FOCUSABLE,
+            onClick: () => onChange(option.value),
+            ...radioKeys(index, all.length, all.findIndex((each) => each.value === value), (next) => onChange(all[next].value)),
+            role: "radio",
+            type: "button",
+            style: {
+              ...S.row,
+              gap: 4,
+              font: "inherit",
+              ...TYPE.small,
+              fontWeight: chosen ? 600 : 500,
+              padding: "2px 9px",
+              borderRadius: 12,
+              border: `1px solid ${chosen ? T.accent : T.border}`,
+              background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
+              color: chosen ? T.accent : option.value === void 0 ? T.muted : T.secondary,
+              cursor: "pointer",
+              transition: "border-color 140ms, background-color 140ms, color 140ms"
+            },
+            children: [
+              option.glyph,
+              option.label
+            ]
+          }
+        ) }, String(option.value ?? ""))
       );
     }) })
   ] });
 }
 function Choice({ label, options, value, onChange, rest }) {
-  return /* @__PURE__ */ jsxs12("label", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: [
+  return /* @__PURE__ */ jsxs12("label", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, ...TYPE.small, color: value === void 0 ? T.muted : T.secondary }, children: [
     label,
     /* @__PURE__ */ jsxs12(
       "select",
       {
         className: FOCUSABLE,
         onChange: (event) => onChange(event.target.value === "" ? void 0 : event.target.value),
-        style: { font: "inherit", fontSize: 12, padding: "2px 6px", borderRadius: 6, border: `1px solid ${value === void 0 ? T.border : T.accent}`, background: "transparent", color: value === void 0 ? T.secondary : T.accent },
+        style: { font: "inherit", ...TYPE.small, padding: "2px 6px", borderRadius: 6, border: `1px solid ${value === void 0 ? T.border : T.accent}`, background: "transparent", color: value === void 0 ? T.secondary : T.accent },
         value: value ?? "",
         children: [
           /* @__PURE__ */ jsx13("option", { value: "", children: rest }),
@@ -6260,13 +6267,13 @@ function Choice({ label, options, value, onChange, rest }) {
 function Toggles({ label, options, value, onChange, rest }) {
   const chosen = value ?? [];
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
-    /* @__PURE__ */ jsxs12("span", { style: { ...S.row, gap: 6, fontSize: 11.5, color: chosen.length ? T.secondary : T.muted }, children: [
+    /* @__PURE__ */ jsxs12("span", { style: { ...S.row, gap: 6, ...TYPE.small, color: chosen.length ? T.secondary : T.muted }, children: [
       label,
-      chosen.length === 0 && /* @__PURE__ */ jsx13("span", { style: { color: T.faint, fontSize: 10.5 }, children: rest })
+      chosen.length === 0 && /* @__PURE__ */ jsx13("span", { style: { ...TYPE.caption, color: T.faint }, children: rest })
     ] }),
     /* @__PURE__ */ jsx13("div", { "aria-label": label, role: "group", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: options.map((option) => {
       const on = chosen.includes(option.value);
-      return /* @__PURE__ */ jsxs12(
+      return /* @__PURE__ */ jsx13(Tip2, { label: option.title, children: /* @__PURE__ */ jsxs12(
         "button",
         {
           "aria-pressed": on,
@@ -6275,11 +6282,10 @@ function Toggles({ label, options, value, onChange, rest }) {
             const next = on ? chosen.filter((other) => other !== option.value) : [...chosen, option.value];
             onChange(next.length ? next : void 0);
           },
-          title: option.title,
           type: "button",
           style: {
             font: "inherit",
-            fontSize: 11.5,
+            ...TYPE.small,
             padding: "2px 9px",
             borderRadius: 6,
             border: `1px solid ${on ? T.accent : T.border}`,
@@ -6292,14 +6298,13 @@ function Toggles({ label, options, value, onChange, rest }) {
             on ? "✓ " : "",
             option.label
           ]
-        },
-        option.value
-      );
+        }
+      ) }, option.value);
     }) })
   ] });
 }
 function Group({ title, count: count2, summary, open, onToggle, actions, children, hint }) {
-  return /* @__PURE__ */ jsxs12("section", { style: { display: "flex", flexDirection: "column", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${open ? `color-mix(in srgb, ${T.border} 100%, transparent)` : T.border}`, background: open ? `color-mix(in srgb, ${T.card} 60%, transparent)` : "transparent", transition: "background-color 160ms" }, children: [
+  return /* @__PURE__ */ jsxs12("section", { style: { display: "flex", flexDirection: "column", gap: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${T.hairline}`, background: open ? `color-mix(in srgb, ${T.card} 60%, transparent)` : "transparent", transition: "background-color 160ms" }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 6 }, children: [
       /* @__PURE__ */ jsxs12(
         "button",
@@ -6308,18 +6313,18 @@ function Group({ title, count: count2, summary, open, onToggle, actions, childre
           className: FOCUSABLE,
           onClick: onToggle,
           type: "button",
-          style: { ...S.row, gap: 6, flex: 1, font: "inherit", fontSize: 12, fontWeight: 650, padding: 0, border: "none", background: "transparent", color: T.text, cursor: "pointer", textAlign: "left" },
+          style: { ...S.row, gap: 6, flex: 1, font: "inherit", ...TYPE.small, fontWeight: 600, padding: 0, border: "none", background: "transparent", color: T.text, cursor: "pointer", textAlign: "left" },
           children: [
             /* @__PURE__ */ jsx13("span", { "aria-hidden": true, style: { display: "inline-block", color: T.muted, transform: open ? "rotate(90deg)" : "none", transition: "transform 160ms" }, children: "▸" }),
             title,
-            count2 && /* @__PURE__ */ jsx13("span", { style: { fontSize: 10.5, fontWeight: 500, padding: "0 6px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 14%, transparent)`, color: T.accent }, children: count2 }),
-            !open && summary && /* @__PURE__ */ jsx13("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11, fontWeight: 400, color: T.muted }, children: summary })
+            count2 && /* @__PURE__ */ jsx13("span", { style: { ...TYPE.caption, fontWeight: 500, padding: "0 6px", borderRadius: 8, background: `color-mix(in srgb, ${T.accent} 14%, transparent)`, color: T.accent }, children: count2 }),
+            !open && summary && /* @__PURE__ */ jsx13("span", { style: { ...S.ellipsis, flex: 1, ...TYPE.caption, fontWeight: 400, color: T.muted }, children: summary })
           ]
         }
       ),
       actions
     ] }),
-    open && hint && /* @__PURE__ */ jsx13("span", { style: { ...S.faint, fontSize: 11, marginTop: -4 }, children: hint }),
+    open && hint && /* @__PURE__ */ jsx13("span", { style: { ...S.faint, ...TYPE.caption, marginTop: -4 }, children: hint }),
     open && /* @__PURE__ */ jsx13("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "10px 16px", alignItems: "start" }, children })
   ] });
 }
@@ -10381,6 +10386,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       const [x, y] = toScreen(view, mapSize, point.x, point.y);
       setView(keepInView(view, x, y, size.width, size.height));
       onSelect(point.id);
+      const sound = model.sounds[point.id];
+      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(", "));
     }
   };
   const picksBox = useMemo2(() => {
@@ -12237,6 +12244,11 @@ var LISTEN_FALLBACK_MS = 2e3;
 var POLL_MS = 5e3;
 var IDLE_POLLS = 6;
 var JOB_POLL_MS = 2e3;
+var ROOM_BESIDE_LEAST = 237 + 320 + 240 + 400;
+function roomBeside2() {
+  const width = globalThis.innerWidth;
+  return typeof width !== "number" || width >= ROOM_BESIDE_LEAST;
+}
 var usePluginWords = typeof sdk3.usePluginI18n === "function" ? sdk3.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
@@ -12342,7 +12354,7 @@ var plugin = {
       }
       if (!ids.length) return;
       store.found(revision, ids, said);
-      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap();
+      if (ctx.storage.get(OPEN_MAP_ON_FIND, true) && roomBeside2()) openMap();
     };
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, (event) => {
       const payload = payloadOf(event);
@@ -12366,7 +12378,7 @@ var plugin = {
           if (calls.has(id)) return;
           calls.add(id);
           store.measure(id, result);
-          openMeasurements();
+          if (roomBeside2()) openMeasurements();
         }, LISTEN_FALLBACK_MS)
       );
     });
@@ -12431,8 +12443,10 @@ var plugin = {
         id: "pane",
         area: PANES_AREA,
         title: "Kumi",
-        data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(KumiPane, { ctx, onOpenMap: openMap, store }) })
+        // As Hermes's own side panes are: never squeezed below 15rem (P8: at 1000 px its words wrapped a letter at a
+        // time while the map kept its 20rem), and on a narrow window an edge overlay rather than a column.
+        data: { placement: "right", width: "320px", minWidth: "15rem", collapsible: true },
+        render: () => /* @__PURE__ */ jsx32(WithT, { children: /* @__PURE__ */ jsx32(KumiPane, { ctx, onOpenMap: openMap, onOpenMeasurements: openMeasurements, store }) })
       },
       {
         id: "status",
@@ -12521,5 +12535,7 @@ export {
   MEASUREMENTS_WORKSPACE,
   PLUGIN_ID,
   POLL_MS,
-  plugin_default as default
+  ROOM_BESIDE_LEAST,
+  plugin_default as default,
+  roomBeside2 as roomBeside
 };

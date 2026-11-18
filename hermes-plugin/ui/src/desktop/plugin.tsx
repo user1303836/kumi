@@ -49,6 +49,17 @@ export const POLL_MS = 5000
 export const IDLE_POLLS = 6
 /** How often a running job is read while the window is in view (none is read when nothing runs). */
 export const JOB_POLL_MS = 2000
+/** The narrowest window where a tab Kumi opens by itself beside the chat still leaves the chat a readable column:
+ *  Hermes's sessions sidebar (237 px) + the tab at its minimum (20rem, 320 px) + Kumi's pane at its minimum (15rem,
+ *  240 px) + 400 px of chat. Narrower, a find or a listen leaves its tab for the producer to open. */
+export const ROOM_BESIDE_LEAST = 237 + 320 + 240 + 400
+
+/** Whether this window is wide enough for Kumi to open a tab beside the chat by itself (`ROOM_BESIDE_LEAST`). It reads
+ *  the window Kumi's own UI is drawn in, never Hermes's markup. */
+export function roomBeside(): boolean {
+  const width = globalThis.innerWidth
+  return typeof width !== 'number' || width >= ROOM_BESIDE_LEAST
+}
 
 // Desktop's translator for this plugin's catalogs, reactive to a language switch; English on a Desktop without it.
 const usePluginWords: ((pluginId: string) => Translate) | null = typeof sdk.usePluginI18n === 'function' ? sdk.usePluginI18n : null
@@ -92,6 +103,8 @@ const plugin: HermesPlugin = {
 
     // 20rem at the least: at a 1024 px window Hermes's sidebar (237 px), the chat (225 px) and its right column (160 px,
     // where Kumi's pane is) leave about 400 px, and a wider minimum squeezed the pane to nothing (H4).
+    // A find or a listen opens its tab by itself only where the chat keeps a readable column beside it (`roomBeside`);
+    // narrower, the producer opens it from Kumi's pane or the chip, as a choice.
     const openMap = () => {
       if (typeof host.openWorkspace === 'function') {
         closeMap = host.openWorkspace(MAP_WORKSPACE, {
@@ -192,7 +205,7 @@ const plugin: HermesPlugin = {
       }
       if (!ids.length) return
       store.found(revision, ids, said)
-      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap()
+      if (ctx.storage.get(OPEN_MAP_ON_FIND, true) && roomBeside()) openMap()
     }
     ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, event => {
       const payload = payloadOf(event)
@@ -221,7 +234,7 @@ const plugin: HermesPlugin = {
           if (calls.has(id)) return
           calls.add(id)
           store.measure(id, result)
-          openMeasurements()
+          if (roomBeside()) openMeasurements()
         }, LISTEN_FALLBACK_MS)
       )
     })
@@ -296,10 +309,12 @@ const plugin: HermesPlugin = {
         id: 'pane',
         area: PANES_AREA,
         title: 'Kumi',
-        data: { placement: 'right', width: '320px' },
+        // As Hermes's own side panes are: never squeezed below 15rem (P8: at 1000 px its words wrapped a letter at a
+        // time while the map kept its 20rem), and on a narrow window an edge overlay rather than a column.
+        data: { placement: 'right', width: '320px', minWidth: '15rem', collapsible: true },
         render: () => (
           <WithT>
-            <KumiPane ctx={ctx} onOpenMap={openMap} store={store} />
+            <KumiPane ctx={ctx} onOpenMap={openMap} onOpenMeasurements={openMeasurements} store={store} />
           </WithT>
         )
       },
