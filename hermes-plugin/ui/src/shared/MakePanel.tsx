@@ -18,7 +18,7 @@ import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, t
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
-import { FOCUSABLE, radioKeys, S, SEGMENT_TRACK, segmentStyle, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, radioKeys, S, SEGMENT_TRACK, segmentStyle, TYPE, useEdgeFade, useT } from './ui.tsx'
 
 export interface MakePanelProps {
   /** The sounds to make from, in order (the picks, or the palette's), with their names. */
@@ -335,6 +335,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   // The panel's own scrolling list. A card comes into view by scrolling it alone: `scrollIntoView` would scroll every
   // ancestor too, the pane the map sits in among them.
   const list = useRef<HTMLDivElement | null>(null)
+  useEdgeFade(list)
   const reveal = (element: HTMLElement | null | undefined, where: 'nearest' | 'start') => {
     const box = list.current
     if (!box || !element) return

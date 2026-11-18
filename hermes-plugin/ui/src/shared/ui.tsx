@@ -2,7 +2,7 @@
 // component reads as native in Hermes Desktop and in the web dashboard. Their words come from the translator a UI
 // root provides (`I18n`): Desktop's for its language, the dashboard's for its locale, English outside any.
 import { T } from '@kumi/theme'
-import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
 
 import { english, type Translate } from './i18n.ts'
@@ -13,14 +13,22 @@ export function useT(): Translate {
   return useContext(I18n)
 }
 
+/** The type scale the design pass draws with (T2-DESIGN): body for what a row says, small for meta lines, hints and
+ *  buttons (Hermes's own button text is 12 px), caption for section headings, times and chips; weights 400 and 600. */
+export const TYPE = {
+  body: { fontSize: 13, lineHeight: '18px' },
+  small: { fontSize: 12, lineHeight: '16px' },
+  caption: { fontSize: 11, lineHeight: '14px' }
+} as const
+
 export const S = {
   section: { display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderBottom: `1px solid ${T.hairline}` },
-  heading: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, lineHeight: '14px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted },
+  heading: { display: 'flex', alignItems: 'center', gap: 6, ...TYPE.caption, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted },
   row: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
   // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
-  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: 'anywhere' },
-  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: 'anywhere' },
-  faint: { fontSize: 11.5, color: T.faint },
+  text: { ...TYPE.body, color: T.text, overflowWrap: 'anywhere' },
+  muted: { ...TYPE.small, color: T.muted, overflowWrap: 'anywhere' },
+  faint: { ...TYPE.caption, color: T.faint },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
   // Read by a screen reader, not drawn: hints and live announcements.
   hidden: { position: 'absolute', width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }
@@ -91,14 +99,6 @@ export function Dot({ color, size = 7, title, beat }: { color: string; size?: nu
   return <span aria-hidden={!title} className={pulse.className} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none', ...pulse.style }} />
 }
 
-/** The type scale the design pass draws with (T2-DESIGN): body for what a row says, small for meta lines, hints and
- *  buttons (Hermes's own button text is 12 px), caption for section headings, times and chips; weights 400 and 600. */
-export const TYPE = {
-  body: { fontSize: 13, lineHeight: '18px' },
-  small: { fontSize: 12, lineHeight: '16px' },
-  caption: { fontSize: 11, lineHeight: '14px' }
-} as const
-
 /** Hermes's segmented look, for a choice among a few (Make's ways and modes, Strict | Loose): a tinted track, the
  *  chosen one raised in the theme's own colours. */
 export const SEGMENT_TRACK = { display: 'flex', flexWrap: 'wrap', gap: 2, padding: 2, borderRadius: 5, background: T.chip } as const
@@ -121,6 +121,49 @@ export function segmentStyle(picked: boolean, disabled = false): CSSProperties {
     cursor: disabled ? 'default' : 'pointer',
     transition: 'background-color 100ms, color 100ms'
   }
+}
+
+/** Fade `element`'s top and bottom edges while there's more to scroll that way, so a row cut at an edge reads as
+ *  scrolling, not as a fault. It sets the element's own mask (no re-render) on scroll, resize and new content. */
+function fadeEdges(element: HTMLElement): () => void {
+  const apply = () => {
+    const top = element.scrollTop > 1
+    const bottom = element.scrollTop + element.clientHeight < element.scrollHeight - 1
+    const mask = top || bottom ? `linear-gradient(to bottom, ${top ? 'transparent' : '#000'}, #000 ${top ? 16 : 0}px, #000 calc(100% - ${bottom ? 16 : 0}px), ${bottom ? 'transparent' : '#000'})` : ''
+    element.style.setProperty('mask-image', mask)
+    element.style.setProperty('-webkit-mask-image', mask)
+  }
+  apply()
+  element.addEventListener('scroll', apply, { passive: true })
+  const resized = new ResizeObserver(apply)
+  resized.observe(element)
+  const changed = new MutationObserver(apply)
+  changed.observe(element, { childList: true, subtree: true, characterData: true })
+  return () => {
+    element.removeEventListener('scroll', apply)
+    resized.disconnect()
+    changed.disconnect()
+    element.style.removeProperty('mask-image')
+    element.style.removeProperty('-webkit-mask-image')
+  }
+}
+
+/** Every scroller of Kumi's fades at the edge it can still scroll to (`fadeEdges`), while `on`. */
+export function useEdgeFade(ref: RefObject<HTMLElement | null>, on = true): void {
+  const bound = useRef<{ element: HTMLElement; stop: () => void } | null>(null)
+  useLayoutEffect(() => {
+    const element = on ? ref.current : null
+    if (bound.current?.element === element) return
+    bound.current?.stop()
+    bound.current = element ? { element, stop: fadeEdges(element) } : null
+  })
+  useLayoutEffect(
+    () => () => {
+      bound.current?.stop()
+      bound.current = null
+    },
+    []
+  )
 }
 
 /** A click that may put a request in the chat: an `onClick` that answers with a promise makes the button a request's.

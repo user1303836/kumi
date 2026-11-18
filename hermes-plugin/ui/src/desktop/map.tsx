@@ -216,6 +216,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
         <MapCanvas
           audio={id => audition.url(id)}
           coverRight={palette.making && beside ? sideSheetWidth(areaWidth) + 16 : 0}
+          veiled={Boolean(palette.making) && !beside}
           onStop={() => audition.stop()}
           actions={(id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision)

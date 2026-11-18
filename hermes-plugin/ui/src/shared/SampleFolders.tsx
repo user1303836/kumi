@@ -5,11 +5,11 @@
 // dashboard copies it), where the tool's approval names it: nothing is added or read from here.
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Translate } from './i18n.ts'
 import type { FolderCheck, KumiStore, SampleFolder } from './store.ts'
-import { FOCUSABLE, S, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, S, TYPE, useEdgeFade, useT } from './ui.tsx'
 
 /** Where the request to add a folder went: sent to Kumi's chat, left in an input, copied, or nowhere. */
 export type FolderAsked = 'copied' | 'drafted' | 'none' | 'sent'
@@ -84,6 +84,8 @@ export function SampleFolders({
   onClose?: () => void
 }) {
   const t = useT()
+  const list = useRef<HTMLUListElement | null>(null)
+  useEdgeFade(list)
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<{ refused: boolean; text: string } | null>(null)
@@ -126,7 +128,7 @@ export function SampleFolders({
       ) : folders === null ? null : folders.length === 0 ? (
         <span style={{ ...TYPE.small, color: T.faint }}>{t('folders.none')}</span>
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 2, maxHeight: 120, overflowY: 'auto' }}>
+        <ul ref={list} style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 2, maxHeight: 120, overflowY: 'auto' }}>
           {folders.map(folder => (
             <li key={folder.path} style={{ ...TYPE.caption, overflowWrap: 'anywhere', color: folder.missing ? T.faint : T.text }}>
               <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', textDecoration: folder.missing ? 'line-through' : undefined }}>{folder.path}</span>

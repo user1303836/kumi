@@ -193,15 +193,6 @@ export function displayReferenceName(reference: ListenReference): string {
   return clean((reference.origin?.name ?? reference.name ?? '').split(/[\\/]/).pop() || 'Reference', 160)
 }
 
-/** Exact measured seconds, not the original file's Analysis.seconds or a source capture's beats. */
-export function windowWords(window: SampleWindow | null | undefined): string | undefined {
-  if (!window || !finite(window.sample_rate) || window.sample_rate <= 0 || !finite(window.frame_count) || !finite(window.start_frame)) return undefined
-  const start = window.start_frame / window.sample_rate
-  const duration = window.frame_count / window.sample_rate
-  const requested = window.requested ? ` · requested ${num(window.requested.from, 6)} + ${num(window.requested.seconds, 6)} s` : ''
-  return `Reference file seconds ${num(start, 6)}–${num(start + duration, 6)} · ${num(duration, 6)} s measured (${window.frame_count} frames at ${window.sample_rate} Hz)${requested}`
-}
-
 // Sort object keys as well as the equal-weight member set; native object insertion order is not identity.
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`

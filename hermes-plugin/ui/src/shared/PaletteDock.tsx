@@ -8,7 +8,7 @@
 import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { rgbOf } from './atlas/color.ts'
 import { Glyph } from './atlas/Glyph.tsx'
@@ -19,7 +19,7 @@ import { ActionMenu, Icon } from './mapUi.tsx'
 import { LOOSE, moved, paletteName, type PaletteAction, type PaletteItem, type PaletteReply, type PaletteView, playableId } from './palette.ts'
 import { peaksFor, peaksKept } from './peaks.ts'
 import type { MapGroup } from './types.ts'
-import { FOCUSABLE, Pending, S, SEGMENT_TRACK, segmentStyle, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, Pending, S, SEGMENT_TRACK, segmentStyle, TYPE, useEdgeFade, useT } from './ui.tsx'
 
 /** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
@@ -444,6 +444,24 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   // New sounds go at the end: the row or grid scrolls to them, so a gather or a kept sound lands in view. Once per
   // gather: a fold or an unfold later opens at the start (the sounds just gathered stay `arrived` until the next answer).
   const strip = useRef<HTMLDivElement | null>(null)
+  useEdgeFade(strip, open)
+  // Whether the folded row shows every sound already: then the drawer's button opens the cards, it doesn't promise
+  // "all" of what's already in view (a palette of one sound read "Show all 1").
+  const [rowFits, setRowFits] = useState(false)
+  useLayoutEffect(() => {
+    const element = open ? null : strip.current
+    if (!element) return
+    const check = () => setRowFits(element.scrollWidth <= element.clientWidth + 1)
+    check()
+    const resized = new ResizeObserver(check)
+    resized.observe(element)
+    const changed = new MutationObserver(check)
+    changed.observe(element, { childList: true })
+    return () => {
+      resized.disconnect()
+      changed.disconnect()
+    }
+  }, [open, editing, (order ?? current?.items ?? []).length > 0])
   const scrolledFor = useRef<Map<string, number> | null>(null)
   useEffect(() => {
     const element = strip.current
@@ -695,7 +713,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
       {view && view.items.length > 0 && kit?.(view)}
       {items.length > 0 && (
         <Button expanded={open} onClick={() => onOpen(!open)} tip={open ? t('dock.collapse') : t('dock.expand')}>
-          {open ? t('dock.fold') : t('dock.showAll', items.length)}
+          {open ? t('dock.fold') : rowFits ? t('dock.openCards') : t('dock.showAll', items.length)}
           <span aria-hidden style={{ display: 'inline-block', marginLeft: 4, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
             ▴
           </span>

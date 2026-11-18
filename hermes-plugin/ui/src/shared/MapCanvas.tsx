@@ -35,7 +35,7 @@ import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup
 import { Player } from './Player.tsx'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
-import { FOCUSABLE, S, TYPE, useT } from './ui.tsx'
+import { FOCUSABLE, S, TYPE, useEdgeFade, useT } from './ui.tsx'
 
 export interface MapCanvasProps {
   map: SoundMap | null
@@ -79,6 +79,9 @@ export interface MapCanvasProps {
   /** How much of the map's right a side sheet covers (the Make panel beside a wide map): the fit, a find's frame and
    *  the picks' actions keep to the room left of it. */
   coverRight?: number
+  /** Something of the parent's lies over the map (Make over a narrow map): the find's card, which would peek out from
+   *  under it, isn't drawn until it's gone. */
+  veiled?: boolean
   /** The layout shown: '' for similarity, else one of the map's arrangements by id (one it lacks is similarity); the
    *  parent keeps it, hearing each choice in `onArrangement`. Without it the map keeps its own. */
   arrangement?: string
@@ -197,7 +200,7 @@ const ROUNDS = 8
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
-export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }: MapCanvasProps) {
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = 'auto', audio, onStop, coverRight = 0, veiled = false, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -572,6 +575,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // "Zoom to them"): the view never moves under the producer's hands as they type.
   const framedFound = useRef<ReadonlySet<string> | null>(null)
   const matchesRef = useRef<HTMLDivElement | null>(null)
+  const matchesList = useRef<HTMLDivElement | null>(null)
+  useEdgeFade(matchesList)
   const frameSounds = (ids: Set<string>): void => {
     // The card sits in the top column (8 px in from the map's corner), which is its offset parent.
     const card = matchesRef.current
@@ -1227,7 +1232,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // corner as they'd stand would leave the map less than its free room (`FREE_LEAST`, or a third of its height). Both
   // decisions read estimates (`listWants`, `CORNER_WITH_STEPS`), never what they change, so neither flips back and forth.
   const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10
-  const listOpen = matches.length > 0 && closedOf !== matches
+  const listOpen = matches.length > 0 && closedOf !== matches && !veiled
   const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED)
   const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0)
   const freeLeast = Math.max(FREE_LEAST, size.height / 4)
@@ -1418,8 +1423,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             )
           })}
         </div>
-        {matches.length > 0 &&
-          closedOf !== matches &&
+        {listOpen &&
           (() => {
             // What every listed row would repeat is said once, in the head: their kind when they're all one, the find's
             // reasons they all share, and their closeness when it's all within two points (CC-23's words, "closeness N,
@@ -1433,7 +1437,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             const closeness = listed.map(id => found?.matches?.[id]?.closeness).filter((value): value is number => typeof value === 'number')
             const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0]
             const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2
-            const facts = [oneKind && t('map.allKind', oneKind), ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}–${high}`) : t('map.closenessShown')) : '']
+            // The kind alone (the head speaks for every row), and a range that never breaks between its two ends.
+            const facts = [oneKind, ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}\u2060–\u2060${high}`) : t('map.closenessShown')) : '']
               .filter(Boolean)
               .join(' · ')
             return (
@@ -1467,7 +1472,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                   </Button>
                 </div>
                 {!listFolded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
+                  <div ref={matchesList} style={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: 0, overflowY: 'auto' }}>
                     {listed.map(id => {
                       const sound = model.sounds[id]
                       const indexed = indexedValues(sound, t)

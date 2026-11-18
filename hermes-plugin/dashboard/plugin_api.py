@@ -248,8 +248,10 @@ def designs_made() -> dict:
 @router.get("/library/folders")
 def library_folders() -> dict:
     """The sample folders Kumi may read (the `library_folders` setting as the guard keeps it), for the Sample folders
-    control: the producer's own setting, as `hermes kumi samples` shows it."""
-    return {"folders": _library_folders()}
+    control: the producer's own setting, as `hermes kumi samples` shows it. `missing` names those that aren't a folder
+    on this computer now (a drive unplugged, a folder moved), so the control can say so; a scan skips them anyway."""
+    folders = _library_folders()
+    return {"folders": folders, "missing": [folder for folder in folders if not Path(folder).is_dir()]}
 
 
 def _library_folder(body: object) -> dict:

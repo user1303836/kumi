@@ -145,7 +145,6 @@ var en = {
     closeness: (value) => `closeness ${value}, relative to this map`,
     closenessTitle: "How close this sound is to the one you asked about, 0 to 100, against the other sounds on this map: not a percentage, and not a confidence.",
     closenessShown: "closeness relative to this map",
-    allKind: (kind) => `all ${kind}`,
     showMore: (count2) => `Show ${count2} more`,
     showFewer: "Show fewer",
     showList: (n) => `Show the list (${n})`,
@@ -516,6 +515,7 @@ var en = {
     looseTitle: (k) => `Kumi may also offer each sound's ${k} nearest, and asks before adding any`,
     fold: "Fold",
     showAll: (n) => `Show all ${n}`,
+    openCards: "Open",
     gripTitle: "Drag to make the palette taller or shorter; click to fold it",
     made: "Made in Kumi",
     excluded: (n) => `${n} kept out`,
@@ -1031,7 +1031,6 @@ var ja = {
     closeness: (value) => `近さ ${value}（このマップ内での相対値）`,
     closenessTitle: "尋ねたサウンドにどれだけ近いかを、このマップ上のほかのサウンドと比べて 0〜100 で表します。パーセントでも確信度でもありません。",
     closenessShown: "このマップ内での相対的な近さ",
-    allKind: (kind) => `すべて ${kind}`,
     showMore: (count2) => `ほか ${count2} 個を表示`,
     showFewer: "折りたたむ",
     showList: (n) => `リストを表示（${n}）`,
@@ -1395,6 +1394,7 @@ var ja = {
     looseTitle: (k) => `Kumi は各サウンドに近い ${k} 個も提案することがあり、追加する前に確認します`,
     fold: "折りたたむ",
     showAll: (n) => `すべて表示（${n}）`,
+    openCards: "開く",
     gripTitle: "ドラッグでパレットの高さを変えます。クリックで折りたたみます",
     made: "Kumi で作成",
     excluded: (n) => `${n} 個を除外`,
@@ -1907,7 +1907,6 @@ var zh = {
     closeness: (value) => `接近度 ${value}（相对于这张地图）`,
     closenessTitle: "与你所问的声音有多接近，0 到 100，相对于这张地图上的其他声音：不是百分比，也不是置信度。",
     closenessShown: "相对于这张地图的接近度",
-    allKind: (kind) => `全部是 ${kind}`,
     showMore: (count2) => `再显示 ${count2} 个`,
     showFewer: "收起",
     showList: (n) => `显示列表（${n}）`,
@@ -2271,6 +2270,7 @@ var zh = {
     looseTitle: (k) => `Kumi 也可能推荐每个声音最接近的 ${k} 个，加入前会先问你`,
     fold: "收起",
     showAll: (n) => `全部显示（${n}）`,
+    openCards: "展开",
     gripTitle: "拖动来调整调色板的高度；点击可收起",
     made: "在 Kumi 中生成",
     excluded: (n) => `已排除 ${n} 个`,
@@ -4188,14 +4188,19 @@ var I18n = createContext(english);
 function useT() {
   return useContext(I18n);
 }
+var TYPE = {
+  body: { fontSize: 13, lineHeight: "18px" },
+  small: { fontSize: 12, lineHeight: "16px" },
+  caption: { fontSize: 11, lineHeight: "14px" }
+};
 var S = {
   section: { display: "flex", flexDirection: "column", gap: 8, padding: 12, borderBottom: `1px solid ${T.hairline}` },
-  heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, lineHeight: "14px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
+  heading: { display: "flex", alignItems: "center", gap: 6, ...TYPE.caption, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
   row: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
   // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
-  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
-  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: "anywhere" },
-  faint: { fontSize: 11.5, color: T.faint },
+  text: { ...TYPE.body, color: T.text, overflowWrap: "anywhere" },
+  muted: { ...TYPE.small, color: T.muted, overflowWrap: "anywhere" },
+  faint: { ...TYPE.caption, color: T.faint },
   ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
   // Read by a screen reader, not drawn: hints and live announcements.
   hidden: { position: "absolute", width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
@@ -4218,11 +4223,6 @@ function Dot({ color, size = 7, title, beat }) {
   const pulse = beating(beat, color);
   return /* @__PURE__ */ jsx("span", { "aria-hidden": !title, className: pulse.className, title, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none", ...pulse.style } });
 }
-var TYPE = {
-  body: { fontSize: 13, lineHeight: "18px" },
-  small: { fontSize: 12, lineHeight: "16px" },
-  caption: { fontSize: 11, lineHeight: "14px" }
-};
 var SEGMENT_TRACK = { display: "flex", flexWrap: "wrap", gap: 2, padding: 2, borderRadius: 5, background: T.chip };
 function segmentStyle(picked, disabled = false) {
   return {
@@ -4243,6 +4243,44 @@ function segmentStyle(picked, disabled = false) {
     cursor: disabled ? "default" : "pointer",
     transition: "background-color 100ms, color 100ms"
   };
+}
+function fadeEdges(element) {
+  const apply = () => {
+    const top = element.scrollTop > 1;
+    const bottom = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    const mask = top || bottom ? `linear-gradient(to bottom, ${top ? "transparent" : "#000"}, #000 ${top ? 16 : 0}px, #000 calc(100% - ${bottom ? 16 : 0}px), ${bottom ? "transparent" : "#000"})` : "";
+    element.style.setProperty("mask-image", mask);
+    element.style.setProperty("-webkit-mask-image", mask);
+  };
+  apply();
+  element.addEventListener("scroll", apply, { passive: true });
+  const resized = new ResizeObserver(apply);
+  resized.observe(element);
+  const changed = new MutationObserver(apply);
+  changed.observe(element, { childList: true, subtree: true, characterData: true });
+  return () => {
+    element.removeEventListener("scroll", apply);
+    resized.disconnect();
+    changed.disconnect();
+    element.style.removeProperty("mask-image");
+    element.style.removeProperty("-webkit-mask-image");
+  };
+}
+function useEdgeFade(ref, on = true) {
+  const bound = useRef2(null);
+  useLayoutEffect(() => {
+    const element = on ? ref.current : null;
+    if (bound.current?.element === element) return;
+    bound.current?.stop();
+    bound.current = element ? { element, stop: fadeEdges(element) } : null;
+  });
+  useLayoutEffect(
+    () => () => {
+      bound.current?.stop();
+      bound.current = null;
+    },
+    []
+  );
 }
 function useRequestClick(onClick) {
   const [busy, setBusy] = useState(false);
@@ -5688,7 +5726,7 @@ function payloadOf(event) {
 
 // src/desktop/map.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
-import { useEffect as useEffect17, useRef as useRef15, useState as useState20 } from "react";
+import { useEffect as useEffect17, useRef as useRef16, useState as useState20 } from "react";
 
 // src/shared/atlas/first.ts
 import { useRef as useRef3, useState as useState6 } from "react";
@@ -5968,8 +6006,8 @@ function Slider({
   const fillFrom = range2 || span2.neutral !== void 0 ? a : 0;
   const fillTo = range2 || span2.neutral !== void 0 ? b : fraction(span2, values[0]);
   const shown = set ? format(value) : rest;
-  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }, title, children: [
-    /* @__PURE__ */ jsxs11("span", { style: { ...S.row, gap: 6, fontSize: 11.5, color: set ? T.secondary : T.muted }, children: [
+  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }, children: [
+    /* @__PURE__ */ jsx13(Tip2, { label: title, children: /* @__PURE__ */ jsxs11("span", { style: { ...S.row, gap: 6, ...TYPE.small, color: set ? T.secondary : T.muted }, children: [
       /* @__PURE__ */ jsx13("span", { style: { ...S.ellipsis, flex: 1 }, children: label }),
       /* @__PURE__ */ jsx13(
         "button",
@@ -5981,7 +6019,7 @@ function Slider({
           type: "button",
           style: {
             font: "inherit",
-            fontSize: 10.5,
+            ...TYPE.caption,
             fontVariantNumeric: "tabular-nums",
             padding: "0 6px",
             borderRadius: 8,
@@ -5995,7 +6033,7 @@ function Slider({
           children: shown || "·"
         }
       )
-    ] }),
+    ] }) }),
     /* @__PURE__ */ jsxs11(
       "div",
       {
@@ -6007,10 +6045,10 @@ function Slider({
         },
         onPointerUp: () => setDragging(null),
         ref: track2,
-        style: { position: "relative", height: 16, cursor: "pointer", touchAction: "none" },
+        style: { position: "relative", height: 24, cursor: "pointer", touchAction: "none" },
         children: [
-          /* @__PURE__ */ jsx13("span", { "aria-hidden": true, style: { position: "absolute", left: 0, right: 0, top: 6, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 } }),
-          span2.neutral !== void 0 && span2.neutral > span2.min && /* @__PURE__ */ jsx13("span", { "aria-hidden": true, style: { position: "absolute", left: `${fraction(span2, span2.neutral) * 100}%`, top: 3, width: 1, height: 10, background: T.faint, transform: "translateX(-0.5px)" } }),
+          /* @__PURE__ */ jsx13("span", { "aria-hidden": true, style: { position: "absolute", left: 0, right: 0, top: 10, height: 4, borderRadius: 2, background: T.border, opacity: set ? 0.9 : 0.55 } }),
+          span2.neutral !== void 0 && span2.neutral > span2.min && /* @__PURE__ */ jsx13("span", { "aria-hidden": true, style: { position: "absolute", left: `${fraction(span2, span2.neutral) * 100}%`, top: 7, width: 1, height: 10, background: T.faint, transform: "translateX(-0.5px)" } }),
           set && /* @__PURE__ */ jsx13(
             "span",
             {
@@ -6019,7 +6057,7 @@ function Slider({
                 position: "absolute",
                 left: `${fillFrom * 100}%`,
                 width: `${Math.max(0, fillTo - fillFrom) * 100}%`,
-                top: 6,
+                top: 10,
                 height: 4,
                 borderRadius: 2,
                 background: T.accent,
@@ -6028,7 +6066,7 @@ function Slider({
               }
             }
           ),
-          values.map((at, thumb) => /* @__PURE__ */ jsx13(
+          values.map((at, thumb) => /* @__PURE__ */ jsx13(Tip2, { label: title, children: /* @__PURE__ */ jsx13(
             "div",
             {
               "aria-label": range2 ? `${label} ${thumb === 0 ? "↓" : "↑"}` : label,
@@ -6043,7 +6081,7 @@ function Slider({
               style: {
                 position: "absolute",
                 left: `${fraction(span2, at) * 100}%`,
-                top: 2,
+                top: 6,
                 width: 12,
                 height: 12,
                 borderRadius: "50%",
@@ -6054,13 +6092,12 @@ function Slider({
                 boxShadow: set ? `0 2px 6px -2px ${T.accent}` : "none",
                 transition: dragging === null ? "left 120ms, transform 120ms, border-color 140ms" : "transform 120ms"
               }
-            },
-            thumb
-          ))
+            }
+          ) }, thumb))
         ]
       }
     ),
-    ends && /* @__PURE__ */ jsxs11("span", { "aria-hidden": true, style: { ...S.row, justifyContent: "space-between", fontSize: 10, color: T.faint, marginTop: -2 }, children: [
+    ends && /* @__PURE__ */ jsxs11("span", { "aria-hidden": true, style: { ...S.row, justifyContent: "space-between", ...TYPE.caption, color: T.faint, marginTop: -2 }, children: [
       /* @__PURE__ */ jsx13("span", { children: ends[0] }),
       /* @__PURE__ */ jsx13("span", { children: ends[1] })
     ] })
@@ -6708,6 +6745,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const canvases = useRef6(/* @__PURE__ */ new Map());
   const chooses = useRef6(/* @__PURE__ */ new Map());
   const list = useRef6(null);
+  useEdgeFade(list);
   const reveal = (element, where) => {
     const box = list.current;
     if (!box || !element) return;
@@ -9545,7 +9583,7 @@ function resolve(canvas) {
 }
 var ROUNDS = 8;
 var maps = 0;
-function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }) {
+function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty, leaving, hiddenActions, marked, picked, onPicked, onHover, tools, pickedActions, tiles = false, onTiles, flying, wheel = "auto", audio, onStop, coverRight = 0, veiled = false, arrangement, onArrangement, grow, growActions, onPlayMade, trail = false, kin, first }) {
   const t = useT();
   const model = useMemo2(() => buildModel(map), [map]);
   const canvasRef = useRef13(null);
@@ -9830,6 +9868,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   }, [topInset, coverRight]);
   const framedFound = useRef13(null);
   const matchesRef = useRef13(null);
+  const matchesList = useRef13(null);
+  useEdgeFade(matchesList);
   const frameSounds = (ids) => {
     const card = matchesRef.current;
     let clear = {};
@@ -10375,7 +10415,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => observer.disconnect();
   }, [playerShown]);
   const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10;
-  const listOpen = matches.length > 0 && closedOf !== matches;
+  const listOpen = matches.length > 0 && closedOf !== matches && !veiled;
   const rowsShown = Math.min(matches.length, allOf === matches ? matches.length : MATCHES_LISTED);
   const listWants = LIST_HEAD + rowsShown * LIST_ROW + (matches.length > MATCHES_LISTED ? LIST_MORE : 0);
   const freeLeast = Math.max(FREE_LEAST, size.height / 4);
@@ -10524,7 +10564,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               }
             ) }, group.key);
           }) }),
-          matches.length > 0 && closedOf !== matches && (() => {
+          listOpen && (() => {
             const listed = matches.slice(0, allOf === matches ? matches.length : MATCHES_LISTED);
             const kinds = new Set(listed.map((id) => model.sounds[id]?.class).filter(Boolean));
             const oneKind = kinds.size === 1 ? clean([...kinds][0], 16) : "";
@@ -10534,7 +10574,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             const closeness = listed.map((id) => found?.matches?.[id]?.closeness).filter((value) => typeof value === "number");
             const [low, high] = closeness.length ? [Math.min(...closeness), Math.max(...closeness)] : [0, 0];
             const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2;
-            const facts = [oneKind && t("map.allKind", oneKind), ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}–${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
+            const facts = [oneKind, ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}⁠–⁠${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
             return (
               // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
               // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
@@ -10550,7 +10590,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                   /* @__PURE__ */ jsx26(Button2, { kind: "quiet", onClick: () => frameSounds(new Set(matches)), tip: t("map.frameTitle"), children: t("map.frame") }),
                   /* @__PURE__ */ jsx26(Button2, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                 ] }),
-                !listFolded && /* @__PURE__ */ jsx26("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
+                !listFolded && /* @__PURE__ */ jsx26("div", { ref: matchesList, style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
                   const sound = model.sounds[id];
                   const indexed = indexedValues(sound, t);
                   const own = whyOf(id).filter((why) => !sharedWhy.includes(why));
@@ -10778,7 +10818,7 @@ function GlyphShape({ glyph, color }) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect14, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
+import { useEffect as useEffect14, useLayoutEffect as useLayoutEffect3, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
 import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs23 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
@@ -11080,6 +11120,22 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, hus
     return new Map(fresh2.map((key, order2) => [key, order2]));
   }, [current]);
   const strip = useRef14(null);
+  useEdgeFade(strip, open);
+  const [rowFits, setRowFits] = useState17(false);
+  useLayoutEffect3(() => {
+    const element = open ? null : strip.current;
+    if (!element) return;
+    const check = () => setRowFits(element.scrollWidth <= element.clientWidth + 1);
+    check();
+    const resized = new ResizeObserver(check);
+    resized.observe(element);
+    const changed = new MutationObserver(check);
+    changed.observe(element, { childList: true });
+    return () => {
+      resized.disconnect();
+      changed.disconnect();
+    };
+  }, [open, editing, (order ?? current?.items ?? []).length > 0]);
   const scrolledFor = useRef14(null);
   useEffect14(() => {
     const element = strip.current;
@@ -11285,7 +11341,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, hus
     view && view.items.length > 1 && make && /* @__PURE__ */ jsx27(Button2, { kind: "quiet", onClick: () => make(view), tip: t("make.openTitle"), children: t("make.open") }),
     view && view.items.length > 0 && kit?.(view),
     items.length > 0 && /* @__PURE__ */ jsxs23(Button2, { expanded: open, onClick: () => onOpen(!open), tip: open ? t("dock.collapse") : t("dock.expand"), children: [
-      open ? t("dock.fold") : t("dock.showAll", items.length),
+      open ? t("dock.fold") : rowFits ? t("dock.openCards") : t("dock.showAll", items.length),
       /* @__PURE__ */ jsx27("span", { "aria-hidden": true, style: { display: "inline-block", marginLeft: 4, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms" }, children: "▴" })
     ] })
   ] });
@@ -11536,7 +11592,7 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
 }
 
 // src/shared/SampleFolders.tsx
-import { useCallback as useCallback3, useEffect as useEffect16, useState as useState19 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect16, useRef as useRef15, useState as useState19 } from "react";
 import { jsx as jsx28, jsxs as jsxs24 } from "react/jsx-runtime";
 var hostDialog;
 var hostDialogKnown;
@@ -11568,6 +11624,8 @@ function SampleFolders({
   onClose
 }) {
   const t = useT();
+  const list = useRef15(null);
+  useEdgeFade(list);
   const [typed, setTyped] = useState19("");
   const [busy, setBusy] = useState19(false);
   const [said, setSaid] = useState19(null);
@@ -11599,7 +11657,7 @@ function SampleFolders({
       /* @__PURE__ */ jsx28("span", { style: { ...TYPE.caption, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted }, children: t("folders.title") }),
       onClose && /* @__PURE__ */ jsx28(Button2, { kind: "quiet", label: t("folders.close"), onClick: onClose, children: "×" })
     ] }),
-    folders === void 0 ? /* @__PURE__ */ jsx28("span", { style: { ...TYPE.small, color: T.faint }, children: t("folders.reading") }) : folders === null ? null : folders.length === 0 ? /* @__PURE__ */ jsx28("span", { style: { ...TYPE.small, color: T.faint }, children: t("folders.none") }) : /* @__PURE__ */ jsx28("ul", { style: { margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 2, maxHeight: 120, overflowY: "auto" }, children: folders.map((folder) => /* @__PURE__ */ jsxs24("li", { style: { ...TYPE.caption, overflowWrap: "anywhere", color: folder.missing ? T.faint : T.text }, children: [
+    folders === void 0 ? /* @__PURE__ */ jsx28("span", { style: { ...TYPE.small, color: T.faint }, children: t("folders.reading") }) : folders === null ? null : folders.length === 0 ? /* @__PURE__ */ jsx28("span", { style: { ...TYPE.small, color: T.faint }, children: t("folders.none") }) : /* @__PURE__ */ jsx28("ul", { ref: list, style: { margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 2, maxHeight: 120, overflowY: "auto" }, children: folders.map((folder) => /* @__PURE__ */ jsxs24("li", { style: { ...TYPE.caption, overflowWrap: "anywhere", color: folder.missing ? T.faint : T.text }, children: [
       /* @__PURE__ */ jsx28("span", { style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", textDecoration: folder.missing ? "line-through" : void 0 }, children: folder.path }),
       folder.missing && /* @__PURE__ */ jsx28("span", { style: { color: T.warn }, children: ` · ${t("folders.missing")}` })
     ] }, folder.path)) }),
@@ -11672,7 +11730,7 @@ var RUNTIME_MISSING = { needs_runtime: true, outdated_runtime: true, damaged_run
 var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, start + 3]);
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
-  const first = useRef15(null);
+  const first = useRef16(null);
   useEffect17(() => first.current?.focus(), []);
   return /* @__PURE__ */ jsx29(
     "div",
@@ -11721,7 +11779,7 @@ function MapWorkspace({ ctx, store, audition }) {
   });
   const playMade = (id) => void audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   const grow = useGrow((request) => store.design(request), (result) => playMade(result.artifact_id), state.map?.revision ?? null);
-  const dock = useRef15(null);
+  const dock = useRef16(null);
   const [paletteOpen, setPaletteOpen] = useState20(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
   const first = useFirstOpen(
     () => ctx.storage.get(FIRST_OPEN, ""),
@@ -11731,7 +11789,7 @@ function MapWorkspace({ ctx, store, audition }) {
   useEffect17(() => {
     if (makeOpen) first.done(["make"]);
   }, [makeOpen]);
-  const area = useRef15(null);
+  const area = useRef16(null);
   const [areaWidth, setAreaWidth] = useState20(0);
   useEffect17(() => {
     const element = area.current;
@@ -11790,6 +11848,7 @@ function MapWorkspace({ ctx, store, audition }) {
         {
           audio: (id) => audition.url(id),
           coverRight: palette.making && beside ? sideSheetWidth(areaWidth) + 16 : 0,
+          veiled: Boolean(palette.making) && !beside,
           onStop: () => audition.stop(),
           actions: (id, sound) => {
             const request = soundRequest(id, sound.name, map?.revision);
