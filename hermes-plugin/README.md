@@ -136,8 +136,10 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` is Kumi's name in Hermes's plugin catalog. Until Kumi is listed there, install it from Kumi's repository with
-`hermes plugins install user1303836/kumi#hermes-plugin`, then enable it the same way.
+`kumi` is Kumi's name in Hermes's plugin catalog. On Hermes v0.22.7 and v0.23.0, `hermes plugins install kumi` says
+Kumi isn't in the catalog (the catalog has outgrown what those versions read): install it from Kumi's repository with
+`hermes plugins install user1303836/kumi#hermes-plugin`, then enable it the same way, or update Hermes to v0.23.1 or
+later. An install from the repository then updates from the repository, not from the catalog.
 
 In Hermes Desktop, also turn on Kumi's **Desktop** switch under **Capabilities → Plugins**: a plugin's Desktop switch
 starts off.
