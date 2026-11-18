@@ -671,9 +671,12 @@ class NativeRelease(unittest.TestCase):
         cargo = lambda target, folder: ("cargo", ["build", "--locked", "--profile", "ci-release", "--target", target, "-p", "reaper-kumi",
                                                   "--target-dir", str(folder)])
         mac = self.root / "x86_64-apple-darwin" / "reaper_kumi.dylib"
-        self.assertEqual([call[:2] for call in calls[:5]], [
-            cargo("aarch64-apple-darwin", target_dir), cargo("x86_64-apple-darwin", target_dir),
-            ("lipo", ["-create", "-output", str(mac), str(target_dir / "aarch64-apple-darwin/ci-release/libreaper_kumi.dylib"),
+        # A Mac's two builds at once (so in either order): the bundle's own architecture in the workspace's target folder,
+        # the other in one of its own.
+        other = target_dir / "extension-aarch64-apple-darwin"
+        self.assertCountEqual([call[:2] for call in calls[:2]], [cargo("aarch64-apple-darwin", other), cargo("x86_64-apple-darwin", target_dir)])
+        self.assertEqual([call[:2] for call in calls[2:5]], [
+            ("lipo", ["-create", "-output", str(mac), str(other / "aarch64-apple-darwin/ci-release/libreaper_kumi.dylib"),
                       str(target_dir / "x86_64-apple-darwin/ci-release/libreaper_kumi.dylib")]),
             # The platform's strip, then a signature over what lipo and strip made.
             ("strip", ["-x", str(mac)]), ("codesign", ["--force", "--sign", "-", str(mac)])])
