@@ -128,6 +128,20 @@ test('a HISTORY row says when Kumi kept a copy of the project before it, by its 
   assert.ok(!draw(undefined).includes('copy of the project'), 'nothing when no copy was made')
 })
 
+test("a HISTORY row's lines run under its title, past its action, and a path in them breaks only after a separator", async () => {
+  const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const row = note => ({ id: 'h-3', title: 'Louder drums', track: 'Drums', state: 'applied', undo_available: true, note })
+  const draw = note => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(note)] }, action: () => createElement('button', null, 'Copy undo') }))
+  // A project's path, as serve words where it kept the project: it breaks between folders, never inside a name.
+  const mac = draw('kept at ~/Music/hermes_demo_audio_real Project/hermes_demo_audio_real.als')
+  assert.ok(mac.includes('kept at ~/<wbr/>Music/<wbr/>hermes_demo_audio_real Project/<wbr/>hermes_demo_audio_real.als'), mac)
+  assert.ok(draw('kept at C:\\Users\\me\\Set.als').includes('kept at C:\\<wbr/>Users\\<wbr/>me\\<wbr/>Set.als'))
+  // The action is on the title's line and the note comes after it, under the title: no column beside the button.
+  assert.ok(mac.indexOf('Copy undo') > mac.indexOf('Louder drums') && mac.indexOf('Copy undo') < mac.indexOf('kept at'), mac)
+  // The breaks are elements: nothing invisible in the row (Hermes's install scan flags invisible characters).
+  assert.ok(!/[\u200B-\u200D\u2060\u2062-\u2064\uFEFF]/.test(mac))
+})
+
 test("a change only Live's own Undo can take back (CC-20) says how, with the DAW machine's key or by hand, and offers no Undo", async () => {
   const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
   // A pad load is two Live steps: the note counts them, and the chip leaves the count to it.

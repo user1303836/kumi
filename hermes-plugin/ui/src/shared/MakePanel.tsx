@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { rgbOf } from './atlas/color.ts'
 import type { Share } from './atlas/lineage.ts'
 import { LineageBar } from './atlas/LineageBar.tsx'
-import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, type DesignTab, madeOf, requestFor, requestOf, reroll, resultName, sourceOfResult, stagesOf, type Steer, TABS, takeKey } from './design.ts'
+import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, type DesignResult, type DesignSource, type DesignTab, loopTiming, madeOf, requestFor, requestOf, reroll, resultName, sourceOfResult, stagesOf, type Steer, TABS, takeKey } from './design.ts'
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
@@ -671,6 +671,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               const inPalette = kept.has(result.artifact_id)
               const isChosen = chosen.includes(result.artifact_id)
               const stages = result.mode === 'modulate' ? stagesOf(result.recipe) : []
+              const timing = loopTiming(result)
               const name = nameOf(result)
               return (
                 <div
@@ -818,10 +819,18 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     </div>
                   </div>
                   <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-                    {/* The take's facts; its seed is in their tip, for anyone who looks, not on the face (K2). */}
+                    {/* The take's facts; its seed is in their tip, for anyone who looks, not on the face (K2). A loop
+                        also says its bars and tempo: its name says only how and from what, and in time with what is
+                        what a producer needs of a loop. */}
                     <Tip label={`#${result.seed} · ${t('make.seedTitle')}`}>
                       <span style={{ ...TYPE.small, color: T.faint }}>
-                        {t(`make.ops.${result.mode === 'loop' ? 'loop' : result.op}`)} · {seconds(result.duration)}
+                        {[
+                          t(`make.ops.${result.mode === 'loop' ? 'loop' : result.op}`),
+                          ...(timing ? [t('make.optionValues.bars', timing.bars), timing.meter, t('make.optionValues.bpm', timing.bpm)] : []),
+                          seconds(result.duration)
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                     </Tip>
                     <span style={{ flex: 1 }} />

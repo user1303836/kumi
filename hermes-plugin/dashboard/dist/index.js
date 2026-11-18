@@ -2873,6 +2873,20 @@
   function Pending({ label, width = "60%" }) {
     return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
   }
+  function PathBreaks({ text }) {
+    const parts = [];
+    let from = 0;
+    for (let at = 0; at < text.length; at++) {
+      if (text[at] !== "/" && text[at] !== "\\") continue;
+      parts.push(text.slice(from, at + 1));
+      from = at + 1;
+    }
+    if (from < text.length || parts.length === 0) parts.push(text.slice(from));
+    return /* @__PURE__ */ jsx(Fragment2, { children: parts.map((part, index) => /* @__PURE__ */ jsxs(Fragment, { children: [
+      part,
+      index < parts.length - 1 && /* @__PURE__ */ jsx("wbr", {})
+    ] }, index)) });
+  }
   function Clamp({ text, lines = 2, style }) {
     const box = useRef(null);
     const [open, setOpen] = useState(false);
@@ -3544,6 +3558,11 @@
   }
   function sourceOfResult(result, name = resultName(result)) {
     return { artifact_id: result.artifact_id, name };
+  }
+  function loopTiming(result) {
+    if (result.mode !== "loop") return null;
+    const said = /(\d+) bars? (?:of (\d+\/\d+) )?at (\d+(?:\.\d+)?) BPM/.exec(result.recipe);
+    return said ? { bars: Number(said[1]), meter: said[2] ?? "", bpm: said[3] } : null;
   }
   function stagesOf(recipe) {
     const body = recipe.includes(":") ? recipe.slice(recipe.indexOf(":") + 1) : recipe;
@@ -4588,27 +4607,35 @@
     const family = item.family && !title.toLowerCase().includes(item.family.toLowerCase()) ? clean(item.family, 16) : "";
     return { track: track2, text: [track2, family, ago(item.at, now, t), item.state === "undone" ? t("history.undone") : ""].filter(Boolean).join(" · ") };
   }
-  function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }) {
-    const t = useT();
+  function RowTitle({ item, whole = false }) {
     const title = clean(item.title ?? item.label ?? item.id, 300);
+    const titleStyle = { ...TYPE.body, color: item.state === "undone" ? T.muted : T.text, textDecoration: item.state === "undone" ? "line-through" : void 0, overflowWrap: "anywhere" };
+    return whole ? /* @__PURE__ */ jsx("span", { style: titleStyle, children: title }) : /* @__PURE__ */ jsx(Clamp, { style: titleStyle, text: title });
+  }
+  function RowLines({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }) {
+    const t = useT();
     const line = metaOf(item, now, t);
     const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
     const note = { ...TYPE.small, color: T.muted, whiteSpace: "normal", overflowWrap: "anywhere" };
-    const titleStyle = { ...TYPE.body, color: item.state === "undone" ? T.muted : T.text, textDecoration: item.state === "undone" ? "line-through" : void 0, overflowWrap: "anywhere" };
     return /* @__PURE__ */ jsxs(Fragment2, { children: [
-      whole ? /* @__PURE__ */ jsx("span", { style: titleStyle, children: title }) : /* @__PURE__ */ jsx(Clamp, { style: titleStyle, text: title }),
       meta && /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6 }, children: [
         line.track && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
         /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, ...whole ? { overflowWrap: "anywhere" } : S.ellipsis, color: T.faint }, children: line.text })
       ] }),
-      item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...note, color: T.warn }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : item.note ? (
-        // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi never
-        // undoes one, CC-19); a restart's is said once, above the rows it covers.
-        /* @__PURE__ */ jsx("span", { style: note, children: clean(item.note, 400) })
+      item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...note, color: T.warn }, children: /* @__PURE__ */ jsx(PathBreaks, { text: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) }) : item.note ? (
+        // The runtime's own words for any other row (where it kept the project, why an undo didn't happen), why a
+        // script's can't (Kumi never undoes one, CC-19); a restart's is said once, above the rows it covers.
+        /* @__PURE__ */ jsx("span", { style: note, children: /* @__PURE__ */ jsx(PathBreaks, { text: clean(item.note, 400) }) })
       ) : item.family === "script" ? /* @__PURE__ */ jsx("span", { style: note, children: t("history.scriptUndo", dawName(daw, t)) }) : !restartSaid && restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: note, children: t("history.restartedSince", dawName(daw, t)) }),
       item.copy?.file ? /* @__PURE__ */ jsx("span", { style: note, children: t("history.copyKept", clean(item.copy.file.split(/[/\\]/).pop() ?? "", 120)) }) : null,
       dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
       detail?.(item)
+    ] });
+  }
+  function RowWords(props) {
+    return /* @__PURE__ */ jsxs(Fragment2, { children: [
+      /* @__PURE__ */ jsx(RowTitle, { item: props.item, whole: props.whole }),
+      /* @__PURE__ */ jsx(RowLines, { ...props })
     ] });
   }
   function Mark({ item, live }) {
@@ -4616,6 +4643,7 @@
     const state = stateOf(item, t, live);
     return /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { ...TYPE.body, width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark });
   }
+  var MARK_ROOM = 22;
   function Change({ rows, live, daw, target, now, action, detail, restartSaid }) {
     const t = useT();
     const [open, setOpen] = useState(false);
@@ -4625,29 +4653,30 @@
     const words = { live, daw, target, now, detail, restartSaid };
     const headMark = stateOf(head, t, live).mark;
     const headMeta = metaOf(head, now, t).text;
-    return /* @__PURE__ */ jsxs("li", { style: { display: "flex", flexDirection: "column", padding: "8px 0", borderTop: `1px solid ${T.hairline}` }, children: [
+    return /* @__PURE__ */ jsxs("li", { style: { display: "flex", flexDirection: "column", gap: 2, padding: "8px 0", borderTop: `1px solid ${T.hairline}` }, children: [
       /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
         /* @__PURE__ */ jsx(Mark, { item: head, live }),
-        /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }, children: [
-          /* @__PURE__ */ jsx(RowWords, { item: head, ...words }),
-          others.length > 0 && /* @__PURE__ */ jsxs(
-            "button",
-            {
-              "aria-expanded": open,
-              className: FOCUSABLE,
-              onClick: () => setOpen(!open),
-              type: "button",
-              style: { ...TYPE.small, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, padding: 0, border: "none", background: "transparent", color: T.muted, cursor: "pointer", fontFamily: "inherit" },
-              children: [
-                /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { display: "inline-block", width: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms" }, children: "▸" }),
-                open ? t("history.fewerSteps", others.length) : t("history.moreSteps", others.length)
-              ]
-            }
-          )
-        ] }),
+        /* @__PURE__ */ jsx("div", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: /* @__PURE__ */ jsx(RowTitle, { item: head }) }),
         dawUndo ? null : action?.(head, rows)
       ] }),
-      open && /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: "2px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 6 }, children: others.map((row) => /* @__PURE__ */ jsxs("li", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, paddingLeft: MARK_ROOM }, children: [
+        /* @__PURE__ */ jsx(RowLines, { item: head, ...words }),
+        others.length > 0 && /* @__PURE__ */ jsxs(
+          "button",
+          {
+            "aria-expanded": open,
+            className: FOCUSABLE,
+            onClick: () => setOpen(!open),
+            type: "button",
+            style: { ...TYPE.small, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, padding: 0, border: "none", background: "transparent", color: T.muted, cursor: "pointer", fontFamily: "inherit" },
+            children: [
+              /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { display: "inline-block", width: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms" }, children: "▸" }),
+              open ? t("history.fewerSteps", others.length) : t("history.moreSteps", others.length)
+            ]
+          }
+        )
+      ] }),
+      open && /* @__PURE__ */ jsx("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }, children: others.map((row) => /* @__PURE__ */ jsxs("li", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
         stateOf(row, t, live).mark !== headMark ? /* @__PURE__ */ jsx(Mark, { item: row, live }) : /* @__PURE__ */ jsx("span", { "aria-hidden": true, style: { width: 14, flex: "none" } }),
         /* @__PURE__ */ jsx("div", { style: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }, children: /* @__PURE__ */ jsx(RowWords, { item: row, ...words, meta: metaOf(row, now, t).text !== headMeta, whole: true }) })
       ] }, row.id)) })
@@ -5796,6 +5825,7 @@
                   const inPalette = kept3.has(result.artifact_id);
                   const isChosen = chosen.includes(result.artifact_id);
                   const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
+                  const timing = loopTiming(result);
                   const name = nameOf2(result);
                   return /* @__PURE__ */ jsxs(
                     "div",
@@ -5938,11 +5968,11 @@
                           ) })
                         ] }),
                         /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                          /* @__PURE__ */ jsx(Tip, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsxs("span", { style: { ...TYPE.small, color: T.faint }, children: [
+                          /* @__PURE__ */ jsx(Tip, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsx("span", { style: { ...TYPE.small, color: T.faint }, children: [
                             t(`make.ops.${result.mode === "loop" ? "loop" : result.op}`),
-                            " · ",
+                            ...timing ? [t("make.optionValues.bars", timing.bars), timing.meter, t("make.optionValues.bpm", timing.bpm)] : [],
                             seconds(result.duration)
-                          ] }) }),
+                          ].filter(Boolean).join(" · ") }) }),
                           /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
                           take.results.length > 1 && /* @__PURE__ */ jsxs("span", { role: "group", "aria-label": t("make.variations"), style: { ...S.row, gap: 2 }, children: [
                             /* @__PURE__ */ jsx(Button, { disabled: at === 0, kind: "quiet", label: t("make.previous"), onClick: () => setShown((current) => ({ ...current, [take.key]: at - 1 })), children: "‹" }),
@@ -9456,7 +9486,9 @@
                 zIndex: 1,
                 left: clusterAt.left,
                 top: clusterAt.top,
-                maxWidth: `calc(100% - 16px)`,
+                // Left of a side sheet over the map (Make), as `floatBeside` places it: with no room for one line, its
+                // actions wrap rather than run under the sheet.
+                maxWidth: `calc(100% - ${coverRight}px - 16px)`,
                 ...S.row,
                 flexWrap: "wrap",
                 gap: 6,

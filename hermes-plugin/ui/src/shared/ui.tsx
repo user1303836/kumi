@@ -3,7 +3,7 @@
 // root provides (`I18n`): Desktop's for its language, the dashboard's for its locale, English outside any.
 import { T } from '@kumi/theme'
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, RefObject } from 'react'
-import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, Fragment, useContext, useLayoutEffect, useRef, useState } from 'react'
 
 import { english, type Translate } from './i18n.ts'
 
@@ -280,6 +280,32 @@ export function Section({ title, right, children }: { title: ReactNode; right?: 
  *  there's nothing ("No changes yet" before HISTORY has been read is untrue). `label` is what a screen reader hears. */
 export function Pending({ label, width = '60%' }: { label: string; width?: number | string }) {
   return <span aria-busy="true" aria-label={label} role="status" style={{ display: 'block', width, maxWidth: '100%', height: 10, margin: '4px 0', borderRadius: 3, background: T.chip, opacity: 0.7 }} />
+}
+
+/** Text whose paths break between folders, not in the middle of a name: a `<wbr>` after each `/` and `\`. It's an
+ *  element, so nothing invisible reaches the bundle (Hermes's install scan flags invisible characters). The text's own
+ *  `overflow-wrap: anywhere` then breaks only a single name longer than the line. Cut by a loop, not a regex
+ *  lookbehind: the dashboard runs in the producer's own browser, and Safari before 16.4 can't even parse one, which
+ *  would take Kumi's whole page down. */
+export function PathBreaks({ text }: { text: string }) {
+  const parts: string[] = []
+  let from = 0
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] !== '/' && text[at] !== '\\') continue
+    parts.push(text.slice(from, at + 1))
+    from = at + 1
+  }
+  if (from < text.length || parts.length === 0) parts.push(text.slice(from))
+  return (
+    <>
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {part}
+          {index < parts.length - 1 && <wbr />}
+        </Fragment>
+      ))}
+    </>
+  )
 }
 
 /** Text that wraps to at most `lines` lines and, when that cuts it, shows the rest on a click or Enter (and folds it
