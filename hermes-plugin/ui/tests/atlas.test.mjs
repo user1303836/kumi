@@ -13,6 +13,7 @@ const lineage = await load('src/shared/atlas/lineage.ts')
 const gestures = await load('src/shared/atlas/gestures.ts')
 const constellation = await load('src/shared/atlas/constellation.ts')
 const first = await load('src/shared/atlas/first.ts')
+const labels = await load('src/shared/atlas/labels.ts')
 
 // A seeded cluster of `count` sounds of `group` around (`cx`, `cy`).
 function cluster(count, group, cx, cy, spread = 0.04) {
