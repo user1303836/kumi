@@ -358,9 +358,7 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
     >
       <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5 }}>{t('make.steer.sound')}</span>
       {(Object.keys(STEER_SOUND) as SteerSound[]).map(slider)}
-      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5, marginTop: 4 }} title={t('make.steer.layersHint')}>
-        {t('make.steer.layers')}
-      </span>
+      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5, marginTop: 4 }}>{t('make.steer.layers')}</span>
       {(Object.keys(STEER_LAYER) as SteerLayer[]).map(slider)}
       <span style={{ gridColumn: '1 / -1', fontSize: 10.5, color: T.faint }}>{t('make.steer.layersHint')}</span>
     </Group>

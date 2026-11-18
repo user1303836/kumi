@@ -124,8 +124,10 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
             // One Undo per change (CC-3 A2), on its head: it undoes every step left, and says so when there are several.
             if (!canUndoChange(state.status, rows)) return null
             const left = rows.filter(row => row.state !== 'undone').length
+            const change = clean(head.title ?? head.label ?? head.id, 120)
+            // Its accessible name starts with the words it shows, so voice control and a screen reader say the same (P7A-29).
             return (
-              <Button label={t('pane.undoLabel', clean(head.title ?? head.label ?? head.id, 120))} onClick={() => ask(ctx, undoRequest(head), { send: true, session })} tip={left > 1 ? t('pane.undoChangeTitle', left) : undefined}>
+              <Button label={left > 1 ? t('pane.undoAllLabel', left, change) : t('pane.undoLabel', change)} onClick={() => ask(ctx, undoRequest(head), { send: true, session })} tip={left > 1 ? t('pane.undoChangeTitle', left) : undefined}>
                 {left > 1 ? t('pane.undoAll', left) : t('pane.undo')}
               </Button>
             )

@@ -147,6 +147,17 @@ test("when Kumi's chat can't take a request, it opens that chat, tries a while, 
     assert.deepEqual(h.calls.insert, [[null, 'Undo Kumi change h-p6f1c9e-g2-c14']])
     assert.equal(h.calls.notify.at(-1).kind, 'warning')
   }
+  // A chat this Desktop doesn't have leaves no input in front: the words wait unsent in a new chat's input, with the note.
+  const { ask } = await load('src/desktop/actions.ts')
+  const h = harness({ submit: () => false })
+  const routes = []
+  globalThis.__kumiTestHost.openSession = async () => {}
+  globalThis.__kumiTestHost.navigate = path => routes.push(path)
+  globalThis.__kumiTestHost.composer.insertText = async (session, text) => (session === null && routes.length > 0 ? (h.calls.insert.push([session, text]), true) : false)
+  assert.deepEqual(await ask(h.ctx, 'Undo Kumi change h-p6f1c9e-g2-c14', { send: true, session: SESSION }), { outcome: 'drafted' })
+  assert.deepEqual([routes, h.calls.insert], [['/'], [[null, 'Undo Kumi change h-p6f1c9e-g2-c14']]])
+  assert.ok(h.calls.submit.every(([session]) => session === SESSION), 'never sent from another chat')
+  assert.equal(h.calls.notify.at(-1).kind, 'warning')
 })
 
 test('a request with no chat owning Kumi yet waits unsent in the input in front, for the producer to send', async () => {

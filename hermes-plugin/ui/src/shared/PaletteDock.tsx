@@ -24,13 +24,24 @@ import { FOCUSABLE, Pending, S, SEGMENT_TRACK, segmentStyle, TYPE, useT } from '
 /** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
 /** The open drawer's height: where it starts, and how far a drag on its grip takes it; never so far that the map above
- *  keeps less than `MAP_LEAST` (its own least height). */
+ *  keeps less than `MAP_SHARE` of the room (`MAP_LEAST` at the least): the find's list, a sound's card and the corner
+ *  float over the map, and at 1024×700 a drawer that took all but 240 px left no sound in view (M14b). */
 const OPEN_HEIGHT = 260
 const LOWEST = 150
 const HIGHEST = 620
 const MAP_LEAST = 240
+const MAP_SHARE = 0.62
 /** How long sounds just gathered pop in where they land: long enough for the last of a batch (its delay included). */
 const POP_FOR_MS = 1500
+/** A card's name and kind: wrapped to two lines, cut only past them (its title says it whole). */
+const TWO_LINES = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', minWidth: 0 } as const
+
+/** The button a box holds, down its first children: Hermes's Button and the ⋯ menu's take no ref of their own. */
+function firstButton(box: Element | null): HTMLButtonElement | null {
+  let at = box?.firstElementChild ?? null
+  while (at && !(at instanceof HTMLButtonElement)) at = at.firstElementChild
+  return at
+}
 
 export interface PaletteDockProps {
   palette: PaletteReply | null
@@ -122,15 +133,16 @@ function Waveform({ id, color, audio, width, height, bars, tints }: { id: string
   return <canvas aria-hidden ref={canvas} style={{ width, height, flex: 'none', display: 'block', color }} />
 }
 
-/** What a chip and a card share: dragged to move, Alt with ← or → to move by keys, Delete to take it out. */
-function useItemKeys(index: number, onMove: (to: number) => void, onRemove: () => void) {
+/** What a chip and a card share: dragged to move, Alt with ← or → to move by keys, Delete to take it out (from its
+ *  play button: the focus goes on to the next sound's). */
+function useItemKeys(index: number, onMove: (to: number) => void, onRemove: (from: 'play' | 'remove') => void) {
   return (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault()
       onMove(index + (event.key === 'ArrowLeft' ? -1 : 1))
     } else if (event.key === 'Delete') {
       event.preventDefault()
-      onRemove()
+      onRemove('play')
     }
   }
 }
@@ -149,7 +161,11 @@ interface ItemProps {
   audio: (id: string) => Promise<string>
   onPlay: () => void
   onStop: () => void
-  onRemove: () => void
+  /** Take it out; `from` is the control it was taken out with, where the focus goes on the next sound. */
+  onRemove: (from: 'play' | 'remove') => void
+  /** Its play button and its ×, for the focus to land on when the sound before it is taken out. */
+  playRef: (element: HTMLButtonElement | null) => void
+  removeRef: (element: HTMLButtonElement | null) => void
   onMove: (to: number) => void
   /** Another sound was dropped on this one: it takes this one's place. */
   onDropHere: () => void
@@ -199,7 +215,7 @@ function useKin(onKin: ItemProps['onKin']) {
 
 /** One sound in the folded drawer's row: its waveform and name. */
 function Chip(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin, playRef, removeRef } = props
   const t = useT()
   const id = playableId(item)
   const name = clean(item.name, 60) || item.key
@@ -236,6 +252,7 @@ function Chip(props: ItemProps) {
         disabled={!id}
         onClick={() => (playing ? onStop() : onPlay())}
         onKeyDown={keys}
+        ref={playRef}
         title={id ? `${name}${item.class ? ` · ${clean(item.class, 16)}` : ''}\n${t('dock.reorderHint')}` : t('dock.offMap')}
         type="button"
         style={{ ...S.row, gap: 5, minWidth: 0, font: 'inherit', fontSize: 11.5, padding: '1px 3px', border: 'none', background: 'transparent', color: T.text, cursor: id ? 'pointer' : 'default' }}
@@ -246,7 +263,8 @@ function Chip(props: ItemProps) {
       <button
         aria-label={t('dock.remove', name)}
         className={FOCUSABLE}
-        onClick={onRemove}
+        onClick={() => onRemove('remove')}
+        ref={removeRef}
         title={t('dock.remove', name)}
         type="button"
         style={{ font: 'inherit', fontSize: 12, lineHeight: '14px', width: 16, height: 16, padding: 0, borderRadius: 3, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}
@@ -259,9 +277,10 @@ function Chip(props: ItemProps) {
 
 /** One sound in the open drawer: a card with its waveform across the top, its name, kind, Use… and ×. */
 function Card(props: ItemProps) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin } = props
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin, playRef, removeRef } = props
   const t = useT()
   const id = playableId(item)
+  const kind = item.source === 'artifact' ? t('dock.made') : clean(item.class ?? '', 16)
   const name = clean(item.name, 80) || item.key
   const { over, handlers } = useDrop(props, name)
   const keys = useItemKeys(index, onMove, onRemove)
@@ -302,6 +321,7 @@ function Card(props: ItemProps) {
         disabled={!id}
         onClick={() => (playing ? onStop() : onPlay())}
         onKeyDown={keys}
+        ref={playRef}
         title={id ? t('dock.reorderHint') : t('dock.offMap')}
         type="button"
         style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: id ? 'pointer' : 'default' }}
@@ -317,13 +337,15 @@ function Card(props: ItemProps) {
         ) : (
           <Glyph color={color} glyph={glyph} />
         )}
-        <span style={{ ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }} title={name}>
+        {/* Two lines before it's cut: four cards a row leave a name ~130 px, and names differ at their end. */}
+        <span style={{ ...TWO_LINES, flex: 1, fontSize: 11.5, lineHeight: '14px', color: T.text }} title={name}>
           {name}
         </span>
         <button
           aria-label={t('dock.remove', name)}
           className={FOCUSABLE}
-          onClick={onRemove}
+          onClick={() => onRemove('remove')}
+          ref={removeRef}
           title={t('dock.remove', name)}
           type="button"
           style={{ font: 'inherit', fontSize: 12, lineHeight: '14px', width: 16, height: 16, padding: 0, borderRadius: 3, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}
@@ -332,7 +354,9 @@ function Card(props: ItemProps) {
         </button>
       </div>
       <div style={{ ...S.row, gap: 5, minHeight: 18 }}>
-        <span style={{ ...S.faint, ...S.ellipsis, flex: 1, fontSize: 10.5 }}>{item.source === 'artifact' ? t('dock.made') : clean(item.class ?? '', 16)}</span>
+        <span style={{ ...S.faint, ...TWO_LINES, flex: 1, fontSize: 10.5, lineHeight: '13px' }} title={kind || undefined}>
+          {kind}
+        </span>
         {use}
       </div>
     </div>
@@ -401,14 +425,43 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     if (fresh.length > 0) arrivedAt.current = Date.now()
     return new Map(fresh.map((key, order) => [key, order]))
   }, [current])
-  // New sounds go at the end: the row or grid scrolls to them, so a gather or a kept sound lands in view.
+  // New sounds go at the end: the row or grid scrolls to them, so a gather or a kept sound lands in view. Once per
+  // gather: a fold or an unfold later opens at the start (the sounds just gathered stay `arrived` until the next answer).
   const strip = useRef<HTMLDivElement | null>(null)
+  const scrolledFor = useRef<Map<string, number> | null>(null)
   useEffect(() => {
     const element = strip.current
+    if (scrolledFor.current === arrived) return
+    scrolledFor.current = arrived
     if (!element || arrived.size === 0) return
     const smooth = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
     element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth })
   }, [arrived, open])
+  // A sound taken out hands the focus on: to the same control of the sound after it (before it, at the end), or to the
+  // grip once the palette is empty, never to the page.
+  const plays = useRef(new Map<string, HTMLButtonElement>())
+  const removes = useRef(new Map<string, HTMLButtonElement>())
+  const gripButton = useRef<HTMLButtonElement | null>(null)
+  const refocus = useRef<{ key: string | null; from: 'play' | 'remove' } | null>(null)
+  useEffect(() => {
+    const next = refocus.current
+    if (!next) return
+    refocus.current = null
+    if (next.key === null) return gripButton.current?.focus()
+    const play = plays.current.get(next.key)
+    ;(next.from === 'play' && play && !play.disabled ? play : removes.current.get(next.key))?.focus()
+  })
+  const keepRef = (kept: Map<string, HTMLButtonElement>, key: string) => (element: HTMLButtonElement | null) => {
+    if (element) kept.set(key, element)
+    else kept.delete(key)
+  }
+  // Forget…'s ask takes the focus to Keep, the safe choice, and Keep gives it back to the palette's ⋯ menu. Both are
+  // drawn by components that take no ref, so each sits in a box that draws nothing (`firstButton`).
+  const keepBox = useRef<HTMLSpanElement | null>(null)
+  const menuBox = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    if (forgetting) firstButton(keepBox.current)?.focus()
+  }, [forgetting])
   // The folded row scrolls sideways: whichever end has more sounds past it fades out, so a chip at the edge reads as
   // "more this way", not as cut off; and a mouse's wheel turns it (nothing else here scrolls up or down).
   const [edges, setEdges] = useState({ start: false, end: false })
@@ -445,7 +498,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     observer.observe(parent)
     return () => observer.disconnect()
   }, [])
-  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST))
+  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - Math.max(MAP_LEAST, Math.round(room * MAP_SHARE))))
   const rowMask = `linear-gradient(to right, ${edges.start ? 'transparent' : '#000'}, #000 28px, #000 calc(100% - 28px), ${edges.end ? 'transparent' : '#000'})`
   // The last sentence fades after a while: it says what just happened, not what is.
   const [now, setNow] = useState(() => Date.now())
@@ -501,10 +554,14 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
       const id = playableId(item)
       if (id) onPlay(id)
     },
-    onRemove: () => {
+    onRemove: from => {
+      const at = items.findIndex(other => other.key === item.key)
+      refocus.current = { key: (items[at + 1] ?? items[at - 1])?.key ?? null, from }
       setOrder(items.filter(other => other.key !== item.key))
       void run({ action: 'remove', keys: [item.key] })
     },
+    playRef: keepRef(plays.current, item.key),
+    removeRef: keepRef(removes.current, item.key),
     onStop,
     playing: playing !== null && playing === playableId(item),
     use: use?.(item)
@@ -556,14 +613,16 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
             </Button>
           )}
           {current && (
-            <ActionMenu
-              actions={[
-                { id: 'rename', name: t('dock.rename'), title: t('dock.renameTitle'), onChoose: () => setEditing('rename') },
-                { id: 'forget', name: t('dock.forget'), title: t('dock.forgetTitle', clean(current.name, 40)), onChoose: () => setForgetting(true), danger: true }
-              ]}
-              label={t('dock.menu', clean(current.name, 40))}
-              up
-            />
+            <span ref={menuBox} style={{ display: 'contents' }}>
+              <ActionMenu
+                actions={[
+                  { id: 'rename', name: t('dock.rename'), title: t('dock.renameTitle'), onChoose: () => setEditing('rename') },
+                  { id: 'forget', name: t('dock.forget'), title: t('dock.forgetTitle', clean(current.name, 40)), onChoose: () => setForgetting(true), danger: true }
+                ]}
+                label={t('dock.menu', clean(current.name, 40))}
+                up
+              />
+            </span>
           )}
         </>
       )}
@@ -630,6 +689,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         onPointerDown={gripDown}
         onPointerMove={gripMove}
         onPointerUp={() => setTimeout(() => (grip.current = null), 0)}
+        ref={gripButton}
         title={open ? t('dock.gripTitle') : t('dock.expand')}
         type="button"
         style={{ alignSelf: 'stretch', height: 12, padding: 0, border: 'none', background: 'transparent', cursor: open ? 'ns-resize' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}
@@ -665,9 +725,17 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
           <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>
           <span style={{ flex: 1 }} />
-          <Button kind="quiet" onClick={() => setForgetting(false)}>
-            {t('dock.keep')}
-          </Button>
+          <span ref={keepBox} style={{ display: 'contents' }}>
+            <Button
+              kind="quiet"
+              onClick={() => {
+                setForgetting(false)
+                firstButton(menuBox.current)?.focus()
+              }}
+            >
+              {t('dock.keep')}
+            </Button>
+          </span>
           <Button
             kind="destructive"
             onClick={() => {

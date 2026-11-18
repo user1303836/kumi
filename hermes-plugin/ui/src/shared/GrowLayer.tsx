@@ -5,19 +5,20 @@
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { usePlayhead, Wave } from './atlas/Wave.tsx'
 import { type DesignResult, sourceOfResult } from './design.ts'
 import { clean, seconds } from './format.ts'
-import { type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
+import { alongPath, type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
 import { floatBeside } from './mapModel.ts'
 import { glass, Icon } from './mapUi.tsx'
 import { FOCUSABLE, S, useT } from './ui.tsx'
 
 type Point = readonly [number, number]
-
 const percent = (at: number): number => Math.round(at * 100)
+/** The card's width: its waveform (278 px) and padding. */
+const CARD_WIDTH = 300
 
 /** A bud's colour: its ends' colours mixed by how far along it is. */
 const mixed = (from: string, to: string, at: number): string => `color-mix(in srgb, ${to} ${percent(at)}%, ${from})`
@@ -53,7 +54,8 @@ export function GrowLayer({
   toMap: Point | null
   fromColor: string
   toColor: string
-  /** The map's size, and what floats over its top and its foot (the player), for the card's place. */
+  /** The map's size, and what floats over its top (the whole top column: a find's list too) and its foot (the corner
+   *  and the player), for the card's place. */
   width: number
   height: number
   top: number
@@ -70,6 +72,18 @@ export function GrowLayer({
   // A press on the handle: where it began, and whether it has moved enough to be a drag. One that never moves is a
   // click, on the bud under the handle when there is one (the handle sits on the vine, often right over a bud).
   const press = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  // The card's own height, as laid out: its words wrap, so it's only known once drawn (an estimate until then).
+  const own = useRef<HTMLDivElement | null>(null)
+  const cardRef = cardBox ?? own
+  const [cardHeight, setCardHeight] = useState(0)
+  const hasCard = Boolean(from && to && grow.to)
+  useEffect(() => {
+    const element = cardRef.current
+    if (!hasCard || !element) return
+    const observer = new ResizeObserver(() => setCardHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [hasCard]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!from) return null
   // The first sound named, while the second is still to come: it breathes where it is.
   if (!to || !grow.to) {
@@ -97,6 +111,11 @@ export function GrowLayer({
   // The point picked: a bud, or the handle's point.
   const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : (grow.buds.find(bud => bud.at === grow.picked) ?? null)
   const pickedAt = picked ? at(picked.at) : null
+  // How far a point of this vine is on the whole path from its first sound (a vine grown from a grown point is the
+  // rest of that path), in percent: what the buds, the handle and the card say, so every name is on one scale.
+  const onPath = (bud: number): number => percent(alongPath(grow.from, bud))
+  const origin = clean(grow.from?.origin ?? '', 60)
+  const toName = clean(grow.to.name, 60)
   // Nothing grew and nothing is on its way: the first failure says why, without a click.
   const failed = grow.buds.some(bud => bud.state !== 'failed') ? undefined : grow.buds.find((bud): bud is Extract<Bud, { state: 'failed' }> => bud.state === 'failed')
   // Another path: the same two sounds on a new seed, offered with a grown point and with a failure.
@@ -105,11 +124,12 @@ export function GrowLayer({
       {t('grow.reroll')}
     </Button>
   )
-  // The card floats beside the point picked, else beside the whole vine (its ends and its bow), never over them.
+  // The card floats beside the point picked, else beside the whole vine (its ends and its bow), never over them; at
+  // its height as laid out (its words wrap), estimated until it has been.
   const xs = [from[0], to[0], cx]
   const ys = [from[1], to[1], cy]
   const anchor: [number, number, number, number] = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
-  const card = floatBeside(anchor, 300, picked?.state === 'ready' ? 164 : failed || picked?.state === 'failed' ? 96 : 70, width, height, top, bottom)
+  const card = floatBeside(anchor, CARD_WIDTH, cardHeight || (picked?.state === 'ready' ? 180 : failed || picked?.state === 'failed' ? 96 : 70), width, height, top, bottom)
   const budView = (bud: Bud, scrubbed = false) => {
     const [x, y] = at(bud.at)
     const color = mixed(fromColor, toColor, bud.at)
@@ -117,7 +137,7 @@ export function GrowLayer({
     const isPicked = grow.picked === bud.at
     return (
       <g
-        aria-label={t('grow.bud', percent(bud.at))}
+        aria-label={t('grow.bud', onPath(bud.at))}
         className={FOCUSABLE}
         key={`${scrubbed ? 's' : 'b'}${bud.at}`}
         onClick={() => grow.pick(bud.at)}
@@ -146,7 +166,7 @@ export function GrowLayer({
   }
   return (
     <>
-      <svg aria-label={t('grow.title', clean(grow.from?.name ?? '', 60), clean(grow.to.name, 60))} height={height} role="group" style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }} width={width}>
+      <svg aria-label={t('grow.title', origin, toName)} height={height} role="group" style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }} width={width}>
         <defs>
           <linearGradient gradientUnits="userSpaceOnUse" id={gradient} x1={from[0]} x2={to[0]} y1={from[1]} y2={to[1]}>
             <stop offset="0" stopColor={fromColor} />
@@ -162,9 +182,9 @@ export function GrowLayer({
         <g
           aria-label={t('grow.handle')}
           aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={percent(grow.handle)}
-          aria-valuetext={t('grow.bud', percent(grow.handle))}
+          aria-valuemin={onPath(0)}
+          aria-valuenow={onPath(grow.handle)}
+          aria-valuetext={t('grow.bud', onPath(grow.handle))}
           className={FOCUSABLE}
           onKeyDown={nudge}
           onPointerDown={event => {
@@ -207,20 +227,20 @@ export function GrowLayer({
           <circle cx={handle[0]} cy={handle[1]} fill={T.raised} r={8.5} stroke={T.accent} strokeWidth={2.5} />
           <circle cx={handle[0]} cy={handle[1]} fill={T.accent} r={3} />
           <text fill={T.text} fontSize={10.5} fontWeight={600} paintOrder="stroke" stroke={T.raised} strokeWidth={3} textAnchor="middle" x={handle[0]} y={handle[1] - 15}>
-            {`${percent(grow.handle)}%`}
+            {`${onPath(grow.handle)}%`}
           </text>
         </g>
       </svg>
       <div
         className="kumi-pop"
         role="group"
-        aria-label={t('grow.title', clean(grow.from?.name ?? '', 60), clean(grow.to.name, 60))}
-        ref={cardBox}
-        style={{ ...glass, position: 'absolute', zIndex: 1, left: card.left, top: card.top, width: 300, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
+        aria-label={t('grow.title', origin, toName)}
+        ref={cardRef}
+        style={{ ...glass, position: 'absolute', zIndex: 1, left: card.left, top: card.top, width: CARD_WIDTH, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
       >
-        <div style={{ ...S.row, gap: 6 }}>
+        <div style={{ ...S.row, gap: 6, alignItems: 'flex-start' }}>
           <Icon name="grow" size={14} />
-          <span style={{ ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }}>{t('grow.title', clean(grow.from?.name ?? '', 40), clean(grow.to.name, 40))}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 650, overflowWrap: 'anywhere' }}>{t('grow.title', clean(grow.from?.origin ?? '', 40), clean(grow.to.name, 40))}</span>
           <button aria-label={t('grow.close')} className={FOCUSABLE} onClick={grow.close} title={t('grow.close')} type="button" style={{ display: 'flex', padding: 3, border: 'none', borderRadius: 10, background: 'transparent', color: T.faint, cursor: 'pointer' }}>
             <Icon name="close" size={11} />
           </button>
@@ -237,9 +257,10 @@ export function GrowLayer({
           )
         ) : picked.state === 'ready' ? (
           <>
-            <span style={{ fontSize: 11, color: T.secondary }} title={picked.result.recipe}>
-              <span style={{ ...S.ellipsis, display: 'block' }}>{clean(picked.result.recipe, 160)}</span>
-              <span style={{ color: T.faint }}>{seconds(picked.result.duration)}</span>
+            {/* The point by its place on the path the head names, in words that wrap: never the engine's recipe, which
+                names a grown sound by the recipe and seed of the one it grew from. */}
+            <span style={{ fontSize: 11, color: T.secondary, overflowWrap: 'anywhere' }}>
+              {t('grow.bud', onPath(picked.at))} <span style={{ color: T.faint }}>· {seconds(picked.result.duration)}</span>
             </span>
             {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
             <GrownWave colors={[fromColor, toColor]} key={picked.result.artifact_id} playing={playing === picked.result.artifact_id} result={picked.result} />
@@ -253,8 +274,10 @@ export function GrowLayer({
                 <Button
                   kind="quiet"
                   onClick={() => {
+                    // A new vine from this point toward the same sound: the rest of the path, named on its scale.
                     const place = vinePoint(fromMap, toMap, picked.at)
-                    const end: GrowEnd = { source: sourceOfResult(picked.result), id: null, place, name: t('grow.bud', percent(picked.at)) }
+                    const name = t('grow.grown', onPath(picked.at), origin, toName)
+                    const end: GrowEnd = { source: { ...sourceOfResult(picked.result), name }, id: null, place, name, origin: grow.from?.origin ?? '', along: alongPath(grow.from, picked.at) }
                     if (grow.to) grow.between(end, grow.to)
                   }}
                   tip={t('grow.againTitle')}
@@ -272,7 +295,7 @@ export function GrowLayer({
             <div style={S.row}>{another}</div>
           </>
         ) : (
-          <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.growing', percent(picked.at))}</span>
+          <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.growing', onPath(picked.at))}</span>
         )}
       </div>
     </>

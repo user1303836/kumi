@@ -260,7 +260,7 @@ class Routes(unittest.TestCase):
                     self.assertEqual(kept.status_code, 200, kept.text)
                     [item] = kept.json()["palette"]["current"]["items"]
                     self.assertEqual((item["source"], item["artifact_id"], item["name"]),
-                                     ("artifact", made[0], "Blend of 2, seed 0"))
+                                     ("artifact", made[0], "Blend of 2 sounds"))
         history = [d["artifact_id"] for d in self.client.get("/api/plugins/kumi/designs").json()["designs"]]
         self.assertEqual(history, [made[4], made[3], made[2], made[0]], "the three newest, and the one the palette keeps")
         self.assertEqual(self.made(), sorted(f"{each}.wav" for each in history), "a result that goes takes its file")
@@ -278,7 +278,8 @@ class Media(unittest.TestCase):
         self.state = Path(tmp.name) / "state"
         self.state.mkdir()
         self.id = "a-d" + "A" * 22
-        listed(self.state, {"artifact_id": self.id, "op": "stack", "seed": 3, "recipe": "Stack of 2: Kick, Tom"})
+        listed(self.state, {"artifact_id": self.id, "op": "stack", "seed": 3, "recipe": "Stack of 2: Kick, Tom",
+                            "sources": [{"sound_id": "s-r7-0002", "name": "Kick"}, {"sound_id": "s-r7-0003", "name": "Tom"}]})
 
     def test_a_listed_design_is_served_from_its_own_file_only(self) -> None:
         found = self.snapshots.media(self.state, self.id)
@@ -298,8 +299,15 @@ class Media(unittest.TestCase):
         kept.symlink_to(outside)
         self.assertIsNone(self.snapshots.media(self.state, self.id))
 
-    def test_a_palette_keeps_a_design_by_its_recipe_and_seed(self) -> None:
-        self.assertEqual(self.snapshots.palette_artifact(self.state, self.id), "Stack of 2, seed 3")
+    def test_a_palette_keeps_a_design_by_how_it_was_made_and_from_what_never_its_seed(self) -> None:
+        self.assertEqual(self.snapshots.palette_artifact(self.state, self.id), "Stack of Kick + Tom")
+        name = self.snapshots._design_name
+        many = [{"sound_id": f"s-r7-{i:04}", "name": f"Punch Kick {i:02}"} for i in range(15)]
+        self.assertEqual(name({"op": "cross", "mode": "blend", "seed": 9, "sources": many}), "Blend of Punch Kick 00 + Punch Kick 01 + 13 more")
+        long = [{"name": "Very Long Granular Ambient Texture Recording " * 2}, {"name": "Tom"}, {"name": "Hat"}]
+        # Cut at a word to fit a palette name's 80 characters, the count of the rest kept whole.
+        self.assertEqual(name({"op": "fuse", "mode": "texture", "sources": long}), "Texture of Very Long Granular Ambient Texture Recording Very Long… + 2 more")
+        self.assertEqual(name({"op": "grow", "seed": 4, "recipe": "Grown 50% of the way from Kick toward Tom; seed 4"}), "Grown 50% of the way from Kick toward Tom")
         self.assertIsNone(self.snapshots.palette_artifact(self.state, "a-d" + "B" * 22))
 
 

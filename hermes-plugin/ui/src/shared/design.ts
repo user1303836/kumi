@@ -456,15 +456,47 @@ export function requestOf(result: DesignResult): DesignRequest {
   return { op: result.op, ...(result.mode ? { mode: result.mode } : {}), sources: result.sources.map(source => ({ ...source })) }
 }
 
-/** A result's name, as the palette names it once kept: its recipe's lead (up to the first `:` or `;`, "Blend of 3")
- *  and its seed, so two variations of one take tell apart ("Blend of 3, seed 482113"). */
-export function resultName(result: Pick<DesignResult, 'recipe' | 'mode' | 'op' | 'seed'>): string {
-  const lead = quotable(result.recipe.split(/[:;]/, 1)[0] ?? '', 60) || quotable(result.mode ?? result.op, 60).replace(/^\w/, letter => letter.toUpperCase())
-  return Number.isInteger(result.seed) ? `${lead}, seed ${result.seed}` : lead
+/** The longest name a made sound gets: a palette name's longest (the backend's `NAME_MAX`). */
+const MADE_NAME_MOST = 80
+/** How a made sound was made, as its name says it: by its mode, or its op for one with none (a grown sound is named by
+ *  its recipe instead). */
+export const MADE_WAYS = { blend: 'Blend', attack: 'Attack', resonate: 'Resonance', modulate: 'Modulation', texture: 'Texture', smear: 'Smear', loop: 'Loop', cross: 'Cross', fuse: 'Fuse', stack: 'Stack' } as const
+export type MadeWay = keyof typeof MADE_WAYS
+
+/** What a made sound's name says: how it was made, the first one or two of its sounds by name (two only when both are
+ *  short enough to read as two), and how many more. A sound with no name counts among the more. */
+export function madeOf(result: Pick<DesignResult, 'mode' | 'op' | 'sources'>): { way: MadeWay; named: string[]; more: number } {
+  const way: MadeWay = result.mode ?? (result.op === 'grow' ? 'cross' : result.op)
+  const names = result.sources.map(source => quotable(source.name ?? '', 200)).filter(Boolean)
+  const named = names.length > 1 && names[0].length + names[1].length <= 40 ? names.slice(0, 2) : names.slice(0, 1)
+  return { way, named, more: result.sources.length - named.length }
+}
+
+/** `text` in at most `most` characters, cut at a word where it's longer. */
+function cutAtWord(text: string, most: number): string {
+  if (text.length <= most) return text
+  const cut = text.slice(0, most - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > most / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
+/** A result's name, as the palette names it once kept (the backend's `_design_name`, the same rule): how it was made
+ *  and from what, "Blend of Kick 02 + Tom 4", "Stack of Punch Kick 09 + 14 more"; a grown sound by its recipe's lead
+ *  ("Grown 50% of the way from … toward …"). Never a seed or an id. At most `MADE_NAME_MOST` characters, the count of
+ *  the rest always whole. */
+export function resultName(result: Pick<DesignResult, 'recipe' | 'mode' | 'op' | 'sources'>): string {
+  if (result.op === 'grow') return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? '', 200), MADE_NAME_MOST) || 'Grown'
+  const { way, named } = madeOf(result)
+  const total = result.sources.length
+  if (named.length === 0) return total > 1 ? `${MADE_WAYS[way]} of ${total} sounds` : MADE_WAYS[way]
+  const lead = `${MADE_WAYS[way]} of `
+  const rest = (shown: number) => (total > shown ? ` + ${total - shown} more` : '')
+  const first = cutAtWord(named[0], MADE_NAME_MOST - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0))
+  return `${lead}${first}${named.length > 1 ? ` + ${named[1]}` : ''}${rest(named.length)}`
 }
 
 /** A result as a source for another make: by its id, under the name the palette would give it. */
-export function sourceOfResult(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'seed'>): DesignSource {
+export function sourceOfResult(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>): DesignSource {
   return { artifact_id: result.artifact_id, name: resultName(result) }
 }
 
@@ -482,7 +514,7 @@ export function stagesOf(recipe: string): string[] {
 /** What Use… puts in the input, unsent: the result's reference and nothing else (its name as the palette gives it, then
  *  its artifact id), so the producer says what to do with it; the model can hand `{artifact_id}` to a file step. Null
  *  for an id the runtime doesn't write. */
-export function useRequest(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'seed'>): string | null {
+export function useRequest(result: Pick<DesignResult, 'artifact_id' | 'recipe' | 'mode' | 'op' | 'sources'>): string | null {
   return artifactReference(result.artifact_id, resultName(result))
 }
 

@@ -88,11 +88,13 @@ const plugin: HermesPlugin = {
       </WithT>
     )
 
+    // 20rem at the least: at a 1024 px window Hermes's sidebar (237 px), the chat (225 px) and its right column (160 px,
+    // where Kumi's pane is) leave about 400 px, and a wider minimum squeezed the pane to nothing (H4).
     const openMap = () => {
       if (typeof host.openWorkspace === 'function') {
         closeMap = host.openWorkspace(MAP_WORKSPACE, {
           title: wordsOf(ctx)('map.tab'),
-          minWidth: '26rem',
+          minWidth: '20rem',
           dock: besideTheChat(closeMeasurements ? MEASUREMENTS_WORKSPACE : null),
           render: mapView,
           onClose: () => {
@@ -120,7 +122,7 @@ const plugin: HermesPlugin = {
       if (typeof host.openWorkspace === 'function') {
         closeMeasurements = host.openWorkspace(MEASUREMENTS_WORKSPACE, {
           title,
-          minWidth: '24rem',
+          minWidth: '20rem',
           dock: besideTheChat(closeMap ? MAP_WORKSPACE : null),
           render,
           onClose: () => {

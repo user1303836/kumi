@@ -151,7 +151,7 @@ function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = f
       {meta && (
         <span style={{ ...S.row, gap: 6 }}>
           {line.track && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
-          <span style={{ ...TYPE.small, ...S.ellipsis, color: T.faint }}>{line.text}</span>
+          <span style={{ ...TYPE.small, ...(whole ? { overflowWrap: 'anywhere' } : S.ellipsis), color: T.faint }}>{line.text}</span>
         </span>
       )}
       {item.state === 'unsure' || item.state === 'partial' ? (
@@ -214,7 +214,7 @@ function Change({ rows, live, daw, target, now, action, detail, restartSaid }: {
               <span aria-hidden style={{ display: 'inline-block', width: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }}>
                 ▸
               </span>
-              {t('history.moreSteps', others.length)}
+              {open ? t('history.fewerSteps', others.length) : t('history.moreSteps', others.length)}
             </button>
           )}
         </div>

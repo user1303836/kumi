@@ -17,7 +17,8 @@ export const RENDERS = 2
 const SCRUB_STEP = 0.04
 
 /** One end of a vine: its sound (a map sound, or one Kumi made), and for a made sound where it sits on the map (where
- *  the bud it was grew); a map sound sits wherever the layout shown puts it. */
+ *  the bud it was grew); a map sound sits wherever the layout shown puts it. A made end is named from the two map
+ *  sounds its first vine ran between, never from the engine's recipe: grown again and again, its name never nests. */
 export interface GrowEnd {
   source: DesignSource
   /** The map sound's id, to find it in the layout shown; null for a made sound. */
@@ -25,12 +26,24 @@ export interface GrowEnd {
   /** A made sound's place on the map (map units). */
   place: readonly [number, number] | null
   name: string
+  /** The map sound the path began at: this end's own name, or for a made end its first vine's start. */
+  origin: string
+  /** How far along the path from `origin` toward the vine's far end this end sits (0…1): 0 for a map sound. A vine
+   *  grown from a made end is the rest of that path, so its points are named on the whole path's scale (`alongPath`). */
+  along: number
 }
 
 /** A map sound as a vine's end: its design source (with the map it's from); null without a map revision. */
 export function soundEnd(id: string, name: string | null | undefined, revision: string | null): GrowEnd | null {
   const [source] = sourcesOf([{ sound_id: id, name: name ?? id }], revision)
-  return source ? { source, id, place: null, name: clean(name ?? id, 80) } : null
+  const named = clean(name ?? id, 80)
+  return source ? { source, id, place: null, name: named, origin: named, along: 0 } : null
+}
+
+/** Where the point `at` (0…1) of a vine from `from` sits on the whole path from `from.origin` toward the far end. */
+export function alongPath(from: GrowEnd | null, at: number): number {
+  const start = from?.along ?? 0
+  return start + at * (1 - start)
 }
 
 /** A point along the vine: waiting for a render, growing, grown (its sound), or not (why). */

@@ -48,6 +48,7 @@ var en = {
     undoTitle: "Ask Hermes to undo this change",
     undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change) => `Undo ${change}`,
+    undoAllLabel: (n, change) => `Undo all ${n} steps of ${change}`,
     openMap: "Open the sound map",
     undoNeedsConnection: "Undo needs a connected Kumi.",
     starters: "Try one:",
@@ -92,6 +93,7 @@ var en = {
     restoreUnsure: "Kumi isn’t sure it put everything back.",
     restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
     moreSteps: (n) => n === 1 ? "1 more step" : `${n} more steps`,
+    fewerSteps: (n) => n === 1 ? "Hide the step" : `Hide the ${n} steps`,
     beforeRestart: "Before Kumi restarted",
     restartedSinceAll: (daw) => `Kumi can't undo these safely: undo them in ${daw} if they're still its latest steps, or ask Hermes to set them back.`,
     dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
@@ -147,6 +149,7 @@ var en = {
     allKind: (kind) => `all ${kind}`,
     showMore: (count2) => `Show ${count2} more`,
     showFewer: "Show fewer",
+    showList: (n) => `Show the list (${n})`,
     closeList: "Close the list",
     near: (name) => `Near “${name}”`,
     nearMany: (name, n) => `Near “${name}” and ${n} more`,
@@ -210,6 +213,7 @@ var en = {
     cancel: "Cancel",
     title: (from, to) => `${from} → ${to}`,
     bud: (percent3) => `${percent3}% of the way`,
+    grown: (percent3, from, to) => `${percent3}% from ${from} toward ${to}`,
     handle: "Grow any point along the vine",
     hint: "Click a bud to hear it, or drag the handle along the vine",
     growing: (percent3) => `Growing the sound ${percent3}% of the way…`,
@@ -456,7 +460,7 @@ var en = {
     kit: "Use as kit…",
     kitTitle: "Put a request in the chat to load these sounds as a kit (a Drum Rack in Live), to send when you like",
     useNamed: (name) => `Use ${name}…`,
-    kitCopy: "Copy kit request",
+    kitCopy: "Copy to use as kit",
     add: "Add to palette",
     addTitle: "Put this sound in your palette",
     addPicked: (n) => n === 1 ? "Add 1 to palette" : `Add ${n} to palette`,
@@ -491,7 +495,7 @@ var en = {
       attack: { title: "Attack", hint: "One's attack on the blend of the rest" },
       resonate: { title: "Resonate", hint: "Half ring through the other half" },
       modulate: { title: "Modulate", hint: "They modulate each other" },
-      texture: { title: "Texture", hint: "A loop that moves between them" },
+      texture: { title: "Texture", hint: "A bed of sound that drifts from one to the next" },
       loop: { title: "Loop", hint: "Their hits as a beat, or their tones as a melody, in time" },
       smear: { title: "Smear", hint: "A long granular stretch" },
       stack: { title: "Stack", hint: "Printed as one hit" }
@@ -512,6 +516,11 @@ var en = {
     missing: "This Kumi for Hermes can't make sounds yet: update it, then try again.",
     failed: (error) => `Kumi couldn't make it: ${error}`,
     seedTitle: "Its seed: the same sounds, way and seed make the same sound again",
+    // A made sound's name on its card: how it was made and from what (the palette keeps the same in English).
+    ways: { blend: "Blend", attack: "Attack", resonate: "Resonance", modulate: "Modulation", texture: "Texture", smear: "Smear", loop: "Loop", cross: "Cross", fuse: "Fuse", stack: "Stack" },
+    madeName: (way, first, second, more) => `${way} of ${first}${second ? ` + ${second}` : ""}${more > 0 ? ` + ${more} more` : ""}`,
+    madeCount: (way, n) => `${way} of ${n} sounds`,
+    grownName: (percent3, from, to) => `${percent3}% of the way from ${from} to ${to}`,
     variations: "Variations",
     previous: "Previous variation",
     next: "Next variation",
@@ -526,13 +535,13 @@ var en = {
     kept: "In palette",
     use: "Use…",
     useTitle: "Put its name and id in the chat, then say what to do with it",
-    copyUse: "Copy its reference",
     back: "Back",
     backTitle: (n) => n === 1 ? "Make from the sound before these again" : `Make from the ${n} sounds before these again`,
     made: "Made by Kumi",
     stages: "How it was modulated",
-    choose: "Choose",
+    choose: (name) => `Choose ${name}`,
     chooseTitle: "Choose it to make from next, alone or with other results",
+    oneChosen: "Choose one more to make from these alone",
     chosen: (n) => n === 1 ? "1 chosen" : `${n} chosen`,
     fromThese: "Make from these",
     fromTheseTitle: "Make new sounds from the chosen results: they become the sounds the panel makes from, and Back returns",
@@ -708,15 +717,15 @@ var en = {
       rollTitle: "Move a few controls a good way, at random",
       sound: "The sound",
       layers: "Each layer",
-      layersHint: "Each sound draws its own value inside the range from the seed, so a reroll draws again",
+      layersHint: "Each sound gets its own amount inside these, and every reroll picks again",
       controls: {
         bright: "Tone",
         body: "Body",
         filter: "Filter",
         resonance: "Resonance",
-        noise: "Texture",
+        noise: "Noise",
         punch: "Punch",
-        length: "Length",
+        length: "Decay",
         drive: "Drive",
         crush: "Crush",
         width: "Width",
@@ -804,7 +813,7 @@ var en = {
     copyTitle: (text) => `Copy “${text}” to paste into a chat`,
     copied: "Copied",
     copyRequest: "Copy request",
-    copyReference: "Copy its reference",
+    copyUse: "Copy to use",
     copyUndo: "Copy undo",
     mapEmpty: "No sound map yet. Add a sample folder here: the request to add and scan it goes into a Hermes chat.",
     askLook: "Ask Hermes in your chat to look again before another change."
@@ -853,6 +862,7 @@ var ja = {
     undoTitle: "この変更の取り消しを Hermes に頼む",
     undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: (change) => `${change} を取り消す`,
+    undoAllLabel: (n, change) => `${change} の ${n} ステップを取り消す`,
     openMap: "サンプルマップを開く",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。",
     starters: "試してみる:",
@@ -896,6 +906,7 @@ var ja = {
     restored: "その間に変えたものは Kumi が元に戻しました。",
     restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
     moreSteps: (n) => `ほか ${n} ステップ`,
+    fewerSteps: (n) => `${n} ステップを隠す`,
     beforeRestart: "Kumi の再起動前",
     restartedSinceAll: (daw) => `これらは Kumi が安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
     restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
@@ -952,6 +963,7 @@ var ja = {
     allKind: (kind) => `すべて ${kind}`,
     showMore: (count2) => `ほか ${count2} 個を表示`,
     showFewer: "折りたたむ",
+    showList: (n) => `リストを表示（${n}）`,
     closeList: "リストを閉じる",
     near: (name) => `「${name}」に近いサウンド`,
     nearMany: (name, n) => `「${name}」ほか ${n} 個に近いサウンド`,
@@ -1013,6 +1025,7 @@ var ja = {
     cancel: "キャンセル",
     title: (from, to) => `${from} → ${to}`,
     bud: (percent3) => `${percent3}% の地点`,
+    grown: (percent3, from, to) => `${from} から ${to} へ ${percent3}%`,
     handle: "つるに沿って好きな地点を育てる",
     hint: "つぼみをクリックして試聴するか、ハンドルをつるに沿ってドラッグします",
     growing: (percent3) => `${percent3}% の地点のサウンドを育てています…`,
@@ -1254,7 +1267,7 @@ var ja = {
     kit: "キットとして使う…",
     kitTitle: "これらのサウンドをキット（Live ではドラムラック）として読み込む依頼をチャットに入れます。送信はご自身で",
     useNamed: (name) => `${name} を使う…`,
-    kitCopy: "キットの依頼をコピー",
+    kitCopy: "コピーしてキットとして使う",
     add: "パレットに追加",
     addTitle: "このサウンドをパレットに入れます",
     addPicked: (n) => `${n} 個をパレットに追加`,
@@ -1288,7 +1301,7 @@ var ja = {
       attack: { title: "アタック", hint: "1 つのアタックを残りのブレンドに" },
       resonate: { title: "レゾネート", hint: "半分がもう半分を通して鳴る" },
       modulate: { title: "モジュレート", hint: "互いに変調し合う" },
-      texture: { title: "テクスチャ", hint: "それらの間を動くループ" },
+      texture: { title: "テクスチャ", hint: "ひとつから次へと漂っていく音の層" },
       loop: { title: "ループ", hint: "ヒットをビートに、または音程をメロディに、テンポに合わせて" },
       smear: { title: "スミア", hint: "長いグラニュラー・ストレッチ" },
       stack: { title: "スタック", hint: "1 つのヒットに書き出す" }
@@ -1309,6 +1322,10 @@ var ja = {
     missing: "この Kumi for Hermes はまだサウンドを作れません。更新してから、もう一度お試しください。",
     failed: (error) => `作れませんでした：${error}`,
     seedTitle: "シード：同じサウンド、同じ作り方、同じシードで同じ音がもう一度できます",
+    ways: { blend: "ブレンド", attack: "アタック", resonate: "レゾネート", modulate: "モジュレート", texture: "テクスチャ", smear: "スミア", loop: "ループ", cross: "クロス", fuse: "フューズ", stack: "スタック" },
+    madeName: (way, first, second, more) => `${way}：${first}${second ? ` + ${second}` : ""}${more > 0 ? ` ほか ${more} 個` : ""}`,
+    madeCount: (way, n) => `${way}：${n} 個のサウンド`,
+    grownName: (percent3, from, to) => `${from} から ${to} へ ${percent3}%`,
     variations: "バリエーション",
     previous: "前のバリエーション",
     next: "次のバリエーション",
@@ -1323,13 +1340,13 @@ var ja = {
     kept: "パレットにあります",
     use: "使う…",
     useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
-    copyUse: "参照をコピー",
     back: "戻る",
     backTitle: (n) => `ひとつ前の ${n} 個のサウンドから作り直します`,
     made: "Kumi が作ったサウンド",
     stages: "変調のしかた",
-    choose: "選ぶ",
+    choose: (name) => `${name} を選ぶ`,
     chooseTitle: "次に作るときの元に選びます（単独でも、ほかの結果と一緒でも）",
+    oneChosen: "これらだけから作るには、もう 1 つ選んでください",
     chosen: (n) => `${n} 個を選択中`,
     fromThese: "これらから作る",
     fromTheseTitle: "選んだ結果から新しいサウンドを作ります。それらが元のサウンドになり、「戻る」で元に戻せます",
@@ -1505,7 +1522,7 @@ var ja = {
       rollTitle: "いくつかのコントロールをランダムに大きく動かします",
       sound: "音そのもの",
       layers: "各レイヤー",
-      layersHint: "それぞれの音がシードから範囲内の値を引くので、リロールで引き直されます",
+      layersHint: "音ごとにこの範囲内で別の量になり、リロールのたびに選び直されます",
       controls: {
         bright: "音色",
         body: "ボディ",
@@ -1513,7 +1530,7 @@ var ja = {
         resonance: "レゾナンス",
         noise: "質感",
         punch: "パンチ",
-        length: "長さ",
+        length: "減衰",
         drive: "ドライブ",
         crush: "クラッシュ",
         width: "広がり",
@@ -1600,7 +1617,7 @@ var ja = {
     copyTitle: (text) => `「${text}」をコピーしてチャットに貼り付け`,
     copied: "コピーしました",
     copyRequest: "依頼をコピー",
-    copyReference: "参照をコピー",
+    copyUse: "コピーして使う",
     copyUndo: "取り消しをコピー",
     mapEmpty: "まだサンプルマップがありません。ここでサンプルフォルダを追加してください。追加とスキャンの依頼は Hermes のチャットに貼り付けて送ります。",
     askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
@@ -1649,6 +1666,7 @@ var zh = {
     undoTitle: "让 Hermes 撤销这次改动",
     undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: (change) => `撤销 ${change}`,
+    undoAllLabel: (n, change) => `全部撤销（${n} 步）：${change}`,
     openMap: "打开采样地图",
     undoNeedsConnection: "撤销需要 Kumi 已连接。",
     starters: "试试：",
@@ -1692,6 +1710,7 @@ var zh = {
     restored: "Kumi 已还原期间做出的改动。",
     restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
     moreSteps: (n) => `另外 ${n} 步`,
+    fewerSteps: (n) => `收起这 ${n} 步`,
     beforeRestart: "Kumi 重启之前",
     restartedSinceAll: (daw) => `Kumi 无法安全撤销这些改动：如果它们仍是 ${daw} 中的最后几步，请在 ${daw} 中撤销，或让 Hermes 把它们改回去。`,
     restoreUnsure: "Kumi 不确定是否已全部还原。",
@@ -1748,6 +1767,7 @@ var zh = {
     allKind: (kind) => `全部是 ${kind}`,
     showMore: (count2) => `再显示 ${count2} 个`,
     showFewer: "收起",
+    showList: (n) => `显示列表（${n}）`,
     closeList: "关闭列表",
     near: (name) => `与“${name}”相近的声音`,
     nearMany: (name, n) => `与“${name}”及另外 ${n} 个相近的声音`,
@@ -1809,6 +1829,7 @@ var zh = {
     cancel: "取消",
     title: (from, to) => `${from} → ${to}`,
     bud: (percent3) => `走到 ${percent3}% 的地方`,
+    grown: (percent3, from, to) => `从 ${from} 走向 ${to} 的 ${percent3}%`,
     handle: "沿着藤蔓生长任意一点",
     hint: "点击花苞试听，或沿着藤蔓拖动手柄",
     growing: (percent3) => `正在生长 ${percent3}% 处的声音…`,
@@ -2050,7 +2071,7 @@ var zh = {
     kit: "用作套件…",
     kitTitle: "把用这些声音载入套件（在 Live 中是 Drum Rack）的请求放进对话，由你决定何时发送",
     useNamed: (name) => `使用 ${name}…`,
-    kitCopy: "复制套件请求",
+    kitCopy: "复制以用作套件",
     add: "加入调色板",
     addTitle: "把这个声音放进你的调色板",
     addPicked: (n) => `把 ${n} 个加入调色板`,
@@ -2084,7 +2105,7 @@ var zh = {
       attack: { title: "起音", hint: "一个声音的起音接上其余声音的混合" },
       resonate: { title: "共鸣", hint: "一半声音通过另一半鸣响" },
       modulate: { title: "调制", hint: "它们相互调制" },
-      texture: { title: "纹理", hint: "在它们之间游走的循环" },
+      texture: { title: "纹理", hint: "从一个慢慢飘向下一个的声音铺底" },
       loop: { title: "循环", hint: "把击打组成节拍，或把音高组成旋律，合着速度" },
       smear: { title: "涂抹", hint: "长长的颗粒拉伸" },
       stack: { title: "叠加", hint: "合成一个击打" }
@@ -2105,6 +2126,10 @@ var zh = {
     missing: "这个版本的 Kumi for Hermes 还不能制作声音：请先更新，再试一次。",
     failed: (error) => `Kumi 没能做出来：${error}`,
     seedTitle: "种子：同样的声音、同样的做法和同样的种子会再次做出同样的声音",
+    ways: { blend: "融合", attack: "起音", resonate: "共鸣", modulate: "调制", texture: "纹理", smear: "涂抹", loop: "循环", cross: "交叉", fuse: "熔合", stack: "叠加" },
+    madeName: (way, first, second, more) => `${way}：${first}${second ? ` + ${second}` : ""}${more > 0 ? ` 另 ${more} 个` : ""}`,
+    madeCount: (way, n) => `${way}：${n} 个声音`,
+    grownName: (percent3, from, to) => `从 ${from} 到 ${to} 的 ${percent3}%`,
     variations: "变体",
     previous: "上一个变体",
     next: "下一个变体",
@@ -2119,13 +2144,13 @@ var zh = {
     kept: "已在调色板中",
     use: "使用…",
     useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
-    copyUse: "复制引用",
     back: "返回",
     backTitle: (n) => `重新用之前的 ${n} 个声音制作`,
     made: "Kumi 做出的声音",
     stages: "调制的方式",
-    choose: "选择",
+    choose: (name) => `选择 ${name}`,
     chooseTitle: "选它作为下一次制作的素材，可单独使用，也可与其他结果一起",
+    oneChosen: "再选一个，就能只用它们来制作",
     chosen: (n) => `已选 ${n} 个`,
     fromThese: "用这些制作",
     fromTheseTitle: "用选中的结果制作新声音：它们会成为面板用来制作的声音，按“返回”可回去",
@@ -2301,7 +2326,7 @@ var zh = {
       rollTitle: "随机把几个控件推得远一些",
       sound: "声音本身",
       layers: "每一层",
-      layersHint: "每个声音都从种子中在范围内取自己的值，所以重掷会重新取",
+      layersHint: "每个声音在这些范围内各取不同的量，每次重掷都会重新选",
       controls: {
         bright: "音色",
         body: "厚度",
@@ -2309,7 +2334,7 @@ var zh = {
         resonance: "共振",
         noise: "质感",
         punch: "冲击",
-        length: "长度",
+        length: "衰减",
         drive: "驱动",
         crush: "降采样",
         width: "宽度",
@@ -2396,7 +2421,7 @@ var zh = {
     copyTitle: (text) => `复制“${text}”以粘贴到对话中`,
     copied: "已复制",
     copyRequest: "复制请求",
-    copyReference: "复制引用",
+    copyUse: "复制以使用",
     copyUndo: "复制撤销",
     mapEmpty: "还没有采样地图。在这里添加一个采样文件夹：添加并扫描的请求要粘贴到 Hermes 对话中发送。",
     askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
@@ -2438,26 +2463,26 @@ function nameOf(value) {
   if (value && typeof value === "object" && typeof value.name === "string") return value.name.trim() || void 0;
   return void 0;
 }
-function focusPath(focus) {
-  const parts = focus?.focus;
+function focusPath(focus2) {
+  const parts = focus2?.focus;
   const inner = nameOf(parts?.device) ?? nameOf(parts?.item?.name) ?? nameOf(parts?.clip);
   return [nameOf(parts?.track), inner].filter((part) => Boolean(part)).map((part) => clean(part, 40));
 }
-function focusPlace(focus) {
-  const parts = focus?.focus;
+function focusPlace(focus2) {
+  const parts = focus2?.focus;
   const view = nameOf(parts?.mainView?.label) ?? nameOf(parts?.view);
   const section = nameOf(parts?.section?.name) ?? nameOf(parts?.scene);
   return [view && clean(view, 20), section && clean(section, 24)].filter((part) => Boolean(part));
 }
-function focusParameter(focus) {
-  const parameter = focus?.focus?.parameter;
+function focusParameter(focus2) {
+  const parameter = focus2?.focus?.parameter;
   const name = nameOf(parameter?.name);
   if (!name) return void 0;
   const value = nameOf(parameter?.value ?? void 0);
   return clean(value ? `${name} ${value}` : name, 60);
 }
-function catchUpLines(focus, most = 4) {
-  const entries = Array.isArray(focus?.catch_up) ? focus.catch_up : [];
+function catchUpLines(focus2, most = 4) {
+  const entries = Array.isArray(focus2?.catch_up) ? focus2.catch_up : [];
   const all = entries.flatMap((entry) => entry && Array.isArray(entry.lines) ? entry.lines.filter((line) => typeof line === "string") : []);
   const unlisted = entries.reduce((sum, entry) => sum + (entry && typeof entry.more === "number" && entry.more > 0 ? Math.floor(entry.more) : 0), 0);
   return { lines: all.slice(0, most).map((line) => clean(line, 120)), more: Math.max(0, all.length - most) + unlisted };
@@ -3148,9 +3173,29 @@ function takeKey(result) {
 function requestOf(result) {
   return { op: result.op, ...result.mode ? { mode: result.mode } : {}, sources: result.sources.map((source) => ({ ...source })) };
 }
+var MADE_NAME_MOST = 80;
+var MADE_WAYS = { blend: "Blend", attack: "Attack", resonate: "Resonance", modulate: "Modulation", texture: "Texture", smear: "Smear", loop: "Loop", cross: "Cross", fuse: "Fuse", stack: "Stack" };
+function madeOf(result) {
+  const way = result.mode ?? (result.op === "grow" ? "cross" : result.op);
+  const names = result.sources.map((source) => quotable(source.name ?? "", 200)).filter(Boolean);
+  const named = names.length > 1 && names[0].length + names[1].length <= 40 ? names.slice(0, 2) : names.slice(0, 1);
+  return { way, named, more: result.sources.length - named.length };
+}
+function cutAtWord(text, most) {
+  if (text.length <= most) return text;
+  const cut = text.slice(0, most - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > most / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
 function resultName(result) {
-  const lead = quotable(result.recipe.split(/[:;]/, 1)[0] ?? "", 60) || quotable(result.mode ?? result.op, 60).replace(/^\w/, (letter) => letter.toUpperCase());
-  return Number.isInteger(result.seed) ? `${lead}, seed ${result.seed}` : lead;
+  if (result.op === "grow") return cutAtWord(quotable(result.recipe.split(/[:;]/, 1)[0] ?? "", 200), MADE_NAME_MOST) || "Grown";
+  const { way, named } = madeOf(result);
+  const total = result.sources.length;
+  if (named.length === 0) return total > 1 ? `${MADE_WAYS[way]} of ${total} sounds` : MADE_WAYS[way];
+  const lead = `${MADE_WAYS[way]} of `;
+  const rest = (shown) => total > shown ? ` + ${total - shown} more` : "";
+  const first = cutAtWord(named[0], MADE_NAME_MOST - lead.length - rest(named.length).length - (named.length > 1 ? named[1].length + 3 : 0));
+  return `${lead}${first}${named.length > 1 ? ` + ${named[1]}` : ""}${rest(named.length)}`;
 }
 function sourceOfResult(result) {
   return { artifact_id: result.artifact_id, name: resultName(result) };
@@ -4147,7 +4192,7 @@ async function ask(ctx, text, options) {
     } catch {
     }
   }
-  if (await composer.insertText(null, text)) {
+  if (await composer.insertText(null, text) || await inNewChat(ctx, composer, text)) {
     host.notify({ kind: "warning", message: t("notify.notOpenHere") });
     return { outcome: "drafted" };
   }
@@ -4729,29 +4774,29 @@ function stateOf(item, t = english, live = false) {
   return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
 }
 var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-function FocusView({ focus, now, loading: loading2 = false, project = true }) {
+function FocusView({ focus: focus2, now, loading: loading2 = false, project = true }) {
   const t = useT();
-  const catchUp = catchUpLines(focus);
-  if (loading2 && !focus) return /* @__PURE__ */ jsx4(Pending, { label: t("pane.reading") });
-  if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
+  const catchUp = catchUpLines(focus2);
+  if (loading2 && !focus2) return /* @__PURE__ */ jsx4(Pending, { label: t("pane.reading") });
+  if (!focus2 || !focus2.focus && !focus2.project && !catchUp.lines.length) {
     return /* @__PURE__ */ jsx4("span", { style: { ...TYPE.small, color: T.muted }, children: t("focus.nothing") });
   }
-  const transport = focus.transport;
-  const path = focusPath(focus);
-  const parameter = focusParameter(focus);
-  const busy = nameOf(focus.focus?.busy ?? void 0);
+  const transport = focus2.transport;
+  const path = focusPath(focus2);
+  const parameter = focusParameter(focus2);
+  const busy = nameOf(focus2.focus?.busy ?? void 0);
   const meter = nameOf(transport?.meter ?? void 0);
-  return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 8, opacity: focus.stale ? 0.6 : 1 }, children: [
+  return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 8, opacity: focus2.stale ? 0.6 : 1 }, children: [
     /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
       /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 8 }, children: [
-        /* @__PURE__ */ jsx4(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 8 }),
+        /* @__PURE__ */ jsx4(Dot, { color: colorOf(focus2.focus?.track) ?? T.faint, size: 8 }),
         /* @__PURE__ */ jsx4("span", { style: { ...TYPE.body, ...S.ellipsis, color: T.text, fontWeight: 600 }, children: path.length ? path.join(" › ") : t("focus.nothingSelected") })
       ] }),
       parameter && /* @__PURE__ */ jsx4("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.muted, paddingLeft: 16 }, children: parameter })
     ] }),
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
-      project && focus.project?.name && /* @__PURE__ */ jsx4(Badge2, { tip: t("focus.project"), children: clean(focus.project.name, 40) }),
-      focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx4(Badge2, { children: place }, index)),
+      project && focus2.project?.name && /* @__PURE__ */ jsx4(Badge2, { tip: t("focus.project"), children: clean(focus2.project.name, 40) }),
+      focusPlace(focus2).map((place, index) => /* @__PURE__ */ jsx4(Badge2, { children: place }, index)),
       typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx4(Badge2, { tone: transport.playing ? "good" : "fact", children: transport.playing ? t("focus.playing") : t("focus.stopped") }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx4(Badge2, { children: bpm(transport?.tempo) }),
       meter && /* @__PURE__ */ jsx4(Badge2, { children: clean(meter, 12) }),
@@ -4762,7 +4807,7 @@ function FocusView({ focus, now, loading: loading2 = false, project = true }) {
       catchUp.lines.map((line, index) => /* @__PURE__ */ jsx4("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.muted }, children: line }, index)),
       catchUp.more > 0 && /* @__PURE__ */ jsx4("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.more", catchUp.more) })
     ] }),
-    focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx4("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
+    focus2.stale && typeof focus2.heard_at === "number" && /* @__PURE__ */ jsx4("span", { style: { ...TYPE.caption, color: T.faint }, children: t("focus.lastHeard", ago(focus2.heard_at, now, t)) })
   ] });
 }
 function undoKeys(target) {
@@ -4795,7 +4840,7 @@ function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = f
     whole ? /* @__PURE__ */ jsx4("span", { style: titleStyle, children: title }) : /* @__PURE__ */ jsx4(Clamp, { style: titleStyle, text: title }),
     meta && /* @__PURE__ */ jsxs3("span", { style: { ...S.row, gap: 6 }, children: [
       line.track && /* @__PURE__ */ jsx4(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
-      /* @__PURE__ */ jsx4("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.faint }, children: line.text })
+      /* @__PURE__ */ jsx4("span", { style: { ...TYPE.small, ...whole ? { overflowWrap: "anywhere" } : S.ellipsis, color: T.faint }, children: line.text })
     ] }),
     item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx4("span", { style: { ...note, color: T.warn }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : item.note ? (
       // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi never
@@ -4836,7 +4881,7 @@ function Change({ rows, live, daw, target, now, action, detail, restartSaid }) {
             style: { ...TYPE.small, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, padding: 0, border: "none", background: "transparent", color: T.muted, cursor: "pointer", fontFamily: "inherit" },
             children: [
               /* @__PURE__ */ jsx4("span", { "aria-hidden": true, style: { display: "inline-block", width: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms" }, children: "▸" }),
-              t("history.moreSteps", others.length)
+              open ? t("history.fewerSteps", others.length) : t("history.moreSteps", others.length)
             ]
           }
         )
@@ -5178,7 +5223,8 @@ function KumiPane({ ctx, store, onOpenMap }) {
               action: (head, rows) => {
                 if (!canUndoChange(state.status, rows)) return null;
                 const left = rows.filter((row2) => row2.state !== "undone").length;
-                return /* @__PURE__ */ jsx8(Button2, { label: t("pane.undoLabel", clean(head.title ?? head.label ?? head.id, 120)), onClick: () => ask(ctx, undoRequest(head), { send: true, session }), tip: left > 1 ? t("pane.undoChangeTitle", left) : void 0, children: left > 1 ? t("pane.undoAll", left) : t("pane.undo") });
+                const change = clean(head.title ?? head.label ?? head.id, 120);
+                return /* @__PURE__ */ jsx8(Button2, { label: left > 1 ? t("pane.undoAllLabel", left, change) : t("pane.undoLabel", change), onClick: () => ask(ctx, undoRequest(head), { send: true, session }), tip: left > 1 ? t("pane.undoChangeTitle", left) : void 0, children: left > 1 ? t("pane.undoAll", left) : t("pane.undo") });
               }
             }
           ),
@@ -5385,7 +5431,7 @@ function payloadOf(event) {
 
 // src/desktop/map.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
-import { useEffect as useEffect16, useRef as useRef15, useState as useState19 } from "react";
+import { useEffect as useEffect17, useRef as useRef15, useState as useState20 } from "react";
 
 // src/shared/atlas/first.ts
 import { useRef as useRef3, useState as useState6 } from "react";
@@ -5421,7 +5467,12 @@ var RENDERS = 2;
 var SCRUB_STEP = 0.04;
 function soundEnd(id, name, revision) {
   const [source] = sourcesOf([{ sound_id: id, name: name ?? id }], revision);
-  return source ? { source, id, place: null, name: clean(name ?? id, 80) } : null;
+  const named = clean(name ?? id, 80);
+  return source ? { source, id, place: null, name: named, origin: named, along: 0 } : null;
+}
+function alongPath(from, at) {
+  const start = from?.along ?? 0;
+  return start + at * (1 - start);
 }
 function vinePoint(a, b, t, bow = 0.22) {
   const [cx, cy] = [(a[0] + b[0]) / 2 - (b[1] - a[1]) * bow, (a[1] + b[1]) / 2 + (b[0] - a[0]) * bow];
@@ -6198,7 +6249,7 @@ function SteerSection({ steer, onChange, open, onToggle }) {
       children: [
         /* @__PURE__ */ jsx14("span", { style: { gridColumn: "1 / -1", ...S.heading, fontSize: 10.5 }, children: t("make.steer.sound") }),
         Object.keys(STEER_SOUND).map(slider),
-        /* @__PURE__ */ jsx14("span", { style: { gridColumn: "1 / -1", ...S.heading, fontSize: 10.5, marginTop: 4 }, title: t("make.steer.layersHint"), children: t("make.steer.layers") }),
+        /* @__PURE__ */ jsx14("span", { style: { gridColumn: "1 / -1", ...S.heading, fontSize: 10.5, marginTop: 4 }, children: t("make.steer.layers") }),
         Object.keys(STEER_LAYER).map(slider),
         /* @__PURE__ */ jsx14("span", { style: { gridColumn: "1 / -1", fontSize: 10.5, color: T.faint }, children: t("make.steer.layersHint") })
       ]
@@ -6365,6 +6416,8 @@ function Stages({ stages }) {
   ] }, index)) });
 }
 var sideSheetWidth = (area) => Math.min(430, area * 0.46);
+var buttonsOf = (root) => root ? [...root.children].flatMap((child) => child instanceof HTMLButtonElement ? [child] : buttonsOf(child)) : [];
+var focus = (element) => element?.focus({ preventScroll: true });
 function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose, playing, onPlay, onStop, onKeep, kept: kept3, use, placement = "bottom", dock, onSources, lineage, onKin }) {
   const inline = placement === "inline";
   const t = useT();
@@ -6377,6 +6430,14 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const [steers, setSteers] = useState10({});
   const [steerOpen, setSteerOpen] = useState10(false);
   const [allSources, setAllSources] = useState10(false);
+  const firstMore = useRef6(null);
+  const toMore = useRef6(false);
+  useEffect6(() => {
+    if (!allSources || !toMore.current) return;
+    toMore.current = false;
+    focus(firstMore.current);
+    reveal(firstMore.current, "nearest");
+  }, [allSources]);
   const [chosen, setChosen] = useState10([]);
   const [trail, setTrail] = useState10([]);
   const [busy, setBusy] = useState10(null);
@@ -6387,8 +6448,9 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   const [arrived, setArrived] = useState10(null);
   const cards = useRef6(/* @__PURE__ */ new Map());
   const canvases = useRef6(/* @__PURE__ */ new Map());
+  const chooses = useRef6(/* @__PURE__ */ new Map());
   const list = useRef6(null);
-  const reveal = (element, where) => {
+  const reveal = (element, where, instant = false) => {
     const box = list.current;
     if (!box || !element) return;
     const [outer, inner] = [box.getBoundingClientRect(), element.getBoundingClientRect()];
@@ -6397,13 +6459,31 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     else if (inner.top < outer.top) top += inner.top - outer.top - 8;
     else if (inner.bottom > outer.bottom) top += inner.bottom - outer.bottom + 8;
     else return;
-    box.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    box.scrollTo({ top, behavior: instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   useEffect6(() => {
     if (!arrived) return;
     reveal(cards.current.get(arrived), "nearest");
     setArrived(null);
   }, [arrived, results]);
+  const held = useRef6(null);
+  useEffect6(() => {
+    const box = list.current;
+    if (!box) return;
+    const observer = new ResizeObserver(() => {
+      if (held.current) reveal(cards.current.get(held.current), "nearest", true);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  const makeRow = useRef6(null);
+  const chosenBar = useRef6(null);
+  const focusNext = useRef6(null);
+  useEffect6(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    next?.();
+  });
   const [flights, setFlights] = useState10([]);
   const flightKey = useRef6(0);
   const fly = (id) => {
@@ -6422,9 +6502,9 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     return () => cancelAnimationFrame(frame2);
   }, []);
   const close = () => {
-    const back = opener.current;
+    const back2 = opener.current;
     onClose();
-    if (back?.isConnected) back.focus({ preventScroll: true });
+    if (back2?.isConnected) back2.focus({ preventScroll: true });
   };
   const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
   const note = cardNote(sources.length);
@@ -6443,6 +6523,18 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
   }, [results]);
   const byId = useMemo(() => new Map((results ?? []).map((result) => [result.artifact_id, result])), [results]);
   const chosenResults = chosen.flatMap((id) => byId.has(id) ? [byId.get(id)] : []);
+  const chosenAlone = cardNote(chosenResults.length) === null;
+  const chosenNew = chosenResults.filter((result) => !sources.some((source) => source.artifact_id === result.artifact_id));
+  const chosenJoin = chosenNew.length > 0 && cardNote(sources.length + chosenNew.length) === null;
+  const nameOf2 = (result) => {
+    if (result.op === "grow") {
+      const [from, to] = result.sources.map((source) => clean(source.name ?? "", 40));
+      return typeof result.at === "number" && from && to ? t("make.grownName", Math.round(result.at * 100), from, to) : resultName(result);
+    }
+    const { way, named, more } = madeOf(result);
+    const word = t(`make.ways.${way}`);
+    return named.length > 0 ? t("make.madeName", word, clean(named[0], 40), named[1] ? clean(named[1], 40) : "", more) : t("make.madeCount", word, result.sources.length);
+  };
   const make = async (request, label) => {
     setBusy(label);
     setError(null);
@@ -6454,6 +6546,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
       setShown((current) => ({ ...current, [key]: Number.MAX_SAFE_INTEGER }));
       setFresh((current) => /* @__PURE__ */ new Set([...current, answer.result.artifact_id]));
       setArrived(answer.result.artifact_id);
+      held.current = answer.result.artifact_id;
       onPlay(answer.result.artifact_id);
       return;
     }
@@ -6465,6 +6558,16 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
     setChosen([]);
     onSources(next);
     reveal(list.current, "start");
+    focusNext.current = () => focus(buttonsOf(makeRow.current)[0]);
+  };
+  const back = () => {
+    if (!onSources || trail.length === 0) return;
+    const previous = trail[trail.length - 1];
+    const again = sources.flatMap((source) => source.artifact_id && byId.has(source.artifact_id) && !previous.some((other) => other.artifact_id === source.artifact_id) ? [source.artifact_id] : []);
+    setTrail((current) => current.slice(0, -1));
+    setChosen(again);
+    onSources(previous);
+    focusNext.current = () => focus(buttonsOf(chosenBar.current).at(-1) ?? panel.current);
   };
   const track2 = SEGMENT_TRACK;
   const segment = (picked) => segmentStyle(picked, refused);
@@ -6555,43 +6658,251 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
           /* @__PURE__ */ jsx15("span", { style: { ...TYPE.body, fontWeight: 600 }, children: t("make.title") }),
           /* @__PURE__ */ jsx15("span", { style: { ...TYPE.small, color: T.faint }, children: t("make.from", sources.length) }),
           /* @__PURE__ */ jsx15("span", { style: { flex: 1 } }),
-          trail.length > 0 && onSources && /* @__PURE__ */ jsxs13(
-            Button2,
+          trail.length > 0 && onSources && /* @__PURE__ */ jsxs13(Button2, { kind: "quiet", onClick: back, tip: t("make.backTitle", trail[trail.length - 1].length), children: [
+            /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: "‹" }),
+            t("make.back")
+          ] }),
+          /* @__PURE__ */ jsx15(Button2, { kind: "quiet", label: t("make.close"), onClick: close, children: "×" })
+        ] }),
+        /* @__PURE__ */ jsxs13(
+          "div",
+          {
+            onTouchMove: () => held.current = null,
+            onWheel: () => held.current = null,
+            ref: list,
+            style: { position: "relative", flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 },
+            children: [
+              /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
+                sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => /* @__PURE__ */ jsxs13(
+                  "span",
+                  {
+                    className: index === SOURCES_FOLDED ? FOCUSABLE : void 0,
+                    ref: index === SOURCES_FOLDED ? firstMore : void 0,
+                    role: "listitem",
+                    style: { ...S.row, gap: 4, ...TYPE.caption, padding: "2px 6px", borderRadius: 3, background: T.chip, boxShadow: source.artifact_id ? `inset 0 0 0 1px color-mix(in srgb, ${T.accent} 45%, transparent)` : void 0, color: T.secondary, maxWidth: "100%" },
+                    tabIndex: index === SOURCES_FOLDED ? -1 : void 0,
+                    children: [
+                      source.artifact_id ? /* @__PURE__ */ jsx15("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx15("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
+                      /* @__PURE__ */ jsx15("span", { style: { minWidth: 0, overflowWrap: "anywhere" }, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 60) })
+                    ]
+                  },
+                  `${index}-${source.sound_id ?? source.artifact_id}`
+                )),
+                allSources && sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx15("span", { style: { ...TYPE.caption, color: T.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) }),
+                sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx15(
+                  Button2,
+                  {
+                    expanded: allSources,
+                    kind: "quiet",
+                    onClick: () => {
+                      toMore.current = !allSources;
+                      setAllSources(!allSources);
+                    },
+                    children: allSources ? t("make.fewerSources") : t("make.moreSources", sources.length - SOURCES_FOLDED)
+                  }
+                )
+              ] }),
+              chooser,
+              card.key === "loop" ? /* @__PURE__ */ jsx15(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx15(CardOptions, { card, onChange: setOptions, options, sources }),
+              /* @__PURE__ */ jsx15(SteerSection, { onChange: (next) => setSteers((current) => ({ ...current, [card.key]: next })), onToggle: () => setSteerOpen(!steerOpen), open: steerOpen, steer }),
+              takes.length > 0 && /* @__PURE__ */ jsx15("div", { "aria-label": t("make.results"), role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
+                const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1);
+                const result = take.results[at];
+                const isPlaying = playing === result.artifact_id;
+                const inPalette = kept3.has(result.artifact_id);
+                const isChosen = chosen.includes(result.artifact_id);
+                const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
+                const name = nameOf2(result);
+                return /* @__PURE__ */ jsxs13(
+                  "div",
+                  {
+                    className: fresh2.has(result.artifact_id) ? "kumi-pop" : void 0,
+                    ref: (element) => {
+                      if (element) cards.current.set(result.artifact_id, element);
+                      else cards.current.delete(result.artifact_id);
+                    },
+                    onBlur: () => onKin?.(null),
+                    onFocus: () => {
+                      held.current = result.artifact_id;
+                      onKin?.(result);
+                    },
+                    onPointerEnter: () => onKin?.(result),
+                    onPointerLeave: () => onKin?.(null),
+                    role: "listitem",
+                    style: {
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 5,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
+                      background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent",
+                      boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : "none",
+                      transition: "border-color 160ms, background-color 160ms, box-shadow 160ms"
+                    },
+                    children: [
+                      lineage && /* @__PURE__ */ jsx15(LineageBar, { shares: lineage(result) }),
+                      /* @__PURE__ */ jsxs13("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+                        /* @__PURE__ */ jsx15(Tip2, { label: clean(result.recipe, 400), children: /* @__PURE__ */ jsx15("span", { style: { ...TYPE.body, flex: 1, minWidth: 0, color: T.text, overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }, children: name }) }),
+                        onSources && /* @__PURE__ */ jsx15(
+                          "button",
+                          {
+                            "aria-label": t("make.choose", name),
+                            "aria-pressed": isChosen,
+                            className: FOCUSABLE,
+                            onClick: () => setChosen((current) => current.includes(result.artifact_id) ? current.filter((id) => id !== result.artifact_id) : [...current, result.artifact_id]),
+                            ref: (element) => {
+                              if (element) chooses.current.set(result.artifact_id, element);
+                              else chooses.current.delete(result.artifact_id);
+                            },
+                            title: t("make.chooseTitle"),
+                            type: "button",
+                            style: {
+                              flex: "none",
+                              width: 20,
+                              height: 20,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              borderRadius: "50%",
+                              border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
+                              background: isChosen ? T.accent : "transparent",
+                              color: isChosen ? T.raised : "transparent",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              transform: isChosen ? "scale(1.08)" : "none",
+                              transition: "background-color 140ms, border-color 140ms, transform 160ms"
+                            },
+                            children: "✓"
+                          }
+                        )
+                      ] }),
+                      stages.length > 0 && /* @__PURE__ */ jsx15(Stages, { stages }),
+                      /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 8 }, children: [
+                        /* @__PURE__ */ jsx15(
+                          "button",
+                          {
+                            "aria-label": isPlaying ? t("make.stop") : t("make.play"),
+                            className: FOCUSABLE,
+                            onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id),
+                            type: "button",
+                            style: {
+                              flex: "none",
+                              width: 30,
+                              height: 30,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              borderRadius: "50%",
+                              border: `1px solid ${T.accent}`,
+                              background: isPlaying ? `color-mix(in srgb, ${T.accent} 30%, transparent)` : `color-mix(in srgb, ${T.accent} 12%, transparent)`,
+                              color: T.accent,
+                              fontSize: 11,
+                              cursor: "pointer",
+                              transition: "background-color 140ms"
+                            },
+                            children: isPlaying ? "■" : "▶"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx15("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx15(
+                          Wave2,
+                          {
+                            colors: lineage?.(result).map((part) => part.color),
+                            duration: result.duration,
+                            onCanvas: (element) => {
+                              if (element) canvases.current.set(result.artifact_id, element);
+                              else canvases.current.delete(result.artifact_id);
+                            },
+                            peaks: result.peaks,
+                            playing: isPlaying
+                          }
+                        ) })
+                      ] }),
+                      /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+                        /* @__PURE__ */ jsx15(Tip2, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsxs13("span", { style: { ...TYPE.small, color: T.faint }, children: [
+                          t(`make.ops.${result.mode === "loop" ? "loop" : result.op}`),
+                          " · ",
+                          seconds(result.duration)
+                        ] }) }),
+                        /* @__PURE__ */ jsx15("span", { style: { flex: 1 } }),
+                        take.results.length > 1 && /* @__PURE__ */ jsxs13("span", { role: "group", "aria-label": t("make.variations"), style: { ...S.row, gap: 2 }, children: [
+                          /* @__PURE__ */ jsx15(Button2, { disabled: at === 0, kind: "quiet", label: t("make.previous"), onClick: () => setShown((current) => ({ ...current, [take.key]: at - 1 })), children: "‹" }),
+                          /* @__PURE__ */ jsx15("span", { style: { ...TYPE.small, color: T.faint, fontVariantNumeric: "tabular-nums" }, children: t("make.variation", at + 1, take.results.length) }),
+                          /* @__PURE__ */ jsx15(Button2, { disabled: at === take.results.length - 1, kind: "quiet", label: t("make.next"), onClick: () => setShown((current) => ({ ...current, [take.key]: at + 1 })), children: "›" })
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
+                        /* @__PURE__ */ jsx15(Button2, { disabled: busy !== null && busy !== take.key, kind: "quiet", onClick: () => make(reroll(take.request), take.key), tip: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs13(Fragment6, { children: [
+                          /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: "↻" }),
+                          t("make.reroll")
+                        ] }) }),
+                        /* @__PURE__ */ jsx15("span", { style: { flex: 1 } }),
+                        /* @__PURE__ */ jsxs13(
+                          Button2,
+                          {
+                            onClick: () => {
+                              if (inPalette) return;
+                              held.current = result.artifact_id;
+                              fly(result.artifact_id);
+                              return onKeep(result);
+                            },
+                            pressed: inPalette,
+                            tip: inPalette ? void 0 : t("make.keepTitle"),
+                            children: [
+                              /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: inPalette ? "✓" : "+" }),
+                              inPalette ? t("make.kept") : t("make.keep")
+                            ]
+                          }
+                        ),
+                        use?.(result)
+                      ] })
+                    ]
+                  },
+                  take.key
+                );
+              }) }),
+              takes.length === 0 && results !== null && /* @__PURE__ */ jsx15("span", { style: S.faint, children: t("make.none") })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxs13("div", { style: { flex: "none", borderTop: `1px solid ${T.hairline}`, background: T.raised, borderRadius: "0 0 12px 12px", ...inline ? { position: "sticky", bottom: 0 } : {} }, children: [
+          onSources && chosenResults.length > 0 && /* @__PURE__ */ jsxs13(
+            "div",
             {
-              kind: "quiet",
-              onClick: () => {
-                const back = trail[trail.length - 1];
-                setTrail((current) => current.slice(0, -1));
-                setChosen([]);
-                onSources(back);
-              },
-              tip: t("make.backTitle", trail[trail.length - 1].length),
+              "aria-label": t("make.chosen", chosenResults.length),
+              className: "kumi-pop",
+              ref: chosenBar,
+              role: "group",
+              style: { ...S.row, flexWrap: "wrap", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${T.hairline}`, background: `color-mix(in srgb, ${T.accent} 7%, ${T.raised})` },
               children: [
-                /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: "‹" }),
-                t("make.back")
+                /* @__PURE__ */ jsx15("span", { style: { ...TYPE.body, fontWeight: 600 }, children: t("make.chosen", chosenResults.length) }),
+                /* @__PURE__ */ jsx15("span", { style: { ...TYPE.small, color: T.muted, flex: "1 1 6rem" }, children: chosenAlone ? "" : t("make.oneChosen") }),
+                /* @__PURE__ */ jsx15(
+                  Button2,
+                  {
+                    kind: "quiet",
+                    onClick: () => {
+                      const first = chosenResults[0]?.artifact_id;
+                      setChosen([]);
+                      focusNext.current = () => focus(first ? chooses.current.get(first) : void 0);
+                    },
+                    tip: t("make.clearChosenTitle"),
+                    children: t("make.clearChosen")
+                  }
+                ),
+                chosenJoin && /* @__PURE__ */ jsx15(Button2, { kind: chosenAlone ? "secondary" : "primary", onClick: () => makeFrom([...sources, ...chosenNew.map(sourceOfResult)]), tip: t("make.addToSoundsTitle"), children: t("make.addToSounds") }),
+                chosenAlone && /* @__PURE__ */ jsx15(Button2, { kind: "primary", onClick: () => makeFrom(chosenResults.map(sourceOfResult)), tip: t("make.fromTheseTitle"), children: t("make.fromThese") })
               ]
             }
           ),
-          /* @__PURE__ */ jsx15(Button2, { kind: "quiet", label: t("make.close"), onClick: close, children: "×" })
-        ] }),
-        /* @__PURE__ */ jsxs13("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-          /* @__PURE__ */ jsxs13("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
-            sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => /* @__PURE__ */ jsxs13("span", { role: "listitem", style: { ...S.row, gap: 4, ...TYPE.caption, padding: "2px 6px", borderRadius: 3, background: T.chip, boxShadow: source.artifact_id ? `inset 0 0 0 1px color-mix(in srgb, ${T.accent} 45%, transparent)` : void 0, color: T.secondary, maxWidth: "100%" }, children: [
-              source.artifact_id ? /* @__PURE__ */ jsx15("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx15("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
-              /* @__PURE__ */ jsx15("span", { style: { minWidth: 0, overflowWrap: "anywhere" }, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 60) })
-            ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
-            !allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx15(Button2, { kind: "quiet", onClick: () => setAllSources(true), children: t("make.moreSources", sources.length - SOURCES_FOLDED) }),
-            allSources && sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx15("span", { style: { ...TYPE.caption, color: T.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) }),
-            allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx15(Button2, { kind: "quiet", onClick: () => setAllSources(false), children: t("make.fewerSources") })
-          ] }),
-          chooser,
-          card.key === "loop" ? /* @__PURE__ */ jsx15(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx15(CardOptions, { card, onChange: setOptions, options, sources }),
-          /* @__PURE__ */ jsx15(SteerSection, { onChange: (next) => setSteers((current) => ({ ...current, [card.key]: next })), onToggle: () => setSteerOpen(!steerOpen), open: steerOpen, steer }),
-          /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+          /* @__PURE__ */ jsxs13("div", { ref: makeRow, style: { ...S.row, gap: 8, flexWrap: "wrap", padding: "8px 12px" }, children: [
             /* @__PURE__ */ jsx15(
               Button2,
               {
-                disabled: refused || busy !== null,
+                disabled: refused || busy !== null && busy !== "make",
                 kind: "primary",
                 onClick: () => make(requestFor(card, sources, { ...options, ...card.key === "loop" ? { bpm: options.bpm ?? dawTempo } : {}, steer }), "make"),
                 size: "md",
@@ -6602,181 +6913,8 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
             busy === "make" && /* @__PURE__ */ jsx15("span", { "aria-hidden": true, className: "kumi-spin", style: { width: 14, height: 14, borderRadius: "50%", border: `2px solid ${T.accent}`, borderRightColor: "transparent" } }),
             note && /* @__PURE__ */ jsx15("span", { style: S.faint, children: t(note.key, note.least) }),
             /* @__PURE__ */ jsx15("span", { "aria-live": "polite", style: error ? { ...S.faint, color: T.warn, flex: "1 1 14rem" } : S.hidden, children: error ?? "" })
-          ] }),
-          takes.length > 0 && /* @__PURE__ */ jsx15("div", { "aria-label": t("make.results"), role: "list", style: { display: "flex", flexDirection: "column", gap: 8 }, children: takes.map((take) => {
-            const at = Math.min(take.results.length - 1, shown[take.key] ?? take.results.length - 1);
-            const result = take.results[at];
-            const isPlaying = playing === result.artifact_id;
-            const inPalette = kept3.has(result.artifact_id);
-            const isChosen = chosen.includes(result.artifact_id);
-            const stages = result.mode === "modulate" ? stagesOf(result.recipe) : [];
-            return /* @__PURE__ */ jsxs13(
-              "div",
-              {
-                className: fresh2.has(result.artifact_id) ? "kumi-pop" : void 0,
-                ref: (element) => {
-                  if (element) cards.current.set(result.artifact_id, element);
-                  else cards.current.delete(result.artifact_id);
-                },
-                onBlur: () => onKin?.(null),
-                onFocus: () => onKin?.(result),
-                onPointerEnter: () => onKin?.(result),
-                onPointerLeave: () => onKin?.(null),
-                role: "listitem",
-                style: {
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 5,
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
-                  background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent",
-                  boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : "none",
-                  transition: "border-color 160ms, background-color 160ms, box-shadow 160ms"
-                },
-                children: [
-                  lineage && /* @__PURE__ */ jsx15(LineageBar, { shares: lineage(result) }),
-                  /* @__PURE__ */ jsxs13("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
-                    stages.length ? /* @__PURE__ */ jsx15("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, children: clean(result.recipe.split(":", 1)[0], 80) }) : /* @__PURE__ */ jsx15(Clamp, { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, text: clean(result.recipe, 220) || resultName(result) }),
-                    onSources && /* @__PURE__ */ jsx15(
-                      "button",
-                      {
-                        "aria-label": t("make.choose"),
-                        "aria-pressed": isChosen,
-                        className: FOCUSABLE,
-                        onClick: () => setChosen((current) => current.includes(result.artifact_id) ? current.filter((id) => id !== result.artifact_id) : [...current, result.artifact_id]),
-                        title: t("make.chooseTitle"),
-                        type: "button",
-                        style: {
-                          flex: "none",
-                          width: 20,
-                          height: 20,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: 0,
-                          borderRadius: "50%",
-                          border: `1.5px solid ${isChosen ? T.accent : T.faint}`,
-                          background: isChosen ? T.accent : "transparent",
-                          color: isChosen ? T.raised : "transparent",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          transform: isChosen ? "scale(1.08)" : "none",
-                          transition: "background-color 140ms, border-color 140ms, transform 160ms"
-                        },
-                        children: "✓"
-                      }
-                    )
-                  ] }),
-                  stages.length > 0 && /* @__PURE__ */ jsx15(Stages, { stages }),
-                  /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 8 }, children: [
-                    /* @__PURE__ */ jsx15(
-                      "button",
-                      {
-                        "aria-label": isPlaying ? t("make.stop") : t("make.play"),
-                        className: FOCUSABLE,
-                        onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id),
-                        type: "button",
-                        style: {
-                          flex: "none",
-                          width: 30,
-                          height: 30,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: 0,
-                          borderRadius: "50%",
-                          border: `1px solid ${T.accent}`,
-                          background: isPlaying ? `color-mix(in srgb, ${T.accent} 30%, transparent)` : `color-mix(in srgb, ${T.accent} 12%, transparent)`,
-                          color: T.accent,
-                          fontSize: 11,
-                          cursor: "pointer",
-                          transition: "background-color 140ms"
-                        },
-                        children: isPlaying ? "■" : "▶"
-                      }
-                    ),
-                    /* @__PURE__ */ jsx15("div", { "aria-hidden": true, onClick: () => isPlaying ? onStop() : onPlay(result.artifact_id), style: { flex: 1, minWidth: 0, cursor: "pointer" }, children: /* @__PURE__ */ jsx15(
-                      Wave2,
-                      {
-                        colors: lineage?.(result).map((part) => part.color),
-                        duration: result.duration,
-                        onCanvas: (element) => {
-                          if (element) canvases.current.set(result.artifact_id, element);
-                          else canvases.current.delete(result.artifact_id);
-                        },
-                        peaks: result.peaks,
-                        playing: isPlaying
-                      }
-                    ) })
-                  ] }),
-                  /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                    /* @__PURE__ */ jsx15(Tip2, { label: `#${result.seed} · ${t("make.seedTitle")}`, children: /* @__PURE__ */ jsxs13("span", { style: { ...TYPE.small, color: T.faint }, children: [
-                      t(`make.ops.${result.mode === "loop" ? "loop" : result.op}`),
-                      result.mode && result.mode !== "loop" ? ` · ${t(`make.cards.${result.mode}.title`)}` : "",
-                      " · ",
-                      seconds(result.duration)
-                    ] }) }),
-                    /* @__PURE__ */ jsx15("span", { style: { flex: 1 } }),
-                    take.results.length > 1 && /* @__PURE__ */ jsxs13("span", { role: "group", "aria-label": t("make.variations"), style: { ...S.row, gap: 2 }, children: [
-                      /* @__PURE__ */ jsx15(Button2, { disabled: at === 0, kind: "quiet", label: t("make.previous"), onClick: () => setShown((current) => ({ ...current, [take.key]: at - 1 })), children: "‹" }),
-                      /* @__PURE__ */ jsx15("span", { style: { ...TYPE.small, color: T.faint, fontVariantNumeric: "tabular-nums" }, children: t("make.variation", at + 1, take.results.length) }),
-                      /* @__PURE__ */ jsx15(Button2, { disabled: at === take.results.length - 1, kind: "quiet", label: t("make.next"), onClick: () => setShown((current) => ({ ...current, [take.key]: at + 1 })), children: "›" })
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsxs13("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                    /* @__PURE__ */ jsx15(Button2, { disabled: busy !== null, kind: "quiet", onClick: () => make(reroll(take.request), take.key), tip: t("make.rerollTitle"), children: busy === take.key ? t("make.rerolling") : /* @__PURE__ */ jsxs13(Fragment6, { children: [
-                      /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: "↻" }),
-                      t("make.reroll")
-                    ] }) }),
-                    /* @__PURE__ */ jsx15("span", { style: { flex: 1 } }),
-                    /* @__PURE__ */ jsxs13(
-                      Button2,
-                      {
-                        disabled: inPalette,
-                        onClick: () => {
-                          fly(result.artifact_id);
-                          return onKeep(result);
-                        },
-                        tip: inPalette ? void 0 : t("make.keepTitle"),
-                        children: [
-                          /* @__PURE__ */ jsx15("span", { "aria-hidden": true, children: inPalette ? "✓" : "+" }),
-                          inPalette ? t("make.kept") : t("make.keep")
-                        ]
-                      }
-                    ),
-                    use?.(result)
-                  ] })
-                ]
-              },
-              take.key
-            );
-          }) }),
-          takes.length === 0 && results !== null && /* @__PURE__ */ jsx15("span", { style: S.faint, children: t("make.none") })
+          ] })
         ] }),
-        onSources && chosenResults.length > 0 && /* @__PURE__ */ jsxs13(
-          "div",
-          {
-            "aria-label": t("make.chosen", chosenResults.length),
-            className: "kumi-pop",
-            role: "group",
-            style: { ...S.row, flexWrap: "wrap", gap: 6, padding: "8px 12px", borderTop: `1px solid ${T.hairline}`, background: `color-mix(in srgb, ${T.accent} 7%, ${T.raised})`, borderRadius: "0 0 12px 12px" },
-            children: [
-              /* @__PURE__ */ jsx15("span", { style: { ...TYPE.body, fontWeight: 600, flex: "1 1 6rem" }, children: t("make.chosen", chosenResults.length) }),
-              /* @__PURE__ */ jsx15(Button2, { kind: "quiet", onClick: () => setChosen([]), tip: t("make.clearChosenTitle"), children: t("make.clearChosen") }),
-              /* @__PURE__ */ jsx15(
-                Button2,
-                {
-                  onClick: () => makeFrom([...sources, ...chosenResults.filter((result) => !sources.some((source) => source.artifact_id === result.artifact_id)).map(sourceOfResult)]),
-                  tip: t("make.addToSoundsTitle"),
-                  children: t("make.addToSounds")
-                }
-              ),
-              /* @__PURE__ */ jsx15(Button2, { kind: "primary", onClick: () => makeFrom(chosenResults.map(sourceOfResult)), tip: t("make.fromTheseTitle"), children: t("make.fromThese") })
-            ]
-          }
-        ),
         flights.map((flight) => /* @__PURE__ */ jsx15(Flying, { flight, onDone: () => setFlights((current) => current.filter((other) => other.key !== flight.key)) }, flight.key))
       ]
     }
@@ -6784,7 +6922,7 @@ function MakePanel({ sources, colorOf: colorOf2, tempo, results, onMake, onClose
 }
 
 // src/shared/MapCanvas.tsx
-import { useEffect as useEffect12, useMemo as useMemo2, useRef as useRef13, useState as useState15 } from "react";
+import { useEffect as useEffect13, useMemo as useMemo2, useRef as useRef13, useState as useState16 } from "react";
 
 // src/shared/atlas/AtlasOverlay.tsx
 import { useEffect as useEffect7, useRef as useRef7 } from "react";
@@ -7122,28 +7260,28 @@ function tileModel(model, layout) {
   });
   return { ...model, points, cells };
 }
-function mapSide(width, height, top = 0) {
-  return Math.max(1, Math.min(width, height - top) - 32);
+function mapSide(width, height, top = 0, bottom = 0) {
+  return Math.max(1, Math.min(width, height - top - bottom) - 32);
 }
 var roomBeside = (width, right) => width - right >= 240 ? width - right : width;
-function fitView(width, height, top = 0, right = 0) {
-  const size = mapSide(width, height, top);
+function fitView(width, height, top = 0, right = 0, bottom = 0) {
+  const size = mapSide(width, height, top, bottom);
   const room = roomBeside(width, right);
-  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - size) / 2 };
+  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - bottom - size) / 2 };
 }
 function floatBeside(box, w, h, width, height, top, bottom) {
   const GAP2 = 12;
   const EDGE = 8;
-  const floor = height - bottom - h;
-  const docked = { left: Math.max(EDGE, (width - w) / 2), top: Math.max(top, floor) };
+  const floor = Math.max(EDGE, height - bottom - h);
+  const docked = { left: Math.max(EDGE, (width - w) / 2), top: floor };
   if (!box) return docked;
   const [x0, y0, x1, y1] = box;
-  const beside = Math.min(Math.max(top, y0 - 6), Math.max(top, floor));
+  const beside = Math.min(Math.max(top, y0 - 6), floor);
   const across = Math.min(Math.max(EDGE, (x0 + x1) / 2 - w / 2), Math.max(EDGE, width - w - EDGE));
   if (x1 + GAP2 + w <= width - EDGE) return { left: x1 + GAP2, top: beside };
   if (x0 - GAP2 - w >= EDGE) return { left: x0 - GAP2 - w, top: beside };
-  if (y0 - GAP2 - h >= top) return { left: across, top: y0 - GAP2 - h };
-  if (y1 + GAP2 <= floor) return { left: across, top: y1 + GAP2 };
+  if (y0 - GAP2 - h >= top && y0 - GAP2 - h <= floor) return { left: across, top: y0 - GAP2 - h };
+  if (y1 + GAP2 <= floor && y1 + GAP2 >= top) return { left: across, top: y1 + GAP2 };
   return docked;
 }
 function toScreen(view, size, x, y) {
@@ -7281,17 +7419,17 @@ function searchSounds(model, query) {
   });
   return found;
 }
-function frame(model, ids, width, height, top = 0, right = 0, margin = 48, clear = {}) {
+function frame(model, ids, width, height, top = 0, right = 0, margin = 48, clear = {}, bottom = 0) {
   const chosen = model.points.filter((point) => ids.has(point.id));
   if (!chosen.length) return null;
   const xs = chosen.map((point) => point.x);
   const ys = chosen.map((point) => point.y);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const size = mapSide(width, height, top);
+  const size = mapSide(width, height, top, bottom);
   const roomTop = Math.max(top, clear.top ?? 0);
   const roomLeft = Math.max(0, clear.left ?? 0);
   const across = Math.max(1, roomBeside(width, right) - roomLeft);
-  const down = Math.max(1, height - roomTop);
+  const down = Math.max(1, height - Math.max(bottom, clear.bottom ?? 0) - roomTop);
   const span2 = Math.max(x1 - x0, y1 - y0, 0.04);
   const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span2 * size)));
   const cx = (x0 + x1) / 2;
@@ -7991,6 +8129,7 @@ function Corner({
   box,
   first,
   cover = 0,
+  compact: compact2 = false,
   still = false
 }) {
   const t = useT();
@@ -8027,14 +8166,14 @@ function Corner({
             "%"
           ] })
         ] }),
-        prompt ?? /* @__PURE__ */ jsxs15("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", fontSize: 11.5, color: T.muted }, children: [
+        prompt ?? (compact2 ? null : /* @__PURE__ */ jsxs15("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", fontSize: 11.5, color: T.muted }, children: [
           picked && /* @__PURE__ */ jsx18("span", { style: { color: T.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }, children: picked }),
           hint.map(([gesture, deed], index) => /* @__PURE__ */ jsxs15("span", { style: { ...S.row, gap: 5, whiteSpace: "nowrap" }, children: [
             (index > 0 || picked) && /* @__PURE__ */ jsx18("span", { "aria-hidden": true, style: { opacity: 0.4 }, children: "·" }),
             /* @__PURE__ */ jsx18(Keycap, { children: t(`corner.keys.${gesture}`) }),
             t(`corner.does.${deed}`)
           ] }, gesture))
-        ] })
+        ] }))
       ]
     }
   );
@@ -8565,7 +8704,7 @@ function drawWords(context, words, alpha, look, room, avoid = []) {
 }
 var widths = /* @__PURE__ */ new Map();
 function drawNames(context, names, gap, look, taken) {
-  if (names.length === 0) return;
+  if (names.length === 0) return [];
   context.save();
   const font = `500 10.5px ${look.family}`;
   context.font = font;
@@ -8574,7 +8713,8 @@ function drawNames(context, names, gap, look, taken) {
   context.lineWidth = 3;
   context.strokeStyle = look.ground;
   if (widths.size > 6e3) widths.clear();
-  const offered = [...names].sort((a, b) => a.rank - b.rank);
+  const order = names.map((_, at) => at).sort((a, b) => names[a].rank - names[b].rank);
+  const offered = order.map((at) => names[at]);
   const boxes = offered.map((word) => {
     const key = `${font}|${word.text}`;
     let width = widths.get(key);
@@ -8589,6 +8729,7 @@ function drawNames(context, names, gap, look, taken) {
     offered.map((word) => [word.x, word.y])
   );
   const open = boxes.flatMap((_, index) => clear[index] ? [index] : []);
+  const written = [];
   for (const pick3 of fitting(open.map((index) => boxes[index]), NAMES_MOST, 16, 5, taken)) {
     const index = open[pick3];
     const word = offered[index];
@@ -8597,8 +8738,10 @@ function drawNames(context, names, gap, look, taken) {
     context.globalAlpha = 0.95;
     context.fillStyle = word.color;
     context.fillText(word.text, boxes[index][0], word.y);
+    written.push({ box: boxes[index], at: order[index] });
   }
   context.restore();
+  return written;
 }
 
 // src/shared/atlas/PickBox.tsx
@@ -8667,9 +8810,10 @@ function PickBox({
 }
 
 // src/shared/GrowLayer.tsx
-import { useRef as useRef11 } from "react";
+import { useEffect as useEffect11, useRef as useRef11, useState as useState14 } from "react";
 import { Fragment as Fragment9, jsx as jsx24, jsxs as jsxs20 } from "react/jsx-runtime";
 var percent2 = (at) => Math.round(at * 100);
+var CARD_WIDTH = 300;
 var mixed = (from, to, at) => `color-mix(in srgb, ${to} ${percent2(at)}%, ${from})`;
 function GrownWave({ result, colors, playing }) {
   return /* @__PURE__ */ jsx24(Wave3, { colors, height: 26, peaks: result.peaks, progress: usePlayhead(playing, result.duration), width: 278 });
@@ -8694,6 +8838,17 @@ function GrowLayer({
 }) {
   const t = useT();
   const press = useRef11(null);
+  const own = useRef11(null);
+  const cardRef = cardBox ?? own;
+  const [cardHeight, setCardHeight] = useState14(0);
+  const hasCard = Boolean(from && to && grow.to);
+  useEffect11(() => {
+    const element = cardRef.current;
+    if (!hasCard || !element) return;
+    const observer = new ResizeObserver(() => setCardHeight(element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasCard]);
   if (!from) return null;
   if (!to || !grow.to) {
     return /* @__PURE__ */ jsx24("svg", { "aria-hidden": true, height, style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: /* @__PURE__ */ jsx24("circle", { className: "kumi-breathe", cx: from[0], cy: from[1], fill: "none", r: 11, stroke: fromColor, strokeWidth: 2.5 }) });
@@ -8715,12 +8870,15 @@ function GrowLayer({
   };
   const picked = grow.picked === null ? null : grow.scrub?.at === grow.picked ? grow.scrub : grow.buds.find((bud) => bud.at === grow.picked) ?? null;
   const pickedAt = picked ? at(picked.at) : null;
+  const onPath = (bud) => percent2(alongPath(grow.from, bud));
+  const origin = clean(grow.from?.origin ?? "", 60);
+  const toName = clean(grow.to.name, 60);
   const failed = grow.buds.some((bud) => bud.state !== "failed") ? void 0 : grow.buds.find((bud) => bud.state === "failed");
   const another = /* @__PURE__ */ jsx24(Button2, { kind: "quiet", onClick: grow.reroll, tip: t("grow.rerollTitle"), children: t("grow.reroll") });
   const xs = [from[0], to[0], cx];
   const ys = [from[1], to[1], cy];
   const anchor = pickedAt ? [pickedAt[0] - 14, pickedAt[1] - 14, pickedAt[0] + 14, pickedAt[1] + 14] : [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  const card = floatBeside(anchor, 300, picked?.state === "ready" ? 164 : failed || picked?.state === "failed" ? 96 : 70, width, height, top, bottom);
+  const card = floatBeside(anchor, CARD_WIDTH, cardHeight || (picked?.state === "ready" ? 180 : failed || picked?.state === "failed" ? 96 : 70), width, height, top, bottom);
   const budView = (bud, scrubbed = false) => {
     const [x, y] = at(bud.at);
     const color = mixed(fromColor, toColor, bud.at);
@@ -8729,7 +8887,7 @@ function GrowLayer({
     return /* @__PURE__ */ jsxs20(
       "g",
       {
-        "aria-label": t("grow.bud", percent2(bud.at)),
+        "aria-label": t("grow.bud", onPath(bud.at)),
         className: FOCUSABLE,
         onClick: () => grow.pick(bud.at),
         onKeyDown: (event) => {
@@ -8752,7 +8910,7 @@ function GrowLayer({
     );
   };
   return /* @__PURE__ */ jsxs20(Fragment9, { children: [
-    /* @__PURE__ */ jsxs20("svg", { "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)), height, role: "group", style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: [
+    /* @__PURE__ */ jsxs20("svg", { "aria-label": t("grow.title", origin, toName), height, role: "group", style: { position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }, width, children: [
       /* @__PURE__ */ jsx24("defs", { children: /* @__PURE__ */ jsxs20("linearGradient", { gradientUnits: "userSpaceOnUse", id: gradient, x1: from[0], x2: to[0], y1: from[1], y2: to[1], children: [
         /* @__PURE__ */ jsx24("stop", { offset: "0", stopColor: fromColor }),
         /* @__PURE__ */ jsx24("stop", { offset: "1", stopColor: toColor })
@@ -8768,9 +8926,9 @@ function GrowLayer({
         {
           "aria-label": t("grow.handle"),
           "aria-valuemax": 100,
-          "aria-valuemin": 0,
-          "aria-valuenow": percent2(grow.handle),
-          "aria-valuetext": t("grow.bud", percent2(grow.handle)),
+          "aria-valuemin": onPath(0),
+          "aria-valuenow": onPath(grow.handle),
+          "aria-valuetext": t("grow.bud", onPath(grow.handle)),
           className: FOCUSABLE,
           onKeyDown: nudge,
           onPointerDown: (event) => {
@@ -8812,7 +8970,7 @@ function GrowLayer({
             /* @__PURE__ */ jsx24("circle", { cx: handle[0], cy: handle[1], fill: "transparent", r: 16 }),
             /* @__PURE__ */ jsx24("circle", { cx: handle[0], cy: handle[1], fill: T.raised, r: 8.5, stroke: T.accent, strokeWidth: 2.5 }),
             /* @__PURE__ */ jsx24("circle", { cx: handle[0], cy: handle[1], fill: T.accent, r: 3 }),
-            /* @__PURE__ */ jsx24("text", { fill: T.text, fontSize: 10.5, fontWeight: 600, paintOrder: "stroke", stroke: T.raised, strokeWidth: 3, textAnchor: "middle", x: handle[0], y: handle[1] - 15, children: `${percent2(grow.handle)}%` })
+            /* @__PURE__ */ jsx24("text", { fill: T.text, fontSize: 10.5, fontWeight: 600, paintOrder: "stroke", stroke: T.raised, strokeWidth: 3, textAnchor: "middle", x: handle[0], y: handle[1] - 15, children: `${onPath(grow.handle)}%` })
           ]
         }
       )
@@ -8822,13 +8980,13 @@ function GrowLayer({
       {
         className: "kumi-pop",
         role: "group",
-        "aria-label": t("grow.title", clean(grow.from?.name ?? "", 60), clean(grow.to.name, 60)),
-        ref: cardBox,
-        style: { ...glass, position: "absolute", zIndex: 1, left: card.left, top: card.top, width: 300, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 },
+        "aria-label": t("grow.title", origin, toName),
+        ref: cardRef,
+        style: { ...glass, position: "absolute", zIndex: 1, left: card.left, top: card.top, width: CARD_WIDTH, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 },
         children: [
-          /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 6 }, children: [
+          /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 6, alignItems: "flex-start" }, children: [
             /* @__PURE__ */ jsx24(Icon, { name: "grow", size: 14 }),
-            /* @__PURE__ */ jsx24("span", { style: { ...S.ellipsis, flex: 1, fontSize: 12, fontWeight: 650 }, children: t("grow.title", clean(grow.from?.name ?? "", 40), clean(grow.to.name, 40)) }),
+            /* @__PURE__ */ jsx24("span", { style: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }, children: t("grow.title", clean(grow.from?.origin ?? "", 40), clean(grow.to.name, 40)) }),
             /* @__PURE__ */ jsx24("button", { "aria-label": t("grow.close"), className: FOCUSABLE, onClick: grow.close, title: t("grow.close"), type: "button", style: { display: "flex", padding: 3, border: "none", borderRadius: 10, background: "transparent", color: T.faint, cursor: "pointer" }, children: /* @__PURE__ */ jsx24(Icon, { name: "close", size: 11 }) })
           ] }),
           !picked ? failed ? (
@@ -8838,9 +8996,13 @@ function GrowLayer({
               /* @__PURE__ */ jsx24("div", { style: S.row, children: another })
             ] })
           ) : /* @__PURE__ */ jsx24("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.hint") }) : picked.state === "ready" ? /* @__PURE__ */ jsxs20(Fragment9, { children: [
-            /* @__PURE__ */ jsxs20("span", { style: { fontSize: 11, color: T.secondary }, title: picked.result.recipe, children: [
-              /* @__PURE__ */ jsx24("span", { style: { ...S.ellipsis, display: "block" }, children: clean(picked.result.recipe, 160) }),
-              /* @__PURE__ */ jsx24("span", { style: { color: T.faint }, children: seconds(picked.result.duration) })
+            /* @__PURE__ */ jsxs20("span", { style: { fontSize: 11, color: T.secondary, overflowWrap: "anywhere" }, children: [
+              t("grow.bud", onPath(picked.at)),
+              " ",
+              /* @__PURE__ */ jsxs20("span", { style: { color: T.faint }, children: [
+                "· ",
+                seconds(picked.result.duration)
+              ] })
             ] }),
             /* @__PURE__ */ jsx24(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }, picked.result.artifact_id),
             /* @__PURE__ */ jsxs20("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
@@ -8854,7 +9016,8 @@ function GrowLayer({
                   kind: "quiet",
                   onClick: () => {
                     const place = vinePoint(fromMap, toMap, picked.at);
-                    const end = { source: sourceOfResult(picked.result), id: null, place, name: t("grow.bud", percent2(picked.at)) };
+                    const name = t("grow.grown", onPath(picked.at), origin, toName);
+                    const end = { source: { ...sourceOfResult(picked.result), name }, id: null, place, name, origin: grow.from?.origin ?? "", along: alongPath(grow.from, picked.at) };
                     if (grow.to) grow.between(end, grow.to);
                   },
                   tip: t("grow.againTitle"),
@@ -8867,7 +9030,7 @@ function GrowLayer({
           ] }) : picked.state === "failed" ? /* @__PURE__ */ jsxs20(Fragment9, { children: [
             /* @__PURE__ */ jsx24("span", { style: { fontSize: 11, color: T.bad }, children: t("grow.failed", clean(picked.error, 160)) }),
             /* @__PURE__ */ jsx24("div", { style: S.row, children: another })
-          ] }) : /* @__PURE__ */ jsx24("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", percent2(picked.at)) })
+          ] }) : /* @__PURE__ */ jsx24("span", { style: { ...S.faint, fontSize: 11 }, children: t("grow.growing", onPath(picked.at)) })
         ]
       }
     )
@@ -8875,16 +9038,16 @@ function GrowLayer({
 }
 
 // src/shared/Player.tsx
-import { useEffect as useEffect11, useRef as useRef12, useState as useState14 } from "react";
+import { useEffect as useEffect12, useRef as useRef12, useState as useState15 } from "react";
 import { jsx as jsx25, jsxs as jsxs21 } from "react/jsx-runtime";
 var BARS = 160;
 function Waveform({ id, color, playing, duration, audio, onClick }) {
   const canvas = useRef12(null);
-  const [peaks, setPeaks] = useState14(() => peaksKept(id, BARS));
-  const [width, setWidth] = useState14(0);
-  const [startedAt, setStartedAt] = useState14(null);
-  const [now, setNow] = useState14(0);
-  useEffect11(() => {
+  const [peaks, setPeaks] = useState15(() => peaksKept(id, BARS));
+  const [width, setWidth] = useState15(0);
+  const [startedAt, setStartedAt] = useState15(null);
+  const [now, setNow] = useState15(0);
+  useEffect12(() => {
     let live = true;
     setPeaks(peaksKept(id, BARS));
     void peaksFor(id, BARS, audio, () => live).then((found) => live && setPeaks(found));
@@ -8892,20 +9055,20 @@ function Waveform({ id, color, playing, duration, audio, onClick }) {
       live = false;
     };
   }, [id, audio]);
-  useEffect11(() => {
+  useEffect12(() => {
     const element = canvas.current?.parentElement;
     if (!element) return;
     const observer = new ResizeObserver((entries) => setWidth(Math.floor(entries[0]?.contentRect.width ?? 0)));
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  useEffect11(() => setStartedAt(playing ? performance.now() : null), [playing, id]);
-  useEffect11(() => {
+  useEffect12(() => setStartedAt(playing ? performance.now() : null), [playing, id]);
+  useEffect12(() => {
     if (startedAt === null) return;
     const frame2 = requestAnimationFrame(setNow);
     return () => cancelAnimationFrame(frame2);
   }, [startedAt, now]);
-  useEffect11(() => {
+  useEffect12(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
     if (!element || !context || width === 0) return;
@@ -8942,8 +9105,8 @@ function Player({
   audio
 }) {
   const t = useT();
-  const [shown, setShown] = useState14(false);
-  useEffect11(() => {
+  const [shown, setShown] = useState15(false);
+  useEffect12(() => {
     const frame2 = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(frame2);
   }, []);
@@ -9033,6 +9196,9 @@ function Player({
 import { jsx as jsx26, jsxs as jsxs22 } from "react/jsx-runtime";
 var MATCHES_LISTED = 6;
 var CORNER_ZOOM_ROOM = 480;
+var CORNER_ROOM = 76;
+var ROOM_LEAST = 200;
+var LIST_LEAST = 150;
 var FADE_MS2 = 450;
 var INTRO_MS = 900;
 var MORPH_MS = 760;
@@ -9076,23 +9242,23 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const model = useMemo2(() => buildModel(map), [map]);
   const canvasRef = useRef13(null);
   const boxRef = useRef13(null);
-  const [size, setSize] = useState15({ width: 0, height: 0 });
-  const [view, setView] = useState15(null);
-  const [query, setQuery] = useState15("");
-  const [searchFor, setSearchFor] = useState15("");
-  const [allOf, setAllOf] = useState15(null);
-  const [closedOf, setClosedOf] = useState15(null);
-  const [hidden, setHidden] = useState15(() => /* @__PURE__ */ new Set());
-  const [hover, setHover] = useState15(null);
+  const [size, setSize] = useState16({ width: 0, height: 0 });
+  const [view, setView] = useState16(null);
+  const [query, setQuery] = useState16("");
+  const [searchFor, setSearchFor] = useState16("");
+  const [allOf, setAllOf] = useState16(null);
+  const [closedOf, setClosedOf] = useState16(null);
+  const [hidden, setHidden] = useState16(() => /* @__PURE__ */ new Set());
+  const [hover, setHover] = useState16(null);
   const drag = useRef13(null);
-  const [box, setBox] = useState15(null);
-  const [handTool, setHandTool] = useState15(false);
-  const [scrollPans, setScrollPans] = useState15(null);
-  const [grabbing, setGrabbing] = useState15(false);
+  const [box, setBox] = useState16(null);
+  const [handTool, setHandTool] = useState16(false);
+  const [scrollPans, setScrollPans] = useState16(null);
+  const [grabbing, setGrabbing] = useState16(false);
   const over = useRef13(false);
-  const [spaceHeld, setSpaceHeld] = useState15(false);
+  const [spaceHeld, setSpaceHeld] = useState16(false);
   const space = useRef13(false);
-  useEffect12(() => {
+  useEffect13(() => {
     const hold = (held) => {
       if (space.current === held) return;
       space.current = held;
@@ -9139,24 +9305,27 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       if (latest) setView(latest);
     });
   };
-  useEffect12(() => () => cancelAnimationFrame(frameRef.current), []);
+  useEffect13(() => () => cancelAnimationFrame(frameRef.current), []);
   const backing = useRef13("");
-  const [said, setSaid] = useState15("");
-  const [hintId] = useState15(() => `kumi-map-keys-${maps += 1}`);
+  const [said, setSaid] = useState16("");
+  const [hintId] = useState16(() => `kumi-map-keys-${maps += 1}`);
   const topRef = useRef13(null);
   const legendRef = useRef13(null);
   const cornerRef = useRef13(null);
   const playerRef = useRef13(null);
   const growCardRef = useRef13(null);
   const clusterBox = useRef13(null);
-  const [cornerHeight, setCornerHeight] = useState15(0);
+  const [cornerHeight, setCornerHeight] = useState16(0);
+  const named = useRef13([]);
+  const [keysHere, setKeysHere] = useState16(false);
   const overlayFollow = useRef13(null);
-  const [topInset, setTopInset] = useState15(0);
-  const [columnBottom, setColumnBottom] = useState15(0);
-  const mapSize = mapSide(size.width, size.height, topInset);
-  const fit = () => fitView(size.width, size.height, topInset, coverRight);
+  const [topInset, setTopInset] = useState16(0);
+  const [columnBottom, setColumnBottom] = useState16(0);
+  const mapSize = mapSide(size.width, size.height, topInset, CORNER_ROOM);
+  const fit = () => fitView(size.width, size.height, topInset, coverRight, CORNER_ROOM);
+  const footing = useRef13({ corner: 10, foot: 10 });
   const hasPoints = model.points.length > 0;
-  useEffect12(() => {
+  useEffect13(() => {
     if (query === searchFor) return;
     const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0);
     return () => clearTimeout(timer);
@@ -9181,34 +9350,34 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   const leftAt = useRef13(/* @__PURE__ */ new Map());
   const introAt = useRef13(-Infinity);
   const until = useRef13(0);
-  const [clock2, setClock] = useState15(0);
+  const [clock2, setClock] = useState16(0);
   const animate = (ms2) => {
     until.current = Math.max(until.current, performance.now() + ms2);
     setClock(performance.now());
   };
-  useEffect12(() => {
+  useEffect13(() => {
     const now = performance.now();
     for (const id of leaving ?? []) if (!leftAt.current.has(id)) leftAt.current.set(id, now);
     for (const id of [...leftAt.current.keys()]) if (!leaving?.has(id)) leftAt.current.delete(id);
     if (leaving?.size) animate(FADE_MS2);
   }, [leaving]);
-  useEffect12(() => {
+  useEffect13(() => {
     if (still || !model.revision) return;
     introAt.current = performance.now();
     animate(INTRO_MS);
   }, [model.revision]);
-  const [morph, setMorph] = useState15(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
-  useEffect12(() => {
+  const [morph, setMorph] = useState16(() => ({ from: tiles ? 1 : 0, to: tiles ? 1 : 0, at: -Infinity }));
+  useEffect13(() => {
     const now = performance.now();
     setMorph((current) => current.to === (tiles ? 1 : 0) ? current : { from: still ? tiles ? 1 : 0 : morphAt(current, now), to: tiles ? 1 : 0, at: now });
     if (!still) animate(MORPH_MS);
   }, [tiles]);
-  useEffect12(() => {
+  useEffect13(() => {
     if (flying && !still) animate(FLY_MS + FLY_STAGGER * FLY_MOST);
   }, [flying]);
   const popped = useRef13(null);
   const pickedBefore = useRef13(void 0);
-  useEffect12(() => {
+  useEffect13(() => {
     const before = pickedBefore.current;
     pickedBefore.current = picked;
     const places = drawn.current?.places;
@@ -9222,12 +9391,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     popped.current = { at: performance.now(), step: new Map(ordered.map(([id], rank) => [id, Math.floor(rank / ordered.length * POP_STEPS)])) };
     animate(POP_MS);
   }, [picked]);
-  useEffect12(() => {
+  useEffect13(() => {
     if (performance.now() >= until.current) return;
     const frame2 = requestAnimationFrame(setClock);
     return () => cancelAnimationFrame(frame2);
   }, [clock2]);
-  const [ownArrangement, setOwnArrangement] = useState15("");
+  const [ownArrangement, setOwnArrangement] = useState16("");
   const arrangementId = arrangement ?? ownArrangement;
   const arrangementIndex = LAYOUTS.includes(arrangementId) ? model.arrangements.findIndex((each) => each.id === arrangementId) : -1;
   const arranged = useMemo2(() => arrangedModel(model, arrangementIndex), [model, arrangementIndex]);
@@ -9236,8 +9405,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     onArrangement?.(id);
   };
   const layoutChoices = useMemo2(() => {
-    const named = LAYOUTS.filter((id) => model.arrangements.some((each) => each.id === id));
-    return named.length === 0 ? [] : [{ id: "", name: t("arrange.similar.name"), title: t("arrange.similar.title") }, ...named.map((id) => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))];
+    const named2 = LAYOUTS.filter((id) => model.arrangements.some((each) => each.id === id));
+    return named2.length === 0 ? [] : [{ id: "", name: t("arrange.similar.name"), title: t("arrange.similar.title") }, ...named2.map((id) => ({ id, name: t(`arrange.${id}.name`), title: t(`arrange.${id}.title`) }))];
   }, [model, t]);
   const drawn = useRef13(null);
   const shift = useRef13(null);
@@ -9248,7 +9417,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     const last = drawn.current;
     shift.current = !still && last && last.model === model && last.places.length === model.points.length * 2 ? { from: last.places.slice(), at: performance.now() } : null;
   }
-  useEffect12(() => {
+  useEffect13(() => {
     if (shift.current) animate(ARRANGE_MS);
   }, [arranged]);
   const layout = useMemo2(() => tiles || morph.from > 0 ? tileLayout(arranged) : null, [arranged, tiles, morph.from > 0]);
@@ -9288,22 +9457,22 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return seeds.length === 1 ? t("map.near", first2) : t("map.nearMany", first2, seeds.length - 1);
   }, [searched, foundIds, found, model, t]);
   const themeKey = useThemeKey();
-  const [painted, setPainted] = useState15("");
-  useEffect12(() => {
+  const [painted, setPainted] = useState16("");
+  useEffect13(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const look = () => {
       const now = Object.values(resolve(canvas)).join();
       setPainted((current) => current === now ? current : now);
     };
-    if (themeKey !== null) {
-      const frame2 = requestAnimationFrame(look);
-      return () => cancelAnimationFrame(frame2);
+    if (themeKey === null) {
+      const timer = setInterval(look, 1e3);
+      return () => clearInterval(timer);
     }
-    const timer = setInterval(look, 1e3);
-    return () => clearInterval(timer);
+    const frame2 = requestAnimationFrame(look);
+    return () => cancelAnimationFrame(frame2);
   }, [hasPoints, themeKey]);
-  useEffect12(() => {
+  useEffect13(() => {
     const box2 = boxRef.current;
     if (!box2) return;
     const observer = new ResizeObserver((entries) => {
@@ -9313,7 +9482,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     observer.observe(box2);
     return () => observer.disconnect();
   }, [hasPoints]);
-  useEffect12(() => {
+  useEffect13(() => {
     const top = topRef.current;
     if (!top) return;
     const observer = new ResizeObserver(() => {
@@ -9325,19 +9494,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return () => observer.disconnect();
   }, [hasPoints]);
   const moved2 = useRef13(false);
-  useEffect12(() => {
+  useEffect13(() => {
     if (size.width > 0 && size.height > 0) setView((current) => current && moved2.current ? current : fit());
   }, [size.width, size.height]);
-  useEffect12(() => {
+  useEffect13(() => {
     moved2.current = false;
     setView(size.width > 0 ? fit() : null);
   }, [model.revision]);
-  useEffect12(() => {
+  useEffect13(() => {
     if (!moved2.current && size.width > 0) setView(fit());
   }, [topInset, coverRight]);
   const framedFound = useRef13(null);
   const matchesRef = useRef13(null);
-  useEffect12(() => {
+  useEffect13(() => {
     if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
     framedFound.current = foundIds;
     const card = matchesRef.current;
@@ -9345,18 +9514,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     if (card && card.offsetHeight > 0) {
       const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 };
       const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 };
-      const areaBelow = (size.width - coverRight) * (size.height - below.top);
-      const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset);
+      const { foot: foot2 } = footing.current;
+      const areaBelow = (size.width - coverRight) * (size.height - foot2 - below.top);
+      const areaBeside = (size.width - coverRight - beside.left) * (size.height - foot2 - topInset);
       clear = areaBelow >= areaBeside ? below : beside;
     }
-    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear);
+    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, { ...clear, bottom: footing.current.foot }, CORNER_ROOM);
     if (!framed) return;
     moved2.current = true;
     setView(framed);
   }, [foundIds, model, size.width, size.height, topInset]);
   const wheelMode = useRef13(wheel);
   wheelMode.current = wheel;
-  useEffect12(() => {
+  useEffect13(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const memory = { pans: null, at: 0 };
@@ -9381,7 +9551,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   }, [hasPoints]);
   const hoverAt = hover ? hover.index : null;
   const constellation = useMemo2(() => hoverAt === null || tiles ? [] : nearestTo(arranged.points, hoverAt, STARS, (index) => mask[index] === 1), [arranged, hoverAt, mask, tiles]);
-  useEffect12(() => {
+  useEffect13(() => {
     const canvas = canvasRef.current;
     if (!canvas || !view || size.width === 0) return;
     const ratio = window.devicePixelRatio || 1;
@@ -9559,18 +9729,24 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         if (box2 && box2.width > 2 && box2.height > 2) floating.push([box2.left - origin.left, box2.top - origin.top, box2.width, box2.height]);
       }
       const [corner, card] = [cornerRef.current, growCardRef.current];
-      if (corner) floating.push([corner.offsetLeft, size.height - (selected && model.sounds[selected] ? 120 : 10) - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight]);
+      if (corner) floating.push([corner.offsetLeft, size.height - footing.current.corner - corner.offsetHeight, corner.offsetWidth, corner.offsetHeight]);
       if (card) floating.push([card.offsetLeft, card.offsetTop, card.offsetWidth, card.offsetHeight]);
       if (clusterBox.current) floating.push(clusterBox.current);
+      const [start, end] = [placeOfEnd(grow?.from ?? null), placeOfEnd(grow?.to ?? null)];
+      if (grow && !grow.choosing && start && end) {
+        const [x, y] = vinePoint(toScreen(view, mapSize, start[0], start[1]), toScreen(view, mapSize, end[0], end[1]), grow.handle);
+        floating.push([x - 22, y - 27, 44, 38]);
+      }
     }
     const regional = !layoutShown || layoutShown.labels.length === 0;
     const written = drawWords(context, words, wordsIn * (regional ? regionAlpha(view.scale) * Math.abs(2 * morphed - 1) : 0.9), lettering, regional, floating);
+    named.current = [];
     if (onScreen <= NAMES_ON_SCREEN) {
       const names = labelled.flatMap(([x, y, index, color]) => {
         const text = mapLabel(model.sounds[points[index].id]?.name ?? "");
-        return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index) }] : [];
+        return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index), index }] : [];
       });
-      drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating]);
+      named.current = drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating]).map(({ box: box2, at: at2 }) => ({ box: box2, index: names[at2].index }));
     }
     if (layoutShown && wordsIn > 0) {
       context.textBaseline = "middle";
@@ -9711,12 +9887,18 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       context.globalAlpha = 1;
     }
     overlayFollow.current?.();
-  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, themeKey, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight]);
+  }, [model, arranged, arrangementIndex, indexOf, view, size, mask, foundIds, selected, mapSize, painted, clock2, marked, picked, tiled, layout, morph, spread, flying, still, hoverAt, constellation, t, topInset, coverRight, grow?.from, grow?.to, grow?.handle, grow?.choosing]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
   };
   const reachPx = (base) => tiles && layout && view ? Math.max(base, mapSize * view.scale / layout.side * 0.62) : base;
+  const soundAt = (at2, x, y) => {
+    const index = pick2(active, at2, mapSize, x, y, reachPx(10), visible);
+    if (index >= 0) return index;
+    const name = named.current.find(({ box: [left, top, width, height], index: index2 }) => x >= left && x <= left + width && y >= top - 2 && y <= top + height + 2 && visible(index2));
+    return name ? name.index : -1;
+  };
   const press = (event) => {
     if (!view || event.button !== 0 && event.button !== 1) return;
     if (event.button === 1) event.preventDefault();
@@ -9742,7 +9924,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       return;
     }
     if (held.moved || held.button !== 0) return;
-    const index = pick2(active, view, mapSize, x, y, reachPx(10), visible);
+    const index = soundAt(view, x, y);
     const adding = event.shiftKey || event.metaKey || event.ctrlKey;
     if (index < 0) {
       if (adding) return;
@@ -9755,6 +9937,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       const end = endOf(id);
       if (end) grow.name(end);
       onPick(id);
+      onSelect(null);
     } else if (onPicked && (event.metaKey || event.ctrlKey)) onPicked([id], "toggle");
     else if (onPicked && event.shiftKey) onPicked([id], "add");
     else onPick(id);
@@ -9833,19 +10016,20 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return inView ? [x0, y0, x1, y1] : null;
   }, [view, pickedIds, indexOf, mask, active, mapSize, size.width, size.height]);
   const cluster = useRef13(null);
-  const [clusterSize, setClusterSize] = useState15([320, 40]);
+  const [clusterSize, setClusterSize] = useState16([320, 40]);
   const hasPicks = pickedIds.length > 0;
+  const picksShown = hasPicks && !grow?.choosing;
   const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : [];
   const boxed = drag.current?.add && picked?.size ? (/* @__PURE__ */ new Set([...picked, ...inBox.map((index) => model.points[index].id)])).size : inBox.length;
   const firstSteps = first && !grow?.choosing ? firstLeft(first.kept, { hover: trail, picks: Boolean(onPicked) }) : [];
   const [heard2, drew] = [hover !== null && trail, inBox.length > 0];
-  useEffect12(() => {
+  useEffect13(() => {
     if (heard2) first?.onDone(["hover"]);
   }, [heard2]);
-  useEffect12(() => {
+  useEffect13(() => {
     if (drew) first?.onDone(["box"]);
   }, [drew]);
-  useEffect12(() => {
+  useEffect13(() => {
     const element = cluster.current;
     if (!element) return;
     const observer = new ResizeObserver((entries) => {
@@ -9854,23 +10038,28 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hasPicks]);
-  useEffect12(() => {
+  }, [picksShown]);
+  const [playerHeight, setPlayerHeight] = useState16(0);
+  const playerShown = Boolean(selected && model.sounds[selected]) && !grow?.choosing;
+  useEffect13(() => {
+    const element = playerRef.current;
+    if (!playerShown || !element) return setPlayerHeight(0);
+    const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [playerShown]);
+  const cornerBottom = playerShown ? Math.max(110, playerHeight) + 18 : 10;
+  const short = size.height > 0 && size.height - topInset - cornerBottom < ROOM_LEAST;
+  const cornerShown = !(short && playerShown);
+  const foot = cornerBottom + (cornerShown && cornerHeight > 0 ? cornerHeight + 8 : 0);
+  footing.current = { corner: cornerBottom, foot };
+  useEffect13(() => {
     const element = cornerRef.current;
     if (!element) return;
     const observer = new ResizeObserver(() => setCornerHeight(element.offsetHeight));
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hasPoints]);
-  const [playerHeight, setPlayerHeight] = useState15(0);
-  const playerOpen = Boolean(selected && model.sounds[selected]);
-  useEffect12(() => {
-    const element = playerRef.current;
-    if (!playerOpen || !element) return setPlayerHeight(0);
-    const observer = new ResizeObserver(() => setPlayerHeight(element.offsetHeight));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [playerOpen]);
+  }, [hasPoints, cornerShown]);
   if (!model.points.length) {
     return /* @__PURE__ */ jsx26("div", { style: { ...S.muted, fontSize: 13, flex: 1, height: "100%", minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }, children: /* @__PURE__ */ jsxs22("div", { style: { maxWidth: 380 }, children: [
       empty,
@@ -9897,17 +10086,23 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
   };
   const countWords = shown === model.points.length - leavingCount ? t("map.count", num(shown, 0)) : t("map.countOf", num(shown, 0), num(model.points.length - leavingCount, 0));
   const hiddenCount = (map?.hidden ?? 0) + leavingCount;
-  const cornerBottom = chosen ? Math.max(110, playerHeight) + 18 : 10;
-  const foot = cornerBottom + (cornerHeight > 0 ? cornerHeight + 8 : 0);
-  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, matches.length > 0 ? Math.max(topInset, columnBottom) : topInset, foot);
-  clusterBox.current = hasPicks ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
+  const columnTop = Math.max(topInset, columnBottom);
+  const clusterAt = floatBeside(picksBox, clusterSize[0], clusterSize[1], size.width - coverRight, size.height, columnTop, foot);
+  clusterBox.current = picksShown ? [clusterAt.left, clusterAt.top, clusterSize[0], clusterSize[1]] : null;
+  const listRoom = size.height - topInset - foot - (picksShown ? clusterSize[1] : 0);
+  const listFolded = size.height > 0 && listRoom < LIST_LEAST && allOf !== matches;
   return /* @__PURE__ */ jsxs22(
     "div",
     {
       onKeyDown: (event) => {
-        if (event.key !== "Escape" || event.defaultPrevented || !grow?.choosing) return;
-        event.preventDefault();
-        grow.choose(false);
+        if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || !grow) return;
+        if (grow.choosing) {
+          event.preventDefault();
+          grow.choose(false);
+        } else if (grow.from && grow.to) {
+          event.preventDefault();
+          grow.close();
+        }
       },
       style: { position: "relative", height: "100%", minHeight: 240, overflow: "hidden", color: T.text },
       children: [
@@ -9999,9 +10194,10 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             const flat = near && closeness.length === listed.length && closeness.length > 0 && high - low <= 2;
             const facts = [oneKind && t("map.allKind", oneKind), ...sharedWhy.map((why) => clean(why, 60)), near && closeness.length ? flat ? t("map.closeness", low === high ? String(low) : `${low}–${high}`) : t("map.closenessShown") : ""].filter(Boolean).join(" · ");
             return (
-              // At most the room between the legend and the corner (the player too, when it's open): in a short map its
-              // list scrolls inside it rather than running under the corner.
-              /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 2, padding: 6, width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: Math.max(120, size.height - topInset - foot), pointerEvents: "auto" }, children: [
+              // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
+              // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
+              // to its head (`listFolded`), so the map below still shows.
+              /* @__PURE__ */ jsxs22("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 2, padding: 6, width: `min(340px, calc(100% - ${coverRight}px))`, maxHeight: size.height > 0 && !listFolded ? Math.max(120, listRoom) : void 0, pointerEvents: "auto" }, children: [
                 /* @__PURE__ */ jsxs22("div", { style: { ...S.row, alignItems: "flex-start", gap: 6, padding: "0 0 4px 4px" }, children: [
                   /* @__PURE__ */ jsxs22("span", { style: { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }, children: [
                     /* @__PURE__ */ jsx26("span", { style: { ...TYPE.small, ...S.ellipsis, color: T.text }, children: searched ? t("map.matches") : nearName || t("map.found") }),
@@ -10011,7 +10207,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                   /* @__PURE__ */ jsx26(Button2, { onClick: () => onPicked(matches, "replace"), tip: searched !== null ? t("dock.pickAllTitle") : t("dock.pickFoundTitle"), children: t("dock.pickAll", matches.length) }),
                   /* @__PURE__ */ jsx26(Button2, { kind: "quiet", label: t("map.closeList"), onClick: () => setClosedOf(matches), children: "×" })
                 ] }),
-                /* @__PURE__ */ jsx26("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
+                !listFolded && /* @__PURE__ */ jsx26("div", { style: { display: "flex", flexDirection: "column", gap: 1, minHeight: 0, overflowY: "auto" }, children: listed.map((id) => {
                   const sound = model.sounds[id];
                   const indexed = indexedValues(sound, t);
                   const own = whyOf(id).filter((why) => !sharedWhy.includes(why));
@@ -10037,7 +10233,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
                     id
                   );
                 }) }),
-                matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx26("span", { style: { padding: "2px 0 0 2px" }, children: /* @__PURE__ */ jsx26(Button2, { kind: "quiet", onClick: () => setAllOf(allOf === matches ? null : matches), children: allOf === matches ? t("map.showFewer") : t("map.showMore", matches.length - MATCHES_LISTED) }) })
+                (listFolded || matches.length > MATCHES_LISTED) && /* @__PURE__ */ jsx26("span", { style: { padding: "2px 0 0 2px" }, children: /* @__PURE__ */ jsx26(Button2, { kind: "quiet", onClick: () => setAllOf(allOf === matches ? null : matches), children: listFolded ? t("map.showList", matches.length) : allOf === matches ? t("map.showFewer") : t("map.showMore", matches.length - MATCHES_LISTED) }) })
               ] })
             );
           })(),
@@ -10057,6 +10253,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               "aria-roledescription": t("map.roledescription"),
               className: FOCUSABLE,
               onKeyDown: onKey,
+              onFocus: () => setKeysHere(true),
+              onBlur: () => setKeysHere(false),
               onPointerDown: press,
               onPointerMove: (event) => {
                 const [x, y] = at(event);
@@ -10110,6 +10308,14 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           box && Math.abs(box[2] - box[0]) + Math.abs(box[3] - box[1]) > 3 && // The box being drawn, with how many sounds it holds now (with the picks it adds to, on a Shift-drag).
           /* @__PURE__ */ jsx26(PickBox, { box, count: t("dock.picked", boxed), height: size.height, width: size.width }),
           /* @__PURE__ */ jsx26("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+          keysHere && // While the canvas has the focus, the map's keys are its own. Hermes Desktop reads keys on the window before
+          // anything on the page (app/hooks/use-keybinds.ts, in capture), and its soft keys (Enter and typing focus the
+          // chat's composer; Escape stops a turn) stand down for an editable target, a button-like one, or while a
+          // surface that keeps its keys is open (lib/keybinds/composer-focus-keys.ts, `composerFocusBlockedBySurface`,
+          // which looks for `[data-overlay-surface]`, the mark Desktop's own overlays carry). The canvas is none of
+          // those, so Enter on a sound picked it and threw the focus into the chat: this mark, there only while the map
+          // has the focus, is Desktop's own way of saying so.
+          /* @__PURE__ */ jsx26("span", { "aria-hidden": true, "data-overlay-surface": "", hidden: true }),
           /* @__PURE__ */ jsx26("span", { "aria-live": "polite", style: S.hidden, children: said }),
           hovered && hoveredSound && hover && /* @__PURE__ */ jsx26(
             HoverPill,
@@ -10142,12 +10348,12 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
               to: screenOf(placeOfEnd(grow.to)),
               toColor: colorOfEnd(grow.to),
               toMap: placeOfEnd(grow.to),
-              top: topInset,
+              top: columnTop,
               width: size.width - coverRight
             }
           )
         ] }),
-        hasPicks && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
+        picksShown && // The picks' actions, beside the picks (`kumi-pop` as they appear): how many, then what they can do.
         /* @__PURE__ */ jsxs22(
           "div",
           {
@@ -10177,7 +10383,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
             ]
           }
         ),
-        selected && chosen && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
+        selected && chosen && playerShown && // The sound picked last, in the player at the map's foot (left of a side sheet, when one is open).
         /* @__PURE__ */ jsx26("div", { style: { position: "absolute", left: 10, right: 10 + coverRight, bottom: 10, zIndex: 2, display: "flex", justifyContent: "center", pointerEvents: "none", transition: still ? "none" : "right 260ms cubic-bezier(.2,.8,.2,1)" }, children: /* @__PURE__ */ jsx26("div", { ref: playerRef, style: { width: "min(640px, 100%)" }, children: /* @__PURE__ */ jsx26(
           Player,
           {
@@ -10196,19 +10402,20 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           },
           selected
         ) }) }),
-        /* @__PURE__ */ jsx26(
+        cornerShown && /* @__PURE__ */ jsx26(
           Corner,
           {
             bottom: cornerBottom,
             box: cornerRef,
+            compact: short,
             cover: coverRight,
             still,
-            first: first && firstSteps.length > 0 ? /* @__PURE__ */ jsx26(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
+            first: first && firstSteps.length > 0 && !short ? /* @__PURE__ */ jsx26(FirstOpen, { onSkip: () => first.onDone(FIRST_STEPS), steps: firstSteps }) : void 0,
             families: model.groups.filter((group) => group.count > 0).length,
             hint: hintOf(mapState(spaceHeld)),
             layout: layoutChoices.length > 0 ? (
               // The menu opens upward from the corner, which sits higher while the player is under it.
-              /* @__PURE__ */ jsx26(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (chosen ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
+              /* @__PURE__ */ jsx26(LayoutMenu, { choices: layoutChoices, current: arrangementIndex >= 0 ? arrangementId : "", label: t("arrange.label"), maxHeight: Math.max(120, size.height - (playerShown ? 260 : 150)), onChoose: chooseArrangement, words: (name) => t("corner.layout", name) })
             ) : void 0,
             picked: hasPicks ? t("dock.picked", pickedIds.length) : void 0,
             prompt: grow?.choosing ? /* @__PURE__ */ jsxs22("div", { className: "kumi-pop", role: "status", style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
@@ -10230,19 +10437,26 @@ function GlyphShape({ glyph, color }) {
 }
 
 // src/shared/PaletteDock.tsx
-import { useEffect as useEffect13, useMemo as useMemo3, useRef as useRef14, useState as useState16 } from "react";
+import { useEffect as useEffect14, useMemo as useMemo3, useRef as useRef14, useState as useState17 } from "react";
 import { Fragment as Fragment10, jsx as jsx27, jsxs as jsxs23 } from "react/jsx-runtime";
 var CHIPS_SHOWN = 240;
 var OPEN_HEIGHT = 260;
 var LOWEST = 150;
 var HIGHEST = 620;
 var MAP_LEAST = 240;
+var MAP_SHARE = 0.62;
 var POP_FOR_MS = 1500;
+var TWO_LINES = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere", minWidth: 0 };
+function firstButton(box) {
+  let at = box?.firstElementChild ?? null;
+  while (at && !(at instanceof HTMLButtonElement)) at = at.firstElementChild;
+  return at;
+}
 function Waveform2({ id, color, audio, width, height, bars, tints }) {
   const canvas = useRef14(null);
-  const [peaks, setPeaks] = useState16(() => id ? peaksKept(id, bars) : null);
-  const [drawnWidth, setDrawnWidth] = useState16(typeof width === "number" ? width : 0);
-  useEffect13(() => {
+  const [peaks, setPeaks] = useState17(() => id ? peaksKept(id, bars) : null);
+  const [drawnWidth, setDrawnWidth] = useState17(typeof width === "number" ? width : 0);
+  useEffect14(() => {
     const element = canvas.current;
     if (!id || !element || peaks) return;
     let live = true;
@@ -10257,7 +10471,7 @@ function Waveform2({ id, color, audio, width, height, bars, tints }) {
       observer.disconnect();
     };
   }, [id, audio, peaks, bars]);
-  useEffect13(() => {
+  useEffect14(() => {
     if (typeof width === "number") return;
     const element = canvas.current;
     if (!element) return;
@@ -10265,7 +10479,7 @@ function Waveform2({ id, color, audio, width, height, bars, tints }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, [width]);
-  useEffect13(() => {
+  useEffect14(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
     if (!element || !context || drawnWidth === 0) return;
@@ -10297,12 +10511,12 @@ function useItemKeys(index, onMove, onRemove) {
       onMove(index + (event.key === "ArrowLeft" ? -1 : 1));
     } else if (event.key === "Delete") {
       event.preventDefault();
-      onRemove();
+      onRemove("play");
     }
   };
 }
 function useDrop({ item, dragging, onDrag, onDropHere }, name) {
-  const [over, setOver] = useState16(false);
+  const [over, setOver] = useState17(false);
   return {
     over,
     handlers: {
@@ -10330,11 +10544,11 @@ function useDrop({ item, dragging, onDrag, onDropHere }, name) {
 function useKin(onKin) {
   const tell = useRef14(onKin);
   tell.current = onKin;
-  useEffect13(() => () => tell.current?.(false), []);
+  useEffect14(() => () => tell.current?.(false), []);
   return { onBlur: () => onKin?.(false), onFocus: () => onKin?.(true), onPointerEnter: () => onKin?.(true), onPointerLeave: () => onKin?.(false) };
 }
 function Chip2(props) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin } = props;
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, tints, onKin, playRef, removeRef } = props;
   const t = useT();
   const id = playableId(item);
   const name = clean(item.name, 60) || item.key;
@@ -10374,6 +10588,7 @@ function Chip2(props) {
             disabled: !id,
             onClick: () => playing ? onStop() : onPlay(),
             onKeyDown: keys,
+            ref: playRef,
             title: id ? `${name}${item.class ? ` · ${clean(item.class, 16)}` : ""}
 ${t("dock.reorderHint")}` : t("dock.offMap"),
             type: "button",
@@ -10389,7 +10604,8 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           {
             "aria-label": t("dock.remove", name),
             className: FOCUSABLE,
-            onClick: onRemove,
+            onClick: () => onRemove("remove"),
+            ref: removeRef,
             title: t("dock.remove", name),
             type: "button",
             style: { font: "inherit", fontSize: 12, lineHeight: "14px", width: 16, height: 16, padding: 0, borderRadius: 3, border: "none", background: "transparent", color: T.faint, cursor: "pointer", flex: "none" },
@@ -10401,9 +10617,10 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
   );
 }
 function Card(props) {
-  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin } = props;
+  const { item, index, color, playing, audio, onPlay, onStop, onRemove, onMove, dragging, arriving, use, glyph, tints, onKin, playRef, removeRef } = props;
   const t = useT();
   const id = playableId(item);
+  const kind = item.source === "artifact" ? t("dock.made") : clean(item.class ?? "", 16);
   const name = clean(item.name, 80) || item.key;
   const { over, handlers } = useDrop(props, name);
   const keys = useItemKeys(index, onMove, onRemove);
@@ -10442,6 +10659,7 @@ function Card(props) {
             disabled: !id,
             onClick: () => playing ? onStop() : onPlay(),
             onKeyDown: keys,
+            ref: playRef,
             title: id ? t("dock.reorderHint") : t("dock.offMap"),
             type: "button",
             style: { display: "block", width: "100%", padding: 0, border: "none", background: "transparent", cursor: id ? "pointer" : "default" },
@@ -10450,13 +10668,14 @@ function Card(props) {
         ),
         /* @__PURE__ */ jsxs23("div", { style: { ...S.row, gap: 5 }, children: [
           glyph === null ? /* @__PURE__ */ jsx27("span", { "aria-hidden": true, style: { color, fontSize: 9, lineHeight: 1, flex: "none" }, children: item.source === "artifact" ? "✦" : "●" }) : /* @__PURE__ */ jsx27(Glyph2, { color, glyph }),
-          /* @__PURE__ */ jsx27("span", { style: { ...S.ellipsis, flex: 1, fontSize: 11.5, color: T.text }, title: name, children: name }),
+          /* @__PURE__ */ jsx27("span", { style: { ...TWO_LINES, flex: 1, fontSize: 11.5, lineHeight: "14px", color: T.text }, title: name, children: name }),
           /* @__PURE__ */ jsx27(
             "button",
             {
               "aria-label": t("dock.remove", name),
               className: FOCUSABLE,
-              onClick: onRemove,
+              onClick: () => onRemove("remove"),
+              ref: removeRef,
               title: t("dock.remove", name),
               type: "button",
               style: { font: "inherit", fontSize: 12, lineHeight: "14px", width: 16, height: 16, padding: 0, borderRadius: 3, border: "none", background: "transparent", color: T.faint, cursor: "pointer", flex: "none" },
@@ -10465,7 +10684,7 @@ function Card(props) {
           )
         ] }),
         /* @__PURE__ */ jsxs23("div", { style: { ...S.row, gap: 5, minHeight: 18 }, children: [
-          /* @__PURE__ */ jsx27("span", { style: { ...S.faint, ...S.ellipsis, flex: 1, fontSize: 10.5 }, children: item.source === "artifact" ? t("dock.made") : clean(item.class ?? "", 16) }),
+          /* @__PURE__ */ jsx27("span", { style: { ...S.faint, ...TWO_LINES, flex: 1, fontSize: 10.5, lineHeight: "13px" }, title: kind || void 0, children: kind }),
           use
         ] })
       ]
@@ -10473,10 +10692,10 @@ function Card(props) {
   );
 }
 function NameField({ initial, label, onDone }) {
-  const [text, setText] = useState16(initial);
+  const [text, setText] = useState17(initial);
   const field = useRef14(null);
   const done = useRef14(false);
-  useEffect13(() => {
+  useEffect14(() => {
     field.current?.focus();
     field.current?.select();
   }, []);
@@ -10513,12 +10732,12 @@ function NameField({ initial, label, onDone }) {
 function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, audio, kit, use, make, landing, open, onOpen, lineage, onKin }) {
   const t = useT();
   const current = palette?.current ?? null;
-  const [editing, setEditing] = useState16(null);
-  const [forgetting, setForgetting] = useState16(false);
-  const [dragging, setDragging] = useState16(null);
-  const [height, setHeight] = useState16(OPEN_HEIGHT);
-  const [order, setOrder] = useState16(null);
-  useEffect13(() => setOrder(null), [palette]);
+  const [editing, setEditing] = useState17(null);
+  const [forgetting, setForgetting] = useState17(false);
+  const [dragging, setDragging] = useState17(null);
+  const [height, setHeight] = useState17(OPEN_HEIGHT);
+  const [order, setOrder] = useState17(null);
+  useEffect14(() => setOrder(null), [palette]);
   const known = useRef14(null);
   const arrivedAt = useRef14(0);
   const arrived = useMemo3(() => {
@@ -10530,14 +10749,38 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     return new Map(fresh2.map((key, order2) => [key, order2]));
   }, [current]);
   const strip = useRef14(null);
-  useEffect13(() => {
+  const scrolledFor = useRef14(null);
+  useEffect14(() => {
     const element = strip.current;
+    if (scrolledFor.current === arrived) return;
+    scrolledFor.current = arrived;
     if (!element || arrived.size === 0) return;
     const smooth = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth });
   }, [arrived, open]);
-  const [edges, setEdges] = useState16({ start: false, end: false });
-  useEffect13(() => {
+  const plays = useRef14(/* @__PURE__ */ new Map());
+  const removes = useRef14(/* @__PURE__ */ new Map());
+  const gripButton = useRef14(null);
+  const refocus = useRef14(null);
+  useEffect14(() => {
+    const next = refocus.current;
+    if (!next) return;
+    refocus.current = null;
+    if (next.key === null) return gripButton.current?.focus();
+    const play = plays.current.get(next.key);
+    (next.from === "play" && play && !play.disabled ? play : removes.current.get(next.key))?.focus();
+  });
+  const keepRef = (kept3, key) => (element) => {
+    if (element) kept3.set(key, element);
+    else kept3.delete(key);
+  };
+  const keepBox = useRef14(null);
+  const menuBox = useRef14(null);
+  useEffect14(() => {
+    if (forgetting) firstButton(keepBox.current)?.focus();
+  }, [forgetting]);
+  const [edges, setEdges] = useState17({ start: false, end: false });
+  useEffect14(() => {
     const element = strip.current;
     if (open || !element) return;
     const measure = () => {
@@ -10561,19 +10804,19 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
     };
   }, [open, current?.items.length]);
   const section = useRef14(null);
-  const [room, setRoom] = useState16(Number.POSITIVE_INFINITY);
-  useEffect13(() => {
+  const [room, setRoom] = useState17(Number.POSITIVE_INFINITY);
+  useEffect14(() => {
     const parent = section.current?.parentElement;
     if (!parent) return;
     const observer = new ResizeObserver(() => setRoom(parent.clientHeight));
     observer.observe(parent);
     return () => observer.disconnect();
   }, []);
-  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST));
+  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - Math.max(MAP_LEAST, Math.round(room * MAP_SHARE))));
   const rowMask = `linear-gradient(to right, ${edges.start ? "transparent" : "#000"}, #000 28px, #000 calc(100% - 28px), ${edges.end ? "transparent" : "#000"})`;
-  const [now, setNow] = useState16(() => Date.now());
+  const [now, setNow] = useState17(() => Date.now());
   const shownFor = said?.failed ? 8e3 : 4e3;
-  useEffect13(() => {
+  useEffect14(() => {
     if (!said) return;
     setNow(Date.now());
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, said.at + shownFor - Date.now()));
@@ -10620,10 +10863,14 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       const id = playableId(item);
       if (id) onPlay(id);
     },
-    onRemove: () => {
+    onRemove: (from) => {
+      const at = items.findIndex((other) => other.key === item.key);
+      refocus.current = { key: (items[at + 1] ?? items[at - 1])?.key ?? null, from };
       setOrder(items.filter((other) => other.key !== item.key));
       void run({ action: "remove", keys: [item.key] });
     },
+    playRef: keepRef(plays.current, item.key),
+    removeRef: keepRef(removes.current, item.key),
     onStop,
     playing: playing !== null && playing === playableId(item),
     use: use?.(item)
@@ -10664,7 +10911,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
       ),
       palette === null ? /* @__PURE__ */ jsx27(Pending, { label: t("dock.reading"), width: "8rem" }) : palette.palettes.length === 0 && /* @__PURE__ */ jsx27("span", { style: S.faint, children: t("dock.none") }),
       palette && palette.palettes.length === 0 && /* @__PURE__ */ jsx27(Button2, { kind: "quiet", onClick: () => setEditing("new"), tip: t("dock.newName"), children: t("dock.newPalette") }),
-      current && /* @__PURE__ */ jsx27(
+      current && /* @__PURE__ */ jsx27("span", { ref: menuBox, style: { display: "contents" }, children: /* @__PURE__ */ jsx27(
         ActionMenu,
         {
           actions: [
@@ -10674,7 +10921,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
           label: t("dock.menu", clean(current.name, 40)),
           up: true
         }
-      )
+      ) })
     ] }),
     current && /* @__PURE__ */ jsxs23("span", { "aria-label": t("dock.mode"), role: "group", style: { ...SEGMENT_TRACK, flexWrap: "nowrap" }, children: [
       /* @__PURE__ */ jsx27("button", { "aria-pressed": current.reach === 0, className: FOCUSABLE, onClick: () => current.reach !== 0 && void run({ action: "reach", reach: 0 }), title: t("dock.strictTitle"), type: "button", style: segmentStyle(current.reach === 0), children: t("dock.strict") }),
@@ -10725,6 +10972,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
             onPointerDown: gripDown,
             onPointerMove: gripMove,
             onPointerUp: () => setTimeout(() => grip.current = null, 0),
+            ref: gripButton,
             title: open ? t("dock.gripTitle") : t("dock.expand"),
             type: "button",
             style: { alignSelf: "stretch", height: 12, padding: 0, border: "none", background: "transparent", cursor: open ? "ns-resize" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flex: "none" },
@@ -10759,7 +11007,17 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
         current && forgetting && /* @__PURE__ */ jsxs23("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
           /* @__PURE__ */ jsx27("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
           /* @__PURE__ */ jsx27("span", { style: { flex: 1 } }),
-          /* @__PURE__ */ jsx27(Button2, { kind: "quiet", onClick: () => setForgetting(false), children: t("dock.keep") }),
+          /* @__PURE__ */ jsx27("span", { ref: keepBox, style: { display: "contents" }, children: /* @__PURE__ */ jsx27(
+            Button2,
+            {
+              kind: "quiet",
+              onClick: () => {
+                setForgetting(false);
+                firstButton(menuBox.current)?.focus();
+              },
+              children: t("dock.keep")
+            }
+          ) }),
           /* @__PURE__ */ jsx27(
             Button2,
             {
@@ -10808,7 +11066,7 @@ function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, said, aud
 }
 
 // src/shared/paletteMap.ts
-import { useEffect as useEffect14, useMemo as useMemo4, useState as useState17 } from "react";
+import { useEffect as useEffect15, useMemo as useMemo4, useState as useState18 } from "react";
 
 // src/shared/atlas/lineage.ts
 var MOST_FAMILIES = 6;
@@ -10842,12 +11100,12 @@ function parentsOf(sources, made, generations = GENERATIONS) {
 // src/shared/paletteMap.ts
 function usePaletteMap(store, state, audition, t, { hover, other, left }) {
   const revision = state.map?.revision ?? null;
-  const [picks, setPicks] = useState17({ revision, ids: /* @__PURE__ */ new Set() });
+  const [picks, setPicks] = useState18({ revision, ids: /* @__PURE__ */ new Set() });
   const picked = picks.revision === revision ? picks.ids : /* @__PURE__ */ new Set();
-  useEffect14(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
+  useEffect15(() => setPicks((current) => current.revision === revision ? current : { revision, ids: /* @__PURE__ */ new Set() }), [revision]);
   const marked = useMemo4(() => marksOf(state.palette, revision), [state.palette, revision]);
-  const [flying, setFlying] = useState17(null);
-  const [making, setMaking] = useState17(null);
+  const [flying, setFlying] = useState18(null);
+  const [making, setMaking] = useState18(null);
   const kept3 = useMemo4(() => new Set((state.palette?.current?.items ?? []).flatMap((item) => item.artifact_id ? [item.artifact_id] : [])), [state.palette]);
   const groupOf = useMemo4(() => new Map((state.map?.points ?? []).map(([id, , , group]) => [id, group])), [state.map]);
   const designed = useMemo4(() => new Map((state.designs ?? []).map((result) => [result.artifact_id, result])), [state.designs]);
@@ -10858,12 +11116,12 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
     },
     made: (id) => designed.get(id) ?? null
   };
-  const [kinOf, setKinOf] = useState17(null);
+  const [kinOf, setKinOf] = useState18(null);
   const kin = useMemo4(() => {
     if (kinOf === null) return null;
     return new Set(parentsOf(typeof kinOf === "string" ? designed.get(kinOf)?.sources ?? [] : kinOf, (id) => designed.get(id) ?? null));
   }, [kinOf, designed]);
-  useEffect14(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
+  useEffect15(() => setMaking((current) => current?.some((source) => source.sound_id && source.map_revision !== revision) ? null : current), [revision]);
   const open = (sources) => {
     setMaking(sources);
     void store.readDesignsOnce();
@@ -10926,12 +11184,12 @@ function usePaletteMap(store, state, audition, t, { hover, other, left }) {
 }
 
 // src/shared/SampleFolders.tsx
-import { useCallback as useCallback3, useEffect as useEffect15, useState as useState18 } from "react";
+import { useCallback as useCallback3, useEffect as useEffect16, useState as useState19 } from "react";
 import { jsx as jsx28, jsxs as jsxs24 } from "react/jsx-runtime";
 function useSampleFolders(store, revision) {
-  const [folders, setFolders] = useState18(void 0);
+  const [folders, setFolders] = useState19(void 0);
   const read = useCallback3(() => void store.libraryFolders().then(setFolders), [store]);
-  useEffect15(read, [read, revision]);
+  useEffect16(read, [read, revision]);
   return folders;
 }
 async function addTyped(typed, check, ask2, t) {
@@ -10952,9 +11210,9 @@ function SampleFolders({
   onClose
 }) {
   const t = useT();
-  const [typed, setTyped] = useState18("");
-  const [busy, setBusy] = useState18(false);
-  const [said, setSaid] = useState18(null);
+  const [typed, setTyped] = useState19("");
+  const [busy, setBusy] = useState19(false);
+  const [said, setSaid] = useState19(null);
   const submit = async () => {
     const folder = typed.trim();
     if (!folder || busy) return;
@@ -11036,7 +11294,7 @@ var PAD_ROWS = [48, 44, 40, 36].map((start) => [start, start + 1, start + 2, sta
 function PadPicker({ daw, onPick, onClose }) {
   const t = useT();
   const first = useRef15(null);
-  useEffect16(() => first.current?.focus(), []);
+  useEffect17(() => first.current?.focus(), []);
   return /* @__PURE__ */ jsx29(
     "div",
     {
@@ -11074,11 +11332,11 @@ function MapWorkspace({ ctx, store, audition }) {
   useWant(store, "palette");
   const state = useKumi(store);
   const playing = usePlaying(audition);
-  const [selected, setSelected] = useState19(null);
-  const [padsFor, setPadsFor] = useState19(null);
-  const [hover, setHover] = useState19(() => ctx.storage.get(HOVER_PLAY, true) !== false);
-  const [tiles, setTiles] = useState19(() => ctx.storage.get(TILES, false) === true);
-  const [layout, setLayout] = useState19(() => ctx.storage.get(LAYOUT, "") ?? "");
+  const [selected, setSelected] = useState20(null);
+  const [padsFor, setPadsFor] = useState20(null);
+  const [hover, setHover] = useState20(() => ctx.storage.get(HOVER_PLAY, true) !== false);
+  const [tiles, setTiles] = useState20(() => ctx.storage.get(TILES, false) === true);
+  const [layout, setLayout] = useState20(() => ctx.storage.get(LAYOUT, "") ?? "");
   const palette = usePaletteMap(store, state, audition, t, {
     hover,
     other: (error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }),
@@ -11087,18 +11345,18 @@ function MapWorkspace({ ctx, store, audition }) {
   const playMade = (id) => void audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   const grow = useGrow((request) => store.design(request), (result) => playMade(result.artifact_id), state.map?.revision ?? null);
   const dock = useRef15(null);
-  const [paletteOpen, setPaletteOpen] = useState19(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
+  const [paletteOpen, setPaletteOpen] = useState20(() => ctx.storage.get(PALETTE_OPEN, true) !== false);
   const first = useFirstOpen(
     () => ctx.storage.get(FIRST_OPEN, ""),
     (kept3) => ctx.storage.set(FIRST_OPEN, kept3)
   );
   const makeOpen = palette.making !== null;
-  useEffect16(() => {
+  useEffect17(() => {
     if (makeOpen) first.done(["make"]);
   }, [makeOpen]);
   const area = useRef15(null);
-  const [areaWidth, setAreaWidth] = useState19(0);
-  useEffect16(() => {
+  const [areaWidth, setAreaWidth] = useState20(0);
+  useEffect17(() => {
     const element = area.current;
     if (!element) return;
     const observer = new ResizeObserver((entries) => setAreaWidth(entries[0]?.contentRect.width ?? 0));
@@ -11109,7 +11367,7 @@ function MapWorkspace({ ctx, store, audition }) {
   const session = ownerSession(state);
   const map = state.map;
   const folders = useSampleFolders(store, map?.revision);
-  const [foldersOpen, setFoldersOpen] = useState19(false);
+  const [foldersOpen, setFoldersOpen] = useState20(false);
   const files = ctx.files;
   const folderControl = (onClose) => /* @__PURE__ */ jsx29(
     SampleFolders,
@@ -11368,7 +11626,7 @@ function petLine(before, after, t) {
 
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
-import { useState as useState20 } from "react";
+import { useState as useState21 } from "react";
 import { Fragment as Fragment13, jsx as jsx31, jsxs as jsxs27 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
@@ -11395,8 +11653,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const t = useT();
   useWant(store, "setup");
   const state = useKumi(store);
-  const [openOnFind, setOpenOnFind] = useState20(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
-  const [petLines, setPetLines] = useState20(() => ctx.storage.get(PET_LINES, false));
+  const [openOnFind, setOpenOnFind] = useState21(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
+  const [petLines, setPetLines] = useState21(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
   const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
@@ -11543,7 +11801,7 @@ var plugin = {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
           title: wordsOf(ctx)("map.tab"),
-          minWidth: "26rem",
+          minWidth: "20rem",
           dock: besideTheChat(closeMeasurements ? MEASUREMENTS_WORKSPACE : null),
           render: mapView,
           onClose: () => {
@@ -11566,7 +11824,7 @@ var plugin = {
       if (typeof host6.openWorkspace === "function") {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
           title,
-          minWidth: "24rem",
+          minWidth: "20rem",
           dock: besideTheChat(closeMap ? MAP_WORKSPACE : null),
           render,
           onClose: () => {

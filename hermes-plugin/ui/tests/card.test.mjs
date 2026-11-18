@@ -476,6 +476,23 @@ test('what the agent found, or a search, is also listed by name above the map, f
   assert.ok(plain.includes('aria-label="Sounds Kumi found"') && plain.includes('measured: darker than most') && !plain.includes('closeness'), plain)
 })
 
+test('a vine grown from a grown point names every point from the two map sounds, on one scale: never nested, never a seed', async () => {
+  const { GrowLayer } = await load('src/shared/GrowLayer.tsx', { react: 'real' })
+  const { alongPath, soundEnd } = await load('src/shared/grow.ts')
+  const punch = soundEnd('s-r7-0002', 'Punch Kick 89.wav', 'r7')
+  // "Grow from here" on the 50% bud of Boom Kick 89 → Punch Kick 89: the new vine is the rest of that path.
+  const grown = { source: { artifact_id: 'a-1', name: '50% from Boom Kick 89.wav toward Punch Kick 89.wav' }, id: null, place: [0.4, 0.4], name: '50% from Boom Kick 89.wav toward Punch Kick 89.wav', origin: 'Boom Kick 89.wav', along: 0.5 }
+  assert.equal(alongPath(grown, 0.5), 0.75)
+  assert.equal(alongPath(punch, 0.5), 0.5)
+  const result = { artifact_id: 'a-2', op: 'grow', seed: 1166296173, recipe: 'Grown 55% of the way from Grown 50% of the way from Boom Kick 89 toward Punch Kick 89, seed 99 toward Punch Kick 89 (highs first)', duration: 0.7, peaks: [], sources: [] }
+  const noop = () => {}
+  const grow = { choosing: null, from: grown, to: punch, buds: [{ at: 0.5, state: 'ready', result }], handle: 0.5, scrub: null, picked: 0.5, choose: noop, name: noop, between: noop, scrubTo: noop, pick: noop, reroll: noop, close: noop }
+  const html = renderToStaticMarkup(createElement(GrowLayer, { grow, from: [100, 100], to: [300, 200], fromMap: [0.4, 0.4], toMap: [0.8, 0.6], fromColor: '#e85d4a', toColor: '#4a90e2', width: 640, height: 480, top: 120, bottom: 90, playing: null, onPlay: noop, onStop: noop }))
+  assert.ok(html.includes(english('grow.title', 'Boom Kick 89.wav', 'Punch Kick 89.wav')), html)
+  assert.ok(html.includes(english('grow.bud', 75)) && html.includes('75%'), 'the point halfway along the rest of the path is 75% of the whole way')
+  for (const word of ['seed', 'Grown', 'of the way from']) assert.ok(!html.includes(word), `${word} in ${html}`)
+})
+
 test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why an undo didn't happen", async () => {
   const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
   // #965's rows: `track` a plain name, `note` the runtime's words, an earlier runtime's rows with no undo.

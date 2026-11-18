@@ -73,9 +73,10 @@ export function drawWords(context: Context, words: readonly Word[], alpha: numbe
 const widths = new Map<string, number>()
 
 /** Each sound's name beside it (`gap` pixels to its right), in its colour, offered in `rank` order: only a name with
- *  empty map to lie on, clear of the other names and of `taken`, is written; `NAMES_MOST` at most. */
-export function drawNames(context: Context, names: readonly (Word & { rank: number })[], gap: number, look: Lettering, taken: readonly Box[]): void {
-  if (names.length === 0) return
+ *  empty map to lie on, clear of the other names and of `taken`, is written; `NAMES_MOST` at most. The names written,
+ *  each as its box and its place in `names`: a name is the sound's as much as its point is (a click on it reaches it). */
+export function drawNames(context: Context, names: readonly (Word & { rank: number })[], gap: number, look: Lettering, taken: readonly Box[]): { box: Box; at: number }[] {
+  if (names.length === 0) return []
   context.save()
   const font = `500 10.5px ${look.family}`
   context.font = font
@@ -84,7 +85,8 @@ export function drawNames(context: Context, names: readonly (Word & { rank: numb
   context.lineWidth = 3
   context.strokeStyle = look.ground
   if (widths.size > 6000) widths.clear()
-  const offered = [...names].sort((a, b) => a.rank - b.rank)
+  const order = names.map((_, at) => at).sort((a, b) => names[a].rank - names[b].rank)
+  const offered = order.map(at => names[at])
   const boxes = offered.map((word): Box => {
     const key = `${font}|${word.text}`
     let width = widths.get(key)
@@ -99,6 +101,7 @@ export function drawNames(context: Context, names: readonly (Word & { rank: numb
     offered.map(word => [word.x, word.y])
   )
   const open = boxes.flatMap((_, index) => (clear[index] ? [index] : []))
+  const written: { box: Box; at: number }[] = []
   for (const pick of fitting(open.map(index => boxes[index]), NAMES_MOST, 16, 5, taken)) {
     const index = open[pick]
     const word = offered[index]
@@ -107,6 +110,8 @@ export function drawNames(context: Context, names: readonly (Word & { rank: numb
     context.globalAlpha = 0.95
     context.fillStyle = word.color
     context.fillText(word.text, boxes[index][0], word.y)
+    written.push({ box: boxes[index], at: order[index] })
   }
   context.restore()
+  return written
 }
