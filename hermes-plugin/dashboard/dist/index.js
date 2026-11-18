@@ -538,6 +538,7 @@
       making: "Making…",
       needTwo: (n) => `Pick at least ${n} sounds to make one.`,
       moreSources: (n) => `+${n} more`,
+      fewerSources: "Fewer",
       missing: "This Kumi for Hermes can't make sounds yet: update it, then try again.",
       failed: (error) => `Kumi couldn't make it: ${error}`,
       seedTitle: "Its seed: the same sounds, way and seed make the same sound again",
@@ -1322,6 +1323,7 @@
       making: "作成中…",
       needTwo: (n) => `作るには ${n} 個以上のサウンドを選んでください。`,
       moreSources: (n) => `ほか ${n} 個`,
+      fewerSources: "折りたたむ",
       missing: "この Kumi for Hermes はまだサウンドを作れません。更新してから、もう一度お試しください。",
       failed: (error) => `作れませんでした：${error}`,
       seedTitle: "シード：同じサウンド、同じ作り方、同じシードで同じ音がもう一度できます",
@@ -2105,6 +2107,7 @@
       making: "制作中…",
       needTwo: (n) => `至少选择 ${n} 个声音才能制作。`,
       moreSources: (n) => `还有 ${n} 个`,
+      fewerSources: "收起",
       missing: "这个版本的 Kumi for Hermes 还不能制作声音：请先更新，再试一次。",
       failed: (error) => `Kumi 没能做出来：${error}`,
       seedTitle: "种子：同样的声音、同样的做法和同样的种子会再次做出同样的声音",
@@ -3899,6 +3902,46 @@
   function Pending({ label, width = "60%" }) {
     return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
   }
+  function Clamp({ text, lines = 2, style, title }) {
+    const box = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [cut, setCut] = useState(false);
+    useLayoutEffect(() => {
+      const element = box.current;
+      if (!element || open) return;
+      const measure = () => setCut(element.scrollHeight > element.clientHeight + 1);
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [text, open, lines]);
+    const folded = open ? {} : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
+    if (!cut && !open) {
+      return /* @__PURE__ */ jsx("span", { ref: box, style: { ...style, ...folded }, title, children: text });
+    }
+    return /* @__PURE__ */ jsx(
+      "span",
+      {
+        "aria-expanded": open,
+        className: FOCUSABLE,
+        onClick: (event) => {
+          event.stopPropagation();
+          setOpen(!open);
+        },
+        onKeyDown: (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen(!open);
+        },
+        ref: box,
+        role: "button",
+        style: { ...style, ...folded, cursor: "pointer" },
+        tabIndex: 0,
+        title,
+        children: text
+      }
+    );
+  }
 
   // src/shared/HistoryView.tsx
   var STATE = {
@@ -3988,10 +4031,10 @@
       const state = stateOf(item, t, live);
       const track2 = nameOf(item.track);
       const dawUndo = item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? item.daw_undo : null;
-      return /* @__PURE__ */ jsxs("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
-        /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
+      return /* @__PURE__ */ jsxs("li", { style: { ...S.row, alignItems: "flex-start", gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
+        /* @__PURE__ */ jsx("span", { "aria-label": state.word, title: state.word, style: { width: 14, lineHeight: "18px", textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
         /* @__PURE__ */ jsxs("span", { style: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }, children: [
-          /* @__PURE__ */ jsx("span", { style: { ...S.text, ...S.ellipsis, textDecoration: item.state === "undone" ? "line-through" : void 0 }, title: clean(item.title ?? "", 300), children: clean(item.title ?? item.label ?? item.id, 120) }),
+          /* @__PURE__ */ jsx(Clamp, { style: { ...S.text, textDecoration: item.state === "undone" ? "line-through" : void 0 }, text: clean(item.title ?? item.label ?? item.id, 300) }),
           /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 5 }, children: [
             track2 && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
             /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track2 && clean(track2, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
@@ -4689,6 +4732,7 @@
     return /* @__PURE__ */ jsx("svg", { "aria-hidden": true, height: size, style: { flex: "none" }, viewBox: "0 0 28 20", width: size * 28 / 20, children: GLYPHS[card] });
   }
   var TAB_GLYPH = { cross: "blend", fuse: "smear", loop: "loop", stack: "stack" };
+  var SOURCES_FOLDED = 8;
   var SOURCE_CHIPS = 48;
   function Flying({ flight, onDone }) {
     const ghost = useRef(null);
@@ -4821,6 +4865,7 @@
     const [options, setOptions] = useState({});
     const [steers, setSteers] = useState({});
     const [steerOpen, setSteerOpen] = useState(false);
+    const [allSources, setAllSources] = useState(false);
     const [chosen, setChosen] = useState([]);
     const [trail, setTrail] = useState([]);
     const [busy, setBusy] = useState(null);
@@ -5024,12 +5069,14 @@
             /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
           ] }),
           /* @__PURE__ */ jsxs("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
-            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "nowrap", gap: 4, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-              sources.slice(0, SOURCE_CHIPS).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, flex: "none", fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }, children: [
+            /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
+              sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => /* @__PURE__ */ jsxs("span", { role: "listitem", style: { ...S.row, gap: 4, fontSize: 11, padding: "1px 7px 1px 5px", borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: "100%" }, children: [
                 source.artifact_id ? /* @__PURE__ */ jsx("span", { "aria-label": t("make.made"), role: "img", style: { color: T.accent, fontSize: 10, flex: "none" }, children: "✦" }) : /* @__PURE__ */ jsx("span", { style: { width: 7, height: 7, borderRadius: "50%", background: colorOf2(source), flex: "none" } }),
-                /* @__PURE__ */ jsx("span", { style: S.ellipsis, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 40) })
+                /* @__PURE__ */ jsx("span", { style: { minWidth: 0, overflowWrap: "anywhere" }, children: clean(source.name ?? source.sound_id ?? source.artifact_id ?? "", 60) })
               ] }, `${index}-${source.sound_id ?? source.artifact_id}`)),
-              sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) })
+              !allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx(TextButton, { onClick: () => setAllSources(true), title: t("make.sources"), children: t("make.moreSources", sources.length - SOURCES_FOLDED) }),
+              allSources && sources.length > SOURCE_CHIPS && /* @__PURE__ */ jsx("span", { style: { ...S.faint, flex: "none" }, children: t("make.moreSources", sources.length - SOURCE_CHIPS) }),
+              allSources && sources.length > SOURCES_FOLDED && /* @__PURE__ */ jsx(TextButton, { onClick: () => setAllSources(false), children: t("make.fewerSources") })
             ] }),
             chooser,
             card.key === "loop" ? /* @__PURE__ */ jsx(LoopSection, { onChange: setOptions, options, tempo: dawTempo }) : /* @__PURE__ */ jsx(CardOptions, { card, onChange: setOptions, options, sources }),
@@ -5097,7 +5144,7 @@
                   children: [
                     lineage && /* @__PURE__ */ jsx(LineageBar, { shares: lineage(result) }),
                     /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
-                      /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...stages.length ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" } }, title: result.recipe, children: stages.length ? clean(result.recipe.split(":", 1)[0], 80) : clean(result.recipe, 220) || resultName(result) }),
+                      stages.length ? /* @__PURE__ */ jsx("span", { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, children: clean(result.recipe.split(":", 1)[0], 80) }) : /* @__PURE__ */ jsx(Clamp, { style: { ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }, text: clean(result.recipe, 220) || resultName(result) }),
                       onSources && /* @__PURE__ */ jsx(
                         "button",
                         {
@@ -5711,19 +5758,22 @@
     });
     return found;
   }
-  function frame(model, ids, width, height, top = 0, right = 0, margin = 48) {
+  function frame(model, ids, width, height, top = 0, right = 0, margin = 48, clear = {}) {
     const chosen = model.points.filter((point) => ids.has(point.id));
     if (!chosen.length) return null;
     const xs = chosen.map((point) => point.x);
     const ys = chosen.map((point) => point.y);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const size = mapSide(width, height, top);
-    const room = roomBeside(width, right);
+    const roomTop = Math.max(top, clear.top ?? 0);
+    const roomLeft = Math.max(0, clear.left ?? 0);
+    const across = Math.max(1, roomBeside(width, right) - roomLeft);
+    const down = Math.max(1, height - roomTop);
     const span = Math.max(x1 - x0, y1 - y0, 0.04);
-    const scale = Math.min(40, Math.max(1, (Math.min(room, height - top) - 2 * margin) / (span * size)));
+    const scale = Math.min(40, Math.max(1, (Math.min(across, down) - 2 * margin) / (span * size)));
     const cx = (x0 + x1) / 2;
     const cy = (y0 + y1) / 2;
-    return { scale, dx: room / 2 - cx * size * scale, dy: top + (height - top) / 2 - cy * size * scale };
+    return { scale, dx: roomLeft + across / 2 - cx * size * scale, dy: roomTop + down / 2 - cy * size * scale };
   }
   function pointsInBox(model, view, size, box, visible) {
     const unit = size * view.scale;
@@ -7642,10 +7692,20 @@
       if (!moved2.current && size.width > 0) setView(fit());
     }, [topInset, coverRight]);
     const framedFound = useRef(null);
+    const matchesRef = useRef(null);
     useEffect(() => {
       if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return;
       framedFound.current = foundIds;
-      const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight);
+      const card = matchesRef.current;
+      let clear = {};
+      if (card && card.offsetHeight > 0) {
+        const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 };
+        const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 };
+        const areaBelow = (size.width - coverRight) * (size.height - below.top);
+        const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset);
+        clear = areaBelow >= areaBeside ? below : beside;
+      }
+      const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear);
       if (!framed) return;
       moved2.current = true;
       setView(framed);
@@ -8235,7 +8295,7 @@
                 )
               ] })
             ] }),
-            /* @__PURE__ */ jsx("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: "100%" }, children: model.groups.filter((group) => group.count > 0).map((group) => {
+            /* @__PURE__ */ jsx("div", { "aria-label": t("map.legend"), ref: legendRef, role: "group", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 4, padding: 4, pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: model.groups.filter((group) => group.count > 0).map((group) => {
               const off = hidden.has(group.key);
               return /* @__PURE__ */ jsxs(
                 "button",
@@ -8261,7 +8321,7 @@
                 group.key
               );
             }) }),
-            matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: "min(340px, 100%)", pointerEvents: "auto" }, children: [
+            matches.length > 0 && /* @__PURE__ */ jsxs("div", { "aria-label": searched ? t("map.matches") : nearName || t("map.found"), ref: matchesRef, role: "group", style: { ...glass, display: "flex", flexDirection: "column", gap: 1, padding: "6px 6px 6px", width: `min(340px, calc(100% - ${coverRight}px))`, pointerEvents: "auto" }, children: [
               /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, padding: "0 4px 4px" }, children: [
                 /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }, children: searched ? t("map.matches") : nearName || t("map.found") }),
                 onPicked && // Native's `a`: every sound the search keeps, or every sound Kumi found (a "More like these" among them).
@@ -8294,7 +8354,7 @@
               matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
             ] }),
             hiddenCount > 0 && // One quiet line for every sound that couldn't play here, never a notice per sound.
-            /* @__PURE__ */ jsxs("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: "100%" }, children: [
+            /* @__PURE__ */ jsxs("div", { role: "status", style: { ...glass, borderRadius: 14, ...S.row, flexWrap: "wrap", gap: 6, padding: "3px 6px 3px 10px", pointerEvents: "auto", maxWidth: `calc(100% - ${coverRight}px)` }, children: [
               /* @__PURE__ */ jsx("span", { style: { ...S.faint, fontSize: 11 }, children: t("map.hidden", hiddenCount) }),
               hiddenActions
             ] })
@@ -8486,6 +8546,8 @@
   var OPEN_HEIGHT = 260;
   var LOWEST = 150;
   var HIGHEST = 620;
+  var MAP_LEAST = 240;
+  var POP_FOR_MS = 1500;
   function Waveform2({ id, color, audio, width, height, bars, tints }) {
     const canvas = useRef(null);
     const [peaks, setPeaks] = useState(() => id ? peaksKept(id, bars) : null);
@@ -8768,11 +8830,13 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
     const [order, setOrder] = useState(null);
     useEffect(() => setOrder(null), [palette]);
     const known = useRef(null);
+    const arrivedAt = useRef(0);
     const arrived = useMemo(() => {
       const keys = new Set((current?.items ?? []).map((item) => item.key));
       const before = known.current;
       const fresh2 = before && before.id === current?.id ? (current?.items ?? []).filter((item) => !before.keys.has(item.key)).map((item) => item.key) : [];
       known.current = { id: current?.id ?? null, keys };
+      if (fresh2.length > 0) arrivedAt.current = Date.now();
       return new Map(fresh2.map((key, order2) => [key, order2]));
     }, [current]);
     const strip = useRef(null);
@@ -8782,6 +8846,41 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       const smooth = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
       element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth });
     }, [arrived, open]);
+    const [edges, setEdges] = useState({ start: false, end: false });
+    useEffect(() => {
+      const element = strip.current;
+      if (open || !element) return;
+      const measure = () => {
+        const next = { start: element.scrollLeft > 1, end: element.scrollLeft + element.clientWidth < element.scrollWidth - 1 };
+        setEdges((before) => before.start === next.start && before.end === next.end ? before : next);
+      };
+      const wheel = (event) => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return;
+        event.preventDefault();
+        element.scrollLeft += event.deltaY;
+      };
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      element.addEventListener("scroll", measure, { passive: true });
+      element.addEventListener("wheel", wheel, { passive: false });
+      return () => {
+        observer.disconnect();
+        element.removeEventListener("scroll", measure);
+        element.removeEventListener("wheel", wheel);
+      };
+    }, [open, current?.items.length]);
+    const section = useRef(null);
+    const [room, setRoom] = useState(Number.POSITIVE_INFINITY);
+    useEffect(() => {
+      const parent = section.current?.parentElement;
+      if (!parent) return;
+      const observer = new ResizeObserver(() => setRoom(parent.clientHeight));
+      observer.observe(parent);
+      return () => observer.disconnect();
+    }, []);
+    const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST));
+    const rowMask = `linear-gradient(to right, ${edges.start ? "transparent" : "#000"}, #000 28px, #000 calc(100% - 28px), ${edges.end ? "transparent" : "#000"})`;
     const [now, setNow] = useState(() => Date.now());
     const shownFor = said?.failed ? 8e3 : 4e3;
     useEffect(() => {
@@ -8802,7 +8901,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       if (!held) return;
       const delta = held.y - event.clientY;
       if (Math.abs(delta) > 3) held.moved = true;
-      if (held.moved) setHeight(Math.min(HIGHEST, Math.max(LOWEST, held.height + delta)));
+      if (held.moved) setHeight(Math.min(highest, Math.max(LOWEST, held.height + delta)));
     };
     const run = (action) => onDo(action).then((done) => {
       if (!done) setOrder(null);
@@ -8823,7 +8922,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       dragging,
       index,
       item,
-      arriving: arrived.get(item.key) ?? null,
+      arriving: Date.now() - arrivedAt.current < POP_FOR_MS ? arrived.get(item.key) ?? null : null,
       onDrag: setDragging,
       onDropHere: () => dragging && move(dragging, index),
       onMove: (to) => move(item.key, to),
@@ -8882,7 +8981,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         /* @__PURE__ */ jsx(TextButton, { onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), pressed: current.reach > 0, title: t("dock.looseTitle", current.reach || LOOSE), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
       ] }),
       current && current.excluded > 0 && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("dock.excluded", current.excluded) }),
-      /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
+      /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: { ...S.faint, ...S.ellipsis, flex: "1 1 0", color: saying?.failed ? T.warn : T.muted }, title: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : void 0, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" }),
       current && current.items.length > 1 && make && /* @__PURE__ */ jsx(TextButton, { onClick: () => make(current), title: t("make.openTitle"), children: t("make.open") }),
       current && current.items.length > 0 && kit?.(current),
       current && !forgetting && /* @__PURE__ */ jsx(TextButton, { onClick: () => setForgetting(true), title: t("dock.forgetTitle", clean(current.name, 40)), children: t("dock.forget") }),
@@ -8919,7 +9018,10 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       "section",
       {
         "aria-label": t("dock.title"),
-        ref: landing,
+        ref: (element) => {
+          section.current = element;
+          if (landing) landing.current = element;
+        },
         style: {
           position: "relative",
           display: "flex",
@@ -8930,7 +9032,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
           background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
           color: T.text,
           flex: "none",
-          height: open && items.length > 0 ? height : void 0,
+          height: open && items.length > 0 ? Math.min(height, highest) : void 0,
           transition: grip.current ? "none" : "height 260ms cubic-bezier(.2,.8,.2,1)"
         },
         children: [
@@ -8974,15 +9076,32 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Card, { ...itemProps(item, index) }, item.key)),
             items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
           ] }),
-          current && items.length > 0 && !open && /* @__PURE__ */ jsxs("div", { "aria-label": t("dock.sounds"), ref: strip, role: "list", style: { display: "flex", flexWrap: "nowrap", gap: 5, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "thin" }, children: [
-            items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Chip2, { ...itemProps(item, index) }, item.key)),
-            items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
-          ] }),
+          current && items.length > 0 && !open && /* @__PURE__ */ jsxs(
+            "div",
+            {
+              "aria-label": t("dock.sounds"),
+              ref: strip,
+              role: "list",
+              style: {
+                display: "flex",
+                flexWrap: "nowrap",
+                gap: 5,
+                overflowX: "auto",
+                paddingBottom: 2,
+                scrollbarWidth: "thin",
+                maskImage: rowMask,
+                WebkitMaskImage: rowMask
+              },
+              children: [
+                items.slice(0, CHIPS_SHOWN).map((item, index) => /* @__PURE__ */ jsx(Chip2, { ...itemProps(item, index) }, item.key)),
+                items.length > CHIPS_SHOWN && /* @__PURE__ */ jsx("span", { style: { ...S.faint, alignSelf: "center", flex: "none" }, children: t("dock.more", items.length - CHIPS_SHOWN) })
+              ]
+            }
+          ),
           palette !== null && (!current || items.length === 0) && /* @__PURE__ */ jsxs("span", { style: { ...S.row, gap: 6, ...S.faint }, children: [
             /* @__PURE__ */ jsx(Icon, { name: "plus", size: 12 }),
             t("dock.empty")
-          ] }),
-          /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden, children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "" })
+          ] })
         ]
       }
     );

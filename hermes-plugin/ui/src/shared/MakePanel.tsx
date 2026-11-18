@@ -17,7 +17,7 @@ import { CARDS, cardNote, DEFAULT_BPM, type DesignOptions, type DesignRequest, t
 import { clean, seconds } from './format.ts'
 import { CardOptions, LoopSection, SteerSection } from './MakeOptions.tsx'
 import type { Designed } from './store.ts'
-import { FOCUSABLE, S, TextButton, useT } from './ui.tsx'
+import { Clamp, FOCUSABLE, S, TextButton, useT } from './ui.tsx'
 
 export interface MakePanelProps {
   /** The sounds to make from, in order (the picks, or the palette's), with their names. */
@@ -117,8 +117,9 @@ function Glyph({ card, size = 20 }: { card: string; size?: number }) {
 
 /** Each tab's picture: two sounds becoming one, a long wave, a loop, and layers. */
 const TAB_GLYPH: Record<DesignTab, string> = { cross: 'blend', fuse: 'smear', loop: 'loop', stack: 'stack' }
-/** The sources drawn as chips: every source goes in, but a pick of thousands draws a few dozen, then says how many
- *  more. */
+/** The sources drawn as chips: every source goes in, but the chips wrap and the first few show (`SOURCES_FOLDED`), with
+ *  the rest on request; a pick of thousands draws a few dozen at most (`SOURCE_CHIPS`), then says how many more. */
+const SOURCES_FOLDED = 8
 const SOURCE_CHIPS = 48
 
 /** A kept sound flies into the palette: its waveform, as drawn, arcs from its card into the dock's row of chips,
@@ -294,6 +295,8 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
   // The steer, kept per mode: Blend's stays Blend's when the producer tries Resonate and comes back.
   const [steers, setSteers] = useState<Record<string, Steer>>({})
   const [steerOpen, setSteerOpen] = useState(false)
+  // Whether every source shows as a chip, or the first few with "+N more".
+  const [allSources, setAllSources] = useState(false)
   // Results chosen to make from next, in the order they were chosen; and the sounds made from before, for Back.
   const [chosen, setChosen] = useState<string[]>([])
   const [trail, setTrail] = useState<DesignSource[][]>([])
@@ -529,12 +532,11 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
       {/* Positioned, so the screen-reader-only words inside (absolutely placed) scroll and clip with the list instead
           of hanging below the pane, which gave the pane room to scroll. */}
       <div ref={list} style={{ position: 'relative', overflowY: 'auto', padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* The sounds that go in (all of them), on one line that scrolls: the first ones as chips (a sound Kumi made
-            marked as one), then how many more. A row that scrolls may shrink to nothing in this column once results
-            fill it, so it keeps its own height. */}
-        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
-          {sources.slice(0, SOURCE_CHIPS).map((source, index) => (
-            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, flex: 'none', fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: 180 }}>
+        {/* The sounds that go in (all of them): the first few as chips that wrap, whole (a sound Kumi made marked as one),
+            then the rest on request. Nothing is cut at the panel's edge. */}
+        <div aria-label={t('make.sources')} role="list" style={{ ...S.row, flex: 'none', flexWrap: 'wrap', gap: 4 }}>
+          {sources.slice(0, allSources ? SOURCE_CHIPS : SOURCES_FOLDED).map((source, index) => (
+            <span key={`${index}-${source.sound_id ?? source.artifact_id}`} role="listitem" style={{ ...S.row, gap: 4, fontSize: 11, padding: '1px 7px 1px 5px', borderRadius: 10, border: `1px solid ${source.artifact_id ? `color-mix(in srgb, ${T.accent} 45%, transparent)` : T.border}`, color: T.secondary, maxWidth: '100%' }}>
               {source.artifact_id ? (
                 <span aria-label={t('make.made')} role="img" style={{ color: T.accent, fontSize: 10, flex: 'none' }}>
                   ✦
@@ -542,10 +544,16 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
               ) : (
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(source), flex: 'none' }} />
               )}
-              <span style={S.ellipsis}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 40)}</span>
+              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{clean(source.name ?? source.sound_id ?? source.artifact_id ?? '', 60)}</span>
             </span>
           ))}
-          {sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
+          {!allSources && sources.length > SOURCES_FOLDED && (
+            <TextButton onClick={() => setAllSources(true)} title={t('make.sources')}>
+              {t('make.moreSources', sources.length - SOURCES_FOLDED)}
+            </TextButton>
+          )}
+          {allSources && sources.length > SOURCE_CHIPS && <span style={{ ...S.faint, flex: 'none' }}>{t('make.moreSources', sources.length - SOURCE_CHIPS)}</span>}
+          {allSources && sources.length > SOURCES_FOLDED && <TextButton onClick={() => setAllSources(false)}>{t('make.fewerSources')}</TextButton>}
         </div>
         {chooser}
         {card.key === 'loop' ? <LoopSection onChange={setOptions} options={options} tempo={dawTempo} /> : <CardOptions card={card} onChange={setOptions} options={options} sources={sources} />}
@@ -616,10 +624,12 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                   {/* Its lineage along its top edge: the families it came from, each as wide as its share. */}
                   {lineage && <LineageBar shares={lineage(result)} />}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    {/* Two lines of the recipe, all of it on hover; a modulate result names its stages in full below. */}
-                    <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35, ...(stages.length ? {} : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }) }} title={result.recipe}>
-                      {stages.length ? clean(result.recipe.split(':', 1)[0], 80) : clean(result.recipe, 220) || resultName(result)}
-                    </span>
+                    {/* Two lines of the recipe, the rest on a click or Enter; a modulate result names its stages in full below. */}
+                    {stages.length ? (
+                      <span style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }}>{clean(result.recipe.split(':', 1)[0], 80)}</span>
+                    ) : (
+                      <Clamp style={{ ...S.text, flex: 1, fontSize: 12, lineHeight: 1.35 }} text={clean(result.recipe, 220) || resultName(result)} />
+                    )}
                     {onSources && (
                       <button
                         aria-label={t('make.choose')}

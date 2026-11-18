@@ -476,6 +476,21 @@ test('zoom keeps the point under the pointer still, search needs every word, and
     const [px] = map.toScreen(framedBeside, wide, point.x, point.y)
     assert.ok(px >= 0 && px <= 460, `${id} framed left of the sheet at ${px}`)
   }
+  // With the card listing the finds over the top-left (340 × 160 under an 80 px bar), the frame sits clear of it:
+  // below it here, and on the map's own scale (the frame never changes the map's size).
+  const framedClear = map.frame(model, new Set(['s-1', 's-2']), 640, 400, 80, 0, 48, { top: 248 })
+  const tall = map.mapSide(640, 400, 80)
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px, py] = map.toScreen(framedClear, tall, point.x, point.y)
+    assert.ok(px >= 0 && px <= 640 && py >= 248 && py <= 400, `${id} framed clear of the card at ${px},${py}`)
+  }
+  const framedRight = map.frame(model, new Set(['s-1', 's-2']), 640, 400, 80, 0, 48, { left: 356 })
+  for (const id of ['s-1', 's-2']) {
+    const point = model.points.find(p => p.id === id)
+    const [px] = map.toScreen(framedRight, tall, point.x, point.y)
+    assert.ok(px >= 356 && px <= 640, `${id} framed right of the card at ${px}`)
+  }
 })
 
 test("the picks' actions float beside the picks and never over them; with no room, or no picks in view, at the map's foot", () => {

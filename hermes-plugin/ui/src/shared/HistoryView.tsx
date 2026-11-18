@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import { ago, bpm, catchUpLines, clean, cleanupWords, colorOf, dawName, focusParameter, focusPath, focusPlace, nameOf } from './format.ts'
 import { english, type Translate } from './i18n.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
-import { Chip, Dot, Pending, S, useT } from './ui.tsx'
+import { Chip, Clamp, Dot, Pending, S, useT } from './ui.tsx'
 
 // Each state's mark, tone, and word (a catalog key). `kept` is muted, not a success: the producer changed it since,
 // so Kumi left it as it is.
@@ -153,14 +153,14 @@ export function HistoryView({
         const track = nameOf(item.track)
         const dawUndo = item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? item.daw_undo : null
         return (
-          <li key={item.id} style={{ ...S.row, gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
-            <span aria-label={state.word} title={state.word} style={{ width: 14, textAlign: 'center', color: TONE[state.tone], flex: 'none' }}>
+          <li key={item.id} style={{ ...S.row, alignItems: 'flex-start', gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
+            <span aria-label={state.word} title={state.word} style={{ width: 14, lineHeight: '18px', textAlign: 'center', color: TONE[state.tone], flex: 'none' }}>
               {state.mark}
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-              <span style={{ ...S.text, ...S.ellipsis, textDecoration: item.state === 'undone' ? 'line-through' : undefined }} title={clean(item.title ?? '', 300)}>
-                {clean(item.title ?? item.label ?? item.id, 120)}
-              </span>
+              {/* Two lines, then the rest on a click or Enter: the part of a title that differs is often its end ("…→ Dusty
+                  Snare 04.wav"), which a one-line cut hid. */}
+              <Clamp style={{ ...S.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined }} text={clean(item.title ?? item.label ?? item.id, 300)} />
               <span style={{ ...S.row, gap: 5 }}>
                 {track && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
                 <span style={{ ...S.faint, ...S.ellipsis }}>

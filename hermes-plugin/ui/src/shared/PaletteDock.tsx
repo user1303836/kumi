@@ -22,10 +22,14 @@ import { FOCUSABLE, Pending, S, TextButton, useT } from './ui.tsx'
 
 /** Sounds drawn at once: a palette can hold thousands (a gather takes 10,000). */
 export const CHIPS_SHOWN = 240
-/** The open drawer's height: where it starts, and how far a drag on its grip takes it. */
+/** The open drawer's height: where it starts, and how far a drag on its grip takes it; never so far that the map above
+ *  keeps less than `MAP_LEAST` (its own least height). */
 const OPEN_HEIGHT = 260
 const LOWEST = 150
 const HIGHEST = 620
+const MAP_LEAST = 240
+/** How long sounds just gathered pop in where they land: long enough for the last of a batch (its delay included). */
+const POP_FOR_MS = 1500
 
 export interface PaletteDockProps {
   palette: PaletteReply | null
@@ -384,13 +388,16 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   const [order, setOrder] = useState<PaletteItem[] | null>(null)
   useEffect(() => setOrder(null), [palette])
   // Which sounds were there before the last answer: one that wasn't is new (a gather), and pops in. The first answer
-  // shows the palette as it is, with nothing popping.
+  // shows the palette as it is, with nothing popping. A pop plays where the sounds land, once: a fold or an unfold
+  // later draws the same sounds without it (`POP_FOR_MS`).
   const known = useRef<{ id: string | null; keys: Set<string> } | null>(null)
+  const arrivedAt = useRef(0)
   const arrived = useMemo(() => {
     const keys = new Set((current?.items ?? []).map(item => item.key))
     const before = known.current
     const fresh = before && before.id === current?.id ? (current?.items ?? []).filter(item => !before.keys.has(item.key)).map(item => item.key) : []
     known.current = { id: current?.id ?? null, keys }
+    if (fresh.length > 0) arrivedAt.current = Date.now()
     return new Map(fresh.map((key, order) => [key, order]))
   }, [current])
   // New sounds go at the end: the row or grid scrolls to them, so a gather or a kept sound lands in view.
@@ -401,6 +408,44 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     const smooth = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
     element.scrollTo(open ? { top: element.scrollHeight, behavior: smooth } : { left: element.scrollWidth, behavior: smooth })
   }, [arrived, open])
+  // The folded row scrolls sideways: whichever end has more sounds past it fades out, so a chip at the edge reads as
+  // "more this way", not as cut off; and a mouse's wheel turns it (nothing else here scrolls up or down).
+  const [edges, setEdges] = useState({ start: false, end: false })
+  useEffect(() => {
+    const element = strip.current
+    if (open || !element) return
+    const measure = () => {
+      const next = { start: element.scrollLeft > 1, end: element.scrollLeft + element.clientWidth < element.scrollWidth - 1 }
+      setEdges(before => (before.start === next.start && before.end === next.end ? before : next))
+    }
+    const wheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || element.scrollWidth <= element.clientWidth) return
+      event.preventDefault()
+      element.scrollLeft += event.deltaY
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    element.addEventListener('scroll', measure, { passive: true })
+    element.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      observer.disconnect()
+      element.removeEventListener('scroll', measure)
+      element.removeEventListener('wheel', wheel)
+    }
+  }, [open, current?.items.length])
+  // The open drawer never leaves the map less than its least height: the room is its workspace's, as it is now.
+  const section = useRef<HTMLElement | null>(null)
+  const [room, setRoom] = useState(Number.POSITIVE_INFINITY)
+  useEffect(() => {
+    const parent = section.current?.parentElement
+    if (!parent) return
+    const observer = new ResizeObserver(() => setRoom(parent.clientHeight))
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [])
+  const highest = Math.max(LOWEST, Math.min(HIGHEST, room - MAP_LEAST))
+  const rowMask = `linear-gradient(to right, ${edges.start ? 'transparent' : '#000'}, #000 28px, #000 calc(100% - 28px), ${edges.end ? 'transparent' : '#000'})`
   // The last sentence fades after a while: it says what just happened, not what is.
   const [now, setNow] = useState(() => Date.now())
   const shownFor = said?.failed ? 8000 : 4000
@@ -424,7 +469,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     if (!held) return
     const delta = held.y - event.clientY
     if (Math.abs(delta) > 3) held.moved = true
-    if (held.moved) setHeight(Math.min(HIGHEST, Math.max(LOWEST, held.height + delta)))
+    if (held.moved) setHeight(Math.min(highest, Math.max(LOWEST, held.height + delta)))
   }
 
   const run = (action: PaletteAction) =>
@@ -447,7 +492,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     dragging,
     index,
     item,
-    arriving: arrived.get(item.key) ?? null,
+    arriving: Date.now() - arrivedAt.current < POP_FOR_MS ? (arrived.get(item.key) ?? null) : null,
     onDrag: setDragging,
     onDropHere: () => dragging && move(dragging, index),
     onMove: to => move(item.key, to),
@@ -525,7 +570,11 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </span>
       )}
       {current && current.excluded > 0 && <span style={S.faint}>{t('dock.excluded', current.excluded)}</span>}
-      <span style={{ flex: 1 }} />
+      {/* What the last edit said, in the header's free room for a few seconds: it never adds a line, so the drawer and
+          the map above it keep their size (a line that came and went resized the map, and an unmoved map refit). */}
+      <span aria-live="polite" style={{ ...S.faint, ...S.ellipsis, flex: '1 1 0', color: saying?.failed ? T.warn : T.muted }} title={saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : undefined}>
+        {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
+      </span>
       {current && current.items.length > 1 && make && (
         <TextButton onClick={() => make(current)} title={t('make.openTitle')}>
           {t('make.open')}
@@ -571,7 +620,10 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   return (
     <section
       aria-label={t('dock.title')}
-      ref={landing}
+      ref={element => {
+        section.current = element
+        if (landing) landing.current = element
+      }}
       style={{
         position: 'relative',
         display: 'flex',
@@ -582,7 +634,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
         color: T.text,
         flex: 'none',
-        height: open && items.length > 0 ? height : undefined,
+        height: open && items.length > 0 ? Math.min(height, highest) : undefined,
         transition: grip.current ? 'none' : 'height 260ms cubic-bezier(.2,.8,.2,1)'
       }}
     >
@@ -630,7 +682,21 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </div>
       )}
       {current && items.length > 0 && !open && (
-        <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ display: 'flex', flexWrap: 'nowrap', gap: 5, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'thin' }}>
+        <div
+          aria-label={t('dock.sounds')}
+          ref={strip}
+          role="list"
+          style={{
+            display: 'flex',
+            flexWrap: 'nowrap',
+            gap: 5,
+            overflowX: 'auto',
+            paddingBottom: 2,
+            scrollbarWidth: 'thin',
+            maskImage: rowMask,
+            WebkitMaskImage: rowMask
+          }}
+        >
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip key={item.key} {...itemProps(item, index)} />
           ))}
@@ -643,9 +709,6 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           {t('dock.empty')}
         </span>
       )}
-      <span aria-live="polite" style={saying ? { ...S.faint, color: saying.failed ? T.warn : T.muted } : S.hidden}>
-        {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
-      </span>
     </section>
   )
 }

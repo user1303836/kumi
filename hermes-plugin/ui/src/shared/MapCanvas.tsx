@@ -486,12 +486,25 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }, [topInset, coverRight]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the agent found: frame it, once the map has a size and its top has laid out, and once only. The frame counts
-  // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again.
+  // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again. It
+  // keeps clear of the card that lists the finds (below it, or beside it, whichever leaves more room): the card used
+  // to sit over the very sounds it named.
   const framedFound = useRef<ReadonlySet<string> | null>(null)
+  const matchesRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return
     framedFound.current = foundIds
-    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight)
+    // The card sits in the top column (8 px in from the map's corner), which is its offset parent.
+    const card = matchesRef.current
+    let clear = {}
+    if (card && card.offsetHeight > 0) {
+      const below = { top: 8 + card.offsetTop + card.offsetHeight + 8 }
+      const beside = { left: 8 + card.offsetLeft + card.offsetWidth + 8 }
+      const areaBelow = (size.width - coverRight) * (size.height - below.top)
+      const areaBeside = (size.width - coverRight - beside.left) * (size.height - topInset)
+      clear = areaBelow >= areaBeside ? below : beside
+    }
+    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, clear)
     if (!framed) return
     moved.current = true
     setView(framed)
@@ -1186,7 +1199,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             />
           </ToolGroup>
         </div>
-        <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: '100%' }}>
+        {/* The legend and the cards under it keep left of a side sheet (Make beside the map), which starts below the bar. */}
+        <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
           {/* Serve names every class it knows, most of them empty in a small library: the legend lists those with sounds. */}
           {model.groups.filter(group => group.count > 0).map(group => {
             const off = hidden.has(group.key)
@@ -1216,7 +1230,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           })}
         </div>
         {matches.length > 0 && (
-          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: 'min(340px, 100%)', pointerEvents: 'auto' }}>
+          <div aria-label={searched ? t('map.matches') : nearName || t('map.found')} ref={matchesRef} role="group" style={{ ...glass, display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 6px 6px', width: `min(340px, calc(100% - ${coverRight}px))`, pointerEvents: 'auto' }}>
             <div style={{ ...S.row, gap: 6, padding: '0 4px 4px' }}>
               {/* CC-23: a near search's neighbours, under the seeds' names from this map (the seeds themselves aren't listed). */}
               <span style={{ ...S.muted, ...S.ellipsis, flex: 1, fontSize: 11.5 }}>{searched ? t('map.matches') : nearName || t('map.found')}</span>
@@ -1263,7 +1277,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         )}
         {hiddenCount > 0 && (
           // One quiet line for every sound that couldn't play here, never a notice per sound.
-          <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: '100%' }}>
+          <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
             <span style={{ ...S.faint, fontSize: 11 }}>{t('map.hidden', hiddenCount)}</span>
             {hiddenActions}
           </div>
