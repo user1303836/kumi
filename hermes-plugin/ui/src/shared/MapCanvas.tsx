@@ -11,7 +11,7 @@
 import { Button, Tip } from '@kumi/controls'
 import { CANVAS, T, useThemeKey } from '@kumi/theme'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AtlasOverlay } from './atlas/AtlasOverlay.tsx'
 import { nearestTo, STARS } from './atlas/constellation.ts'
@@ -1444,9 +1444,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             // The kind alone (the head speaks for every row). The range's ends sit either side of a plain en dash: an
             // invisible joiner there would reach the bundle as the character itself, which Hermes's install scan
             // flags (a caution that blocks a git install).
-            const facts = [oneKind, ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}–${high}`) : t('map.closenessShown')) : '']
-              .filter(Boolean)
-              .join(' · ')
+            const facts = [oneKind, ...sharedWhy.map(why => clean(why, 60)), near && closeness.length ? (flat ? t('map.closeness', low === high ? String(low) : `${low}–${high}`) : t('map.closenessShown')) : ''].filter(Boolean)
             return (
               // At most the room between the legend and the foot (the corner, the player, the picks' actions docked
               // there): its rows scroll inside it rather than running under them, and with no room for a row it folds
@@ -1466,9 +1464,19 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                   </Button>
                 </div>
                 {/* What every row shares, under the head across the card's whole width: it reads in a line or two. */}
-                {facts && (
+                {facts.length > 0 && (
                   <Tip label={near ? t('map.closenessTitle') : undefined}>
-                    <span style={{ ...TYPE.caption, color: T.faint, overflowWrap: 'anywhere', padding: '0 4px 4px' }}>{facts}</span>
+                    {/* Each fact its own inline block, its separator at its end: a line breaks between facts, so
+                        "closeness 99–100, relative to this map" moves down whole, and breaks inside only in a card
+                        narrower than the phrase itself. */}
+                    <span style={{ ...TYPE.caption, color: T.faint, overflowWrap: 'anywhere', padding: '0 4px 4px' }}>
+                      {facts.map((fact, index) => (
+                        <Fragment key={index}>
+                          {index > 0 && ' '}
+                          <span style={{ display: 'inline-block', maxWidth: '100%' }}>{index < facts.length - 1 ? `${fact} ·` : fact}</span>
+                        </Fragment>
+                      ))}
+                    </span>
                   </Tip>
                 )}
                 {!listFolded && (
