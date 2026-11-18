@@ -9474,6 +9474,7 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
       return () => clearTimeout(timer);
     }, [said, shownFor]);
     const saying = said && now - said.at < shownFor ? said : null;
+    const sayingText = saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : "";
     const grip = useRef(null);
     const gripDown = (event) => {
       if (!open || event.button !== 0) return;
@@ -9579,7 +9580,15 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
         /* @__PURE__ */ jsx("button", { "aria-pressed": current.reach > 0, className: FOCUSABLE, onClick: () => current.reach === 0 && void run({ action: "reach", reach: LOOSE }), title: t("dock.looseTitle", current.reach || LOOSE), type: "button", style: segmentStyle(current.reach > 0), children: current.reach > 0 ? t("dock.looseN", current.reach) : t("dock.loose") })
       ] }),
       current && current.excluded > 0 && /* @__PURE__ */ jsx("span", { style: { ...TYPE.caption, color: T.faint }, children: t("dock.excluded", current.excluded) }),
-      /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          "aria-live": "polite",
+          title: sayingText || void 0,
+          style: { flex: 1, minWidth: 0, ...TYPE.caption, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: saying?.failed ? T.warn : T.muted, opacity: saying ? 1 : 0, transition: "opacity 160ms" },
+          children: sayingText
+        }
+      ),
       current && current.items.length > 1 && make && /* @__PURE__ */ jsx(Button, { kind: "quiet", onClick: () => make(current), tip: t("make.openTitle"), children: t("make.open") }),
       current && current.items.length > 0 && kit?.(current),
       current && items.length > 0 && /* @__PURE__ */ jsxs(Button, { expanded: open, onClick: () => onOpen(!open), tip: open ? t("dock.collapse") : t("dock.expand"), children: [
@@ -9631,30 +9640,6 @@ ${t("dock.reorderHint")}` : t("dock.offMap"),
             }
           ),
           header,
-          /* @__PURE__ */ jsx(
-            "span",
-            {
-              "aria-live": "polite",
-              style: {
-                position: "absolute",
-                right: 10,
-                bottom: "calc(100% + 6px)",
-                maxWidth: "calc(100% - 20px)",
-                zIndex: 3,
-                padding: "3px 10px",
-                borderRadius: 12,
-                border: `1px solid ${T.border}`,
-                background: T.raised,
-                boxShadow: "0 6px 18px -10px rgba(0,0,0,.5)",
-                fontSize: 11.5,
-                color: saying?.failed ? T.warn : T.muted,
-                pointerEvents: "none",
-                opacity: saying ? 1 : 0,
-                transition: "opacity 160ms"
-              },
-              children: saying ? saying.failed ? t("dock.failed", saying.text) : saying.text : ""
-            }
-          ),
           current && forgetting && /* @__PURE__ */ jsxs("div", { role: "alert", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: [
             /* @__PURE__ */ jsx("span", { style: S.muted, children: t("dock.forgetAsk", clean(current.name, 40), current.items.length) }),
             /* @__PURE__ */ jsx("span", { style: { flex: 1 } }),

@@ -510,6 +510,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     return () => clearTimeout(timer)
   }, [said, shownFor])
   const saying = said && now - said.at < shownFor ? said : null
+  const sayingText = saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''
 
   // The grip: a click folds or opens the drawer; a drag on an open one resizes it.
   const grip = useRef<{ y: number; height: number; moved: boolean } | null>(null)
@@ -637,7 +638,15 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         </span>
       )}
       {current && current.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', current.excluded)}</span>}
-      <span style={{ flex: 1 }} />
+      {/* What the last edit said, for a few seconds, in the header's free room: it never adds a line (a line that came and
+          went resized the map) and never covers what floats over the map (Make's foot, P7A-38); its title says it whole. */}
+      <span
+        aria-live="polite"
+        title={sayingText || undefined}
+        style={{ flex: 1, minWidth: 0, ...TYPE.caption, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: saying?.failed ? T.warn : T.muted, opacity: saying ? 1 : 0, transition: 'opacity 160ms' }}
+      >
+        {sayingText}
+      </span>
       {current && current.items.length > 1 && make && (
         <Button kind="quiet" onClick={() => make(current)} tip={t('make.openTitle')}>
           {t('make.open')}
@@ -697,30 +706,6 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
       </button>
       {header}
-      {/* What the last edit said, for a few seconds, floating just above the dock's top edge: it never adds a line (a line
-          that came and went resized the map, and an unmoved map refit), and however crowded the header, it's never cut. */}
-      <span
-        aria-live="polite"
-        style={{
-          position: 'absolute',
-          right: 10,
-          bottom: 'calc(100% + 6px)',
-          maxWidth: 'calc(100% - 20px)',
-          zIndex: 3,
-          padding: '3px 10px',
-          borderRadius: 12,
-          border: `1px solid ${T.border}`,
-          background: T.raised,
-          boxShadow: '0 6px 18px -10px rgba(0,0,0,.5)',
-          fontSize: 11.5,
-          color: saying?.failed ? T.warn : T.muted,
-          pointerEvents: 'none',
-          opacity: saying ? 1 : 0,
-          transition: 'opacity 160ms'
-        }}
-      >
-        {saying ? (saying.failed ? t('dock.failed', saying.text) : saying.text) : ''}
-      </span>
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
           <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>
