@@ -153,7 +153,7 @@ test("a change only Live's own Undo can take back (CC-20) says how, with the DAW
 })
 
 test("the pane warns while Kumi isn't sure of the project and offers no Undo, until a completed observe clears it", async () => {
-  const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
+  const { Clock, KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
   const unsure = { at: Date.now(), op: 'listen_track', reason: 'Live stopped answering during the capture', cleanup: 'restored' }
   const render = async status => {
@@ -163,7 +163,7 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
       throw Object.assign(new Error('not here'), { status: 404 })
     })
     await store.refreshStatus()
-    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
+    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, clock: new Clock(), onOpenMap() {} }))
   }
   const warned = await render({ unsure })
   for (const text of ['listen_track', 'Live stopped answering during the capture', 'Kumi put back what it changed meanwhile.', english('pane.lookAgain')]) {
@@ -176,7 +176,7 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
 })
 
 test("while Kumi is connected through a current DAW part setup didn't install, the pane doesn't ask to install it; an older one still asks", async () => {
-  const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
+  const { Clock, KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
   const setup = { state: 'needs_daw_component', daw: 'ableton', message: "Kumi's runtime is ready; next, install Kumi's part in Live." }
   const render = async (status, answer = setup) => {
@@ -186,7 +186,7 @@ test("while Kumi is connected through a current DAW part setup didn't install, t
       throw Object.assign(new Error('not here'), { status: 404 })
     })
     await store.refreshStatus()
-    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
+    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, clock: new Clock(), onOpenMap() {} }))
   }
   const asks = html => html.includes('Set up Kumi for Live') || html.includes("install Kumi's part")
   const part = (installed, version) => ({ setup: { component: { installed, version, bundled: '1.0.104' }, daw_open: true } })

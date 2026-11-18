@@ -77,10 +77,12 @@ export function FocusStyle() {
   )
 }
 
+/** A small chip. `title` is the dashboard's hint (its tooltips are the browser's own); Desktop puts a chip in Hermes's
+ *  Tip instead (`Tip` in `@kumi/controls`), never in a native title. */
 export function Chip({ children, title, tone }: { children: ReactNode; title?: string; tone?: 'accent' | 'bad' | 'good' | 'warn' }) {
   const color = tone === 'accent' ? T.accent : tone === 'good' ? T.good : tone === 'warn' ? T.warn : tone === 'bad' ? T.bad : T.secondary
   return (
-    <span title={title} style={{ fontSize: 11, lineHeight: '16px', padding: '0 6px', borderRadius: 3, background: T.chip, color, whiteSpace: 'nowrap' }}>
+    <span title={title} style={{ ...TYPE.caption, lineHeight: '16px', padding: '0 6px', borderRadius: 3, background: T.chip, color, whiteSpace: 'nowrap' }}>
       {children}
     </span>
   )
@@ -96,9 +98,9 @@ export const beating = (seconds: number | null | undefined, color?: string): { c
 
 /** A dot of `color`. With `beat` (a beat's length in seconds) it pulses in time: the connection's dot, while the DAW
  *  plays. */
-export function Dot({ color, size = 7, title, beat }: { color: string; size?: number; title?: string; beat?: number | null }) {
+export function Dot({ color, size = 7, beat }: { color: string; size?: number; beat?: number | null }) {
   const pulse = beating(beat, color)
-  return <span aria-hidden={!title} className={pulse.className} title={title} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none', ...pulse.style }} />
+  return <span aria-hidden className={pulse.className} style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flex: 'none', ...pulse.style }} />
 }
 
 /** Hermes's segmented look, for a choice among a few (Make's ways and modes, Strict | Loose): a tinted track, the
@@ -212,7 +214,6 @@ export function useRequestClick(onClick: () => unknown): { busy: boolean; click:
 export function TextButton({
   children,
   onClick,
-  title,
   label,
   pressed,
   disabled,
@@ -220,7 +221,6 @@ export function TextButton({
 }: {
   children: ReactNode
   onClick: () => unknown
-  title?: string
   label?: string
   pressed?: boolean
   disabled?: boolean
@@ -235,7 +235,6 @@ export function TextButton({
       className={FOCUSABLE}
       disabled={disabled}
       onClick={click}
-      title={title}
       type="button"
       style={{
         // The face is a row: an icon sits beside its word whatever the host's CSS does with an `svg` (Hermes's base
@@ -244,12 +243,12 @@ export function TextButton({
         alignItems: 'center',
         gap: 4,
         font: 'inherit',
-        fontSize: 11.5,
+        ...TYPE.small,
         lineHeight: '18px',
         padding: '0 7px',
         borderRadius: 3,
         // A toggle that's on reads as on, not only to a screen reader (hover to play, Select, Strict or Loose).
-        border: `1px solid ${strong || pressed ? T.accent : T.border}`,
+        border: `1px solid ${strong || pressed ? T.accent : T.hairline}`,
         background: pressed ? `color-mix(in srgb, ${T.accent} 14%, transparent)` : 'transparent',
         color: disabled ? T.faint : strong || pressed ? T.accent : T.secondary,
         cursor: disabled ? 'default' : busy ? 'progress' : 'pointer',
@@ -285,8 +284,8 @@ export function Pending({ label, width = '60%' }: { label: string; width?: numbe
 
 /** Text that wraps to at most `lines` lines and, when that cuts it, shows the rest on a click or Enter (and folds it
  *  again the same way): nothing is cut without a way to read it, and a pointer is never the only way. Whether it's cut
- *  is measured, so a short text is plain text. `title` stays for the full words on hover. */
-export function Clamp({ text, lines = 2, style, title }: { text: string; lines?: number; style?: CSSProperties; title?: string }) {
+ *  is measured, so a short text is plain text. */
+export function Clamp({ text, lines = 2, style }: { text: string; lines?: number; style?: CSSProperties }) {
   const box = useRef<HTMLSpanElement | null>(null)
   const [open, setOpen] = useState(false)
   const [cut, setCut] = useState(false)
@@ -302,7 +301,7 @@ export function Clamp({ text, lines = 2, style, title }: { text: string; lines?:
   const folded: CSSProperties = open ? {} : { display: '-webkit-box', WebkitLineClamp: lines, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
   if (!cut && !open) {
     return (
-      <span ref={box} style={{ ...style, ...folded }} title={title}>
+      <span ref={box} style={{ ...style, ...folded }}>
         {text}
       </span>
     )
@@ -324,7 +323,6 @@ export function Clamp({ text, lines = 2, style, title }: { text: string; lines?:
       role="button"
       style={{ ...style, ...folded, cursor: 'pointer' }}
       tabIndex={0}
-      title={title}
     >
       {text}
     </span>

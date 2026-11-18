@@ -96,6 +96,10 @@
       undoAllLabel: (n, change) => `Undo all ${n} steps of ${change}`,
       openMap: "Open the sound map",
       openMeasurements: "Show the last measurement",
+      waitingFound: (n) => n === 1 ? "1 sound found" : `${n} sounds found`,
+      showOnMap: "Show on the map",
+      waitingMeasured: "A measurement is ready",
+      showMeasurement: "Show it",
       undoNeedsConnection: "Undo needs a connected Kumi.",
       starters: "Try one:",
       starterLook: "What am I looking at?",
@@ -983,6 +987,10 @@
       undoAllLabel: (n, change) => `${change} の ${n} ステップを取り消す`,
       openMap: "サンプルマップを開く",
       openMeasurements: "最後の測定を表示",
+      waitingFound: (n) => `${n} 個のサウンドが見つかりました`,
+      showOnMap: "マップで見る",
+      waitingMeasured: "測定ができました",
+      showMeasurement: "表示",
       undoNeedsConnection: "取り消すには Kumi の接続が必要です。",
       starters: "試してみる:",
       starterLook: "いま何を見てる？",
@@ -1860,6 +1868,10 @@
       undoAllLabel: (n, change) => `全部撤销（${n} 步）：${change}`,
       openMap: "打开采样地图",
       openMeasurements: "显示最近的测量",
+      waitingFound: (n) => `找到 ${n} 个声音`,
+      showOnMap: "在地图上查看",
+      waitingMeasured: "测量已完成",
+      showMeasurement: "查看",
       undoNeedsConnection: "撤销需要 Kumi 已连接。",
       starters: "试试：",
       starterLook: "我现在在看什么？",
@@ -2751,16 +2763,16 @@
   }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
-    return /* @__PURE__ */ jsx("span", { title, style: { fontSize: 11, lineHeight: "16px", padding: "0 6px", borderRadius: 3, background: T.chip, color, whiteSpace: "nowrap" }, children });
+    return /* @__PURE__ */ jsx("span", { title, style: { ...TYPE.caption, lineHeight: "16px", padding: "0 6px", borderRadius: 3, background: T.chip, color, whiteSpace: "nowrap" }, children });
   }
   var beating = (seconds2, color) => {
     if (!seconds2) return { style: {} };
     const animationDuration = `${seconds2.toFixed(3)}s`;
     return color ? { className: "kumi-beat", style: { color, animationDuration } } : { className: "kumi-swell", style: { animationDuration } };
   };
-  function Dot({ color, size = 7, title, beat }) {
+  function Dot({ color, size = 7, beat }) {
     const pulse = beating(beat, color);
-    return /* @__PURE__ */ jsx("span", { "aria-hidden": !title, className: pulse.className, title, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none", ...pulse.style } });
+    return /* @__PURE__ */ jsx("span", { "aria-hidden": true, className: pulse.className, style: { display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flex: "none", ...pulse.style } });
   }
   var SEGMENT_TRACK = { display: "flex", flexWrap: "wrap", gap: 2, padding: 2, borderRadius: 5, background: T.chip };
   function segmentStyle(picked, disabled = false) {
@@ -2861,7 +2873,7 @@
   function Pending({ label, width = "60%" }) {
     return /* @__PURE__ */ jsx("span", { "aria-busy": "true", "aria-label": label, role: "status", style: { display: "block", width, maxWidth: "100%", height: 10, margin: "4px 0", borderRadius: 3, background: T.chip, opacity: 0.7 } });
   }
-  function Clamp({ text, lines = 2, style, title }) {
+  function Clamp({ text, lines = 2, style }) {
     const box = useRef(null);
     const [open, setOpen] = useState(false);
     const [cut, setCut] = useState(false);
@@ -2876,7 +2888,7 @@
     }, [text, open, lines]);
     const folded = open ? {} : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
     if (!cut && !open) {
-      return /* @__PURE__ */ jsx("span", { ref: box, style: { ...style, ...folded }, title, children: text });
+      return /* @__PURE__ */ jsx("span", { ref: box, style: { ...style, ...folded }, children: text });
     }
     return /* @__PURE__ */ jsx(
       "span",
@@ -2896,7 +2908,6 @@
         role: "button",
         style: { ...style, ...folded, cursor: "pointer" },
         tabIndex: 0,
-        title,
         children: text
       }
     );
@@ -2945,8 +2956,7 @@
           gap: 6,
           flex: "none",
           font: "inherit",
-          fontSize: 12,
-          lineHeight: "16px",
+          ...TYPE.small,
           fontWeight: 500,
           padding: size === "md" ? "6px 12px" : "4px 10px",
           border: "none",
@@ -3827,7 +3837,7 @@
   var MOST_JOBS = 20;
   var MOST_ROUNDS = 6;
   var MOST_REFERENCES = 8;
-  var EMPTY = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
+  var EMPTY = { available: null, error: null, failed: {}, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, waiting: null, rounds: {}, script: null, leaving: /* @__PURE__ */ new Set(), palette: null, paletteSaid: null, designs: null };
   var HIDE_BATCH_MS = 1200;
   var HIDE_MOST = 500;
   var SHA256 = /^[0-9a-f]{64}$/;
@@ -4162,6 +4172,10 @@
     /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
     measure(toolCallId, result) {
       this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
+    }
+    /** A tab held back for want of room (`waiting`), or none once it's opened. */
+    wait(waiting) {
+      this.set({ waiting });
     }
     /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
      *  that reference's next round, whether it named the reference's file or the copy Kumi kept of it. The same audio
@@ -4554,9 +4568,9 @@
     const t = useT();
     const app = dawName(daw, t);
     if (how === "buried") {
-      return /* @__PURE__ */ jsx("span", { title: t("history.byHandTitle", app), style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) });
+      return /* @__PURE__ */ jsx(Tip, { label: t("history.byHandTitle", app), children: /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: t("history.byHand", app) }) });
     }
-    return /* @__PURE__ */ jsx("span", { title: t("history.dawUndoTitle", app, keys), style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) });
+    return /* @__PURE__ */ jsx(Tip, { label: t("history.dawUndoTitle", app, keys), children: /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.dawUndo", app) }) });
   }
   var WORDLY = /[\p{L}\p{N}_]/u;
   function namesWhole(title, name) {
@@ -4901,7 +4915,7 @@
                 fontWeight: chosen ? 600 : 500,
                 padding: "2px 9px",
                 borderRadius: 12,
-                border: `1px solid ${chosen ? T.accent : T.border}`,
+                border: `1px solid ${chosen ? T.accent : T.hairline}`,
                 background: chosen ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
                 color: chosen ? T.accent : option.value === void 0 ? T.muted : T.secondary,
                 cursor: "pointer",
@@ -4959,7 +4973,7 @@
               ...TYPE.small,
               padding: "2px 9px",
               borderRadius: 6,
-              border: `1px solid ${on ? T.accent : T.border}`,
+              border: `1px solid ${on ? T.accent : T.hairline}`,
               background: on ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : "transparent",
               color: on ? T.accent : T.secondary,
               cursor: "pointer",
@@ -5805,7 +5819,7 @@
                         gap: 5,
                         padding: "8px 10px",
                         borderRadius: 10,
-                        border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
+                        border: `1px solid ${isChosen || isPlaying ? T.accent : T.hairline}`,
                         background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : "transparent",
                         boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : "none",
                         transition: "border-color 160ms, background-color 160ms, box-shadow 160ms"
@@ -9632,7 +9646,7 @@
           maxWidth: 220,
           padding: "2px 2px 2px 4px",
           borderRadius: 7,
-          border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
+          border: `1px solid ${playing ? color : over ? T.accent : T.hairline}`,
           boxShadow: playing ? `0 0 0 1px ${color}, 0 0 10px -2px ${color}` : "none",
           background: playing ? T.chip : "transparent",
           opacity: dragging === item.key ? 0.4 : id ? 1 : 0.55,
@@ -9688,7 +9702,7 @@
           minWidth: 0,
           padding: "7px 7px 7px 10px",
           borderRadius: 10,
-          border: `1px solid ${playing ? color : over ? T.accent : T.border}`,
+          border: `1px solid ${playing ? color : over ? T.accent : T.hairline}`,
           background: playing ? `color-mix(in srgb, ${color} 12%, transparent)` : `color-mix(in srgb, ${T.card} 55%, transparent)`,
           boxShadow: playing ? `0 0 0 1px ${color}, 0 6px 18px -8px ${color}` : "none",
           opacity: dragging === item.key ? 0.4 : id ? 1 : 0.55,
@@ -10533,7 +10547,7 @@
         /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyRequest"), text: LOOK_AGAIN_REQUEST })
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 2fr)", gap: 12, alignItems: "stretch" }, children: [
-        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", alignSelf: "start" }, children: [
+        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.hairline}`, borderRadius: 6, background: T.card, overflow: "hidden", alignSelf: "start" }, children: [
           /* @__PURE__ */ jsx(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx(FocusView, { focus: state.focus, loading: state.focus === null && !state.failed.focus, now, project: !statusNamesProject(state.status) }) }),
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
@@ -10551,7 +10565,7 @@
             }
           ) })
         ] }),
-        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 780, display: "flex", flexDirection: "column", position: "relative" }, children: [
+        /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.hairline}`, borderRadius: 6, background: T.card, overflow: "hidden", minHeight: 780, display: "flex", flexDirection: "column", position: "relative" }, children: [
           foldersOpen && (state.map?.points?.length ?? 0) > 0 && /* @__PURE__ */ jsx(
             "div",
             {

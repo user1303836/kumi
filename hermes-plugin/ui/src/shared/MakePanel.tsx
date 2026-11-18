@@ -694,7 +694,7 @@ export function MakePanel({ sources, colorOf, tempo, results, onMake, onClose, p
                     gap: 5,
                     padding: '8px 10px',
                     borderRadius: 10,
-                    border: `1px solid ${isChosen || isPlaying ? T.accent : T.border}`,
+                    border: `1px solid ${isChosen || isPlaying ? T.accent : T.hairline}`,
                     background: isChosen ? `color-mix(in srgb, ${T.accent} 10%, transparent)` : isPlaying ? `color-mix(in srgb, ${T.accent} 6%, transparent)` : 'transparent',
                     boxShadow: isChosen ? `0 0 0 1px ${T.accent}` : 'none',
                     transition: 'border-color 160ms, background-color 160ms, box-shadow 160ms'

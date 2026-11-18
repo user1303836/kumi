@@ -192,7 +192,7 @@ function Dashboard() {
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
+        <div style={{ border: `1px solid ${T.hairline}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
           <Section title={t('pane.focus')}>
             <FocusView focus={state.focus} loading={state.focus === null && !state.failed.focus} now={now} project={!statusNamesProject(state.status)} />
           </Section>
@@ -213,7 +213,7 @@ function Dashboard() {
         </div>
         {/* Tall enough that the palette drawer, open, still leaves the map most of the card. The page scrolls, so the
             height costs nothing. */}
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 780, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <div style={{ border: `1px solid ${T.hairline}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 780, display: 'flex', flexDirection: 'column', position: 'relative' }}>
           {/* Sample folders, over the map's top right corner once there's a map (an empty map shows it in place). */}
           {foldersOpen && (state.map?.points?.length ?? 0) > 0 && (
             <div

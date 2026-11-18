@@ -70,7 +70,7 @@ export function Wave({ audition, id, label, caption = label }: { audition: Audit
         {(peaks ?? []).map((peak, index) => (
           <rect fill={playing ? T.accent : T.secondary} height={Math.max(1, peak * 34)} key={index} opacity={0.85} width={0.7} x={index + 0.15} y={18 - Math.max(0.5, peak * 17)} />
         ))}
-        {!peaks && <line stroke={T.border} x1={0} x2={96} y1={18} y2={18} />}
+        {!peaks && <line stroke={T.hairline} x1={0} x2={96} y1={18} y2={18} />}
       </svg>
       {failed && <span style={S.faint}>{t('listen.audioGone')}</span>}
     </div>
@@ -187,7 +187,7 @@ function Bands({ view }: { view: ListenView }) {
                   ) : (
                     <div style={{ position: 'absolute', left: '15%', right: '15%', bottom: 0, height: `${Math.max(4, (1 - share) * 100)}%`, background: T.secondary, opacity: 0.8 }} />
                   )}
-                  {view.bandsAre === 'difference' && <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', borderTop: `1px solid ${T.border}` }} />}
+                  {view.bandsAre === 'difference' && <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', borderTop: `1px solid ${T.hairline}` }} />}
                 </div>
                 <span style={{ ...TYPE.caption, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{name}</span>
               </div>
@@ -549,7 +549,7 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
   return (
     <div
       data-kumi-card="listen"
-      style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.hairline}`, background: T.card, color: T.text }}
     >
       <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <span style={{ ...S.text, ...TYPE.body, fontWeight: 600, minWidth: 0 }}>

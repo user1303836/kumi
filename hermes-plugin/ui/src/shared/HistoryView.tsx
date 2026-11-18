@@ -1,6 +1,6 @@
 // FOCUS (what the producer is looking at, and the transport) and HISTORY (Kumi's changes, newest first), as both UI
 // halves show them. Nothing here acts: what a row can do comes from the half that draws it.
-import { Badge } from '@kumi/controls'
+import { Badge, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
@@ -111,15 +111,15 @@ function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; key
   const app = dawName(daw, t)
   if (how === 'buried') {
     return (
-      <span title={t('history.byHandTitle', app)} style={{ ...S.muted, color: T.warn, whiteSpace: 'normal' }}>
-        {t('history.byHand', app)}
-      </span>
+      <Tip label={t('history.byHandTitle', app)}>
+        <span style={{ ...S.muted, color: T.warn, whiteSpace: 'normal' }}>{t('history.byHand', app)}</span>
+      </Tip>
     )
   }
   return (
-    <span title={t('history.dawUndoTitle', app, keys)} style={{ ...S.muted, whiteSpace: 'normal' }}>
-      {t('history.dawUndo', app)}
-    </span>
+    <Tip label={t('history.dawUndoTitle', app, keys)}>
+      <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.dawUndo', app)}</span>
+    </Tip>
   )
 }
 

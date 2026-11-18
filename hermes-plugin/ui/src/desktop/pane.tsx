@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { Button } from '@kumi/controls'
 import { T } from '@kumi/theme'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { beatSeconds, canUndoChange, changesOf, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, STARTER_REQUESTS, statusNamesProject, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
@@ -18,14 +18,22 @@ import { PendingScriptView, SavedScript } from './script.tsx'
 // The starters' labels, in the producer's language (their requests stay English, as every request does).
 const STARTER_LABELS = { look: 'pane.starterLook', change: 'pane.starterChange', find: 'pane.starterFind' } as const
 
-/** The time, re-read every `every` ms while mounted, for "4 min ago" labels. */
-export function useNow(every = 30_000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), every)
-    return () => clearInterval(timer)
-  }, [every])
-  return now
+/** The time for "4 min ago" labels. Kumi's status poll moves it on (every 30 s while the pane is in view, and as it
+ *  comes back into view): the pane keeps no timer of its own. */
+export class Clock {
+  private now = Date.now()
+  private readonly listeners = new Set<() => void>()
+  readonly get = (): number => this.now
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+  tick(): void {
+    this.now = Date.now()
+    for (const listener of this.listeners) listener()
+  }
 }
 
 export function ownerSession(state: KumiState): null | string {
@@ -35,10 +43,73 @@ export function ownerSession(state: KumiState): null | string {
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void; onOpenMeasurements: () => void }) {
+interface PaneProps {
+  ctx: PluginContext
+  store: KumiStore
+  clock: Clock
+  onOpenMap: () => void
+  onOpenMeasurements: () => void
+}
+
+/** The least of the pane worth laying its content out in when Desktop runs Kumi's column past the window's edge (145
+ *  px of 240 at a 900 px window with the map open beside the chat): under 8rem on screen nothing reads, and the content
+ *  keeps the pane's width. */
+const LEAST_ON_SCREEN = 128
+/** Every hundredth of the pane coming into or going out of view: the observer then sees the window's edge move. */
+const STEPS = Array.from({ length: 101 }, (_, step) => step / 100)
+
+/** Whether nothing hides the element: `display`, `visibility` or `opacity` on it or a parent. */
+const unhidden = (element: Element) => typeof element.checkVisibility !== 'function' || element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+
+/** Kumi's pane, handing `onAsk` a function that says whether it's in view now (null once it's gone). Desktop's own
+ *  `paneVisibility('kumi:pane')` reads false while the pane shows (it's stacked with Desktop's hidden Review pane, whose
+ *  id stays the group's active one), so Kumi asks its own root instead: its observer knows whether its box is on
+ *  screen, and `checkVisibility` whether Desktop hides it behind another tab of its column (Files in front keeps the
+ *  pane's box and hides it with `visibility` and `opacity` on a parent, which no observer reports). It's asked, never
+ *  watched: no timer of the pane's own. The same observer keeps the pane's content in the part of it that's on screen:
+ *  in a narrow window Desktop can run Kumi's column past the window's edge (P8: 95 px at 900 px with the map open
+ *  beside the chat), and the right of every row, Undo with it, would be cut off. */
+export function KumiPane({ onAsk, ...props }: PaneProps & { onAsk?: (inView: (() => boolean) | null) => void }) {
+  const root = useRef<HTMLDivElement | null>(null)
+  const [cut, setCut] = useState({ left: 0, right: 0 })
+  useEffect(() => {
+    const element = root.current
+    if (!element) return
+    let intersecting = false
+    const seen = new IntersectionObserver(
+      entries => {
+        const entry = entries[entries.length - 1]
+        if (!entry) return
+        intersecting = entry.isIntersecting
+        const box = entry.boundingClientRect
+        const shown = entry.intersectionRect
+        const left = entry.isIntersecting ? Math.max(0, Math.round(shown.left - box.left)) : 0
+        const right = entry.isIntersecting ? Math.max(0, Math.round(box.right - shown.right)) : 0
+        const next = box.width - left - right < LEAST_ON_SCREEN ? { left: 0, right: 0 } : { left, right }
+        setCut(current => (current.left === next.left && current.right === next.right ? current : next))
+      },
+      { threshold: STEPS }
+    )
+    seen.observe(element)
+    onAsk?.(() => intersecting && unhidden(element))
+    return () => {
+      seen.disconnect()
+      onAsk?.(null)
+    }
+  }, [onAsk])
+  return (
+    <div ref={root} style={{ height: '100%' }}>
+      <div style={{ height: '100%', marginLeft: cut.left, marginRight: cut.right }}>
+        <PaneBody {...props} />
+      </div>
+    </div>
+  )
+}
+
+function PaneBody({ ctx, store, clock, onOpenMap, onOpenMeasurements }: PaneProps) {
   const t = useT()
   const state = useKumi(store)
-  const now = useNow()
+  const now = useSyncExternalStore(clock.subscribe, clock.get, clock.get)
   if (state.available === false) {
     return (
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -73,6 +144,17 @@ export function KumiPane({ ctx, store, onOpenMap, onOpenMeasurements }: { ctx: P
         </div>
         {setupMessage && <span style={note}>{setupMessage}</span>}
         {state.error && <span style={{ ...note, color: T.warn }}>{t('pane.backendError', state.error)}</span>}
+        {/* A find or a measurement whose tab a narrow window held back (P8): the one thing to do, at the top, until it's
+            opened or another takes its place. Under twenty HISTORY rows it was lost, while the chat said the sounds were
+            lit up on the map. */}
+        {state.waiting && (
+          <div role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ ...TYPE.small, color: T.text, flex: '1 1 auto' }}>{state.waiting.tab === 'map' ? t('pane.waitingFound', state.waiting.count) : t('pane.waitingMeasured')}</span>
+            <Button kind="primary" onClick={state.waiting.tab === 'map' ? onOpenMap : onOpenMeasurements}>
+              {state.waiting.tab === 'map' ? t('pane.showOnMap') : t('pane.showMeasurement')}
+            </Button>
+          </div>
+        )}
         {state.status?.unsure && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
             <span style={{ ...note, color: T.warn }}>

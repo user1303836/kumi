@@ -1,6 +1,7 @@
 // Under the composer of Kumi's own chat: what Kumi sees right now (FOCUS), so "this track" means the same to the
 // producer and to Kumi before they send. It shows in no other chat, and it does nothing: it's words, not a control.
 import { host } from '@hermes/plugin-sdk'
+import { Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import { useCallback, useSyncExternalStore } from 'react'
 
@@ -36,13 +37,11 @@ export function FocusHint({ store }: { store: KumiStore }) {
   // While Kumi isn't sure the project is as it was (CC-2 R6), what it last saw may not be what's there: say so, dimmed.
   const unsure = Boolean(state.status?.unsure)
   return (
-    <div
-      data-unsure={unsure || undefined}
-      style={{ ...S.row, gap: 6, padding: '2px 10px', maxWidth: '100%', opacity: unsure ? 0.5 : 1 }}
-      title={unsure ? t('hint.titleUnsure') : t('hint.title')}
-    >
-      <Dot color={unsure ? T.faint : (colorOf(state.focus?.focus?.track) ?? T.faint)} size={7} />
-      <span style={{ ...S.faint, ...S.ellipsis }}>{`${unsure ? t('hint.lastSaw') : t('hint.sees')} ${path.join(' › ')}${tempo ? ` · ${tempo}` : ''}`}</span>
-    </div>
+    <Tip label={unsure ? t('hint.titleUnsure') : t('hint.title')}>
+      <div data-unsure={unsure || undefined} style={{ ...S.row, gap: 6, padding: '2px 10px', maxWidth: '100%', opacity: unsure ? 0.5 : 1 }}>
+        <Dot color={unsure ? T.faint : (colorOf(state.focus?.focus?.track) ?? T.faint)} size={7} />
+        <span style={{ ...S.faint, ...S.ellipsis }}>{`${unsure ? t('hint.lastSaw') : t('hint.sees')} ${path.join(' › ')}${tempo ? ` · ${tempo}` : ''}`}</span>
+      </div>
+    </Tip>
   )
 }

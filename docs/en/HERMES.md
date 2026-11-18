@@ -125,7 +125,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 "Find me a dusty, dark snare."
 - Kumi searches the sample folders you listed by how each sound measures, and by the words in its name and folder. In
-  Hermes Desktop the sound map opens.
+  Hermes Desktop the sound map opens beside the chat; in a window too narrow for both, Kumi's pane offers it at its top
+  (**Show on the map**).
 - Ask by tempo, key, length or kind too: "120 BPM drum loops in A minor", "a dark kick under 300 ms". Each result
   says why it matches, and on what: the tempo, key or note Kumi indexed at the folder's last scan (from the audio, or
   from a file's or folder's name; a rescan updates them), or what it measured ("dark", "bright", "dusty", "lo-fi",

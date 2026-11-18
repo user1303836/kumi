@@ -2,6 +2,7 @@
 // opens the sound map or Kumi's settings, and asks for setup or a connection in the chat when one is needed.
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, StatusDot } from '@hermes/plugin-sdk'
+import { Tip } from '@kumi/controls'
 
 import { beatSeconds, chipWords } from '../shared/format.ts'
 import { useKumi } from '../shared/hooks.ts'
@@ -34,34 +35,36 @@ export function StatusChip({
   const pulse = beating(connected ? beatSeconds(state.focus?.transport) : null)
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          aria-label={t('chip.label', words.text)}
-          className={FOCUSABLE}
-          title="Kumi"
-          type="button"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            height: '100%',
-            padding: '0 6px',
-            border: 0,
-            background: 'transparent',
-            color: 'var(--ui-text-tertiary)',
-            font: 'inherit',
-            fontSize: '0.6875rem',
-            fontVariantNumeric: 'tabular-nums',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <span className={pulse.className} style={{ display: 'inline-flex', ...pulse.style }}>
-            <StatusDot tone={words.tone} />
-          </span>
-          {words.text}
-        </button>
-      </DropdownMenuTrigger>
+      {/* Hermes's Tip around the menu's trigger, as Radix composes them: hover or focus names the chip, a click opens the menu. */}
+      <Tip label="Kumi">
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={t('chip.label', words.text)}
+            className={FOCUSABLE}
+            type="button"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              height: '100%',
+              padding: '0 6px',
+              border: 0,
+              background: 'transparent',
+              color: 'var(--ui-text-tertiary)',
+              font: 'inherit',
+              fontSize: '0.6875rem',
+              fontVariantNumeric: 'tabular-nums',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <span className={pulse.className} style={{ display: 'inline-flex', ...pulse.style }}>
+              <StatusDot tone={words.tone} />
+            </span>
+            {words.text}
+          </button>
+        </DropdownMenuTrigger>
+      </Tip>
       <DropdownMenuContent align="end" side="top">
         <DropdownMenuItem onSelect={onOpenMap}>{t('chip.openMap')}</DropdownMenuItem>
         {steps.map(step => (
