@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { ago, bpm, catchUpLines, changesOf, clean, cleanupWords, colorOf, dawName, focusParameter, focusPath, focusPlace, nameOf, undoRowOf } from './format.ts'
 import { english, type Translate } from './i18n.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
-import { Clamp, Dot, FOCUSABLE, Pending, S, TYPE, useT } from './ui.tsx'
+import { Clamp, Dot, FOCUSABLE, PathBreaks, Pending, S, TYPE, useT } from './ui.tsx'
 
 // Each state's mark, tone, and word (a catalog key). `kept` is muted, not a success: the producer changed it since,
 // so Kumi left it as it is.
@@ -150,20 +150,24 @@ function metaOf(item: HistoryItem, now: number | undefined, t: Translate): { tra
   return { track, text: [track, family, ago(item.at, now, t), item.state === 'undone' ? t('history.undone') : ''].filter(Boolean).join(' · ') }
 }
 
-/** A row's words: its title (in two lines with the rest on a click, or `whole`), its meta line unless `meta` is false,
- *  and any note the row carries. */
-function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }: { item: HistoryItem; live: boolean; daw: unknown; target?: string; now?: number; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean; whole?: boolean; meta?: boolean }) {
-  const t = useT()
+/** A row's title: in two lines with the rest on a click, or `whole`. */
+function RowTitle({ item, whole = false }: { item: HistoryItem; whole?: boolean }) {
   const title = clean(item.title ?? item.label ?? item.id, 300)
+  const titleStyle = { ...TYPE.body, color: item.state === 'undone' ? T.muted : T.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined, overflowWrap: 'anywhere' } as const
+  // Two lines, then the rest on a click or Enter: the part of a title that differs is often its end ("…→ Dusty Snare
+  // 04.wav"), which a one-line cut hid. A step the producer opened to read is read whole.
+  return whole ? <span style={titleStyle}>{title}</span> : <Clamp style={titleStyle} text={title} />
+}
+
+/** The lines under a row's title: its meta line unless `meta` is false, and any note the row carries. A note's path
+ *  breaks between folders (`PathBreaks`); a name longer than the line is all that breaks anywhere. */
+function RowLines({ item, live, daw, target, now, detail, restartSaid, whole = false, meta = true }: { item: HistoryItem; live: boolean; daw: unknown; target?: string; now?: number; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean; whole?: boolean; meta?: boolean }) {
+  const t = useT()
   const line = metaOf(item, now, t)
   const dawUndo = item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? item.daw_undo : null
   const note = { ...TYPE.small, color: T.muted, whiteSpace: 'normal', overflowWrap: 'anywhere' } as const
-  const titleStyle = { ...TYPE.body, color: item.state === 'undone' ? T.muted : T.text, textDecoration: item.state === 'undone' ? 'line-through' : undefined, overflowWrap: 'anywhere' } as const
   return (
     <>
-      {/* Two lines, then the rest on a click or Enter: the part of a title that differs is often its end ("…→ Dusty
-          Snare 04.wav"), which a one-line cut hid. A step the producer opened to read is read whole. */}
-      {whole ? <span style={titleStyle}>{title}</span> : <Clamp style={titleStyle} text={title} />}
       {meta && (
         <span style={{ ...S.row, gap: 6 }}>
           {line.track && <Dot color={colorOf(item.track) ?? T.faint} size={6} />}
@@ -172,12 +176,14 @@ function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = f
       )}
       {item.state === 'unsure' || item.state === 'partial' ? (
         <span style={{ ...note, color: T.warn }}>
-          {[clean(item.reason ?? item.note ?? t('history.unconfirmed'), 200), cleanupWords(item.cleanup, t), t('history.lookFirst')].filter(Boolean).join(' ')}
+          <PathBreaks text={[clean(item.reason ?? item.note ?? t('history.unconfirmed'), 200), cleanupWords(item.cleanup, t), t('history.lookFirst')].filter(Boolean).join(' ')} />
         </span>
       ) : item.note ? (
-        // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi never
-        // undoes one, CC-19); a restart's is said once, above the rows it covers.
-        <span style={note}>{clean(item.note, 400)}</span>
+        // The runtime's own words for any other row (where it kept the project, why an undo didn't happen), why a
+        // script's can't (Kumi never undoes one, CC-19); a restart's is said once, above the rows it covers.
+        <span style={note}>
+          <PathBreaks text={clean(item.note, 400)} />
+        </span>
       ) : item.family === 'script' ? (
         <span style={note}>{t('history.scriptUndo', dawName(daw, t))}</span>
       ) : (
@@ -186,6 +192,16 @@ function RowWords({ item, live, daw, target, now, detail, restartSaid, whole = f
       {item.copy?.file ? <span style={note}>{t('history.copyKept', clean(item.copy.file.split(/[/\\]/).pop() ?? '', 120))}</span> : null}
       {dawUndo && <DawUndo daw={daw} how={dawUndo} keys={undoKeys(target)} />}
       {detail?.(item)}
+    </>
+  )
+}
+
+/** A row's words: its title, then the lines under it. */
+function RowWords(props: { item: HistoryItem; live: boolean; daw: unknown; target?: string; now?: number; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean; whole?: boolean; meta?: boolean }) {
+  return (
+    <>
+      <RowTitle item={props.item} whole={props.whole} />
+      <RowLines {...props} />
     </>
   )
 }
@@ -200,10 +216,14 @@ function Mark({ item, live }: { item: HistoryItem; live: boolean }) {
   )
 }
 
-/** One change: its newest step as the head (the one its undo starts from), with the change's action beside it, and
- *  its other steps folded under "N more steps". Opened, the steps take the row's whole width (no column is kept for a
- *  button there), read in full, and say only what the head doesn't: a step's mark only when its state differs, its
- *  meta line only when it isn't the head's. */
+// Where a row's words start: past the state's mark (14 px) and the gap after it (8 px).
+const MARK_ROOM = 22
+
+/** One change: its newest step as the head (the one its undo starts from), with the change's action on its title's
+ *  line, and its other steps folded under "N more steps". The lines under the title (meta, notes, the steps' toggle)
+ *  take the row's whole width: the action belongs to the title's line, not to a column running down the row, where a
+ *  note's path was squeezed into scraps. Opened, the steps take the row's whole width too, read in full, and say only
+ *  what the head doesn't: a step's mark only when its state differs, its meta line only when it isn't the head's. */
 function Change({ rows, live, daw, target, now, action, detail, restartSaid }: { rows: HistoryItem[]; live: boolean; daw: unknown; target?: string; now?: number; action?: (head: HistoryItem, rows: HistoryItem[]) => ReactNode; detail?: (item: HistoryItem) => ReactNode; restartSaid: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -214,30 +234,33 @@ function Change({ rows, live, daw, target, now, action, detail, restartSaid }: {
   const headMark = stateOf(head, t, live).mark
   const headMeta = metaOf(head, now, t).text
   return (
-    <li style={{ display: 'flex', flexDirection: 'column', padding: '8px 0', borderTop: `1px solid ${T.hairline}` }}>
+    <li style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 0', borderTop: `1px solid ${T.hairline}` }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Mark item={head} live={live} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-          <RowWords item={head} {...words} />
-          {others.length > 0 && (
-            <button
-              aria-expanded={open}
-              className={FOCUSABLE}
-              onClick={() => setOpen(!open)}
-              type="button"
-              style={{ ...TYPE.small, alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 24, padding: 0, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', fontFamily: 'inherit' }}
-            >
-              <span aria-hidden style={{ display: 'inline-block', width: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }}>
-                ▸
-              </span>
-              {open ? t('history.fewerSteps', others.length) : t('history.moreSteps', others.length)}
-            </button>
-          )}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+          <RowTitle item={head} />
         </div>
         {dawUndo ? null : action?.(head, rows)}
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, paddingLeft: MARK_ROOM }}>
+        <RowLines item={head} {...words} />
+        {others.length > 0 && (
+          <button
+            aria-expanded={open}
+            className={FOCUSABLE}
+            onClick={() => setOpen(!open)}
+            type="button"
+            style={{ ...TYPE.small, alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 24, padding: 0, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            <span aria-hidden style={{ display: 'inline-block', width: 10, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }}>
+              ▸
+            </span>
+            {open ? t('history.fewerSteps', others.length) : t('history.moreSteps', others.length)}
+          </button>
+        )}
+      </div>
       {open && (
-        <ol style={{ listStyle: 'none', margin: '2px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {others.map(row => (
             <li key={row.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               {stateOf(row, t, live).mark !== headMark ? <Mark item={row} live={live} /> : <span aria-hidden style={{ width: 14, flex: 'none' }} />}
