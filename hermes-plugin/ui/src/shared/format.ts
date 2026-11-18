@@ -364,5 +364,7 @@ export function chipWords(status: Status | null, tempo?: unknown, t: Translate =
   // Its last word was that it stopped (its chat ended, or it sat idle): nothing's wrong, it just isn't running.
   if (status.stale && status.running === false) return { tone: 'muted', text: [daw, project, t('chip.stopped')].filter(Boolean).join(' · ') }
   if (status.stale && status.owner) return { tone: 'warn', text: [daw, project, t('chip.notAnswering')].filter(Boolean).join(' · ') }
+  // A running Kumi that sees the DAW's app isn't open says that, not a disconnect with no cause.
+  if (!status.stale && status.setup?.daw_open === false) return { tone: 'muted', text: t('chip.dawClosed', daw) }
   return { tone: 'muted', text: t('chip.notConnected', daw) }
 }

@@ -28,6 +28,7 @@ import type { DesignResult } from './design.ts'
 import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd } from './grow.ts'
 import { GrowLayer } from './GrowLayer.tsx'
+import { useLessMotion } from './hooks.ts'
 import { arrangedModel, buildModel, fitView, floatBeside, foundLine, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
@@ -301,8 +302,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // Motion: when each leaving sound started fading, when the map arrived (its points pop in from the middle out), the
   // dots-to-tiles morph, and the sounds flying into the palette. One clock moves once a frame while any of them runs,
   // and not otherwise: a map that sits still draws nothing, and a sound playing redraws only the overlay. A system
-  // asking for less motion gets none of it.
-  const still = useMemo(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, [])
+  // asking for less motion gets none of it, from the moment it asks.
+  const still = useLessMotion()
   const leftAt = useRef(new Map<string, number>())
   const introAt = useRef(-Infinity)
   const until = useRef(0)
@@ -1025,6 +1026,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       event.preventDefault()
       onPicked?.([], 'replace')
       setSaid(t('dock.cleared'))
+      return
+    }
+    // Enter does on the sound the arrow keys reached what a click does on it: while Grow names its sounds it names this
+    // one, else it adds it to the picks or lets it go (a click with Command or Ctrl), so Make is a keyboard's too.
+    if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+      event.preventDefault()
+      if (grow?.choosing) {
+        const end = endOf(selected)
+        if (end) grow.name(end)
+      } else if (onPicked) {
+        const count = pickedIds.length + (pickedIds.includes(selected) ? -1 : 1)
+        onPicked([selected], 'toggle')
+        setSaid(count > 0 ? t('dock.picked', count) : t('dock.cleared'))
+      }
       return
     }
     const key = mapKey(event)

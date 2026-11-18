@@ -57,6 +57,7 @@
       stopped: "Kumi stopped",
       notAnswering: "not answering",
       notConnected: (daw) => `Kumi · ${daw} not connected`,
+      dawClosed: (daw) => `Kumi · ${daw} is closed`,
       label: (text) => `Kumi: ${text}`,
       openMap: "Open the sound map",
       settings: "Kumi settings"
@@ -161,7 +162,7 @@
       tab: "Sound map",
       canvas: "Sound map",
       roledescription: "sound map",
-      keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
+      keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Enter adds the sound to the picks or lets it go (while Grow names its sounds, it names this one). Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
       failed: (error) => `Kumi couldn't read the sound map: ${error}`,
@@ -184,8 +185,8 @@
       near: (name) => `Near “${name}”`,
       nearMany: (name, n) => `Near “${name}” and ${n} more`,
       more: (n) => `and ${n} more on the map`,
-      play: "▶ Play",
-      stop: "■ Stop",
+      play: "Play",
+      stop: "Stop",
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
       useTitle: "Put its name and id in the chat, then say what to do with it",
@@ -850,6 +851,7 @@
       stopped: "Kumi は停止中",
       notAnswering: "応答なし",
       notConnected: (daw) => `Kumi · ${daw} 未接続`,
+      dawClosed: (daw) => `Kumi · ${daw} は閉じています`,
       label: (text) => `Kumi: ${text}`,
       openMap: "サンプルマップを開く",
       settings: "Kumi の設定"
@@ -954,7 +956,7 @@
       tab: "サンプルマップ",
       canvas: "サンプルマップ",
       roledescription: "サンプルマップ",
-      keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
+      keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Enter でそのサウンドを選択に加えるか外します（グロウがサウンドを選んでいる間は、そのサウンドを選びます）。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
       failed: (error) => `サンプルマップを読み込めませんでした: ${error}`,
@@ -977,8 +979,8 @@
       near: (name) => `「${name}」に近いサウンド`,
       nearMany: (name, n) => `「${name}」ほか ${n} 個に近いサウンド`,
       more: (n) => `ほか ${n} 個はマップ上に`,
-      play: "▶ 再生",
-      stop: "■ 停止",
+      play: "再生",
+      stop: "停止",
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
       useTitle: "名前と ID をチャットに入れます。どうするかはそのあとで伝えてください",
@@ -1634,6 +1636,7 @@
       stopped: "Kumi 已停止",
       notAnswering: "无响应",
       notConnected: (daw) => `Kumi · ${daw} 未连接`,
+      dawClosed: (daw) => `Kumi · ${daw} 未打开`,
       label: (text) => `Kumi：${text}`,
       openMap: "打开采样地图",
       settings: "Kumi 设置"
@@ -1738,7 +1741,7 @@
       tab: "采样地图",
       canvas: "采样地图",
       roledescription: "采样地图",
-      keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
+      keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Enter 把这个声音加入已选或取消选择（生长在选声音时，按 Enter 选中这个声音）。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
       failed: (error) => `无法读取采样地图：${error}`,
@@ -1761,8 +1764,8 @@
       near: (name) => `与“${name}”相近的声音`,
       nearMany: (name, n) => `与“${name}”及另外 ${n} 个相近的声音`,
       more: (n) => `地图上还有 ${n} 个`,
-      play: "▶ 播放",
-      stop: "■ 停止",
+      play: "播放",
+      stop: "停止",
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
       useTitle: "把它的名称和 ID 放进对话，然后说要怎么用它",
@@ -2580,6 +2583,7 @@
     }
     if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
     if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
+    if (!status.stale && status.setup?.daw_open === false) return { tone: "muted", text: t("chip.dawClosed", daw) };
     return { tone: "muted", text: t("chip.notConnected", daw) };
   }
 
@@ -3630,6 +3634,18 @@
   function useWant(store, part) {
     useEffect(() => store.want(part), [store, part]);
   }
+  var LESS_MOTION = "(prefers-reduced-motion: reduce)";
+  var lessMotion = () => typeof matchMedia === "function" && matchMedia(LESS_MOTION).matches;
+  var onLessMotion = (changed) => {
+    if (typeof matchMedia !== "function") return () => {
+    };
+    const query = matchMedia(LESS_MOTION);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  };
+  function useLessMotion() {
+    return useSyncExternalStore(onLessMotion, lessMotion, lessMotion);
+  }
   var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
   var PREVIEW_SECONDS = 2;
   var PREVIEW_FADE_SECONDS = 0.2;
@@ -3961,6 +3977,20 @@
       }
     );
   }
+  function radioKeys(index, count, chosen, choose) {
+    return {
+      tabIndex: index === Math.max(0, chosen) ? 0 : -1,
+      onKeyDown: (event) => {
+        const step2 = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+        if (!step2 || count < 2 || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        const next = (index + step2 + count) % count;
+        choose(next);
+        const radio = event.currentTarget.parentElement?.children[next];
+        if (radio instanceof HTMLElement) radio.focus();
+      }
+    };
+  }
 
   // src/shared/HistoryView.tsx
   var STATE = {
@@ -4280,7 +4310,7 @@
     const all = rest === null ? options : [{ value: void 0, label: rest }, ...options];
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }, children: [
       /* @__PURE__ */ jsx("span", { style: { fontSize: 11.5, color: value === void 0 ? T.muted : T.secondary }, children: label }),
-      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option) => {
+      /* @__PURE__ */ jsx("div", { "aria-label": label, role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 4 }, children: all.map((option, index) => {
         const chosen = option.value === value;
         return /* @__PURE__ */ jsxs(
           "button",
@@ -4288,6 +4318,7 @@
             "aria-checked": chosen,
             className: FOCUSABLE,
             onClick: () => onChange(option.value),
+            ...radioKeys(index, all.length, all.findIndex((each) => each.value === value), (next) => onChange(all[next].value)),
             role: "radio",
             title: option.title,
             type: "button",
@@ -4922,10 +4953,18 @@
       setFlights((current) => [...current, { key, from: canvas.getBoundingClientRect(), to, image: canvas.toDataURL() }]);
     };
     const [open, setOpen] = useState(false);
+    const panel = useRef(null);
+    const opener = useRef(null);
     useEffect(() => {
+      panel.current?.focus({ preventScroll: true });
       const frame2 = requestAnimationFrame(() => setOpen(true));
       return () => cancelAnimationFrame(frame2);
     }, []);
+    const close = () => {
+      const back = opener.current;
+      onClose();
+      if (back?.isConnected) back.focus({ preventScroll: true });
+    };
     const card = CARDS.find((entry) => entry.key === cardKey) ?? CARDS[0];
     const note = cardNote(sources.length);
     const refused = note !== null;
@@ -4978,6 +5017,7 @@
             className: FOCUSABLE,
             disabled: refused,
             onClick: () => setCardKey(lastMode[tab]),
+            ...radioKeys(index, TABS.length, TABS.indexOf(card.tab), (next) => setCardKey(lastMode[TABS[next]])),
             role: "radio",
             title: t(`make.opHints.${tab}`),
             type: "button",
@@ -5006,18 +5046,20 @@
           tab
         );
       }) }),
-      modes.length > 1 && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry) => {
+      modes.length > 1 && /* @__PURE__ */ jsx("div", { "aria-label": t(`make.ops.${card.tab}`), role: "radiogroup", style: { ...S.row, flexWrap: "wrap", gap: 6 }, children: modes.map((entry, index) => {
         const picked = entry.key === card.key;
+        const choose = (chosen2) => {
+          setCardKey(chosen2.key);
+          setLastMode((current) => ({ ...current, [chosen2.tab]: chosen2.key }));
+        };
         return /* @__PURE__ */ jsxs(
           "button",
           {
             "aria-checked": picked,
             className: FOCUSABLE,
             disabled: refused,
-            onClick: () => {
-              setCardKey(entry.key);
-              setLastMode((current) => ({ ...current, [entry.tab]: entry.key }));
-            },
+            onClick: () => choose(entry),
+            ...radioKeys(index, modes.length, modes.findIndex((each) => each.key === card.key), (next) => choose(modes[next])),
             role: "radio",
             title: t(`make.cards.${entry.key}.hint`),
             type: "button",
@@ -5050,7 +5092,19 @@
       "section",
       {
         "aria-label": t("make.title"),
+        onFocus: (event) => {
+          if (opener.current === null && event.target === event.currentTarget && event.relatedTarget instanceof HTMLElement) opener.current = event.relatedTarget;
+        },
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          event.preventDefault();
+          close();
+        },
+        ref: panel,
+        tabIndex: -1,
         style: {
+          // It holds the focus only as it opens (Tab goes on to its controls, which show the ring): no ring round it all.
+          outline: "none",
           ...placement === "side" ? { position: "absolute", right: 8, top: 52, bottom: 8, width: "min(430px, 46%)" } : placement === "bottom" ? { position: "absolute", left: 8, right: 8, bottom: 8, maxHeight: "82%" } : {},
           display: "flex",
           flexDirection: "column",
@@ -5085,7 +5139,7 @@
                 ]
               }
             ),
-            /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: onClose, title: t("make.close"), children: "×" })
+            /* @__PURE__ */ jsx(TextButton, { label: t("make.close"), onClick: close, title: t("make.close"), children: "×" })
           ] }),
           /* @__PURE__ */ jsxs("div", { ref: list, style: { position: "relative", overflowY: "auto", padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }, children: [
             /* @__PURE__ */ jsxs("div", { "aria-label": t("make.sources"), role: "list", style: { ...S.row, flex: "none", flexWrap: "wrap", gap: 4 }, children: [
@@ -7275,7 +7329,10 @@
               ] }),
               /* @__PURE__ */ jsx(GrownWave, { colors: [fromColor, toColor], playing: playing === picked.result.artifact_id, result: picked.result }, picked.result.artifact_id),
               /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-                /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: playing === picked.result.artifact_id ? t("map.stop") : t("map.play") }),
+                /* @__PURE__ */ jsxs(TextButton, { onClick: () => playing === picked.result.artifact_id ? onStop() : onPlay(picked.result), children: [
+                  /* @__PURE__ */ jsx("span", { "aria-hidden": "true", children: playing === picked.result.artifact_id ? "■" : "▶" }),
+                  playing === picked.result.artifact_id ? t("map.stop") : t("map.play")
+                ] }),
                 actions?.(picked.result),
                 fromMap && toMap && /* @__PURE__ */ jsx(
                   TextButton,
@@ -7377,6 +7434,11 @@
       "section",
       {
         "aria-label": t("map.player", name),
+        onKeyDown: (event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          event.preventDefault();
+          onClose();
+        },
         style: {
           ...glass,
           position: "relative",
@@ -7594,7 +7656,7 @@
     const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
     const shown = useMemo(() => mask.reduce((count, keep2) => count + (keep2 === 1 ? 1 : 0), 0), [mask]);
     const leavingCount = useMemo(() => mask.reduce((count, keep2) => count + (keep2 === 2 ? 1 : 0), 0), [mask]);
-    const still = useMemo(() => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches, []);
+    const still = useLessMotion();
     const leftAt = useRef(/* @__PURE__ */ new Map());
     const introAt = useRef(-Infinity);
     const until = useRef(0);
@@ -8194,6 +8256,18 @@
         event.preventDefault();
         onPicked?.([], "replace");
         setSaid(t("dock.cleared"));
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && selected !== null && indexOf.has(selected)) {
+        event.preventDefault();
+        if (grow?.choosing) {
+          const end = endOf(selected);
+          if (end) grow.name(end);
+        } else if (onPicked) {
+          const count = pickedIds.length + (pickedIds.includes(selected) ? -1 : 1);
+          onPicked([selected], "toggle");
+          setSaid(count > 0 ? t("dock.picked", count) : t("dock.cleared"));
+        }
         return;
       }
       const key = mapKey(event);

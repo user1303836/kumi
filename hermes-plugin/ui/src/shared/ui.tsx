@@ -218,3 +218,22 @@ export function Clamp({ text, lines = 2, style, title }: { text: string; lines?:
     </span>
   )
 }
+
+/** A radio group's keyboard, as a native one has (WAI-ARIA's radio group): the group is one Tab stop, its chosen radio
+ *  (the first while none is), and the arrow keys move to the next or previous radio and choose it, wrapping at the
+ *  ends. Spread on radio `index` of `count`, `chosen` being the chosen one's index (-1: none). Focus moves through the
+ *  group's own children, which must be its radios in order. */
+export function radioKeys(index: number, count: number, chosen: number, choose: (index: number) => void): { tabIndex: number; onKeyDown: (event: KeyboardEvent<HTMLElement>) => void } {
+  return {
+    tabIndex: index === Math.max(0, chosen) ? 0 : -1,
+    onKeyDown: event => {
+      const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+      if (!step || count < 2 || event.altKey || event.ctrlKey || event.metaKey) return
+      event.preventDefault()
+      const next = (index + step + count) % count
+      choose(next)
+      const radio = event.currentTarget.parentElement?.children[next]
+      if (radio instanceof HTMLElement) radio.focus()
+    }
+  }
+}

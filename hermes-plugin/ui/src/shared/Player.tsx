@@ -104,6 +104,12 @@ export function Player({
   return (
     <section
       aria-label={t('map.player', name)}
+      // Escape lets go of the sound from anywhere in the player, as its × does; the map's own Escape is for the picks.
+      onKeyDown={event => {
+        if (event.key !== 'Escape' || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+        event.preventDefault()
+        onClose()
+      }}
       style={{
         ...glass,
         position: 'relative',

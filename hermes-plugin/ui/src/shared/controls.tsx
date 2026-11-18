@@ -7,7 +7,7 @@ import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { useRef, useState } from 'react'
 
 import type { Span } from './design.ts'
-import { FOCUSABLE, S } from './ui.tsx'
+import { FOCUSABLE, radioKeys, S } from './ui.tsx'
 
 export type SliderValue = number | [number, number]
 
@@ -217,7 +217,7 @@ export function Pills<V extends number | string>({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
       <span style={{ fontSize: 11.5, color: value === undefined ? T.muted : T.secondary }}>{label}</span>
       <div aria-label={label} role="radiogroup" style={{ ...S.row, flexWrap: 'wrap', gap: 4 }}>
-        {all.map(option => {
+        {all.map((option, index) => {
           const chosen = option.value === value
           return (
             <button
@@ -225,6 +225,7 @@ export function Pills<V extends number | string>({
               className={FOCUSABLE}
               key={String(option.value ?? '')}
               onClick={() => onChange(option.value)}
+              {...radioKeys(index, all.length, all.findIndex(each => each.value === value), next => onChange(all[next].value))}
               role="radio"
               title={option.title}
               type="button"

@@ -243,7 +243,10 @@ export function GrowLayer({
             {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
             <GrownWave colors={[fromColor, toColor]} key={picked.result.artifact_id} playing={playing === picked.result.artifact_id} result={picked.result} />
             <div style={{ ...S.row, gap: 6, flexWrap: 'wrap' }}>
-              <TextButton onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>{playing === picked.result.artifact_id ? t('map.stop') : t('map.play')}</TextButton>
+              <TextButton onClick={() => (playing === picked.result.artifact_id ? onStop() : onPlay(picked.result))}>
+                <span aria-hidden="true">{playing === picked.result.artifact_id ? '■' : '▶'}</span>
+                {playing === picked.result.artifact_id ? t('map.stop') : t('map.play')}
+              </TextButton>
               {actions?.(picked.result)}
               {fromMap && toMap && (
                 <TextButton
