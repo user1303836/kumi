@@ -3191,15 +3191,17 @@
   }
   function errorText(error) {
     const text = error instanceof Error ? error.message : String(error ?? "");
+    let said = text;
     const json = text.indexOf("{");
     if (json >= 0) {
       try {
         const body = JSON.parse(text.slice(json));
-        if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") return body.detail;
+        if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") said = body.detail;
       } catch {
       }
     }
-    return text || "no answer";
+    if (said.includes("Traceback (most recent call last)")) said = said.trim().split("\n").filter((line) => line.trim()).pop()?.trim() ?? said;
+    return said || "no answer";
   }
   function notLive(state) {
     return {

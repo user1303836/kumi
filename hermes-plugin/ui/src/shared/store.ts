@@ -151,19 +151,22 @@ export function statusOf(error: unknown): number {
 }
 
 /** Why a request failed, in the backend's words: Desktop's `ctx.rest` rejects with "<status>: <body>", and FastAPI's
- *  body says why in `detail`; the dashboard's error already is that sentence. */
+ *  body says why in `detail`; the dashboard's error already is that sentence. A Python traceback in it says only the
+ *  error it ends with ("RuntimeError: state.db locked"), never its file and line frames. */
 export function errorText(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error ?? '')
+  let said = text
   const json = text.indexOf('{')
   if (json >= 0) {
     try {
       const body: unknown = JSON.parse(text.slice(json))
-      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
+      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') said = body.detail
     } catch {
       // not JSON: the text as it came
     }
   }
-  return text || 'no answer'
+  if (said.includes('Traceback (most recent call last)')) said = said.trim().split('\n').filter(line => line.trim()).pop()?.trim() ?? said
+  return said || 'no answer'
 }
 
 /** What's shown once Kumi stops answering: the last known state, nothing live in it and nothing to undo. */
