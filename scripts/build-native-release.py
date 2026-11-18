@@ -2,6 +2,7 @@
 """Build native Kumi bundles and receipt-bound bridge artifacts (Python 3.11+)."""
 from __future__ import annotations
 import argparse
+import concurrent.futures
 import datetime
 import gzip
 import hashlib
@@ -668,9 +669,12 @@ def build_extension(daw: dict, root: Path, target: str, profile: str, out: Path)
     Never stripped by rustc: on macOS 27 a rustc strip can misalign the library's LINKEDIT string pool, and dyld then
     refuses it (Cargo.toml keeps the crate at strip = "none"). The platform's own strip runs afterwards instead. A Mac
     gets one universal file, signed again after lipo and strip; Windows links the C runtime in.
+
+    A Mac's two architectures build at once: the bundle's own in the workspace's target folder, where the bundle's build
+    left its dependencies, the other in a target folder of its own, so neither waits for the other's lock.
     """
     profile_args = ["--release"] if profile == "release" else ["--profile", profile]
-    commands, built = [], []
+    jobs = []
     for rust_target in extension_builds(target):
         environment = dict(os.environ)
         target_dir = Path(environment.get("CARGO_TARGET_DIR", root / "target"))
@@ -678,11 +682,15 @@ def build_extension(daw: dict, root: Path, target: str, profile: str, out: Path)
             # In a target folder of its own: the flag changes every crate's build, and the workspace's has none.
             environment["RUSTFLAGS"] = (environment.get("RUSTFLAGS", "") + " -C target-feature=+crt-static").strip()
             target_dir = target_dir / "crt-static"
+        elif rust_target != target:
+            target_dir = target_dir / f"extension-{rust_target}"
         command = ["cargo", "build", "--locked", *profile_args, "--target", rust_target, "-p", crate_names(daw)[0],
                    "--target-dir", str(target_dir)]
-        subprocess.run(command, cwd=root, env=environment, check=True)
-        commands.append(" ".join(command))
-        built.append(target_dir / rust_target / profile / cargo_library(daw, rust_target))
+        jobs.append((command, environment, target_dir / rust_target / profile / cargo_library(daw, rust_target)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        for done in [pool.submit(subprocess.run, command, cwd=root, env=environment, check=True) for command, environment, _ in jobs]:
+            done.result()
+    commands, built = [" ".join(command) for command, _, _ in jobs], [library for _, _, library in jobs]
     out.mkdir(parents=True, exist_ok=True)
     final = out / extension_name(daw, target)
     final.unlink(missing_ok=True)
@@ -788,7 +796,11 @@ def main() -> None:
         raise ValueError("invalid Cargo profile name")
     profile = ["--release"] if args.profile == "release" else ["--profile", args.profile]
     command = ["cargo", "build", "--locked", *profile, "--target", target]
-    command += ["-p", "ableton-mcp-server", "--bin", "ableton-mcp-server", "--bin", "ableton-mcp-analysis-worker"] if args.bridge_only else ["--workspace", "--bins"]
+    # The programs a bundle carries, and nothing else: each one costs its own whole-program optimization, and the
+    # bridge's other programs (setup, migrate, diagnostics, the Remote Script's installer, the lifecycle, the benchmark)
+    # aren't shipped.
+    shipped = [argument for name in BINARIES for argument in ("--bin", name)]
+    command += ["-p", "ableton-mcp-server", "--bin", "ableton-mcp-server", "--bin", "ableton-mcp-analysis-worker"] if args.bridge_only else ["--workspace", *shipped]
     recipe = " ".join(command)
     out = args.out or ROOT / "release/native" / target
     extensions = {daw_id: getattr(args, daw_id.replace("-", "_") + "_extension")
