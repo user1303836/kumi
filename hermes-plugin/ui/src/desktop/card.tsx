@@ -2,17 +2,18 @@
 // it compared two files, the measured numbers side by side, and the differences Kumi computed. Every number is a
 // local measurement; a model's reading of them shows only when the user turned it on, and says so.
 import type { ToolMediaRendererProps } from '@hermes/plugin-sdk'
-import { Button } from '@kumi/controls'
+import { Badge, Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
 import { clean, num, signed } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying } from '../shared/hooks.ts'
-import { displayReferenceName, listenView, parseListen, referenceName, roundKey, roundWords, windowWords, type ListenView } from '../shared/listen.ts'
+import type { Translate } from '../shared/i18n.ts'
+import { displayReferenceName, listenView, parseListen, referenceName, roundKey, roundWords, type ListenView } from '../shared/listen.ts'
 import type { KumiStore } from '../shared/store.ts'
-import type { ListenReference, ListenResult } from '../shared/types.ts'
-import { Chip, FOCUSABLE, S, useT } from '../shared/ui.tsx'
+import type { ListenReference, ListenResult, SampleWindow } from '../shared/types.ts'
+import { FOCUSABLE, S, TYPE, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
 async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
@@ -87,10 +88,10 @@ function Rows({ view }: { view: ListenView }) {
     // own region, focusable so the keyboard can scroll it, rather than spilling past the card, where the chat cut off
     // the reference and the differences.
     <div aria-label={t('measurements.tab')} className={FOCUSABLE} role="region" style={{ overflowX: 'auto', maxWidth: '100%' }} tabIndex={0}>
-      <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, width: '100%', margin: 0 }}>
+      <table style={{ borderCollapse: 'collapse', ...TYPE.small, color: T.text, width: '100%', margin: 0 }}>
         {compared && (
           <thead style={{ border: 'none' }}>
-            <tr style={{ color: T.muted, fontSize: 11, border: 'none' }}>
+            <tr style={{ ...TYPE.caption, color: T.muted, border: 'none' }}>
               <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
               <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
               <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
@@ -100,7 +101,7 @@ function Rows({ view }: { view: ListenView }) {
         )}
         <tbody>
           {view.rows.map(row => (
-            <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.border}` }}>
+            <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.hairline}` }}>
               <td style={{ ...cell, textAlign: 'left', color: T.muted }}>{row.label}</td>
               <td style={cell}>{row.mine}</td>
               {compared && <td style={{ ...cell, color: T.muted }}>{row.reference ?? '—'}</td>}
@@ -136,15 +137,18 @@ function Overlay({ view }: { view: ListenView }) {
       </span>
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 3, height: 64 }}>
         {view.overlay.map(band => {
-          const label = t('listen.overlayBand', band.name, band.hz, num(band.mine), num(band.reference), signed(band.mine - band.reference))
+          const name = bandName(t, band.name)
+          const label = t('listen.overlayBand', name, band.hz, num(band.mine), num(band.reference), signed(band.mine - band.reference))
           return (
-            <div key={band.name} role="img" aria-label={label} title={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
-              <div style={{ position: 'relative', flex: 1, width: '100%' }}>
-                <div style={{ position: 'absolute', left: '18%', right: '18%', bottom: 0, height: at(band.mine), background: T.accent, opacity: 0.8 }} />
-                <div style={{ position: 'absolute', left: 0, right: 0, bottom: at(band.reference), borderTop: `2px solid ${T.text}` }} />
+            <Tip key={band.name} label={label}>
+              <div role="img" aria-label={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                <div style={{ position: 'relative', flex: 1, width: '100%' }}>
+                  <div style={{ position: 'absolute', left: '18%', right: '18%', bottom: 0, height: at(band.mine), background: T.accent, opacity: 0.8 }} />
+                  <div style={{ position: 'absolute', left: 0, right: 0, bottom: at(band.reference), borderTop: `2px solid ${T.text}` }} />
+                </div>
+                <span style={{ ...TYPE.caption, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{name}</span>
               </div>
-              <span style={{ fontSize: 9, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{band.name}</span>
-            </div>
+            </Tip>
           )
         })}
       </div>
@@ -163,28 +167,31 @@ function Bands({ view }: { view: ListenView }) {
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 3, height: 54 }}>
         {view.bands.map(band => {
           const share = Math.min(1, Math.abs(band.value) / top)
-          const label = view.bandsAre === 'difference' ? `${band.name}: ${signed(band.value)} dB` : `${band.name}: ${num(band.value)} dB`
+          const name = bandName(t, band.name)
+          const label = view.bandsAre === 'difference' ? `${name}: ${signed(band.value)} dB` : `${name}: ${num(band.value)} dB`
           return (
-            <div key={band.name} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }} title={label}>
-              <div style={{ position: 'relative', flex: 1, width: '100%' }}>
-                {view.bandsAre === 'difference' ? (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '15%',
-                      right: '15%',
-                      background: band.value < 0 ? T.secondary : T.accent,
-                      opacity: 0.8,
-                      ...(band.value < 0 ? { top: '50%', height: `${share * 50}%` } : { bottom: '50%', height: `${share * 50}%` })
-                    }}
-                  />
-                ) : (
-                  <div style={{ position: 'absolute', left: '15%', right: '15%', bottom: 0, height: `${Math.max(4, (1 - share) * 100)}%`, background: T.secondary, opacity: 0.8 }} />
-                )}
-                {view.bandsAre === 'difference' && <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', borderTop: `1px solid ${T.border}` }} />}
+            <Tip key={band.name} label={label}>
+              <div role="img" aria-label={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                <div style={{ position: 'relative', flex: 1, width: '100%' }}>
+                  {view.bandsAre === 'difference' ? (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '15%',
+                        right: '15%',
+                        background: band.value < 0 ? T.secondary : T.accent,
+                        opacity: 0.8,
+                        ...(band.value < 0 ? { top: '50%', height: `${share * 50}%` } : { bottom: '50%', height: `${share * 50}%` })
+                      }}
+                    />
+                  ) : (
+                    <div style={{ position: 'absolute', left: '15%', right: '15%', bottom: 0, height: `${Math.max(4, (1 - share) * 100)}%`, background: T.secondary, opacity: 0.8 }} />
+                  )}
+                  {view.bandsAre === 'difference' && <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', borderTop: `1px solid ${T.border}` }} />}
+                </div>
+                <span style={{ ...TYPE.caption, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{name}</span>
               </div>
-              <span style={{ fontSize: 9, color: T.faint, ...S.ellipsis, maxWidth: '100%' }}>{band.name}</span>
-            </div>
+            </Tip>
           )
         })}
       </div>
@@ -214,108 +221,258 @@ function Interpretation({ view }: { view: ListenView }) {
   )
 }
 
-function ReferenceFacts({ reference }: { reference: ListenReference }) {
+/** The bands the runtime names (the analysis's ten, the profile's eight regions among them) in the card's words; a
+ *  band Kumi doesn't know shows by the name it came with. These lookups are Maps because their keys come from the
+ *  runtime: an object would answer a name like `constructor` with its own prototype's function. */
+const BANDS = new Map([
+  ['sub', 'listen.bandNames.sub'],
+  ['bass', 'listen.bandNames.bass'],
+  ['upper bass', 'listen.bandNames.upperBass'],
+  ['low mids', 'listen.bandNames.lowMids'],
+  ['mids', 'listen.bandNames.mids'],
+  ['upper mids', 'listen.bandNames.upperMids'],
+  ['presence', 'listen.bandNames.presence'],
+  ['bite', 'listen.bandNames.bite'],
+  ['brilliance', 'listen.bandNames.brilliance'],
+  ['air', 'listen.bandNames.air']
+])
+
+function bandName(t: Translate, name: string): string {
+  const key = BANDS.get(name)
+  return key ? t(key) : name
+}
+
+/** The reference profile's quantities by the runtime's codes (`listen_reference.rs`); `regions` is what the
+ *  availability calls all eight bands at once. */
+const QUANTITIES = new Map([
+  ['integrated', 'listen.loudness'],
+  ['plr', 'listen.peakToLoudness'],
+  ['crest', 'listen.crest'],
+  ['tilt', 'listen.tilt'],
+  ['range', 'listen.range'],
+  ['centroid', 'listen.brightness'],
+  ['regions', 'listen.bandsLevel'],
+  ['low_width', 'listen.profile.lowWidth'],
+  ['noise', 'listen.profile.noise'],
+  ['attack', 'listen.profile.attack'],
+  ['decay', 'listen.profile.decay'],
+  ['sustain', 'listen.profile.sustain']
+])
+
+function quantityName(t: Translate, code: string): string {
+  const key = QUANTITIES.get(code)
+  if (key) return t(key)
+  if (code.startsWith('region/')) return t('listen.profile.region', bandName(t, code.slice('region/'.length)))
+  return clean(code, 60)
+}
+
+/** Why a value is missing, by the runtime's code. A code Kumi doesn't know yet shows the runtime's own sentence, else
+ *  "Not measured": never the code itself. The two bandwidth reasons name the file's top frequency (`nyquist`, Hz). */
+const REASONS = new Map([
+  ['not_requested', 'listen.profile.reasons.not_requested'],
+  ['zero_energy', 'listen.profile.reasons.zero_energy'],
+  ['too_short_for_profile_frames', 'listen.profile.reasons.too_short_for_profile_frames'],
+  ['no_usable_profile_energy', 'listen.profile.reasons.no_usable_profile_energy'],
+  ['too_short_for_loudness', 'listen.profile.reasons.too_short_for_loudness'],
+  ['below_loudness_gate', 'listen.profile.reasons.below_loudness_gate'],
+  ['too_short_for_range', 'listen.profile.reasons.too_short_for_range'],
+  ['mono', 'listen.profile.reasons.mono'],
+  ['no_low_band_energy', 'listen.profile.reasons.no_low_band_energy'],
+  ['not_measured', 'listen.profile.reasons.not_measured'],
+  ['no_reference_measurement', 'listen.profile.reasons.no_reference_measurement'],
+  ['above_nyquist', 'listen.profile.reasons.above_nyquist'],
+  ['partial_frequency_coverage', 'listen.profile.reasons.partial_frequency_coverage']
+])
+
+function reasonWords(t: Translate, code: unknown, words?: unknown, nyquist?: unknown): string {
+  const key = typeof code === 'string' ? REASONS.get(code) : undefined
+  if (key) return t(key, typeof nyquist === 'number' && nyquist > 0 ? num(nyquist / 1000, 1) : '')
+  return clean(words, 300) || t('listen.profile.reasons.not_measured')
+}
+
+/** The part of a file that was measured: `10–12 s (2 s at 48 kHz, 96,000 samples)`. Seconds to the hundredth; the
+ *  exact count is the samples. */
+function windowLine(t: Translate, window: SampleWindow | null | undefined): string | undefined {
+  if (!window || !(window.sample_rate > 0) || !Number.isFinite(window.frame_count) || !Number.isFinite(window.start_frame)) return undefined
+  const start = window.start_frame / window.sample_rate
+  const seconds = window.frame_count / window.sample_rate
+  return t('listen.facts.window', num(start, 2), num(start + seconds, 2), num(seconds, 2), num(window.sample_rate / 1000, 2), num(window.frame_count, 0))
+}
+
+/** Which file a reference is and which part of it was measured, in plain words: how Kumi knows the file, the part of
+ *  the original an excerpt came from, the part measured, and that Kumi kept a copy to play. Never an id, an inode or
+ *  a timestamp: the model has those; the producer reads these behind "Details". */
+function referenceFacts(t: Translate, reference: ListenReference): string[] {
   const identity = reference.origin?.identity ?? reference.identity
-  const file = identity?.file_identity
-  // Render only the native public identity fields, never an arbitrary nested value or source path.
-  const facts = file && typeof file === 'object' ? Object.entries(file).filter(([key, value]) =>
-    ['dev', 'ino', 'size', 'mtime_ns'].includes(key) && (typeof value === 'number' || typeof value === 'string')
-  ).map(([key, value]) => `${key}=${clean(String(value), 60)}`).join(' · ') : ''
-  const original = reference.origin?.window
-  const measured = windowWords(reference.window)
+  const sound = identity?.kind === 'sound' && identity.sound_id ? clean(identity.sound_id.split(/[\\/]/).pop() ?? '', 80) : ''
+  const original = windowLine(t, reference.origin?.window)
+  const measured = windowLine(t, reference.window)
+  const lines = [
+    identity?.kind === 'file' ? t('listen.facts.file') : '',
+    sound ? t('listen.facts.sound', sound) : '',
+    original ? t('listen.facts.original', original) : '',
+    measured ? (original ? t('listen.facts.kept', measured) : t('listen.facts.measured', measured)) : '',
+    reference.artifact_id ? t('listen.facts.retained') : ''
+  ]
+  return lines.filter(Boolean)
+}
+
+/** One quiet disclosure for what a producer rarely needs: how a number was made, which file, which part of it. It
+ *  starts closed; its summary is a 24 px target. */
+function Details({ children }: { children: ReactNode }) {
+  const t = useT()
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowWrap: 'anywhere' }}>
-      {identity && <span style={S.faint}>Identity: {clean(identity.kind ?? '', 20)} {facts}
-        {identity.sound_id && ` · sound ${clean(identity.sound_id.split(/[\\/]/).pop() ?? '', 80)}`}
-        {identity.map_revision && ` · map ${clean(identity.map_revision, 80)}`}
-        {identity.artifact_id && ` · artifact ${clean(identity.artifact_id, 80)}`}
-      </span>}
-      {original && <span style={S.faint}>Original provenance · {windowWords(original)}</span>}
-      {reference.artifact_id && <span style={S.faint}>Retained artifact: {clean(reference.artifact_id, 100)}</span>}
-      {measured && <span style={S.faint}>{original ? 'Artifact measured window · ' : ''}{measured}</span>}
-      {reference.window && <span style={S.faint}>Retained artifact playback starts at {num(reference.window.replay_from, 6)} s</span>}
-    </div>
+    <details>
+      <summary className={FOCUSABLE} style={{ ...TYPE.small, color: T.muted, cursor: 'pointer', padding: '4px 0', width: 'fit-content' }}>
+        {t('listen.details')}
+      </summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 4, overflowWrap: 'anywhere' }}>{children}</div>
+    </details>
   )
 }
 
+/** A comparison against several references: per quantity, this file, the references' target with its spread, and
+ *  where this file sits; then each reference with its player and what it couldn't measure. How the target is made,
+ *  each reference's own numbers and which part of which file was measured sit behind "Details". The spread is never
+ *  a confidence, and nothing here is a percentage. */
 function ReferenceProfile({ result, audition }: { result: ListenResult; audition: Audition }) {
   const t = useT()
   const profile = result.reference_profile
   if (!profile) return null
-  const cell = { padding: '5px 6px', verticalAlign: 'top', textAlign: 'left' } as const
+  const cell = { padding: '4px 6px', verticalAlign: 'top', textAlign: 'left' } as const
+  const head = { ...cell, ...TYPE.caption, fontWeight: 400, color: T.muted }
+  const label = { ...cell, fontWeight: 400, color: T.muted }
+  const table = { borderCollapse: 'collapse', ...TYPE.small, color: T.text, width: '100%', margin: 0 } as const
+  const row = { borderTop: `1px solid ${T.hairline}` }
+  const title = { ...TYPE.body, fontWeight: 600, color: T.text, overflowWrap: 'anywhere' } as const
+  const source = windowLine(t, profile.source_window)
   return (
-    <section aria-label="Measured reference profile" style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      <strong style={S.text}>Reference target and spread</strong>
-      <span style={S.muted}>{profile.usable_references}/{profile.references} usable references · equal per-reference weighting</span>
-      <span style={S.faint}>{clean(profile.basis, 500)}</span>
-      {profile.source_window && <span style={S.faint}>Source measured window · {windowWords(profile.source_window)?.replace('Reference file seconds', 'seconds')}</span>}
+    <section aria-label={t('listen.profile.title')} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <strong style={title}>{t('listen.profile.title')}</strong>
+      <span style={S.muted}>{t('listen.profile.usable', profile.usable_references, profile.references)}</span>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
-          <thead><tr style={{ color: T.muted }}>
-            {['Quantity / basis', 'Measured source', 'Target [spread]', 'Source − target', 'Contributors / total'].map(label => <th key={label} style={{ ...cell, fontWeight: 400 }}>{label}</th>)}
-          </tr></thead>
-          <tbody>{profile.quantities.map(quantity => {
-            const value = (number: number | null) => typeof number === 'number' && Number.isFinite(number) ? `${num(number, 2)} ${clean(quantity.unit, 30)}` : '—'
-            return <tr key={quantity.quantity} style={{ borderTop: `1px solid ${T.border}` }}>
-              <th scope="row" style={{ ...cell, fontWeight: 400 }}>
-                {clean(quantity.quantity, 80)}<div style={S.faint}>{clean(quantity.basis, 300)}</div>
-              </th>
-              <td style={cell}>{value(quantity.source)}{quantity.source === null && <div style={S.faint}>{clean(quantity.source_reason_detail ?? quantity.source_reason ?? 'not measured', 300)}</div>}</td>
-              <td style={cell}>{quantity.target ? <>{value(quantity.target.mid)}<div style={S.faint}>[{value(quantity.target.low)} … {value(quantity.target.high)}]</div></> : <>—<div style={S.faint}>{clean(quantity.target_reason ?? 'not measured', 100)}</div></>}</td>
-              <td style={cell}>{quantity.deviation !== null && Number.isFinite(quantity.deviation) ? `${signed(quantity.deviation, 2)} ${quantity.unit === 'LUFS' ? 'LU' : clean(quantity.unit, 30)}` : '—'}
-                {quantity.inside_spread !== null && <div style={S.faint}>{quantity.inside_spread ? 'Inside spread' : 'Outside spread'}</div>}
-              </td>
-              <td style={cell}>{quantity.contributors}/{quantity.references}</td>
+        <table style={table}>
+          <thead>
+            <tr>
+              <th style={head} />
+              <th style={head}>{t('listen.this')}</th>
+              <th style={head}>{t('listen.profile.target')}</th>
+              <th style={head}>{t('listen.difference')}</th>
             </tr>
-          })}</tbody>
+          </thead>
+          <tbody>
+            {profile.quantities.map(quantity => {
+              const unit = clean(quantity.unit, 30)
+              const value = (number: number | null) => (typeof number === 'number' && Number.isFinite(number) ? `${num(number, 2)} ${unit}` : '—')
+              const deviation = quantity.deviation
+              const sits = quantity.inside_spread === null || deviation === null ? '' : quantity.inside_spread ? t('listen.profile.inside') : deviation < 0 ? t('listen.profile.below') : t('listen.profile.above')
+              return (
+                <tr key={quantity.quantity} style={row}>
+                  <th scope="row" style={label}>
+                    {quantityName(t, quantity.quantity)}
+                  </th>
+                  <td style={cell}>
+                    {value(quantity.source)}
+                    {quantity.source === null && <div style={S.faint}>{reasonWords(t, quantity.source_reason, quantity.source_reason_detail, quantity.source_nyquist_hz)}</div>}
+                  </td>
+                  <td style={cell}>
+                    {quantity.target ? (
+                      <>
+                        {value(quantity.target.mid)}
+                        <div style={S.faint}>{t('listen.profile.spread', `${num(quantity.target.low, 2)} … ${value(quantity.target.high)}`)}</div>
+                        {quantity.contributors < quantity.references && <div style={S.faint}>{t('listen.profile.from', quantity.contributors, quantity.references)}</div>}
+                      </>
+                    ) : (
+                      <>
+                        —<div style={S.faint}>{reasonWords(t, quantity.target_reason)}</div>
+                      </>
+                    )}
+                  </td>
+                  <td style={cell}>
+                    {deviation !== null && Number.isFinite(deviation) ? `${signed(deviation, 2)} ${quantity.unit === 'LUFS' ? 'LU' : unit}` : '—'}
+                    {sits && <div style={S.faint}>{sits}</div>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
         </table>
       </div>
-      <span style={S.faint}>{clean(profile.range_note, 500)}</span>
-      <span style={S.faint}>{clean(profile.peak_note, 500)}</span>
+      <span style={S.faint}>{t('listen.profile.spreadNote')}</span>
+      <Details>
+        <span style={S.faint}>{t('listen.profile.how')}</span>
+        <span style={S.faint}>{t('listen.profile.noPeak')}</span>
+        {source && <span style={S.faint}>{t('listen.facts.thisFile', source)}</span>}
+      </Details>
       {(result.references ?? []).map((reference, index) => {
         const name = displayReferenceName(reference)
         const availability = reference.availability
         const canonical = listenView({ metrics: reference.metrics }, t)
+        // Why this reference has no profile at all (it's out of the target), and what it couldn't measure, grouped
+        // by why: on the face, since that's why a target has fewer references behind it.
+        const out = availability?.profile_reason ?? (availability?.energy_zero ? 'zero_energy' : null)
         const unavailable = new Map<string, string[]>()
+        const miss = (reason: string, quantity: string) => unavailable.set(reason, [...(unavailable.get(reason) ?? []), quantityName(t, quantity)])
         for (const quantity of reference.profile_quantities ?? []) {
-          if (quantity.value !== null) continue
-          const reason = clean(quantity.reason ?? quantity.reason_code ?? 'not measured', 300)
-          const quantities = unavailable.get(reason) ?? []
-          quantities.push(clean(quantity.quantity, 80))
-          unavailable.set(reason, quantities)
+          if (quantity.value === null) miss(reasonWords(t, quantity.reason_code, quantity.reason, quantity.nyquist_hz), quantity.quantity)
         }
-        return <section key={reference.artifact_id ?? index} aria-label={`Reference ${index + 1}: ${name}`} style={{ display: 'flex', flexDirection: 'column', gap: 5, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
-          <strong style={S.text}>{index + 1}. {name}</strong>
-          <ReferenceFacts reference={reference} />
-          {reference.artifact_id && <Wave audition={audition} id={reference.artifact_id} label={name} />}
-          {unavailable.size > 0 && <ul aria-label={`${name}: unavailable profile quantities`} style={{ margin: 0, paddingLeft: 16, ...S.faint }}>
-            {[...unavailable].map(([reason, quantities]) => <li key={reason}>{quantities.join(', ')}: — · {reason}</li>)}
-          </ul>}
-          {reference.profile_quantities && <details>
-            <summary className={FOCUSABLE} style={{ ...S.muted, cursor: 'pointer' }}>{t('listen.more')} · Each reference's measurements</summary>
-            <div style={{ overflowX: 'auto', marginTop: 5 }}>
-            <table aria-label={`${name}: reference measurements`} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, width: '100%', margin: 0 }}>
-              <caption style={{ ...S.faint, textAlign: 'left' }}>Each reference's measurements · only covered regions contribute to the target</caption>
-              <thead><tr style={{ color: T.muted }}>
-                {['Quantity / basis', 'Measured reference', 'Unavailable reason'].map(label => <th key={label} style={{ ...cell, fontWeight: 400 }}>{label}</th>)}
-              </tr></thead>
-              <tbody>{reference.profile_quantities.map(quantity => <tr key={quantity.quantity} style={{ borderTop: `1px solid ${T.border}` }}>
-                <th scope="row" style={{ ...cell, fontWeight: 400 }}>{clean(quantity.quantity, 80)}<div style={S.faint}>{clean(quantity.basis, 300)}</div></th>
-                <td style={cell}>{typeof quantity.value === 'number' && Number.isFinite(quantity.value) ? `${num(quantity.value, 2)} ${clean(quantity.unit, 30)}` : '—'}</td>
-                <td style={{ ...cell, color: T.muted }}>{quantity.value === null ? clean(quantity.reason ?? 'not measured', 300) : '—'}</td>
-              </tr>)}</tbody>
-            </table>
-            </div>
-          </details>}
-          <span style={S.faint}>Standard measurements · a different meter from the reference target</span>
-          {canonical.rows.length ? <Rows view={canonical} /> : <span style={S.faint}>Standard measurements unavailable</span>}
-          {availability && <span style={S.faint}>
-            Profile availability: {availability.profile_reason ? clean(availability.profile_reason, 100) : `${availability.loud_frame_count} loud frames`}
-            {availability.energy_zero && ' · zero energy'}
-            {availability.fixed_region_tolerance && ' · fixed region tolerance, not observed variation'}
-            {!reference.profile_quantities && availability.unavailable.map(missing => ` · ${clean(missing.quantity, 60)}: ${clean(missing.reason, 100)}`).join('')}
-          </span>}
-        </section>
+        if (!reference.profile_quantities && !out) for (const missing of availability?.unavailable ?? []) miss(reasonWords(t, missing.reason), missing.quantity)
+        return (
+          <section
+            aria-label={t('listen.profile.member', index + 1, name)}
+            key={reference.artifact_id ?? index}
+            style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: `1px solid ${T.hairline}`, paddingTop: 8 }}
+          >
+            <strong style={title}>
+              {index + 1}. {name}
+            </strong>
+            {reference.artifact_id && <Wave audition={audition} id={reference.artifact_id} label={name} />}
+            {out && <span style={S.muted}>{t('listen.profile.out', reasonWords(t, out))}</span>}
+            {unavailable.size > 0 && (
+              <ul aria-label={t('listen.profile.missingLabel', name)} style={{ margin: 0, paddingLeft: 16, ...S.faint }}>
+                {[...unavailable].map(([reason, quantities]) => (
+                  <li key={reason}>{t('listen.profile.missing', quantities.join(', '), reason)}</li>
+                ))}
+              </ul>
+            )}
+            <Details>
+              {reference.profile_quantities && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table aria-label={t('listen.profile.memberTable', name)} style={table}>
+                    <caption style={{ ...S.faint, textAlign: 'left' }}>{t('listen.profile.memberCaption')}</caption>
+                    <thead>
+                      <tr>
+                        <th style={head} />
+                        <th style={head}>{t('listen.profile.measured')}</th>
+                        <th style={head}>{t('listen.profile.why')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reference.profile_quantities.map(quantity => (
+                        <tr key={quantity.quantity} style={row}>
+                          <th scope="row" style={label}>
+                            {quantityName(t, quantity.quantity)}
+                          </th>
+                          <td style={cell}>{typeof quantity.value === 'number' && Number.isFinite(quantity.value) ? `${num(quantity.value, 2)} ${clean(quantity.unit, 30)}` : '—'}</td>
+                          <td style={{ ...cell, color: T.muted }}>{quantity.value === null ? reasonWords(t, quantity.reason_code, quantity.reason, quantity.nyquist_hz) : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <span style={S.faint}>{t('listen.profile.standard')}</span>
+              {canonical.rows.length ? <Rows view={canonical} /> : <span style={S.faint}>{t('listen.profile.noStandard')}</span>}
+              {referenceFacts(t, reference).map(line => (
+                <span key={line} style={S.faint}>
+                  {line}
+                </span>
+              ))}
+              {availability && !out && <span style={S.faint}>{t('listen.profile.loud', availability.loud_frame_count)}</span>}
+              {availability?.fixed_region_tolerance && <span style={S.faint}>{t('listen.profile.fixedSpread')}</span>}
+            </Details>
+          </section>
+        )
       })}
     </section>
   )
@@ -341,30 +498,31 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
   const seen = key ? (rounds[key] ?? []) : []
   const index = seen.findIndex(round => round.id === parsed.artifact_id)
   const round = index < 0 ? undefined : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map(each => each.gaps), t)
+  const facts = parsed.compare ? referenceFacts(t, parsed.compare) : []
   return (
     <div
       data-kumi-card="listen"
-      style={{ display: 'flex', flexDirection: 'column', gap: 9, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 560, padding: '10px 12px', borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text }}
     >
       <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <span style={{ ...S.text, fontWeight: 600, minWidth: 0 }}>
+        <span style={{ ...S.text, ...TYPE.body, fontWeight: 600, minWidth: 0 }}>
           <span style={{ color: T.accent }}>♪</span> {view.title}
           {view.referenceTitle && <span style={{ color: T.muted, fontWeight: 400 }}>{t('listen.versus', view.referenceTitle)}</span>}
         </span>
-        <Chip title={t('listen.measuredTitle')}>{t('listen.measured')}</Chip>
+        <Badge tip={t('listen.measuredTitle')}>{t('listen.measured')}</Badge>
       </div>
       {view.capture && (
-        <span style={S.faint} title={t('listen.captureTitle')}>
-          {view.capture}
-        </span>
+        <Tip label={t('listen.captureTitle')}>
+          <span style={S.faint}>{view.capture}</span>
+        </Tip>
       )}
       {/* The runtime's own note on the capture (CC-2 A3): muted plain text, no tone, never a control. */}
       {view.captureNote && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{view.captureNote}</span>}
       {view.verdict && <span style={S.text}>{view.verdict}</span>}
       {round && (
-        <span style={{ ...S.muted, fontVariantNumeric: 'tabular-nums' }} title={t('listen.roundTitle')}>
-          {round}
-        </span>
+        <Tip label={t('listen.roundTitle')}>
+          <span style={{ ...S.muted, fontVariantNumeric: 'tabular-nums' }}>{round}</span>
+        </Tip>
       )}
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -374,8 +532,7 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
       ) : (
         fallback
       )}
-      {parsed.compare && (parsed.compare.window || parsed.compare.origin || parsed.compare.identity) && <ReferenceFacts reference={parsed.compare} />}
-      {parsed.reference_profile && <span style={S.faint}>Source standard measurements · a different meter from the reference target</span>}
+      {parsed.reference_profile && <span style={S.faint}>{t('listen.profile.standard')}</span>}
       <Rows view={view} />
       <Bands view={view} />
       <ReferenceProfile result={parsed} audition={audition} />
@@ -389,6 +546,15 @@ export function ListenResultCard({ result, audition, fallback, store }: { result
         </ul>
       )}
       <Interpretation view={view} />
+      {facts.length > 0 && (
+        <Details>
+          {facts.map(line => (
+            <span key={line} style={S.faint}>
+              {line}
+            </span>
+          ))}
+        </Details>
+      )}
     </div>
   )
 }

@@ -43,7 +43,7 @@ import {
   TUNINGS
 } from './design.ts'
 import { clean, num, seconds } from './format.ts'
-import { S, useT } from './ui.tsx'
+import { S, TYPE, useT } from './ui.tsx'
 
 /** An option set or not: what a control hands back. */
 type Patch = (current: DesignOptions) => DesignOptions
@@ -356,11 +356,11 @@ export function SteerSection({ steer, onChange, open, onToggle }: { steer: Steer
       summary={summary}
       title={t('make.steer.title')}
     >
-      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5 }}>{t('make.steer.sound')}</span>
+      <span style={{ gridColumn: '1 / -1', ...S.heading }}>{t('make.steer.sound')}</span>
       {(Object.keys(STEER_SOUND) as SteerSound[]).map(slider)}
-      <span style={{ gridColumn: '1 / -1', ...S.heading, fontSize: 10.5, marginTop: 4 }}>{t('make.steer.layers')}</span>
+      <span style={{ gridColumn: '1 / -1', ...S.heading, marginTop: 4 }}>{t('make.steer.layers')}</span>
       {(Object.keys(STEER_LAYER) as SteerLayer[]).map(slider)}
-      <span style={{ gridColumn: '1 / -1', fontSize: 10.5, color: T.faint }}>{t('make.steer.layersHint')}</span>
+      <span style={{ gridColumn: '1 / -1', ...TYPE.caption, color: T.faint }}>{t('make.steer.layersHint')}</span>
     </Group>
   )
 }

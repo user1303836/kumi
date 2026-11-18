@@ -479,6 +479,27 @@ test('what the agent found, or a search, is also listed by name above the map, f
   assert.ok(plain.includes('aria-label="Sounds Kumi found"') && plain.includes('measured: darker than most') && !plain.includes('closeness'), plain)
 })
 
+test("the map says each thing once: the count and the layout menu in the corner, the picks' count on their card, and a found list offers to bring its sounds into view", async () => {
+  const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
+  const ids = ['s-r7-0010', 's-r7-0011', 's-r7-0012']
+  const map = {
+    revision: 'r7',
+    points: ids.map((id, index) => [id, index / 4, index / 4, 0, 1 - index / 4, index / 4]),
+    groups: { 0: { name: 'snare', color: '#f59e0b', count: 3 } },
+    sounds: Object.fromEntries(ids.map((id, index) => [id, { name: `Dusty Snare ${index + 1}.wav`, class: 'snare' }])),
+    arrangements: [{ id: 'character', labels: [] }]
+  }
+  const html = renderToStaticMarkup(
+    createElement(MapCanvas, { map, found: { revision: 'r7', ids: ids.slice(0, 2) }, playing: null, selected: null, picked: new Set(ids.slice(0, 2)), onPick: () => {}, onSelect: () => {}, onPicked: () => {}, pickedActions: () => null, empty: 'none' })
+  )
+  const times = text => html.split(text).length - 1
+  assert.equal(times(english('map.count', '3')), 1, 'the count, in the corner alone')
+  assert.equal(times('aria-haspopup="menu"'), 1, 'one layout menu')
+  // The picks' card: its name and its words; the corner no longer repeats them.
+  assert.equal(times(english('dock.picked', 2)), 2, html)
+  assert.ok(html.includes(english('map.frame')), html)
+})
+
 test("the map's keyboard stop is the sound reached: a checkbox in the map's group, named for the sound and checked as it's picked", async () => {
   const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
   const map = {
@@ -605,30 +626,50 @@ test('the generate card shows what was asked, the file, the waveform, the cost a
   assert.ok(!extended.includes('>3 s<'), 'no bare seconds chip')
 })
 
-test('a measured profile keeps actual reference players, canonical facts and one Heard target separate', () => {
+test('a measured profile shows the target, its spread and where this file sits; which file and which part sit behind Details, never a machine fact', () => {
   const native = profileResult()
   native.references[0].name = '/private/music/<img onerror=attack>.wav'
   const html = render({ result: native })
-  for (const text of ['2/3', '0/3', '−13.25 LUFS', '−11.25 LUFS', '−2 LU', '96000', '48000', '16–24']) {
+  for (const text of ['2/3', '−13.25 LUFS', '−11.25 LUFS', '−12.25 … −10.25 LUFS', '−2 LU', english('listen.profile.below'), english('listen.profile.reasons.no_reference_measurement'), '16–24']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
   assert.ok(html.includes('&lt;img onerror=attack&gt;.wav'))
   assert.ok(!html.includes('<img'))
   assert.ok(!html.includes('/private/'))
-  assert.ok(!html.includes('100 s measured'))
+  assert.ok(!html.includes('100 s'))
+  // The exact part measured and how Kumi knows each file are still there, in plain words, behind a closed Details.
+  const details = html.split('<details>').slice(1).map(part => part.slice(0, part.indexOf('</details>')))
+  assert.equal(details.length, 4, 'one for the target, one per reference')
+  assert.ok(details.some(part => part.includes('0–2 s (2 s at 48 kHz, 96,000 samples)')), html)
+  assert.ok(details.some(part => part.includes(english('listen.facts.file'))), html)
+  // No file id, inode, timestamp, artifact id, engineer basis or six-decimal second anywhere on the card.
+  for (const text of ['dev=', 'ino=', 'mtime', 'ref-one', 'Profile::', 'Heard', 'Quantity / basis', 'Contributors', 'Retained']) assert.ok(!html.includes(text), `${text} in ${html}`)
+  assert.ok(!/\d\.\d{6}/.test(html), html)
   // Only source plus three retained members have players; the combined target has none.
   assert.equal((html.match(/<button/g) ?? []).length, 4)
   assert.equal((html.match(/−11.25 LUFS/g) ?? []).length, 1)
   assert.ok(!html.includes('NaN'))
 })
 
-test('an excerpt replay discloses original file seconds separately from artifact offset zero', () => {
+test('a reference comparison reads in Japanese, every word of it', async () => {
+  const { ListenCard: Card, I18n, translator } = await load('tests/i18n.entry.ts', { react: 'real' })
+  const ja = translator('ja')
+  const media = { file: { path: '/tmp/a.wav', name: 'a.wav', kind: 'audio', mime: 'audio/wav', resolveUrl: async () => '' }, toolName: 'kumi_listen', toolCallId: 'call-1', args: {}, sessionId: 's-1', fallback: null, result: profileResult() }
+  const audition = new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
+  const html = renderToStaticMarkup(createElement(I18n.Provider, { value: ja }, createElement(Card, { media, audition, store: new KumiStore(async () => ({})) })))
+  for (const key of ['listen.profile.title', 'listen.profile.target', 'listen.profile.spreadNote', 'listen.details', 'listen.loudness', 'listen.facts.file']) assert.ok(html.includes(ja(key)), `${ja(key)} in ${html}`)
+  for (const text of ['Target', 'spread', 'references', 'Details', 'Standard', 'Measured', 'samples', 'Not ']) assert.ok(!html.includes(text), `${text} in ${html}`)
+})
+
+test('an excerpt replay discloses, behind Details, the original file seconds separately from the kept copy starting at zero', () => {
   const ref = reference()
   const html = render({ result: { metrics: result.metrics, artifact_id: 'source', compare: replay(ref) } })
   assert.ok(html.includes('vs one.wav'))
-  assert.ok(html.includes('10–12'))
-  assert.ok(html.includes('0–2'))
+  const details = html.slice(html.indexOf('<details>'), html.indexOf('</details>'))
+  assert.ok(details.includes(english('listen.facts.original', '10–12 s (2 s at 48 kHz, 96,000 samples)')), details)
+  assert.ok(details.includes('0–2 s'), details)
   assert.ok(!html.includes('never-display'))
+  assert.ok(!/\d\.\d{6}/.test(html), html)
 })
 
 test('low-rate member regions stay null with reasons while the target reports only covered contributors', () => {
@@ -651,34 +692,41 @@ test('low-rate member regions stay null with reasons while the target reports on
   const memberStart = html.indexOf('aria-label="Reference 1: 22k-reference.wav"')
   const memberEnd = html.indexOf('aria-label="Reference 2:', memberStart)
   const lowHtml = html.slice(memberStart, memberEnd)
-  assert.ok(lowHtml.includes('Air is above the 11.025 kHz Nyquist limit.'), lowHtml)
-  assert.ok(lowHtml.includes('only partially covered'), lowHtml)
+  const above = english('listen.profile.reasons.above_nyquist', '11')
+  const partly = english('listen.profile.reasons.partial_frequency_coverage', '11')
+  assert.ok(lowHtml.includes(above), lowHtml)
+  assert.ok(lowHtml.includes(partly), lowHtml)
   assert.ok(!lowHtml.includes('−24 dB'), lowHtml)
-  assert.ok(lowHtml.includes('−12 LUFS'), 'canonical Analysis remains independently visible')
+  assert.ok(lowHtml.includes('−12 LUFS'), 'the standard measurements remain independently readable')
   assert.equal(lowHtml.split('>—</td>').length - 1, 2, 'unavailable member values are dashes, never zero')
   const disclosureStart = lowHtml.indexOf('<details>')
   const disclosureEnd = lowHtml.indexOf('</details>', disclosureStart)
   assert.ok(disclosureStart >= 0 && disclosureEnd > disclosureStart, lowHtml)
   assert.ok(!lowHtml.slice(disclosureStart, lowHtml.indexOf('>', disclosureStart)).includes('open'), 'member details start collapsed')
   const visible = lowHtml.slice(0, disclosureStart) + lowHtml.slice(disclosureEnd + '</details>'.length)
-  assert.ok(visible.includes('Air is above the 11.025 kHz Nyquist limit.'), 'Nyquist reason remains outside the collapsed disclosure')
-  assert.ok(visible.includes('only partially covered'), 'partial coverage remains outside the collapsed disclosure')
+  assert.ok(visible.includes(above), 'the bandwidth reason remains outside the collapsed disclosure')
+  assert.ok(visible.includes(partly), 'partial coverage remains outside the collapsed disclosure')
   assert.ok(visible.includes('aria-label="Play 22k-reference.wav"'), 'real member playback remains outside the disclosure')
-  assert.ok(lowHtml.slice(disclosureStart, disclosureEnd).includes('Heard relative region power'), 'full basis remains accessible inside the disclosure')
+  const inside = lowHtml.slice(disclosureStart, disclosureEnd)
+  for (const text of [english('listen.profile.memberCaption'), '−12 LUFS', '10–12 s (2 s at 22.05 kHz, 44,100 samples)']) assert.ok(inside.includes(text), `${text} inside the disclosure`)
   const target = html.slice(0, memberStart)
   assert.ok(target.includes('2/3'), target)
   assert.ok(target.includes('−24 dB'), target)
   assert.ok(!target.includes('3/3</td>'), target)
 })
 
-test('a missing source profile quantity prefers human coverage detail and falls back to its reason code', () => {
+test("a missing source profile quantity says why in the card's words, never its code", () => {
   const native = profileResult()
   const quantity = native.reference_profile.quantities[0]
   Object.assign(quantity, { source: null, source_reason: 'above_nyquist', source_reason_detail: 'Source air is above the 11.025 kHz Nyquist limit.', source_nyquist_hz: 11025, deviation: null, inside_spread: null })
-  const detailed = render({ result: native })
-  assert.ok(detailed.includes('Source air is above the 11.025 kHz Nyquist limit.'), detailed)
-  assert.ok(!detailed.includes('above_nyquist'), detailed)
+  const known = render({ result: native })
+  assert.ok(known.includes(english('listen.profile.reasons.above_nyquist', '11')), known)
+  assert.ok(!known.includes('above_nyquist'), known)
+  // A reason this card doesn't know yet: the runtime's own sentence, else "Not measured"; never the code.
+  quantity.source_reason = 'a_newer_reason'
+  assert.ok(render({ result: native }).includes('Source air is above the 11.025 kHz Nyquist limit.'))
   delete quantity.source_reason_detail
-  const fallback = render({ result: native })
-  assert.ok(fallback.includes('above_nyquist'), fallback)
+  const bare = render({ result: native })
+  assert.ok(bare.includes(english('listen.profile.reasons.not_measured')), bare)
+  assert.ok(!bare.includes('a_newer_reason'), bare)
 })

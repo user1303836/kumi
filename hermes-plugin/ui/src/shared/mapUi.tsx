@@ -19,7 +19,7 @@ export const glass: CSSProperties = {
   borderRadius: 12
 }
 
-export type IconName = 'arrange' | 'close' | 'fit' | 'folder' | 'grow' | 'hand' | 'hover' | 'layers' | 'make' | 'near' | 'pick' | 'play' | 'plus' | 'reset' | 'stop' | 'tiles'
+export type IconName = 'arrange' | 'close' | 'fit' | 'folder' | 'grow' | 'hand' | 'hover' | 'make' | 'near' | 'pick' | 'play' | 'plus' | 'reset' | 'stop' | 'tiles'
 
 const PATHS: Record<IconName, ReactNode> = {
   pick: <path d="M4 2.5 L4 13 L6.8 10.4 L8.7 14.5 L10.4 13.7 L8.6 9.7 L12.4 9.5 Z" fill="currentColor" strokeLinejoin="round" />,
@@ -79,12 +79,6 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M8.5 8.5 L13.5 13.5 M13.5 9.6 V13.5 H9.6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
     </>
   ),
-  layers: (
-    <>
-      <path d="M8 2 L14 5.2 L8 8.4 L2 5.2 Z" fill="currentColor" fillOpacity=".9" />
-      <path d="M2.4 8 L8 11 L13.6 8 M2.4 10.8 L8 13.8 L13.6 10.8" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.2" />
-    </>
-  ),
   close: <path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />,
   play: <path d="M5 3 L13 8 L5 13 Z" fill="currentColor" strokeLinejoin="round" />,
   stop: <rect fill="currentColor" height="9" rx="1.5" width="9" x="3.5" y="3.5" />,
@@ -115,15 +109,13 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
 }
 
 /** A round tool button: an icon, its name for a screen reader and in Hermes's Tip, pressed while its tool or toggle is
- *  on; with `expanded`, the button of a menu (open or not) instead of a toggle. */
-export function ToolButton({ icon, label, title, pressed, onClick, children, disabled, expanded }: { icon: IconName; label: string; title?: string; pressed?: boolean; onClick: () => void; children?: ReactNode; disabled?: boolean; expanded?: boolean }) {
+ *  on. */
+export function ToolButton({ icon, label, title, pressed, onClick, disabled }: { icon: IconName; label: string; title?: string; pressed?: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <Tip label={title ?? label}>
       <button
-        aria-expanded={expanded}
-        aria-haspopup={expanded === undefined ? undefined : 'menu'}
-        aria-label={children ? undefined : label}
-        aria-pressed={expanded === undefined ? pressed : undefined}
+        aria-label={label}
+        aria-pressed={pressed}
         className={`${FOCUSABLE} kumi-btn`}
         disabled={disabled}
         onClick={onClick}
@@ -131,13 +123,9 @@ export function ToolButton({ icon, label, title, pressed, onClick, children, dis
         style={{
           ...S.row,
           justifyContent: 'center',
-          gap: 5,
-          minWidth: 30,
+          width: 30,
           height: 30,
-          padding: children ? '0 10px 0 8px' : 0,
-          font: 'inherit',
-          fontSize: 12,
-          fontWeight: pressed ? 600 : 500,
+          padding: 0,
           borderRadius: 15,
           border: 'none',
           background: pressed ? `color-mix(in srgb, ${T.accent} 22%, transparent)` : 'transparent',
@@ -149,7 +137,6 @@ export function ToolButton({ icon, label, title, pressed, onClick, children, dis
         }}
       >
         <Icon name={icon} />
-        {children}
       </button>
     </Tip>
   )
@@ -166,7 +153,7 @@ export function ToolGroup({ children, label }: { children: ReactNode; label: str
 }
 
 export function Rule() {
-  return <span aria-hidden style={{ width: 1, height: 18, margin: '0 3px', background: T.border, flex: 'none' }} />
+  return <span aria-hidden style={{ width: 1, height: 18, margin: '0 3px', background: T.hairline, flex: 'none' }} />
 }
 
 /** One way to lay the map out, as the layout menu lists it. */
@@ -176,14 +163,14 @@ export interface LayoutChoice {
   title: string
 }
 
-/** The layout menu: a tool button (naming the layout shown, unless it's the first), opening a menu of `choices`. A
- *  choice closes it, as do Escape and a press anywhere else; the arrow keys move between choices. The menu scrolls
- *  within `maxHeight` (the room below the map's top bar), so every choice can be reached on a short map. With `words`
- *  it is the map's corner's instead: a button of words naming the layout ("Layout: Similarity"), its menu opening
- *  upward. */
-export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void; maxHeight?: number; words?: (name: string) => string }) {
+/** The layout menu, in the map's corner: a button of words naming the layout shown ("Layout: Similarity"), opening a
+ *  menu of `choices` upward. A choice closes it, as do Escape and a press anywhere else, and a choice or Escape gives
+ *  the focus back to its button; the arrow keys move between choices. The menu scrolls within `maxHeight` (the room
+ *  above the corner), so every choice can be reached on a short map. */
+export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words }: { label: string; choices: LayoutChoice[]; current: string; onChoose: (id: string) => void; maxHeight?: number; words: (name: string) => string }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
+  const button = useRef<HTMLButtonElement | null>(null)
   const items = useRef<(HTMLButtonElement | null)[]>([])
   useEffect(() => {
     if (!open) return
@@ -199,12 +186,17 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words
   useEffect(() => {
     if (open) items.current[Math.max(0, choices.indexOf(shown))]?.focus()
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The focused item goes with the menu: the focus goes back to the button, never to the page.
+  const close = () => {
+    setOpen(false)
+    button.current?.focus()
+  }
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!open) return
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
-      setOpen(false)
+      close()
       return
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
@@ -214,26 +206,22 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words
   }
   return (
     <div onKeyDown={keys} ref={box} style={{ position: 'relative', display: 'flex' }}>
-      {words ? (
+      <Tip label={shown?.title}>
         <button
           aria-expanded={open}
           aria-haspopup="menu"
           className={FOCUSABLE}
           onClick={() => setOpen(!open)}
-          title={shown?.title}
+          ref={button}
           type="button"
-          style={{ ...S.row, gap: 5, font: 'inherit', fontSize: 11.5, fontWeight: 500, padding: '2px 8px', borderRadius: 8, border: `1px solid ${open ? T.accent : T.border}`, background: `color-mix(in srgb, ${T.text} 4%, transparent)`, color: T.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          style={{ ...S.row, gap: 5, font: 'inherit', ...TYPE.small, minHeight: 24, padding: '2px 8px', borderRadius: 8, border: `1px solid ${open ? T.accent : T.hairline}`, background: `color-mix(in srgb, ${T.text} 4%, transparent)`, color: T.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
           {words(shown?.name ?? '')}
-          <span aria-hidden style={{ fontSize: 9, color: T.muted }}>
+          <span aria-hidden style={{ ...TYPE.caption, color: T.muted }}>
             ▾
           </span>
         </button>
-      ) : (
-        <ToolButton expanded={open} icon="layers" label={label} onClick={() => setOpen(!open)} pressed={open || shown !== choices[0]} title={`${label}: ${shown?.name ?? ''}`}>
-          {shown !== choices[0] ? shown?.name : undefined}
-        </ToolButton>
-      )}
+      </Tip>
       {open && (
         <div
           aria-label={label}
@@ -241,7 +229,7 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words
           role="menu"
           // Inside the corner's glass a second blur shows nothing behind it: the corner's menu is the raised surface, whole.
           // The corner sits at the map's right edge: its menu opens up and leftwards from there, inside the map (M19).
-          style={{ ...glass, position: 'absolute', ...(words ? { bottom: 28, right: -4, background: T.raised } : { top: 38, right: -4 }), width: 'max-content', maxWidth: 300, maxHeight, overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}
+          style={{ ...glass, position: 'absolute', bottom: 30, right: -4, background: T.raised, width: 'max-content', maxWidth: 300, maxHeight, overflowY: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 1, zIndex: 3 }}
         >
           {choices.map((choice, index) => (
             <button
@@ -250,7 +238,7 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words
               key={choice.id}
               onClick={() => {
                 onChoose(choice.id)
-                setOpen(false)
+                close()
               }}
               ref={element => {
                 items.current[index] = element
@@ -272,8 +260,8 @@ export function LayoutMenu({ label, choices, current, onChoose, maxHeight, words
                 background: choice.id === shown?.id ? `color-mix(in srgb, ${T.accent} 16%, transparent)` : 'transparent'
               }}
             >
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }}>{choice.name}</span>
-              <span style={{ fontSize: 11, color: T.muted }}>{choice.title}</span>
+              <span style={{ ...TYPE.body, fontWeight: 600, color: choice.id === shown?.id ? T.accent : T.text }}>{choice.name}</span>
+              <span style={{ ...TYPE.caption, color: T.muted }}>{choice.title}</span>
             </button>
           ))}
         </div>
@@ -329,19 +317,20 @@ export function ActionMenu({ label, actions, up = false }: { label: string; acti
   }
   return (
     <div onKeyDown={keys} ref={box} style={{ position: 'relative', display: 'flex' }}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={label}
-        className={`${FOCUSABLE} kumi-btn`}
-        onClick={() => setOpen(!open)}
-        ref={button}
-        title={label}
-        type="button"
-        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0, font: 'inherit', fontSize: 14, lineHeight: 1, borderRadius: 4, border: 'none', background: open ? T.chip : 'transparent', color: T.secondary, cursor: 'pointer', flex: 'none' }}
-      >
-        ⋯
-      </button>
+      <Tip label={label}>
+        <button
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={label}
+          className={`${FOCUSABLE} kumi-btn`}
+          onClick={() => setOpen(!open)}
+          ref={button}
+          type="button"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0, font: 'inherit', fontSize: 14, lineHeight: 1, borderRadius: 4, border: 'none', background: open ? T.chip : 'transparent', color: T.secondary, cursor: 'pointer', flex: 'none' }}
+        >
+          ⋯
+        </button>
+      </Tip>
       {open && (
         <div
           aria-label={label}
@@ -349,23 +338,23 @@ export function ActionMenu({ label, actions, up = false }: { label: string; acti
           style={{ position: 'absolute', ...(up ? { bottom: 28 } : { top: 28 }), left: 0, zIndex: 3, minWidth: 160, width: 'max-content', maxWidth: 280, padding: 4, display: 'flex', flexDirection: 'column', gap: 1, borderRadius: 6, border: `1px solid ${T.border}`, background: T.raised, boxShadow: '0 8px 24px -8px rgba(0,0,0,.45)' }}
         >
           {actions.map((action, index) => (
-            <button
-              className={`${FOCUSABLE} kumi-btn`}
-              key={action.id}
-              onClick={() => {
-                close()
-                action.onChoose()
-              }}
-              ref={element => {
-                items.current[index] = element
-              }}
-              role="menuitem"
-              title={action.title}
-              type="button"
-              style={{ font: 'inherit', ...TYPE.small, textAlign: 'left', padding: '5px 10px', borderRadius: 4, border: 'none', background: 'transparent', color: action.danger ? T.bad : T.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              {action.name}
-            </button>
+            <Tip key={action.id} label={action.title}>
+              <button
+                className={`${FOCUSABLE} kumi-btn`}
+                onClick={() => {
+                  close()
+                  action.onChoose()
+                }}
+                ref={element => {
+                  items.current[index] = element
+                }}
+                role="menuitem"
+                type="button"
+                style={{ font: 'inherit', ...TYPE.small, textAlign: 'left', padding: '5px 10px', borderRadius: 4, border: 'none', background: 'transparent', color: action.danger ? T.bad : T.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                {action.name}
+              </button>
+            </Tip>
           ))}
         </div>
       )}

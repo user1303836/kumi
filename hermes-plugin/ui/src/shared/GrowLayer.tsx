@@ -13,7 +13,7 @@ import { clean, seconds } from './format.ts'
 import { alongPath, type Bud, type Grow, type GrowEnd, nearestOnVine, vinePoint } from './grow.ts'
 import { floatBeside } from './mapModel.ts'
 import { glass, Icon } from './mapUi.tsx'
-import { FOCUSABLE, S, useT } from './ui.tsx'
+import { FOCUSABLE, S, TYPE, useT } from './ui.tsx'
 
 type Point = readonly [number, number]
 const percent = (at: number): number => Math.round(at * 100)
@@ -226,7 +226,7 @@ export function GrowLayer({
           <circle cx={handle[0]} cy={handle[1]} fill="transparent" r={16} />
           <circle cx={handle[0]} cy={handle[1]} fill={T.raised} r={8.5} stroke={T.accent} strokeWidth={2.5} />
           <circle cx={handle[0]} cy={handle[1]} fill={T.accent} r={3} />
-          <text fill={T.text} fontSize={10.5} fontWeight={600} paintOrder="stroke" stroke={T.raised} strokeWidth={3} textAnchor="middle" x={handle[0]} y={handle[1] - 15}>
+          <text fill={T.text} fontSize={11} fontWeight={600} paintOrder="stroke" stroke={T.raised} strokeWidth={3} textAnchor="middle" x={handle[0]} y={handle[1] - 15}>
             {`${onPath(grow.handle)}%`}
           </text>
         </g>
@@ -240,8 +240,9 @@ export function GrowLayer({
       >
         <div style={{ ...S.row, gap: 6, alignItems: 'flex-start' }}>
           <Icon name="grow" size={14} />
-          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 650, overflowWrap: 'anywhere' }}>{t('grow.title', clean(grow.from?.origin ?? '', 40), clean(grow.to.name, 40))}</span>
-          <button aria-label={t('grow.close')} className={FOCUSABLE} onClick={grow.close} title={t('grow.close')} type="button" style={{ display: 'flex', padding: 3, border: 'none', borderRadius: 10, background: 'transparent', color: T.faint, cursor: 'pointer' }}>
+          <span style={{ flex: 1, minWidth: 0, ...TYPE.small, fontWeight: 600, overflowWrap: 'anywhere' }}>{t('grow.title', clean(grow.from?.origin ?? '', 40), clean(grow.to.name, 40))}</span>
+          {/* The × says what it does: no tip. A 24 px target, drawn into the card's padding. */}
+          <button aria-label={t('grow.close')} className={FOCUSABLE} onClick={grow.close} type="button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, margin: '-4px -6px -4px 0', padding: 0, border: 'none', borderRadius: 12, background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}>
             <Icon name="close" size={11} />
           </button>
         </div>
@@ -249,17 +250,17 @@ export function GrowLayer({
           failed ? (
             // Nothing grew and nothing is on its way (a sound's file is gone, the map moved on): why, at once.
             <>
-              <span style={{ fontSize: 11, color: T.bad }}>{t('grow.failed', clean(failed.error, 160))}</span>
+              <span style={{ ...TYPE.caption, color: T.bad }}>{t('grow.failed', clean(failed.error, 160))}</span>
               <div style={S.row}>{another}</div>
             </>
           ) : (
-            <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.hint')}</span>
+            <span style={{ ...S.faint, ...TYPE.caption }}>{t('grow.hint')}</span>
           )
         ) : picked.state === 'ready' ? (
           <>
             {/* The point by its place on the path the head names, in words that wrap: never the engine's recipe, which
                 names a grown sound by the recipe and seed of the one it grew from. */}
-            <span style={{ fontSize: 11, color: T.secondary, overflowWrap: 'anywhere' }}>
+            <span style={{ ...TYPE.caption, color: T.secondary, overflowWrap: 'anywhere' }}>
               {t('grow.bud', onPath(picked.at))} <span style={{ color: T.faint }}>· {seconds(picked.result.duration)}</span>
             </span>
             {/* Keyed by the sound: another bud played while this one sounds starts its playhead anew. */}
@@ -291,11 +292,11 @@ export function GrowLayer({
           </>
         ) : picked.state === 'failed' ? (
           <>
-            <span style={{ fontSize: 11, color: T.bad }}>{t('grow.failed', clean(picked.error, 160))}</span>
+            <span style={{ ...TYPE.caption, color: T.bad }}>{t('grow.failed', clean(picked.error, 160))}</span>
             <div style={S.row}>{another}</div>
           </>
         ) : (
-          <span style={{ ...S.faint, fontSize: 11 }}>{t('grow.growing', onPath(picked.at))}</span>
+          <span style={{ ...S.faint, ...TYPE.caption }}>{t('grow.growing', onPath(picked.at))}</span>
         )}
       </div>
     </>

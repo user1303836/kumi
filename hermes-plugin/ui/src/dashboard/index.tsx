@@ -23,7 +23,7 @@ import { SampleFolders, useSampleFolders } from '../shared/SampleFolders.tsx'
 import { KumiStore } from '../shared/store.ts'
 import { nextSteps, setupWords } from '../shared/steps.ts'
 import type { AudioReply } from '../shared/types.ts'
-import { Dot, FocusStyle, I18n, S, Section, useT } from '../shared/ui.tsx'
+import { Dot, FocusStyle, I18n, S, Section, TYPE, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
@@ -167,7 +167,7 @@ function Dashboard() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: T.text, minHeight: 'calc(100vh - 160px)' }}>
       <div style={{ ...S.row, gap: 10, padding: '4px 2px' }}>
         <Dot beat={connected ? beatSeconds(state.focus?.transport) : null} color={tone} size={9} />
-        <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
+        <span style={{ ...TYPE.body, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         {setupMessage && <span style={S.muted}>{setupMessage}</span>}
         {/* Setup's next step, to paste into a chat: the dashboard can't send one itself. */}

@@ -1,8 +1,10 @@
 // node --test: the palette as the map and its dock see it: which sounds the map marks, what a gather sends, a move's
-// order, names, the kit request, thumbnails' bars, the box a drag picks, the store's palette reads and edits, and a
-// hover's preview.
+// order, names, the kit request, thumbnails' bars, the box a drag picks, the store's palette reads and edits, a
+// hover's preview, and what the dock draws.
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 import { load } from './load.mjs'
 
@@ -175,4 +177,22 @@ test('a drag picks the points inside its box, whichever corner it started from, 
   // Zoomed in 4× around the middle: the same box covers a quarter of the span.
   const zoomed = map.zoomAt(view, 4, 50, 50)
   assert.deepEqual(map.pointsInBox(model, zoomed, 100, [45, 45, 55, 55]), [1])
+})
+
+test('an empty dock says one sentence, once; a full one draws its sounds, a × with a 24 px target, and an off-map one still focusable', async () => {
+  const { PaletteDock } = await load('src/shared/PaletteDock.tsx', { react: 'real' })
+  const { english } = await load('src/shared/i18n.ts')
+  const draw = current =>
+    renderToStaticMarkup(
+      createElement(PaletteDock, { palette: { seq: 1, map_revision: 'r1', current, palettes: current ? [{ id: current.id, name: current.name, items: current.items.length }] : [] }, groups: {}, playing: null, onPlay() {}, onStop() {}, onDo: async () => true, said: null, audio: async () => '', open: false, onOpen() {} })
+    )
+  const empty = english('dock.empty')
+  for (const current of [null, { id: 'p1', name: 'Drums', reach: 0, mode: 'strict', excluded: 0, items: [] }]) {
+    const html = draw(current)
+    assert.equal(html.split(empty).length - 1, 1, html)
+  }
+  const full = draw({ id: 'p1', name: 'Drums', reach: 0, mode: 'strict', excluded: 0, items: [item('kick', 's-r1-1'), item('gone', null, { group: null })] })
+  assert.ok(!full.includes(empty), full)
+  assert.equal(full.match(/<button aria-label="Take [^"]*"[^>]*width:24px;height:24px/g)?.length, 2, 'each chip’s × is a 24 px target')
+  assert.ok(full.includes('aria-disabled="true"') && !/<button[^>]*disabled=""/.test(full), 'an off-map sound’s button stays focusable')
 })

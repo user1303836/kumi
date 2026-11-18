@@ -295,6 +295,22 @@ export function tileModel(model: MapModel, layout: TileLayout): MapModel {
   return { ...model, points, cells }
 }
 
+/** The map with every point at `places` (x, y pairs in the points' order, map units: where the canvas last drew them),
+ *  the grid rebuilt: what the pointer, a box and the keys meet while the sounds are on their way somewhere (a layout's
+ *  move, the dots' morph into tiles), so they act on the sounds as drawn, not where they are going. */
+export function placedModel(model: MapModel, places: Float32Array): MapModel {
+  const cells = new Map<number, number[]>()
+  const points = model.points.map((point, index) => {
+    const at = { ...point, x: Math.min(1, Math.max(0, places[2 * index])), y: Math.min(1, Math.max(0, places[2 * index + 1])) }
+    const cell = cellOf(at.x, at.y)
+    const list = cells.get(cell)
+    if (list) list.push(index)
+    else cells.set(cell, [index])
+    return at
+  })
+  return { ...model, points, cells }
+}
+
 /** The map's square side in a `width` × `height` canvas whose top `top` pixels (the floating bar) and bottom `bottom`
  *  pixels (the corner) are covered: what every view of that canvas draws the map at, times its scale. */
 export function mapSide(width: number, height: number, top = 0, bottom = 0): number {
@@ -305,13 +321,20 @@ export function mapSide(width: number, height: number, top = 0, bottom = 0): num
  *  the sheet would leave too little to be worth centring in. */
 const roomBeside = (width: number, right: number): number => (width - right >= 240 ? width - right : width)
 
-/** The view that shows the whole map in a `width` × `height` canvas, between its top `top` and bottom `bottom` pixels,
- *  with a margin: in the room left of a side sheet covering its right `right` pixels when the map fits there (the map's
- *  size stays the canvas's, so a sheet opening moves the map and never rescales it). */
-export function fitView(width: number, height: number, top = 0, right = 0, bottom = 0): MapViewport {
+/** The view that shows the whole map in a `width` × `height` canvas whose map side is the one between its top `top`
+ *  and bottom `bottom` pixels (`mapSide`), with a margin, in the room that is free: below `room.top` and above
+ *  `room.bottom` when more than that floats over the map (a find's card in the top column; the player, the corner and
+ *  the picks' actions at the foot, as measured), and left of a side sheet covering its right `right` pixels. Where the
+ *  free room is smaller than the map's side, the view is scaled below 1 to fit it: the map's side itself never changes
+ *  with what floats over it, so nothing else on the map rescales. */
+export function fitView(width: number, height: number, top = 0, right = 0, bottom = 0, room: { top?: number; bottom?: number } = {}): MapViewport {
   const size = mapSide(width, height, top, bottom)
-  const room = roomBeside(width, right)
-  return { scale: 1, dx: size <= room ? (room - size) / 2 : (width - size) / 2, dy: top + (height - top - bottom - size) / 2 }
+  const across = roomBeside(width, right)
+  const [roomTop, roomBottom] = [Math.max(top, room.top ?? 0), Math.max(bottom, room.bottom ?? 0)]
+  const free = Math.max(1, Math.min(across, height - roomTop - roomBottom) - 32)
+  const scale = Math.min(1, free / size)
+  const shown = size * scale
+  return { scale, dx: (across - shown) / 2, dy: roomTop + (height - roomTop - roomBottom - shown) / 2 }
 }
 
 /** Where a `w` × `h` card goes beside the screen box `box` ([x0, y0, x1, y1]: the picks) in a `width` × `height` map
@@ -346,9 +369,11 @@ export function keepPlace(view: MapViewport, from: number, to: number): MapViewp
   return from > 0 && to > 0 && from !== to ? { ...view, scale: (view.scale * from) / to } : view
 }
 
-/** Zoom by `factor` around the screen point (`px`, `py`), within 1× to 40×. */
+/** Zoom by `factor` around the screen point (`px`, `py`), up to 40×, and down to 1× (the whole map), or to the scale
+ *  the view already has when it's below that (a Fit into a small free room): zooming in from there is smooth, never a
+ *  jump to 1×. */
 export function zoomAt(view: MapViewport, factor: number, px: number, py: number): MapViewport {
-  const scale = Math.min(40, Math.max(1, view.scale * factor))
+  const scale = Math.min(40, Math.max(Math.min(1, view.scale), view.scale * factor))
   const applied = scale / view.scale
   return { scale, dx: px - (px - view.dx) * applied, dy: py - (py - view.dy) * applied }
 }

@@ -45,14 +45,44 @@ test('the request names the folder as it is, and the field shows a path of the c
   assert.equal(folderExample(undefined), '/Users/you/Samples')
 })
 
-test('the control lists the folders and offers the dialog only where there is one, and a copy where nothing can be sent', () => {
-  const draw = props => renderToStaticMarkup(createElement(SampleFolders, { folders: ['D:\\Samples', SAMPLES], example: SAMPLES, check: async () => ({}), ask: async () => 'none', ...props }))
-  const desktop = draw({ pick: async () => null })
-  for (const text of ['D:\\Samples', SAMPLES, english('folders.choose'), english('folders.add'), english('folders.note')]) assert.ok(desktop.includes(text), `${text} in ${desktop}`)
+test('the control lists the folders, a gone one struck and said so, and offers a copy where nothing can be sent', () => {
+  const folders = [{ path: 'D:\\Samples', missing: false }, { path: SAMPLES, missing: false }]
+  const draw = props => renderToStaticMarkup(createElement(SampleFolders, { folders, example: SAMPLES, check: async () => ({}), ask: async () => 'none', ...props }))
+  const desktop = draw({})
+  for (const text of ['D:\\Samples', SAMPLES, english('folders.add'), english('folders.note')]) assert.ok(desktop.includes(text), `${text} in ${desktop}`)
   assert.ok(desktop.includes(`placeholder="${english('folders.pathHint', SAMPLES).replaceAll("'", '&#x27;')}"`), desktop)
+  assert.ok(!desktop.includes(english('folders.missing')) && !desktop.includes('line-through'), desktop)
+  const gone = draw({ folders: [folders[0], { path: SAMPLES, missing: true }] })
+  assert.equal(gone.split(english('folders.missing')).length - 1, 1, gone)
+  assert.equal(gone.split('line-through').length - 1, 1, 'only the gone folder is struck')
   const dashboard = draw({ copies: true })
   assert.ok(dashboard.includes(english('folders.copy')) && !dashboard.includes(english('folders.add')) && !dashboard.includes(english('folders.choose')), dashboard)
   assert.ok(draw({ folders: [] }).includes(english('folders.none')))
   assert.ok(draw({ folders: undefined }).includes(english('folders.reading')))
   assert.ok(!draw({ folders: null }).includes(english('folders.none')), 'folders that can’t be read are not said to be none')
+})
+
+test('Choose… shows only once the host says it has a folder dialog: never in Hermes in a browser', async () => {
+  for (const present of [false, true]) {
+    // A window of its own each: the answer is asked once a window.
+    const { SampleFolders: Control, dialogPresent } = await load('src/shared/SampleFolders.tsx', { react: 'real' })
+    const asked = []
+    const dialog = { present: async () => (asked.push('present'), present), pick: async () => (asked.push('pick'), null) }
+    const draw = () => renderToStaticMarkup(createElement(Control, { folders: [], example: SAMPLES, check: async () => ({}), ask: async () => 'none', dialog }))
+    assert.ok(!draw().includes(english('folders.choose')), 'not before the host answers')
+    assert.equal(await dialogPresent(dialog), present)
+    assert.equal(await dialogPresent(dialog), present)
+    assert.deepEqual(asked, ['present'], 'asked once, and the dialog never opened to ask')
+    assert.equal(draw().includes(english('folders.choose')), present)
+  }
+})
+
+test('the folders route’s `missing` marks the folders gone from the disk; an older backend’s answer has none missing', async () => {
+  const read = answer => new KumiStore(async path => (assert.equal(path, '/library/folders'), answer)).libraryFolders()
+  assert.deepEqual(await read({ folders: ['/a', '/b', 3], missing: ['/b', 7] }), [
+    { path: '/a', missing: false },
+    { path: '/b', missing: true }
+  ])
+  assert.deepEqual(await read({ folders: ['/a'] }), [{ path: '/a', missing: false }])
+  assert.equal(await read({}), null)
 })

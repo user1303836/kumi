@@ -45,6 +45,8 @@ export const MEASUREMENTS_WORKSPACE = 'kumi-measurements'
 export const LISTEN_FALLBACK_MS = 2000
 /** How often /status is read while the window is in view: events are faster, but only reach the process that emits. */
 export const POLL_MS = 5000
+/** While only the chip shows Kumi, every this many polls (30 s): the chip's dot is kept by events, the poll is a net. */
+export const IDLE_POLLS = 6
 /** How often a running job is read while the window is in view (none is read when nothing runs). */
 export const JOB_POLL_MS = 2000
 
@@ -135,12 +137,19 @@ const plugin: HermesPlugin = {
     }
     const openSettings = () => host.navigate(typeof sdk.pluginSettingsHref === 'function' ? sdk.pluginSettingsHref(PLUGIN_ID) : '/settings?tab=plugins')
 
-    // Read /status now, every few seconds while the window is in view, and on every event that says something moved.
-    // An event about another profile's Kumi (#966's `profile`) moves nothing this window shows.
+    // Read /status now, every few seconds while a Kumi view is in view (the pane, the map or measurements, the settings
+    // page) and every 30 s while only the chip shows Kumi (X9), and on every event that says something moved. An event
+    // about another profile's Kumi (#966's `profile`) moves nothing this window shows.
     const refresh = () => void store.refreshStatus()
     refresh()
+    const paneShown = typeof host.paneVisibility === 'function' ? host.paneVisibility(`${PLUGIN_ID}:pane`) : null
+    const viewing = () => paneShown?.get() !== false || closeMap !== null || closeMeasurements !== null || mapPane !== null || measurementsPane !== null || store.wants('setup')
+    let idle = 0
     ctx.setInterval(() => {
-      if (document.visibilityState !== 'hidden') refresh()
+      if (document.visibilityState === 'hidden') return
+      if (!viewing() && ++idle < IDLE_POLLS) return
+      idle = 0
+      refresh()
     }, POLL_MS)
     const ours = (act: (payload: Record<string, unknown>) => void) => (event: { payload?: unknown }) => {
       const payload = payloadOf(event)

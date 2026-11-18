@@ -13,7 +13,7 @@ import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import { dawPartWorks, type KumiStore } from '../shared/store.ts'
 import { dawChosen, nextSteps } from '../shared/steps.ts'
-import { Chip, FOCUSABLE, Pending, S, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, Pending, S, TYPE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 import { PET_LINES } from './pet.ts'
@@ -28,7 +28,7 @@ const HEADING = { ...S.heading, display: 'block', margin: '0 0 4px', fontWeight:
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '9rem 1fr', gap: 8, alignItems: 'baseline', padding: '5px 0', borderTop: `1px solid ${T.border}` }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '9rem 1fr', gap: 8, alignItems: 'baseline', padding: '5px 0', borderTop: `1px solid ${T.hairline}` }}>
       <span style={S.muted}>{label}</span>
       <span style={{ ...S.text, minWidth: 0 }}>{children}</span>
     </div>
@@ -73,7 +73,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 640, color: T.text }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontSize: 15, fontWeight: 600 }}>Kumi</span>
+        <span style={{ ...TYPE.body, fontWeight: 600 }}>Kumi</span>
         <span style={S.muted}>{t('settings.intro', knownDaw(daw) ?? '')}</span>
       </div>
       {state.available === false ? (
@@ -170,7 +170,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
       )}
       <div>
         <h3 style={HEADING}>{t('settings.thisWindow')}</h3>
-        <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, cursor: 'pointer' }}>
+        <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.hairline}`, cursor: 'pointer' }}>
           <input
             checked={openOnFind}
             className={FOCUSABLE}
@@ -184,7 +184,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
         </label>
         {/* Only where Desktop has a pet to speak (ctx.pet); off until the producer turns it on. */}
         {ctx.pet && (
-          <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, cursor: 'pointer' }}>
+          <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.hairline}`, cursor: 'pointer' }}>
             <input
               checked={petLines}
               className={FOCUSABLE}

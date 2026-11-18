@@ -30,7 +30,7 @@ import { clean, num } from './format.ts'
 import { type Grow, type GrowEnd, soundEnd, vinePoint } from './grow.ts'
 import { GrowLayer } from './GrowLayer.tsx'
 import { useLessMotion } from './hooks.ts'
-import { arrangedModel, buildModel, fitView, floatBeside, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, keepPlace, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
+import { arrangedModel, buildModel, fitView, floatBeside, frame, GLYPH_SHAPES, glyphOf, indexedValues, keepInView, keepPlace, mapKey, mapLabel, type MapModel, mapSide, type MapViewport, moveWith, pick, placedModel, pointsInBox, searchSounds, tileLayout, tileModel, toScreen, traceGlyph, type WheelMemory, type WheelMode, wheelPans, zoomAt } from './mapModel.ts'
 import { glass, Icon, type LayoutChoice, LayoutMenu, Rule, ToolButton, ToolGroup } from './mapUi.tsx'
 import { Player } from './Player.tsx'
 import type { KumiState } from './store.ts'
@@ -308,7 +308,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // Where everything floating over the map's top ends (a find's card included): what floats beside the picks keeps below it.
   const [columnBottom, setColumnBottom] = useState(0)
   const mapSize = mapSide(size.width, size.height, topInset, CORNER_ROOM)
-  const fit = () => fitView(size.width, size.height, topInset, coverRight, CORNER_ROOM)
+  // Fit shows the whole map in the room that is free (`fitView`): below the whole top column (a find's card in it),
+  // above all that docks at the foot as measured (the player, the corner, the picks' actions), left of a side sheet.
+  // Kept by each render, read when the map is fitted.
+  const fitRoom = useRef({ top: 0, bottom: 0 })
+  const fit = () => fitView(size.width, size.height, topInset, coverRight, CORNER_ROOM, fitRoom.current)
   // How far up from the map's foot what docks there reaches (the player and the corner, as last laid out): a find's
   // frame keeps above it, and no word is written under the corner. Kept by each render, read by the effects.
   const footing = useRef({ corner: 10, foot: 10 })
@@ -431,6 +435,18 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What the pointer, the keyboard, a box and a find's frame work on: the tiles once they show, else the dots, in the
   // layout shown.
   const active = tiles && tiled ? tiled : arranged
+  // While the sounds are on their way (a layout's move, the dots' morph into tiles and back), the pointer, a box and the
+  // keys meet them where they are drawn (`placedModel`, from the last frame's places), not where they are going: a
+  // click mid-move picks the sound under it. Built at most once a frame, and only while something moves.
+  const placed = useRef<{ paint: number; of: MapModel; model: MapModel } | null>(null)
+  const live = (): MapModel => {
+    const now = performance.now()
+    const last = drawn.current
+    const moving = !still && ((shift.current !== null && now - shift.current.at < ARRANGE_MS) || now - morph.at < MORPH_MS)
+    if (!moving || !last || last.model !== model || last.places.length !== model.points.length * 2) return active
+    if (placed.current?.paint !== lastPaint.current || placed.current.of !== model) placed.current = { paint: lastPaint.current, of: model, model: placedModel(model, last.places) }
+    return placed.current.model
+  }
   // Each point's place in the motion: 0 at the map's middle, 1 at its edge.
   const spread = useMemo(() => {
     const points = model.points
@@ -552,12 +568,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // What the agent found: frame it, once the map has a size and its top has laid out, and once only. The frame counts
   // as a move, so a later resize (the palette drawer, a side sheet) keeps it until the producer fits the map again. It
   // keeps clear of the card that lists the finds (below it, or beside it, whichever leaves more room): the card used
-  // to sit over the very sounds it named.
+  // to sit over the very sounds it named. A search's matches are framed the same way only when asked (the card's
+  // "Zoom to them"): the view never moves under the producer's hands as they type.
   const framedFound = useRef<ReadonlySet<string> | null>(null)
   const matchesRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return
-    framedFound.current = foundIds
+  const frameSounds = (ids: Set<string>): void => {
     // The card sits in the top column (8 px in from the map's corner), which is its offset parent.
     const card = matchesRef.current
     let clear = {}
@@ -570,10 +585,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       clear = areaBelow >= areaBeside ? below : beside
     }
     // Above what docks at the foot too (the player and the corner): the frame is the room the map actually shows.
-    const framed = frame(active, foundIds, size.width, size.height, topInset, coverRight, 48, { ...clear, bottom: footing.current.foot }, CORNER_ROOM)
+    const framed = frame(active, ids, size.width, size.height, topInset, coverRight, 48, { ...clear, bottom: footing.current.foot }, CORNER_ROOM)
     if (!framed) return
     moved.current = true
     setView(framed)
+  }
+  useEffect(() => {
+    if (!foundIds || size.width === 0 || topInset === 0 || framedFound.current === foundIds) return
+    framedFound.current = foundIds
+    frameSounds(foundIds)
   }, [foundIds, model, size.width, size.height, topInset]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The wheel (a native listener: React's wheel handler can't stop the page from scrolling). A pinch, which comes as a
@@ -848,7 +868,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         const text = mapLabel(model.sounds[points[index].id]?.name ?? '')
         return text ? [{ text, color: glow.shape(color), x, y, rank: nameRank(index), index }] : []
       })
-      named.current = drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating]).map(({ box, at }) => ({ box, index: names[at].index }))
+      named.current = drawNames(context, names, reach(morphed) + 4, lettering, [...written, ...floating], size.width - coverRight).map(({ box, at }) => ({ box, index: names[at].index }))
     }
     // Then the layout's axis words inside the map's edges, kept in view.
     if (layoutShown && wordsIn > 0) {
@@ -1018,7 +1038,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // The sound at a canvas point: its point, else the name the map wrote beside it (as last drawn), among the sounds the
   // search and the legend keep; -1 for none.
   const soundAt = (at: MapViewport, x: number, y: number): number => {
-    const index = pick(active, at, mapSize, x, y, reachPx(10), visible)
+    const index = pick(live(), at, mapSize, x, y, reachPx(10), visible)
     if (index >= 0) return index
     const name = named.current.find(({ box: [left, top, width, height], index }) => x >= left && x <= left + width && y >= top - 2 && y <= top + height + 2 && visible(index))
     return name ? name.index : -1
@@ -1048,7 +1068,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     if (!held || !view) return
     const [x, y] = at(event)
     if (held.box && held.moved) {
-      const inside = pointsInBox(active, view, mapSize, [held.x, held.y, x, y], visible).map(index => model.points[index].id)
+      const inside = pointsInBox(live(), view, mapSize, [held.x, held.y, x, y], visible).map(index => model.points[index].id)
       onPicked?.(inside, held.add ? 'add' : 'replace')
       return
     }
@@ -1126,18 +1146,19 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     const from = selected === null ? undefined : indexOf.get(selected)
     const picked = from !== undefined && visible(from) ? from : undefined
     const middle: [number, number] = [size.width / 2, size.height / 2]
+    const hit = live()
     if ('fit' in key) {
       moved.current = false
       setView(fit())
     } else if ('zoom' in key) {
       // Around the sound picked, so it stays where it is; else around the middle.
-      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, active.points[picked].x, active.points[picked].y)
+      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, hit.points[picked].x, hit.points[picked].y)
       moved.current = true
       setView(zoomAt(view, key.zoom, x, y))
     } else {
-      const next = moveWith(active, view, mapSize, picked, key, middle, visible)
+      const next = moveWith(hit, view, mapSize, picked, key, middle, visible)
       if (next < 0) return
-      const point = active.points[next]
+      const point = hit.points[next]
       const [x, y] = toScreen(view, mapSize, point.x, point.y)
       setView(keepInView(view, x, y, size.width, size.height))
       // The keyboard stop now stands for this sound: its name and state are what a screen reader says, once.
@@ -1165,7 +1186,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // choose between.
   const picksShown = hasPicks && !grow?.choosing
   // While a box is drawn: how many sounds letting go would leave picked (a Shift-drag's box adds to the picks).
-  const inBox = box && view ? pointsInBox(active, view, mapSize, box, visible) : []
+  const inBox = box && view ? pointsInBox(live(), view, mapSize, box, visible) : []
   const boxed = drag.current?.add && picked?.size ? new Set([...picked, ...inBox.map(index => model.points[index].id)]).size : inBox.length
   // The first-open steps still to do here: hearing a sound (with hover-to-play on) and drawing a box are done the
   // moment the map sees them. Not while Grow's prompt has the corner.
@@ -1224,11 +1245,22 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     observer.observe(element)
     return () => observer.disconnect()
   }, [hasPoints, cornerShown])
+  // Which floating piece holds the keyboard's focus (the picks' actions, the player, Grow's card): when it goes while it
+  // does (its ×, Escape, Clear, Add to palette), the focus goes to the map's keyboard stop rather than falling to the
+  // page. Kept by the map's focus events, read here.
+  const focusIn = useRef<'grow' | 'picks' | 'player' | null>(null)
+  const growShown = Boolean(grow?.from && grow.to)
+  useEffect(() => {
+    const gone = focusIn.current === 'picks' ? !picksShown : focusIn.current === 'player' ? !playerShown : focusIn.current === 'grow' ? !growShown : false
+    if (!gone) return
+    focusIn.current = null
+    keysRef.current?.focus({ preventScroll: true })
+  }, [picksShown, playerShown, growShown])
 
   // No sounds yet: what builds the map, in the middle of the pane it will fill.
   if (!model.points.length) {
     return (
-      <div style={{ ...S.muted, fontSize: 13, flex: 1, height: '100%', minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+      <div style={{ ...S.muted, ...TYPE.body, flex: 1, height: '100%', minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ maxWidth: 380 }}>
           {empty}
           {(map?.hidden ?? 0) > 0 && (
@@ -1251,7 +1283,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   const reachedId = selected !== null && chosenIndex !== undefined && visible(chosenIndex) ? selected : null
   const reachedSound = reachedId ? model.sounds[reachedId] : undefined
   const reachedName = reachedId ? [clean(reachedSound?.name ?? reachedId, 80), clean(reachedSound?.class, 16)].filter(Boolean).join(', ') : ''
-  const reachedAt = reachedId && view && chosenIndex !== undefined ? toScreen(view, mapSize, active.points[chosenIndex].x, active.points[chosenIndex].y) : null
+  const reachedPoint = reachedId && chosenIndex !== undefined ? live().points[chosenIndex] : undefined
+  const reachedAt = reachedPoint && view ? toScreen(view, mapSize, reachedPoint.x, reachedPoint.y) : null
   const keysRole = reachedId && onPicked && !grow?.choosing ? 'checkbox' : 'button'
   const hovered = hover ? model.points[hover.index] : undefined
   const hoveredSound = hovered ? model.sounds[hovered.id] : undefined
@@ -1284,10 +1317,19 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   // when there's too little room for any row, or when its rows would leave the map less than its free room. A find's
   // frame reads the list as drawn, folded or not, so the found sounds land in the room left.
   const listRoom = size.height - topInset - foot - (picksShown ? clusterSize[1] : 0)
+  fitRoom.current = { top: columnTop, bottom: foot + (picksShown ? clusterSize[1] : 0) }
   const listFolded = size.height > 0 && allOf !== matches && (listRoom < LIST_LEAST || listRoom - listWants < freeLeast)
 
   return (
     <div
+      onBlur={event => {
+        // The focus left the map altogether: no piece of it holds it any more.
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) focusIn.current = null
+      }}
+      onFocus={event => {
+        const target = event.target as Node
+        focusIn.current = cluster.current?.contains(target) ? 'picks' : playerRef.current?.contains(target) ? 'player' : growCardRef.current?.contains(target) ? 'grow' : null
+      }}
       onKeyDown={event => {
         // Escape leaves Grow's naming wherever the keyboard is in the map (on the Grow tool just pressed, say), else
         // puts Grow's vine away (from its handle, a bud, its card or the map): only once whatever is nearer the focus
@@ -1310,23 +1352,16 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
           keeps it above the canvas, drawn after it. */}
       <div ref={topRef} style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, pointerEvents: 'none' }}>
         <div style={{ ...S.row, alignSelf: 'stretch', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          {/* The count sits inside the search field. The revision is an id (`r` and 32 hex digits): there for anyone who
-              looks, not in the line itself. */}
+          {/* The search alone: how many sounds it keeps is the corner's count ("12 of 900 sounds"), the map's one count. */}
           <div style={{ ...glass, borderRadius: 18, position: 'relative', display: 'flex', alignItems: 'center', flex: '1 1 180px', maxWidth: 420, minWidth: 150, height: 36, pointerEvents: 'auto' }}>
             <input
               aria-label={t('map.search')}
               className={FOCUSABLE}
               onChange={event => setQuery(event.target.value)}
               placeholder={t('map.searchHint')}
-              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', fontSize: 12.5, padding: '0 12px', paddingRight: `${countWords.length * 0.55 + 1.6}em`, borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2, textOverflow: 'ellipsis' }}
+              style={{ flex: 1, minWidth: 0, height: '100%', font: 'inherit', ...TYPE.body, padding: '0 12px', borderRadius: 18, border: 'none', background: 'transparent', color: T.text, outlineOffset: -2, textOverflow: 'ellipsis' }}
               value={query}
             />
-            <span
-              style={{ ...S.faint, fontSize: 10.5, lineHeight: '18px', padding: '0 7px', borderRadius: 9, background: T.chip, position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', cursor: 'default' }}
-              title={model.revision ? t('map.revision', model.revision) : undefined}
-            >
-              {countWords}
-            </span>
           </div>
           <span style={{ flex: 1 }} />
           <ToolGroup label={t('map.tools')}>
@@ -1338,7 +1373,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             {grow && <ToolButton icon="grow" label={t('grow.tool')} onClick={() => grow.choose(!grow.choosing)} pressed={grow.choosing !== null} title={t('grow.toolTitle')} />}
             {grow?.choosing && <ToolName>{t('grow.tool')}</ToolName>}
             {onPicked && <Rule />}
-            {layoutChoices.length > 0 && <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - 60)} onChoose={chooseArrangement} />}
             {onTiles && <ToolButton icon="tiles" label={t('map.tiles')} onClick={() => onTiles(!tiles)} pressed={tiles} title={t('map.tilesTitle')} />}
             {tools}
             <Rule />
@@ -1355,31 +1389,32 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         </div>
         {/* The legend and the cards under it keep left of a side sheet (Make beside the map), which starts below the bar. */}
         <div aria-label={t('map.legend')} ref={legendRef} role="group" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 4, padding: 4, pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
-          {/* Serve names every class it knows, most of them empty in a small library: the legend lists those with sounds. */}
+          {/* Serve names every class it knows, most of them empty in a small library: the legend lists those with sounds.
+              Each chip is a 24 px target. */}
           {model.groups.filter(group => group.count > 0).map(group => {
             const off = hidden.has(group.key)
             return (
-              <button
-                aria-pressed={!off}
-                className={FOCUSABLE}
-                key={group.key}
-                onClick={() =>
-                  setHidden(current => {
-                    const next = new Set(current)
-                    if (next.has(group.key)) next.delete(group.key)
-                    else next.add(group.key)
-                    return next
-                  })
-                }
-                title={off ? t('map.show', group.name) : t('map.hide', group.name)}
-                type="button"
-                style={{ ...S.row, gap: 5, font: 'inherit', fontSize: 11, padding: '2px 8px 2px 6px', borderRadius: 10, border: 'none', background: off ? 'transparent' : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: 'pointer', opacity: off ? 0.55 : 1, transition: 'background-color 140ms, opacity 140ms' }}
-              >
-                <svg aria-hidden height="9" style={{ flex: 'none', opacity: off ? 0.35 : 1 }} viewBox="-1.5 -1.5 3 3" width="9">
-                  <GlyphShape color={group.color} glyph={glyphOf(group.key)} />
-                </svg>
-                {group.name} <span style={{ color: T.faint }}>{group.count}</span>
-              </button>
+              <Tip key={group.key} label={off ? t('map.show', group.name) : t('map.hide', group.name)}>
+                <button
+                  aria-pressed={!off}
+                  className={FOCUSABLE}
+                  onClick={() =>
+                    setHidden(current => {
+                      const next = new Set(current)
+                      if (next.has(group.key)) next.delete(group.key)
+                      else next.add(group.key)
+                      return next
+                    })
+                  }
+                  type="button"
+                  style={{ ...S.row, gap: 5, font: 'inherit', ...TYPE.caption, minHeight: 24, padding: '0 8px 0 6px', borderRadius: 12, border: 'none', background: off ? 'transparent' : `color-mix(in srgb, ${group.color} 12%, transparent)`, color: off ? T.faint : T.secondary, cursor: 'pointer', opacity: off ? 0.55 : 1, transition: 'background-color 140ms, opacity 140ms' }}
+                >
+                  <svg aria-hidden height="9" style={{ flex: 'none', opacity: off ? 0.35 : 1 }} viewBox="-1.5 -1.5 3 3" width="9">
+                    <GlyphShape color={group.color} glyph={glyphOf(group.key)} />
+                  </svg>
+                  {group.name} <span style={{ color: T.faint }}>{group.count}</span>
+                </button>
+              </Tip>
             )
           })}
         </div>
@@ -1422,6 +1457,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                       {t('dock.pickAll', matches.length)}
                     </Button>
                   )}
+                  {/* The sounds listed may lie out of view (a search typed while zoomed in): this brings them all into
+                      the room the map shows, as a find's frame does, only when asked. */}
+                  <Button kind="quiet" onClick={() => frameSounds(new Set(matches))} tip={t('map.frameTitle')}>
+                    {t('map.frame')}
+                  </Button>
                   <Button kind="quiet" label={t('map.closeList')} onClick={() => setClosedOf(matches)}>
                     ×
                   </Button>
@@ -1445,9 +1485,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
                           <span style={{ ...S.row, gap: 8 }}>
                             <span style={{ ...S.ellipsis, flex: 1 }}>{clean(sound?.name ?? id, 80)}</span>
                             {indexed && (
-                              <span style={{ color: T.faint, whiteSpace: 'nowrap' }} title={t('map.indexedTitle')}>
-                                {t('map.indexed', indexed)}
-                              </span>
+                              <Tip label={t('map.indexedTitle')}>
+                                <span style={{ color: T.faint, whiteSpace: 'nowrap' }}>{t('map.indexed', indexed)}</span>
+                              </Tip>
                             )}
                             {near && !flat && typeof value === 'number' && <span style={{ color: T.secondary, fontVariantNumeric: 'tabular-nums' }}>{value}</span>}
                             {!oneKind && sound?.class && <span style={{ color: T.faint }}>{clean(sound.class, 16)}</span>}
@@ -1471,7 +1511,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         {hiddenCount > 0 && (
           // One quiet line for every sound that couldn't play here, never a notice per sound.
           <div role="status" style={{ ...glass, borderRadius: 14, ...S.row, flexWrap: 'wrap', gap: 6, padding: '3px 6px 3px 10px', pointerEvents: 'auto', maxWidth: `calc(100% - ${coverRight}px)` }}>
-            <span style={{ ...S.faint, fontSize: 11 }}>{t('map.hidden', hiddenCount)}</span>
+            <span style={{ ...S.faint, ...TYPE.caption }}>{t('map.hidden', hiddenCount)}</span>
             {hiddenActions}
           </div>
         )}
@@ -1493,7 +1533,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               return
             }
             if (!view) return
-            const index = pick(active, view, mapSize, x, y, reachPx(8), visible)
+            const index = pick(live(), view, mapSize, x, y, reachPx(8), visible)
             setHover(index >= 0 ? { index, x, y } : null)
             rest(index >= 0 ? model.points[index].id : null)
           }}
@@ -1613,7 +1653,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
             transition: still ? 'none' : 'left 220ms cubic-bezier(.2,.8,.2,1), top 220ms cubic-bezier(.2,.8,.2,1)'
           }}
         >
-          <span style={{ ...S.row, gap: 5, fontSize: 12, fontWeight: 650, color: T.text }}>
+          <span style={{ ...S.row, gap: 5, ...TYPE.small, fontWeight: 600, color: T.text }}>
             <Icon name="pick" size={12} />
             {t('dock.picked', pickedIds.length)}
           </span>
@@ -1663,7 +1703,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
               <LayoutMenu choices={layoutChoices} current={arrangementIndex >= 0 ? arrangementId : ''} label={t('arrange.label')} maxHeight={Math.max(120, size.height - (playerShown ? 260 : 150))} onChoose={chooseArrangement} words={name => t('corner.layout', name)} />
             ) : undefined
           }
-          picked={hasPicks ? t('dock.picked', pickedIds.length) : undefined}
           prompt={
             grow?.choosing ? (
               <div className="kumi-pop" role="status" style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>

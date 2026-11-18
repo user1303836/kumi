@@ -64,11 +64,13 @@ declare module '@hermes/plugin-sdk' {
     path: string
   }
 
-  /** Desktop's folder door (`ctx.files`), as far as Kumi uses it: the app's folder dialog, and giving back the file
-   *  grant the dialog makes. Older Desktops have none. */
+  /** Desktop's folder door (`ctx.files`), as far as Kumi uses it: the app's folder dialog, giving back the file grant
+   *  the dialog makes, and listing a folder, whose `error: 'unavailable'` says the shell has no door (Hermes in a
+   *  browser: no dialog either), asked without opening anything. Older Desktops have none. */
   export interface PluginFiles {
     requestFolder: () => Promise<{ ok: true; folder: PluginFolder | null } | { ok: false; error: string; message: string }>
     release: (folderId: string) => Promise<boolean>
+    list?: (folder: string, path?: string) => Promise<{ ok: true } | { ok: false; error: string; message: string }>
   }
 
   /** Desktop's plugin i18n (`ctx.i18n`): bundles per locale, resolved in the app's language with English, then the key,

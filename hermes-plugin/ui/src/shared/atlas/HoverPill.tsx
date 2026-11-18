@@ -9,7 +9,7 @@ import { clean, seconds } from '../format.ts'
 import { glass } from '../mapUi.tsx'
 import { peaksKept } from '../peaks.ts'
 import type { MapSound } from '../types.ts'
-import { S } from '../ui.tsx'
+import { S, TYPE } from '../ui.tsx'
 import { Glyph } from './Glyph.tsx'
 import { labelPlace } from './labelPlace.ts'
 import { WAVE_BARS } from './pulse.ts'
@@ -56,13 +56,13 @@ export function HoverPill({
   return (
     <div style={{ ...glass, borderRadius: 10, position: 'absolute', ...side, top: place.top, maxWidth: Math.max(140, place.most), pointerEvents: 'none', padding: '5px 10px', ...S.row, gap: 10 }}>
       <div style={{ minWidth: 0, flex: '0 1 auto' }}>
-        <div style={{ ...S.row, gap: 6, fontSize: 11.5, color: T.text }}>
+        <div style={{ ...S.row, gap: 6, ...TYPE.small, color: T.text }}>
           <Glyph color={color} glyph={glyph} />
           <span style={{ ...S.ellipsis, fontWeight: 600 }}>
             {clean(sound.name, 48)} <span style={{ color: T.muted, fontWeight: 400 }}>· {clean(sound.class ?? '', 16)}</span>
           </span>
         </div>
-        {under && <div style={{ ...S.ellipsis, fontSize: 10.5, color: T.faint, paddingLeft: 15, fontVariantNumeric: 'tabular-nums' }}>{under}</div>}
+        {under && <div style={{ ...S.ellipsis, ...TYPE.caption, color: T.faint, paddingLeft: 15, fontVariantNumeric: 'tabular-nums' }}>{under}</div>}
       </div>
       {peaks && <Wave colors={[color]} height={24} peaks={peaks} progress={progress} width={96} />}
     </div>

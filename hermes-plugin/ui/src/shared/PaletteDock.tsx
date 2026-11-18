@@ -5,7 +5,7 @@
 // forgets one, sets it strict or loose, and offers it as a kit or as the sounds to make a new one from. Every edit
 // changes no project, so it runs at once (`POST /palette`); the agent's `kumi_palette` reads and edits the same
 // palette. Both UI halves use it: what "Use as kit", a card's "Use…" and "Make…" do comes from the parent.
-import { Button } from '@kumi/controls'
+import { Button, Tip } from '@kumi/controls'
 import { T } from '@kumi/theme'
 import type { DragEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +35,25 @@ const MAP_SHARE = 0.62
 const POP_FOR_MS = 1500
 /** A card's name and kind: wrapped to two lines, cut only past them (its title says it whole). */
 const TWO_LINES = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', minWidth: 0 } as const
+/** The × on a chip and a card: a 24 px target around a small glyph; its negative margins keep the row as tall and as
+ *  wide as the 16 px it draws, so the target reaches into the chip's or the card's own padding. */
+const REMOVE_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 24,
+  height: 24,
+  margin: -4,
+  padding: 0,
+  font: 'inherit',
+  ...TYPE.body,
+  borderRadius: 4,
+  border: 'none',
+  background: 'transparent',
+  color: T.faint,
+  cursor: 'pointer',
+  flex: 'none'
+} as const
 
 /** The button a box holds, down its first children: Hermes's Button and the ⋯ menu's take no ref of their own. */
 function firstButton(box: Element | null): HTMLButtonElement | null {
@@ -248,32 +267,29 @@ function Chip(props: ItemProps) {
         animationDelay: arriving === null ? undefined : `${380 + Math.min(arriving, 24) * 22}ms`
       }}
     >
-      <button
-        aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
-        aria-pressed={playing}
-        className={FOCUSABLE}
-        disabled={!id}
-        onClick={() => (playing ? onStop() : onPlay())}
-        onKeyDown={keys}
-        ref={playRef}
-        title={id ? `${name}${item.class ? ` · ${clean(item.class, 16)}` : ''}\n${t('dock.reorderHint')}` : t('dock.offMap')}
-        type="button"
-        style={{ ...S.row, gap: 5, minWidth: 0, font: 'inherit', fontSize: 11.5, padding: '1px 3px', border: 'none', background: 'transparent', color: T.text, cursor: id ? 'pointer' : 'default' }}
-      >
-        <Waveform audio={audio} bars={28} color={color} height={16} id={id} tints={tints} width={44} />
-        <span style={S.ellipsis}>{name}</span>
-      </button>
-      <button
-        aria-label={t('dock.remove', name)}
-        className={FOCUSABLE}
-        onClick={() => onRemove('remove')}
-        ref={removeRef}
-        title={t('dock.remove', name)}
-        type="button"
-        style={{ font: 'inherit', fontSize: 12, lineHeight: '14px', width: 16, height: 16, padding: 0, borderRadius: 3, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}
-      >
-        ×
-      </button>
+      {/* An off-map sound keeps its button focusable (`aria-disabled`): its Tip says why it can't play, on hover and on
+          keyboard focus, and Delete or Alt with an arrow still reach it. */}
+      <Tip label={id ? `${name}${item.class ? ` · ${clean(item.class, 16)}` : ''} · ${t('dock.reorderHint')}` : t('dock.offMap')}>
+        <button
+          aria-disabled={!id || undefined}
+          aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
+          aria-pressed={playing}
+          className={FOCUSABLE}
+          onClick={() => id && (playing ? onStop() : onPlay())}
+          onKeyDown={keys}
+          ref={playRef}
+          type="button"
+          style={{ ...S.row, gap: 5, minWidth: 0, font: 'inherit', ...TYPE.caption, padding: '1px 3px', border: 'none', background: 'transparent', color: T.text, cursor: id ? 'pointer' : 'default' }}
+        >
+          <Waveform audio={audio} bars={28} color={color} height={16} id={id} tints={tints} width={44} />
+          <span style={S.ellipsis}>{name}</span>
+        </button>
+      </Tip>
+      <Tip label={t('dock.remove', name)}>
+        <button aria-label={t('dock.remove', name)} className={FOCUSABLE} onClick={() => onRemove('remove')} ref={removeRef} type="button" style={{ ...REMOVE_STYLE, margin: '-4px -3px -4px 0' }}>
+          ×
+        </button>
+      </Tip>
     </div>
   )
 }
@@ -317,20 +333,21 @@ function Card(props: ItemProps) {
       <span aria-hidden style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', overflow: 'hidden', pointerEvents: 'none' }}>
         <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: tints && tints.length > 1 ? `linear-gradient(${tints.map(tint => tint ?? T.accent).join(', ')})` : (tints?.[0] ?? color) }} />
       </span>
-      <button
-        aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
-        aria-pressed={playing}
-        className={FOCUSABLE}
-        disabled={!id}
-        onClick={() => (playing ? onStop() : onPlay())}
-        onKeyDown={keys}
-        ref={playRef}
-        title={id ? t('dock.reorderHint') : t('dock.offMap')}
-        type="button"
-        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: id ? 'pointer' : 'default' }}
-      >
-        <Waveform audio={audio} bars={64} color={tints?.length === 1 && tints[0] ? tints[0] : color} height={30} id={id} tints={tints} width="100%" />
-      </button>
+      <Tip label={id ? t('dock.reorderHint') : t('dock.offMap')}>
+        <button
+          aria-disabled={!id || undefined}
+          aria-label={playing ? t('dock.stop', name) : t('dock.play', name)}
+          aria-pressed={playing}
+          className={FOCUSABLE}
+          onClick={() => id && (playing ? onStop() : onPlay())}
+          onKeyDown={keys}
+          ref={playRef}
+          type="button"
+          style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: id ? 'pointer' : 'default' }}
+        >
+          <Waveform audio={audio} bars={64} color={tints?.length === 1 && tints[0] ? tints[0] : color} height={30} id={id} tints={tints} width="100%" />
+        </button>
+      </Tip>
       <div style={{ ...S.row, gap: 5 }}>
         {/* The shape the map draws its family in; a made sound has none, and wears a spark. */}
         {glyph === null ? (
@@ -340,24 +357,19 @@ function Card(props: ItemProps) {
         ) : (
           <Glyph color={color} glyph={glyph} />
         )}
-        {/* Two lines before it's cut: four cards a row leave a name ~130 px, and names differ at their end. */}
-        <span style={{ ...TWO_LINES, flex: 1, fontSize: 11.5, lineHeight: '14px', color: T.text }} title={name}>
+        {/* Two lines before it's cut: four cards a row leave a name ~130 px, and names differ at their end. Not a
+            button, and a card has no room for a Tip of its own: the title is the only way to read a name cut short. */}
+        <span style={{ ...TWO_LINES, flex: 1, ...TYPE.small, color: T.text }} title={name}>
           {name}
         </span>
-        <button
-          aria-label={t('dock.remove', name)}
-          className={FOCUSABLE}
-          onClick={() => onRemove('remove')}
-          ref={removeRef}
-          title={t('dock.remove', name)}
-          type="button"
-          style={{ font: 'inherit', fontSize: 12, lineHeight: '14px', width: 16, height: 16, padding: 0, borderRadius: 3, border: 'none', background: 'transparent', color: T.faint, cursor: 'pointer', flex: 'none' }}
-        >
-          ×
-        </button>
+        <Tip label={t('dock.remove', name)}>
+          <button aria-label={t('dock.remove', name)} className={FOCUSABLE} onClick={() => onRemove('remove')} ref={removeRef} type="button" style={REMOVE_STYLE}>
+            ×
+          </button>
+        </Tip>
       </div>
       <div style={{ ...S.row, gap: 5, minHeight: 18 }}>
-        <span style={{ ...S.faint, ...TWO_LINES, flex: 1, fontSize: 10.5, lineHeight: '13px' }} title={kind || undefined}>
+        <span style={{ ...TWO_LINES, flex: 1, ...TYPE.caption, color: T.faint }} title={kind || undefined}>
           {kind}
         </span>
         {use}
@@ -366,8 +378,9 @@ function Card(props: ItemProps) {
   )
 }
 
-/** A one-line text field that commits on Enter or when it loses focus, and gives up on Escape. */
-function NameField({ initial, label, onDone }: { initial: string; label: string; onDone: (name: string | null) => void }) {
+/** A one-line text field that commits on Enter or when it loses focus, and gives up on Escape; `by` says which: a key
+ *  (the focus goes back to what opened it) or a click elsewhere (the focus stays where it went). */
+function NameField({ initial, label, onDone }: { initial: string; label: string; onDone: (name: string | null, by: 'blur' | 'key') => void }) {
   const [text, setText] = useState(initial)
   const field = useRef<HTMLInputElement | null>(null)
   const done = useRef(false)
@@ -375,31 +388,31 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
     field.current?.focus()
     field.current?.select()
   }, [])
-  const finish = (name: string | null) => {
+  const finish = (name: string | null, by: 'blur' | 'key') => {
     if (done.current) return
     done.current = true
-    onDone(name)
+    onDone(name, by)
   }
   return (
     <input
       aria-label={label}
       className={FOCUSABLE}
       maxLength={120}
-      onBlur={() => finish(paletteName(text))}
+      onBlur={() => finish(paletteName(text), 'blur')}
       onChange={event => setText(event.target.value)}
       onKeyDown={event => {
         if (event.key === 'Enter') {
           event.preventDefault()
-          finish(paletteName(text))
+          finish(paletteName(text), 'key')
         } else if (event.key === 'Escape') {
           event.preventDefault()
           event.stopPropagation()
-          finish(null)
+          finish(null, 'key')
         }
       }}
       placeholder={label}
       ref={field}
-      style={{ font: 'inherit', fontSize: 12, fontWeight: 600, width: '12rem', padding: '1px 6px', borderRadius: 3, border: `1px solid ${T.accent}`, background: 'transparent', color: T.text }}
+      style={{ font: 'inherit', ...TYPE.small, fontWeight: 600, width: '12rem', height: 24, boxSizing: 'border-box', padding: '0 6px', borderRadius: 3, border: `1px solid ${T.accent}`, background: 'transparent', color: T.text }}
       value={text}
     />
   )
@@ -452,7 +465,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     refocus.current = null
     if (next.key === null) return gripButton.current?.focus()
     const play = plays.current.get(next.key)
-    ;(next.from === 'play' && play && !play.disabled ? play : removes.current.get(next.key))?.focus()
+    ;(next.from === 'play' && play ? play : removes.current.get(next.key))?.focus()
   })
   const keepRef = (kept: Map<string, HTMLButtonElement>, key: string) => (element: HTMLButtonElement | null) => {
     if (element) kept.set(key, element)
@@ -465,6 +478,22 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
   useEffect(() => {
     if (forgetting) firstButton(keepBox.current)?.focus()
   }, [forgetting])
+  // The name field, closed by Enter or Escape, gives the focus back to what opened it: Rename's ⋯ menu button, or the
+  // picker (New palette… on it, or the button of that name in an empty dock). A first palette's picker comes with the
+  // backend's answer, so while that's asked (`naming`) the focus waits on New palette…, and `nudge` draws once more
+  // when it comes.
+  const picker = useRef<HTMLSelectElement | null>(null)
+  const newBox = useRef<HTMLSpanElement | null>(null)
+  const giveBack = useRef<'menu' | 'picker' | null>(null)
+  const naming = useRef(false)
+  const [, setNudge] = useState(0)
+  useEffect(() => {
+    const back = giveBack.current
+    if (!back || editing) return
+    const target = back === 'menu' ? firstButton(menuBox.current) : picker.current
+    if (target || !naming.current) giveBack.current = null
+    ;(target ?? firstButton(newBox.current))?.focus()
+  })
   // The folded row scrolls sideways: whichever end has more sounds past it fades out, so a chip at the edge reads as
   // "more this way", not as cut off; and a mouse's wheel turns it (nothing else here scrolls up or down).
   const [edges, setEdges] = useState({ start: false, end: false })
@@ -534,7 +563,9 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
     onDo(action).then(done => {
       if (!done) setOrder(null)
     })
-  const items = order ?? current?.items ?? []
+  // While a new palette's name is typed, the palette it leaves shows nothing of itself: no sounds, no mode, no actions.
+  const view = editing === 'new' ? null : current
+  const items = view ? (order ?? view.items) : []
   const colorOf = (item: PaletteItem) => (item.source === 'artifact' ? T.accent : item.group === null ? T.faint : groupColor(groups?.[String(item.group)]?.color, item.group))
   const move = (key: string, to: number) => {
     if (to < 0 || to >= items.length) return
@@ -580,11 +611,18 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         <NameField
           initial={editing === 'rename' ? (current?.name ?? '') : ''}
           label={editing === 'rename' ? t('dock.renameTitle') : t('dock.newName')}
-          onDone={name => {
+          onDone={(name, by) => {
             const action = editing
             setEditing(null)
+            giveBack.current = by === 'key' ? (action === 'rename' ? 'menu' : 'picker') : null
             if (name && action === 'rename' && name !== current?.name) void run({ action: 'rename', name })
-            if (name && action === 'new') void run({ action: 'new', name })
+            if (name && action === 'new') {
+              naming.current = true
+              void run({ action: 'new', name }).then(() => {
+                naming.current = false
+                if (giveBack.current) setNudge(n => n + 1)
+              })
+            }
           }}
         />
       ) : (
@@ -593,6 +631,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
             <select
               aria-label={t('dock.switch')}
               className={FOCUSABLE}
+              ref={picker}
               onChange={event => {
                 const value = event.target.value
                 if (value === '\u0000new') setEditing('new')
@@ -610,11 +649,13 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
               <option value={'\u0000new'}>{t('dock.newPalette')}</option>
             </select>
           )}
-          {palette === null ? <Pending label={t('dock.reading')} width="8rem" /> : palette.palettes.length === 0 && <span style={S.faint}>{t('dock.none')}</span>}
+          {palette === null && <Pending label={t('dock.reading')} width="8rem" />}
           {palette && palette.palettes.length === 0 && (
-            <Button kind="quiet" onClick={() => setEditing('new')} tip={t('dock.newName')}>
-              {t('dock.newPalette')}
-            </Button>
+            <span ref={newBox} style={{ display: 'contents' }}>
+              <Button kind="quiet" onClick={() => setEditing('new')} tip={t('dock.newName')}>
+                {t('dock.newPalette')}
+              </Button>
+            </span>
           )}
           {current && (
             <span ref={menuBox} style={{ display: 'contents' }}>
@@ -630,25 +671,29 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           )}
         </>
       )}
-      {current && (
+      {view && (
         <span aria-label={t('dock.mode')} role="group" style={{ ...SEGMENT_TRACK, flexWrap: 'nowrap' }}>
-          <button aria-pressed={current.reach === 0} className={FOCUSABLE} onClick={() => current.reach !== 0 && void run({ action: 'reach', reach: 0 })} title={t('dock.strictTitle')} type="button" style={segmentStyle(current.reach === 0)}>
-            {t('dock.strict')}
-          </button>
-          <button aria-pressed={current.reach > 0} className={FOCUSABLE} onClick={() => current.reach === 0 && void run({ action: 'reach', reach: LOOSE })} title={t('dock.looseTitle', current.reach || LOOSE)} type="button" style={segmentStyle(current.reach > 0)}>
-            {current.reach > 0 ? t('dock.looseN', current.reach) : t('dock.loose')}
-          </button>
+          <Tip label={t('dock.strictTitle')}>
+            <button aria-pressed={view.reach === 0} className={FOCUSABLE} onClick={() => view.reach !== 0 && void run({ action: 'reach', reach: 0 })} type="button" style={segmentStyle(view.reach === 0)}>
+              {t('dock.strict')}
+            </button>
+          </Tip>
+          <Tip label={t('dock.looseTitle', view.reach || LOOSE)}>
+            <button aria-pressed={view.reach > 0} className={FOCUSABLE} onClick={() => view.reach === 0 && void run({ action: 'reach', reach: LOOSE })} type="button" style={segmentStyle(view.reach > 0)}>
+              {view.reach > 0 ? t('dock.looseN', view.reach) : t('dock.loose')}
+            </button>
+          </Tip>
         </span>
       )}
-      {current && current.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', current.excluded)}</span>}
+      {view && view.excluded > 0 && <span style={{ ...TYPE.caption, color: T.faint }}>{t('dock.excluded', view.excluded)}</span>}
       <span style={{ flex: 1 }} />
-      {current && current.items.length > 1 && make && (
-        <Button kind="quiet" onClick={() => make(current)} tip={t('make.openTitle')}>
+      {view && view.items.length > 1 && make && (
+        <Button kind="quiet" onClick={() => make(view)} tip={t('make.openTitle')}>
           {t('make.open')}
         </Button>
       )}
-      {current && current.items.length > 0 && kit?.(current)}
-      {current && items.length > 0 && (
+      {view && view.items.length > 0 && kit?.(view)}
+      {items.length > 0 && (
         <Button expanded={open} onClick={() => onOpen(!open)} tip={open ? t('dock.collapse') : t('dock.expand')}>
           {open ? t('dock.fold') : t('dock.showAll', items.length)}
           <span aria-hidden style={{ display: 'inline-block', marginLeft: 4, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 200ms' }}>
@@ -672,7 +717,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         flexDirection: 'column',
         gap: 6,
         padding: '0 10px 8px',
-        borderTop: `1px solid ${T.border}`,
+        borderTop: `1px solid ${T.hairline}`,
         background: `color-mix(in srgb, ${T.card} 40%, transparent)`,
         color: T.text,
         flex: 'none',
@@ -680,26 +725,28 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
         transition: grip.current ? 'none' : 'height 260ms cubic-bezier(.2,.8,.2,1)'
       }}
     >
-      {/* The grip: a handle across the top, so the drawer reads as one that opens. */}
-      <button
-        aria-expanded={open}
-        aria-label={open ? t('dock.collapse') : t('dock.expand')}
-        className={FOCUSABLE}
-        onClick={() => {
-          if (grip.current?.moved) return
-          onOpen(!open)
-        }}
-        onPointerCancel={() => (grip.current = null)}
-        onPointerDown={gripDown}
-        onPointerMove={gripMove}
-        onPointerUp={() => setTimeout(() => (grip.current = null), 0)}
-        ref={gripButton}
-        title={open ? t('dock.gripTitle') : t('dock.expand')}
-        type="button"
-        style={{ alignSelf: 'stretch', height: 12, padding: 0, border: 'none', background: 'transparent', cursor: open ? 'ns-resize' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}
-      >
-        <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
-      </button>
+      {/* The grip: a handle across the top, so the drawer reads as one that opens. Its target is 24 px tall around the
+          12 px it takes in the column: 6 px over the dock's top edge and the 6 px gap under it, so the bar never moves. */}
+      <Tip label={open ? t('dock.gripTitle') : t('dock.expand')}>
+        <button
+          aria-expanded={open}
+          aria-label={open ? t('dock.collapse') : t('dock.expand')}
+          className={FOCUSABLE}
+          onClick={() => {
+            if (grip.current?.moved) return
+            onOpen(!open)
+          }}
+          onPointerCancel={() => (grip.current = null)}
+          onPointerDown={gripDown}
+          onPointerMove={gripMove}
+          onPointerUp={() => setTimeout(() => (grip.current = null), 0)}
+          ref={gripButton}
+          type="button"
+          style={{ position: 'relative', zIndex: 1, alignSelf: 'stretch', height: 24, margin: '-6px 0', padding: 0, border: 'none', background: 'transparent', cursor: open ? 'ns-resize' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}
+        >
+          <span aria-hidden style={{ width: 36, height: 4, borderRadius: 2, background: T.border, transition: 'background-color 140ms' }} />
+        </button>
+      </Tip>
       {header}
       {/* What the last edit said, for a few seconds, floating just above the dock's top edge: it never adds a line (a line
           that came and went resized the map, and an unmoved map refit), and however crowded the header, it's never cut. */}
@@ -727,7 +774,7 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
       </span>
       {current && forgetting && (
         <div role="alert" style={{ ...S.row, flexWrap: 'wrap', gap: 6 }}>
-          <span style={S.muted}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>
+          <span style={{ ...TYPE.small, color: T.muted, overflowWrap: 'anywhere' }}>{t('dock.forgetAsk', clean(current.name, 40), current.items.length)}</span>
           <span style={{ flex: 1 }} />
           <span ref={keepBox} style={{ display: 'contents' }}>
             <Button
@@ -751,15 +798,15 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           </Button>
         </div>
       )}
-      {current && items.length > 0 && open && (
+      {items.length > 0 && open && (
         <div aria-label={t('dock.sounds')} ref={strip} role="list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, alignContent: 'start', padding: '2px 1px' }}>
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Card key={item.key} {...itemProps(item, index)} />
           ))}
-          {items.length > CHIPS_SHOWN && <span style={{ ...S.faint, alignSelf: 'center' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
+          {items.length > CHIPS_SHOWN && <span style={{ ...TYPE.caption, color: T.faint, alignSelf: 'center' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
         </div>
       )}
-      {current && items.length > 0 && !open && (
+      {items.length > 0 && !open && (
         <div
           aria-label={t('dock.sounds')}
           ref={strip}
@@ -778,11 +825,12 @@ export function PaletteDock({ palette, groups, playing, onPlay, onStop, onDo, sa
           {items.slice(0, CHIPS_SHOWN).map((item, index) => (
             <Chip key={item.key} {...itemProps(item, index)} />
           ))}
-          {items.length > CHIPS_SHOWN && <span style={{ ...S.faint, alignSelf: 'center', flex: 'none' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
+          {items.length > CHIPS_SHOWN && <span style={{ ...TYPE.caption, color: T.faint, alignSelf: 'center', flex: 'none' }}>{t('dock.more', items.length - CHIPS_SHOWN)}</span>}
         </div>
       )}
-      {palette !== null && (!current || items.length === 0) && (
-        <span style={{ ...S.row, gap: 6, ...S.faint }}>
+      {/* The one sentence an empty dock says (the header says nothing of its own); none while a new name is typed. */}
+      {palette !== null && editing !== 'new' && items.length === 0 && (
+        <span style={{ ...S.row, gap: 6, ...TYPE.small, color: T.faint }}>
           <Icon name="plus" size={12} />
           {t('dock.empty')}
         </span>

@@ -9,7 +9,7 @@ export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSk
   const t = useT()
   if (steps.length === 0) return null
   return (
-    <div aria-label={t('first.label')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: 7, borderBottom: `1px solid ${T.border}` }}>
+    <div aria-label={t('first.label')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: 7, borderBottom: `1px solid ${T.hairline}` }}>
       {steps.map((step, index) => (
         <div key={step} style={{ ...S.row, gap: 8, ...TYPE.small, color: T.text }}>
           <span
@@ -23,8 +23,8 @@ export function FirstOpen({ steps, onSkip }: { steps: readonly FirstStep[]; onSk
               placeItems: 'center',
               background: `color-mix(in srgb, ${T.accent} 24%, transparent)`,
               color: T.accent,
-              fontSize: 10.5,
-              fontWeight: 700,
+              ...TYPE.caption,
+              fontWeight: 600,
               fontVariantNumeric: 'tabular-nums'
             }}
           >
