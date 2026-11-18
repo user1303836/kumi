@@ -16,7 +16,7 @@ paths = ["docs/**", "**/*.md", "LICENSE*"]
 
 # The workspace's own settings: every package builds and tests by them.
 [workspace]
-paths = ["Cargo.toml", "Cargo.lock", "rustfmt.toml", ".config/**", ".cargo/**"]
+paths = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", ".config/**", ".cargo/**"]
 feeds = ["*"]
 
 # The test runners every Rust job runs.

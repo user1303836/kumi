@@ -66,9 +66,14 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p test_models_catalog.py
       - name: The installers are POSIX sh, and PowerShell that parses and is ASCII
         run: sh scripts/check-installers.sh .
+      # Rust at the version rust-toolchain.toml pins, read from it as every workflow does: releases build with it too.
+      - id: rust
+        if: steps.affected.outputs.rust_lint == 'true'
+        run: sed -n 's/^channel = "\([^"]*\)".*/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - if: steps.affected.outputs.rust_lint == 'true'
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
+          toolchain: ${{ steps.rust.outputs.channel }}
           components: rustfmt, clippy
       - if: steps.affected.outputs.rust_lint == 'true'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -111,7 +116,12 @@ jobs:
           - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Rust at the version rust-toolchain.toml pins (see Required CI).
+      - id: rust
+        run: sed -n 's/^channel = "\([^"]*\)".*/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
