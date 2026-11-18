@@ -13,7 +13,7 @@ hermes plugins install kumi
 hermes plugins enable kumi
 ```
 
-`kumi` 是 Kumi 在 Hermes 插件目录中的名称。在 Hermes v0.22.7 和 v0.23.0 上，目录已超出这些版本能读取的大小，`hermes plugins install kumi` 会说目录里没有 Kumi：请改从 Kumi 的代码仓库安装 `hermes plugins install user1303836/kumi#hermes-plugin`，然后同样启用它；或者把 Hermes 更新到 v0.23.1 或更高版本。从代码仓库安装的 Kumi 之后会从代码仓库更新，而不是从目录更新。
+`kumi` 是 Kumi 在 Hermes 插件目录中的名称。在 Hermes v0.22.7 和 v0.23.0 上，目录已超出这些版本能读取的大小，`hermes plugins install kumi` 会说目录里没有 Kumi：请把 Hermes 更新到 v0.23.1 或更高版本，或者从 Kumi 的代码仓库安装 `hermes plugins install user1303836/kumi#hermes-plugin`，然后同样启用它。从代码仓库安装的 Kumi 会从代码仓库更新，而不是从目录更新。
 
 在 Hermes Desktop 中，还要在 **技能与工具 → 插件** 里打开 Kumi 的**桌面**开关：插件的桌面开关默认是关闭的。
 
