@@ -126,6 +126,8 @@ CI 只保留最低限度（[AGENTS.md](../../AGENTS.md)，"Minimal CI"）。拉�
 
 每次推送到 `main` 都会运行 `Required CI` 和全部 Linux 测试，直到结束（更新的合并不会取消它）；有作业失败时会开一个 issue（“Main's CI failed”）。在 `main` 上对要发布的提交运行的 CI 通过之前，`release.py --go` 会拒绝发布。每个标签运行 Installer 的全部内容。Installer 每晚会用 `release` 配置构建全部六个发行包，从而为下一个标签保持该配置的构建缓存，并在每个系统的一台机器上安装和检查它们（失败时会开一个 issue：“The nightly Installer build failed”）。Caches 工作流每天删除 Rust 构建缓存中除每类最新一份以外的所有缓存，这样旧的锁文件世代就不会把拉取请求要恢复的缓存挤出仓库的 10 GB 空间。
 
+每周一 `Required CI` 和 `Rust / Linux` 各部分会在 `main` 上再运行一次，这样即使一周没有合并，GitHub 也不会删除它们的缓存（7 天没有被读取的缓存会被删除，之后的每次运行都是冷的）。
+
 要合并到 `main`，`Required CI` 和 `Willington files` 必须通过。Installer 不是必需的。其余规则见[发布与分发](DISTRIBUTION_POLICY.md#合并门禁)。
 
 ## 通过意味着什么

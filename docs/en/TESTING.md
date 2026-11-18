@@ -186,6 +186,10 @@ deletes every Rust build cache but the newest of its kind, so older lockfile
 generations don't push the caches pull requests restore out of the
 repository's 10 GB.
 
+Each Monday `Required CI` and the `Rust / Linux` parts run on `main` again, so
+a week without a merge doesn't let GitHub drop their caches (it drops one
+nobody has read for 7 days, and every run after it is cold).
+
 To merge into `main`, `Required CI` and `Willington files` must pass. The
 Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of
