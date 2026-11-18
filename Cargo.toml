@@ -169,6 +169,11 @@ opt-level = 3
 [profile.dev.package.kumi-design]
 opt-level = 3
 
+# And the audio analysis every listen, render and judge runs (kumi-media's audio): optimized, Live's goal and listening
+# tests take a third of the time.
+[profile.dev.package.kumi-media]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
